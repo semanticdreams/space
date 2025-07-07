@@ -1,0 +1,1 @@
+{"id": "244", "type": "class", "data": "{\"code_str\": \"class FlexChild:\\n    def __init__(self, layout, flex=0, expanded=None):\\n        self.layout = layout\\n        self.flex = flex\\n        #self.expanded = expanded if expanded is not None else (True if flex else False)\", \"name\": \"FlexChild\"}", "created_at": null, "updated_at": 1751906432.7444615}

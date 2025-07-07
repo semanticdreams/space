@@ -1,0 +1,1 @@
+{"id": "800021cf-e806-49ef-b195-6d3c96889e3d", "type": "code", "data": "{\"code_str\": \"world.apps.add_app(world.classes.get_class(name='ProjectsApp')())\", \"name\": \"projects-app\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.1388123, "updated_at": 1751718335.1388123}

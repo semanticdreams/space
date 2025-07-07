@@ -1,0 +1,1 @@
+{"id": "8cc40ec9-8696-4e15-8001-46b7884c457a", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['CodebooksView']())\", \"name\": \"codebooks\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.0608044, "updated_at": 1751718335.0608044}

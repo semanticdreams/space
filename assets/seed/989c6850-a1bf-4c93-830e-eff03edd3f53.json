@@ -1,0 +1,1 @@
+{"id": "989c6850-a1bf-4c93-830e-eff03edd3f53", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes.get_class(name='ClockView')())\", \"name\": \"clock\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718334.9535007, "updated_at": 1751718334.9535007}

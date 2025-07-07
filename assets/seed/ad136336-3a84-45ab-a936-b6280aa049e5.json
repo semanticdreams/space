@@ -1,0 +1,1 @@
+{"id": "ad136336-3a84-45ab-a936-b6280aa049e5", "type": "code", "data": "{\"code_str\": \"from spaceui.gamepads_view import GamepadsView\\nworld.floaties.add(GamepadsView())\", \"name\": \"gamepads\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.0068927, "updated_at": 1751718335.0068927}

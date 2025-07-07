@@ -1,0 +1,1 @@
+{"id": "9e6feabc-1254-48b4-be3d-030c39529706", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['SqliteView']())\", \"name\": \"sqlite\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718334.9828517, "updated_at": 1751718334.9828517}

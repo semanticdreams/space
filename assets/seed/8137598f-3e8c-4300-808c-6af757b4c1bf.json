@@ -1,0 +1,1 @@
+{"id": "8137598f-3e8c-4300-808c-6af757b4c1bf", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['SkyboxBrowser']())\", \"name\": \"skybox-browser\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718334.9888992, "updated_at": 1751718334.9888992}

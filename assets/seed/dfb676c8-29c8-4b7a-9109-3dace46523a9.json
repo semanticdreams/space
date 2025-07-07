@@ -1,0 +1,1 @@
+{"id": "dfb676c8-29c8-4b7a-9109-3dace46523a9", "type": "shader", "data": "{\"name\": \"line.frag\", \"code_str\": \"#version 330 core\\nsmooth in vec3 theColor;\\nout vec4 fragColor;\\n\\nvoid main () {\\n  fragColor = vec4(theColor, 1.0);\\n}\"}", "created_at": 1751711944.1210968, "updated_at": 1751711944.1210968}

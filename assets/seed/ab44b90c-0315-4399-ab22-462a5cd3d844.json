@@ -1,0 +1,1 @@
+{"id": "ab44b90c-0315-4399-ab22-462a5cd3d844", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes.get_class(name='ProjectsView')())\", \"name\": \"projects\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.1267476, "updated_at": 1751718335.1267476}

@@ -1,0 +1,1 @@
+{"id": "ef3f4f1b-7c73-4fb3-a12b-5cecdd533f7e", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['LaunchableCodesView']())\", \"name\": \"launchable-codes\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.1208205, "updated_at": 1751718335.1208205}

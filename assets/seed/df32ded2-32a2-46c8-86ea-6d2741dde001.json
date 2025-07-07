@@ -1,0 +1,1 @@
+{"id": "df32ded2-32a2-46c8-86ea-6d2741dde001", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['NotebooksView']())\", \"name\": \"notebooks\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.1568696, "updated_at": 1751718335.1568696}

@@ -1,0 +1,1 @@
+{"id": "bb29af00-9c2d-4631-8cb3-caa62ec31f4f", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes.get_class(name='FileSystemView')())\", \"name\": \"fs\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.054755, "updated_at": 1751718335.054755}

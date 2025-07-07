@@ -1,0 +1,1 @@
+{"id": "b8b2b169-47d8-4256-983e-25a14e6e4498", "type": "shader", "data": "{\"name\": \"mesh.frag\", \"code_str\": \"#version 330 core\\n\\nin vec2 theUv;\\n\\nuniform sampler2D myTexture;\\n\\nout vec4 fragColor;\\n\\nvoid main () {\\n    fragColor = texture(myTexture, vec2(theUv.x, 1-theUv.y));\\n}\"}", "created_at": 1751711944.1450393, "updated_at": 1751711944.1450393}

@@ -1,0 +1,29 @@
+# Custom
+gl.log
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Builds
+build/
+release/
+.vscode/ipch
+cmake-build-*
+
+#IDE
+.idea

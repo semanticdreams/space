@@ -1,0 +1,217 @@
+#include <iostream>
+#include <utility>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#include "window_sdl.h"
+#include "gl_debug.hpp"
+#include "asset_manager.h"
+
+WindowSdl::WindowSdl(std::string title) : title(std::move(title)) {
+}
+
+WindowSdl::~WindowSdl() {
+    SDL_Quit();
+    LOG(Info) << "Bye :)";
+}
+
+bool WindowSdl::init(int xPos, int yPos, int width, int height) {
+    int flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_ALLOW_HIGHDPI;
+
+    if (isFullscreen) {
+        flags |= SDL_WINDOW_FULLSCREEN;
+    }
+
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+
+    if (SDL_Init(SDL_INIT_EVERYTHING) == 0) {
+        LOG(Info) << "Subsystems initialised";
+
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+
+        // WindowSdl
+        window = std::unique_ptr<SDL_Window, SdlWindowDestroyer>(
+                SDL_CreateWindow(title.c_str(), xPos, yPos, width, height, flags));
+        if (window) {
+            LOG(Info) << "WindowSdl initialised";
+        } else
+            return false;
+
+        // Set icon
+        auto iconPath = AssetManager::getAssetPath("pics/space.png");
+        int iconWidth, iconHeight, iconChannels;
+        unsigned char* pixels = stbi_load(iconPath.c_str(), &iconWidth, &iconHeight, &iconChannels, 4);
+        if (pixels) {
+            // Create an SDL_Surface from pixel data
+            SDL_Surface* iconSurface = SDL_CreateRGBSurfaceFrom(
+                    pixels,            // pixel data
+                    iconWidth,              // width
+                    iconHeight,             // height
+                    32,                 // depth (bits per pixel)
+                    iconWidth * 4,          // pitch (bytes per row)
+                    0x000000FF,         // red mask
+                    0x0000FF00,         // green mask
+                    0x00FF0000,         // blue mask
+                    0xFF000000          // alpha mask
+                    );
+
+            if (iconSurface) {
+                SDL_SetWindowIcon(window.get(), iconSurface);
+                SDL_FreeSurface(iconSurface);
+            } else {
+                LOG(Warning) << "Failed to create SDL surface from icon pixels!";
+            }
+
+            stbi_image_free(pixels); // Free stb_image memory after creating surface
+        } else {
+            LOG(Warning) << "Failed to load icon with stb_image: " << stbi_failure_reason();
+        }
+
+        // OpenGL context
+        context = SDL_GL_CreateContext(window.get());
+        if (context) {
+            LOG(Info) << "OpenGL Context initialised";
+        } else
+            return false;
+
+        // OpenGL setup
+        glewExperimental = GL_TRUE;
+        GLenum initGLEW(glewInit());
+        if (initGLEW == GLEW_OK) {
+            LOG(Info) << "GLEW initialised";
+        } else
+            return false;
+
+
+        // Get graphics info
+        const GLubyte* renderer = glGetString(GL_RENDERER);
+        const GLubyte* version = glGetString(GL_VERSION);
+        LOG(Info) << "Renderer: " << renderer;
+        LOG(Info) << "OpenGL version supported " << version;
+
+        glViewport(0, 0, width, height);
+        //glEnable(GL_CULL_FACE);
+        glEnable(GL_BLEND);
+        //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+        if (glDebugMessageControlARB != nullptr) {
+            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            glDebugMessageCallback((GLDEBUGPROCARB) debugGlErrorCallback, nullptr);
+            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+        }
+
+        return true;
+    } else {
+        LOG(Error) << "SDL initialisation failed";
+        LOG(Error) << SDL_GetError();
+        return false;
+    }
+}
+
+void WindowSdl::logGlParams() {
+    GLenum params[] = {
+            GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS,
+            GL_MAX_CUBE_MAP_TEXTURE_SIZE,
+            GL_MAX_DRAW_BUFFERS,
+            GL_MAX_FRAGMENT_UNIFORM_COMPONENTS,
+            GL_MAX_TEXTURE_IMAGE_UNITS,
+            GL_MAX_TEXTURE_SIZE,
+            GL_MAX_VARYING_FLOATS,
+            GL_MAX_VERTEX_ATTRIBS,
+            GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,
+            GL_MAX_VERTEX_UNIFORM_COMPONENTS,
+            GL_MAX_VIEWPORT_DIMS,
+            GL_STEREO,
+    };
+    const char* names[] = {
+            "GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS",
+            "GL_MAX_CUBE_MAP_TEXTURE_SIZE",
+            "GL_MAX_DRAW_BUFFERS",
+            "GL_MAX_FRAGMENT_UNIFORM_COMPONENTS",
+            "GL_MAX_TEXTURE_IMAGE_UNITS",
+            "GL_MAX_TEXTURE_SIZE",
+            "GL_MAX_VARYING_FLOATS",
+            "GL_MAX_VERTEX_ATTRIBS",
+            "GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS",
+            "GL_MAX_VERTEX_UNIFORM_COMPONENTS",
+            "GL_MAX_VIEWPORT_DIMS",
+            "GL_STEREO",
+    };
+    LOG(Info) << "-----------------------------";
+    LOG(Info) << "GL Context Params:";
+    // integers - only works if the order is 0-10 integer return types
+    for (int i = 0; i < 10; i++) {
+        int v = 0;
+        glGetIntegerv(params[i], &v);
+        LOG(Info) << names[i] << " " << v;
+    }
+    // others
+    int v[2];
+    v[0] = v[1] = 0;
+    glGetIntegerv(params[10], v);
+    LOG(Info) << names[10] << " " << v[0] << " " << v[1];
+    unsigned char s = 0;
+    glGetBooleanv(params[11], &s);
+    LOG(Info) << names[11] << " " << (unsigned int) s;
+    LOG(Info) << "";
+}
+
+void WindowSdl::updateFpsCounter(uint32_t dt) {
+    double elapsedSeconds;
+
+    currentSeconds += dt / 1000.0;
+    elapsedSeconds = currentSeconds - previousSeconds;
+    /* limit text updates to 4 per second */
+    if (elapsedSeconds > 0.25) {
+        previousSeconds = currentSeconds;
+        char tmp[128];
+        double fps = (double) frameCount / elapsedSeconds;
+#if __linux__
+        sprintf(tmp, "%s @ fps: %.2f", title.c_str(), fps);
+#else
+        sprintf_s(tmp, "%s @ fps: %.2f", title.c_str(), fps);
+#endif
+        SDL_SetWindowTitle(window.get(), tmp);
+        frameCount = 0;
+    }
+    frameCount++;
+}
+
+void WindowSdl::clear() {
+    glClearColor(0.0f, 0.0f, 0.2f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
+void WindowSdl::swapBuffer() {
+    // Check OpenGL error
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        LOG(Error) << "OpenGL error: " << err;
+    }
+
+    SDL_GL_SwapWindow(window.get());
+}
+
+void WindowSdl::clean() {
+    // SDL_DestroyWindow(window); Handled by unique_ptr
+    SDL_GL_DeleteContext(context);
+}
+
+std::unique_ptr<WindowSdl> WindowSdl::create() {
+    std::string title = "space";
+    return std::make_unique<WindowSdl>(title);
+}
+
+void WindowSdl::toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    SDL_SetWindowFullscreen(window.get(), isFullscreen);
+}

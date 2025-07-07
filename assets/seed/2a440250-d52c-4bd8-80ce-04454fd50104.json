@@ -1,0 +1,1 @@
+{"id": "2a440250-d52c-4bd8-80ce-04454fd50104", "type": "string", "data": "\"would have to make DynamicGraphNode and DynamicGraphEdge entities.\\nBut: Not all nodes may be serializable...\"", "created_at": 1751437537.5339758, "updated_at": 1751437780.5725951}

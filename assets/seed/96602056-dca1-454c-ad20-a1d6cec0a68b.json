@@ -1,0 +1,1 @@
+{"id": "96602056-dca1-454c-ad20-a1d6cec0a68b", "type": "task", "data": "{\"label\": \"NotebookView takes a graph entity and a note/string entity as starting point.\\nNodes could have multiple children in which case a tab view could be used.\\n\", \"points\": 10, \"parent\": null, \"done_at\": null}", "created_at": 1751441696.4900196, "updated_at": 1751442444.1001594}

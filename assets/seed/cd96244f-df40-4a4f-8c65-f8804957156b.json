@@ -1,0 +1,1 @@
+{"id": "cd96244f-df40-4a4f-8c65-f8804957156b", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['FoldersView']())\", \"name\": \"folders\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.0848272, "updated_at": 1751718335.0848272}

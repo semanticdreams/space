@@ -1,0 +1,90 @@
+name: Build space
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install SDL2
+        run: brew install sdl2
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Bundle SDL2 Framework
+        run: |
+          mkdir dist
+          cp build/sdl_app dist/
+          cp -R /opt/homebrew/Cellar/sdl2/*/lib/SDL2.framework dist/
+
+      - name: Create DMG (optional)
+        run: |
+          hdiutil create -volname SDL2App -srcfolder dist -ov -format UDZO sdl2app-macos.dmg
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sdl2app-macos.dmg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install vcpkg and SDL2
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg install sdl2
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Bundle SDL2 DLLs
+        run: |
+          mkdir dist
+          copy build\Release\sdl_app.exe dist\
+          copy vcpkg\installed\x64-windows\bin\SDL2.dll dist\
+
+      - name: Create ZIP
+        run: powershell Compress-Archive -Path dist\* -DestinationPath sdl2app-windows.zip
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sdl2app-windows.zip
+
+   build-linux:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install SDL2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+
+      - name: Configure and Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Create .deb Package with CPack
+        run: |
+          cd build
+          cpack -G DEB
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.deb

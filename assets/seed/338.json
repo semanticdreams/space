@@ -1,0 +1,1 @@
+{"id": "338", "type": "class", "data": "{\"code_str\": \"class VectorHandle:\\n    __slots__ = ('index', 'size')\\n\\n    def __init__(self, index, size):\\n        self.index = index\\n        self.size = size\", \"name\": \"VectorHandle\"}", "created_at": null, "updated_at": 1751906432.7459466}

@@ -1,0 +1,1 @@
+{"id": "552921bb-ffff-452d-af27-6ed69beb550a", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['WorldView']())\", \"name\": \"world\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718334.9648476, "updated_at": 1751718334.9648476}

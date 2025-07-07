@@ -1,0 +1,1 @@
+{"id": "c7d96317-b189-42b0-88a0-e6cfd16df6d1", "type": "code", "data": "{\"code_str\": \"from spaceui.sub_world import SubWorldView\\nworld.floaties.add(SubWorldView())\", \"name\": \"sub-world\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.1808202, "updated_at": 1751718335.1808202}

@@ -1,0 +1,1 @@
+{"id": "4d98a65d-58bf-4f1c-b63e-7162b698d96e", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['SpeechRecorderView']())\", \"name\": \"speech-recorder\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.168862, "updated_at": 1751718335.168862}

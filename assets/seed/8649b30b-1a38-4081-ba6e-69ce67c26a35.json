@@ -1,0 +1,1 @@
+{"id": "8649b30b-1a38-4081-ba6e-69ce67c26a35", "type": "task", "data": "{\"label\": \"a more generic approach would be DynamicGraphLinearView which would\\ntake any DynamicGraphNode as starting point\", \"points\": 10, \"parent\": null, \"done_at\": null}", "created_at": 1751442460.93353, "updated_at": 1751442502.652246}

@@ -1,0 +1,1 @@
+{"id": "0f0b9f20-047d-4e86-8c11-14b219f7aa9a", "type": "shader", "data": "{\"name\": \"pic.frag\", \"code_str\": \"#version 130\\n\\nin vec2 theUv;\\nout vec4 outputColor;\\nuniform sampler2D texture;\\n\\nvoid main() {\\n\\toutputColor = texture2D(texture, theUv);\\n}\"}", "created_at": 1751711944.0851228, "updated_at": 1751711944.0851228}

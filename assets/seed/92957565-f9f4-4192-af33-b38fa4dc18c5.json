@@ -1,0 +1,1 @@
+{"id": "92957565-f9f4-4192-af33-b38fa4dc18c5", "type": "task", "data": "{\"label\": \"don't apply force on node being dragged, instead make sure force-layout position for that node is updated with drag movement\", \"points\": 10, \"parent\": null}", "created_at": null, "updated_at": null}

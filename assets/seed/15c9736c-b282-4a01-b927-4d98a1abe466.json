@@ -1,0 +1,1 @@
+{"id": "15c9736c-b282-4a01-b927-4d98a1abe466", "type": "code", "data": "{\"code_str\": \"world.floaties.add(world.classes['NotesView']())\", \"name\": \"notes\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.0128148, "updated_at": 1751718335.0128148}

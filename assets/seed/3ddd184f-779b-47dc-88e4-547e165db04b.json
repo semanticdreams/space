@@ -1,0 +1,1 @@
+{"id": "3ddd184f-779b-47dc-88e4-547e165db04b", "type": "shader", "data": "{\"name\": \"skybox.frag\", \"code_str\": \"#version 130\\n\\nin vec3 TexCoords;\\n\\nuniform samplerCube skybox;\\n\\nout vec4 color;\\n\\nvoid main()\\n{    \\n    color = texture(skybox, TexCoords);\\n}\"}", "created_at": 1751711944.097055, "updated_at": 1751711944.097055}

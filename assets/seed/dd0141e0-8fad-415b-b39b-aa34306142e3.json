@@ -1,0 +1,1 @@
+{"id": "dd0141e0-8fad-415b-b39b-aa34306142e3", "type": "code", "data": "{\"code_str\": \"CodesView = world.classes.get_class('CodesView')\\nworld.floaties.add(CodesView())\", \"name\": \"codes\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 1}", "created_at": 1751718335.024828, "updated_at": 1751718335.024828}
