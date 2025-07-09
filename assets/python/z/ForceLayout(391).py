@@ -6,7 +6,7 @@ from force_layout import ForceLayout as CppForceLayout
 
 
 class ForceLayout:
-    def __init__(self, dimensions=2, update_interval=0.1,
+    def __init__(self, update_interval=0.1,
                  spring_rest_length = 50,
                  repulsive_force_constant = 6250,
                  spring_constant = 1,
@@ -16,7 +16,6 @@ class ForceLayout:
                  stabilized_avg_displacement=0.01,
                  max_displacement_squared = 100):
         self.position = np.array((0, 500, 0), float)
-        self.dimensions = dimensions
         self.update_interval = update_interval
         self.spring_rest_length = spring_rest_length
         self.repulsive_force_constant = repulsive_force_constant
@@ -31,7 +30,6 @@ class ForceLayout:
         self.results = 0, 0, 0
 
         self.cpp_force_layout = CppForceLayout(
-            dimensions=self.dimensions,
             spring_rest_length=self.spring_rest_length,
             repulsive_force_constant=self.repulsive_force_constant,
             spring_constant=self.spring_constant,
@@ -72,7 +70,7 @@ class ForceLayout:
         self.active = True
         self.changed.emit()
 
-    def update(self, num_iterations=1000):
+    def update(self, num_iterations=2000):
         if not self.active:# or not self.positions.size:
             return
 

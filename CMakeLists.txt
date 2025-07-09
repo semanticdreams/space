@@ -53,6 +53,9 @@ target_link_libraries(${PROJECT_NAME}
     OpenMP::OpenMP_CXX
 )
 
+target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
+target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
+
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 # Copying assets to the build folder
