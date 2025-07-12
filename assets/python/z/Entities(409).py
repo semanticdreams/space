@@ -21,6 +21,7 @@ class Entities:
         'workspaces': z.Workspaces,
         'dynamic-graph': z.DynamicGraphEntity,
         'shader': z.ShaderEntity,
+        'fs-folder': z.FSFolderEntity,
     }
 
     morphs = {

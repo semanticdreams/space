@@ -1,6 +1,7 @@
 class Floatie:
-    def __init__(self, obj, tile, code_entity=None, hud=False):
+    def __init__(self, obj, tile, code_entity=None, hud=False, side='left'):
         self.hud = hud
+        self.side = side
         if hud:
             obj.set_hud(hud)
         self.obj = obj
@@ -17,8 +18,13 @@ class Floatie:
         else:
             self.title = str(obj)
 
+        dialog_actions = self.obj.actions if hasattr(obj, 'actions') else [
+            ('icon:code', lambda: world.floaties.add(z.PyObjView(self.obj, reloadable=False))),
+            ('icon:close', lambda: world.floaties.drop_obj(self.obj)),
+        ]
+
         self.focus = self.obj.focus
-        self.dialog = z.Dialog(self.title, self.obj)
+        self.dialog = z.Dialog(self.title, self.obj, actions=dialog_actions)
         self.dialog.closed.connect(lambda: world.floaties.drop_obj(self.obj))
         self.layout = self.dialog.layout
         self.handle = self

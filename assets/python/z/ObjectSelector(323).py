@@ -37,6 +37,11 @@ class ObjectSelector:
         self.selected = []
         self.changed.emit()
 
+    def set_selected(self, selected, emit_changed=True):
+        self.selected = selected
+        if emit_changed:
+            self.changed.emit()
+
     def on_box_changed(self, box):
         unproject = world.unproject
         p1, p2 = box
@@ -57,7 +62,7 @@ class ObjectSelector:
         c_right = unproject((p2[0], p2[1], 1.0)) \
                 - unproject((p2[0], p1[1], 0.0))
 
-        self.selected = []
+        selected = []
 
         for selectable in self.selectables:
             x_top = selectable.layout.position - unproject((p1[0], p1[1], 0.0))
@@ -77,9 +82,8 @@ class ObjectSelector:
             if np.sign(det_left) != np.sign(det_right):
                 continue
 
-            self.selected.append(selectable)
-
-        self.changed.emit()
+            selected.append(selectable)
+        self.set_selected(selected)
 
     def on_mouse_button(self, button, action, mods):
         self.box_selector.on_mouse_button(button, action, mods)

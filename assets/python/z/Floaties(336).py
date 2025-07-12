@@ -42,27 +42,25 @@ class Floaties:
         #self.col_widths.clear()
         for floatie in self.floaties.values():
             floatie.layout.measurer()
-            #self.col_widths[floatie.tile[0]] = \
-            #        max(self.col_widths.get(floatie.tile[0], self.min_tile_size[0]), floatie.layout.measure[0])
-            #self.row_heights[floatie.tile[1]] = \
-            #        max(self.row_heights.get(floatie.tile[1], self.min_tile_size[1]), floatie.layout.measure[1])
 
     def layouter(self):
         if not self.floaties:
             return
         width = max(x.measure[0]  for x in self.layout.children)
         offset = np.array((0, 0, 0), float)
-        #offset += world.camera.camera.position
-        offset[0] += self.alignment.width/2 - width
-        offset[1] += self.alignment.height/2 - 7 - self.spacing
+        y_cursor_left = y_cursor_right = self.alignment.height/2 - 7 - self.spacing
         offset[2] -= self.distance
         for i, floatie in enumerate(self.floaties.values()):
             offset[2] += i * 0.01
-            #tile_size = np.array((self.col_widths[floatie.tile[0]], self.row_heights[floatie.tile[1]], 0))
-            #floatie.layout.size = np.maximum(tile_size, floatie.layout.measure)
             floatie.layout.size = np.array((width, floatie.layout.measure[1], floatie.layout.measure[2]), float)
-            offset[1] -= self.spacing + floatie.layout.size[1]
-            #if not floatie.layout.position.any():
+            if floatie.side == 'left':
+                offset[0] = -self.alignment.width/2
+                y_cursor_left -= self.spacing + floatie.layout.size[1]
+                offset[1] = y_cursor_left
+            else:
+                offset[0] = self.alignment.width/2 - width
+                y_cursor_right -= self.spacing + floatie.layout.size[1]
+                offset[1] = y_cursor_right
             floatie.layout.rotation = world.camera.camera.rotation
             floatie.layout.position = transformations.rotate_vector(floatie.layout.rotation, offset) + world.camera.camera.position
             try:
@@ -83,10 +81,10 @@ class Floaties:
                             + (obj.get_position() - (drag.offset + drag.start_pos)))
         self.changed.emit()
 
-    def add(self, o=None, code_entity=None):
+    def add(self, o=None, code_entity=None, side='left'):
         if o is None:
             o = eval(code_entity.code_str)
-        floatie = z.Floatie(o, tuple(self.next_free_tile), code_entity)
+        floatie = z.Floatie(o, tuple(self.next_free_tile), code_entity, side=side)
         if self.to_hud:
             world.apps['Hud'].worktop.add(floatie)
             #self.floaties[floatie.obj] = floatie
@@ -124,7 +122,8 @@ class Floaties:
             self.changed.emit()
 
     def drop_all(self):
-        for o, floatie in list(self.floaties.items()):
+        while self.floaties:
+            o, floatie = next(iter(self.floaties.items()))
             self.drop_obj(o, emit_changed=False)
         self.changed.emit()
 

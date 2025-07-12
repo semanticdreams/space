@@ -13,6 +13,7 @@ extern "C" int luaopen_lsqlite3(lua_State* L);
 
 void lua_bind_bullet(sol::state&);
 void lua_bind_opengl(sol::state&);
+void lua_bind_json(sol::state&);
 
 extern "C" PyObject* PyInit_bullet();
 extern "C" PyObject* PyInit_space();
@@ -36,6 +37,7 @@ void Engine::start() {
     lua.require("lsqlite3", luaopen_lsqlite3);
     lua_bind_opengl(lua);
     lua_bind_bullet(lua);
+    lua_bind_json(lua);
     std::string luaPath = AssetManager::getAssetPath("lua");
     std::string packagePath = luaPath + "/?.lua";
     std::string fennelPath = luaPath + "/?.fnl";
@@ -116,6 +118,15 @@ void Engine::run() {
                             pythonWorld.attr("drop")();
                             pythonWorld.attr("init")();
                             lua_space["fbo"] = pythonWorld.attr("renderers").attr("lua_world").attr("fbo").cast<int>();
+                            break;
+
+                        case SDLK_F7:
+                            ((sol::unsafe_function) lua_space["drop"])();
+                            lua.script(R"(
+                            package.loaded["main"] = nil
+                            require("main")
+                            )");
+                            ((sol::unsafe_function) lua_space["init"])();
                             break;
                     }
                     pythonWorld.attr("window").attr("keys").attr("add")((int)event.key.keysym.sym);

@@ -63,8 +63,9 @@ class Apps:
         self.load_app('DefaultViews')
         self.load_app('BluetoothAudioManager')
         self.load_app('KernelsSnacks')
-        self.load_app('FlatGround')
+        #self.load_app('FlatGround')
         self.load_app('DynamicGraphApp')
+        self.load_app('LuaWorldApp')
 
     def __getitem__(self, key):
         if key in self.names:

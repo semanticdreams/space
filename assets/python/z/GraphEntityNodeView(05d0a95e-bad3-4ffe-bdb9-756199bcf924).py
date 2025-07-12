@@ -3,6 +3,10 @@ class GraphEntityNodeView:
         self.node = node
         self.focus = focus_parent.add_child(self)
 
+        self.actions = [
+            ('icon:keep', self.on_pin_triggered),
+        ]
+
         self.actions_panel = z.ActionsPanel([
             ('show all', self.node.show_all),
             ('hide all', self.node.hide_all),
@@ -52,6 +56,9 @@ class GraphEntityNodeView:
             source, target = selected_graph_entity_nodes
             self.set_source_entity(source.entity)
             self.set_target_entity(target.entity)
+
+    def on_pin_triggered(self):
+        self.node.dynamic_graph.pin_node_view(self)
 
     def paste_triggered(self):
         assert Y.register_type == 'entity', Y.register_type

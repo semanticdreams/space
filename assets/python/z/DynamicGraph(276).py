@@ -14,6 +14,8 @@ class DynamicGraph:
         self.labels = {}
         self.lines = {}
 
+        self.node_view_objs = {}
+
         self.lod = {}
 
         self.selected_nodes = []
@@ -113,6 +115,25 @@ class DynamicGraph:
                                if point in world.apps['ObjectSelector'].selected]
         self.selected_nodes_changed.emit()
 
+        self.update_node_views()
+
+    def update_node_views(self):
+        for node, view in list(self.node_view_objs.items()):
+            if node not in self.selected_nodes:
+                world.floaties.drop_obj(view)
+                self.node_view_objs.pop(node)
+        for node in self.selected_nodes:
+            if node.view and node not in self.node_view_objs:
+                obj = node.view(node)
+                self.node_view_objs[node] = obj
+                world.floaties.add(obj, side='right')
+
+    def pin_node_view(self, obj):
+        # removing node view obj from self.node_view_objs will
+        # prevent its removal in update
+        self.node_view_objs = {k: v for k, v in self.node_view_objs.items()
+                               if v != obj}
+
     def add_node(self, node, update_force_layout=True):
         node.mount(self)
         point = z.Point(
@@ -178,8 +199,8 @@ class DynamicGraph:
             self.update_force_layout()
 
     def node_clicked(self, node):
-        if node.view:
-            world.floaties.add(node.view(node))
+        if point := self.points.get(node):
+            world.apps['ObjectSelector'].set_selected([point])
 
     def node_double_clicked(self, node):
         for edge in node.get_edges():
@@ -228,6 +249,7 @@ class DynamicGraph:
         self.last_force_layout_position_update = time.time()
         for point, i in self.indices.items():
             point.layout.set_position(np.array((*self.force_layout.positions[i], 0)))
+        #self.shift_positions_to_center([0, 500, 0])
 
     def save_force_layout_params(self):
         self.force_layout.update_params()
@@ -246,6 +268,17 @@ class DynamicGraph:
         for node, point in self.points.items():
             self.entity.positions[node.key] = point.layout.position.tolist()
         self.entity.save()
+
+    def shift_positions(self, offset):
+        for point in self.points.values():
+            point.layout.position += np.asarray(offset, float)
+            self.force_layout.set_position(self.indices[point], point.layout.position)
+        self.save_positions()
+
+    def shift_positions_to_center(self, center):
+        current_center = np.sum(np.array(
+            [x.layout.position for x in self.points.values()]), axis=0) / len(self.points)
+        self.shift_positions(np.asarray(center) - current_center)
 
     def on_obj_moved(self):
         for point in self.points.values():

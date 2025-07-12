@@ -7,7 +7,7 @@ class ShaderEntity(z.Entity):
 
         self.view = None
         self.preview = None
-        self.color = (1.0, 0.2, 0, 1)
+        self.color = (1.0, 0.2, 1.0, 1)
 
     @classmethod
     def create(cls, name='', code_str='', id=None):

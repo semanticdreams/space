@@ -25,8 +25,8 @@ class FirstPersonControls:
         self.speed_multiplier = 1.0
 
         self.scroll_speed = np.array((0, 0), float)
-        self.max_scroll_speed = 10.0
-        self.scroll_acceleration = 2.0
+        self.max_scroll_speed = 5.0
+        self.scroll_acceleration = 2.5
         self.scroll_deceleration = 0.99
 
         self.drag_look_start = None
@@ -77,7 +77,7 @@ class FirstPersonControls:
         self.scroll_speed = np.array((0, 0), float)
 
     def on_scrolled(self, x, y):
-        self.scroll_speed += np.array([x, y]) * self.scroll_acceleration
+        self.scroll_speed += np.array([x, y]) * self.scroll_acceleration * max(1000, abs(self.camera.position[2])) * 0.001
 
     def on_mouse_button(self, button, action, mods):
         if button == sdl2.SDL_BUTTON_LEFT:
@@ -102,8 +102,9 @@ class FirstPersonControls:
             dx = x - self.drag_move_start[0]
             dy = y - self.drag_move_start[1]
             self.drag_move_start = x, y
-            self.camera.right(-dx * self.mouse_move_speed)
-            self.camera.up(dy * self.mouse_move_speed)
+            speed = self.mouse_move_speed * abs(self.camera.position[2]) * 0.006
+            self.camera.right(-dx * speed)
+            self.camera.up(dy * speed)
 
     def drag_active(self):
         return self.drag_look_start is not None or self.drag_move_start is not None

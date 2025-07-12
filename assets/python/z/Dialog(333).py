@@ -7,11 +7,10 @@ class Dialog:
         self.inspector = None
         if actions is None:
             actions = []
-            actions.extend([
-                #('icon:frame_source', lambda: world.floaties.add(world.classes['ClassView'](world.classes.get_class_code(name=self.child.__class__.__name__), self.child))),
-                ('icon:code', self.on_inspector),
-                ('icon:close', self.closed.emit),
-            ])
+            #actions.extend([
+            #    ('icon:code', self.on_inspector),
+            #    ('icon:close', self.closed.emit),
+            #])
         self.title_bar = z.TitleBar(title, actions=actions, color=color)
 
         self.padding = z.Padding(self.child.layout, (0.5, 0.5))
@@ -36,9 +35,9 @@ class Dialog:
 
         self.spatiolator = z.Spatiolator(self.layout, self.title_bar.label)
 
-    def on_inspector(self):
-        self.inspector = z.PyObjView(self.child, reloadable=False)
-        world.floaties.add(self.inspector)
+    #def on_inspector(self):
+    #    self.inspector = z.PyObjView(self.child, reloadable=False)
+    #    world.floaties.add(self.inspector)
 
     def reset_child(self, child):
         self.padding.layout.clear_children()

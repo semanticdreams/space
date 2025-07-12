@@ -6,6 +6,13 @@ class GraphEntityNodeNodeView:
         self.title = z.Button(str(self.node.entity), centered=False, wrap=False,
                               background_color=self.node.entity.color)
 
+        self.copy_button = z.ContextButton(label='c', actions=[
+            ('copy', self.node.entity.copy),
+            ('copy id', lambda: Y(self.node.entity.id)),
+            ('sys copy id', lambda: world.apps['Clipboard'].set_text(
+                self.node.entity.id)),
+        ])
+
         self.remove_child_button = z.ContextButton(label='-', actions=[
             ('remove-child', self.on_remove_child_triggered),
         ])
@@ -18,11 +25,15 @@ class GraphEntityNodeNodeView:
 
         self.meta_row = z.Flex([
             z.FlexChild(self.title.layout, flex=1),
+            z.FlexChild(self.copy_button.layout),
             z.FlexChild(self.remove_child_button.layout),
             z.FlexChild(self.create_child_button.layout),
         ], yalign='largest')
 
-        self.entity_view_obj = self.node.entity.view(self.node.entity)
+        if self.node.entity.view:
+            self.entity_view_obj = self.node.entity.view(self.node.entity)
+        else:
+            self.entity_view_obj = z.Label('entity has no view')
 
         self.column = z.Flex([
             z.FlexChild(self.meta_row.layout),
@@ -53,6 +64,7 @@ class GraphEntityNodeNodeView:
         self.column.drop()
         self.meta_row.drop()
         self.title.drop()
+        self.copy_button.drop()
         self.create_child_button.drop()
         self.remove_child_button.drop()
         self.entity_view_obj.drop()
