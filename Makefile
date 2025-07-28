@@ -42,9 +42,7 @@ act:
 	gh act
 
 release:
-	@# Get the latest tag like v1, v2, etc.
 	@last_tag=$$(git tag --list 'v*' | sort -V | tail -n1); \
-	\
 	if [ -z "$$last_tag" ]; then \
 		new_version="v1"; \
 	else \
@@ -52,6 +50,6 @@ release:
 		new_num=$$((num + 1)); \
 		new_version="v$${new_num}"; \
 	fi; \
-	echo "Creating new tag $$new_version"; \
-	git tag $$new_version; \
+	echo "Creating new annotated tag $$new_version"; \
+	git tag -a $$new_version -m "$$new_version"; \
 	git push origin $$new_version
