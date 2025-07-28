@@ -22,6 +22,8 @@ class Entities:
         'dynamic-graph': z.DynamicGraphEntity,
         'shader': z.ShaderEntity,
         'fs-folder': z.FSFolderEntity,
+        'llm-message': z.LLMMessageEntity,
+        'llm-conversation': z.LLMConversationEntity,
     }
 
     morphs = {
@@ -30,6 +32,8 @@ class Entities:
             ('dict', z.String2DictEntityMorph),
             ('json', z.String2JsonEntityMorph),
             ('task', z.String2TaskEntityMorph),
+            ('llm-message', z.String2LLMMessageEntityMorph),
+            ('llm-conversation', z.String2LLMConversationEntityMorph),
         ],
         'code': [
             ('class', z.Code2ClassEntityMorph)

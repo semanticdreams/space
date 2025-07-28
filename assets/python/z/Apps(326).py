@@ -27,7 +27,7 @@ class Apps:
         self.load_app('Menus')
         self.load_app('Hud')
         self.load_app('EntityIndicator')
-        #self.load_app('Claude')
+        self.load_app('Claude')
         #self.load_app('ClaudeIndicator')
         self.load_app('TasksIndicator')
         self.load_app('BackupIndicator')

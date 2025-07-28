@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import sys
 import importlib
@@ -39,6 +40,14 @@ def one_or_none(items):
 def read_file(filename):
     with open(filename) as f:
         return f.read()
+
+
+def camel_to_hyphen(s):
+    # First, add hyphen between a lowercase letter or digit and an uppercase letter
+    s = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', s)
+    # Then, add hyphen before an uppercase followed by lowercase if preceded by another uppercase (handles acronyms)
+    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1-\2', s)
+    return s.lower()
 
 
 def arrays2elements(vertices):

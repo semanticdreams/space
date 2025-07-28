@@ -15,7 +15,7 @@ class Floaties:
         self.col_widths = {}
         self.tiles = {}
         self.next_free_tile = [0, 0]
-        self.distance = 250
+        self.distance = 200
 
         self.to_hud = False
 

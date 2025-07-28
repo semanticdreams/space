@@ -13,8 +13,9 @@ class ClassEntity(z.Entity):
     @classmethod
     def create(cls, name='', code_str='', id=None):
         id = super().create('class', {'name': name, 'code_str': code_str}, id=id)
-        world.classes.reload()
-        return cls(id, code_str, name)
+        o = cls(id, code_str, name)
+        o.save_to_file()
+        return o
 
     @classmethod
     def load(cls, id, data):
@@ -45,10 +46,14 @@ class ClassEntity(z.Entity):
     def save(self, to_file=True):
         super().save()
         if to_file:
-            path = os.path.join(world.assets_path, 'python/z',
-                                f'{self.name}({self.id}).py')
-            with open(path, 'w') as f:
-                f.write(self.code_str)
+            self.save_to_file()
+
+    def save_to_file(self, reload_world_classes=True):
+        path = os.path.join(world.assets_path, 'python/z',
+                            f'{self.name}({self.id}).py')
+        with open(path, 'w') as f:
+            f.write(self.code_str)
+        if reload_world_classes:
             world.classes.reload()
 
     def delete(self):

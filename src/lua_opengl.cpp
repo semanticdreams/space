@@ -1,6 +1,8 @@
 #include <sol/sol.hpp>
 #include <GL/glew.h>
 
+#include "vector_buffer.h"
+
 void lua_bind_opengl(sol::state& lua) {
     sol::table gl = lua.create_named_table("gl");
 
@@ -40,5 +42,10 @@ void lua_bind_opengl(sol::state& lua) {
     gl.set_function("glBufferData", [](GLenum target, sol::as_table_t<std::vector<float>> data, GLenum usage) {
         glBufferData(target, data.value().size() * sizeof(float), data.value().data(), usage);
     });
-
+    gl.set_function("bufferDataFromVectorBuffer",
+            [](VectorBuffer& buffer, GLenum target, GLenum usage) {
+            float* data = buffer.raw_data();       // new method
+            size_t size = buffer.used_size();      // new method
+            glBufferData(target, size, data, usage);
+            });
 }

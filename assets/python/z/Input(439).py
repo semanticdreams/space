@@ -145,7 +145,7 @@ class Input:
             color = world.themes.theme.focused_background_color
         else:
             color = world.themes.theme.input_background_color
-        self.rectangle.set_color(adjust_perceptual_color_brightness(
+        self.rectangle.set_color(util.adjust_perceptual_color_brightness(
             color, 0.03 if self.unsubmitted_change else 0.0))
         self.rectangle.update()
 

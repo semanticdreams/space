@@ -18,6 +18,7 @@ class Workspace(z.Entity):
                 floatie = world.floaties.add(code_entity=entity)
             else:
                 entity = world.apps['Entities'].get_entity(floatie_data['class_entity_id'])
+                print('workspace: adding class entity as floatie:', entity.name)
                 cls = entity.eval()
                 floatie = world.floaties.add(cls())
             floatie.layout.position = np.array(floatie_data['position'])

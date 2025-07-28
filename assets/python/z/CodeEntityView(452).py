@@ -15,6 +15,9 @@ class CodeEntityView:
             ('delete', self.delete_code),
         ], focus_parent=self.focus)
 
+        self.name_input = z.Input(self.entity.name, focus_parent=self.focus)
+        self.name_input.submitted.connect(self.name_input_submitted)
+
         self.code_input = z.Input(self.entity.code_str, multiline=True,
                                   tabs=True, focus_parent=self.focus,
                                   min_lines=3, max_lines=10, syntax_coloring=True)
@@ -22,6 +25,7 @@ class CodeEntityView:
 
         self.column = z.Flex([
             z.FlexChild(self.actions_panel.layout),
+            z.FlexChild(self.name_input.layout),
             z.FlexChild(self.code_input.layout, flex=1)
         ], axis='y', xalign='largest')
 
@@ -29,6 +33,10 @@ class CodeEntityView:
 
     def code_input_submitted(self):
         self.entity.set_code_str(self.code_input.text)
+        self.entity.save()
+
+    def name_input_submitted(self):
+        self.entity.name = self.name_input.text
         self.entity.save()
 
     def __str__(self):
@@ -88,5 +96,6 @@ class CodeEntityView:
     def drop(self):
         self.column.drop()
         self.actions_panel.drop()
+        self.name_input.drop()
         self.code_input.drop()
         self.focus.drop()

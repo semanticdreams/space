@@ -18,7 +18,7 @@ class Floatie:
         else:
             self.title = str(obj)
 
-        dialog_actions = self.obj.actions if hasattr(obj, 'actions') else [
+        dialog_actions = self.obj.actions if hasattr(obj, 'actions') and obj.actions is not None else [
             ('icon:code', lambda: world.floaties.add(z.PyObjView(self.obj, reloadable=False))),
             ('icon:close', lambda: world.floaties.drop_obj(self.obj)),
         ]

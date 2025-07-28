@@ -17,19 +17,6 @@ class ClaudeConversation:
     def __init__(self, data):
         self.data = data
 
-    def get_messages(self):
-        return list(map(dict, world.db.execute(
-            'select * from claude_conversation_messages'
-            ' where claude_conversation_id = ? and archived_at is null'
-            ' order by id asc',
-            (self.data['id'],)).fetchall()))
-
-    def get_message(self, id):
-        return dict(one(world.db.execute(
-            'select * from claude_conversation_messages'
-            ' where id = ?',
-            (id,)).fetchall()))
-
     def insert_message(self, content, role='user', num_tokens=None,
                        type='text', tool_use_id=None):
         message = {'role': role, 'content': content, 'claude_conversation_id': self.data['id'],
