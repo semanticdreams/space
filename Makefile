@@ -1,7 +1,4 @@
-.PHONY: build cmake debug run pack install clean dump-seed load-seed
-
-build: cmake
-	cd build && $(MAKE) -j$(shell nproc)
+.PHONY: build cmake debug run pack install clean dump-seed load-seed act
 
 cmake:
 	@if [ ! -f build/Makefile ] || [ CMakeLists.txt -nt build/Makefile ]; then \
@@ -9,6 +6,9 @@ cmake:
 	else \
 		echo "CMake is up to date."; \
 	fi
+
+build: cmake
+	cd build && $(MAKE) -j$(shell nproc)
 
 debug:
 	@if [ ! -f build/debug/Makefile ] || [ CMakeLists.txt -nt build/debug/Makefile ]; then \
@@ -37,3 +37,6 @@ dump-seed:
 
 load-seed:
 	python scripts/seed.py load
+
+act:
+	gh act
