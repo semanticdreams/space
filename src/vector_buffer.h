@@ -38,6 +38,10 @@ public:
         return freeFrom * sizeof(float);
     }
 
+    size_t length() const {
+        return freeFrom;
+    }
+
     VectorHandle allocate(size_t size) {
         // Try reuse
         auto& freedList = freed[size];

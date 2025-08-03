@@ -4,6 +4,7 @@
 #include <GL/glew.h>
 #include <GL/gl.h>
 #include <GL/glu.h>
+#include <glm/glm.hpp>
 
 #include <iostream>
 #include <string>
@@ -28,15 +29,15 @@ public:
     );
 
     // Utility functions
-    //void setFloat(const GLchar* name, GLfloat value) const;
-    //void setInteger(const GLchar* name, GLint value) const;
-    //void setVector2f(const GLchar* name, GLfloat x, GLfloat y) const;
-    //void setVector2f(const GLchar* name, const Vector2& value) const;
-    //void setVector3f(const GLchar* name, GLfloat x, GLfloat y, GLfloat z) const;
-    //void setVector3f(const GLchar* name, const Vector3& value) const;
-    //void setVector4f(const GLchar* name, GLfloat x, GLfloat y, GLfloat z, GLfloat w) const;
-    //void setVector4f(const GLchar* name, const Vector4& value) const;
-    //void setMatrix4(const GLchar* name, const Matrix4& matrix) const;
+    void setFloat(const GLchar* name, GLfloat value) const;
+    void setInteger(const GLchar* name, GLint value) const;
+    void setVector2f(const GLchar* name, GLfloat x, GLfloat y) const;
+    void setVector2f(const GLchar* name, const glm::vec2& value) const;
+    void setVector3f(const GLchar* name, GLfloat x, GLfloat y, GLfloat z) const;
+    void setVector3f(const GLchar* name, const glm::vec3& value) const;
+    void setVector4f(const GLchar* name, GLfloat x, GLfloat y, GLfloat z, GLfloat w) const;
+    void setVector4f(const GLchar* name, const glm::vec4& value) const;
+    void setMatrix4(const GLchar* name, const glm::mat4& matrix) const;
 
 private:
     GLuint vs;

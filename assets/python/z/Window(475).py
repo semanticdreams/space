@@ -36,6 +36,7 @@ class Window:
     def set_clear_color(self, color):
         self.clear_color = color
         glClearColor(*color)
+        print("python set clear color", color)
 
     def clear(self):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)

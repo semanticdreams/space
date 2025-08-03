@@ -35,12 +35,12 @@
 (local Entity
   {:entity-type-cls-map {}
    :register-cls (fn [self entity-type entity-cls]
-          (set (. self.entity-type-cls-map entity-type) entity-cls))
+                   (set (. self.entity-type-cls-map entity-type) entity-cls))
    :get (fn [self entity-id]
           (let [entity (get-entity entity-id true)
                 entity-cls (. self.entity-type-cls-map entity.type)]
             (entity-cls entity)))
-          })
+   })
 
 (global one (fn [val] (assert (= (length val) 1) val) (. val 1)))
 
@@ -65,9 +65,9 @@
                            (icollect [_ v (ipairs self.edges)]
                                      (if (= v.source_id entity.id) v)))
      :graph-code-obj (fn [self node-entity]
-                        (let [func (fennel.eval (. node-entity :code-str))
-                              (ok? res) (xpcall func debug.traceback (self:make-this node-entity))]
-                          (if ok? res (error res))))
+                       (let [func (fennel.eval (. node-entity :code-str))
+                             (ok? res) (xpcall func debug.traceback (self:make-this node-entity))]
+                         (if ok? res (error res))))
      :get-children (fn [self node-entity filters]
                      (icollect [_ v (ipairs
                                       (self:get-outgoing-edges node-entity))]
@@ -115,18 +115,62 @@
 ;(-> (G:make-this W) (: :get-children {:value "widgets"}) (pp))
 ;(-> G (. :force-layout-params) (pp))
 
+(fn Rectangle [opts]
+  (set opts.color (or opts.color (glm.vec4:new 1 0 0 1)))
+  (set opts.position (or opts.position (glm.vec3:new 0)))
+  (set opts.size (or opts.size (glm.vec2:new 10)))
+  (set opts.rotation (or opts.rotation (glm.quat:new 1 0 0 0)))
+  (set opts.depth-offset-index (or opts.depth-offset-index 0))
+
+  (fn build [self ctx]
+    (local handle (ctx.triangle-vector:allocate (* 8 3 2)))
+
+    (fn update [self]
+      (local verts [[0 0 0] [0 opts.size.y 0] [opts.size.x opts.size.y 0]
+                    [opts.size.x opts.size.y 0] [opts.size.x 0 0] [0 0 0]])
+      (for [i 1 6]
+        (ctx.triangle-vector:set_vec3
+          handle
+          (* (- i 1) 8)
+          (+ (opts.rotation:rotate (glm.vec3:new (table.unpack (. verts i))))
+             opts.position))
+        (ctx.triangle-vector:set_vec4 handle (+ (* (- i 1) 8) 3) opts.color)
+        (ctx.triangle-vector:set_float handle (+ (* (- i 1) 8) 7) opts.depth-offset-index)
+        )
+      )
+
+    (fn drop [self]
+      (ctx.triangle-vector:delete handle))
+
+    {: update
+     : drop}
+    )
+
+  {: opts
+   : build})
+
 (fn space.init []
   (let [world-entity (Entity:get "021cb530-ae60-47f3-a322-64383f850a05")
         world-entity-func (fennel.eval world-entity.code-str)]
     (set space.world (world-entity-func (G:make-this world-entity))))
-  ;(local vb (VectorBuffer.new))
-  ;(gl.bufferDataFromVectorBuffer vb gl.GL_ARRAY_BUFFER gl.GL_STATIC_DRAW)
-  (space.world:init)
-  (local triangle-shader space.world.renderers.triangles.shader)
+  (local vb space.world.renderers.scene-triangle-vector)
+  (local h (vb:allocate (* 8 3)))
+  (vb:set_vec4 h 3 (glm.vec4:new 1 0 0 1))
+  (vb:set_vec4 h 11 (glm.vec4:new 0 1 0 1))
+  (vb:set_vec4 h 19 (glm.vec4:new 0 0 1 1))
+
+  (vb:set_vec3 h 0 (glm.vec3:new -5 -5 0))
+  (vb:set_vec3 h 8 (glm.vec3:new 5 -5 0))
+  (vb:set_vec3 h 16 (glm.vec3:new 0 0 0))
+
+  (local r (Rectangle {}))
+  (local rr (r:build {:triangle-vector vb}))
+  (rr:update)
   )
 
 (fn space.update [delta]
-  (space.world:update delta))
+  (space.world:update delta)
+  )
 
 (fn space.drop []
   (space.world:drop)

@@ -36,7 +36,7 @@ void Engine::start() {
     memset(inputState.keyboardState.previousValue, 0, SDL_NUM_SCANCODES);
 
     // lua
-    lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table, sol::lib::math, sol::lib::string, sol::lib::debug, sol::lib::io);
+    lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table, sol::lib::math, sol::lib::string, sol::lib::debug, sol::lib::io, sol::lib::os);
     lua.require("lsqlite3", luaopen_lsqlite3);
     lua_bind_opengl(lua);
     lua_bind_bullet(lua);
@@ -109,6 +109,8 @@ void Engine::run() {
                             int width = event.window.data1;
                             int height = event.window.data2;
                             glViewport(0, 0, width, height);
+                            lua_space["width"] = width;
+                            lua_space["height"] = height;
                             pythonWorld.attr("viewport_changed")(py::make_tuple(0, 0, width, height));
                             break;
                     }

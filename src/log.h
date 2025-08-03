@@ -57,3 +57,11 @@ private:
         Log().get(level)
 
 #endif
+
+#define GL_CHECK_ERROR() \
+    do { \
+        GLenum err; \
+        while ((err = glGetError()) != GL_NO_ERROR) { \
+            LOG(Error) << "OpenGL error " << err << " at " << __FILE__ << ":" << __LINE__; \
+        } \
+    } while (0)

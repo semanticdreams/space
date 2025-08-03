@@ -1,0 +1,1 @@
+{"id": "42fe86bf-15b3-4050-b44d-97bd897fd0d8", "type": "code", "data": "{\"code_str\": \"z.ClassEntityView(z.Entity.get(\\\"34a86cf6-f60a-423e-8abe-264a5f20409b\\\"))\", \"name\": \"\", \"lang\": \"py\", \"project_id\": 1, \"kernel\": 0, \"summary\": null, \"autolaunch\": 0, \"launchable\": 0}", "created_at": 1752139370.5491056, "updated_at": 1752139370.5491056}

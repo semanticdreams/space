@@ -5,7 +5,7 @@ class ShaderEntity(z.Entity):
         self.name = name
         self.label = self.name
 
-        self.view = None
+        self.view = z.ShaderEntityView
         self.preview = None
         self.color = (1.0, 0.2, 1.0, 1)
 

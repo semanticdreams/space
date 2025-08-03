@@ -36,6 +36,7 @@ class Renderers:
         glDeleteFramebuffers(1, self.final_fbo)
         glDeleteRenderbuffers(1, self.final_rbo)
         self.create_final_fbo()
+        self.lua_world.viewport_changed(viewport)
 
     def create_final_fbo(self):
         width, height = world.viewport.value[2:4]
