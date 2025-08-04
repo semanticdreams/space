@@ -1,7 +1,6 @@
 #include <iostream>
 #include <utility>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 #include "window_sdl.h"

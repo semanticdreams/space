@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.0)
+cmake_minimum_required(VERSION 3.12.0)
 set(CMAKE_CXX_STANDARD 17)
 project(space VERSION 0.1.0)
 set(OpenGL_GL_PREFERENCE "GLVND")
@@ -9,7 +9,11 @@ enable_testing()
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries")
 add_subdirectory(external/lua)
 
+add_subdirectory(external/sqlite)
+
 include_directories(${CMAKE_SOURCE_DIR}/external/sol2)
+
+include_directories(${CMAKE_SOURCE_DIR}/external/stb)
 
 find_package(glm REQUIRED)
 
@@ -49,7 +53,9 @@ target_link_libraries(${PROJECT_NAME}
     OpenGL::GL
     Python3::Python
     glm::glm
-    lua::lib
+    lua
+    sqlite3
+    lsqlite3
     OpenMP::OpenMP_CXX
 )
 
@@ -101,8 +107,7 @@ set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "space")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 #set(CPACK_DEBIAN_PACKAGE_DEPENDS
-#"libsdl2-2.0-0, libglew2.2, libbullet-dev, libopenal1, \
-#python3, python3-opengl"
+#"libsdl2-2.0-0, libglew2.2, libbullet-dev, libopenal1"
 #)
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "space")
 set(CPACK_DEBIAN_PACKAGE_SECTION "games")
