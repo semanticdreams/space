@@ -48,7 +48,7 @@ class DynamicGraph:
 
         world.updated.connect(self.update)
 
-        self.add_node(z.StartNode())
+        self.add_node(z.StartNode(), pinned=True)
 
         world.vim.add_mode(z.DynamicGraphVimMode())
         world.vim.modes['leader'].add_action_group(z.VimActionGroup('dynamic-graph', [
@@ -134,10 +134,10 @@ class DynamicGraph:
         self.node_view_objs = {k: v for k, v in self.node_view_objs.items()
                                if v != obj}
 
-    def add_node(self, node, update_force_layout=True):
+    def add_node(self, node, update_force_layout=True, pinned=False):
         node.mount(self)
         point = z.Point(
-            color=node.color, sub_color=node.sub_color, size=8,
+            color=node.color, sub_color=node.sub_color, size=8, pinned=pinned,
             on_click=lambda f, i, d, node=node: self.node_clicked(node),
             on_double_click=lambda f, i, d, node=node: self.node_double_clicked(node),
         )
@@ -236,6 +236,8 @@ class DynamicGraph:
         for i, point in enumerate(self.points.values()):
             self.force_layout.add_node(point.layout.position)
             self.indices[point] = i
+            if point.pinned:
+                self.force_layout.pin_node(i, True)
         for source, target in self.lines.keys():
             self.force_layout.add_edge(
                 self.indices[self.points[source]],

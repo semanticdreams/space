@@ -15,7 +15,7 @@ class ForceLayout:
                  stabilized_max_displacement=0.02,
                  stabilized_avg_displacement=0.01,
                  max_displacement_squared = 100):
-        self.position = np.array((0, 500, 0), float)
+        self.position = np.array((0, 0, 0), float)
         self.update_interval = update_interval
         self.spring_rest_length = spring_rest_length
         self.repulsive_force_constant = repulsive_force_constant
@@ -58,6 +58,9 @@ class ForceLayout:
     def add_node(self, position):
         return self.cpp_force_layout.add_node(np.asarray(position, float))
 
+    def pin_node(self, index, value):
+        self.cpp_force_layout.pin_node(index, value)
+
     def add_edge(self, source, target, mirror=True):
         self.cpp_force_layout.add_edge(source, target, mirror)
 
@@ -70,7 +73,7 @@ class ForceLayout:
         self.active = True
         self.changed.emit()
 
-    def update(self, num_iterations=2000):
+    def update(self, num_iterations=1000):
         if not self.active:# or not self.positions.size:
             return
 

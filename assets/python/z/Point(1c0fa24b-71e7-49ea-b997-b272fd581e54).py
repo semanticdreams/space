@@ -1,8 +1,9 @@
 class Point:
-    def __init__(self, color=(1, 0, 1, 1), sub_color=None, size=10,
+    def __init__(self, color=(1, 0, 1, 1), sub_color=None, size=10, pinned=False,
                  on_click=None, on_right_click=None, on_double_click=None):
         self.size = size
         self.hud = False
+        self.pinned = pinned
         self.on_click = on_click or (lambda f, i, d: None)
         self.on_right_click = on_right_click or (lambda f, i, d: None)
         self.on_double_click = on_double_click or (lambda f, i, d: None)

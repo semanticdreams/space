@@ -8,6 +8,7 @@
 #include <omp.h>
 
 #include "python_force_layout.h"
+#include "force_layout_quad_tree.hpp"
 
 ForceLayout::ForceLayout(
 		py::array_t<double> center_position_,
@@ -79,64 +80,64 @@ std::tuple<double, double, double> ForceLayout::step(int num_iterations) {
 	glm::dvec2 jitter, diff, center_force_vec, disp;
 
 	// Auto-center
-	center_position.x = 0; center_position.y = 0;
-	for (size_t i = 0; i < n; ++i) {
-		center_position += glm::dvec2(positions[i].x, positions[i].y);
-	}
-	center_position /= static_cast<double>(n);
+	//center_position = glm::dvec2(0.0);
+	//for (size_t i = 0; i < n; ++i) {
+	//	center_position += positions[i];
+	//}
+	//center_position /= static_cast<double>(n);
 
 	for (int iter = 0; iter < num_iterations; ++iter) {
 		std::memset(forces.data(), 0, n * sizeof(glm::dvec2));
 
-#pragma omp parallel for private(pi, pj, delta, f, jitter) schedule(dynamic)
-		for (int i = 0; i < static_cast<int>(n); ++i) {
-			pi.x = positions[i].x;
-			pi.y = positions[i].y;
+        double theta = 0.5;//0.3 + 0.7 * (iter / double(num_iterations));
 
-			for (int j = i + 1; j < static_cast<int>(n); ++j) {
-				pj.x = positions[j].x;
-				pj.y = positions[j].y;
-				delta = pi - pj;
-				double dist_sq = glm::dot(delta, delta);
-
-				if (dist_sq == 0.0) {
-					jitter.x = ((rand() / double(RAND_MAX)) - 0.5) * 60.0;
-					jitter.y = ((rand() / double(RAND_MAX)) - 0.5) * 60.0;
-#pragma omp atomic
-					forces[i].x += jitter.x;
-#pragma omp atomic
-					forces[i].y += jitter.y;
-#pragma omp atomic
-					forces[j].x -= jitter.x;
-#pragma omp atomic
-					forces[j].y -= jitter.y;
-					continue;
-				}
-
-				double dist = std::sqrt(dist_sq);
-				double force_mag = repulsive_force_constant / dist_sq;
-				f = force_mag * (delta / dist);
-
-#pragma omp atomic
-				forces[i].x += f.x;
-#pragma omp atomic
-				forces[i].y += f.y;
-#pragma omp atomic
-				forces[j].x -= f.x;
-#pragma omp atomic
-				forces[j].y -= f.y;
-			}
+		// --- Compute bounds for quadtree
+		glm::dvec2 minPos = positions[0], maxPos = positions[0];
+		for (size_t i = 1; i < n; ++i) {
+			minPos = glm::min(minPos, positions[i]);
+			maxPos = glm::max(maxPos, positions[i]);
 		}
+		glm::dvec2 center = (minPos + maxPos) * 0.5;
+        glm::dvec2 extent = maxPos - minPos;
+        double maxDim = std::max(extent.x, extent.y) * 0.5 + 1.0;
 
-#pragma omp parallel for private(pi, pj, delta, f) schedule(dynamic)
+		// --- Build quadtree
+		QuadTreeNode tree(center, maxDim);
+		for (size_t i = 0; i < n; ++i) {
+			tree.insert(i, positions[i], positions);
+		}
+        tree.finalizeMass();
+
+		// --- Repulsive forces using Barnes-Hut
+        std::vector<std::vector<glm::dvec2>> local_forces;
+        int num_threads = omp_get_max_threads();
+        local_forces.resize(num_threads, std::vector<glm::dvec2>(n, glm::dvec2(0.0)));
+
+#pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+            auto& local = local_forces[tid];
+
+#pragma omp for
+            for (int i = 0; i < static_cast<int>(n); ++i) {
+                tree.computeRepulsion(i, positions[i], local[i], positions, theta, repulsive_force_constant);
+            }
+        }
+
+        // Combine local forces into shared array
+        std::fill(forces.begin(), forces.end(), glm::dvec2(0.0));
+        for (int t = 0; t < num_threads; ++t) {
+            for (size_t i = 0; i < n; ++i) {
+                forces[i] += local_forces[t][i];
+            }
+        }
+
+		// --- Attractive (spring) forces
 		for (int i = 0; i < static_cast<int>(n); ++i) {
-			pi.x = positions[i].x;
-			pi.y = positions[i].y;
-
+			pi = positions[i];
 			for (int j : edges[i]) {
 				if (i < j) {
-					pj.x = positions[j].x;
-					pj.y = positions[j].y;
+					pj = positions[j];
 					delta = pi - pj;
 					double dist = glm::length(delta);
 					if (dist == 0.0) continue;
@@ -144,32 +145,23 @@ std::tuple<double, double, double> ForceLayout::step(int num_iterations) {
 					double force_mag = spring_constant * (dist - spring_rest_length);
 					f = force_mag * (delta / dist);
 
-#pragma omp atomic
-					forces[i].x -= f.x;
-#pragma omp atomic
-					forces[i].y -= f.y;
-#pragma omp atomic
-					forces[j].x += f.x;
-#pragma omp atomic
-					forces[j].y += f.y;
+					forces[i] -= f;
+					forces[j] += f;
 				}
 			}
 		}
 
-#pragma omp parallel for private(diff, center_force_vec) schedule(static)
+		// --- Centering force
 		for (size_t i = 0; i < n; ++i) {
-			diff = center_position - glm::dvec2(positions[i].x, positions[i].y);
+			diff = center_position - positions[i];
 			center_force_vec = center_force * diff * glm::abs(diff);
-#pragma omp atomic
-			forces[i].x += center_force_vec.x;
-#pragma omp atomic
-			forces[i].y += center_force_vec.y;
+			forces[i] += center_force_vec;
 		}
 
+		// --- Integrate forces and update positions
 		total = 0.0;
 		max_d = 0.0;
 
-#pragma omp parallel for private(disp, delta) reduction(+:total) reduction(max:max_d)
 		for (size_t i = 0; i < n; ++i) {
 			if (pinned[i]) continue;
 
@@ -181,8 +173,7 @@ std::tuple<double, double, double> ForceLayout::step(int num_iterations) {
 				scale = std::sqrt(max_displacement_squared / disp_sq);
 
 			delta = disp * scale;
-			positions[i].x += delta.x;
-			positions[i].y += delta.y;
+			positions[i] += delta;
 
 			double dist = glm::length(delta);
 			total += dist;
