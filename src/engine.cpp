@@ -17,6 +17,7 @@ void lua_bind_json(sol::state&);
 void lua_bind_shaders(sol::state&);
 void lua_bind_glm(sol::state&);
 void lua_bind_vector_buffer(sol::state&);
+void lua_bind_tree_sitter(sol::state&);
 
 extern "C" PyObject* PyInit_bullet();
 extern "C" PyObject* PyInit_space();
@@ -44,6 +45,7 @@ void Engine::start() {
     lua_bind_shaders(lua);
     lua_bind_glm(lua);
     lua_bind_vector_buffer(lua);
+    lua_bind_tree_sitter(lua);
     std::string luaPath = AssetManager::getAssetPath("lua");
     std::string packagePath = luaPath + "/?.lua";
     std::string fennelPath = luaPath + "/?.fnl";

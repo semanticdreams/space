@@ -11,6 +11,8 @@ add_subdirectory(external/lua)
 
 add_subdirectory(external/sqlite)
 
+add_subdirectory(external/tree-sitter)
+
 include_directories(${CMAKE_SOURCE_DIR}/external/sol2)
 
 include_directories(${CMAKE_SOURCE_DIR}/external/stb)
@@ -56,6 +58,11 @@ target_link_libraries(${PROJECT_NAME}
     lua
     sqlite3
     lsqlite3
+    tree_sitter_core
+    tree_sitter_cpp
+    tree_sitter_python
+    tree_sitter_fennel
+    tree_sitter_javascript
     OpenMP::OpenMP_CXX
 )
 
