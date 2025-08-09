@@ -1,1 +1,1 @@
-{"id": "324", "type": "class", "data": "{\"code_str\": \"class Plane:\\n    def __init__(self, normal, point):\\n        self.normal = np.asarray(normal, float)\\n        self.point = np.asarray(point, float)\", \"name\": \"Plane\"}", "created_at": null, "updated_at": 1754239007.5027146}
+{"id": "324", "type": "class", "data": "{\"code_str\": \"class Plane:\\n    def __init__(self, normal, point):\\n        self.normal = np.asarray(normal, float)\\n        self.point = np.asarray(point, float)\", \"name\": \"Plane\"}", "created_at": null, "updated_at": 1754736945.474511}

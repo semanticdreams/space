@@ -32,7 +32,7 @@ def load_seed():
             with open(path) as f:
                 data = json.load(f)
                 cursor.execute(
-                    'INSERT OR IGNORE INTO entities'
+                    'INSERT OR REPLACE INTO entities'
                     ' (id, type, data, created_at, updated_at)'
                     ' VALUES (?, ?, ?, ?, ?)',
                     (data['id'], data['type'], data['data'], data['created_at'],
