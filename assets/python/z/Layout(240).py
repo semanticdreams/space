@@ -93,7 +93,6 @@ class Layout(z.Droppable):
                 node.root.layout_dirt.discard(node)
             node.root = root
 
-
     def mark_layout_dirty(self):
         if self.root:
             self.root.layout_dirt.add(self)

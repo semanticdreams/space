@@ -46,8 +46,12 @@ find_package(OpenMP REQUIRED)
 string(STRIP ${SDL2_LIBRARIES} SDL2_LIBRARIES)
 
 file( GLOB SOURCES src/*.cpp src/*.c)
-add_executable(${PROJECT_NAME} ${SOURCES})
-target_link_libraries(${PROJECT_NAME}
+add_library(${PROJECT_NAME}_lib ${SOURCES})
+target_include_directories(${PROJECT_NAME}_lib
+    PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(${PROJECT_NAME}_lib
     ${SDL2_LIBRARIES}
     ${GLEW_LIBRARIES}
     ${BULLET_LIBRARIES}
@@ -64,6 +68,16 @@ target_link_libraries(${PROJECT_NAME}
     tree_sitter_fennel
     tree_sitter_javascript
     OpenMP::OpenMP_CXX
+)
+
+add_executable(${PROJECT_NAME} apps/space/main.cpp)
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib)
+
+add_executable(${PROJECT_NAME}_test_lua tests/test_lua.cpp)
+target_link_libraries(${PROJECT_NAME}_test_lua ${PROJECT_NAME}_lib)
+add_test(NAME test_lua COMMAND ${PROJECT_NAME}_test_lua)
+set_tests_properties(test_lua PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)

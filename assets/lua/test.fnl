@@ -1,1 +1,1 @@
-{:hello (fn [] (pp "Hello from fennel!"))}
+(require :test-layout)
