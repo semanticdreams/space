@@ -1,1 +1,1 @@
-{"id": "454", "type": "class", "data": "{\"code_str\": \"class EntityNotFoundError(Exception):\\n    def __init__(self, entity_id):\\n        super().__init__(f'Entity {entity_id} not found.')\", \"name\": \"EntityNotFoundError\"}", "created_at": null, "updated_at": 1754736945.4636977}
+{"id": "454", "type": "class", "data": "{\"code_str\": \"class EntityNotFoundError(Exception):\\n    def __init__(self, entity_id):\\n        super().__init__(f'Entity {entity_id} not found.')\", \"name\": \"EntityNotFoundError\"}", "created_at": null, "updated_at": 1756754129.7245066}

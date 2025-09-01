@@ -1,1 +1,1 @@
-{"id": "376", "type": "class", "data": "{\"code_str\": \"class VimAction:\\n    def __init__(self, name, func, key):\\n        self.name = name\\n        self.func = func\\n        self.key = key\", \"name\": \"VimAction\"}", "created_at": null, "updated_at": 1754736945.4974482}
+{"id": "376", "type": "class", "data": "{\"code_str\": \"class VimAction:\\n    def __init__(self, name, func, key):\\n        self.name = name\\n        self.func = func\\n        self.key = key\", \"name\": \"VimAction\"}", "created_at": null, "updated_at": 1756754129.7306638}
