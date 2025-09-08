@@ -19,6 +19,11 @@ void lua_bind_glm(sol::state& lua) {
         sol::meta_function::multiplication, sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator*),
         sol::meta_function::division, sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator/)
     );
+    lua.set_function("vec2", sol::overload(
+                []() { return glm::vec2(); },
+                [](float v) { return glm::vec2(v); },
+                [](float x, float y) { return glm::vec2(x, y); }
+                ));
 
     // vec3
     glm_table.new_usertype<glm::vec3>("vec3",
@@ -26,11 +31,27 @@ void lua_bind_glm(sol::state& lua) {
         "x", &glm::vec3::x,
         "y", &glm::vec3::y,
         "z", &glm::vec3::z,
+
+        sol::meta_function::index, [](glm::vec3& self, int i) -> float& {
+        if (i < 1 || i > 3) throw sol::error("vec3 index out of range");
+        return self[i - 1];  // Lua/Fennel are 1-based, GLM is 0-based
+        },
+        sol::meta_function::new_index, [](glm::vec3& self, int i, float value) {
+        if (i < 1 || i > 3) throw sol::error("vec3 index out of range");
+        self[i - 1] = value;
+        },
+
         sol::meta_function::addition, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator+),
         sol::meta_function::subtraction, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator-),
         sol::meta_function::multiplication, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator*),
         sol::meta_function::division, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator/)
     );
+    lua.set_function("vec3", sol::overload(
+                []() { return glm::vec3(); },
+                [](float v) { return glm::vec3(v); },
+                [](float x, float y, float z) { return glm::vec3(x, y, z); },
+                [](const glm::vec2& v, float z) { return glm::vec3(v, z); }
+                ));
 
     // vec4
     glm_table.new_usertype<glm::vec4>("vec4",
@@ -44,6 +65,13 @@ void lua_bind_glm(sol::state& lua) {
             sol::meta_function::multiplication, sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator*),
             sol::meta_function::division, sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator/)
             );
+    lua.set_function("vec4", sol::overload(
+    []() { return glm::vec4(); },
+    [](float v) { return glm::vec4(v); },
+    [](float x, float y, float z, float w) { return glm::vec4(x, y, z, w); },
+    [](const glm::vec2& v, float z, float w) { return glm::vec4(v, z, w); },
+    [](const glm::vec3& v, float w) { return glm::vec4(v, w); }
+));
 
     glm_table.new_usertype<glm::quat>("quat",
             sol::constructors<
@@ -71,13 +99,21 @@ void lua_bind_glm(sol::state& lua) {
             // Apply rotation
             "rotate", [](const glm::quat& q, const glm::vec3& v) { return q * v; }
     );
-
+    lua.set_function("quat", sol::overload(
+                []() { return glm::quat(); },
+                [](float w, float x, float y, float z) { return glm::quat(w, x, y, z); },
+                [](const glm::vec3& eulerAngles) { return glm::quat(eulerAngles); } // from Euler angles
+                ));
 
     // mat4
     glm_table.new_usertype<glm::mat4>("mat4",
         sol::constructors<glm::mat4(), glm::mat4(float)>(),
         sol::meta_function::multiplication, sol::resolve<glm::mat4(const glm::mat4&, const glm::mat4&)>(&glm::operator*)
     );
+    lua.set_function("mat4", sol::overload(
+    []() { return glm::mat4(1.0f); },         // identity by default
+    [](float diag) { return glm::mat4(diag); } // diagonal matrix
+));
 
     // Vector functions
     glm_table.set_function("normalize", sol::overload(

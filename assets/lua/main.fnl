@@ -1,46 +1,16 @@
 (global fennel (require :fennel))
 
+(set fennel.macro-path space.fennel_path)
+
 (global pp (fn [x] (print (fennel.view x))))
 
-;(local test (require :test))
-;(test.hello)
-
-(local sqlite (require :lsqlite3))
-
-(fn get-db []
-  (local db_path (space.join_path space.data_dir "space.db"))
-  (sqlite.open db_path))
-
-(fn get-entities-by-type [entity-type]
-  (let [db (get-db)
-        stmt (db:prepare "select * from entities where type = ?")
-        rows []]
-    (stmt:bind 1 entity-type)
-    (while (= (stmt:step) sqlite.ROW)
-      (table.insert rows (stmt:get_named_values)))
-    (stmt:finalize)
-    rows))
-
-(fn get-entity [id parse-data?]
-  (let [db (get-db)
-        stmt (db:prepare "select * from entities where id = ?")]
-    (stmt:bind 1 id)
-    (assert (= (stmt:step) sqlite.ROW))
-    (local result (stmt:get_named_values))
-    (stmt:finalize)
-    (when parse-data?
-      (set result.data (json.loads result.data)))
-    result))
-
-(local Entity
-  {:entity-type-cls-map {}
-   :register-cls (fn [self entity-type entity-cls]
-                   (set (. self.entity-type-cls-map entity-type) entity-cls))
-   :get (fn [self entity-id]
-          (let [entity (get-entity entity-id true)
-                entity-cls (. self.entity-type-cls-map entity.type)]
-            (entity-cls entity)))
-   })
+(global read-file (fn [path]
+  (let [file (io.open path "r")]
+    (if file
+        (let [content (file:read "*all")]
+          (file:close)
+          content)
+        (error (.. "Could not open file: " path))))))
 
 (global one (fn [val] (assert (= (length val) 1) val) (. val 1)))
 
@@ -52,127 +22,48 @@
         (lua "return false")))
     true))
 
-(Entity:register-cls
-  :graph
-  (fn [entity]
-    {:id entity.id
-     :type entity.type
-     :nodes entity.data.nodes
-     :edges entity.data.edges
-     :positions entity.data.positions
-     :force-layout-params entity.data.force_layout_params
-     :get-outgoing-edges (fn [self entity]
-                           (icollect [_ v (ipairs self.edges)]
-                                     (if (= v.source_id entity.id) v)))
-     :graph-code-obj (fn [self node-entity]
-                       (let [func (fennel.eval (. node-entity :code-str))
-                             (ok? res) (xpcall func debug.traceback (self:make-this node-entity))]
-                         (if ok? res (error res))))
-     :get-children (fn [self node-entity filters]
-                     (icollect [_ v (ipairs
-                                      (self:get-outgoing-edges node-entity))]
-                               (let [e (Entity:get v.target_id)]
-                                 (if (matches-filters? e filters) e))))
-     :get-child (fn [self node-entity filters]
-                  (one (self:get-children node-entity filters)))
-     :make-this (fn [self node-entity]
-                  {:graph self
-                   :node node-entity
-                   :graph-code-obj-by-child-name (fn [self2 child-name]
-                                                   (self:graph-code-obj (self2:get-child {:name child-name})))
-                   :get-children (fn [self2 filters]
-                                   (self:get-children node-entity filters))
-                   :get-child (fn [self2 filters]
-                                (self:get-child node-entity filters))})}))
-
-(Entity:register-cls
-  :string
-  (fn [entity]
-    {:id entity.id
-     :type entity.type
-     :value entity.data}))
-
-(Entity:register-cls
-  :code
-  (fn [entity]
-    {:id entity.id
-     :type entity.type
-     :name entity.data.name
-     :code-str entity.data.code_str
-     :lang entity.data.lang}))
-
-(Entity:register-cls
-  :shader
-  (fn [entity]
-    {:id entity.id
-     :type entity.type
-     :code-str entity.data.code_str
-     :name entity.data.name}))
-
-(global G (Entity:get "18"))
-
-;(local W (Entity:get "021cb530-ae60-47f3-a322-64383f850a05"))
-;(-> (G:make-this W) (: :get-children {:value "widgets"}) (pp))
-;(-> G (. :force-layout-params) (pp))
-
 (local {: LayoutRoot} (require :layout))
 (local Rectangle (require :rectangle))
-(local Flex (require :flex))
+
+(local {: Flex : FlexChild} (require :flex))
+(local Sized (require :sized))
 
 (fn space.init []
-  (let [world-entity (Entity:get "021cb530-ae60-47f3-a322-64383f850a05")
-        world-entity-func (fennel.eval world-entity.code-str)]
-    (set space.world (world-entity-func (G:make-this world-entity))))
-  (local vb space.world.renderers.scene-triangle-vector)
-  ;(local h (vb:allocate (* 8 3)))
-  ;(vb:set_vec4 h 3 (glm.vec4:new 1 0 0 1))
-  ;(vb:set_vec4 h 11 (glm.vec4:new 0 1 0 1))
-  ;(vb:set_vec4 h 19 (glm.vec4:new 0 0 1 1))
+  (set space.renderers ((require :renderers)))
 
-  ;(vb:set_vec3 h 0 (glm.vec3:new -5 -5 0))
-  ;(vb:set_vec3 h 8 (glm.vec3:new 5 -5 0))
-  ;(vb:set_vec3 h 16 (glm.vec3:new 0 0 0))
-
-  (local build-context {:triangle-vector vb})
-
-  ;(local r (RawRectangle {}))
-  ;(local rr (r {:triangle-vector vb}))
-  ;(rr:update)
+  (local build-context {:triangle-vector space.renderers.scene-triangle-vector})
 
   (local layout-root (LayoutRoot))
-  (local r1 ((Rectangle {}) build-context))
-  ;(r1.layout:set-root layout-root)
-  ;(r1.layout:set-position (glm.vec3:new -8 0 0))
-  (local r2 ((Rectangle {:color (glm.vec4:new 0 1 1 1)}) build-context))
-  ;(r2.layout:set-root layout-root)
-  ;(r2.layout:set-position (glm.vec3:new -5 0 0))
-  (local flex
-    ((Flex {:children [{:layout r1.layout}
-                       {:layout r2.layout}]}) {}))
-  (flex.layout:set-root layout-root)
-  (flex.layout:set-position (glm.vec3:new -8 -5 0))
-  (flex.layout:mark-measure-dirty)
-  (flex.layout:set-root layout-root)
 
-; target api:
-  ;(local flex
-  ;  (Flex
-  ;    {:children
-  ;     [{:widget (Rectangle
-  ;                 :color (glm.vec4:new (1 0 0 1)))}
-  ;      {:widget (Rectangle
-  ;                 :color (glm.vec4:new (0 1 0 1)))}]}))
-  ;(local e (flex build-context))
-  ;(e.layout:set-root layout-root)
-;(flex:drop)
+  (local flex
+    (Flex
+      {:axis 2 :children
+       [(FlexChild
+          (Sized {:size (vec3 4 4 0)
+                  :child (Rectangle {:color (vec4 1 0 0 1)})}))
+        (FlexChild
+          (Flex {:children [(FlexChild (Sized {:size (vec3 5 2 0) :child (Rectangle {:color (vec4 0 1 1 1)})}))
+                            (FlexChild (Sized {:size (vec3 3 3 0) :child (Rectangle {:color (vec4 0 1 0 1)})}))]}))
+        (FlexChild (Sized {:size (vec3 4 4 0) :child (Rectangle {:color (vec4 1 1 0 1)})}))
+        ]}))
+
+  (local e (flex build-context))
+  (e.layout:set-root layout-root)
+  (e.layout:set-position (vec3 -5 -5 0))
+  (e.layout:mark-measure-dirty)
 
   (layout-root:update)
   )
 
 (fn space.update [delta]
-  (space.world:update delta)
+  (gl.glBindFramebuffer gl.GL_FRAMEBUFFER space.fbo)
+  (gl.glDisable gl.GL_CULL_FACE)
+  (gl.glEnable gl.GL_DEPTH_TEST)
+  (gl.glDepthFunc gl.GL_LESS)
+  (gl.glClearColor 0.1 0.2 0.3 1.0)
+  (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
+  (space.renderers:update)
   )
 
 (fn space.drop []
-  (space.world:drop)
   )

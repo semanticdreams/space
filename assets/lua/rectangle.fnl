@@ -4,20 +4,20 @@
 
 (fn Rectangle [opts]
   (set opts.color (or opts.color (glm.vec4:new 1 1 0 1)))
-  (set opts.size (or opts.size (glm.vec2:new 10)))
+  ;(set opts.size (or opts.size (glm.vec2:new 3)))
 
   (fn build [ctx]
-    (local e {:color opts.color :size opts.size})
+    (local e {:color opts.color})
 
     (local rectangle
       ((RawRectangle {}) ctx))
 
     (fn measurer [self]
-      (set self.measure (glm.vec3:new 3)))
+      (set self.measure (vec3 0)))
 
     (fn layouter [self]
       (set rectangle.color e.color)
-      (set rectangle.size e.size)
+      (set rectangle.size self.size)
       (set rectangle.position self.position)
       (set rectangle.rotation self.rotation)
       (rectangle:update))
@@ -27,6 +27,7 @@
                                  : layouter}))
 
     (set e.drop (fn [self]
+                  (e.layout:drop)
                   (rectangle:drop)))
     e)
   )

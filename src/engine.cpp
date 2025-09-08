@@ -36,6 +36,8 @@ void Engine::start() {
     // Clear previous state memory
     memset(inputState.keyboardState.previousValue, 0, SDL_NUM_SCANCODES);
 
+    std::string assetsPath = AssetManager::getAssetPath("");
+
     // lua
     lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table, sol::lib::math, sol::lib::string, sol::lib::debug, sol::lib::io, sol::lib::os);
     lua.require("lsqlite3", luaopen_lsqlite3);
@@ -52,7 +54,10 @@ void Engine::start() {
     lua["package"]["path"] = lua["package"]["path"].get<std::string>() + ";" + packagePath;
     lua_space = lua.create_named_table("space");
     lua_space["data_dir"] = get_user_data_dir("space");
+    lua_space["assets_dir"] = assetsPath;
+    lua_space["fennel_path"] = fennelPath;
     lua_space.set_function("join_path", join_path);
+    lua_space.set_function("get_asset_path", &AssetManager::getAssetPath);
     //lua.script_file(luaPath + "/init.lua");
     lua.script(R"(
     local fennel = require("fennel")
@@ -69,7 +74,6 @@ void Engine::start() {
     PyImport_AppendInittab("force_layout", &PyInit_force_layout);
     PyImport_AppendInittab("colors", &PyInit_colors);
     python = std::make_unique<py::scoped_interpreter>();
-    std::string assetsPath = AssetManager::getAssetPath("");
     std::string pyAssetsPath = AssetManager::getAssetPath("python");
     std::replace(pyAssetsPath.begin(), pyAssetsPath.end(), '\\', '/');
     py::module sys = py::module::import("sys");
