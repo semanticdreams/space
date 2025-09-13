@@ -1,0 +1,26 @@
+# space
+
+[![.github/workflows/build.yml](https://github.com/semanticdreams/space/actions/workflows/build.yml/badge.svg?branch=)](https://github.com/semanticdreams/space/actions/workflows/build.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
+
+## Setup
+
+<!--
+### AppImage for Linux
+
+*Tested on: Pop!_OS 22.04 LTS*
+-->
+
+### Build from source
+
+*Tested on: Pop!_OS 22.04 LTS*
+
+```
+sudo apt install cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libglew-dev pybind11-dev python3-dev python3-sdl2 python3-opengl python3-zmq python3-pygments
+make cmake
+make build
+make run
+```
+## License
+
+[GNU General Public License version 3](https://opensource.org/license/gpl-3-0)
