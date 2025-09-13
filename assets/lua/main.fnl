@@ -56,12 +56,6 @@
   )
 
 (fn space.update [delta]
-  (gl.glBindFramebuffer gl.GL_FRAMEBUFFER space.fbo)
-  (gl.glDisable gl.GL_CULL_FACE)
-  (gl.glEnable gl.GL_DEPTH_TEST)
-  (gl.glDepthFunc gl.GL_LESS)
-  (gl.glClearColor 0.1 0.2 0.3 1.0)
-  (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
   (space.renderers:update)
   )
 
