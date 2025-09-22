@@ -10,7 +10,7 @@ class HackernewsStoryListItem:
         self.author_link = z.Link(item['by'],
                                           foreground_color=sub_color,
                                           focus_parent=context['focus_parent'])
-        self.time_text = z.Text(z.time_ago(item['time']),
+        self.time_text = z.Text(util.time_ago(item['time']),
                                         style=sub_style)
         self.comments_link = z.Link(f'{item.get("descendants", 0)} comments',
                                             foreground_color=sub_color,
