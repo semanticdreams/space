@@ -5,7 +5,8 @@
       (read-file (space.get_asset_path "shaders/msdf.vert"))
       (read-file (space.get_asset_path "shaders/msdf.frag"))))
 
-  (local vao (gl.glGenVertexArraysa 1))
+
+  (local vao (gl.glGenVertexArrays 1))
   (local vbo (gl.glGenBuffers 1))
 
   (gl.glBindVertexArray vao)
@@ -23,7 +24,7 @@
   (gl.glVertexAttribPointer 2 4 gl.GL_FLOAT gl.GL_FALSE stride (* 5 4))
 
   (gl.glEnableVertexAttribArray 3)
-  (gl.VertexAttribPointer 3 1 gl.GL_INT gl.GL_FALSE stride (* 9 4))
+  (gl.glVertexAttribPointer 3 1 gl.GL_INT gl.GL_FALSE stride (* 9 4))
 
   (fn render [self vector font projection view]
     (gl.glBindVertexArray vao)
