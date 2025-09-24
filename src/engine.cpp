@@ -118,6 +118,7 @@ void Engine::run() {
                             lua_space["width"] = width;
                             lua_space["height"] = height;
                             pythonWorld.attr("viewport_changed")(py::make_tuple(0, 0, width, height));
+                            lua_space["fbo"] = pythonWorld.attr("renderers").attr("lua_world").attr("fbo").cast<int>();
                             break;
                     }
                     break;

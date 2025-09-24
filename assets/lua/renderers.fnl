@@ -7,7 +7,7 @@
 
   (local scene-text-vectors {})
   (local text-renderer (TextRenderer))
-  
+
   (local perspective (glm.perspective -5.0 2.0 10 2000.0))
   (local view (glm.translate (mat4 1.0) (vec3 0 0 -10)))
 
