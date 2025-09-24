@@ -7,21 +7,23 @@ class Classes:
         self.reload()
 
     def reload(self):
-        rows = world.db.execute(
-            'select * from entities where type = "class"').fetchall()
-
         self.codes, self.names = {}, {}
-        for row in rows:
-            data = json.loads(row['data'])
-            self.codes[row['id']] = {
-                'code': data['code_str'],
-                'name': data['name'],
+        z_dir = os.path.join(world.assets_path, 'python/z')
+        for filename in os.listdir(z_dir):
+            path = os.path.join(z_dir, filename)
+            basename, ext = os.path.splitext(filename)
+            name, rest = basename.split('(')
+            id = rest[:-1]
+            code_str = open(path).read()
+            self.codes[id] = {
+                'code': code_str,
+                'name': name,
                 'lang': 'py',
-                'id': row['id'],
+                'id': id,
                 'kernel': 0,
                 'project_id': 1,
             }
-            self.names[data['name']] = self.codes[row['id']]
+            self.names[name] = self.codes[id]
         self.classes = {}
 
     def load_class(self, id):

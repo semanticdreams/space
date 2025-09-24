@@ -110,28 +110,6 @@ class PythonWorld:
                     )
 
 
-        # update class entities from z folder
-        z_dir = os.path.join(self.assets_path, 'python/z')
-        with self.db:
-            for filename in os.listdir(z_dir):
-                path = os.path.join(z_dir, filename)
-                basename, ext = os.path.splitext(filename)
-                name, rest = basename.split('(')
-                id = rest[:-1]
-                code_str = open(path).read()
-                data = {'code_str': code_str, 'name': name}
-                now = time.time()
-                cur = self.db.execute('update entities set data = ?, updated_at = ?'
-                                      ' where id = ? and type = "class"',
-                                      (json.dumps(data), now, id))
-                if cur.rowcount == 0:
-                    now = time.time()
-                    cur.execute(
-                        'insert into entities (id, type, data, created_at, updated_at)'
-                        ' values (?, ?, ?, ?, ?)',
-                        (id, 'class', json.dumps(data), now, now)
-                    )
-
         self.next_tick_funcs = []
 
         from kernels import Kernels
