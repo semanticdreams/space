@@ -3,7 +3,7 @@
 [![.github/workflows/build.yml](https://github.com/semanticdreams/space/actions/workflows/build.yml/badge.svg?branch=)](https://github.com/semanticdreams/space/actions/workflows/build.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://opensource.org/license/gpl-3-0)
 
-Check out the [docs](https://semanticdreams.com/projects/space/) for more information.
+Check out the <a href="https://semanticdreams.com/projects/space/" target="_blank">docs</a> for more information.
 
 ## Setup
 
