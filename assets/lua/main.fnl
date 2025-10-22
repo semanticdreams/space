@@ -60,4 +60,5 @@
   )
 
 (fn space.drop []
+  (set (. package.loaded "renderers") nil)
   )

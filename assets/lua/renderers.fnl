@@ -16,11 +16,10 @@
     (gl.glDisable gl.GL_CULL_FACE)
     (gl.glEnable gl.GL_DEPTH_TEST)
     (gl.glDepthFunc gl.GL_LESS)
-    (gl.glClearColor 0.1 0.2 0.3 1.0)
+    (gl.glClearColor 0.5 0.5 0.5 1.0)
     (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
     (triangle-renderer:render scene-triangle-vector perspective view))
 
   {: scene-triangle-vector
    : update
    })
-
