@@ -68,6 +68,7 @@ public:
     std::optional<std::string> getTitle() const;
     bool isAltScreen() const;
     bool isPtyAvailable() const;
+    bool isScrollbackSupported() const;
     int getScrollbackSize() const;
     std::vector<Cell> getScrollbackLine(int index) const;
 

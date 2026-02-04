@@ -58,6 +58,7 @@ sol::table create_terminal_table(sol::state_view lua)
     });
     terminal_type.set_function("is-alt-screen", &Terminal::isAltScreen);
     terminal_type.set_function("is-pty-available", &Terminal::isPtyAvailable);
+    terminal_type.set_function("is-scrollback-supported", &Terminal::isScrollbackSupported);
     terminal_type.set_function("get-scrollback-size", &Terminal::getScrollbackSize);
     terminal_type.set_function("get-scrollback-line", &Terminal::getScrollbackLine);
     terminal_type.set_function("send-text", &Terminal::sendText);

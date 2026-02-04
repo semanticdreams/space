@@ -665,6 +665,11 @@ bool Terminal::isPtyAvailable() const
     return impl->ptyAvailable;
 }
 
+bool Terminal::isScrollbackSupported() const
+{
+    return SPACE_VTERM_HAS_SCROLLBACK != 0;
+}
+
 int Terminal::getScrollbackSize() const
 {
     return static_cast<int>(impl->scrollback.size());
