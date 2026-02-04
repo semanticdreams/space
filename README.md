@@ -18,13 +18,13 @@ Check out the <a href="https://semanticdreams.com/projects/space/" target="_blan
 
 *Tested on: Pop!_OS 22.04 LTS*
 
-```
 <!-- CI_DEPS_START -->
+```
 sudo apt install cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libglew-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev cargo libaubio-dev libboost-dev
-<!-- CI_DEPS_END -->
 make build
 make run
 ```
+<!-- CI_DEPS_END -->
 
 To run the app directly, use `./build/space -m main`.
 
