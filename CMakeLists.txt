@@ -138,7 +138,10 @@ if(UNIX AND NOT APPLE)
     pkg_check_modules(LIBNOTIFY IMPORTED_TARGET libnotify)
 endif()
 
-find_package(Boost REQUIRED)
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+find_package(Boost CONFIG REQUIRED)
 
 # Executable and link
 string(STRIP ${SDL2_LIBRARIES} SDL2_LIBRARIES)
@@ -168,7 +171,6 @@ target_include_directories(${PROJECT_NAME}_lib
     SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/external/nlohmann
     ${CMAKE_CURRENT_SOURCE_DIR}/external/tomlplusplus/include
-    ${Boost_INCLUDE_DIRS}
 )
 target_include_directories(${PROJECT_NAME}_lib
     SYSTEM PRIVATE
@@ -201,6 +203,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     tree_sitter_javascript
     OpenMP::OpenMP_CXX
     spdlog::spdlog
+    Boost::headers
 )
 if(SPACE_HAS_VTERM)
     target_link_libraries(${PROJECT_NAME}_lib PkgConfig::VTERM)
