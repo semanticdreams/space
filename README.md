@@ -20,7 +20,7 @@ Check out the <a href="https://semanticdreams.com/projects/space/" target="_blan
 
 ```
 <!-- CI_DEPS_START -->
-sudo apt install cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libglew-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev cargo libaubio-dev
+sudo apt install cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libglew-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev cargo libaubio-dev libboost-dev
 <!-- CI_DEPS_END -->
 make build
 make run
