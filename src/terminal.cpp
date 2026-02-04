@@ -2,6 +2,14 @@
 
 #include <vterm.h>
 
+#if (VTERM_VERSION_MAJOR > 0) || (VTERM_VERSION_MINOR >= 3)
+#define SPACE_VTERM_HAS_STRING_CHUNKS 1
+#define SPACE_VTERM_HAS_SCROLLBACK 1
+#else
+#define SPACE_VTERM_HAS_STRING_CHUNKS 0
+#define SPACE_VTERM_HAS_SCROLLBACK 0
+#endif
+
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
@@ -110,9 +118,12 @@ struct Terminal::Impl {
             &Impl::handleSetTermProp,
             &Impl::handleBell,
             &Impl::handleResize,
+#if SPACE_VTERM_HAS_SCROLLBACK
             &Impl::handleScrollbackPushLine,
             &Impl::handleScrollbackPopLine,
-            &Impl::handleScrollbackClear};
+            &Impl::handleScrollbackClear
+#endif
+        };
 
         vterm_screen_set_callbacks(screen, &callbacks, this);
         vterm_screen_set_damage_merge(screen, VTERM_DAMAGE_ROW);
@@ -510,6 +521,7 @@ struct Terminal::Impl {
     {
         Impl* impl = static_cast<Impl*>(user);
         if (prop == VTERM_PROP_TITLE) {
+#if SPACE_VTERM_HAS_STRING_CHUNKS
             if (val->string.initial) {
                 impl->titleBuffer.clear();
             }
@@ -520,6 +532,14 @@ struct Terminal::Impl {
                     impl->owner.onTitleChanged(*impl->title);
                 }
             }
+#else
+            if (val->string) {
+                impl->title = std::string(val->string);
+                if (impl->owner.onTitleChanged) {
+                    impl->owner.onTitleChanged(*impl->title);
+                }
+            }
+#endif
         } else if (prop == VTERM_PROP_ALTSCREEN) {
             impl->inAltScreen = val->boolean != 0;
             int rows = std::max(impl->size.rows, 1);
