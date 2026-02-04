@@ -12,18 +12,36 @@ jobs:
       SKIP_KEYRING_TESTS: 1
       XDG_DATA_HOME: /tmp/space/tests/xdg-data
       SPACE_DISABLE_AUDIO: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+      CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'Makefile') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref }}-
+            ccache-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' README.md | sed -n 's/^sudo apt install //p')
-          sudo apt-get install -y ${deps} xvfb
+          sudo apt-get install -y ${deps} xvfb ccache
 
       - name: Build
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: make build
+
+      - name: ccache stats
+        run: ccache -s
 
       - name: Run test suite
         env:
