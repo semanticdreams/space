@@ -65,8 +65,10 @@ struct LuaTSTree {
     }
 };
 
-// Binding function
-void lua_bind_tree_sitter(sol::state& lua) {
+namespace {
+
+sol::table create_tree_sitter_table(sol::state_view lua)
+{
     sol::table ts_module = lua.create_table();
 
     ts_module.set_function("parse", [](const std::string& code) -> LuaTSTree {
@@ -78,19 +80,31 @@ void lua_bind_tree_sitter(sol::state& lua) {
         return LuaTSTree(tree);  // Returned as userdata
     });
 
-    lua.new_usertype<LuaTSNode>("TSNode",
+    ts_module.new_usertype<LuaTSNode>("TSNode",
         "type", &LuaTSNode::type,
-        "child_count", &LuaTSNode::child_count,
+        "child-count", &LuaTSNode::child_count,
         "child", &LuaTSNode::child,
-        "start_byte", &LuaTSNode::start_byte,
-        "end_byte", &LuaTSNode::end_byte,
-        "is_null", &LuaTSNode::is_null,
+        "start-byte", &LuaTSNode::start_byte,
+        "end-byte", &LuaTSNode::end_byte,
+        "is-null", &LuaTSNode::is_null,
         "sexpr", &LuaTSNode::sexpr
     );
 
-    lua.new_usertype<LuaTSTree>("TSTree",
+    ts_module.new_usertype<LuaTSTree>("TSTree",
         "root", &LuaTSTree::root
     );
+    return ts_module;
+}
 
-    lua["tree_sitter"] = ts_module;
+} // namespace
+
+void lua_bind_tree_sitter(sol::state& lua)
+{
+    sol::table package = lua["package"];
+    sol::table preload = package["preload"];
+
+    preload.set_function("tree-sitter", [](sol::this_state state) {
+        sol::state_view lua(state);
+        return create_tree_sitter_table(lua);
+    });
 }

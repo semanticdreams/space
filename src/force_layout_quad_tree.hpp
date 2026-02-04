@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <cmath>
+#include <cstdlib>
 
 struct QuadTreeNode {
     static constexpr int CAPACITY = 1;

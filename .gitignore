@@ -1,6 +1,7 @@
 # Custom
 gl.log
 .env
+/prof
 
 # Python
 __pycache__/

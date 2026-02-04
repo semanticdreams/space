@@ -28,35 +28,6 @@ class Dialogs:
 
         return (*edited_color, initial_color[3])
 
-    def edit_string(self, initial_string, file_suffix=''):
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=file_suffix) as temp_file:
-            # Write the initial string to the file
-            temp_file_name = temp_file.name
-            temp_file.write(initial_string)
-
-        # Open Kitty terminal with Vim
-        try:
-            #subprocess.run(['xfce4-terminal', '--disable-server', '-x', 'vim', temp_file_name], check=True)
-            subprocess.run(['gnome-terminal', '--wait', '--', 'vim', temp_file_name], check=True)
-        except subprocess.CalledProcessError:
-            print("Failed to open Kitty with Vim")
-            return None
-
-        # Read the edited content
-        with open(temp_file_name, 'r') as temp_file:
-            edited_string = temp_file.read()
-
-        return edited_string
-
-    def edit_file(self, path):
-        try:
-            #subprocess.run(['xfce4-terminal', '-x', 'vim', path], check=True)
-            subprocess.run(['kitty', 'vim', path], check=True)
-        except subprocess.CalledProcessError:
-            print("Failed to open Kitty with Vim")
-            return None
-
     def error_message_box(self, message):
         subprocess.run(['zenity', '--error', '--text', message], check=True)
 

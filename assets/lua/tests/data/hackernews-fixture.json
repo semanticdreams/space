@@ -1,0 +1,77 @@
+{
+  "name": "hackernews-offline",
+  "recorded_at": "2024-05-28T00:00:00Z",
+  "base_url": "https://hacker-news.firebaseio.com/v0",
+  "responses": [
+    {
+      "key": "topstories",
+      "url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+      "method": "GET",
+      "status": 200,
+      "ok": true,
+      "headers": [
+        [
+          "content-type",
+          "application/json; charset=utf-8"
+        ]
+      ],
+      "body": "[8863,2921983,121003]"
+    },
+    {
+      "key": "item/8863",
+      "url": "https://hacker-news.firebaseio.com/v0/item/8863.json",
+      "method": "GET",
+      "status": 200,
+      "ok": true,
+      "headers": [
+        [
+          "content-type",
+          "application/json; charset=utf-8"
+        ]
+      ],
+      "body": "{\"by\":\"dhouston\",\"descendants\":71,\"id\":8863,\"kids\":[8952,9224,8917,8884,8887,8869,8958,9005,9671,8940],\"score\":111,\"time\":1175714200,\"title\":\"My YC app: Dropbox - Throw away your USB drive\",\"type\":\"story\",\"url\":\"http://www.getdropbox.com/u/2/screencast.html\"}"
+    },
+    {
+      "key": "user/dhouston",
+      "url": "https://hacker-news.firebaseio.com/v0/user/dhouston.json",
+      "method": "GET",
+      "status": 200,
+      "ok": true,
+      "headers": [
+        [
+          "content-type",
+          "application/json; charset=utf-8"
+        ]
+      ],
+      "body": "{\"about\":\"This is a fixture used for offline Hacker News client tests.\",\"created\":1173923446,\"id\":\"dhouston\",\"karma\":2796,\"submitted\":[8863,8952,9224]}"
+    },
+    {
+      "key": "updates",
+      "url": "https://hacker-news.firebaseio.com/v0/updates.json",
+      "method": "GET",
+      "status": 200,
+      "ok": true,
+      "headers": [
+        [
+          "content-type",
+          "application/json; charset=utf-8"
+        ]
+      ],
+      "body": "{\"items\":[8863,8952],\"profiles\":[\"dhouston\",\"pg\"]}"
+    },
+    {
+      "key": "maxitem",
+      "url": "https://hacker-news.firebaseio.com/v0/maxitem.json",
+      "method": "GET",
+      "status": 200,
+      "ok": true,
+      "headers": [
+        [
+          "content-type",
+          "application/json; charset=utf-8"
+        ]
+      ],
+      "body": "40000000"
+    }
+  ]
+}

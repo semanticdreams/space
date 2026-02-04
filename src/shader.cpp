@@ -1,4 +1,7 @@
 #include "shader.h"
+
+#define LOG_SUBSYSTEM "shader"
+
 #include "log.h"
 
 #ifdef __linux__

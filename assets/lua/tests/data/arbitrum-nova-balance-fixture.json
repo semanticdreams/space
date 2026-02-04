@@ -1,0 +1,25 @@
+{
+  "name": "arbitrum-nova-balance",
+  "base_url": "https://nova.arbitrum.io/rpc",
+  "recorded_at": "2025-12-28T02:05:00Z",
+  "responses": [
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 200,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x2a\"}"
+    },
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 200,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32000,\"message\":\"bad request\"}}"
+    },
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 500,
+      "body": "upstream error"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "context_window": 128000,
+  "max_output_tokens": 16384,
+  "slug": "gpt-4o-mini",
+  "url": "https://platform.openai.com/docs/models/gpt-4o-mini"
+}

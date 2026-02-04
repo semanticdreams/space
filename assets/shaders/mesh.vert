@@ -6,10 +6,16 @@ layout(location=2) in vec3 vert;
 
 uniform mat4 projection;
 uniform mat4 view;
+uniform mat4 model;
 
 out vec2 theUv;
+out vec3 worldPos;
+out vec3 worldNormal;
 
 void  main() {
-    gl_Position = projection * view * vec4(vert, 1.0);
+    vec4 world = model * vec4(vert, 1.0);
+    gl_Position = projection * view * world;
     theUv = uv;
+    worldPos = world.xyz;
+    worldNormal = mat3(transpose(inverse(model))) * normal;
 }

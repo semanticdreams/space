@@ -5,22 +5,15 @@ Physics::Physics() {
     collisionConfiguration = new btDefaultCollisionConfiguration();
     dispatcher = new btCollisionDispatcher(collisionConfiguration);
     solver = new btSequentialImpulseConstraintSolver();
-    dynamicsWorld = new btSoftRigidDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration);
+    dynamicsWorld = new btDiscreteDynamicsWorld(dispatcher, broadphase, solver, collisionConfiguration);
 }
 
 Physics::~Physics()
 {
-    // Remove and delete all rigid bodies
+    // Remove all rigid bodies; Lua owns the objects themselves via sol2.
     for (int i = dynamicsWorld->getNumCollisionObjects() - 1; i >= 0; i--) {
         btCollisionObject* obj = dynamicsWorld->getCollisionObjectArray()[i];
-
-        btRigidBody* body = btRigidBody::upcast(obj);
-        if (body && body->getMotionState()) {
-            delete body->getMotionState();
-        }
-
         dynamicsWorld->removeCollisionObject(obj);
-        delete obj;
     }
 
     delete dynamicsWorld;
@@ -48,4 +41,14 @@ void Physics::addRigidBody(btRigidBody* body)
 void Physics::removeRigidBody(btRigidBody* body)
 {
     dynamicsWorld->removeRigidBody(body);
+}
+
+void Physics::addAction(btActionInterface* action)
+{
+    dynamicsWorld->addAction(action);
+}
+
+void Physics::removeAction(btActionInterface* action)
+{
+    dynamicsWorld->removeAction(action);
 }

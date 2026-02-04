@@ -7,65 +7,7 @@ on:
       - 'v*'
 
 jobs:
-  #  build-macos:
-  #    runs-on: macos-latest
-  #    steps:
-  #      - uses: actions/checkout@v3
-  #
-  #      - name: Install SDL2
-  #        run: brew install sdl2
-  #
-  #      - name: Configure and Build
-  #        run: |
-  #          cmake -B build -DCMAKE_BUILD_TYPE=Release
-  #          cmake --build build --config Release
-  #
-  #      - name: Bundle SDL2 Framework
-  #        run: |
-  #          mkdir dist
-  #          cp build/sdl_app dist/
-  #          cp -R /opt/homebrew/Cellar/sdl2/*/lib/SDL2.framework dist/
-  #
-  #      - name: Create DMG (optional)
-  #        run: |
-  #          hdiutil create -volname SDL2App -srcfolder dist -ov -format UDZO sdl2app-macos.dmg
-  #
-  #      - name: Upload to GitHub Release
-  #        uses: softprops/action-gh-release@v2
-  #        with:
-  #          files: sdl2app-macos.dmg
-  #
-  #  build-windows:
-  #    runs-on: windows-latest
-  #    steps:
-  #      - uses: actions/checkout@v3
-  #
-  #      - name: Install vcpkg and SDL2
-  #        run: |
-  #          git clone https://github.com/microsoft/vcpkg
-  #          .\vcpkg\bootstrap-vcpkg.bat
-  #          .\vcpkg\vcpkg install sdl2
-  #
-  #      - name: Configure and Build
-  #        run: |
-  #          cmake -B build -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
-  #          cmake --build build --config Release
-  #
-  #      - name: Bundle SDL2 DLLs
-  #        run: |
-  #          mkdir dist
-  #          copy build\Release\sdl_app.exe dist\
-  #          copy vcpkg\installed\x64-windows\bin\SDL2.dll dist\
-  #
-  #      - name: Create ZIP
-  #        run: powershell Compress-Archive -Path dist\* -DestinationPath sdl2app-windows.zip
-  #
-  #      - name: Upload to GitHub Release
-  #        uses: softprops/action-gh-release@v2
-  #        with:
-  #          files: sdl2app-windows.zip
-
-   build-linux:
+  build-linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
@@ -73,22 +15,69 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libglew-dev pybind11-dev python3-dev python3-sdl2 python3-opengl python3-zmq python3-pygments
+          deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' README.md | sed -n 's/^sudo apt install //p')
+          sudo apt-get install -y ${deps}
 
       - name: Configure and Build
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --config Release
-
-      - name: Create .deb Package with CPack
-        run: |
-          cd build
-          cpack -G DEB
+        run: scripts/build-linux.sh
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
-          files: build/*.deb
+          files: |
+            build/*.deb
+            build/dist/space-linux-x86_64-bin.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-curl
+            git
+
+      - name: Install vcpkg
+        shell: msys2 {0}
+        run: |
+          git clone https://github.com/microsoft/vcpkg
+          ./vcpkg/bootstrap-vcpkg.sh
+
+      - name: Configure and Build
+        shell: msys2 {0}
+        env:
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+          VCPKG_TARGET_TRIPLET: x64-mingw
+        run: scripts/build-windows.sh
+
+      - name: Bundle SDL2 DLLs
+        shell: msys2 {0}
+        run: |
+          mkdir -p dist
+          cp build/windows/space.exe dist/
+          cp -r assets dist/assets
+          cp vcpkg/installed/x64-mingw/bin/*.dll dist/
+          cp /mingw64/bin/libgcc_s_seh-1.dll dist/
+          cp /mingw64/bin/libstdc++-6.dll dist/
+          cp /mingw64/bin/libwinpthread-1.dll dist/
+
+      - name: Create ZIP
+        run: powershell Compress-Archive -Path dist\* -DestinationPath space-windows.zip
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
+        with:
+          files: space-windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

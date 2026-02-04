@@ -2,17 +2,27 @@
 #include "shader.h"
 #include "resource_manager.h"
 
-Shader lua_load_shader(const std::string& name, const std::string& vertexCode, const std::string& fragmentCode, const std::string& geometryCode = "") {
-    return ResourceManager::loadShader(name, vertexCode, fragmentCode, geometryCode);
+Shader lua_load_shader(const std::string& name, const std::string& vertexCode, const std::string& fragmentCode,
+                       sol::optional<std::string> geometryCode) {
+    return ResourceManager::loadShader(name, vertexCode, fragmentCode, geometryCode.value_or(""));
+}
+
+Shader lua_load_shader_from_files(const std::string& name, const std::string& vertexPath, const std::string& fragmentPath,
+                                  sol::optional<std::string> geometryPath) {
+    return ResourceManager::loadShaderFromFile(name, vertexPath, fragmentPath, geometryPath.value_or(""));
 }
 
 Shader lua_get_shader(const std::string& name) {
     return ResourceManager::getShader(name);
 }
 
-void lua_bind_shaders(sol::state& lua) {
+namespace {
+
+sol::table create_shaders_table(sol::state_view lua)
+{
     // Bind the Shader class
-    lua.new_usertype<Shader>("Shader",
+    sol::table shaders_table = lua.create_table();
+    shaders_table.new_usertype<Shader>("Shader",
         "id", &Shader::id,
         "use", &Shader::use,
 
@@ -40,10 +50,20 @@ void lua_bind_shaders(sol::state& lua) {
         "setMatrix4", &Shader::setMatrix4
     );
 
-    // Create the shaders table and expose functions
-    sol::table shaders_table = lua.create_table();
-    shaders_table.set_function("load_shader", &lua_load_shader);
-    shaders_table.set_function("get_shader", &lua_get_shader);
+    shaders_table.set_function("load-shader", &lua_load_shader);
+    shaders_table.set_function("load-shader-from-files", &lua_load_shader_from_files);
+    shaders_table.set_function("get-shader", &lua_get_shader);
+    return shaders_table;
+}
 
-    lua["shaders"] = shaders_table;
+} // namespace
+
+void lua_bind_shaders(sol::state& lua) {
+    sol::table package = lua["package"];
+    sol::table preload = package["preload"];
+
+    preload.set_function("shaders", [](sol::this_state state) {
+        sol::state_view lua(state);
+        return create_shaders_table(lua);
+    });
 }

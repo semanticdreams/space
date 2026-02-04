@@ -12,14 +12,16 @@ std::string AssetManager::getAssetPath(const std::string& relativePath) {
     // Look for asset in env var
     if (const char* envAssetsPath = std::getenv("SPACE_ASSETS_PATH")) {
         fs::path envPath = fs::path(envAssetsPath) / relativePath;
-        if (fs::exists(envPath)) {
-            return envPath.string();
+        fs::path absEnvPath = fs::absolute(envPath);
+        if (fs::exists(absEnvPath)) {
+            return absEnvPath.string();
         }
     }
     // Look for asset in local assets folder
     fs::path devPath = fs::current_path() / "assets" / relativePath;
-    if (fs::exists(devPath)) {
-        return devPath.string();
+    fs::path absDevPath = fs::absolute(devPath);
+    if (fs::exists(absDevPath)) {
+        return absDevPath.string();
     }
 
     // Look for asset in system assets folder

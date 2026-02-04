@@ -1,0 +1,137 @@
+ (fn LayoutRoot []
+  (local pick-depth
+        (fn [buckets comparator]
+          (var best nil)
+          (each [depth bucket (pairs buckets)]
+            (when bucket
+              (if (not best)
+                  (set best depth)
+                  (when (comparator depth best)
+                    (set best depth)))))
+          best))
+
+  (local add-to-bucket
+        (fn [state depth node]
+          (when node
+            (var bucket (. state.buckets depth))
+            (if bucket
+                nil
+                (do
+                  (set bucket {:queue [] :set {}})
+                  (set (. state.buckets depth) bucket)))
+            (when (not (. bucket.set node))
+              (table.insert bucket.queue node)
+              (set (. bucket.set node) true)
+              (set (. state.pending node) true)))))
+
+  (local ancestor-scheduled?
+        (fn [node pending dirty-set]
+          (var ancestor (and node node.parent))
+          (var found? false)
+          (while (and ancestor (not found?))
+            (when (or (. pending ancestor)
+                      (and dirty-set (. dirty-set ancestor)))
+              (set found? true))
+            (set ancestor (and ancestor ancestor.parent)))
+          found?))
+
+  (local schedule-measure-nodes
+        (fn [self state]
+          (each [node _ (pairs self.measure-dirt)]
+            (set (. self.measure-dirt node) nil)
+            (when node
+              (set node.measure-dirty false)
+              (when (not (ancestor-scheduled? node state.pending self.measure-dirt))
+                (add-to-bucket state (or node.depth 0) node))))))
+
+  (local schedule-layout-nodes
+        (fn [self state]
+          (each [node _ (pairs self.layout-dirt)]
+            (set (. self.layout-dirt node) nil)
+            (when node
+              (set node.layout-dirty false)
+              (when (not (ancestor-scheduled? node state.pending self.layout-dirt))
+                (add-to-bucket state (or node.depth 0) node))))))
+
+  (local measure-node
+        (fn [self node]
+          (local before (snapshot-vec3 node.measure))
+          (node:set-measure-propagation :auto)
+          (node:measurer)
+          (local changed? (not (vec3-equal? before node.measure)))
+          (local propagate-mode node.measure-propagation)
+          (local propagate? (if (= propagate-mode :auto) changed? propagate-mode))
+          (node:set-measure-propagation :auto)
+          (when changed?
+            (set (. self.layout-dirt node) true))
+          propagate?))
+
+  (local process-buckets
+        (fn [state comparator]
+          (set state.current (pick-depth state.buckets comparator))))
+
+  (local process-next-bucket
+        (fn [state comparator handle-node]
+          (when (not state.current)
+            (process-buckets state comparator))
+          (if (not state.current)
+              false
+              (let [depth state.current
+                    bucket (. state.buckets depth)]
+                (if (and bucket (> (length bucket.queue) 0))
+                    (do
+                      (local node (table.remove bucket.queue))
+                      (set (. bucket.set node) nil)
+                      (set (. state.pending node) nil)
+                      (handle-node node state)
+                      (when (= (length bucket.queue) 0)
+                        (set (. state.buckets depth) nil)
+                        (set state.current nil))
+                      true)
+                    (do
+                      (set (. state.buckets depth) nil)
+                      (set state.current nil)
+                      true))))))
+
+  (local run-measure-pass
+        (fn [self]
+          (local state {:buckets {} :pending {} :current nil})
+          (schedule-measure-nodes self state)
+          (local handle-node
+                (fn [node local-state]
+                  (when (measure-node self node)
+                    (local parent node.parent)
+                    (when parent
+                      (add-to-bucket local-state (or parent.depth 0) parent)))))
+          (while true
+            (when (not (process-next-bucket state (fn [a b] (> a b)) handle-node))
+              (break))))
+
+  (local run-layout-pass
+        (fn [self]
+          (local state {:buckets {} :pending {} :current nil})
+          (schedule-layout-nodes self state)
+          (local handle-node
+                (fn [node _local-state]
+                  (node:layouter)))
+          (while true
+            (when (not (process-next-bucket state (fn [a b] (< a b)) handle-node))
+              (break))))
+
+  (local update
+        (fn [self]
+          (run-measure-pass self)
+          (run-layout-pass self)))
+
+  (local drop
+        (fn [self]
+          (set self.measure-dirt {})
+          (set self.layout-dirt {})))
+
+  {:update update
+   :drop drop
+   :measure-dirt {}
+   :layout-dirt {}}
+  )
+
+{: Layout : LayoutRoot}

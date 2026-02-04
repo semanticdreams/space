@@ -4,7 +4,10 @@
 #include <unordered_map>
 #include <list>
 #include <stdexcept>
-#include <cstring> // for std::memset
+#include <utility>
+#include <cstring>  // for std::memset
+#include <iostream> // for std::cout
+#include <iomanip>  // for std::setprecision
 
 class VectorHandle {
 public:
@@ -20,13 +23,20 @@ public:
     VectorBuffer(size_t initialSize = 1024) {
         buffer.resize(initialSize, 0.0f);
         freeFrom = 0;
+        clearDirty();
     }
 
     const float* view(const VectorHandle& handle) const {
+        if (handle.index + handle.size > buffer.size()) {
+            throw std::runtime_error("VectorBuffer.view out of bounds: invalid handle");
+        }
         return &buffer[handle.index];
     }
 
     float* view(VectorHandle& handle) {
+        if (handle.index + handle.size > buffer.size()) {
+            throw std::runtime_error("VectorBuffer.view out of bounds: invalid handle");
+        }
         return &buffer[handle.index];
     }
 
@@ -40,6 +50,46 @@ public:
 
     size_t length() const {
         return freeFrom;
+    }
+
+    bool has_dirty() const {
+        return dirtyFrom != static_cast<size_t>(-1) && dirtyTo > dirtyFrom;
+    }
+
+    std::pair<size_t, size_t> dirty_range() const {
+        if (!has_dirty()) {
+            return { 0, 0 };
+        }
+        return { dirtyFrom, dirtyTo };
+    }
+
+    void clearDirty() {
+        dirtyFrom = static_cast<size_t>(-1);
+        dirtyTo = 0;
+    }
+
+    void markDirty(size_t start, size_t size) {
+        if (size == 0) {
+            return;
+        }
+        if (start >= freeFrom) {
+            return;
+        }
+        size_t end = start + size;
+        if (end > freeFrom) {
+            end = freeFrom;
+        }
+        if (!has_dirty()) {
+            dirtyFrom = start;
+            dirtyTo = end;
+            return;
+        }
+        if (start < dirtyFrom) {
+            dirtyFrom = start;
+        }
+        if (end > dirtyTo) {
+            dirtyTo = end;
+        }
     }
 
     VectorHandle allocate(size_t size) {
@@ -80,13 +130,41 @@ public:
         freed[handle.size].push_back(handle);
     }
 
+    void print(const VectorHandle* handle = nullptr) const {
+        std::cout << std::fixed << std::setprecision(4);
+
+        if (handle) {
+            if (handle->index + handle->size > buffer.size()) {
+                std::cerr << "[VectorBuffer] Invalid handle: out of bounds\n";
+                return;
+            }
+
+            std::cout << "Handle @ index " << handle->index
+                      << ", size " << handle->size << ":\n";
+
+            const float* ptr = view(*handle);
+            for (size_t i = 0; i < handle->size; ++i) {
+                std::cout << "  [" << i << "] = " << ptr[i] << '\n';
+            }
+        } else {
+            std::cout << "Full buffer (" << freeFrom << " / " 
+                      << buffer.size() << " used):\n";
+
+            for (size_t i = 0; i < freeFrom; ++i) {
+                std::cout << "  [" << i << "] = " << buffer[i] << '\n';
+            }
+        }
+    }
+
 private:
     std::vector<float> buffer;
     size_t freeFrom;
-
+    size_t dirtyFrom;
+    size_t dirtyTo;
     std::unordered_map<size_t, std::list<VectorHandle>> freed;
 
     void zeroRegion(size_t start, size_t size) {
+        markDirty(start, size);
         std::fill(buffer.begin() + start, buffer.begin() + start + size, 0.0f);
     }
 

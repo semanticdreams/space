@@ -1,0 +1,17 @@
+[package]
+name = "matrix"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "matrix"
+crate-type = ["cdylib"]
+
+[dependencies]
+matrix-sdk = "0.7"
+once_cell = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[profile.release]
+codegen-units = 1
+lto = true

@@ -1,0 +1,6 @@
+{
+  "context_window": 400000,
+  "max_output_tokens": 128000,
+  "slug": "gpt-5-mini",
+  "url": "https://platform.openai.com/docs/models/gpt-5-mini"
+}

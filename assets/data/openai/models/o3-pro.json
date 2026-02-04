@@ -1,0 +1,6 @@
+{
+  "context_window": 200000,
+  "max_output_tokens": 100000,
+  "slug": "o3-pro",
+  "url": "https://platform.openai.com/docs/models/o3-pro"
+}
