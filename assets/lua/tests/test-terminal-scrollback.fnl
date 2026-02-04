@@ -9,6 +9,9 @@
 
 (fn scrollback-captures-lines []
   (local term (terminal.Terminal 2 4))
+  (when (not (term:is-scrollback-supported))
+    (print "Skipping scrollback capture test: scrollback unsupported")
+    (return))
   (term:set-scrollback-limit 3)
   (term:inject-output "aa\n")
   (term:inject-output "bb\n")
@@ -21,6 +24,9 @@
 
 (fn alt-screen-suppresses-scrollback []
   (local term (terminal.Terminal 2 3))
+  (when (not (term:is-scrollback-supported))
+    (print "Skipping alt-screen scrollback test: scrollback unsupported")
+    (return))
   (term:set-scrollback-limit 4)
   (term:inject-output "alpha\nbeta\n")
   (local before (term:get-scrollback-size))

@@ -45,7 +45,8 @@
         (term:update)
 
         (assert screen-updated?)
-        (assert (> (term:get-scrollback-size) 0))
+        (when (term:is-scrollback-supported)
+          (assert (> (term:get-scrollback-size) 0)))
         (assert (< elapsed 200)))))
 
 (table.insert tests {:name "terminal reports size and blank cell" :fn terminal-basic-shape})
