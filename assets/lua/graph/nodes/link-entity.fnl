@@ -1,0 +1,113 @@
+(local glm (require :glm))
+(local {:GraphNode GraphNode} (require :graph/node-base))
+(local Signal (require :signal))
+(local LinkEntityStore (require :entities/link))
+(local Utils (require :graph/view/utils))
+(local KeyLoaderUtils (require :graph/key-loader-utils))
+
+(local PALE_YELLOW (glm.vec4 0.7 0.65 0.3 1))
+(local PALE_YELLOW_ACCENT (glm.vec4 0.75 0.7 0.35 1))
+
+(local SCHEME "link-entity")
+(local KEY_PREFIX (KeyLoaderUtils.key-prefix SCHEME))
+
+(fn make-label [entity]
+  (if (and entity entity.source-key entity.target-key
+           (> (string.len entity.source-key) 0)
+           (> (string.len entity.target-key) 0))
+      (.. (Utils.truncate-with-ellipsis entity.source-key 20)
+          " → "
+          (Utils.truncate-with-ellipsis entity.target-key 20))
+      (or (and entity entity.id) "link entity")))
+
+(fn LinkEntityNode [opts]
+  (local options (or opts {}))
+  (local entity-id (assert options.entity-id "LinkEntityNode requires entity-id"))
+  (local store (or options.store (LinkEntityStore.get-default)))
+  (local LinkEntityNodeView (require :graph/view/views/link-entity))
+
+  (local entity (store:get-entity entity-id))
+  (local initial-label (make-label entity))
+
+  (local node
+    (GraphNode {:key (.. KEY_PREFIX entity-id)
+                :label initial-label
+                :color PALE_YELLOW
+                :sub-color PALE_YELLOW_ACCENT
+                :size 8.0
+                :view LinkEntityNodeView}))
+
+  (set node.entity-id entity-id)
+  (set node.store store)
+  (set node.entity-deleted (Signal))
+  (set node.changed (Signal))
+
+  (fn refresh-label [self]
+    (local current (self.store:get-entity self.entity-id))
+    (set self.label (make-label current))
+    (when self.changed
+      (self.changed:emit self)))
+
+  (set node.refresh-label refresh-label)
+
+  (set node.get-entity
+       (fn [self]
+         (self.store:get-entity self.entity-id)))
+
+  (set node.update-source
+       (fn [self new-key]
+         (self.store:update-entity self.entity-id {:source-key new-key})
+         (self:refresh-label)))
+
+  (set node.update-target
+       (fn [self new-key]
+         (self.store:update-entity self.entity-id {:target-key new-key})
+         (self:refresh-label)))
+
+  (set node.update-metadata
+       (fn [self new-metadata]
+         (self.store:update-entity self.entity-id {:metadata new-metadata})))
+
+  (set node.delete-entity
+       (fn [self]
+         (self.store:delete-entity self.entity-id)))
+
+  (var deleted-handler nil)
+  (var updated-handler nil)
+
+  (set deleted-handler
+       (store.link-entity-deleted:connect
+         (fn [deleted]
+           (when (= (tostring deleted.id) (tostring entity-id))
+             (node.entity-deleted:emit deleted)
+             (when (and node.graph node.graph.remove-nodes)
+               (node.graph:remove-nodes [node]))))))
+
+  (set updated-handler
+       (store.link-entity-updated:connect
+         (fn [updated]
+           (when (= (tostring updated.id) (tostring entity-id))
+             (node:refresh-label)))))
+
+  (set node.drop
+       (fn [self]
+         (when deleted-handler
+           (store.link-entity-deleted:disconnect deleted-handler true)
+           (set deleted-handler nil))
+         (when updated-handler
+           (store.link-entity-updated:disconnect updated-handler true)
+           (set updated-handler nil))
+         (self.entity-deleted:clear)
+         (when self.changed
+           (self.changed:clear))))
+
+  node)
+
+(local register-loader
+  (KeyLoaderUtils.make-register-loader SCHEME
+    LinkEntityStore.get-default
+    (fn [entity-id store]
+      (LinkEntityNode {:entity-id entity-id :store store}))))
+
+{:LinkEntityNode LinkEntityNode
+ :register-loader register-loader}

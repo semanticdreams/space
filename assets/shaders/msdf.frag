@@ -1,8 +1,11 @@
 #version 130
 
+#include "clipping.glsl"
+
 in vec2 texCoord;
 in vec4 fgColor;
-flat in int depth_offset_index;
+flat in float depth_offset_index;
+smooth in vec3 worldPos;
 
 out vec4 color;
 
@@ -22,13 +25,18 @@ float median(float r, float g, float b) {
 }
 
 void main() {
+    if (isClipped(worldPos)) {
+        discard;
+    }
     vec3 msd = texture(msdf, texCoord).rgb;
     float sd = median(msd.r, msd.g, msd.b);
     float screenPxDistance = screenPxRange()*(sd - 0.5);
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
     color = vec4(fgColor.rgb * opacity, opacity);
+    //color = vec4(1.0);
+
     //color = vec4(fgColor.rgb, fgColor.a * opacity);
     //vec4 bgColor = vec4(0.0, 0.0, 1.0, 1.0);
     //color = mix(bgColor, fgColor, opacity);
-	gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * float(depth_offset_index) * depthStep));
+	gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * depth_offset_index * depthStep));
 }

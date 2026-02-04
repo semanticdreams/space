@@ -1,0 +1,6 @@
+{
+  "context_window": 8192,
+  "max_output_tokens": 8192,
+  "slug": "gpt-4",
+  "url": "https://platform.openai.com/docs/models/gpt-4"
+}

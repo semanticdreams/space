@@ -1,0 +1,31 @@
+{
+  "name": "arbitrum-nova-send",
+  "base_url": "https://nova.arbitrum.io/rpc",
+  "recorded_at": "2025-12-28T03:05:00Z",
+  "responses": [
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 200,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"0x1\"}"
+    },
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 200,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":\"0x2a\"}"
+    },
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 200,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":\"0x5208\"}"
+    },
+    {
+      "key": "rpc",
+      "method": "POST",
+      "status": 200,
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":\"0xabc123\"}"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "context_window": 128000,
+  "max_output_tokens": 4096,
+  "slug": "gpt-4-turbo",
+  "url": "https://platform.openai.com/docs/models/gpt-4-turbo"
+}

@@ -1,11 +1,12 @@
 #include <iostream>
 #include <utility>
 
-#include "stb_image.h"
+#define LOG_SUBSYSTEM "window"
 
 #include "window_sdl.h"
 #include "gl_debug.hpp"
 #include "asset_manager.h"
+#include "image_loader.h"
 
 WindowSdl::WindowSdl(std::string title) : title(std::move(title)) {
 }
@@ -15,8 +16,11 @@ WindowSdl::~WindowSdl() {
     LOG(Info) << "Bye :)";
 }
 
-bool WindowSdl::init(int xPos, int yPos, int width, int height) {
-    int flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_ALLOW_HIGHDPI;
+bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) {
+    int flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+    if (maximized) {
+        flags |= SDL_WINDOW_MAXIMIZED;
+    }
 
     if (isFullscreen) {
         flags |= SDL_WINDOW_FULLSCREEN;
@@ -46,16 +50,16 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height) {
 
         // Set icon
         auto iconPath = AssetManager::getAssetPath("pics/space.png");
-        int iconWidth, iconHeight, iconChannels;
-        unsigned char* pixels = stbi_load(iconPath.c_str(), &iconWidth, &iconHeight, &iconChannels, 4);
-        if (pixels) {
+        ImageBuffer icon;
+        std::string error;
+        if (load_png_file(iconPath, icon, error)) {
             // Create an SDL_Surface from pixel data
             SDL_Surface* iconSurface = SDL_CreateRGBSurfaceFrom(
-                    pixels,            // pixel data
-                    iconWidth,              // width
-                    iconHeight,             // height
+                    icon.pixels.get(),            // pixel data
+                    icon.width,              // width
+                    icon.height,             // height
                     32,                 // depth (bits per pixel)
-                    iconWidth * 4,          // pitch (bytes per row)
+                    icon.width * 4,          // pitch (bytes per row)
                     0x000000FF,         // red mask
                     0x0000FF00,         // green mask
                     0x00FF0000,         // blue mask
@@ -68,10 +72,8 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height) {
             } else {
                 LOG(Warning) << "Failed to create SDL surface from icon pixels!";
             }
-
-            stbi_image_free(pixels); // Free stb_image memory after creating surface
         } else {
-            LOG(Warning) << "Failed to load icon with stb_image: " << stbi_failure_reason();
+            LOG(Warning) << "Failed to load icon PNG: " << iconPath;
         }
 
         // OpenGL context

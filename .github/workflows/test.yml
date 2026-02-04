@@ -1,0 +1,34 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    env:
+      SKIP_KEYRING_TESTS: 1
+      XDG_DATA_HOME: /tmp/space/tests/xdg-data
+      SPACE_DISABLE_AUDIO: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' README.md | sed -n 's/^sudo apt install //p')
+          sudo apt-get install -y ${deps} xvfb
+
+      - name: Build
+        run: make build
+
+      - name: Run test suite
+        env:
+          SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
+        run: ctest --test-dir build --output-on-failure -V
+
+      - name: Run e2e test suite
+        run: make test-e2e

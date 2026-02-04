@@ -1,0 +1,6 @@
+{
+  "context_window": 16385,
+  "max_output_tokens": 4096,
+  "slug": "gpt-3.5-turbo",
+  "url": "https://platform.openai.com/docs/models/gpt-3.5-turbo"
+}

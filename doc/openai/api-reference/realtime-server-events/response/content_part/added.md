@@ -1,0 +1,88 @@
+# response.content_part.added
+
+Returned when a new content part is added to an assistant message item during
+response generation.
+
+
+## Properties
+
+| Property | Type | Required | Default | Allowed Values | Description |
+| -------- | ---- | -------- | ------- | -------------- | ----------- |
+| `event_id` | string | Yes |  |  | The unique ID of the server event. |
+| `type` | string | Yes |  | `response.content_part.added` | The event type, must be `response.content_part.added`. |
+| `response_id` | string | Yes |  |  | The ID of the response. |
+| `item_id` | string | Yes |  |  | The ID of the item to which the content part was added. |
+| `output_index` | integer | Yes |  |  | The index of the output item in the response. |
+| `content_index` | integer | Yes |  |  | The index of the content part in the item's content array. |
+| `part` | object (4 properties) | Yes |  |  | The content part that was added. |
+|   ↳ `audio` | string | No |  |  | Base64-encoded audio data (if type is "audio"). |
+|   ↳ `transcript` | string | No |  |  | The transcript of the audio (if type is "audio"). |
+
+## Property Details
+
+### `event_id` (required)
+
+The unique ID of the server event.
+
+**Type**: string
+
+### `type` (required)
+
+The event type, must be `response.content_part.added`.
+
+**Type**: string
+
+**Allowed values**: `response.content_part.added`
+
+### `response_id` (required)
+
+The ID of the response.
+
+**Type**: string
+
+### `item_id` (required)
+
+The ID of the item to which the content part was added.
+
+**Type**: string
+
+### `output_index` (required)
+
+The index of the output item in the response.
+
+**Type**: integer
+
+### `content_index` (required)
+
+The index of the content part in the item's content array.
+
+**Type**: integer
+
+### `part` (required)
+
+The content part that was added.
+
+**Type**: object (4 properties)
+
+**Nested Properties**:
+
+* `type`, `text`, `audio`, `transcript`
+
+## Example
+
+```json
+{
+    "event_id": "event_3738",
+    "type": "response.content_part.added",
+    "response_id": "resp_001",
+    "item_id": "msg_007",
+    "output_index": 0,
+    "content_index": 0,
+    "part": {
+        "type": "text",
+        "text": ""
+    }
+}
+
+```
+

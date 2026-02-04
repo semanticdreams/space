@@ -19,6 +19,7 @@ enum KeyStatus {
 // Holds the keyboard state
 class KeyboardState {
     friend class Engine;
+    friend struct InputState;
 
 public:
     // True when key is up or just released
@@ -39,15 +40,14 @@ public:
     // True when key is just released
     [[nodiscard]] bool isJustReleased(SDL_Scancode) const;
 
-//private:
+    [[nodiscard]] KeyStatus getKeyState(SDL_Scancode) const;
+
+private:
     const Uint8* currentValue;
     Uint8 previousValue[SDL_NUM_SCANCODES];
 
     // Get the boolean value of key
     [[nodiscard]] bool getKeyValue(SDL_Scancode) const;
-
-    // Get a state based on current and previous frame
-    [[nodiscard]] KeyStatus getKeyState(SDL_Scancode) const;
 };
 
 #endif

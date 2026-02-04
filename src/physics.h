@@ -1,9 +1,6 @@
 #pragma once
 
 #include <btBulletDynamicsCommon.h>
-#include <BulletSoftBody/btSoftRigidDynamicsWorld.h>
-#include <BulletSoftBody/btSoftBody.h>
-#include <BulletSoftBody/btSoftBodyHelpers.h>
 
 class Physics {
 public:
@@ -14,13 +11,15 @@ public:
     void setGravity(float x, float y, float z);
     void addRigidBody(btRigidBody* body);
     void removeRigidBody(btRigidBody* body);
+    void addAction(btActionInterface* action);
+    void removeAction(btActionInterface* action);
+    btDiscreteDynamicsWorld* getWorld() const { return dynamicsWorld; }
 
-    btSoftRigidDynamicsWorld* getWorld() const { return dynamicsWorld; }
 
 private:
     btBroadphaseInterface *broadphase;
     btDefaultCollisionConfiguration *collisionConfiguration;
     btCollisionDispatcher *dispatcher;
     btSequentialImpulseConstraintSolver *solver;
-    btSoftRigidDynamicsWorld *dynamicsWorld;
+    btDiscreteDynamicsWorld *dynamicsWorld;
 };

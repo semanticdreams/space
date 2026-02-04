@@ -12,6 +12,8 @@
       (set child.layout.size self.size)
       (set child.layout.position self.position)
       (set child.layout.rotation self.rotation)
+      (set child.layout.depth-offset-index self.depth-offset-index)
+      (set child.layout.clip-region self.clip-region)
       (child.layout:layouter))
 
     (local layout (Layout {:name "sized"

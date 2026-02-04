@@ -104,7 +104,7 @@ std::map<int, glm::vec3> createColorSwatch(const glm::vec3& baseColor) {
         float newL = std::clamp(baseLab.x + delta, 0.0f, 100.0f);
 
         glm::vec3 variantLab(newL, baseLab.y, baseLab.z);
-        glm::vec3 variantRgb = labToRgb(variantLab);
+        glm::vec3 variantRgb = i == 5 ? baseColor : labToRgb(variantLab);
 
         swatch[i * 100] = variantRgb;
     }

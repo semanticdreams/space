@@ -74,11 +74,11 @@ void debugGlErrorCallback(GLenum source,
     glLog.append(debugGlSeverityToStr(severity));
 
     if (type == GL_DEBUG_TYPE_ERROR) {
-        LOG(Error) << glLog;
+        LOG_NAMED("opengl", Error) << glLog;
     } else if (type == GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR || type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR
                || type == GL_DEBUG_TYPE_PORTABILITY || type == GL_DEBUG_TYPE_PERFORMANCE) {
-        LOG(Warning) << glLog;
+        LOG_NAMED("opengl", Warning) << glLog;
     } else {
-        LOG(Debug) << glLog;
+        LOG_NAMED("opengl", Debug) << glLog;
     }
 }

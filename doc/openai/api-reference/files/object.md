@@ -1,0 +1,95 @@
+# The file object
+
+The `File` object represents a document that has been uploaded to OpenAI.
+
+## Properties
+
+| Property | Type | Required | Default | Allowed Values | Description |
+| -------- | ---- | -------- | ------- | -------------- | ----------- |
+| `id` | string | Yes |  |  | The file identifier, which can be referenced in the API endpoints. |
+| `bytes` | integer | Yes |  |  | The size of the file, in bytes. |
+| `created_at` | integer | Yes |  |  | The Unix timestamp (in seconds) for when the file was created. |
+| `expires_at` | integer | No |  |  | The Unix timestamp (in seconds) for when the file will expire. |
+| `filename` | string | Yes |  |  | The name of the file. |
+| `object` | string | Yes |  | `file` | The object type, which is always `file`. |
+| `purpose` | string | Yes |  | `assistants`, `assistants_output`, `batch`, `batch_output`, `fine-tune`, `fine-tune-results`, `vision` | The intended purpose of the file. Supported values are `assistants`, `assistants_output`, `batch`, `batch_output`, `fine-tune`, `fine-tune-results` and `vision`. |
+| `status` | string | Yes |  | `uploaded`, `processed`, `error` | Deprecated. The current status of the file, which can be either `uploaded`, `processed`, or `error`. |
+| `status_details` | string | No |  |  | Deprecated. For details on why a fine-tuning training file failed validation, see the `error` field on `fine_tuning.job`. |
+
+## Property Details
+
+### `id` (required)
+
+The file identifier, which can be referenced in the API endpoints.
+
+**Type**: string
+
+### `bytes` (required)
+
+The size of the file, in bytes.
+
+**Type**: integer
+
+### `created_at` (required)
+
+The Unix timestamp (in seconds) for when the file was created.
+
+**Type**: integer
+
+### `expires_at`
+
+The Unix timestamp (in seconds) for when the file will expire.
+
+**Type**: integer
+
+### `filename` (required)
+
+The name of the file.
+
+**Type**: string
+
+### `object` (required)
+
+The object type, which is always `file`.
+
+**Type**: string
+
+**Allowed values**: `file`
+
+### `purpose` (required)
+
+The intended purpose of the file. Supported values are `assistants`, `assistants_output`, `batch`, `batch_output`, `fine-tune`, `fine-tune-results` and `vision`.
+
+**Type**: string
+
+**Allowed values**: `assistants`, `assistants_output`, `batch`, `batch_output`, `fine-tune`, `fine-tune-results`, `vision`
+
+### `status` (required)
+
+Deprecated. The current status of the file, which can be either `uploaded`, `processed`, or `error`.
+
+**Type**: string
+
+**Allowed values**: `uploaded`, `processed`, `error`
+
+### `status_details`
+
+Deprecated. For details on why a fine-tuning training file failed validation, see the `error` field on `fine_tuning.job`.
+
+**Type**: string
+
+## Example
+
+```json
+{
+  "id": "file-abc123",
+  "object": "file",
+  "bytes": 120000,
+  "created_at": 1677610602,
+  "expires_at": 1680202602,
+  "filename": "salesOverview.pdf",
+  "purpose": "assistants",
+}
+
+```
+

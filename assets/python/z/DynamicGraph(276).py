@@ -8,8 +8,6 @@ class DynamicGraph:
             '4c04f274-c318-4e01-935f-a00a2d57c65f'
         )
 
-        self.profiler = z.Profiler('dynamic-graph')
-
         self.points = {}
         self.labels = {}
         self.lines = {}
@@ -207,7 +205,6 @@ class DynamicGraph:
             self.add_edge(edge)
 
     def update(self, delta):
-        self.profiler.enable()
         self.force_layout.update()
         if self.force_layout.active \
            and time.time() - self.last_force_layout_position_update > 0.3:
@@ -228,7 +225,6 @@ class DynamicGraph:
                 line.set_start_position(source_layout.position + source_layout.size/2)
                 line.set_end_position(target_layout.position + target_layout.size/2)
                 line.update()
-        self.profiler.disable()
 
     def update_force_layout(self):
         self.force_layout.clear()
@@ -313,8 +309,6 @@ class DynamicGraph:
     def drop(self):
         world.vim.modes['leader'].remove_action_group('dynamic-graph')
         world.vim.remove_mode('dynamic-graph')
-        self.profiler.dump()
-        self.profiler.svg()
         self.force_layout_view.params_changed.disconnect(
             self.save_force_layout_params)
         self.column.drop()

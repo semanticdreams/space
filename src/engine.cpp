@@ -1,96 +1,87 @@
-#include <pybind11/pybind11.h>
+//#include <pybind11/pybind11.h>
 #include "engine.h"
-#include "asset_manager.h"
-#include "appdirs.h"
-#include "paths.h"
+#include "resource_manager.h"
+#include "lua_callbacks.h"
+#include "lua_http.h"
+#include "lua_process.h"
+#include "cgltf_jobs.h"
+#include "lua_jobs.h"
+#include "lua_keyring.h"
+#include "log.h"
+#include "input_mouse_state.h"
 
-namespace py = pybind11;
+//namespace py = pybind11;
 
 Engine::Engine() {
 }
 
-extern "C" int luaopen_lsqlite3(lua_State* L);
+bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig& config) {
+    log_set_frame_id_provider(&frame_id);
+    if (!config.headless) {
+        window = WindowSdl::create();
+        int target_width = config.width > 0 ? config.width : screenWidth;
+        int target_height = config.height > 0 ? config.height : screenHeight;
+        if (!window->init(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, target_width, target_height, config.maximized)) {
+            return false;
+        }
+        window->logGlParams();
 
-void lua_bind_bullet(sol::state&);
-void lua_bind_opengl(sol::state&);
-void lua_bind_json(sol::state&);
-void lua_bind_shaders(sol::state&);
-void lua_bind_glm(sol::state&);
-void lua_bind_vector_buffer(sol::state&);
-void lua_bind_tree_sitter(sol::state&);
+        initSystemCursors();
 
-extern "C" PyObject* PyInit_bullet();
-extern "C" PyObject* PyInit_space();
-extern "C" PyObject* PyInit_audio();
-extern "C" PyObject* PyInit_force_layout();
-extern "C" PyObject* PyInit_colors();
-
-void Engine::start() {
-    window = WindowSdl::create();
-    if (!window->init(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screenWidth, screenHeight)) {
-        return;
+        inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
+        // Clear previous state memory
+        memset(inputState.keyboardState.previousValue, 0, SDL_NUM_SCANCODES);
+        {
+            int mouseX = 0;
+            int mouseY = 0;
+            Uint32 mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
+            inputState.mouseState.update_from_mask(mouseMask);
+            inputState.mouseState.set_motion(mouseX, mouseY, 0, 0);
+        }
     }
-    window->logGlParams();
 
-    inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
-    // Clear previous state memory
-    memset(inputState.keyboardState.previousValue, 0, SDL_NUM_SCANCODES);
+    http = std::make_unique<HttpClient>();
+    jobs = std::make_unique<JobSystem>();
+    register_default_job_handlers(*jobs);
+    register_texture_job_handlers(*jobs);
+    register_audio_job_handlers(*jobs);
+    register_cgltf_job_handlers(*jobs);
+    ResourceManager::setJobSystem(jobs.get());
+    ResourceManager::setAudio(&audio);
 
-    std::string assetsPath = AssetManager::getAssetPath("");
-
-    // lua
-    lua.open_libraries(sol::lib::base, sol::lib::package, sol::lib::table, sol::lib::math, sol::lib::string, sol::lib::debug, sol::lib::io, sol::lib::os);
-    lua.require("lsqlite3", luaopen_lsqlite3);
-    lua_bind_opengl(lua);
-    lua_bind_bullet(lua);
-    lua_bind_json(lua);
-    lua_bind_shaders(lua);
-    lua_bind_glm(lua);
-    lua_bind_vector_buffer(lua);
-    lua_bind_tree_sitter(lua);
-    std::string luaPath = AssetManager::getAssetPath("lua");
-    std::string packagePath = luaPath + "/?.lua";
-    std::string fennelPath = luaPath + "/?.fnl";
-    lua["package"]["path"] = lua["package"]["path"].get<std::string>() + ";" + packagePath;
-    lua_space = lua.create_named_table("space");
-    lua_space["data_dir"] = get_user_data_dir("space");
-    lua_space["assets_dir"] = assetsPath;
-    lua_space["fennel_path"] = fennelPath;
-    lua_space.set_function("join_path", join_path);
-    lua_space.set_function("get_asset_path", &AssetManager::getAssetPath);
-    //lua.script_file(luaPath + "/init.lua");
-    lua.script(R"(
-    local fennel = require("fennel")
-    fennel.path = ")" + fennelPath + R"(" .. ";" .. fennel.path
-    fennel.install()
-    require("main")
-    )");
-    ((sol::unsafe_function) lua_space["init"])();
-
-    // python
-    PyImport_AppendInittab("space", &PyInit_space);
-    PyImport_AppendInittab("bullet", &PyInit_bullet);
-    PyImport_AppendInittab("audio", &PyInit_audio);
-    PyImport_AppendInittab("force_layout", &PyInit_force_layout);
-    PyImport_AppendInittab("colors", &PyInit_colors);
-    python = std::make_unique<py::scoped_interpreter>();
-    std::string pyAssetsPath = AssetManager::getAssetPath("python");
-    std::replace(pyAssetsPath.begin(), pyAssetsPath.end(), '\\', '/');
-    py::module sys = py::module::import("sys");
-    sys.attr("path").attr("insert")(0, pyAssetsPath);
-    py::module init = py::module::import("python_world");
-    py::object PythonWorld = init.attr("PythonWorld");
-    pythonWorld = PythonWorld(
-        py::make_tuple(screenWidth, screenHeight),
-        assetsPath,
-        py::cast(&physics, py::return_value_policy::reference),
-        py::cast(&audio, py::return_value_policy::reference)
-    );
-    pythonWorld.attr("init")();
-
-    lua_space["fbo"] = pythonWorld.attr("renderers").attr("lua_world").attr("fbo").cast<int>();
-
-    isRunning = true;
+    lua_state = &lua;
+    lua_engine = engine_table;
+    lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
+    if (!config.headless) {
+        int target_width = config.width > 0 ? config.width : screenWidth;
+        int target_height = config.height > 0 ? config.height : screenHeight;
+        lua_engine["width"] = target_width;
+        lua_engine["height"] = target_height;
+    }
+    lua_engine.set_function("quit", [this]() {
+        this->quit();
+    });
+    lua_engine.set_function("set-system-cursor", [this](const std::string& name) {
+        this->setSystemCursor(name);
+    });
+    lua_bind_callbacks(*lua_state, lua_engine);
+    lua_engine["physics"] = &physics;
+    lua_engine["audio"] = &audio;
+    lua_engine["input"] = &inputState;
+    lua_bind_jobs(*lua_state, lua_engine, *jobs);
+    lua_bind_keyring(*lua_state, keyring);
+    lua_bind_http(*lua_state, *http);
+    {
+        sol::table mouse_buttons = lua_state->create_table();
+        mouse_buttons["left"] = SDL_BUTTON_LEFT;
+        mouse_buttons["middle"] = SDL_BUTTON_MIDDLE;
+        mouse_buttons["right"] = SDL_BUTTON_RIGHT;
+        mouse_buttons["x1"] = SDL_BUTTON_X1;
+        mouse_buttons["x2"] = SDL_BUTTON_X2;
+        lua_engine["mouse-buttons"] = mouse_buttons;
+    }
+    isRunning = !config.headless;
+    return true;
 }
 
 void Engine::run() {
@@ -101,6 +92,14 @@ void Engine::run() {
         window->clear();
 
         memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_NUM_SCANCODES);
+        inputState.mouseState.begin_frame();
+        {
+            int mouseX = inputState.mouseState.x;
+            int mouseY = inputState.mouseState.y;
+            Uint32 mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
+            inputState.mouseState.update_from_mask(mouseMask);
+            inputState.mouseState.set_motion(mouseX, mouseY, 0, 0);
+        }
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
@@ -115,96 +114,189 @@ void Engine::run() {
                             int width = event.window.data1;
                             int height = event.window.data2;
                             glViewport(0, 0, width, height);
-                            lua_space["width"] = width;
-                            lua_space["height"] = height;
-                            pythonWorld.attr("viewport_changed")(py::make_tuple(0, 0, width, height));
-                            lua_space["fbo"] = pythonWorld.attr("renderers").attr("lua_world").attr("fbo").cast<int>();
+                            lua_engine["width"] = width;
+                            lua_engine["height"] = height;
+                            {
+                                sol::table payload = lua_state->create_table();
+                                payload["width"] = width;
+                                payload["height"] = height;
+                                payload["timestamp"] = event.common.timestamp;
+                                emit_engine_event("window-resized", payload);
+                            }
                             break;
                     }
                     break;
 
-                case SDL_KEYDOWN:
+                case SDL_KEYDOWN: {
                     switch(event.key.keysym.sym) {
                         case SDLK_F11:
                             window->toggleFullscreen();
                             break;
 
-                        case SDLK_F5:
-                            pythonWorld.attr("drop")();
-                            pythonWorld.attr("init")();
-                            lua_space["fbo"] = pythonWorld.attr("renderers").attr("lua_world").attr("fbo").cast<int>();
-                            break;
-
-                        case SDLK_F7:
-                            ((sol::unsafe_function) lua_space["drop"])();
-                            lua.script(R"(
-                            package.loaded["main"] = nil
-                            require("main")
-                            )");
-                            ((sol::unsafe_function) lua_space["init"])();
-                            break;
                     }
-                    pythonWorld.attr("window").attr("keys").attr("add")((int)event.key.keysym.sym);
-                    pythonWorld.attr("window").attr("keyboard").attr("emit")((int)event.key.keysym.sym, (int)event.key.keysym.scancode, 1, (int)event.key.keysym.mod);
+                    sol::table payload = lua_state->create_table();
+                    payload["key"] = static_cast<int>(event.key.keysym.sym);
+                    payload["scancode"] = static_cast<int>(event.key.keysym.scancode);
+                    payload["mod"] = static_cast<int>(event.key.keysym.mod);
+                    payload["repeat"] = event.key.repeat != 0;
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("key-down", payload);
                     break;
+                }
 
-                case SDL_KEYUP:
-                    pythonWorld.attr("window").attr("keys").attr("discard")((int)event.key.keysym.sym);
-                    pythonWorld.attr("window").attr("keyboard").attr("emit")((int)event.key.keysym.sym, (int)event.key.keysym.scancode, 0, (int)event.key.keysym.mod);
+                case SDL_KEYUP: {
+                    sol::table payload = lua_state->create_table();
+                    payload["key"] = static_cast<int>(event.key.keysym.sym);
+                    payload["scancode"] = static_cast<int>(event.key.keysym.scancode);
+                    payload["mod"] = static_cast<int>(event.key.keysym.mod);
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("key-up", payload);
                     break;
+                }
 
-                case SDL_MOUSEMOTION:
-                    pythonWorld.attr("window").attr("mouse_motion").attr("emit")(event.motion.x, event.motion.y);
-                    pythonWorld.attr("window").attr("mouse_pos") = py::make_tuple(event.motion.x, event.motion.y);
+                case SDL_MOUSEMOTION: {
+                    inputState.mouseState.set_motion(event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel);
+                    sol::table payload = lua_state->create_table();
+                    payload["x"] = event.motion.x;
+                    payload["y"] = event.motion.y;
+                    payload["xrel"] = event.motion.xrel;
+                    payload["yrel"] = event.motion.yrel;
+                    payload["which"] = static_cast<int>(event.motion.which);
+                    payload["mod"] = static_cast<int>(SDL_GetModState());
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("mouse-motion", payload);
                     break;
+                }
 
-                case SDL_MOUSEBUTTONDOWN:
-                    pythonWorld.attr("window").attr("mouse_button").attr("emit")((int)event.button.button, 1, (int)event.button.state);
+                case SDL_MOUSEBUTTONDOWN: {
+                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0, 0);
+                    inputState.mouseState.set_button(event.button.button, true);
+                    sol::table payload = lua_state->create_table();
+                    payload["button"] = static_cast<int>(event.button.button);
+                    payload["state"] = static_cast<int>(event.button.state);
+                    payload["clicks"] = static_cast<int>(event.button.clicks);
+                    payload["x"] = event.button.x;
+                    payload["y"] = event.button.y;
+                    payload["which"] = static_cast<int>(event.button.which);
+                    payload["mod"] = static_cast<int>(SDL_GetModState());
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("mouse-button-down", payload);
                     break;
+                }
 
-                case SDL_MOUSEBUTTONUP:
-                    pythonWorld.attr("window").attr("mouse_button").attr("emit")((int)event.button.button, 0, (int)event.button.state);
+                case SDL_MOUSEBUTTONUP: {
+                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0, 0);
+                    inputState.mouseState.set_button(event.button.button, false);
+                    sol::table payload = lua_state->create_table();
+                    payload["button"] = static_cast<int>(event.button.button);
+                    payload["state"] = static_cast<int>(event.button.state);
+                    payload["clicks"] = static_cast<int>(event.button.clicks);
+                    payload["x"] = event.button.x;
+                    payload["y"] = event.button.y;
+                    payload["which"] = static_cast<int>(event.button.which);
+                    payload["mod"] = static_cast<int>(SDL_GetModState());
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("mouse-button-up", payload);
                     break;
+                }
 
-                case SDL_MOUSEWHEEL:
-                    pythonWorld.attr("window").attr("scrolled").attr("emit")((int)event.wheel.x, (int)event.wheel.y);
+                case SDL_MOUSEWHEEL: {
+                    inputState.mouseState.add_wheel(event.wheel.x, event.wheel.y);
+                    sol::table payload = lua_state->create_table();
+                    payload["x"] = event.wheel.x;
+                    payload["y"] = event.wheel.y;
+                    payload["direction"] = static_cast<int>(event.wheel.direction);
+                    payload["which"] = static_cast<int>(event.wheel.which);
+                    payload["mod"] = static_cast<int>(SDL_GetModState());
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("mouse-wheel", payload);
                     break;
+                }
 
-                case SDL_TEXTINPUT:
-                    pythonWorld.attr("window").attr("on_text_input")(event.text.text);
+                case SDL_TEXTINPUT: {
+                    sol::table payload = lua_state->create_table();
+                    payload["text"] = std::string(event.text.text);
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("text-input", payload);
                     break;
+                }
 
-                case SDL_CONTROLLERBUTTONDOWN:
-                    pythonWorld.attr("gamepads").attr("__getitem__")(event.cbutton.which).attr("button_down").attr("emit")(event.cbutton.button, event.cbutton.state, event.cbutton.timestamp);
+                case SDL_CONTROLLERBUTTONDOWN: {
+                    sol::table payload = lua_state->create_table();
+                    payload["which"] = static_cast<int>(event.cbutton.which);
+                    payload["button"] = static_cast<int>(event.cbutton.button);
+                    payload["state"] = static_cast<int>(event.cbutton.state);
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("controller-button-down", payload);
                     break;
+                }
 
-                case SDL_CONTROLLERBUTTONUP:
-                    pythonWorld.attr("gamepads").attr("__getitem__")(event.cbutton.which).attr("button_up").attr("emit")(event.cbutton.button, event.cbutton.state, event.cbutton.timestamp);
+                case SDL_CONTROLLERBUTTONUP: {
+                    sol::table payload = lua_state->create_table();
+                    payload["which"] = static_cast<int>(event.cbutton.which);
+                    payload["button"] = static_cast<int>(event.cbutton.button);
+                    payload["state"] = static_cast<int>(event.cbutton.state);
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("controller-button-up", payload);
                     break;
+                }
 
-                case SDL_CONTROLLERAXISMOTION:
-                    pythonWorld.attr("gamepads").attr("__getitem__")(event.caxis.which).attr("motion").attr("emit")(event.caxis.axis, event.caxis.value / 32768.0, event.caxis.timestamp);
+                case SDL_CONTROLLERAXISMOTION: {
+                    sol::table payload = lua_state->create_table();
+                    payload["which"] = static_cast<int>(event.caxis.which);
+                    payload["axis"] = static_cast<int>(event.caxis.axis);
+                    payload["value"] = static_cast<float>(event.caxis.value) / 32768.0f;
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("controller-axis-motion", payload);
                     break;
+                }
 
-                case SDL_CONTROLLERDEVICEADDED:
-                    pythonWorld.attr("gamepads").attr("add")(event.cdevice.which);
+                case SDL_CONTROLLERDEVICEADDED: {
+                    sol::table payload = lua_state->create_table();
+                    payload["which"] = static_cast<int>(event.cdevice.which);
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("controller-device-added", payload);
                     break;
+                }
 
-                case SDL_CONTROLLERDEVICEREMOVED:
-                    pythonWorld.attr("gamepads").attr("remove")(event.cdevice.which);
+                case SDL_CONTROLLERDEVICEREMOVED: {
+                    sol::table payload = lua_state->create_table();
+                    payload["which"] = static_cast<int>(event.cdevice.which);
+                    payload["timestamp"] = event.common.timestamp;
+                    emit_engine_event("controller-device-removed", payload);
                     break;
+                }
 
                 default:
                     break;
             }
+
         }
 
         physics.update(dt);
+
         audio.update(dt);
 
-        ((sol::unsafe_function) lua_space["update"])(dt);
+        if (jobs) {
+            ResourceManager::processTextureJobs();
+            ResourceManager::processAudioJobs();
+        }
 
-        pythonWorld.attr("update")(dt);
+        lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
+        if (jobs) {
+            lua_jobs_dispatch(*lua_state, *jobs);
+        }
+        lua_http_dispatch(*lua_state);
+        lua_process_dispatch(*lua_state);
+        lua_callbacks_dispatch(*lua_state);
+        {
+            sol::table events = lua_engine["events"];
+            sol::table signal = events["updated"];
+            sol::function emit = signal["emit"];
+            fennel_call_fatal(emit, dt);
+        }
+        frame_id.fetch_add(1, std::memory_order_relaxed);
+
 
         window->swapBuffer();
 
@@ -213,8 +305,101 @@ void Engine::run() {
 }
 
 void Engine::shutdown() {
-    pythonWorld.attr("drop")();
-    pythonWorld.release();
-    ((sol::unsafe_function) lua_space["drop"])();
-    window->clean();
+    lua_jobs_clear_callbacks();
+    lua_keyring_drop(*lua_state);
+    lua_http_drop(*lua_state);
+    lua_process_drop(*lua_state);
+    lua_callbacks_shutdown();
+    ResourceManager::clearPending();
+    ResourceManager::clear();
+    log_set_frame_id_provider(nullptr);
+    if (http) {
+        http->shutdown();
+    }
+    if (jobs) {
+        jobs->shutdown();
+    }
+    shutdownSystemCursors();
+    if (window) {
+        window->clean();
+    }
+}
+
+void Engine::emit_engine_event(const std::string& signal_name, sol::table payload) {
+    sol::object events_obj = lua_engine["events"];
+    //if (!events_obj.valid() || !events_obj.is<sol::table>()) {
+    //    return;
+    //}
+
+    sol::table events = events_obj.as<sol::table>();
+    sol::object signal_obj = events[signal_name];
+    //if (!signal_obj.valid() || !signal_obj.is<sol::table>()) {
+    //    return;
+    //}
+
+    sol::table signal = signal_obj.as<sol::table>();
+    sol::object emit_obj = signal["emit"];
+    //if (!emit_obj.is<sol::function>()) {
+    //    return;
+    //}
+
+    sol::function emit = emit_obj.as<sol::function>();
+    fennel_call_fatal(emit, payload);
+}
+
+void Engine::initSystemCursors() {
+    shutdownSystemCursors();
+
+    struct CursorDesc {
+        const char* name;
+        SDL_SystemCursor type;
+    };
+
+    static const CursorDesc cursorDescs[] = {
+        {"arrow", SDL_SYSTEM_CURSOR_ARROW},
+        {"hand", SDL_SYSTEM_CURSOR_HAND},
+        {"ibeam", SDL_SYSTEM_CURSOR_IBEAM},
+    };
+
+    for (const auto& desc : cursorDescs) {
+        SDL_Cursor* cursor = SDL_CreateSystemCursor(desc.type);
+        if (!cursor) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to create system cursor '%s': %s",
+                        desc.name,
+                        SDL_GetError());
+            continue;
+        }
+        systemCursors[desc.name] = cursor;
+    }
+
+    activeCursor = nullptr;
+}
+
+void Engine::shutdownSystemCursors() {
+    for (auto& pair : systemCursors) {
+        if (pair.second) {
+            SDL_FreeCursor(pair.second);
+        }
+    }
+    systemCursors.clear();
+    activeCursor = nullptr;
+}
+
+void Engine::setSystemCursor(const std::string& name) {
+    auto it = systemCursors.find(name);
+    if (it == systemCursors.end()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Attempted to set unknown system cursor '%s'",
+                    name.c_str());
+        return;
+    }
+
+    SDL_Cursor* cursor = it->second;
+    if (!cursor || cursor == activeCursor) {
+        return;
+    }
+
+    SDL_SetCursor(cursor);
+    activeCursor = cursor;
 }

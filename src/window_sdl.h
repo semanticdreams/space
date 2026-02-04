@@ -42,7 +42,7 @@ public:
 
     WindowSdl& operator=(const WindowSdl&) = delete;
 
-    bool init(int xPos, int yPos, int width, int height) ;
+    bool init(int xPos, int yPos, int width, int height, bool maximized);
 
     void logGlParams() ;
 

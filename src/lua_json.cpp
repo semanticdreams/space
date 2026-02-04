@@ -1,7 +1,7 @@
 #include <sol/sol.hpp>
 #include <fstream>
 
-#include "json.hpp"
+#include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
 
@@ -106,9 +106,24 @@ json lua_to_json(const sol::object& obj) {
 // ----------------------------------
 // Expose to Lua
 
-void lua_bind_json(sol::state& lua) {
+namespace {
+
+sol::table create_json_table(sol::state_view lua)
+{
     sol::table json_table = lua.create_table();
     json_table.set_function("loads", &json_loads);
     json_table.set_function("dumps", &json_dumps);
-    lua["json"] = json_table;
+    return json_table;
+}
+
+} // namespace
+
+void lua_bind_json(sol::state& lua) {
+    sol::table package = lua["package"];
+    sol::table preload = package["preload"];
+
+    preload.set_function("json", [](sol::this_state state) {
+        sol::state_view lua(state);
+        return create_json_table(lua);
+    });
 }

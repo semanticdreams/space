@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
+#include <algorithm>
 #include <unordered_map>
 #include <string>
 #include <vector>
@@ -18,6 +20,12 @@ public:
     // Sound loading and management
     bool loadSound(const std::string& name, const std::string& filepath);
     void unloadSound(const std::string& name);
+    ALuint createBufferFromPcm(const std::string& name,
+                               const std::uint8_t* data,
+                               std::size_t size_bytes,
+                               ALenum format,
+                               ALsizei freq);
+    bool isSoundReady(const std::string& name) const;
 
     // Playback
     ALuint playSound(const std::string& name, const glm::vec3& position, bool loop = false, bool positional = true);
@@ -33,6 +41,9 @@ public:
     void setSourcePosition(ALuint sourceId, const glm::vec3& position);
     void setSourceVelocity(ALuint sourceId, const glm::vec3& velocity);
 
+    void setMasterVolume(float gain);
+    float getMasterVolume() const;
+
     void reset();
 
 private:
@@ -41,8 +52,9 @@ private:
 
     std::unordered_map<std::string, ALuint> buffers;
     std::vector<ALuint> activeSources;
+    float masterVolume = 1.0f;
 
     ALuint createSource(ALuint buffer, const glm::vec3& position, bool loop, bool positional);
     void cleanupStoppedSources();
+    void applyMasterVolume();
 };
-

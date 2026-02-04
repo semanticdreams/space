@@ -6,31 +6,78 @@
 #include <glm/gtx/quaternion.hpp>
 #include <sol/sol.hpp>
 
-void lua_bind_glm(sol::state& lua) {
+namespace {
+
+sol::table create_glm_table(sol::state_view lua)
+{
     sol::table glm_table = lua.create_table();
 
     // vec2
     glm_table.new_usertype<glm::vec2>("vec2",
-        sol::constructors<glm::vec2(), glm::vec2(float), glm::vec2(float, float)>(),
+        sol::no_constructor,
         "x", &glm::vec2::x,
         "y", &glm::vec2::y,
         sol::meta_function::addition, sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator+),
         sol::meta_function::subtraction, sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator-),
-        sol::meta_function::multiplication, sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator*),
-        sol::meta_function::division, sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator/)
+        sol::meta_function::multiplication, sol::overload(
+            sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator*),
+            [](const glm::vec2& v, float s) { return v * s; },
+            [](float s, const glm::vec2& v) { return s * v; }
+        ),
+        sol::meta_function::division, sol::overload(
+            sol::resolve<glm::vec2(const glm::vec2&, const glm::vec2&)>(&glm::operator/),
+            [](const glm::vec2& v, float s) { return v / s; },
+            [](float s, const glm::vec2& v) { return s / v; }
+        )
     );
-    lua.set_function("vec2", sol::overload(
-                []() { return glm::vec2(); },
-                [](float v) { return glm::vec2(v); },
-                [](float x, float y) { return glm::vec2(x, y); }
-                ));
+    glm_table.set_function("vec2", sol::overload(
+        []() { return glm::vec2(); },
+        [](float v) { return glm::vec2(v); },
+        [](float x, float y) { return glm::vec2(x, y); }
+    ));
 
     // vec3
     glm_table.new_usertype<glm::vec3>("vec3",
-        sol::constructors<glm::vec3(), glm::vec3(float), glm::vec3(float, float, float)>(),
-        "x", &glm::vec3::x,
-        "y", &glm::vec3::y,
-        "z", &glm::vec3::z,
+        sol::no_constructor,
+        "x", sol::property(
+            [](const glm::vec3& self) { return self.x; },
+            [](glm::vec3& self, float value) {
+                if (!std::isfinite(value)) {
+                    throw sol::error("vec3.x must be finite");
+                }
+                self.x = value;
+                double magnitude = glm::length(self);
+                if (!std::isfinite(magnitude) || magnitude > 1e6) {
+                    throw sol::error("vec3 magnitude exceeds threshold after setting x");
+                }
+            }
+        ),
+        "y", sol::property(
+            [](const glm::vec3& self) { return self.y; },
+            [](glm::vec3& self, float value) {
+                if (!std::isfinite(value)) {
+                    throw sol::error("vec3.y must be finite");
+                }
+                self.y = value;
+                double magnitude = glm::length(self);
+                if (!std::isfinite(magnitude) || magnitude > 1e6) {
+                    throw sol::error("vec3 magnitude exceeds threshold after setting y");
+                }
+            }
+        ),
+        "z", sol::property(
+            [](const glm::vec3& self) { return self.z; },
+            [](glm::vec3& self, float value) {
+                if (!std::isfinite(value)) {
+                    throw sol::error("vec3.z must be finite");
+                }
+                self.z = value;
+                double magnitude = glm::length(self);
+                if (!std::isfinite(magnitude) || magnitude > 1e6) {
+                    throw sol::error("vec3 magnitude exceeds threshold after setting z");
+                }
+            }
+        ),
 
         sol::meta_function::index, [](glm::vec3& self, int i) -> float& {
         if (i < 1 || i > 3) throw sol::error("vec3 index out of range");
@@ -38,47 +85,72 @@ void lua_bind_glm(sol::state& lua) {
         },
         sol::meta_function::new_index, [](glm::vec3& self, int i, float value) {
         if (i < 1 || i > 3) throw sol::error("vec3 index out of range");
+        if (!std::isfinite(value)) {
+            throw sol::error("vec3 component must be finite");
+        }
         self[i - 1] = value;
+        double magnitude = glm::length(self);
+        if (!std::isfinite(magnitude) || magnitude > 1e6) {
+            throw sol::error("vec3 magnitude exceeds threshold after indexed set");
+        }
         },
 
         sol::meta_function::addition, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator+),
         sol::meta_function::subtraction, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator-),
-        sol::meta_function::multiplication, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator*),
-        sol::meta_function::division, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator/)
+        sol::meta_function::multiplication, sol::overload(
+            sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator*),
+            [](const glm::vec3& v, float s) { return v * s; },
+            [](float s, const glm::vec3& v) { return s * v; }
+        ),
+        sol::meta_function::division, sol::overload(
+            sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator/),
+            [](const glm::vec3& v, float s) { return v / s; },
+            [](float s, const glm::vec3& v) { return s / v; }
+        ),
+        sol::meta_function::to_string, [](const glm::vec3& v) {
+        std::ostringstream ss;
+        ss << "vec3(" << v.x << ", " << v.y << ", " << v.z << ")";
+        return ss.str();
+        }
     );
-    lua.set_function("vec3", sol::overload(
-                []() { return glm::vec3(); },
-                [](float v) { return glm::vec3(v); },
-                [](float x, float y, float z) { return glm::vec3(x, y, z); },
-                [](const glm::vec2& v, float z) { return glm::vec3(v, z); }
-                ));
+    glm_table.set_function("vec3", sol::overload(
+        []() { return glm::vec3(); },
+        [](float v) { return glm::vec3(v); },
+        [](float x, float y, float z) { return glm::vec3(x, y, z); },
+        [](const glm::vec2& v, float z) { return glm::vec3(v, z); }
+    ));
 
     // vec4
     glm_table.new_usertype<glm::vec4>("vec4",
-            sol::constructors<glm::vec4(), glm::vec4(float), glm::vec4(float, float, float, float)>(),
+            sol::no_constructor,
             "x", &glm::vec4::x,
             "y", &glm::vec4::y,
             "z", &glm::vec4::z,
             "w", &glm::vec4::w,
             sol::meta_function::addition, sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator+),
             sol::meta_function::subtraction, sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator-),
-            sol::meta_function::multiplication, sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator*),
-            sol::meta_function::division, sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator/)
+            sol::meta_function::multiplication, sol::overload(
+                sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator*),
+                [](const glm::vec4& v, const glm::mat4& m) { return v * m; },
+                [](const glm::vec4& v, float s) { return v * s; },
+                [](float s, const glm::vec4& v) { return s * v; }
+            ),
+            sol::meta_function::division, sol::overload(
+                sol::resolve<glm::vec4(const glm::vec4&, const glm::vec4&)>(&glm::operator/),
+                [](const glm::vec4& v, float s) { return v / s; },
+                [](float s, const glm::vec4& v) { return s / v; }
+            )
             );
-    lua.set_function("vec4", sol::overload(
-    []() { return glm::vec4(); },
-    [](float v) { return glm::vec4(v); },
-    [](float x, float y, float z, float w) { return glm::vec4(x, y, z, w); },
-    [](const glm::vec2& v, float z, float w) { return glm::vec4(v, z, w); },
-    [](const glm::vec3& v, float w) { return glm::vec4(v, w); }
-));
+    glm_table.set_function("vec4", sol::overload(
+        []() { return glm::vec4(); },
+        [](float v) { return glm::vec4(v); },
+        [](float x, float y, float z, float w) { return glm::vec4(x, y, z, w); },
+        [](const glm::vec2& v, float z, float w) { return glm::vec4(v, z, w); },
+        [](const glm::vec3& v, float w) { return glm::vec4(v, w); }
+    ));
 
     glm_table.new_usertype<glm::quat>("quat",
-            sol::constructors<
-            glm::quat(),                                            // default constructor
-            glm::quat(float, float, float, float),                  // full component constructor
-            glm::quat(float, glm::vec3)                             // angle-axis constructor
-            >(),
+            sol::no_constructor,
             "x", &glm::quat::x,
             "y", &glm::quat::y,
             "z", &glm::quat::z,
@@ -99,21 +171,28 @@ void lua_bind_glm(sol::state& lua) {
             // Apply rotation
             "rotate", [](const glm::quat& q, const glm::vec3& v) { return q * v; }
     );
-    lua.set_function("quat", sol::overload(
-                []() { return glm::quat(); },
-                [](float w, float x, float y, float z) { return glm::quat(w, x, y, z); },
-                [](const glm::vec3& eulerAngles) { return glm::quat(eulerAngles); } // from Euler angles
-                ));
+    glm_table.set_function("quat", sol::overload(
+        []() { return glm::quat(); },
+        [](float w, float x, float y, float z) { return glm::quat(w, x, y, z); },
+        [](const glm::vec3& eulerAngles) { return glm::quat(eulerAngles); }, // from Euler angles
+        [](float angleRadians, const glm::vec3& axis) { return glm::angleAxis(angleRadians, glm::normalize(axis)); } // angle-axis
+    ));
 
     // mat4
     glm_table.new_usertype<glm::mat4>("mat4",
-        sol::constructors<glm::mat4(), glm::mat4(float)>(),
-        sol::meta_function::multiplication, sol::resolve<glm::mat4(const glm::mat4&, const glm::mat4&)>(&glm::operator*)
+        sol::no_constructor,
+        sol::meta_function::multiplication, sol::overload(
+            sol::resolve<glm::mat4(const glm::mat4&, const glm::mat4&)>(&glm::operator*),
+            [](const glm::mat4& m, const glm::vec4& v) { return m * v; },
+            [](const glm::vec4& v, const glm::mat4& m) { return v * m; },
+            [](const glm::mat4& m, float s) { return m * s; },
+            [](float s, const glm::mat4& m) { return s * m; }
+        )
     );
-    lua.set_function("mat4", sol::overload(
-    []() { return glm::mat4(1.0f); },         // identity by default
-    [](float diag) { return glm::mat4(diag); } // diagonal matrix
-));
+    glm_table.set_function("mat4", sol::overload(
+        []() { return glm::mat4(1.0f); },         // identity by default
+        [](float diag) { return glm::mat4(diag); } // diagonal matrix
+    ));
 
     // Vector functions
     glm_table.set_function("normalize", sol::overload(
@@ -148,6 +227,13 @@ void lua_bind_glm(sol::state& lua) {
         return glm::scale(mat, v);
     });
 
+    glm_table.set_function("strip-translation", [](glm::mat4 mat) {
+        mat[3][0] = 0.0f;
+        mat[3][1] = 0.0f;
+        mat[3][2] = 0.0f;
+        return mat;
+    });
+
     // Projection functions
     glm_table.set_function("perspective", [](float fovRadians, float aspectRatio, float nearPlane, float farPlane) {
         return glm::perspective(fovRadians, aspectRatio, nearPlane, farPlane);
@@ -161,11 +247,30 @@ void lua_bind_glm(sol::state& lua) {
         return glm::lookAt(eye, center, up);
     });
 
-    // Optional: raw pointers for OpenGL interop
-    glm_table.set_function("value_ptr_vec2", [](glm::vec2& v) { return static_cast<void*>(glm::value_ptr(v)); });
-    glm_table.set_function("value_ptr_vec3", [](glm::vec3& v) { return static_cast<void*>(glm::value_ptr(v)); });
-    glm_table.set_function("value_ptr_vec4", [](glm::vec4& v) { return static_cast<void*>(glm::value_ptr(v)); });
-    glm_table.set_function("value_ptr_mat4", [](glm::mat4& m) { return static_cast<void*>(glm::value_ptr(m)); });
+    glm_table.set_function("unproject", [](const glm::vec3& win, const glm::mat4& view, const glm::mat4& projection, const glm::vec4& viewport) {
+        return glm::unProject(win, view, projection, viewport);
+    });
 
-    lua["glm"] = glm_table;
+    glm_table.set_function("project", [](const glm::vec3& obj, const glm::mat4& view, const glm::mat4& projection, const glm::vec4& viewport) {
+        return glm::project(obj, view, projection, viewport);
+    });
+
+    // Optional: raw pointers for OpenGL interop
+    glm_table.set_function("value-ptr-vec2", [](glm::vec2& v) { return static_cast<void*>(glm::value_ptr(v)); });
+    glm_table.set_function("value-ptr-vec3", [](glm::vec3& v) { return static_cast<void*>(glm::value_ptr(v)); });
+    glm_table.set_function("value-ptr-vec4", [](glm::vec4& v) { return static_cast<void*>(glm::value_ptr(v)); });
+    glm_table.set_function("value-ptr-mat4", [](glm::mat4& m) { return static_cast<void*>(glm::value_ptr(m)); });
+    return glm_table;
+}
+
+} // namespace
+
+void lua_bind_glm(sol::state& lua) {
+    sol::table package = lua["package"];
+    sol::table preload = package["preload"];
+
+    preload.set_function("glm", [](sol::this_state state) {
+        sol::state_view lua(state);
+        return create_glm_table(lua);
+    });
 }

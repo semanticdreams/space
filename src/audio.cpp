@@ -1,13 +1,94 @@
 #include "audio.h"
 #include <iostream>
 #include <fstream>
-#include <vector>
+#include <cstdint>
+#include <cstddef>
+#include <memory>
 #include <thread>
 #include <chrono>
+#include <cstdlib>
+#include <cctype>
+#include <vector>
 #include <AL/alext.h>
 
+namespace {
+void ensure_openal_drivers() {
+    if (std::getenv("ALSOFT_DRIVERS")) {
+        return;
+    }
+#if defined(_WIN32)
+    _putenv_s("ALSOFT_DRIVERS", "pulse,alsa");
+#else
+    setenv("ALSOFT_DRIVERS", "pulse,alsa", 0);
+#endif
+}
+
+std::vector<std::string> list_al_devices() {
+    const ALCchar* devices = nullptr;
+    if (alcIsExtensionPresent(nullptr, "ALC_ENUMERATE_ALL_EXT") == AL_TRUE) {
+        devices = alcGetString(nullptr, ALC_ALL_DEVICES_SPECIFIER);
+    } else {
+        devices = alcGetString(nullptr, ALC_DEVICE_SPECIFIER);
+    }
+    std::vector<std::string> results;
+    if (!devices) {
+        return results;
+    }
+    const ALCchar* ptr = devices;
+    while (*ptr) {
+        results.emplace_back(ptr);
+        ptr += results.back().size() + 1;
+    }
+    return results;
+}
+
+bool contains_case_insensitive(const std::string& haystack, const std::string& needle) {
+    auto it = std::search(haystack.begin(), haystack.end(),
+                          needle.begin(), needle.end(),
+                          [](char a, char b) {
+                              return std::tolower(a) == std::tolower(b);
+                          });
+    return it != haystack.end();
+}
+
+std::string pick_preferred_device() {
+    const char* env_device = std::getenv("SPACE_AUDIO_DEVICE");
+    if (env_device && *env_device) {
+        return std::string(env_device);
+    }
+
+    const std::vector<std::string> devices = list_al_devices();
+    const char* preferred[] = {"pulse", "pipewire", "alsa"};
+    for (const char* token : preferred) {
+        for (const auto& device : devices) {
+            if (contains_case_insensitive(device, token)) {
+                return device;
+            }
+        }
+    }
+    return "";
+}
+
+ALCdevice* open_al_device() {
+    ensure_openal_drivers();
+    std::string preferred = pick_preferred_device();
+    if (!preferred.empty()) {
+        if (ALCdevice* device = alcOpenDevice(preferred.c_str())) {
+            std::cout << "[Audio] Using OpenAL device: " << preferred << std::endl;
+            return device;
+        }
+        std::cerr << "[Audio] Failed to open preferred OpenAL device: " << preferred << std::endl;
+    }
+    return alcOpenDevice(nullptr);
+}
+} // namespace
+
 // Basic .wav loader (PCM 16-bit only)
-bool loadWavFile(const std::string& filepath, std::vector<char>& outData, ALenum& format, ALsizei& freq) {
+bool loadWavFile(const std::string& filepath,
+                 std::unique_ptr<std::uint8_t[]>& outData,
+                 std::size_t& outSize,
+                 ALenum& format,
+                 ALsizei& freq) {
     std::ifstream file(filepath, std::ios::binary);
     if (!file) return false;
 
@@ -38,14 +119,30 @@ bool loadWavFile(const std::string& filepath, std::vector<char>& outData, ALenum
 
     if (audioFormat != 1) return false; // Not PCM
 
-    file.seekg(20 + fmtChunkSize + 8, std::ios::beg); // Skip to data
-    char dataId[4];
-    file.read(dataId, 4);
-    uint32_t dataSize;
-    file.read(reinterpret_cast<char*>(&dataSize), 4);
+    // Walk chunks until we find the "data" chunk
+    std::string chunkId;
+    uint32_t chunkSize = 0;
+    while (file.read(reinterpret_cast<char*>(fmtChunkId), 4)) {
+        chunkId.assign(fmtChunkId, 4);
+        file.read(reinterpret_cast<char*>(&chunkSize), 4);
+        if (chunkId == "data") {
+            break;
+        }
+        // Skip unknown chunk payload; chunks are word-aligned
+        file.seekg(chunkSize + (chunkSize % 2), std::ios::cur);
+    }
 
-    outData.resize(dataSize);
-    file.read(outData.data(), dataSize);
+    if (chunkId != "data") {
+        return false;
+    }
+
+    std::unique_ptr<std::uint8_t[]> buffer(new std::uint8_t[chunkSize]);
+    file.read(reinterpret_cast<char*>(buffer.get()), chunkSize);
+    if (!file) {
+        return false;
+    }
+    outSize = static_cast<std::size_t>(chunkSize);
+    outData = std::move(buffer);
 
     // Determine format
     if (numChannels == 1) {
@@ -61,7 +158,7 @@ bool loadWavFile(const std::string& filepath, std::vector<char>& outData, ALenum
 }
 
 Audio::Audio() {
-    device = alcOpenDevice(nullptr);
+    device = open_al_device();
     if (!device) {
         std::cerr << "Failed to open OpenAL device." << std::endl;
         return;
@@ -72,6 +169,8 @@ Audio::Audio() {
         std::cerr << "Failed to create or activate OpenAL context." << std::endl;
         return;
     }
+
+    applyMasterVolume();
 }
 
 Audio::~Audio() {
@@ -100,11 +199,12 @@ void Audio::update(uint32_t dt) {
 bool Audio::loadSound(const std::string& name, const std::string& filepath) {
     if (buffers.find(name) != buffers.end()) return true; // Already loaded
 
-    std::vector<char> data;
+    std::unique_ptr<std::uint8_t[]> data;
+    std::size_t dataSize = 0;
     ALenum format;
     ALsizei freq;
 
-    if (!loadWavFile(filepath, data, format, freq)) {
+    if (!loadWavFile(filepath, data, dataSize, format, freq)) {
         std::cerr << "Failed to load WAV file: " << filepath << format << freq << std::endl;
         return false;
     }
@@ -117,10 +217,10 @@ bool Audio::loadSound(const std::string& name, const std::string& filepath) {
         std::cout << "Error after alGenBuffers: " << alGetString(err) << std::endl;
     }
 
-    auto bufferSize = static_cast<ALsizei>(data.size());
+    auto bufferSize = static_cast<ALsizei>(dataSize);
     bufferSize = bufferSize - bufferSize%4;
 
-    alBufferData(buffer, format, data.data(), bufferSize, freq);
+    alBufferData(buffer, format, data.get(), bufferSize, freq);
     buffers[name] = buffer;
 
     err = alGetError();
@@ -129,6 +229,40 @@ bool Audio::loadSound(const std::string& name, const std::string& filepath) {
     }
 
     return true;
+}
+
+ALuint Audio::createBufferFromPcm(const std::string& name,
+                                  const std::uint8_t* data,
+                                  std::size_t size_bytes,
+                                  ALenum format,
+                                  ALsizei freq) {
+    if (buffers.find(name) != buffers.end()) {
+        return buffers[name];
+    }
+
+    ALuint buffer = 0;
+    alGenBuffers(1, &buffer);
+    ALenum err = alGetError();
+    if (err != AL_NO_ERROR) {
+        std::cerr << "Error after alGenBuffers: " << alGetString(err) << std::endl;
+        return 0;
+    }
+
+    auto bufferSize = static_cast<ALsizei>(size_bytes);
+    alBufferData(buffer, format, data, bufferSize, freq);
+    err = alGetError();
+    if (err != AL_NO_ERROR) {
+        std::cerr << "OpenAL error: " << alGetString(err) << std::endl;
+        alDeleteBuffers(1, &buffer);
+        return 0;
+    }
+
+    buffers[name] = buffer;
+    return buffer;
+}
+
+bool Audio::isSoundReady(const std::string& name) const {
+    return buffers.find(name) != buffers.end();
 }
 
 void Audio::unloadSound(const std::string& name) {
@@ -212,6 +346,15 @@ void Audio::setSourceVelocity(ALuint sourceId, const glm::vec3& velocity) {
     alSource3f(sourceId, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
 }
 
+void Audio::setMasterVolume(float gain) {
+    masterVolume = std::clamp(gain, 0.0f, 1.0f);
+    applyMasterVolume();
+}
+
+float Audio::getMasterVolume() const {
+    return masterVolume;
+}
+
 void Audio::cleanupStoppedSources() {
     auto it = activeSources.begin();
     while (it != activeSources.end()) {
@@ -253,7 +396,7 @@ void Audio::reset() {
     }
 
     // 4. Reopen the default device
-    device = alcOpenDevice(nullptr);
+    device = open_al_device();
     if (!device) {
         std::cerr << "Failed to reopen OpenAL device." << std::endl;
         return;
@@ -265,5 +408,10 @@ void Audio::reset() {
         return;
     }
 
+    applyMasterVolume();
     std::cout << "[Audio] OpenAL reset completed.\n";
+}
+
+void Audio::applyMasterVolume() {
+    alListenerf(AL_GAIN, masterVolume);
 }
