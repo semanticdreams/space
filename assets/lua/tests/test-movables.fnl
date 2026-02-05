@@ -5,6 +5,7 @@
 (local Intersectables (require :intersectables))
 (local Scene (require :scene))
 (local MathUtils (require :math-utils))
+(local AppProjection (require :app-projection))
 
 (local tests [])
 
@@ -63,6 +64,23 @@
   (set app.screen-pos-ray (fn [_pointer _opts] ray))
   (let [(ok result) (pcall body)]
     (set app.screen-pos-ray original)
+    (when (not ok)
+      (error result))
+    result))
+
+(fn with-viewport [viewport body]
+  (local original-set app.set-viewport)
+  (local original-viewport app.viewport)
+  (local original-create app.create-default-projection)
+  (when (not original-set)
+    (set app.set-viewport (fn [value] (set app.viewport value))))
+  (when (not original-create)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (app.set-viewport viewport)
+  (let [(ok result) (pcall body)]
+    (set app.set-viewport original-set)
+    (set app.viewport original-viewport)
+    (set app.create-default-projection original-create)
     (when (not ok)
       (error result))
     result))
@@ -140,49 +158,47 @@
   (local original-movables app.movables)
   (local original-camera app.camera)
   (local original-viewport app.viewport)
-  (app.set-viewport {:x 0 :y 0 :width 640 :height 480})
-  (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
-  (local intersector (Intersectables))
-  (set app.intersectables intersector)
-  (local movables (Movables {:intersectables app.intersectables}))
-  (set app.movables movables)
-  (local scene (Scene {:position (glm.vec3 0 0 0) :rotation (glm.quat 1 0 0 0)}))
-  (set app.scene scene)
-  (scene:build (fn [_ctx]
-                 (local layout
-                   (Layout {:name "simple"
-                            :measurer (fn [self]
-                                        (set self.measure (glm.vec3 1 1 1)))
-                            :layouter (fn [self]
-                                        (set self.size self.measure))}))
-                 {:layout layout
-                  :drop (fn [_] (layout:drop))}))
-  (scene:update)
-  (local entity scene.entity)
-  (assert entity "Scene should attach entity")
-  (local layout entity.layout)
-  (assert layout "Scene entity missing layout")
-  (var ray-origin (glm.vec3 0 0 5))
-  (set scene.screen-pos-ray
-       (fn [_self _pointer _opts]
-         {:origin ray-origin :direction (glm.vec3 0 0 -1)}))
-  (app.movables:on-mouse-button-down {:button 1 :x 0 :y 0})
-  (app.movables:on-mouse-motion {:x 5 :y 0})
-  (assert (app.movables:drag-active?))
-  (set ray-origin (glm.vec3 1 0 5))
-  (app.movables:on-mouse-motion {:x 1 :y 0})
-  (assert (> layout.position.x -0.5))
-  (app.movables:on-mouse-button-up {:button 1})
-  (scene:drop)
-  (intersector:drop)
-  (movables:drop)
-  (set app.scene original-scene)
-  (set app.intersectables original-intersectables)
-  (set app.movables original-movables)
-  (set app.camera original-camera)
-  (if original-viewport
-      (app.set-viewport original-viewport)
-      (app.set-viewport {:width 0 :height 0})))
+  (with-viewport {:x 0 :y 0 :width 640 :height 480}
+    (fn []
+      (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
+      (local intersector (Intersectables))
+      (set app.intersectables intersector)
+      (local movables (Movables {:intersectables app.intersectables}))
+      (set app.movables movables)
+      (local scene (Scene {:position (glm.vec3 0 0 0) :rotation (glm.quat 1 0 0 0)}))
+      (set app.scene scene)
+      (scene:build (fn [_ctx]
+                     (local layout
+                       (Layout {:name "simple"
+                                :measurer (fn [self]
+                                            (set self.measure (glm.vec3 1 1 1)))
+                                :layouter (fn [self]
+                                            (set self.size self.measure))}))
+                     {:layout layout
+                      :drop (fn [_] (layout:drop))}))
+      (scene:update)
+      (local entity scene.entity)
+      (assert entity "Scene should attach entity")
+      (local layout entity.layout)
+      (assert layout "Scene entity missing layout")
+      (var ray-origin (glm.vec3 0 0 5))
+      (set scene.screen-pos-ray
+           (fn [_self _pointer _opts]
+             {:origin ray-origin :direction (glm.vec3 0 0 -1)}))
+      (app.movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (app.movables:on-mouse-motion {:x 5 :y 0})
+      (assert (app.movables:drag-active?))
+      (set ray-origin (glm.vec3 1 0 5))
+      (app.movables:on-mouse-motion {:x 1 :y 0})
+      (assert (> layout.position.x -0.5))
+      (app.movables:on-mouse-button-up {:button 1})
+      (scene:drop)
+      (intersector:drop)
+      (movables:drop)
+      (set app.scene original-scene)
+      (set app.intersectables original-intersectables)
+      (set app.movables original-movables)
+      (set app.camera original-camera))))
 
 (fn scene-registers-custom-movable-targets []
   (local original-scene app.scene)
@@ -190,112 +206,110 @@
   (local original-movables app.movables)
   (local original-camera app.camera)
   (local original-viewport app.viewport)
-  (app.set-viewport {:x 0 :y 0 :width 640 :height 480})
-  (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
-  (local intersector (Intersectables))
-  (set app.intersectables intersector)
-  (local movables (Movables {:intersectables app.intersectables}))
-  (set app.movables movables)
-  (local scene (Scene {:position (glm.vec3 0 0 0) :rotation (glm.quat 1 0 0 0)}))
-  (set app.scene scene)
-  (var first nil)
-  (var second nil)
-  (var root-layout nil)
-  (scene:build (fn [_ctx]
-                 (set first
-                      (Layout {:name "first"
-                               :measurer (fn [self]
-                                           (set self.measure (glm.vec3 1 1 1)))
-                               :layouter (fn [self]
-                                           (set self.size self.measure))}))
-                 (set second
-                      (Layout {:name "second"
-                               :measurer (fn [self]
-                                           (set self.measure (glm.vec3 1 1 1)))
-                               :layouter (fn [self]
-                                           (set self.size self.measure))}))
-                 (set root-layout
-                      (Layout {:name "root"
-                               :children [first second]
-                               :measurer (fn [self]
-                                           (first:measurer)
-                                           (second:measurer)
-                                           (set self.measure (glm.vec3 4 1 1)))
-                               :layouter (fn [self]
-                                           (set self.size self.measure)
-                                           (set first.rotation self.rotation)
-                                           (set first.position self.position)
-                                           (first:layouter)
-                                           (set second.rotation self.rotation)
-                                           (set second.position (+ self.position (glm.vec3 2 0 0)))
-                                           (second:layouter))}))
-                 {:layout root-layout
-                  :movables [{:target first :key first}
-                             {:target second :key second}]
-                  :drop (fn [_]
-                          (root-layout:drop)
-                          (first:drop)
-                          (second:drop))}))
-  (scene:update)
-  (assert (> first.measure.x 0.5) "First layout should measure width")
-  (assert (> first.size.x 0.5) "First layout should lay out width")
-  (assert (> second.measure.x 0.5) "Second layout should measure width")
-  (assert (> second.size.x 0.5) "Second layout should lay out width")
-  (var ray-origin (glm.vec3 0 0 5))
-  (set scene.screen-pos-ray
-       (fn [_self _pointer _opts]
-         {:origin ray-origin
-          :direction (glm.vec3 0 0 -1)}))
-  (assert (= (# app.movables.entries) 2)
-          "Scene should register provided movable targets")
-  (local first-selection (. app.movables.objects 1))
-  (local second-selection (. app.movables.objects 2))
-  (assert first-selection "First selection object should exist")
-  (assert second-selection "Second selection object should exist")
-  (assert (= first-selection.pointer-target scene)
-          "First selection should target scene")
-  (assert (= second-selection.pointer-target scene)
-          "Second selection should target scene")
-  (set ray-origin (glm.vec3 0.25 0 5))
-  (app.movables:on-mouse-button-down {:button 1 :x 0.25 :y 0})
-  (set ray-origin (glm.vec3 5 0 5))
-  (app.movables:on-mouse-motion {:x 5 :y 0})
-  (assert (app.movables:drag-active?)
-          "Drag should activate for first movable")
-  (set ray-origin (glm.vec3 1.25 0 5))
-  (app.movables:on-mouse-motion {:x 1.25 :y 0})
-  (assert (> first.position.x 0.75)
-          "Drag should update first movable position")
-  (assert (< (math.abs (- second.position.x 2)) 1e-4)
-          "Second movable should remain stationary")
-  (app.movables:on-mouse-button-up {:button 1})
-  (assert (not (app.movables:drag-active?))
-          "Drag should end after releasing first movable")
-  (set ray-origin (glm.vec3 2.25 0 5))
-  (app.movables:on-mouse-button-down {:button 1 :x 2.25 :y 0})
-  (set ray-origin (glm.vec3 10 0 5))
-  (app.movables:on-mouse-motion {:x 10 :y 0})
-  (assert (app.movables:drag-active?)
-          "Drag should activate for second movable")
-  (set ray-origin (glm.vec3 3.25 0 5))
-  (app.movables:on-mouse-motion {:x 3.25 :y 0})
-  (assert (> second.position.x 2.5)
-          "Drag should update second movable position")
-  (assert (> first.position.x 0.75)
-          "First movable should retain its updated position")
-  (app.movables:on-mouse-button-up {:button 1})
-  (assert (not (app.movables:drag-active?))
-          "Drag should end after releasing second movable")
-  (scene:drop)
-  (intersector:drop)
-  (movables:drop)
+  (with-viewport {:x 0 :y 0 :width 640 :height 480}
+    (fn []
+      (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
+      (local intersector (Intersectables))
+      (set app.intersectables intersector)
+      (local movables (Movables {:intersectables app.intersectables}))
+      (set app.movables movables)
+      (local scene (Scene {:position (glm.vec3 0 0 0) :rotation (glm.quat 1 0 0 0)}))
+      (set app.scene scene)
+      (var first nil)
+      (var second nil)
+      (var root-layout nil)
+      (scene:build (fn [_ctx]
+                     (set first
+                          (Layout {:name "first"
+                                   :measurer (fn [self]
+                                               (set self.measure (glm.vec3 1 1 1)))
+                                   :layouter (fn [self]
+                                               (set self.size self.measure))}))
+                     (set second
+                          (Layout {:name "second"
+                                   :measurer (fn [self]
+                                               (set self.measure (glm.vec3 1 1 1)))
+                                   :layouter (fn [self]
+                                               (set self.size self.measure))}))
+                     (set root-layout
+                          (Layout {:name "root"
+                                   :children [first second]
+                                   :measurer (fn [self]
+                                               (first:measurer)
+                                               (second:measurer)
+                                               (set self.measure (glm.vec3 4 1 1)))
+                                   :layouter (fn [self]
+                                               (set self.size self.measure)
+                                               (set first.rotation self.rotation)
+                                               (set first.position self.position)
+                                               (first:layouter)
+                                               (set second.rotation self.rotation)
+                                               (set second.position (+ self.position (glm.vec3 2 0 0)))
+                                               (second:layouter))}))
+                     {:layout root-layout
+                      :movables [{:target first :key first}
+                                 {:target second :key second}]
+                      :drop (fn [_]
+                              (root-layout:drop)
+                              (first:drop)
+                              (second:drop))}))
+      (scene:update)
+      (assert (> first.measure.x 0.5) "First layout should measure width")
+      (assert (> first.size.x 0.5) "First layout should lay out width")
+      (assert (> second.measure.x 0.5) "Second layout should measure width")
+      (assert (> second.size.x 0.5) "Second layout should lay out width")
+      (var ray-origin (glm.vec3 0 0 5))
+      (set scene.screen-pos-ray
+           (fn [_self _pointer _opts]
+             {:origin ray-origin
+              :direction (glm.vec3 0 0 -1)}))
+      (assert (= (# app.movables.entries) 2)
+              "Scene should register provided movable targets")
+      (local first-selection (. app.movables.objects 1))
+      (local second-selection (. app.movables.objects 2))
+      (assert first-selection "First selection object should exist")
+      (assert second-selection "Second selection object should exist")
+      (assert (= first-selection.pointer-target scene)
+              "First selection should target scene")
+      (assert (= second-selection.pointer-target scene)
+              "Second selection should target scene")
+      (set ray-origin (glm.vec3 0.25 0 5))
+      (app.movables:on-mouse-button-down {:button 1 :x 0.25 :y 0})
+      (set ray-origin (glm.vec3 5 0 5))
+      (app.movables:on-mouse-motion {:x 5 :y 0})
+      (assert (app.movables:drag-active?)
+              "Drag should activate for first movable")
+      (set ray-origin (glm.vec3 1.25 0 5))
+      (app.movables:on-mouse-motion {:x 1.25 :y 0})
+      (assert (> first.position.x 0.75)
+              "Drag should update first movable position")
+      (assert (< (math.abs (- second.position.x 2)) 1e-4)
+              "Second movable should remain stationary")
+      (app.movables:on-mouse-button-up {:button 1})
+      (assert (not (app.movables:drag-active?))
+              "Drag should end after releasing first movable")
+      (set ray-origin (glm.vec3 2.25 0 5))
+      (app.movables:on-mouse-button-down {:button 1 :x 2.25 :y 0})
+      (set ray-origin (glm.vec3 10 0 5))
+      (app.movables:on-mouse-motion {:x 10 :y 0})
+      (assert (app.movables:drag-active?)
+              "Drag should activate for second movable")
+      (set ray-origin (glm.vec3 3.25 0 5))
+      (app.movables:on-mouse-motion {:x 3.25 :y 0})
+      (assert (> second.position.x 2.5)
+              "Drag should update second movable position")
+      (assert (> first.position.x 0.75)
+              "First movable should retain its updated position")
+      (app.movables:on-mouse-button-up {:button 1})
+      (assert (not (app.movables:drag-active?))
+              "Drag should end after releasing second movable")
+      (scene:drop)
+      (intersector:drop)
+      (movables:drop)
       (set app.scene original-scene)
       (set app.intersectables original-intersectables)
       (set app.movables original-movables)
-      (set app.camera original-camera)
-      (if original-viewport
-          (app.set-viewport original-viewport)
-          (app.set-viewport {:width 0 :height 0})))
+      (set app.camera original-camera))))
 
 (fn movables-fire-drag-hooks []
   (with-camera (glm.vec3 0 0 -1)
