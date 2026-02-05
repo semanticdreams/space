@@ -48,6 +48,16 @@
       (error result))
     result))
 
+(fn with-camera-vectors [forward up body]
+  (local original app.camera)
+  (set app.camera {:get-forward (fn [_] forward)
+                   :get-up (fn [_] up)})
+  (let [(ok result) (pcall body)]
+    (set app.camera original)
+    (when (not ok)
+      (error result))
+    result))
+
 (fn with-screen-ray [ray body]
   (local original app.screen-pos-ray)
   (set app.screen-pos-ray (fn [_pointer _opts] ray))
@@ -306,6 +316,46 @@
       (movables:on-mouse-button-up {:button 1})
       (assert ended "Expected on-drag-end to fire"))))
 
+(fn movables-shift-drag-uses-up-plane []
+  (with-camera-vectors (glm.vec3 0 0 -1) (glm.vec3 0 1 0)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector :drag-threshold 0}))
+      (local layout (make-layout))
+      (set layout.position (glm.vec3 4 5 6))
+      (movables:register {:layout layout})
+      (set intersector.selection-point (glm.vec3 1 2 3))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (set intersector.next-ray {:origin (glm.vec3 2 10 3)
+                                 :direction (glm.vec3 0 -1 0)})
+      (movables:on-mouse-motion {:x 0 :y 0 :mod 1})
+      (assert (approx layout.position.y 5)
+              "Shift drag should keep Y constant when using camera up plane")
+      (assert (approx layout.position.z 3)
+              "Shift drag should move along plane normal to camera up"))))
+
+(fn movables-shift-toggle-restores-forward-plane []
+  (with-camera-vectors (glm.vec3 0 0 -1) (glm.vec3 0 1 0)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector :drag-threshold 0}))
+      (local layout (make-layout))
+      (set layout.position (glm.vec3 4 5 6))
+      (movables:register {:layout layout})
+      (set intersector.selection-point (glm.vec3 1 2 3))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0 :mod 1})
+      (set intersector.next-ray {:origin (glm.vec3 2 10 3)
+                                 :direction (glm.vec3 0 -1 0)})
+      (movables:on-mouse-motion {:x 0 :y 0 :mod 1})
+      (local prior-z layout.position.z)
+      (set intersector.next-ray {:origin (glm.vec3 8 5 10)
+                                 :direction (glm.vec3 0 0 -1)})
+      (movables:on-mouse-motion {:x 0 :y 0 :mod 0})
+      (assert (approx layout.position.y 5)
+              "Forward drag should keep Y stable after shift release")
+      (assert (approx layout.position.z prior-z)
+              "Forward drag should keep Z on the forward plane"))))
+
 (table.insert tests {:name "Movables register/unregister layouts" :fn movables-register-and-unregister})
 (table.insert tests {:name "Movables update layout positions while dragging" :fn movables-update-position-while-dragging})
 (table.insert tests {:name "Movables clear drag state on release" :fn movables-release-clears-drag})
@@ -313,6 +363,8 @@
 (table.insert tests {:name "Scene registers simple entity with Movables" :fn scene-registers-simple-entity})
 (table.insert tests {:name "Scene registers explicit movable targets" :fn scene-registers-custom-movable-targets})
 (table.insert tests {:name "Movables fire drag start/end hooks" :fn movables-fire-drag-hooks})
+(table.insert tests {:name "Movables shift drag uses camera up plane" :fn movables-shift-drag-uses-up-plane})
+(table.insert tests {:name "Movables shift toggle restores forward plane" :fn movables-shift-toggle-restores-forward-plane})
 
 (local main
   (fn []

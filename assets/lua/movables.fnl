@@ -2,6 +2,7 @@
 (local SDL_BUTTON_LEFT 1)
 (local default-drag-threshold 16) ; squared pixels
 (local Intersectables (require :intersectables))
+(local {: shift-held?} (require :input-modifiers))
 
 (fn safe-offset [target-point hit-point]
   (if (and target-point hit-point)
@@ -34,16 +35,25 @@
             (not (finite-number? vec.z)))
     (error (.. "Movables received non-finite " label))))
 
-(fn resolve-plane-normal []
+(fn resolve-plane-normal [mode]
   (local camera app.camera)
-  (normalize-or
-    (and camera camera.get-forward (camera:get-forward))
-    (glm.vec3 0 0 -1)))
+  (if (= mode :up)
+      (normalize-or
+        (and camera camera.get-up (camera:get-up))
+        (glm.vec3 0 1 0))
+      (normalize-or
+        (and camera camera.get-forward (camera:get-forward))
+        (glm.vec3 0 0 -1))))
 
-(fn make-plane [point]
+(fn resolve-plane-mode [payload]
+  (if (and payload (shift-held? payload.mod))
+      :up
+      :forward))
+
+(fn make-plane [point mode]
   (when point
     {:point point
-     :normal (resolve-plane-normal)}))
+     :normal (resolve-plane-normal mode)}))
 
 (fn ray-plane-intersection [ray plane]
   (when (and ray plane plane.normal plane.point)
@@ -81,7 +91,7 @@
       (when (and started? entry entry.on-drag-end)
         (entry.on-drag-end entry))))
 
-  (fn start-drag [_self drag]
+  (fn start-drag [_self drag payload]
     (when (and drag (not drag.started?))
       (set drag.started? true)
       (local entry drag.entry)
@@ -90,18 +100,21 @@
       (local target (and entry entry.target))
       (local hit-point drag.hit-point)
       (when (and target hit-point)
-        (local plane (make-plane hit-point))
+        (local mode (resolve-plane-mode payload))
+        (local plane (make-plane hit-point mode))
         (local offset (safe-offset target.position hit-point))
         (set drag.plane plane)
-        (set drag.offset offset))))
+        (set drag.offset offset)
+        (set drag.plane-mode mode))))
 
-  (fn ensure-drag-started [self pointer]
+  (fn ensure-drag-started [self payload]
     (local drag self.drag)
     (when (and drag (not drag.started?))
+      (local pointer (self.intersector:pointer payload))
       (if (<= self.drag-threshold 0)
-          (start-drag self drag)
+          (start-drag self drag payload)
           (when (>= (distance-squared pointer drag.start-pointer) self.drag-threshold)
-            (start-drag self drag)))))
+            (start-drag self drag payload)))))
 
   (fn resolve-target [_self widget options]
     (or (and options options.target)
@@ -206,7 +219,7 @@
                             :hit-point hit-point
                             :start-pointer pointer
                             :started? false})
-            (ensure-drag-started self pointer)
+            (ensure-drag-started self payload)
             true))
         (do
           (set self.drag nil)
@@ -217,11 +230,20 @@
     (when (and drag drag.started?)
       (local pointer (self.intersector:pointer payload))
       (local ray (self.intersector:resolve-ray pointer drag.pointer-target))
-      (local hit (ray-plane-intersection ray drag.plane))
-      (when (and hit drag.entry drag.entry.target)
-        (local new-position (+ hit drag.offset))
-        (assert-finite-vec3 new-position "drag position")
-        (drag.entry.target:set-position new-position))))
+      (local desired-mode (resolve-plane-mode payload))
+      (when (and ray drag.entry drag.entry.target)
+        (when (and drag.plane-mode (not (= drag.plane-mode desired-mode)))
+          (local current-hit (ray-plane-intersection ray drag.plane))
+          (local anchor (or current-hit drag.entry.target.position drag.hit-point))
+          (when anchor
+            (set drag.plane (make-plane anchor desired-mode))
+            (set drag.offset (safe-offset drag.entry.target.position anchor))
+            (set drag.plane-mode desired-mode)))
+        (local hit (ray-plane-intersection ray drag.plane))
+        (when hit
+          (local new-position (+ hit drag.offset))
+          (assert-finite-vec3 new-position "drag position")
+          (drag.entry.target:set-position new-position)))))
 
   (fn on-mouse-button-down [self payload]
     (when (and payload (= payload.button SDL_BUTTON_LEFT))
@@ -233,8 +255,7 @@
 
   (fn on-mouse-motion [self payload]
     (when self.drag
-      (local pointer (self.intersector:pointer payload))
-      (ensure-drag-started self pointer)
+      (ensure-drag-started self payload)
       (when (and self.drag self.drag.started?)
         (update-drag self payload))))
 
