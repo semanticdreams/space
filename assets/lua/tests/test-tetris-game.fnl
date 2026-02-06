@@ -41,10 +41,32 @@
   (game:start)
   (assert game.game-over? "Spawn collision should set game-over"))
 
+(fn count-stamped-cells [grid]
+  (var cells 0)
+  (each [_y row (ipairs (or grid []))]
+    (each [_x value (ipairs (or row []))]
+      (when value
+        (set cells (+ cells 1)))))
+  cells)
+
+(fn tetris-game-update-uses-ms-delta []
+  (local game (TetrisGame {:width 10 :height 20 :sequence [:I]}))
+  (game:start)
+
+  (local before (count-stamped-cells game.grid))
+  (assert (= before 0) "New game should start with empty grid")
+
+  (game:update 16)
+
+  (local after (count-stamped-cells game.grid))
+  (assert (= after 0)
+          "A single ~16ms update should not hard-drop/lock pieces into the grid"))
+
 (table.insert tests {:name "Tetris spawns from sequence" :fn tetris-spawns-sequence-piece})
 (table.insert tests {:name "Tetris respects wall collisions" :fn tetris-respects-wall-collisions})
 (table.insert tests {:name "Tetris clears full lines" :fn tetris-clears-lines})
 (table.insert tests {:name "Tetris detects game over" :fn tetris-detects-game-over})
+(table.insert tests {:name "Tetris game uses ms delta" :fn tetris-game-update-uses-ms-delta})
 
 (local main
   (fn []

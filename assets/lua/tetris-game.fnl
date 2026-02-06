@@ -44,7 +44,8 @@
 
 (fn copy-sequence [sequence]
   (if sequence
-      (let [entries []]
+      (do
+        (local entries [])
         (each [_ entry (ipairs sequence)]
           (table.insert entries entry))
         entries)
@@ -150,7 +151,8 @@
   (local options (or opts {}))
   (local width (or options.width 10))
   (local height (or options.height 20))
-  (local drop-interval (or options.drop-interval 0.6))
+  ; Engine frame delta is in milliseconds (see Timer::computeDeltaTime).
+  (local drop-interval (or options.drop-interval 600))
   (local sequence (copy-sequence options.sequence))
 
   (fn next-piece [self]
@@ -232,9 +234,10 @@
     (local active self.active)
     (if (not active)
         false
-        (let [piece (piece-by-id active.id)
-              next-x (+ active.x (or dx 0))
-              next-y (+ active.y (or dy 0))]
+        (do
+          (local piece (piece-by-id active.id))
+          (local next-x (+ active.x (or dx 0)))
+          (local next-y (+ active.y (or dy 0)))
           (if (cells-fit? self.grid self.width self.height piece active.rotation next-x next-y)
               (do
                 (set active.x next-x)
@@ -246,9 +249,10 @@
     (local active self.active)
     (if (not active)
         false
-        (let [piece (piece-by-id active.id)
-              next-rotation (+ (or active.rotation 1) 1)
-              rotation (if (> next-rotation 4) 1 next-rotation)]
+        (do
+          (local piece (piece-by-id active.id))
+          (local next-rotation (+ (or active.rotation 1) 1))
+          (local rotation (if (> next-rotation 4) 1 next-rotation))
           (if (cells-fit? self.grid self.width self.height piece rotation active.x active.y)
               (do
                 (set active.rotation rotation)
@@ -270,11 +274,16 @@
     moved)
 
   (fn update-game [self delta]
-    (when (and self.running? (not self.paused?) (not self.game-over?))
-      (set self.drop-timer (+ (or self.drop-timer 0) (or delta 0)))
-      (while (>= self.drop-timer self.drop-interval)
-        (set self.drop-timer (- self.drop-timer self.drop-interval))
-        (soft-drop self))))
+    (if (and self.running? (not self.paused?) (not self.game-over?))
+        (do
+          (set self.drop-timer (+ (or self.drop-timer 0) (or delta 0)))
+          (var changed? false)
+          (while (>= self.drop-timer self.drop-interval)
+            (set self.drop-timer (- self.drop-timer self.drop-interval))
+            (soft-drop self)
+            (set changed? true))
+          changed?)
+        false))
 
   {:width width
    :height height
