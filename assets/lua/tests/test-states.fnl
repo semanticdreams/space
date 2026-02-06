@@ -28,6 +28,7 @@
 (local KEY_L (string.byte "l"))
 (local KEY_F4 1073741885)
 (local KEY_Q (string.byte "q"))
+(local KEY_P (string.byte "p"))
 (local KEY_LEFT 1073741904)
 (local KEY_RIGHT 1073741903)
 (local KEY_DOWN 1073741905)
@@ -337,6 +338,32 @@
       (state.on-key-down {:key KEY_C})
       (assert (= (# transitions) 1) "C should move to camera state")
       (assert (= (. transitions 1) :camera)))))
+
+(fn leader-state-p-opens-launcher []
+  (local original-hud app.hud)
+  (local original-engine app.engine)
+  (local original-states app.states)
+  (local transitions [])
+  (var panel-added? false)
+  (set app.hud {:add-panel-child (fn [_self _opts]
+                                  (set panel-added? true)
+                                  {:set-items (fn [_view _items] nil)
+                                   :set-query (fn [_view _query] nil)})
+                :remove-panel-child (fn [_self _element] true)})
+  (set app.states {:set-state (fn [name]
+                                (table.insert transitions name))
+                   :active-name (fn [] :leader)})
+  (set app.engine {:get-asset-path (fn [path]
+                                    (if (= path "lua/launchables")
+                                        (.. (or (os.getenv "SPACE_ASSETS_PATH") ".") "/lua/launchables")
+                                        path))})
+  (local state (LeaderState))
+  (state.on-key-down {:key KEY_P})
+  (assert (= (# transitions) 0) "Leader-P should not force a state transition")
+  (assert panel-added? "Leader-P should open launcher")
+  (set app.hud original-hud)
+  (set app.engine original-engine)
+  (set app.states original-states))
 
 (fn camera-state-f-enters-fpc-state []
   (with-state-recorder
@@ -717,6 +744,7 @@
 
 (table.insert tests {:name "Normal state leader key enters leader state" :fn normal-state-leader-enters-leader-state})
 (table.insert tests {:name "Leader state C enters camera state" :fn leader-state-c-enters-camera-state})
+(table.insert tests {:name "Leader state P opens launcher" :fn leader-state-p-opens-launcher})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})

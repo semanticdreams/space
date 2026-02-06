@@ -25,6 +25,7 @@
     :tests.test-theme-switch
     :tests.test-text
     :tests.test-dialog
+    :tests.test-hud-control-panel
     :tests.test-deep-dialog
     :tests.test-tetris-game
     :tests.test-tetris-state
@@ -51,6 +52,7 @@
     :tests.test-scene-drag
     :tests.test-list-view
     :tests.test-search-view
+    :tests.test-launchables
     :tests.test-fs
     :tests.test-random
     :tests.test-fs-view
