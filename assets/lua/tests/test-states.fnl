@@ -1,4 +1,5 @@
 (local _ (require :main))
+(local glm (require :glm))
 (local States (require :states))
 (local NormalState (require :normal-state))
 (local LeaderState (require :leader-state))
@@ -6,6 +7,7 @@
 (local TextState (require :text-state))
 (local InsertState (require :insert-state))
 (local CameraState (require :camera-state))
+(local Camera (require :camera))
 (local FpcState (require :fpc-state))
 (local InputState (require :input-state-router))
 (local StateBase (require :state-base))
@@ -352,6 +354,26 @@
       (assert (= (# transitions) 1) "Escape should move to normal state")
       (assert (= (. transitions 1) :normal)))))
 
+(fn camera-state-zero-resets-camera []
+  (with-state-recorder
+    (fn [transitions]
+      (local original-camera app.camera)
+      (local camera (Camera {:position (glm.vec3 1 2 3)
+                             :rotation (glm.quat 0 1 0 0)}))
+      (set app.camera camera)
+      (local state (CameraState))
+      (state.on-key-down {:key (string.byte "0")})
+      (assert (= (# transitions) 0))
+      (assert (= camera.position.x 0))
+      (assert (= camera.position.y 0))
+      (assert (= camera.position.z 0))
+      (assert (= camera.rotation.w 1))
+      (assert (= camera.rotation.x 0))
+      (assert (= camera.rotation.y 0))
+      (assert (= camera.rotation.z 0))
+      (camera:drop)
+      (set app.camera original-camera))))
+
 (fn fpc-state-escape-exits-to-normal []
   (with-state-recorder
     (fn [transitions]
@@ -697,6 +719,7 @@
 (table.insert tests {:name "Leader state C enters camera state" :fn leader-state-c-enters-camera-state})
 (table.insert tests {:name "Camera state F enters fpc state" :fn camera-state-f-enters-fpc-state})
 (table.insert tests {:name "Camera state escape exits to normal" :fn camera-state-escape-exits-to-normal})
+(table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})
 (table.insert tests {:name "Fpc state escape exits to normal" :fn fpc-state-escape-exits-to-normal})
 (table.insert tests {:name "Fpc state routes input only to controls" :fn fpc-state-routes-input-only-to-controls})
 (table.insert tests {:name "Leader state routes to quit or normal" :fn leader-state-q-and-escape-transitions})
