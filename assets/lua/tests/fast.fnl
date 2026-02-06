@@ -25,8 +25,10 @@
     :tests.test-theme-switch
     :tests.test-text
     :tests.test-dialog
+    :tests.test-deep-dialog
     :tests.test-tetris-game
     :tests.test-tetris-state
+    :tests.test-tetris-view
     :tests.test-menu
     :tests.test-sized
     :tests.test-container

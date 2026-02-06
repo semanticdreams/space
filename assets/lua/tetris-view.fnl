@@ -10,6 +10,7 @@
 (local WidgetCuboid (require :widget-cuboid))
 (local TetrisGame (require :tetris-game))
 (local TetrisStateRouter (require :tetris-state-router))
+(local DeepDialog (require :deep-dialog))
 
 (local SDLK_LEFT 1073741904)
 (local SDLK_RIGHT 1073741903)
@@ -20,7 +21,6 @@
 (local default-cell-size 1.0)
 (local board-background (glm.vec4 0.08 0.08 0.1 1))
 (local panel-background (glm.vec4 0.12 0.12 0.16 1))
-(local titlebar-background (glm.vec4 0.18 0.18 0.2 1))
 
 (local block-colors
   {:I (glm.vec4 0.2 0.8 0.9 1)
@@ -41,20 +41,30 @@
 (fn make-block [opts]
   (local options (or opts {}))
   (local base-color (resolve-block-color options.id))
-  (local front (Rectangle {:color base-color}))
+  (local front-builder (Rectangle {:color base-color}))
   (local cube-builder
-    (WidgetCuboid {:child front
+    (WidgetCuboid {:child front-builder
                    :side-color (darken base-color)
                    :depth-scale 1.0
                    :min-depth 0}))
-  (fn build [ctx]
-    (local cube (cube-builder ctx))
-    (local faces (and cube.cuboid cube.cuboid.faces))
-    (local side-faces [])
+  (fn resolve-side-face [face]
+    (if (and face face.set-visible)
+        face
+        (and face face.child face.child.set-visible face.child)))
+  (fn collect-side-faces [faces]
+    (local out [])
     (when faces
       (each [i face (ipairs faces)]
         (when (> i 1)
-          (table.insert side-faces face))))
+          (local target (resolve-side-face face))
+          (when target
+            (table.insert out target)))))
+    out)
+  (fn build [ctx]
+    (local cube (cube-builder ctx))
+    (local front (or cube.front (and cube.cuboid cube.cuboid.__front_widget)))
+    (local faces (and cube.cuboid cube.cuboid.faces))
+    (local side-faces (collect-side-faces faces))
 
     (fn apply-visible [visible?]
       (when front
@@ -116,11 +126,13 @@
     (local key (and payload payload.key))
     (if (not key)
         false
-        (let [recognized? (or (= key SDLK_LEFT)
-                              (= key SDLK_RIGHT)
-                              (= key SDLK_DOWN)
-                              (= key SDLK_UP)
-                              (= key SDLK_SPACE))]
+        (do
+          (local recognized?
+            (or (= key SDLK_LEFT)
+                (= key SDLK_RIGHT)
+                (= key SDLK_DOWN)
+                (= key SDLK_UP)
+                (= key SDLK_SPACE)))
           (when (= key SDLK_LEFT)
             (game:move -1 0))
           (when (= key SDLK_RIGHT)
@@ -160,7 +172,8 @@
   (local layout
     (Layout {:name (or options.name "tetris-board")
              :children
-             (let [children [background.layout]]
+             (do
+               (local children [background.layout])
                (each [_ row (ipairs blocks)]
                  (each [_ block (ipairs row)]
                    (table.insert children block.layout)))
@@ -270,30 +283,16 @@
   build)
 
 (fn status-text [game]
-  (if game.game-over?
-      (string.format "Status: Game Over | Lines: %d | Score: %d" game.lines-cleared game.score)
-      (if game.running?
-          (string.format "Status: Running | Lines: %d | Score: %d" game.lines-cleared game.score)
-          (string.format "Status: Paused | Lines: %d | Score: %d" game.lines-cleared game.score))))
-
-(fn make-titlebar [opts]
-  (local title (or opts.title "Tetris"))
-  (local on-close opts.on-close)
-  (local title-row
-    (Flex {:axis 1
-           :xspacing 0.4
-           :yalign :center
-           :children
-           [(FlexChild (Text {:text title}) 1)
-            (FlexChild (Button {:icon "close"
-                                :variant :tertiary
-                                :padding [0.3 0.3]
-                                :on-click (fn [_button _event]
-                                            (when on-close
-                                              (on-close)))}))]}))
-  (DepthCuboid {:child (Card {:color titlebar-background
-                              :child (Padding {:edge-insets [0.4 0.35]
-                                               :child title-row})})}))
+  (local status-label
+    (if game.game-over?
+        "Game Over"
+        (if game.running?
+            "Running"
+            "Paused")))
+  (string.format "Status: %s\nLines: %d\nScore: %d"
+                 status-label
+                 game.lines-cleared
+                 game.score))
 
 (fn build-tetris-dialog [ctx options]
   (local game (TetrisGame (or options.game {})))
@@ -308,7 +307,41 @@
                   :cell-size (or options.cell-size default-cell-size)
                   :name "tetris-board"
                   :on-status update-status}))
-  (local board (board-builder ctx))
+  (var board nil)
+  (local board-capture-builder
+    (fn [child-ctx]
+      (set board (board-builder child-ctx))
+      board))
+
+  (var update-handler nil)
+
+  (fn disconnect-updates []
+    (when (and update-handler app.engine app.engine.events app.engine.events.updated)
+      (app.engine.events.updated:disconnect update-handler true)
+      (set update-handler nil)))
+
+  (fn on-update [delta]
+    (when (game:update delta)
+      (board:sync)
+      (update-status)
+      (when (or game.game-over? (not game.running?))
+        (disconnect-updates))))
+
+  (fn connect-updates []
+    (when (and (not update-handler) app.engine app.engine.events app.engine.events.updated)
+      (set update-handler (app.engine.events.updated:connect on-update))))
+
+  ;; Tetris dialog owns the update loop subscription: connect only while running.
+  (local base-start game.start)
+  (set game.start
+       (fn [self]
+         (base-start self)
+         (connect-updates)))
+  (local base-pause game.pause)
+  (set game.pause
+       (fn [self]
+         (base-pause self)
+         (disconnect-updates)))
 
   (local start-button
     (Button {:text "Start"
@@ -316,6 +349,7 @@
              :padding [0.4 0.35]
              :on-click (fn [_button _event]
                          (game:start)
+                         (assert board "tetris start requires board")
                          (board:request-focus)
                          (board:sync)
                          (update-status))}))
@@ -330,49 +364,51 @@
     (fn [child-ctx]
       (set status-text-entity ((Text {:text (status-text game)}) child-ctx))
       status-text-entity))
-  (local control-row
+  (local button-row
     (Flex {:axis 1
            :xspacing 0.5
            :yalign :center
-           :children
-           [(FlexChild start-button 0)
-            (FlexChild stop-button 0)
-            (FlexChild status-builder 1)]}))
-  (local control-panel
+           :children [(FlexChild start-button 0)
+                      (FlexChild stop-button 0)]}))
+  (local side-panel-content
+    (Flex {:axis 2
+           :xalign :stretch
+           :yspacing 0.4
+           :children [(FlexChild button-row 0)
+                      (FlexChild status-builder 0)]}))
+  (local side-panel
     (DepthCuboid
       {:child
        (Card {:color panel-background
               :child (Padding {:edge-insets [0.5 0.35]
-                               :child control-row})})}))
+                               :child side-panel-content})})}))
 
-  (local titlebar (make-titlebar {:title (or options.title "Tetris")
-                                  :on-close options.on-close}))
-  (local content
-    (Flex {:axis 2
+  (local body-builder
+    (Flex {:axis 1
+           :xspacing 0
            :xalign :stretch
+           :yalign :stretch
            :zalign :stretch
-           :yspacing 0.4
            :children
-           [(FlexChild titlebar 0)
-            (FlexChild control-panel 0)
-            (FlexChild board 0)]}))
+           [(FlexChild board-capture-builder 0)
+            (FlexChild side-panel 0)]}))
 
-  (var update-handler nil)
-  (when (and app.engine app.engine.events app.engine.events.updated)
-    (set update-handler
-         (app.engine.events.updated:connect
-           (fn [delta]
-             (game:update delta)
-             (board:sync)
-             (update-status)))))
+  (local dialog-builder
+    (DeepDialog {:title (or options.title "Tetris")
+                 :body-padding [0 0]
+                 :child body-builder
+                 :on-close options.on-close}))
+  (local content (dialog-builder ctx))
+  (assert board "TetrisDialog build requires board entity")
 
   (set content.game game)
   (set content.board board)
+  (set content.status_text status-text-entity)
+  (set content.update_status update-status)
   (local base-drop content.drop)
   (set content.drop
        (fn [self]
-         (when (and update-handler app.engine app.engine.events app.engine.events.updated)
-           (app.engine.events.updated:disconnect update-handler true))
+         (disconnect-updates)
          (base-drop self)))
   content)
 

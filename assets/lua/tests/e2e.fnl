@@ -24,6 +24,7 @@
 (local ListEntityViewTest (require :tests.e2e.test-list-entity-view))
 (local TabViewTest (require :tests.e2e.test-tab-view))
 (local SubAppTest (require :tests.e2e.test-sub-app))
+(local TetrisDeepDialogTest (require :tests.e2e.test-tetris-deep-dialog))
 
 (fn run-all []
   (ButtonTest.main)
@@ -50,6 +51,7 @@
   (ListEntityViewTest.main)
   (TabViewTest.main)
   (SubAppTest.main)
+  (TetrisDeepDialogTest.main)
   (RenderCaptureTest.main))
 
 (fn main []
