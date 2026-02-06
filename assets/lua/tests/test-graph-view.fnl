@@ -48,6 +48,7 @@
                               :terminal 4242
                               :settings 4242
                               :contrast 4242
+                              :apps 4242
                               :wallet 4242
                               :volume_mute 4242
                               :volume_down 4242
