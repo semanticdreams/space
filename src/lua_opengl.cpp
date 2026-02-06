@@ -1,6 +1,6 @@
 #include <sol/sol.hpp>
 #include <glm/glm.hpp>
-#include <GL/glew.h>
+#include <epoxy/gl.h>
 
 #ifdef __linux__
 #include <SDL2/SDL.h>

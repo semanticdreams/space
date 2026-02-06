@@ -12,7 +12,7 @@
 #include <memory>
 #include <string>
 
-#include <GL/glew.h>
+#include <epoxy/gl.h>
 
 #include "log.h"
 

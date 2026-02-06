@@ -79,6 +79,7 @@ endif()
 pkg_check_modules(ZMQ REQUIRED IMPORTED_TARGET libzmq)
 pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
 pkg_check_modules(AUBIO REQUIRED IMPORTED_TARGET aubio)
+pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
 if(UNIX AND NOT APPLE)
     pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
 endif()
@@ -89,9 +90,6 @@ find_package(OpenGL REQUIRED COMPONENTS OpenGL)
 
 find_package(SDL2 REQUIRED)
 include_directories(${SDL2_INCLUDE_DIRS})
-
-find_package(GLEW REQUIRED)
-include_directories(${GLEW_INCLUDE_DIRS})
 
 find_package(OpenGL)
 
@@ -179,7 +177,6 @@ target_include_directories(${PROJECT_NAME}_lib
 )
 target_link_libraries(${PROJECT_NAME}_lib
     ${SDL2_LIBRARIES}
-    ${GLEW_LIBRARIES}
     ${BULLET_LIBRARIES}
     ${OPENAL_LIBRARY}
     PNG::PNG
@@ -208,6 +205,7 @@ target_link_libraries(${PROJECT_NAME}_lib
 if(SPACE_HAS_VTERM)
     target_link_libraries(${PROJECT_NAME}_lib PkgConfig::VTERM)
 endif()
+target_link_libraries(${PROJECT_NAME}_lib PkgConfig::EPOXY)
 if(SPACE_ENABLE_WALLET_CORE)
     target_link_libraries(${PROJECT_NAME}_lib TrustWalletCore)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_ENABLE_WALLET_CORE=1)

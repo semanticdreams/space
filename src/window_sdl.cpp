@@ -83,13 +83,8 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) 
         } else
             return false;
 
-        // OpenGL setup
-        glewExperimental = GL_TRUE;
-        GLenum initGLEW(glewInit());
-        if (initGLEW == GLEW_OK) {
-            LOG(Info) << "GLEW initialised";
-        } else
-            return false;
+        // OpenGL loader (epoxy)
+        LOG(Info) << "Epoxy OpenGL loader active";
 
 
         // Get graphics info

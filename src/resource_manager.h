@@ -7,7 +7,7 @@
 #include <vector>
 #include <functional>
 
-#include <GL/glew.h>
+#include <epoxy/gl.h>
 
 #include "job_system.h"
 #include "audio.h"

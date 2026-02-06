@@ -9,7 +9,7 @@
 
 #endif
 
-#include <GL/glew.h>
+#include <epoxy/gl.h>
 #include <GL/gl.h>
 
 #include <memory>
