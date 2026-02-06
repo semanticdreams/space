@@ -396,7 +396,7 @@ set(CPACK_GENERATOR "DEB")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "space")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 #set(CPACK_DEBIAN_PACKAGE_DEPENDS
-#"libsdl2-2.0-0, libglew2.2, libbullet-dev, libopenal1"
+#"libsdl2-2.0-0, libepoxy0, libbullet-dev, libopenal1"
 #)
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "space")
 set(CPACK_DEBIAN_PACKAGE_SECTION "games")
