@@ -1,10 +1,7 @@
 (local gl (require :gl))
 (local glm (require :glm))
 (local shaders (require :shaders))
-
-(local terrain-center (glm.vec3 0 -100 0))
-(local light-position (glm.vec3 200 200 200))
-(local light-direction (glm.normalize (- light-position terrain-center)))
+(local LightUtils (require :light-utils))
 
 (fn MeshRenderer []
   (local shader
@@ -19,10 +16,6 @@
   (gl.glBindVertexArray vao)
   (shader:use)
   (shader:setInteger "myTexture" 0)
-  (shader:setVector3f "dirLight.direction" light-direction)
-  (shader:setVector3f "dirLight.ambient" 0.4 0.4 0.4)
-  (shader:setVector3f "dirLight.diffuse" 0.6 0.6 0.6)
-  (shader:setVector3f "dirLight.specular" 1.0 1.0 1.0)
   (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
   (gl.glEnableVertexAttribArray 0)
   (gl.glEnableVertexAttribArray 1)
@@ -37,6 +30,9 @@
       (gl.glBindVertexArray vao)
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
       (shader:use)
+      (local lights (assert (and app app.lights)
+                            "MeshRenderer requires app.lights; call AppBootstrap.init-lights"))
+      (LightUtils.apply-lights shader lights)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
       (shader:setVector3f "viewPos" (glm.vec3 0.0))

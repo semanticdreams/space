@@ -124,6 +124,15 @@
     (app.themes.add-theme :dark (require :dark-theme))
     (app.themes.add-theme :light (require :light-theme))
     (app.themes.set-theme :dark)))
+  (when (not app.lights)
+    (local LightSystem (require :light-system))
+    (local theme (and app.themes app.themes.get-active-theme
+                      (app.themes.get-active-theme)))
+    (local defaults (and theme theme.lights))
+    (local active (and defaults {:ambient defaults.ambient
+                                 :directional defaults.directional}))
+    (set app.lights (LightSystem {:defaults defaults
+                                  :active active}))))
 
 (fn execute-tests [suite test-verbose test-filter traceback]
   (local registered-tests [])

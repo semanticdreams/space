@@ -15,6 +15,17 @@
   (app.themes.set-theme (or resolved-theme :dark))
   app.themes)
 
+(fn init-lights []
+  (local LightSystem (require :light-system))
+  (local theme (and app.themes app.themes.get-active-theme
+                    (app.themes.get-active-theme)))
+  (local defaults (and theme theme.lights))
+  (local active (and defaults {:ambient defaults.ambient
+                               :directional defaults.directional}))
+  (set app.lights (LightSystem {:defaults defaults
+                                :active active}))
+  app.lights)
+
 (fn init-input-systems []
   (local Intersectables (require :intersectables))
   (local Clickables (require :clickables))
@@ -71,6 +82,7 @@
   app.states)
 
 {:init-themes init-themes
+ :init-lights init-lights
  :init-input-systems init-input-systems
  :init-renderers init-renderers
  :init-icons init-icons
