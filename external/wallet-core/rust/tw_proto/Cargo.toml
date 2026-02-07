@@ -1,0 +1,15 @@
+[package]
+name = "tw_proto"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+fuzz = ["arbitrary"]
+
+[dependencies]
+# Enable in fuzz tests only!
+arbitrary = { version = "1", features = ["derive"], optional = true }
+quick-protobuf = "0.8.1"
+
+[build-dependencies]
+pb-rs = "0.10.0"

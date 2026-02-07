@@ -1,0 +1,68 @@
+<%= render('kotlin/package.erb') %>
+
+<%  has_string = entity.cases.all? { |c| !c.string.nil? } -%>
+<%  if has_string -%>
+import com.trustwallet.core.<%= "TW#{entity.name}" %>.*
+
+<%  end -%>
+<%  type = ": TW#{entity.name}" -%>
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+actual enum class <%= entity.name %>(
+<%  if has_string -%>
+    val nativeValue<%= type %>,
+    actual val stringValue: String,
+<%  else -%>
+    val nativeValue<%= type %>,
+<%  end -%>
+) {
+<%# Cases -%>
+<%  entity.cases.each_with_index do |c, i| -%>
+<%  if has_string -%>
+    <%= c.name %>(TW<%= entity.name %><%= c.name %>, <%= c.string %>),
+<%  else -%>
+    <%= c.name %>(TW<%= entity.name %><%= c.name %>),
+<%  end -%>
+<%  end -%>
+    ;
+
+<%  if has_string -%>
+    actual val value: UInt
+        get() = nativeValue.value
+<%  else -%>
+    actual val value<%= type %>
+        get() = nativeValue
+<%  end -%>
+<%# Property declarations -%>
+<%- entity.properties.each do |property| -%>
+
+    actual val <%= KotlinHelper.format_name(property.name) %><%= KotlinHelper.return_type(property.return_type) %>
+        get() = <%= KotlinHelper.convert_calling_return_type_ios(property.return_type, "TW#{entity.name}#{property.name}(value)") %>
+<%- end -%>
+<%# Method declarations -%>
+<%- entity.methods.each do |method| -%>
+<%-   next if method.name.start_with?('Delete') -%>
+
+    actual fun <%= KotlinHelper.format_name(method.name) %>(<%= KotlinHelper.parameters(method.parameters.drop(1)) %>)<%= KotlinHelper.return_type(method.return_type) %> {
+<%=   render('kotlin/ios_parameter_access.erb', { method: method }) -%>
+            val result = TW<%= entity.name %><%= method.name %>(value<%= ', ' if not method.parameters.one? %><%= KotlinHelper.calling_parameters_ios(method.parameters.drop(1)) %>)<%= KotlinHelper.convert_calling_return_type_ios(method.return_type) %>
+<%=   render('kotlin/ios_parameter_release.erb', { method: method }) -%>
+            return result
+    }
+<%- end -%>
+<%# Value -%>
+<%  if entity.cases.any? { |e| !e.value.nil? } -%>
+
+    actual companion object {
+<%  if has_string -%>
+        actual fun fromValue(value: UInt): <%= entity.name %>? =
+            values().firstOrNull { it.value == value }
+
+        fun fromValue(value<%= type %>): <%= entity.name %> =
+            fromValue(value.value)!!
+<%  else -%>
+        actual fun fromValue(value<%= type %>): <%= entity.name %>? =
+            values().firstOrNull { it.value == value }
+<%  end -%>
+    }
+<%  end -%>
+}

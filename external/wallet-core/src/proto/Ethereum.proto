@@ -1,0 +1,362 @@
+syntax = "proto3";
+
+package TW.Ethereum.Proto;
+option java_package = "wallet.core.jni.proto";
+
+import "Common.proto";
+
+// Transaction (transfer, smart contract call, ...)
+message Transaction {
+    // Native coin transfer transaction
+    message Transfer {
+        // Amount to send in wei (uint256, serialized big endian)
+        bytes amount = 1;
+
+        // Optional payload data
+        bytes data = 2;
+    }
+
+    // ERC20 token transfer transaction
+    message ERC20Transfer {
+        // destination address (string)
+        string to = 1;
+
+        // Amount to send (uint256, serialized big endian)
+        bytes amount = 2;
+    }
+
+    // ERC20 approve transaction
+    message ERC20Approve {
+        // Target of the approval
+        string spender = 1;
+
+        // Amount to send (uint256, serialized big endian)
+        bytes amount = 2;
+    }
+
+    // ERC721 NFT transfer transaction
+    message ERC721Transfer {
+        // Source address
+        string from = 1;
+
+        // Destination address
+        string to = 2;
+
+        // ID of the token (uint256, serialized big endian)
+        bytes token_id = 3;
+    }
+
+    // ERC1155 NFT transfer transaction
+    message ERC1155Transfer {
+        // Source address
+        string from = 1;
+
+        // Destination address
+        string to = 2;
+
+        // ID of the token (uint256, serialized big endian)
+        bytes token_id = 3;
+
+        // The amount of tokens being transferred (uint256, serialized big endian)
+        bytes value = 4;
+
+        bytes data = 5;
+    }
+
+    // Generic smart contract transaction
+    message ContractGeneric {
+        // Amount to send in wei (uint256, serialized big endian)
+        bytes amount = 1;
+
+        // Contract call payload data
+        bytes data = 2;
+    }
+
+    // Batch transaction to a Smart Contract Wallet (ERC-4337 and ERC-7702).
+    message SCWalletBatch {
+        message BatchedCall {
+            // Recipient addresses.
+            string address = 1;
+
+            // Amounts to send in wei (uint256, serialized big endian)
+            bytes amount = 2;
+
+            // Contract call payloads data
+            bytes payload = 3;
+        }
+
+        // Batched calls to be executed on the smart contract wallet.
+        repeated BatchedCall calls = 1;
+        // Smart contract wallet type.
+        SCWalletType wallet_type = 2;
+    }
+
+    // Execute transaction to a Smart Contract Wallet (ERC-4337 and ERC-7702).
+    message SCWalletExecute {
+        // Transaction to be executed on the smart contract wallet.
+        // TODO currently, smart contract wallet address is specified in `SigningInput.toAddress`, but it will be refactored soon.
+        Transaction transaction = 1;
+        // Smart contract wallet type.
+        SCWalletType wallet_type = 2;
+    }
+
+    // Payload transfer
+    oneof transaction_oneof {
+        Transfer transfer = 1;
+        ERC20Transfer erc20_transfer = 2;
+        ERC20Approve erc20_approve = 3;
+        ERC721Transfer erc721_transfer = 4;
+        ERC1155Transfer erc1155_transfer = 5;
+        ContractGeneric contract_generic = 6;
+        // Batch transaction to a Smart Contract Wallet (ERC-4337 and ERC-7702).
+        SCWalletBatch scw_batch = 7;
+        // Execute transaction to a Smart Contract Wallet (ERC-4337 and ERC-7702).
+        SCWalletExecute scw_execute = 8;
+    }
+}
+
+// Transaction type
+enum TransactionMode {
+    // Legacy transaction, pre-EIP2718/EIP1559; for fee gasPrice/gasLimit is used
+    Legacy = 0;
+
+    // Enveloped transaction EIP2718 (with type 0x2), fee is according to EIP1559 (base fee, inclusion fee, ...) 
+    Enveloped = 1;
+
+    // EIP4337-compatible UserOperation
+    UserOp = 2;
+
+    // EIP-7702 transaction (with type 0x4); allows to set the code of a contract for an EOA.
+    // Note that `SetCode` transaction extends `Enveloped` transaction.
+    // https://eips.ethereum.org/EIPS/eip-7702
+    SetCode = 4;
+}
+
+// ERC-4337 structure that describes a transaction to be sent on behalf of a user
+message UserOperation {
+    // Entry point contract address
+    string entry_point = 1;
+
+    // Account factory contract address
+    bytes init_code = 2;
+
+    // Account logic contract address
+    string sender = 3;
+
+    // The amount of gas to pay for to compensate the bundler for pre-verification execution and calldata
+    bytes pre_verification_gas = 4;
+
+    // The amount of gas to allocate for the verification step
+    bytes verification_gas_limit = 5;
+
+    // Address of paymaster sponsoring the transaction, followed by extra data to send to the paymaster (empty for self-sponsored transaction)
+    bytes paymaster_and_data = 6;
+}
+
+// EIP-7702 compatible ERC-4337 structure that describes a transaction to be sent on behalf of a user
+message UserOperationV0_7 {
+    // Entry point contract address
+    string entry_point = 1;
+
+    // Account factory contract address
+    string factory = 2;
+
+    // Account factory data
+    bytes factory_data = 3;
+
+    // Account logic contract address
+    string sender = 4;
+
+    // The amount of gas to pay for to compensate the bundler for pre-verification execution and calldata
+    bytes pre_verification_gas = 5;
+
+    // The amount of gas to allocate for the verification step
+    bytes verification_gas_limit = 6;
+
+    // Address of paymaster
+    string paymaster = 7;
+
+    // The amount of gas to allocate for the paymaster verification step
+    bytes paymaster_verification_gas_limit = 8;
+
+    // The amount of gas to allocate for paymaster post ops
+    bytes paymaster_post_op_gas_limit = 9;
+
+    // Paymaster data
+    bytes paymaster_data = 10;
+}
+
+// An item of the [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930) access list.
+message Access {
+    // Address to be accessed by the transaction.
+    string address = 1;
+    // Storage keys to be accessed by the transaction.
+    repeated bytes stored_keys = 2;
+}
+
+// [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702) authorization.
+message Authorization {
+    // Address to be authorized, a smart contract address.
+    string address = 2;
+    // If custom_signature isn't provided, the authorization will be signed with the provided private key, nonce and chainId
+    AuthorizationCustomSignature custom_signature = 3;
+}
+
+// [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702) authorization.
+message AuthorizationCustomSignature {
+    // Chain id (uint256, serialized big endian).
+    bytes chain_id = 1;
+    // Nonce, the nonce of authority.
+    bytes nonce = 2;
+    // The signature, Hex-encoded.
+    string signature = 3;
+}
+
+// Smart Contract Wallet type.
+enum SCWalletType {
+    // ERC-4337 compatible smart contract wallet.
+    // https://github.com/eth-infinitism/account-abstraction/blob/develop/contracts/accounts/SimpleAccount.sol
+    SimpleAccount = 0;
+    // Biz smart contract (Trust Wallet specific) through ERC-4337 EntryPoint.
+    Biz4337 = 1;
+    // Biz smart contract (Trust Wallet specific) directly through ERC-7702.
+    Biz = 2;
+}
+
+// Input data necessary to create a signed transaction.
+// Legacy and EIP2718/EIP1559 transactions supported, see TransactionMode.
+message SigningInput {
+    // Chain identifier (uint256, serialized big endian)
+    bytes chain_id = 1;
+
+    // Nonce (uint256, serialized big endian)
+    bytes nonce = 2;
+
+    // Transaction version selector: Legacy or enveloped, has impact on fee structure.
+    // Default is Legacy (value 0)
+    TransactionMode tx_mode = 3;
+
+    // Gas price (uint256, serialized big endian)
+    // Relevant for legacy transactions only (disregarded for enveloped/EIP1559)
+    bytes gas_price = 4;
+
+    // Gas limit (uint256, serialized big endian)
+    bytes gas_limit = 5;
+
+    // Maximum optional inclusion fee (aka tip) (uint256, serialized big endian)
+    // Relevant for enveloped/EIP1559 transactions only, tx_mode=Enveloped, (disregarded for legacy)
+    bytes max_inclusion_fee_per_gas = 6;
+
+    // Maximum fee (uint256, serialized big endian)
+    // Relevant for enveloped/EIP1559 transactions only, tx_mode=Enveloped, (disregarded for legacy)
+    bytes max_fee_per_gas = 7;
+
+    // Recipient's address.
+    // TODO currently, will be moved to each `Transaction` oneof soon.
+    string to_address = 8;
+
+    // The secret private key used for signing (32 bytes).
+    bytes private_key = 9;
+
+    // The payload transaction
+    Transaction transaction = 10;
+
+    // UserOperation for ERC-4337 wallets
+    oneof user_operation_oneof {
+        UserOperation user_operation = 11;
+
+        // EIP-7702 compatible
+        UserOperationV0_7 user_operation_v0_7 = 13;
+    }
+
+    // Optional list of addresses and storage keys that the transaction plans to access.
+    // Used in `TransactionMode::Enveloped` only.
+    repeated Access access_list = 12;
+
+    // EIP7702 authorization.
+    // Used in `TransactionMode::SetOp` or `TransactionMode::UserOp`.
+    // Currently, we support delegation to only one authority at a time.
+    Authorization eip7702_authorization = 15;
+}
+
+// Result containing the signed and encoded transaction.
+message SigningOutput {
+
+    // Signed and encoded transaction bytes.
+    bytes encoded = 1;
+
+    // The V, R, S components of the resulting signature, (each uint256, serialized big endian)
+    bytes v = 2;
+    bytes r = 3;
+    bytes s = 4;
+
+    // The payload part, supplied in the input or assembled from input parameters
+    bytes data = 5;
+
+    // error code, 0 is ok, other codes will be treated as errors
+    Common.Proto.SigningError error = 6;
+
+    // error code description
+    string error_message = 7;
+
+    // Encoded transaction bytes.
+    bytes pre_hash = 8;
+}
+
+enum MessageType {
+    // Sign a message following EIP-191.
+    MessageType_legacy = 0;
+    // Sign a message following EIP-191 with EIP-155 replay attack protection.
+    MessageType_eip155 = 1;
+    // Sign a typed message EIP-712 V4.
+    MessageType_typed = 2;
+    // Sign a typed message EIP-712 V4 with EIP-155 replay attack protection.
+    MessageType_typed_eip155 = 3;
+    // Sign a message with Immutable X msg type.
+    MessageType_immutable_x = 4;
+    // Sign a EIP-7702 authorization tuple.
+    MessageType_eip7702_authorization = 5;
+}
+
+message MaybeChainId {
+    // Chain ID.
+    uint64 chain_id = 3;
+}
+
+message MessageSigningInput {
+    // The secret private key used for signing (32 bytes).
+    bytes private_key = 1;
+
+    // Message to sign. Either a regular message or a typed data structured message in JSON format.
+    // Message type should be declared at `message_type`.
+    string message = 2;
+
+    // Optional. Used in replay protection and to check Typed Structured Data input.
+    // Eg. should be set if `message_type` is `MessageType_eip155`, or MessageType_typed, or `MessageType_typed_eip155`.
+    MaybeChainId chain_id = 3;
+
+    // Message type.
+    MessageType message_type = 4;
+}
+
+message MessageSigningOutput {
+    // The signature, Hex-encoded.
+    string signature = 1;
+
+    // error code, 0 is ok, other codes will be treated as errors
+    Common.Proto.SigningError error = 2;
+
+    // error code description
+    string error_message = 3;
+}
+
+message MessageVerifyingInput {
+    // The message signed.
+    string message = 1;
+
+    // Public key that will verify and recover the message from the signature.
+    bytes public_key = 2;
+
+    // The signature, Hex-encoded.
+    string signature = 3;
+}

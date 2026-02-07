@@ -1,0 +1,25 @@
+#!/bin/bash
+
+set -e
+
+brew install boost ninja xcodegen xcbeautify
+
+if command -v cmake &> /dev/null
+then
+    echo "Skip installing CMake."
+else
+    brew install cmake
+fi
+
+if [[ "$BOOST_ROOT" == "" ]]; then
+    echo "export BOOST_ROOT=$(brew --prefix boost)" >>  ~/.zprofile
+fi
+
+if command -v rustup &> /dev/null
+then
+    echo "Rustup is already installed."
+else
+    echo "Rustup is not installed. Installing it now."
+    brew install rustup
+    rustup-init -y --default-toolchain none --no-update-default-toolchain
+fi
