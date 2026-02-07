@@ -113,17 +113,18 @@
 
 (fn make-default-builder []
   (local terrain (FlatTerrain {}))
-  (local container-children [])
   (local scene-children [])
-  (table.insert container-children
-                (fn [ctx]
-                  (local element (terrain ctx))
-                  {:element element
-                   :position (glm.vec3 -500 -100 -500)}))
-  (local builder
-    (Container {:children
-                container-children}))
+
   (fn build [ctx]
+    (local container-children [])
+    (table.insert container-children
+                  (fn [child-ctx]
+                    (local element (terrain child-ctx))
+                    {:element element
+                     :position (glm.vec3 -500 -100 -500)}))
+    (local builder
+      (Container {:children
+                  container-children}))
     (local entity (builder ctx))
     (set entity.scene-children scene-children)
     ;(local balls

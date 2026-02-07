@@ -11,9 +11,11 @@ void main()
 {    
     vec4 sampleColor = texture(skybox, TexCoords);
     float t = clamp(brightness, -1.0, 1.0);
+    vec3 base;
     if (t < 0.0) {
-        color = vec4(mix(sampleColor.rgb, vec3(0.0), -t), sampleColor.a);
+        base = mix(sampleColor.rgb, vec3(0.0), -t);
     } else {
-        color = vec4(mix(sampleColor.rgb, vec3(1.0), t), sampleColor.a);
+        base = mix(sampleColor.rgb, vec3(1.0), t);
     }
+    color = vec4(base, sampleColor.a);
 }
