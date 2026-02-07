@@ -205,10 +205,11 @@
                                        :rotation (glm.quat (math.rad 12) (glm.vec3 0 1 0))
                                        :position (glm.vec3 -2 4 -34)
                                        :size (glm.vec3 7 16 7)}))
+  (local children [floor.layout wall.layout ramp.layout
+                   cube-a.layout cube-b.layout cube-c.layout cube-d.layout])
   (local layout
     (Layout {:name "lighting-scene"
-             :children [floor.layout wall.layout ramp.layout
-                        cube-a.layout cube-b.layout cube-c.layout cube-d.layout]
+             :children children
              :measurer (fn [self]
                          (set self.measure (glm.vec3 1 1 1)))
              :layouter (fn [self]
@@ -227,6 +228,7 @@
                          (cube-c.layout:layouter)
                          (set cube-d.layout.depth-offset-index self.depth-offset-index)
                          (cube-d.layout:layouter))}))
+  (layout:set-position (or options.scene-offset (glm.vec3 0 0 0)))
   {:layout layout
    :drop (fn [_self]
            (when floor.drop (floor:drop))
@@ -241,10 +243,20 @@
   (local options (or opts {}))
   (set app.lights lights)
   (local camera (Camera {:position (glm.vec3 0 14 34)}))
-  (camera:look-at (glm.vec3 0 -6 -26))
+  (local base-center (glm.vec3 0 -6 -26))
+  (local center (+ base-center (or options.scene-offset (glm.vec3 0 0 0))))
+  (camera:look-at center)
+  (local dir-lights (lights:get-directional))
+  (when (> (length dir-lights) 0)
+    (local dir (glm.normalize (. (. dir-lights 1) :direction)))
+    (tset (. dir-lights 1) :direction dir))
   (local target
     (Harness.make-scene-target {:builder (fn [child-ctx]
-                                           (build-scene-element child-ctx options))
+                                           (build-scene-element
+                                             child-ctx
+                                             {:texture options.texture
+                                              :rotation options.rotation
+                                              :scene-offset options.scene-offset}))
                                 :view-matrix (camera:get-view-matrix)}))
   (Harness.draw-targets ctx.width ctx.height [{:target target}])
   (Harness.capture-snapshot {:name name
@@ -264,12 +276,12 @@
     (LightSystem {:active {:ambient (glm.vec3 0.03 0.03 0.03)
                            :directional [{:direction (glm.normalize (glm.vec3 0.5 1.0 0.2))
                                           :ambient (glm.vec3 0.02 0.02 0.02)
-                                          :diffuse (glm.vec3 1.7 1.5 1.3)
-                                          :specular (glm.vec3 1.6 1.6 1.8)}
+                                          :diffuse (glm.vec3 1.2 1.1 1.0)
+                                          :specular (glm.vec3 0.9 0.9 1.0)}
                                          {:direction (glm.normalize (glm.vec3 -0.7 0.6 -0.1))
                                           :ambient (glm.vec3 0.01 0.01 0.015)
-                                          :diffuse (glm.vec3 0.6 0.8 1.1)
-                                          :specular (glm.vec3 0.6 0.7 0.9)}]
+                                          :diffuse (glm.vec3 0.45 0.6 0.85)
+                                          :specular (glm.vec3 0.45 0.55 0.7)}]
                            :point []
                            :spot []}}))
   (local point-only
@@ -321,6 +333,7 @@
                        :rotation (glm.quat (math.rad -12) (glm.vec3 1 0 0))})
   (render-light-setup ctx "lighting-directional" directional-only
                       {:texture texture
+                       :scene-offset (glm.vec3 0 -10 -6)
                        :rotation (glm.quat (math.rad -18) (glm.vec3 1 0 0))})
   (render-light-setup ctx "lighting-point" point-only
                       {:texture texture
