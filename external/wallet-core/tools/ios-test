@@ -1,0 +1,18 @@
+#!/bin/bash
+#
+# This script runs the iOS tests.
+
+set -e
+set -o pipefail
+
+tools/xcodegen
+
+pushd swift
+
+xcodebuild -workspace TrustWalletCore.xcworkspace \
+	-scheme WalletCore \
+	-sdk iphonesimulator \
+	-destination "platform=iOS Simulator,name=iPhone 16,OS=18.5" \
+	test | xcbeautify
+
+popd

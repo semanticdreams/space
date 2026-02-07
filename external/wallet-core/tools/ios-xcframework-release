@@ -1,0 +1,92 @@
+#!/bin/bash
+
+set -o pipefail
+set -e
+
+# load release library code
+base_dir=$(dirname $0)
+source ${base_dir}/library
+
+# version to release
+version=$(wc_read_version $1)
+echo "release version ${version}"
+
+pushd ${base_dir}/../swift/build
+
+# archive xcframeworks
+core_zip_filename="WalletCore.xcframework.zip"
+core_dsyms_filename="WalletCore.xcframework.dSYM.zip"
+protobuf_zip_filename="WalletCoreSwiftProtobuf.xcframework.zip"
+protobuf_dsyms_filename="WalletCoreSwiftProtobuf.xcframework.dSYM.zip"
+
+rm -rf ${core_zip_filename} ${core_dsyms_filename} ${protobuf_zip_filename} ${protobuf_dsyms_filename}
+
+zip -r ${core_dsyms_filename} WalletCore.dSYMs
+
+zip -r ${core_zip_filename} WalletCore.xcframework
+core_hash=$(/usr/bin/shasum -a 256 ${core_zip_filename} | awk '{printf $1}')
+
+zip -r ${protobuf_dsyms_filename} WalletCoreSwiftProtobuf.dSYMs
+
+zip -r ${protobuf_zip_filename} WalletCoreSwiftProtobuf.xcframework
+protobuf_hash=$(/usr/bin/shasum -a 256 ${protobuf_zip_filename} | awk '{printf $1}')
+
+# upload to release
+echo "Upload asset $core_zip_filename"
+core_download_url=$(wc_upload_asset ${version} ${core_zip_filename})
+echo "wallet core url is: ${core_download_url}"
+
+echo "Upload asset $protobuf_zip_filename"
+protobuf_download_url=$(wc_upload_asset ${version} ${protobuf_zip_filename})
+echo "swift protobuf url is: ${protobuf_download_url}"
+
+# create Package.swift
+
+package_swift="Package.swift"
+cat > $package_swift <<EOF
+// swift-tools-version:5.3
+import PackageDescription
+
+let package = Package(
+    name: "WalletCore",
+    platforms: [.iOS(.v13)],
+    products: [
+        .library(name: "WalletCore", targets: ["WalletCore"]),
+        .library(name: "WalletCoreSwiftProtobuf", targets: ["WalletCoreSwiftProtobuf"])
+    ],
+    dependencies: [],
+    targets: [
+        .binaryTarget(
+            name: "WalletCore",
+            url: ${core_download_url},
+            checksum: "${core_hash}"
+        ),
+        .binaryTarget(
+            name: "WalletCoreSwiftProtobuf",
+            url: ${protobuf_download_url},
+            checksum: "${protobuf_hash}"
+        )
+    ]
+)
+EOF
+
+echo "${package_swift} generated."
+cat $package_swift
+
+echo "Upload asset $package_swift"
+package_swift_download_url=$(wc_upload_asset ${version} ${package_swift})
+echo "${package_swift} url is: ${package_swift_download_url}"
+
+echo "Upload asset $protobuf_dsyms_filename"
+protobuf_dsyms_url=$(wc_upload_asset ${version} ${protobuf_dsyms_filename})
+echo "protobuf dsyms url is: ${protobuf_dsyms_url}"
+
+echo "Upload asset $core_dsyms_filename"
+core_dsyms_url=$(wc_upload_asset ${version} ${core_dsyms_filename})
+echo "core dsyms url is: ${core_dsyms_url}"
+
+echo "Upload asset WalletCore.doccarchive.zip"
+docc_url=$(wc_upload_asset ${version} WalletCore.doccarchive.zip)
+echo "docc url is: ${docc_url}"
+
+popd

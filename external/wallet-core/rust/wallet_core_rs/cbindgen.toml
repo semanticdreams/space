@@ -1,0 +1,24 @@
+# Whether to add a `#pragma once` guard
+# default: doesn't emit a `#pragma once`
+pragma_once = true
+
+namespaces = ["TW", "Rust"]
+
+[parse]
+parse_deps = true
+extra_bindings = [
+    "tw_any_coin",
+    "tw_encoding",
+    "tw_hash",
+    "tw_keypair",
+    "tw_memory",
+    "tw_evm",
+]
+include = [
+    "tw_any_coin",
+    "tw_encoding",
+    "tw_hash",
+    "tw_keypair",
+    "tw_memory",
+    "tw_evm",
+]

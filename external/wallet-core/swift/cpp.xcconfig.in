@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+//
+// Copyright © 2017 Trust Wallet.
+
+HEADER_SEARCH_PATHS = $(SRCROOT)/../src @Boost_INCLUDE_DIRS@
+SYSTEM_HEADER_SEARCH_PATHS = $(SRCROOT)/../src/build/local/include $(SRCROOT)/../build/local/src/protobuf/protobuf-3.20.3/src

@@ -1,0 +1,263 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ dev, master ]
+  pull_request:
+    branches: [ dev, master ]
+
+env:
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Check formatting, clippy warnings, run tests and check code coverage.
+  rust-lints:
+    permissions:
+      contents: read
+      checks: write
+    runs-on: ubuntu-24.04
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install system dependencies
+        run: |
+          tools/install-sys-dependencies-linux
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+
+      - name: Install Rust dependencies
+        run: |
+          tools/install-rust-dependencies dev
+
+      - name: Check code formatting
+        run: |
+          cargo fmt --check
+        working-directory: rust
+
+      - name: Check Clippy warnings
+        run: |
+          cargo clippy -- -D warnings
+        working-directory: rust
+
+  # Run Rust tests in WASM.
+  test-wasm:
+    runs-on: ubuntu-24.04
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install system dependencies
+        run: |
+          tools/install-sys-dependencies-linux
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+
+      - name: Install Rust dependencies
+        run: |
+          tools/install-rust-dependencies
+
+      - name: Install emsdk
+        run: tools/install-wasm-dependencies
+
+      - name: Run tests in WASM
+        run: tools/rust-test wasm
+
+  check-binary-sizes:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: macos-latest-xlarge
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install system dependencies
+        run: |
+          tools/install-sys-dependencies-mac
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+
+      - name: Install Rust dependencies
+        run: tools/install-rust-dependencies
+
+      - name: Install emsdk
+        run: tools/install-wasm-dependencies
+
+      - name: Compile release binaries
+        run: |
+          mkdir -p build/local/lib
+          source emsdk/emsdk_env.sh
+          tools/rust-bindgen
+
+      - name: Generate release report
+        run: |
+          ./tools/release-size measure-rust > release-report.json
+
+      - name: Upload release report
+        uses: actions/upload-artifact@v4
+        with:
+          name: release_report
+          path: release-report.json
+
+      # Download previous release report, compare the release binary sizes, and post/update a comment at the Pull Request.
+      - name: Download previous release report
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          commit: ${{github.event.pull_request.base.sha}}
+          path: previous
+          if_no_artifact_found: warn
+          # Same artifact name as at the "Upload release report" step.
+          name: release_report
+          # Ignore status or conclusion in the search.
+          workflow_conclusion: ""
+
+      - name: Craft Comment Body
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        run: |
+          # Please note `previous/release-report.json` may not exist if the previous report was not found.
+          ./tools/release-size compare --before previous/release-report.json --current release-report.json > report-diff.md
+
+      - name: Create or Update Comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false
+        uses: edumserrano/find-create-or-update-comment@v2
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-includes: "Binary size comparison"
+          comment-author: 'github-actions[bot]'
+          edit-mode: replace
+          body-path: 'report-diff.md'
+
+  memory-profiler:
+    runs-on: ubuntu-24.04
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+
+      - name: Install llvm
+        run: |
+          # to get the symbolizer for debug symbol resolution
+          sudo apt install llvm
+
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Enable debug symbols
+        run: |
+            cd rust
+            # to fix buggy leak analyzer:
+            # https://github.com/japaric/rust-san#unrealiable-leaksanitizer
+            # ensure there's a profile.dev section
+            if ! grep -qE '^[ \t]*[profile.dev]' Cargo.toml; then
+                echo >> Cargo.toml
+                echo '[profile.dev]' >> Cargo.toml
+            fi
+            # remove pre-existing opt-levels in profile.dev
+            sed -i '/^\s*\[profile.dev\]/,/^\s*\[/ {/^\s*opt-level/d}' Cargo.toml
+            # now set opt-level to 1
+            sed -i '/^\s*\[profile.dev\]/a opt-level = 1' Cargo.toml
+            cat Cargo.toml
+        
+      - name: cargo test -Zsanitizer=address
+        # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
+        run: |
+          cd rust
+          cargo test --lib --tests --all-features --target x86_64-unknown-linux-gnu
+        env:
+          ASAN_OPTIONS: "detect_odr_violation=0:detect_leaks=0"
+          RUSTFLAGS: "-Z sanitizer=address"
+
+      - name: cargo test -Zsanitizer=leak
+        if: always()
+        run: |
+          cd rust
+          cargo test --all-features --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Z sanitizer=leak"
+
+  coverage:
+    runs-on: ubuntu-24.04
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install system dependencies
+        run: |
+          tools/install-sys-dependencies-linux
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.8
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            rust
+
+      - name: Install Rust dependencies
+        run: |
+          tools/install-rust-dependencies dev
+        
+      - name: cargo generate-lockfile
+        if: hashFiles('Cargo.lock') == ''
+        run: |
+          cd rust
+          cargo generate-lockfile
+      
+      - name: Run tests
+        run: |
+          tools/rust-coverage
+    
+      - name: Run Doc tests
+        run: |
+          tools/rust-test doc
+      
+      - name: Record Rust version
+        run: echo "RUST=$(rustc --version)" >> "$GITHUB_ENV"
+      
+      # TODO: Uncomment this when we have a codecov token
+      # - name: Upload to codecov.io
+      #   uses: codecov/codecov-action@v5
+      #   with:
+      #     fail_ci_if_error: true
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     env_vars: OS,RUST
+
+      - name: Gather and check Rust code coverage
+        run: |
+          tools/check-coverage rust/coverage.stats rust/lcov.info

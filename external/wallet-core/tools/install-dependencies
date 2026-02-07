@@ -1,0 +1,99 @@
+#!/bin/bash
+
+set -e
+
+ROOT="$PWD"
+PREFIX="${PREFIX:-$ROOT/build/local}"
+echo "PREFIX: $PREFIX"
+
+CMAKE=cmake
+MAKE=make
+
+# Load dependencies version
+BASE_DIR=$(
+    cd $(dirname $0)
+    pwd
+)
+source ${BASE_DIR}/dependencies-version
+
+# Setup up folders
+export PATH="$PREFIX/bin":$PATH
+export LDFLAGS="-L$PREFIX/lib"
+export LT_SYS_LIBRARY_PATH="$PREFIX/lib"
+export DYLD_LIBRARY_PATH="$PREFIX/lib"
+export LD_LIBRARY_PATH="$PREFIX/lib"
+export LD_RUN_PATH="$PREFIX/lib"
+
+function download_dependencies() {
+    ${BASE_DIR}/download-dependencies
+}
+
+function build_gtest() {
+    # Build gtest
+    GTEST_DIR="$ROOT/build/local/src/gtest"
+    cd ${GTEST_DIR}/googletest-$GTEST_VERSION
+    $CMAKE -DCMAKE_INSTALL_PREFIX:PATH=$PREFIX -H.
+    $MAKE -j4
+    $MAKE install
+    $MAKE clean
+}
+
+function build_libcheck() {
+    # Build Check
+    CHECK_DIR="$ROOT/build/local/src/check"
+    cd ${CHECK_DIR}/check-$CHECK_VERSION
+    $CMAKE -DCMAKE_INSTALL_PREFIX:PATH=$PREFIX -H.
+    $MAKE -j4
+    $MAKE install
+    $MAKE clean
+}
+
+function build_protobuf() {
+    # Build Protobuf
+    PROTOBUF_DIR="$ROOT/build/local/src/protobuf"
+    cd ${PROTOBUF_DIR}/protobuf-$PROTOBUF_VERSION
+
+    $CMAKE -Scmake -B . -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_MODULE_COMPATIBLE=ON
+    $CMAKE --build . -j
+    $CMAKE --install . --prefix $PREFIX
+
+    # after install, cleanup to save space (docker)
+    $CMAKE --build . --target clean
+    "$PREFIX/bin/protoc" --version
+
+    # Protobuf plugins
+    cd "$ROOT/protobuf-plugin"
+    $CMAKE . -Bbuild -DProtobuf_DIR=$PREFIX/lib/cmake/protobuf
+    $CMAKE --build build -j
+    $CMAKE --install build --prefix $PREFIX
+    $CMAKE --build build --target clean
+
+    if [[ -x "$(command -v swift)" && $(uname -s) == "Darwin" ]]; then
+        build_swift_plugin
+    fi
+}
+
+function build_swift_plugin() {
+    # Download Swift Protobuf sources
+    SWIFT_PROTOBUF_DIR="$ROOT/build/local/src/swift-protobuf"
+    mkdir -p "$SWIFT_PROTOBUF_DIR"
+    cd "$SWIFT_PROTOBUF_DIR"
+    if [ ! -f $SWIFT_PROTOBUF_VERSION.tar.gz ]; then
+        curl -fSsOL https://github.com/apple/swift-protobuf/archive/$SWIFT_PROTOBUF_VERSION.tar.gz
+    fi
+    tar xzf $SWIFT_PROTOBUF_VERSION.tar.gz
+
+    # Build Swift Protobuf
+    cd swift-protobuf-$SWIFT_PROTOBUF_VERSION
+    swift build --static-swift-stdlib -c release
+    cp -f "$SWIFT_PROTOBUF_DIR/swift-protobuf-$SWIFT_PROTOBUF_VERSION/.build/release/protoc-gen-swift" "$PREFIX/bin" | true
+    $PREFIX/bin/protoc-gen-swift --version
+}
+
+download_dependencies
+
+build_gtest
+build_libcheck
+build_protobuf
+
+cd "$ROOT"

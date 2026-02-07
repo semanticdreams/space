@@ -1,0 +1,64 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
+
+group = 'com.trustwallet'
+
+android {
+    namespace 'wallet.core'
+    compileSdk 35
+    ndkVersion '28.0.12674087'
+    defaultConfig {
+        minSdkVersion 23
+        externalNativeBuild {
+            cmake {
+                arguments "-DCMAKE_BUILD_TYPE=Release", "-DTW_UNITY_BUILD=ON"
+            }
+        }
+    }
+
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        debug {
+            minifyEnabled false
+            // limit platforms built for testing
+            ndk {
+                abiFilters 'x86', 'arm64-v8a'
+            }
+        }
+    }
+
+    sourceSets {
+        main.java.srcDirs += '../../jni/java'
+    }
+
+    externalNativeBuild {
+        cmake {
+            version "3.18.1"
+            path "../../CMakeLists.txt"
+        }
+    }
+
+    publishing {
+        singleVariant('release') {
+            withSourcesJar()
+        }
+    }
+    lint {
+        abortOnError false
+        disable 'InvalidPackage'
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    api project(':wallet-core-proto')
+}
+
+apply from: 'maven-push.gradle'
