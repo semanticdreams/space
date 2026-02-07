@@ -213,6 +213,13 @@
 (fn bash-runs-command []
     (local result (LlmTools.call "bash" {:command "printf 'hello'"
                                          :timeout 1}))
+    (when (or (not (= result.exit_code 0))
+              (not (= result.stdout "hello"))
+              (not (= result.timed_out false)))
+        (print (.. "[DEBUG] bash result exit_code=" (tostring result.exit_code)
+                   " timed_out=" (tostring result.timed_out)
+                   " stdout=" (tostring result.stdout)
+                   " stderr=" (tostring result.stderr))))
     (assert (= result.exit_code 0))
     (assert (= result.stdout "hello"))
     (assert (= result.timed_out false))
