@@ -76,6 +76,7 @@
   (set app.engine.audio nil)
   (sync-texture-loading)
   (AppBootstrap.init-themes)
+  (AppBootstrap.init-lights)
   (AppBootstrap.init-input-systems)
   (AppBootstrap.init-icons)
   (AppBootstrap.init-states)

@@ -438,6 +438,7 @@
     (set app.remote-control (RemoteControl {:endpoint app.remote-control-endpoint})))
 
   (AppBootstrap.init-themes)
+  (AppBootstrap.init-lights)
 
   (set app.camera (Camera {:position (glm.vec3 0 0 30)}))
   (when (and app.settings app.camera)

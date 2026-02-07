@@ -2,6 +2,10 @@
 (local Font (require :font))
 (local {: adjust : make-button-variant} (require :widget-theme-utils))
 
+(local terrain-center (glm.vec3 0 -100 0))
+(local light-position (glm.vec3 200 200 200))
+(local light-direction (glm.normalize (- light-position terrain-center)))
+
 (fn LightTheme []
   (local font (Font {:metadata-path "ubuntu-font/msdf/UbuntuMono-R.json"
                      :texture-path "ubuntu-font/msdf/UbuntuMono-R.png"
@@ -30,6 +34,30 @@
    :graph {:edge-color (glm.vec4 0.25 0.3 0.4 0.85)
            :label-color (glm.vec4 0.3 0.34 0.42 0.95)
            :selection-border-color (glm.vec4 0.18 0.5 0.9 0.9)}
+   :lights {:ambient (glm.vec3 0 0 0)
+            :directional [{:direction light-direction
+                           :ambient (glm.vec3 0.6 0.6 0.6)
+                           :diffuse (glm.vec3 0.9 0.9 0.9)
+                           :specular (glm.vec3 1.1 1.1 1.1)}]
+            :point [{:enabled? false
+                     :position (glm.vec3 0 0 0)
+                     :ambient (glm.vec3 0.0 0.0 0.0)
+                     :diffuse (glm.vec3 1.0 1.0 1.0)
+                     :specular (glm.vec3 1.0 1.0 1.0)
+                     :constant 1.0
+                     :linear 0.09
+                     :quadratic 0.032}]
+            :spot [{:enabled? false
+                    :position (glm.vec3 0 0 0)
+                    :direction (glm.vec3 0 0 -1)
+                    :ambient (glm.vec3 0.0 0.0 0.0)
+                    :diffuse (glm.vec3 1.0 1.0 1.0)
+                    :specular (glm.vec3 1.0 1.0 1.0)
+                    :cutoff (math.cos (math.rad 12.5))
+                    :outer-cutoff (math.cos (math.rad 17.5))
+                    :constant 1.0
+                    :linear 0.09
+                    :quadratic 0.032}]}
    :skybox {:brightness 0.3}
    :flat-terrain {:dark (glm.vec4 0.86 0.88 0.9 1.0)
                   :light (glm.vec4 0.94 0.95 0.97 1.0)}

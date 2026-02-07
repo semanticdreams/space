@@ -1,13 +1,11 @@
 (local glm (require :glm))
 (local ClipUtils (require :clip-utils))
+(local LightUtils (require :light-utils))
 
 (local gl (require :gl))
 (local shaders (require :shaders))
 (local {:VectorBuffer VectorBuffer :VectorHandle VectorHandle} (require :vector-buffer))
 
-(local terrain-center (glm.vec3 0 -100 0))
-(local light-position (glm.vec3 200 200 200))
-(local light-direction (glm.normalize (- light-position terrain-center)))
 (fn TriangleRenderer []
   (local shader
     (shaders.load-shader-from-files
@@ -20,10 +18,6 @@
 
   (gl.glBindVertexArray vao)
   (shader:use)
-  (shader:setVector3f "dirLight.direction" light-direction)
-  (shader:setVector3f "dirLight.ambient" 0.4 0.4 0.4)
-  (shader:setVector3f "dirLight.diffuse" 0.6 0.6 0.6)
-  (shader:setVector3f "dirLight.specular" 1.0 1.0 1.0)
   (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
   (gl.glEnableVertexAttribArray 0)
   (gl.glEnableVertexAttribArray 1)
@@ -80,6 +74,9 @@
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
       (self:upload-vector vector)
       (shader:use)
+      (local lights (assert (and app app.lights)
+                            "TriangleRenderer requires app.lights; call AppBootstrap.init-lights"))
+      (LightUtils.apply-lights shader lights)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
       (shader:setVector3f "viewPos" (glm.vec3 0.0))

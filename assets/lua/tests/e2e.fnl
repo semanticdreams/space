@@ -26,6 +26,7 @@
 (local TabViewTest (require :tests.e2e.test-tab-view))
 (local SubAppTest (require :tests.e2e.test-sub-app))
 (local TetrisDeepDialogTest (require :tests.e2e.test-tetris-deep-dialog))
+(local LightingTest (require :tests.e2e.test-lighting))
 
 (fn run-all []
   (ButtonTest.main)
@@ -54,6 +55,7 @@
   (TabViewTest.main)
   (SubAppTest.main)
   (TetrisDeepDialogTest.main)
+  (LightingTest.main)
   (RenderCaptureTest.main))
 
 (fn main []
