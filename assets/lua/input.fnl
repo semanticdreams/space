@@ -189,14 +189,24 @@
         (sync-viewport-state self)
         (mark-virtual-dirty self {:mark-measure-dirty? false})))
 
+    (fn text-measure-height [self fallback]
+      (local measure (and self.text self.text.layout self.text.layout.measure))
+      (or (and measure measure.y) fallback 0))
+
+    (fn text-block-offset [self inner-height]
+      (local text-height (text-measure-height self inner-height))
+      (math.max 0 (- inner-height text-height)))
+
     (fn caret-vertical-offset [self]
       (local relative (- (or self.model.cursor-line 0)
                          (or self.model.scroll-line 0)))
       (local inner-height (or (and self.inner-size self.inner-size.y) 0))
       (local line-height (math.max 0 (or self.line-height 0)))
-      (local top-offset (+ self.padding.y
-                           (math.max 0 (- inner-height line-height))))
-      (- top-offset (* (math.max 0 relative) line-height)))
+      (local text-height (text-measure-height self inner-height))
+      (local offset-top (+ self.padding.y
+                           (text-block-offset self inner-height)
+                           (math.max 0 (- text-height line-height))))
+      (- offset-top (* (math.max 0 relative) line-height)))
 
     (fn cursor-prefix-width [self]
       (local lines (or self.model.lines []))
@@ -404,7 +414,11 @@
           (node.layout:layouter)))
       (apply-layout self.focus-overlay 0)
       (apply-layout self.background 1)
-      (local text-offset (rotation:rotate (glm.vec3 padding.x padding.y 0)))
+      (local text-offset
+        (rotation:rotate
+          (glm.vec3 padding.x
+                    (+ padding.y (text-block-offset self inner-height))
+                    0)))
       (local text-position (+ position text-offset))
       (set self.text.layout.size inner-size)
       (set self.text.layout.position text-position)
