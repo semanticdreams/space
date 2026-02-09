@@ -12,13 +12,15 @@
   {:direction default-light-direction
    :ambient (glm.vec3 0.4 0.4 0.4)
    :diffuse (glm.vec3 0.6 0.6 0.6)
-   :specular (glm.vec3 1.0 1.0 1.0)})
+   :specular (glm.vec3 1.0 1.0 1.0)
+   :specular-power 8.0})
 
 (local default-point
   {:position (glm.vec3 0 0 0)
    :ambient (glm.vec3 0.0 0.0 0.0)
    :diffuse (glm.vec3 1.0 1.0 1.0)
    :specular (glm.vec3 1.0 1.0 1.0)
+   :specular-power 8.0
    :constant 1.0
    :linear 0.09
    :quadratic 0.032})
@@ -29,6 +31,7 @@
    :ambient (glm.vec3 0.0 0.0 0.0)
    :diffuse (glm.vec3 1.0 1.0 1.0)
    :specular (glm.vec3 1.0 1.0 1.0)
+   :specular-power 8.0
    :cutoff (math.cos (math.rad 12.5))
    :outer-cutoff (math.cos (math.rad 17.5))
    :constant 1.0
@@ -71,6 +74,8 @@
                          "Directional light diffuse")
    :specular (ensure-vec3 (or base.specular fallback.specular)
                           "Directional light specular")
+   :specular-power (ensure-number (or base.specular-power fallback.specular-power)
+                                  "Directional light specular power")
    :enabled? (not (= base.enabled? false))})
 
 (fn normalize-point [light defaults]
@@ -84,6 +89,8 @@
                          "Point light diffuse")
    :specular (ensure-vec3 (or base.specular fallback.specular)
                           "Point light specular")
+   :specular-power (ensure-number (or base.specular-power fallback.specular-power)
+                                  "Point light specular power")
    :constant (ensure-number (or base.constant fallback.constant)
                             "Point light constant attenuation")
    :linear (ensure-number (or base.linear fallback.linear)
@@ -111,6 +118,8 @@
                          "Spot light diffuse")
    :specular (ensure-vec3 (or base.specular fallback.specular)
                           "Spot light specular")
+   :specular-power (ensure-number (or base.specular-power fallback.specular-power)
+                                  "Spot light specular power")
    :cutoff cutoff
    :outer-cutoff outer-cutoff
    :constant (ensure-number (or base.constant fallback.constant)
