@@ -10,6 +10,7 @@
 #include "lua_notify.h"
 #include "lua_tray.h"
 #include "lua_webbrowser.h"
+#include "lua_xapian.h"
 #if defined(SPACE_ENABLE_WALLET_CORE)
 #include "lua_wallet_core.h"
 #endif
@@ -144,6 +145,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_uuid(lua);
     lua_bind_shell(lua);
     lua_bind_process(lua);
+    lua_bind_xapian(lua);
 #if defined(SPACE_ENABLE_WALLET_CORE)
     lua_bind_wallet_core(lua);
 #else

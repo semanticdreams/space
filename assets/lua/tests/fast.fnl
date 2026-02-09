@@ -54,6 +54,7 @@
     :tests.test-search-view
     :tests.test-launchables
     :tests.test-fs
+    :tests.test-xapian
     :tests.test-random
     :tests.test-fs-view
     :tests.test-tempfile
