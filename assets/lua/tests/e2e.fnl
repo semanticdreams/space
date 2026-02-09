@@ -27,6 +27,7 @@
 (local SubAppTest (require :tests.e2e.test-sub-app))
 (local TetrisDeepDialogTest (require :tests.e2e.test-tetris-deep-dialog))
 (local LightingTest (require :tests.e2e.test-lighting))
+(local InputCursorAlignmentTest (require :tests.e2e.test-input-cursor-alignment))
 
 (fn run-all []
   (ButtonTest.main)
@@ -56,6 +57,7 @@
   (SubAppTest.main)
   (TetrisDeepDialogTest.main)
   (LightingTest.main)
+  (InputCursorAlignmentTest.main)
   (RenderCaptureTest.main))
 
 (fn main []
