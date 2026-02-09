@@ -72,17 +72,22 @@
             (set ctx.icons icons)
             ctx)
 
+        (fn resolve-dialog-element [dialog]
+            (or dialog.__front_widget dialog.front dialog))
+
         (fn resolve-dialog-body [dialog]
-            (local body-meta (. dialog.children 2))
+            (local target (resolve-dialog-element dialog))
+            (local body-meta (. target.children 2))
             (local body body-meta.element)
             (local body-card (or (and body.scroll body.scroll.child) body))
-            (local content (. body-card.children 2))
+            (var content (. body-card.children 2))
+            (while (and content content.layout (= content.layout.name "padding"))
+                (set content content.child))
             content)
 
         (fn find-send-elements [dialog]
             (local content (resolve-dialog-body dialog))
-            (local padding-child content.child)
-            (local flex padding-child)
+            (local flex content)
             (fn at [index]
                 (local meta (. flex.children index))
                 meta.element)
