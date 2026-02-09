@@ -80,6 +80,7 @@ pkg_check_modules(ZMQ REQUIRED IMPORTED_TARGET libzmq)
 pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
 pkg_check_modules(AUBIO REQUIRED IMPORTED_TARGET aubio)
 pkg_check_modules(EPOXY REQUIRED IMPORTED_TARGET epoxy)
+pkg_check_modules(XAPIAN REQUIRED IMPORTED_TARGET xapian-core)
 if(UNIX AND NOT APPLE)
     pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
 endif()
@@ -193,6 +194,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     PkgConfig::ZMQ
     PkgConfig::PORTAUDIO
     PkgConfig::AUBIO
+    PkgConfig::XAPIAN
     tree_sitter_core
     tree_sitter_cpp
     tree_sitter_python
