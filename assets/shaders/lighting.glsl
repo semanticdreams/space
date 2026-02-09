@@ -8,6 +8,7 @@ struct DirLight {
     vec3 ambient;
     vec3 diffuse;
     vec3 specular;
+    float specularPower;
 };
 
 struct PointLight {
@@ -16,6 +17,7 @@ struct PointLight {
     vec3 ambient;
     vec3 diffuse;
     vec3 specular;
+    float specularPower;
 
     float constant;
     float linear;
@@ -29,6 +31,7 @@ struct SpotLight {
     vec3 ambient;
     vec3 diffuse;
     vec3 specular;
+    float specularPower;
 
     float cutOff;
     float outerCutOff;
@@ -48,7 +51,7 @@ vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir)
     vec3 lightDir = normalize(-light.direction);
     float diff = max(dot(normal, lightDir), 0.0);
     vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), light.specularPower);
     vec3 ambient  = light.ambient;
     vec3 diffuse  = light.diffuse  * diff;
     vec3 specular = light.specular * spec;
@@ -60,7 +63,7 @@ vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir)
     vec3 lightDir = normalize(light.position - fragPos);
     float diff = max(dot(normal, lightDir), 0.0);
     vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), light.specularPower);
     float distance = length(light.position - fragPos);
     float attenuation = CalcAttenuation(light.constant, light.linear, light.quadratic, distance);
     vec3 ambient  = light.ambient  * attenuation;
@@ -74,7 +77,7 @@ vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir)
     vec3 lightDir = normalize(light.position - fragPos);
     float diff = max(dot(normal, lightDir), 0.0);
     vec3 reflectDir = reflect(-lightDir, normal);
-    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), light.specularPower);
     float distance = length(light.position - fragPos);
     float attenuation = CalcAttenuation(light.constant, light.linear, light.quadratic, distance);
     float theta = dot(lightDir, normalize(-light.direction));

@@ -27,7 +27,7 @@ void main()
 
 	vec3 normal = normalize(cross(dFdy(worldPos), dFdx(worldPos)));
 	vec3 viewDir = normalize(viewPos - worldPos);
-    vec3 lightingViewDir = -viewDir;
+    vec3 lightingViewDir = viewDir;
 	vec3 light = ambientLight;
 	light += CalcDirLights(dirLights, dirLightCount, normal, lightingViewDir);
 	light += CalcPointLights(pointLights, pointLightCount, normal, worldPos, lightingViewDir);

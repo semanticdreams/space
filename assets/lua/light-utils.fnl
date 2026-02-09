@@ -17,7 +17,8 @@
     (apply-vec3 shader (.. "dirLights[" idx "].direction") light.direction)
     (apply-vec3 shader (.. "dirLights[" idx "].ambient") light.ambient)
     (apply-vec3 shader (.. "dirLights[" idx "].diffuse") light.diffuse)
-    (apply-vec3 shader (.. "dirLights[" idx "].specular") light.specular)))
+    (apply-vec3 shader (.. "dirLights[" idx "].specular") light.specular)
+    (shader:setFloat (.. "dirLights[" idx "].specularPower") light.specular-power)))
 
 (fn apply-point-lights [shader lights]
   (local point-lights (lights:get-point))
@@ -32,6 +33,7 @@
     (apply-vec3 shader (.. "pointLights[" idx "].ambient") light.ambient)
     (apply-vec3 shader (.. "pointLights[" idx "].diffuse") light.diffuse)
     (apply-vec3 shader (.. "pointLights[" idx "].specular") light.specular)
+    (shader:setFloat (.. "pointLights[" idx "].specularPower") light.specular-power)
     (shader:setFloat (.. "pointLights[" idx "].constant") light.constant)
     (shader:setFloat (.. "pointLights[" idx "].linear") light.linear)
     (shader:setFloat (.. "pointLights[" idx "].quadratic") light.quadratic)))
@@ -50,6 +52,7 @@
     (apply-vec3 shader (.. "spotLights[" idx "].ambient") light.ambient)
     (apply-vec3 shader (.. "spotLights[" idx "].diffuse") light.diffuse)
     (apply-vec3 shader (.. "spotLights[" idx "].specular") light.specular)
+    (shader:setFloat (.. "spotLights[" idx "].specularPower") light.specular-power)
     (shader:setFloat (.. "spotLights[" idx "].cutOff") light.cutoff)
     (shader:setFloat (.. "spotLights[" idx "].outerCutOff") (. light :outer-cutoff))
     (shader:setFloat (.. "spotLights[" idx "].constant") light.constant)

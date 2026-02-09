@@ -3,7 +3,7 @@
 (local {: adjust : make-button-variant} (require :widget-theme-utils))
 
 (local terrain-center (glm.vec3 0 -100 0))
-(local light-position (glm.vec3 200 200 200))
+(local light-position (glm.vec3 0 200 100))
 (local light-direction (glm.normalize (- light-position terrain-center)))
 
 (fn DarkTheme []
@@ -38,12 +38,14 @@
             :directional [{:direction light-direction
                            :ambient (glm.vec3 0.6 0.6 0.6)
                            :diffuse (glm.vec3 0.9 0.9 0.9)
-                           :specular (glm.vec3 1.1 1.1 1.1)}]
+                           :specular (glm.vec3 1.1 1.1 1.1)
+                           :specular-power 8.0}]
             :point [{:enabled? false
                      :position (glm.vec3 0 0 0)
                      :ambient (glm.vec3 0.0 0.0 0.0)
                      :diffuse (glm.vec3 1.0 1.0 1.0)
                      :specular (glm.vec3 1.0 1.0 1.0)
+                     :specular-power 8.0
                      :constant 1.0
                      :linear 0.09
                      :quadratic 0.032}]
@@ -53,6 +55,7 @@
                     :ambient (glm.vec3 0.0 0.0 0.0)
                     :diffuse (glm.vec3 1.0 1.0 1.0)
                     :specular (glm.vec3 1.0 1.0 1.0)
+                    :specular-power 8.0
                     :cutoff (math.cos (math.rad 12.5))
                     :outer-cutoff (math.cos (math.rad 17.5))
                     :constant 1.0
