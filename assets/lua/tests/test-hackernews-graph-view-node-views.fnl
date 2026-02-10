@@ -12,6 +12,7 @@
                              4242 glyph}})
     (local stub {:font font
                  :codepoints {:close 4242
+                              :table 4242
                               :code 4242}})
     (set stub.get
          (fn [self name]
