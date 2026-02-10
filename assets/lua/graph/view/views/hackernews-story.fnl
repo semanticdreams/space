@@ -1,4 +1,3 @@
-(local glm (require :glm))
 (local Button (require :button))
 (local ListView (require :list-view))
 (local Padding (require :padding))
@@ -6,28 +5,6 @@
 (local TextStyle (require :text-style))
 (local Input (require :input))
 (local {: Flex : FlexChild} (require :flex))
-
-(fn disable-button [button ctx]
-    (set button.disabled? true)
-    (local clickables (assert ctx.clickables "disable-button requires ctx.clickables"))
-    (local hoverables (assert ctx.hoverables "disable-button requires ctx.hoverables"))
-    (clickables:unregister button)
-    (clickables:unregister-right-click button)
-    (clickables:unregister-double-click button)
-    (hoverables:unregister button)
-    (when button.clicked
-        (button.clicked:clear))
-    (when button.right-clicked
-        (button.right-clicked:clear))
-    (when button.double-clicked
-        (button.double-clicked:clear))
-    (set button.on-click (fn [_btn _event] nil))
-    (when button.focus-node
-        (button.focus-node:drop)
-        (set button.focus-node nil))
-    (when button.update-background-color
-        (set button.background-color (glm.vec4 0.25 0.25 0.25 0.5))
-        (button:update-background-color {:mark-layout-dirty? false})))
 
 (fn HackerNewsStoryView [node opts]
     (local options (or opts {}))
@@ -63,7 +40,7 @@
                                                         (local enabled? (not (= action.enabled? false)))
                                                         (local button
                                                             ((Button {:text action.label
-                                                                      :focusable? enabled?
+                                                                      :enabled? enabled?
                                                                       :variant (if enabled?
                                                                                  :solid
                                                                                  :ghost)
@@ -71,9 +48,7 @@
                                                                                      (when (and enabled? action.on-click)
                                                                                          (action.on-click)))})
                                                              child-ctx))
-                                                        (set button.enabled? enabled?)
-                                                        (when (not enabled?)
-                                                            (disable-button button child-ctx))
+                                                        (button:set-enabled enabled? {:mark-layout-dirty? false})
                                                         button))]
                                                 (local children
                                                     (icollect [_ button (ipairs buttons)]

@@ -254,6 +254,40 @@
         (button:update-focus-visual opts)
         (button:update-background-color opts)))
 
+    (local enabled? (not (= options.enabled? false)))
+    (set button.enabled? enabled?)
+    (set button.__enabled-background-color nil)
+
+    (fn set-enabled [self value opts]
+      (local next (not (= value false)))
+      (when (not (= self.enabled? next))
+        (set self.enabled? next)
+        (if next
+            (do
+              (when self.__enabled-background-color
+                (set self.background-color self.__enabled-background-color))
+              (register-hoverables)
+              (register-clickables)
+              (when self.focus-node
+                (set self.focus-node.can-request-focus? true)
+                (set self.focus-node.skip-traversal? false))
+              (self:update-background-color opts))
+            (do
+              (when (not self.__enabled-background-color)
+                (set self.__enabled-background-color self.background-color))
+              (set self.background-color (glm.vec4 0.25 0.25 0.25 0.5))
+              (unregister-clickables)
+              (unregister-hoverables)
+              (set self.hovered? false)
+              (set self.pressed? false)
+              (when self.focus-node
+                (set self.focus-node.can-request-focus? false)
+                (set self.focus-node.skip-traversal? true)
+                (when (and self.focus-manager
+                           (= (self.focus-manager:get-focused-node) self.focus-node))
+                  (self.focus-manager:clear-focus)))
+              (self:update-background-color opts)))))
+
     (set button.intersect (fn [self ray]
                             (self.layout:intersect ray)))
     (set button.request-focus
@@ -283,6 +317,7 @@
            (self:update-background-color)))
     (set button.update-background-color update-background-color)
     (set button.update-focus-visual update-focus-visual)
+    (set button.set-enabled set-enabled)
     (when (and focus-manager focus-node)
       (set button.__focus-focus-listener
            (focus-manager.focus-focus.connect
@@ -326,6 +361,8 @@
 
     (register-hoverables)
     (register-clickables)
+    (when (not enabled?)
+      (button:set-enabled false {:mark-layout-dirty? false}))
     (button:update-background-color {:mark-layout-dirty? false})
     (button:update-focus-visual {:mark-layout-dirty? false})
     button))
