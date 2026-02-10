@@ -5,6 +5,7 @@
 (local ObjectSelector (require :object-selector))
 (local GraphViewLayout (require :graph/view/layout))
 (local GraphViewPersistence (require :graph/view/persistence))
+(local GraphViewNodeViews (require :graph/view/node-views))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local LlmConversationNode (require :graph/nodes/llm-conversation))
 (local LlmConversationsNode (require :graph/nodes/llm-conversations))
@@ -40,6 +41,7 @@
                              4242 glyph}})
     (local stub {:font font
                  :codepoints {:refresh 4242
+                              :table 4242
                               :code 4242
                               :edit 4242
                               :close 4242
@@ -483,6 +485,56 @@
             (when (and (not original-hud) app.hud)
                 (app.hud:drop)
                 (set app.hud nil)))))
+
+(fn graph-node-view-dialog-table-action-adds-table-node []
+    (with-temp-data-dir
+        (fn [_root]
+            (local unwrap-element
+                   (fn [item]
+                       (or (and item item.element) item)))
+            (local ctx (make-ctx))
+            (local target {:build-context ctx
+                           :children []
+                           :add-panel-child (fn [self opts]
+                                              (local builder (and opts opts.builder))
+                                              (assert builder "builder required")
+                                              (local dialog (builder self.build-context {}))
+                                              (table.insert self.children dialog)
+                                              dialog)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))})
+            (local graph (Graph {}))
+            (local node graph.start)
+            (local views (GraphViewNodeViews {:ctx ctx
+                                              :view-target target}))
+            (views:open node)
+            (assert (= (length target.children) 1)
+                    "Node view should attach a dialog")
+            (local dialog (. target.children 1))
+            (local titlebar (unwrap-element (. dialog.children 1)))
+            (local title-flex (unwrap-element (. titlebar.children 2)))
+            (local action-row (unwrap-element (. title-flex.children (length title-flex.children))))
+            (assert (= (length action-row.children) 3)
+                    "Node view dialog should include table, code, and close actions")
+            (local table-button (unwrap-element (. action-row.children 1)))
+            (local code-button (unwrap-element (. action-row.children 2)))
+            (assert (= table-button.icon "table")
+                    "Table action should be first")
+            (assert (= code-button.icon "code")
+                    "Code action should be second")
+            (table-button:on-click {:button 1})
+            (local table-key (.. "table:node-view-dialog:" (tostring dialog)))
+            (local table-node (graph:lookup table-key))
+            (assert table-node
+                    "Table action should add a table node for the node view module")
+            (assert (= table-node.table dialog)
+                    "Table action should use the actual node view dialog table")
+            (assert (= (graph:edge-count) 1)
+                    "Table action should add one edge")
+            (views:drop-all)
+            (graph:drop))))
 
 (fn graph-selection-emits-changed []
     (with-temp-data-dir
@@ -936,6 +988,8 @@
 (table.insert tests {:name "Table node view adds edges for entries" :fn table-node-view-adds-child-nodes})
 (table.insert tests {:name "GraphView removes selected nodes and related edges" :fn graph-removes-selected-nodes-and-edges})
 (table.insert tests {:name "GraphView opens node view in HUD on double click" :fn graph-opens-node-view-in-hud-on-double-click})
+(table.insert tests {:name "Graph node view dialog table action adds table node"
+                     :fn graph-node-view-dialog-table-action-adds-table-node})
 (table.insert tests {:name "GraphView emits selection changes" :fn graph-selection-emits-changed})
 (table.insert tests {:name "GraphView updates selection and focus borders" :fn graph-view-updates-selection-and-focus-borders})
 (table.insert tests {:name "GraphView auto-focus updates focus ring" :fn graph-view-autofocus-updates-focus-ring})
