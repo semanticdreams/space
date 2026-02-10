@@ -227,9 +227,7 @@
             float-meta))))
 
   (fn resolve-min-size [layout]
-    (or (and layout layout.measure)
-        (and layout layout.size)
-        (glm.vec3 0 0 0)))
+    (and layout layout.min-size))
 
   (fn collect-panel-movables [self]
     (var entries [])
