@@ -73,9 +73,7 @@
   entries)
 
 (fn resolve-min-size [layout]
-  (or (and layout layout.measure)
-      (and layout layout.size)
-      (glm.vec3 0 0 0)))
+  (and layout layout.min-size))
 
 (fn collect-positioned-resizables [children]
   (var entries [])
