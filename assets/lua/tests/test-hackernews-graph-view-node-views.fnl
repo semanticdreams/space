@@ -11,7 +11,8 @@
                  :glyph-map {65533 glyph
                              4242 glyph}})
     (local stub {:font font
-                 :codepoints {:close 4242}})
+                 :codepoints {:close 4242
+                              :code 4242}})
     (set stub.get
          (fn [self name]
              (local value (. self.codepoints name))
