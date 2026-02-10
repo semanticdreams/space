@@ -1,4 +1,7 @@
 (local Dialog (require :dialog))
+(local {:GraphEdge GraphEdge} (require :graph/edge))
+(local {:FsNode FsNode} (require :graph/nodes/fs))
+(local fs (require :fs))
 
 (fn GraphViewNodeViews [opts]
     (local options (or opts {}))
@@ -32,9 +35,38 @@
                 (set view (view ctx opts)))
             (assert (and view view.layout)
                     "Node view builder must return a widget with a layout")
+            (fn resolve-view-module-name [node]
+                (local view-fn (and node node.view))
+                (assert (= (type view-fn) :function)
+                        "Node view code action requires a node view function")
+                (var module-name nil)
+                (each [name value (pairs package.loaded)]
+                    (when (= value view-fn)
+                        (set module-name name)))
+                (assert module-name "Node view code action requires a loaded view module")
+                module-name)
+            (fn resolve-view-module-path [module-name]
+                (assert app "Node view code action requires global app")
+                (assert (and app.engine app.engine.get-asset-path)
+                        "Node view code action requires app.engine.get-asset-path")
+                (assert module-name "Node view code action requires module name")
+                (app.engine.get-asset-path (.. "lua/" module-name ".fnl")))
             (local dialog-builder
               (Dialog {:title (or node.label node.key)
-                       :actions [{:name "close"
+                       :actions [{:name "code"
+                                  :icon "code"
+                                  :handler (fn [_button _event]
+                                             (local graph (and node node.graph))
+                                             (assert graph "Node view code action requires a mounted graph")
+                                             (local module-name (resolve-view-module-name node))
+                                             (local module-path (resolve-view-module-path module-name))
+                                             (local key (.. "fs:" module-path))
+                                             (local fs-node (or (and graph.lookup (graph:lookup key))
+                                                                (FsNode {:path (fs.absolute module-path)
+                                                                         :key key})))
+                                             (graph:add-edge (GraphEdge {:source node
+                                                                         :target fs-node})))}
+                                 {:name "close"
                                   :icon "close"
                                   :handler (fn [_button _event]
                                              (drop-node-view node))}]

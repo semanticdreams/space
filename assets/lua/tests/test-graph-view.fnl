@@ -40,6 +40,7 @@
                              4242 glyph}})
     (local stub {:font font
                  :codepoints {:refresh 4242
+                              :code 4242
                               :close 4242
                               :cancel 4242
                               :move_item 4242
