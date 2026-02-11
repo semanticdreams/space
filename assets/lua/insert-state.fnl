@@ -52,7 +52,9 @@
                                     false))))))))))
 
 (fn on-key-down [payload]
-  (handle-insert-key payload)
+  (if (InputState.dispatch-input :on-key-down payload)
+      true
+      (handle-insert-key payload))
   true)
 
 (fn sync-insert-mode []
