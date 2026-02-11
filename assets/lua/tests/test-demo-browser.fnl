@@ -136,6 +136,26 @@
     (when (not ok)
       (error err))))
 
+(fn demo-browser-perlin-entry-adds-terrain []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall (fn []
+                 (scene:add-demo-browser)
+                 (local entry (DemoDialogs.find-entry :perlin-terrain))
+                 (assert entry "Expected Perlin terrain entry in demo browser")
+                 (local element (scene:add-demo-entry entry))
+                 (assert element "Expected Perlin terrain element to be created")
+                 (assert (= (length scene.scene-children) 2)
+                         "Scene should contain browser and Perlin terrain")
+                 (assert (= (length scene.entity.__scene_movable_keys) 2)
+                         "Movables should include demo browser and Perlin terrain")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (fn added-dialog-appears-in-front-of-camera []
   (local camera (Camera {:position (glm.vec3 2 3 4)}))
   (camera:yaw (math.rad 45))
@@ -188,6 +208,7 @@
 
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
+(table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
 (table.insert tests {:name "Scene additions appear in front of the camera" :fn added-dialog-appears-in-front-of-camera})
 
 (local main

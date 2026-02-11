@@ -15,6 +15,7 @@
 (local Sized (require :sized))
 (local Text (require :text))
 (local logging (require :logging))
+(local PerlinTerrain (require :perlin-terrain))
 
 (local DemoDialogs {})
 
@@ -182,10 +183,21 @@
     :builder (dialog-padding (new-fs-dialog))}
    {:key :object-browser
     :label "Object Browser"
-    :builder (dialog-padding (new-object-browser-dialog))}
+   :builder (dialog-padding (new-object-browser-dialog))}
    {:key :mission-log
     :label "Mission Log Inputs"
-    :builder (dialog-padding (new-input-dialog))}])
+    :builder (dialog-padding (new-input-dialog))}
+   {:key :perlin-terrain
+    :label "Perlin Terrain"
+    :builder
+    (PerlinTerrain {:position (glm.vec3 500 -100 -500)
+                    :scale (glm.vec3 20 3.5 20)
+                    :width 50
+                    :length 50
+                    :seed 424242
+                    :n1scale 34
+                    :n2scale 4
+                    :n3scale 1.5})}])
 
 (fn DemoDialogs.list []
   demo-entries)
