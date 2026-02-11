@@ -12,12 +12,14 @@
 (local InputState (require :input-state-router))
 (local StateBase (require :state-base))
 (local InputModel (require :input-model))
+(global reset-engine-events nil)
 
 (local tests [])
 
 (local SHIFT-MOD 1)
 (local KEY_ESCAPE 27)
 (local KEY_SPACE (string.byte " "))
+(local KEY_BACKQUOTE (string.byte "`"))
 (local KEY_DELETE 127)
 (local KEY_RETURN 13)
 (local KEY_C (string.byte "c"))
@@ -295,6 +297,24 @@
   (set app.graph-view-factory nil)
   (set app.first-person-controls nil))
 
+(fn normal-state-backquote-opens-fennel-interpreters []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (set app.first-person-controls controls)
+  (var opens 0)
+  (set app.scene {:add-panel-child (fn [_self opts]
+                                     (set opens (+ opens 1))
+                                     opts)})
+  (local state (NormalState))
+  (state.on-enter)
+  (app.engine.events.key-down.emit {:key KEY_BACKQUOTE})
+  (app.engine.events.key-down.emit {:key KEY_BACKQUOTE})
+  (assert (= opens 2) "Backquote should open a new interpreter each press")
+  (assert (= controls.record.key_down nil) "Handled backquote should not reach controls")
+  (state.on-leave)
+  (set app.scene nil)
+  (set app.first-person-controls nil))
+
 (table.insert tests {:name "State transitions call enter/leave hooks" :fn transitions-call-enter-and-leave})
 (table.insert tests {:name "Setting the same state twice is a no-op" :fn reselecting-active-state-noops})
 (table.insert tests {:name "State history records recent transitions" :fn state-history-tracks-transitions})
@@ -307,6 +327,7 @@
 (table.insert tests {:name "Normal state delete removes selected graph nodes" :fn normal-state-delete-removes-graph-selection})
 (table.insert tests {:name "Normal state Enter opens focused graph node" :fn normal-state-enter-opens-focused-graph-node})
 (table.insert tests {:name "Normal state F4 toggles graph view" :fn normal-state-f4-toggles-graph-view})
+(table.insert tests {:name "Normal state backquote opens interpreter dialogs" :fn normal-state-backquote-opens-fennel-interpreters})
 
 (fn with-state-recorder [body]
   (local original app.states)

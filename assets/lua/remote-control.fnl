@@ -1,35 +1,9 @@
 (local zmq (require :zmq))
 (local logging (require :logging))
-(local fennel (require :fennel))
+(local FennelEvaluator (require :fennel-evaluator))
 
 (var request-counter 0)
 (local results {})
-
-(fn safe-tostring [value]
-  (local (ok result) (pcall tostring value))
-  (if ok result "<tostring failed>"))
-
-(fn safe-view [value]
-  (local (ok result) (pcall fennel.view value))
-  (if ok result (.. "<unprintable " (type value) ": " (safe-tostring value) ">")))
-
-(fn format-result [value]
-  (if (= value nil)
-      "nil"
-      (if (= (type value) "string")
-          value
-          (safe-view value))))
-
-(fn format-error [value]
-  (if (= value nil)
-      "unknown error"
-      (if (= (type value) "string")
-          value
-          (tostring value))))
-
-(fn eval-source [source]
-  (local (ok result) (pcall fennel.eval source {:env _G}))
-  {:ok ok :result result})
 
 (fn next-request-id []
   (set request-counter (+ request-counter 1))
@@ -91,14 +65,14 @@
   (expose-api)
 
   (fn send-error [err]
-    (socket:send (.. "error " (format-error err))))
+    (socket:send (.. "error " (FennelEvaluator.format-error err))))
 
   (fn send-ok [value]
-    (socket:send (.. "ok " (format-result value))))
+    (socket:send (.. "ok " (FennelEvaluator.format-result value))))
 
   (fn handle-message [msg]
     (local source (msg:to-string))
-    (local result (eval-source source))
+    (local result (FennelEvaluator.eval-source source))
     (if result.ok
         (send-ok result.result)
         (send-error result.result)))

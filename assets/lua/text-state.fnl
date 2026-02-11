@@ -407,14 +407,16 @@
               (handle-key-command state input key))))))
 
 (fn on-key-down [state payload]
-  (if (handle-text-key state payload)
+  (if (InputState.dispatch-input :on-key-down payload)
+      true
+      (if (handle-text-key state payload)
       true
       (if (StateBase.handle-focus-tab payload)
           true
           (if (active-input)
               true
               (and app.first-person-controls
-                   (app.first-person-controls:on-key-down payload))))))
+                   (app.first-person-controls:on-key-down payload)))))))
 
 (fn sync-mode []
   (local input (active-input))

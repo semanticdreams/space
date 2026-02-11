@@ -32,6 +32,17 @@
      :on-close options.on-close
      :child (XdgIconBrowser.XdgIconBrowser {})}))
 
+(fn make-fennel-interpreter-dialog [opts]
+  (local options (or opts {}))
+  (local DefaultDialog (require :default-dialog))
+  (local FennelInterpreterView (require :fennel-interpreter-view))
+  (DefaultDialog
+    {:title "Fennel Interpreter"
+     :name "fennel-interpreter-dialog"
+     :resizeable true
+     :on-close options.on-close
+     :child (FennelInterpreterView {:name "fennel-interpreter"})}))
+
 (var box-textured-element nil)
 (fn add-box-textured []
   (local scene app.scene)
@@ -66,6 +77,7 @@
                   :units-per-pixel hud.world-units-per-pixel})}))
 
 {:make-terminal-dialog make-terminal-dialog
+ :make-fennel-interpreter-dialog make-fennel-interpreter-dialog
  :make-icon-browser-dialog make-icon-browser-dialog
  :add-box-textured add-box-textured
  :make-sub-app-one-dialog make-sub-app-one-dialog

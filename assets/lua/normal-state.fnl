@@ -2,6 +2,7 @@
 (local GraphView (require :graph/view))
 
 (local KEY_SPACE (string.byte " "))
+(local KEY_BACKQUOTE (string.byte "`"))
 (local SDLK_RETURN 13)
 (local SDLK_DELETE 127)
 (local SDLK_F4 1073741885)
@@ -41,6 +42,14 @@
     (when (and graph-view graph-view.remove-selected-nodes)
         (> (graph-view:remove-selected-nodes) 0)))
 
+  (fn open-fennel-interpreter []
+    (local scene app.scene)
+    (assert (and scene scene.add-panel-child)
+            "NormalState fennel interpreter requires app.scene.add-panel-child")
+    (local helpers (require :launchables-helpers))
+    (scene:add-panel-child {:builder (helpers.make-fennel-interpreter-dialog {})})
+    true)
+
   (fn handle-key-down [payload]
     (local key (and payload payload.key))
     (if (= key KEY_SPACE)
@@ -68,6 +77,8 @@
             (base-on-key-down payload))
         (= key SDLK_F4)
         (toggle-graph-view)
+        (= key KEY_BACKQUOTE)
+        (open-fennel-interpreter)
         (base-on-key-down payload)))
 
   (StateBase.make-state
