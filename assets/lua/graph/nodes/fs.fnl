@@ -2,6 +2,7 @@
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local FsNodeView (require :graph/view/views/fs))
+(local CodeDirNode (require :graph/nodes/code-dir))
 (local Signal (require :signal))
 (local fs (require :fs))
 (local logging (require :logging))
@@ -144,6 +145,20 @@
                  (graph:add-edge (GraphEdge {:source self
                                                  :target child})))))
 
+    (set node.open-code-dir
+         (fn [self]
+             (local graph self.graph)
+             (assert graph "FsNode requires a mounted graph to open code-dir")
+             (local resolved-path (and self.path fs.absolute (fs.absolute self.path)))
+             (assert resolved-path "FsNode requires a path to open code-dir")
+             (local stat (and fs.stat (fs.stat resolved-path)))
+             (when (and stat stat.exists stat.is-dir)
+                 (local code-node (CodeDirNode {:path resolved-path
+                                                :root resolved-path}))
+                 (graph:add-edge (GraphEdge {:source self
+                                             :target code-node}))
+                 code-node)))
+
     (set node.actions
          (fn [self]
              (local actions
@@ -163,6 +178,12 @@
                               (self:emit-items))}])
              (local resolved-path (and self.path fs.absolute (fs.absolute self.path)))
              (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
+             (when (and stat stat.exists stat.is-dir)
+                 (table.insert actions 2
+                               {:name "Open as Code Graph"
+                                :icon "code"
+                                :fn (fn [_button _event]
+                                        (self:open-code-dir))}))
              (when (and stat stat.exists stat.is-file)
                  (table.insert actions 2
                                {:name "Edit"

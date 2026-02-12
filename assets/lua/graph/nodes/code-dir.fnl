@@ -3,6 +3,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local CodeDirNodeView (require :graph/view/views/code-dir))
 (local FnlModuleNode (require :graph/nodes/fnl-module))
+(local CppModuleNode (require :graph/nodes/cpp-module))
 (local Signal (require :signal))
 (local fs (require :fs))
 (local logging (require :logging))
@@ -13,11 +14,9 @@
         path))
 
 (fn default-root []
-    (if (and app app.engine app.engine.get-asset-path)
-        (app.engine.get-asset-path "lua")
-        (if (and fs fs.cwd fs.join-path)
-            (fs.join-path (fs.cwd) "assets" "lua")
-            "assets/lua")))
+    (if (and fs fs.cwd)
+        (fs.cwd)
+        "."))
 
 (fn safe-lower [text]
     (if text
@@ -26,6 +25,15 @@
 
 (fn fnl-file? [entry]
     (and entry entry.is-file entry.name (string.match entry.name "%.fnl$")))
+
+(fn cpp-file? [entry]
+    (and entry entry.is-file entry.name
+         (or (string.match entry.name "%.cpp$")
+             (string.match entry.name "%.cc$")
+             (string.match entry.name "%.cxx$")
+             (string.match entry.name "%.h$")
+             (string.match entry.name "%.hpp$")
+             (string.match entry.name "%.hh$"))))
 
 (fn sort-entries [entries]
     (table.sort entries
@@ -37,7 +45,7 @@
 
 (fn CodeDirNode [opts]
     (local options (or opts {}))
-    (local root (normalize-path (or options.lua-root (default-root))))
+    (local root (normalize-path (or options.root (default-root))))
     (local path (normalize-path (or options.path root)))
     (local absolute-path (if (and path fs.absolute)
                              (fs.absolute path)
@@ -52,7 +60,7 @@
                             :view CodeDirNodeView}))
     (set node.kind "code-dir")
     (set node.path absolute-path)
-    (set node.lua-root root)
+    (set node.root root)
     (set node.items-changed (Signal))
 
     (set node.list-directory
@@ -76,7 +84,8 @@
              (local entries [])
              (each [_ entry (ipairs (self:list-directory))]
                  (when (or entry.is-dir
-                           (fnl-file? entry))
+                           (fnl-file? entry)
+                           (cpp-file? entry))
                      (table.insert entries (self:normalize-entry entry))))
              (sort-entries entries)
              (icollect [_ entry (ipairs entries)]
@@ -98,9 +107,12 @@
              (assert child-path "CodeDirNode requires entry.path")
              (if entry.is-dir
                  (CodeDirNode {:path child-path
-                               :lua-root self.lua-root})
-                 (FnlModuleNode {:path child-path
-                                 :lua-root self.lua-root}))))
+                               :root self.root})
+                 (if (fnl-file? entry)
+                     (FnlModuleNode {:path child-path
+                                     :lua-root self.root})
+                     (CppModuleNode {:path child-path
+                                     :project-root self.root})))))
 
     (set node.open-entry
          (fn [self entry]

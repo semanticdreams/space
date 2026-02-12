@@ -8,7 +8,6 @@
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local EntitiesNode (require :graph/nodes/entities))
-(local CodeDirNode (require :graph/nodes/code-dir))
 (local Signal (require :signal))
 (local fs (require :fs))
 
@@ -29,14 +28,6 @@
                  (fs-resolve-path (fs.cwd))
                  (fs.cwd))))
 
-    (set node.resolve-code-path
-         (fn [_self]
-             (if (and app app.engine app.engine.get-asset-path)
-                 (app.engine.get-asset-path "lua")
-                 (if (and fs fs.cwd fs.join-path)
-                     (fs.join-path (fs.cwd) "assets" "lua")
-                     "assets/lua"))))
-
     (set node.collect-targets
          (fn [self]
              (local produced [])
@@ -54,8 +45,6 @@
              (table.insert produced [hn-node (or hn-node.label hn-node.key (node-id hn-node))])
              (local entities-node (EntitiesNode))
              (table.insert produced [entities-node (or entities-node.label entities-node.key)])
-             (local code-node (CodeDirNode {:path (self:resolve-code-path)}))
-             (table.insert produced [code-node (or code-node.label "code")])
              produced))
 
     (set node.emit-targets
@@ -84,9 +73,6 @@
             (if (= target-key :fs-prefix)
                 (when (= (string.sub key 1 3) "fs:")
                     (self:add-target target))
-                (= target-key :code-prefix)
-                (when (= (string.sub key 1 9) "code-dir:")
-                    (self:add-target target))
                 (when (= key target-key)
                     (self:add-target target)))))
 
@@ -114,11 +100,7 @@
           {:name "Add Quit"
            :icon "exit_to_app"
            :fn (fn [_button _event]
-                   (add-target-by-key node "quit"))}
-          {:name "Add Code (assets/lua)"
-           :icon "code"
-           :fn (fn [_button _event]
-                   (add-target-by-key node :code-prefix))}])
+                   (add-target-by-key node "quit"))}])
 
     (set node.drop
          (fn [self]
