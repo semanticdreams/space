@@ -138,6 +138,51 @@
 
     (assert clickables "GraphView requires clickables for node view double click")
 
+    (fn get-menu-manager []
+        (or (and ctx ctx.menu-manager) app.menu-manager))
+
+    (fn node-menu-actions [node]
+        (local actions [])
+        (local configured-actions
+               (if (= (type (and node node.actions)) :function)
+                   ((. node :actions) node)
+                   (and node node.actions)))
+        (table.insert actions
+                      {:name "Open"
+                       :icon "open_in_new"
+                       :fn (fn [_button event]
+                               (when focus-manager
+                                   (focus-manager:arm-auto-focus {:event event}))
+                               (views:open node)
+                               (when focus-manager
+                                   (focus-manager:clear-auto-focus)))})
+        (each [_ action (ipairs (or configured-actions []))]
+            (when (and action action.name action.fn)
+                (table.insert actions action)))
+        (table.insert actions
+                      {:name "Remove"
+                       :icon "close"
+                       :fn (fn [_button _event]
+                               (when (and graph graph.remove-nodes)
+                                   (graph:remove-nodes [node])))})
+        actions)
+
+    (fn resolve-menu-position [event]
+        (local screen (and event event.screen))
+        (if (and screen app.hud app.hud.screen-pos-ray)
+            (do
+                (local ray (app.hud:screen-pos-ray {:x (or screen.x 0)
+                                                    :y (or screen.y 0)}))
+                (if (and ray ray.origin ray.direction)
+                    (do
+                        (local dz (or ray.direction.z 0))
+                        (local t (if (not (= dz 0))
+                                     (/ (- 0 ray.origin.z) dz)
+                                     0))
+                        (+ ray.origin (* ray.direction t)))
+                    (or (and event event.point) (glm.vec3 0 0 0))))
+            (or (and event event.point) (glm.vec3 0 0 0))))
+
     (fn update-point-state [node]
         (local point (. registry.points node))
         (when point
@@ -443,7 +488,17 @@
                                  (views:open node)
                                  (when focus-manager
                                      (focus-manager:clear-auto-focus))))))
+                (set point.on-right-click
+                     (fn [_self event]
+                         (when focus-node
+                             (focus-node:request-focus))
+                         (local manager (get-menu-manager))
+                         (when manager
+                             (manager:open {:actions (node-menu-actions node)
+                                            :position (resolve-menu-position event)}))))
                 (clickables:register point)
+                (when clickables.register-right-click
+                    (clickables:register-right-click point))
                 (clickables:register-double-click point)
                 (registry:add-node node point idx (and node-opts node-opts.pinned))
                 (register-movable node point)
@@ -484,13 +539,29 @@
             (when replacement
                 (when replacement.point
                     (set replacement.point.on-double-click
-                         (fn [_self _event]
-                             (views:open node)))
+                         (fn [_self event]
+                             (if (Modifiers.alt-held? (and event event.mod))
+                                 (expand-linked-frontier graph [(tostring node.key)])
+                                 (do
+                                     (when focus-manager
+                                         (focus-manager:arm-auto-focus {:event event}))
+                                     (views:open node)
+                                     (when focus-manager
+                                         (focus-manager:clear-auto-focus))))))
                     (set replacement.point.on-click
                          (fn [_self _event]
                              (local focus-node (. focus-nodes node))
                              (when focus-node
-                                 (focus-node:request-focus)))))
+                                 (focus-node:request-focus))))
+                    (set replacement.point.on-right-click
+                         (fn [_self event]
+                             (local focus-node (. focus-nodes node))
+                             (when focus-node
+                                 (focus-node:request-focus))
+                             (local manager (get-menu-manager))
+                             (when manager
+                                 (manager:open {:actions (node-menu-actions node)
+                                                :position (resolve-menu-position event)})))))
                 (register-movable node replacement.point))
             (labels:move-label existing node)
             (views:move-view existing node)
@@ -518,8 +589,11 @@
                                            (drop-node-artifacts node)
                                            (when (and clickables point)
                                                (clickables:unregister point)
+                                               (when clickables.unregister-right-click
+                                                   (clickables:unregister-right-click point))
                                                (clickables:unregister-double-click point)
-                                               (set point.on-double-click nil))
+                                               (set point.on-double-click nil)
+                                               (set point.on-right-click nil))
                                            (when selector
                                                (selector:remove-selectables [point]))
                                            (when movables-handler
@@ -680,8 +754,11 @@
             (each [_ point (pairs registry.points)]
                 (when clickables
                     (clickables:unregister point)
+                    (when clickables.unregister-right-click
+                        (clickables:unregister-right-click point))
                     (clickables:unregister-double-click point)
-                    (set point.on-double-click nil))
+                    (set point.on-double-click nil)
+                    (set point.on-right-click nil))
                 (when selector
                     (selector:remove-selectables [point]))
                 (set (. node-by-point point) nil)

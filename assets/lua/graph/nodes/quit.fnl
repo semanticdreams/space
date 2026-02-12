@@ -16,6 +16,11 @@
             (if (and handler (= (type handler) :function))
                 (handler)
                 (logging.info "[graph] quit requested"))))
+    (set node.actions
+         [{:name "Quit"
+           :icon "exit_to_app"
+           :fn (fn [_button _event]
+                   (node:activate))}])
     node)
 
 QuitNode

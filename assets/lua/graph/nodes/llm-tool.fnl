@@ -83,6 +83,11 @@
                              :updated_at self.updated-at})
              (JsonUtils.write-json! self.data-path payload)
              payload))
+    (set node.actions
+         [{:name "Persist"
+           :icon "save"
+           :fn (fn [_button _event]
+                   (node:persist))}])
     node)
 
 LlmToolNode

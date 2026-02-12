@@ -65,6 +65,16 @@
          (self:emit-items)
          entity))
 
+  (set node.actions
+       [{:name "Refresh"
+         :icon "refresh"
+         :fn (fn [_button _event]
+                 (node:emit-items))}
+        {:name "New Link"
+         :icon "link"
+         :fn (fn [_button _event]
+                 (node:create-entity {}))}])
+
   (var created-handler nil)
   (var updated-handler nil)
   (var deleted-handler nil)

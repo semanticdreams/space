@@ -42,6 +42,23 @@
                      (GraphEdge {:source self
                                      :target child})))))
 
+    (set node.actions
+         [{:name "Top Stories"
+           :icon "whatshot"
+           :fn (fn [_button _event]
+                   (node:add-feed {:kind "topstories"
+                                   :label "Top stories"}))}
+          {:name "New Stories"
+           :icon "schedule"
+           :fn (fn [_button _event]
+                   (node:add-feed {:kind "newstories"
+                                   :label "New stories"}))}
+          {:name "Best Stories"
+           :icon "star"
+           :fn (fn [_button _event]
+                   (node:add-feed {:kind "beststories"
+                                   :label "Best stories"}))}])
+
     (set node.drop
          (fn [self]
              (when self.feeds-changed

@@ -45,6 +45,30 @@
                  (graph:add-edge (GraphEdge {:source self
                                              :target target})))))
 
+    (fn add-target-by-key [self key]
+        (each [_ pair (ipairs (self:collect-targets))]
+            (local target (. pair 1))
+            (when (= (and target target.key) key)
+                (self:add-target target))))
+
+    (set node.actions
+         [{:name "Add Conversations"
+           :icon "chat"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "llm-conversations"))}
+          {:name "Add Tools"
+           :icon "build"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "llm-tools"))}
+          {:name "Add Model"
+           :icon "memory"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "llm-model"))}
+          {:name "Add Provider"
+           :icon "settings"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "llm-provider"))}])
+
     (set node.drop
          (fn [self]
              (when self.targets-changed

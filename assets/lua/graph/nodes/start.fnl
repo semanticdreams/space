@@ -66,6 +66,42 @@
                 (graph:add-edge (GraphEdge {:source self
                                                 :target node})))))
 
+    (fn add-target-by-key [self target-key]
+        (each [_ pair (ipairs (self:collect-targets))]
+            (local target (. pair 1))
+            (local key (or (and target target.key) ""))
+            (if (= target-key :fs-prefix)
+                (when (= (string.sub key 1 3) "fs:")
+                    (self:add-target target))
+                (when (= key target-key)
+                    (self:add-target target)))))
+
+    (set node.actions
+         [{:name "Add Filesystem"
+           :icon "folder"
+           :fn (fn [_button _event]
+                   (add-target-by-key node :fs-prefix))}
+          {:name "Add Globals Table"
+           :icon "table"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "table:_G"))}
+          {:name "Add LLM"
+           :icon "chat"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "llm"))}
+          {:name "Add HackerNews"
+           :icon "public"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "hackernews-root"))}
+          {:name "Add Entities"
+           :icon "apps"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "entities"))}
+          {:name "Add Quit"
+           :icon "exit_to_app"
+           :fn (fn [_button _event]
+                   (add-target-by-key node "quit"))}])
+
     (set node.drop
          (fn [self]
              (when self.targets-changed

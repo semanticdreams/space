@@ -53,6 +53,12 @@
                                          :target tool-node}))
              tool-node))
 
+    (set node.actions
+         [{:name "Refresh"
+           :icon "refresh"
+           :fn (fn [_button _event]
+                   (node:refresh))}])
+
     (set node.drop
          (fn [self]
              (when self.items-changed

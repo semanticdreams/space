@@ -133,6 +133,11 @@
                                        :on-item (and options options.on-item)
                                        :on-finish (and options options.on-finish)})
              true))
+    (set node.actions
+         [{:name "Continue"
+           :icon "play_arrow"
+           :fn (fn [_button _event]
+                   (node:run-request {}))}])
     (set node.drop
          (fn [self]
              (each [_ handler (ipairs (or self.handlers []))]

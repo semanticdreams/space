@@ -486,6 +486,90 @@
                 (app.hud:drop)
                 (set app.hud nil)))))
 
+(fn graph-point-right-click-opens-node-actions-menu []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (var opened nil)
+            (var custom-invoked 0)
+            (local original-menu-manager app.menu-manager)
+            (set app.menu-manager {:open (fn [_self opts]
+                                           (set opened opts))})
+            (local node (Graph.GraphNode {:key "menu-node"
+                                          :actions [{:name "Custom Action"
+                                                     :icon "build"
+                                                     :fn (fn [_button _event]
+                                                             (set custom-invoked (+ custom-invoked 1)))}]}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx}))
+            (graph:add-node node {:position (glm.vec3 10 12 0)})
+            (local point (. view.points node))
+            (assert point.on-right-click "GraphView should attach right click handler to node point")
+            (point:on-right-click {:point (glm.vec3 3 4 0)})
+            (assert opened "Right click should open a menu")
+            (assert (= (length opened.actions) 3)
+                    "Node menu should include Open, custom actions, and Remove")
+            (assert (= (. opened.actions 1 :name) "Open"))
+            (assert (= (. opened.actions 2 :name) "Custom Action"))
+            (assert (= (. opened.actions 3 :name) "Remove"))
+            ((. opened.actions 2 :fn) nil {})
+            (assert (= custom-invoked 1)
+                    "Custom node action should be callable from the context menu")
+            ((. opened.actions 3 :fn) nil {})
+            (assert (not (graph:lookup "menu-node"))
+                    "Remove action should remove the node from the graph")
+            (view:drop)
+            (graph:drop)
+            (set app.menu-manager original-menu-manager))))
+
+(fn graph-point-right-click-uses-menu-manager-created-later []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (var opened nil)
+            (local original-menu-manager app.menu-manager)
+            (set app.menu-manager nil)
+            (local node (Graph.GraphNode {:key "late-menu-node"}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx}))
+            (graph:add-node node {:position (glm.vec3 1 1 0)})
+            (set app.menu-manager {:open (fn [_self opts]
+                                           (set opened opts))})
+            (local point (. view.points node))
+            (point:on-right-click {:point (glm.vec3 7 8 0)})
+            (assert opened
+                    "GraphView should resolve app.menu-manager at click time")
+            (view:drop)
+            (graph:drop)
+            (set app.menu-manager original-menu-manager))))
+
+(fn fs-node-actions-include-edit-only-for-files []
+    (with-temp-data-dir
+        (fn [_root]
+            (with-temp-dir
+                (fn [root]
+                    (local file-path (fs.join-path root "note.txt"))
+                    (local dir-path (fs.join-path root "child"))
+                    (fs.create-dirs dir-path)
+                    (fs.write-file file-path "hello")
+                    (local file-node (FsNode {:path file-path}))
+                    (local dir-node (FsNode {:path dir-path}))
+                    (local file-actions (file-node:actions))
+                    (local dir-actions (dir-node:actions))
+                    (local has-edit
+                           (fn [actions]
+                               (var found false)
+                               (each [_ action (ipairs (or actions []))]
+                                   (when (= action.name "Edit")
+                                       (set found true)))
+                               found))
+                    (assert (has-edit file-actions)
+                            "FsNode actions should include Edit for files")
+                    (assert (not (has-edit dir-actions))
+                            "FsNode actions should omit Edit for directories"))))))
+
 (fn graph-node-view-dialog-table-action-adds-table-node []
     (with-temp-data-dir
         (fn [_root]
@@ -988,6 +1072,12 @@
 (table.insert tests {:name "Table node view adds edges for entries" :fn table-node-view-adds-child-nodes})
 (table.insert tests {:name "GraphView removes selected nodes and related edges" :fn graph-removes-selected-nodes-and-edges})
 (table.insert tests {:name "GraphView opens node view in HUD on double click" :fn graph-opens-node-view-in-hud-on-double-click})
+(table.insert tests {:name "GraphView node point right-click opens node actions"
+                     :fn graph-point-right-click-opens-node-actions-menu})
+(table.insert tests {:name "GraphView right-click resolves late menu manager"
+                     :fn graph-point-right-click-uses-menu-manager-created-later})
+(table.insert tests {:name "FsNode actions include edit only for files"
+                     :fn fs-node-actions-include-edit-only-for-files})
 (table.insert tests {:name "Graph node view dialog table action adds table node"
                      :fn graph-node-view-dialog-table-action-adds-table-node})
 (table.insert tests {:name "GraphView emits selection changes" :fn graph-selection-emits-changed})

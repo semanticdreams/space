@@ -545,6 +545,12 @@
 
     (set node.run-request run-llm-request)
 
+    (set node.actions
+         [{:name "Run Request"
+           :icon "play_arrow"
+           :fn (fn [_button _event]
+                   (node:run-request {}))}])
+
     (set node.drop
          (fn [self]
              (each [_ record (ipairs (or self.handlers []))]

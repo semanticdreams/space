@@ -169,6 +169,12 @@
                      (GraphEdge {:source self
                                      :target story-node})))))
 
+    (set node.actions
+         [{:name "Refresh Stories"
+           :icon "refresh"
+           :fn (fn [_button _event]
+                   (node:fetch-list))}])
+
     (local mount node.mount)
     (set node.mount
          (fn [self graph]

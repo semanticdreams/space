@@ -124,6 +124,11 @@
              (when (and options options.on-item)
                  (options.on-item record))
              true))
+    (set node.actions
+         [{:name "Run Tool Call"
+           :icon "play_arrow"
+           :fn (fn [_button _event]
+                   (node:run-request {}))}])
     (set node.drop
          (fn [self]
              (each [_ handler (ipairs (or self.handlers []))]

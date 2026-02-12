@@ -201,6 +201,11 @@
                  (local child (self:create-child-node entry))
                  (graph:add-edge (GraphEdge {:source self
                                                  :target child})))))
+    (set node.actions
+         [{:name "Refresh"
+           :icon "refresh"
+           :fn (fn [_button _event]
+                   (node:emit-items))}])
     (set node.drop
          (fn [self]
              (when self.items-changed
