@@ -12,7 +12,6 @@
 (local InputState (require :input-state-router))
 (local StateBase (require :state-base))
 (local InputModel (require :input-model))
-(global reset-engine-events nil)
 
 (local tests [])
 
