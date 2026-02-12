@@ -98,6 +98,16 @@
                                      :target conversation}))
          conversation))
 
+  (set node.actions
+       [{:name "Refresh"
+         :icon "refresh"
+         :fn (fn [_button _event]
+                 (node:refresh))}
+        {:name "New Conversation"
+         :icon "add_comment"
+         :fn (fn [_button _event]
+                 (node:create-conversation {}))}])
+
   (local drop-fn
     (fn [self]
       (when self.items-changed

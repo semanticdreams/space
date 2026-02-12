@@ -100,6 +100,12 @@
                      (future:cancel)))
              (set self.pending [])))
 
+    (set node.actions
+         [{:name "Refresh User"
+           :icon "refresh"
+           :fn (fn [_button _event]
+                   (node:fetch))}])
+
     (local mount node.mount)
     (set node.mount
          (fn [self graph]

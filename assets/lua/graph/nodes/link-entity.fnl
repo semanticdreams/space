@@ -72,6 +72,12 @@
        (fn [self]
          (self.store:delete-entity self.entity-id)))
 
+  (set node.actions
+       [{:name "Delete Entity"
+         :icon "delete"
+         :fn (fn [_button _event]
+                 (node:delete-entity))}])
+
   (var deleted-handler nil)
   (var updated-handler nil)
 

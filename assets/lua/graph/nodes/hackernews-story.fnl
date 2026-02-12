@@ -160,6 +160,18 @@
              (when self.actions-changed
                  (self.actions-changed:clear))))
 
+    (set node.actions
+         [{:name "Refresh Story"
+           :icon "refresh"
+           :fn (fn [_button _event]
+                   (node:fetch))}
+          {:name "Open Author"
+           :icon "person"
+           :fn (fn [_button _event]
+                   (local author (trim-author (and node.item node.item.by)))
+                   (when author
+                       (node:add-user-node author)))}])
+
     node)
 
 HackerNewsStoryNode

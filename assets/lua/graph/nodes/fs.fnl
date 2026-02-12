@@ -5,6 +5,7 @@
 (local Signal (require :signal))
 (local fs (require :fs))
 (local logging (require :logging))
+(local ExternalEditor (require :external-editor))
 
 (local M {})
 
@@ -142,6 +143,33 @@
                  (local child (self:create-child-node resolved))
                  (graph:add-edge (GraphEdge {:source self
                                                  :target child})))))
+
+    (set node.actions
+         (fn [self]
+             (local actions
+                    [{:name "Refresh"
+                      :icon "refresh"
+                      :fn (fn [_button _event]
+                              (self:emit-items))}
+                     {:name "Show Hidden"
+                      :icon "visibility"
+                      :fn (fn [_button _event]
+                              (set self.include-hidden? true)
+                              (self:emit-items))}
+                     {:name "Hide Hidden"
+                      :icon "visibility_off"
+                      :fn (fn [_button _event]
+                              (set self.include-hidden? false)
+                              (self:emit-items))}])
+             (local resolved-path (and self.path fs.absolute (fs.absolute self.path)))
+             (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
+             (when (and stat stat.exists stat.is-file)
+                 (table.insert actions 2
+                               {:name "Edit"
+                                :icon "edit"
+                                :fn (fn [_button _event]
+                                        (ExternalEditor.open-file resolved-path (fn [] nil)))}))
+             actions))
 
     (set node.drop
          (fn [self]

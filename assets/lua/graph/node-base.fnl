@@ -10,6 +10,7 @@
                  :color color
                  :accent accent
                  :view options.view
+                 :actions (or options.actions [])
                  :size (or options.size 8.0)
                  :graph nil})
     (set node.mount (fn [self graph]

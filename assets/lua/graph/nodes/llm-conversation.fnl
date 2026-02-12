@@ -346,6 +346,25 @@
            (graph:remove-nodes nodes-to-remove))
          (store:delete-conversation self.llm-id)))
 
+  (set node.actions
+       [{:name "Add Message"
+         :icon "add_comment"
+         :fn (fn [_button _event]
+                 (node:add-message {:role "user"
+                                    :content ""}))}
+        {:name "Expand"
+         :icon "unfold_more"
+         :fn (fn [_button _event]
+                 (node:expand))}
+        {:name "Contract"
+         :icon "unfold_less"
+         :fn (fn [_button _event]
+                 (node:contract))}
+        {:name "Delete Conversation"
+         :icon "delete"
+         :fn (fn [_button _event]
+                 (node:delete))}])
+
   (set node.drop
        (fn [self]
          (each [_ record (ipairs self.handlers)]
