@@ -101,8 +101,8 @@
                                 :fn (fn [_button _event]
                                         (local graph self.graph)
                                         (when graph
-                                            (graph:add-edge (GraphEdge {:source self
-                                                                        :target parent-node}))))}))
+                                            (graph:add-edge (GraphEdge {:source parent-node
+                                                                        :target self}))))}))
              (each [_ action (ipairs (or (and options options.extra-actions
                                               (options.extra-actions self)) []))]
                  (table.insert actions action))
