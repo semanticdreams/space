@@ -1,10 +1,10 @@
 (local ModuleNodeView (require :graph/view/views/module))
 
-(fn FnlModuleNodeView [node opts]
+(fn TextModuleNodeView [node opts]
     (local options (or opts {}))
-    (ModuleNodeView node {:name "fnl-module-node-view"
+    (ModuleNodeView node {:name "text-module-node-view"
                           :node (or options.node node)
                           :items (or options.items [])
                           :ctx options.ctx}))
 
-FnlModuleNodeView
+TextModuleNodeView
