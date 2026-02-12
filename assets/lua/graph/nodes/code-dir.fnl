@@ -4,6 +4,7 @@
 (local CodeDirNodeView (require :graph/view/views/code-dir))
 (local FnlModuleNode (require :graph/nodes/fnl-module))
 (local CppModuleNode (require :graph/nodes/cpp-module))
+(local TextModuleNode (require :graph/nodes/text-module))
 (local Signal (require :signal))
 (local fs (require :fs))
 (local logging (require :logging))
@@ -34,6 +35,9 @@
              (string.match entry.name "%.h$")
              (string.match entry.name "%.hpp$")
              (string.match entry.name "%.hh$"))))
+
+(fn text-file? [entry]
+    (and entry entry.is-file (not (fnl-file? entry)) (not (cpp-file? entry))))
 
 (fn sort-entries [entries]
     (table.sort entries
@@ -83,9 +87,7 @@
          (fn [self]
              (local entries [])
              (each [_ entry (ipairs (self:list-directory))]
-                 (when (or entry.is-dir
-                           (fnl-file? entry)
-                           (cpp-file? entry))
+                 (when (or entry.is-dir entry.is-file)
                      (table.insert entries (self:normalize-entry entry))))
              (sort-entries entries)
              (icollect [_ entry (ipairs entries)]
@@ -111,8 +113,13 @@
                  (if (fnl-file? entry)
                      (FnlModuleNode {:path child-path
                                      :lua-root self.root})
-                     (CppModuleNode {:path child-path
-                                     :project-root self.root})))))
+                     (if (cpp-file? entry)
+                         (CppModuleNode {:path child-path
+                                         :project-root self.root})
+                         (if (text-file? entry)
+                             (TextModuleNode {:path child-path
+                                              :project-root self.root})
+                             (error (.. "CodeDirNode unsupported entry: " child-path))))))))
 
     (set node.open-entry
          (fn [self entry]

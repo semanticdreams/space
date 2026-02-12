@@ -1,23 +1,8 @@
 (local glm (require :glm))
-(local {:GraphEdge GraphEdge} (require :graph/edge))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local FnlModuleNodeView (require :graph/view/views/fnl-module))
-(local Signal (require :signal))
-(local ExternalEditor (require :external-editor))
+(local ModuleSemantics (require :graph/nodes/module-semantics))
 (local fs (require :fs))
-(local logging (require :logging))
-
-(fn normalize-path [path]
-    (if (= (type path) :table)
-        (or path.path (tostring path))
-        path))
-
-(fn default-root []
-    (if (and app app.engine app.engine.get-asset-path)
-        (app.engine.get-asset-path "lua")
-        (if (and fs fs.cwd fs.join-path)
-            (fs.join-path (fs.cwd) "assets" "lua")
-            "assets/lua")))
 
 (fn safe-module-segment [module-name]
     (string.gsub module-name "%." "/"))
@@ -48,97 +33,55 @@
     (table.sort list)
     list)
 
-(fn display-label [path root]
-    (if (and path root)
-        (do
-            (local prefix (.. root "/"))
-            (if (= (string.sub path 1 (string.len prefix)) prefix)
-                (string.sub path (+ (string.len prefix) 1))
-                path))
-        path))
+(fn default-root []
+    (if (and app app.engine app.engine.get-asset-path)
+        (app.engine.get-asset-path "lua")
+        (if (and fs fs.cwd fs.join-path)
+            (fs.join-path (fs.cwd) "assets" "lua")
+            "assets/lua")))
 
 (fn FnlModuleNode [opts]
     (local options (or opts {}))
-    (local root (normalize-path (or options.lua-root (default-root))))
-    (local path (normalize-path (or options.path options.module-path)))
+    (local root (ModuleSemantics.normalize-path (or options.lua-root
+                                                    options.root
+                                                    (default-root))))
+    (local path (ModuleSemantics.normalize-path (or options.path options.module-path)))
     (assert path "FnlModuleNode requires path")
     (local absolute-path (if (and path fs.absolute)
                              (fs.absolute path)
                              path))
     (local key (or options.key (.. "fnl-module:" absolute-path)))
-    (local label (or options.label (display-label absolute-path root)))
+    (local label (or options.label (ModuleSemantics.display-label absolute-path root)))
     (local node (GraphNode {:key key
                             :label label
                             :color (glm.vec4 0.7 0.45 0.8 1)
                             :sub-color (glm.vec4 0.6 0.35 0.7 1)
                             :size 8.0
                             :view FnlModuleNodeView}))
-    (set node.kind "fnl-module")
-    (set node.path absolute-path)
     (set node.lua-root root)
-    (set node.items-changed (Signal))
 
-    (set node.read-source
-         (fn [self]
-             (local (ok content) (pcall fs.read-file self.path))
-             (if ok
-                 content
-                 (do
-                     (logging.warn (.. "FnlModuleNode failed reading " self.path ": " content))
-                     nil))))
+    (local semantics
+        {:kind "fnl-module"
+         :path absolute-path
+         :project-root root
+         :collect-items (fn [self]
+                            (local source (self:read-source))
+                            (local requires (parse-requires source))
+                            (local items [])
+                            (each [_ module-name (ipairs requires)]
+                                (local dependency-path (resolve-module-path self.project-root module-name))
+                                (when dependency-path
+                                    (table.insert items [{:module module-name
+                                                          :path dependency-path}
+                                                         module-name])))
+                            items)
+         :resolve-child-node (fn [self item]
+                                 (local path (and item item.path))
+                                 (when path
+                                     (FnlModuleNode {:path path
+                                                     :lua-root self.project-root})))})
 
-    (set node.collect-items
-         (fn [self]
-             (local source (self:read-source))
-             (local requires (parse-requires source))
-             (local items [])
-             (each [_ module-name (ipairs requires)]
-                 (local dependency-path (resolve-module-path self.lua-root module-name))
-                 (when dependency-path
-                     (table.insert items [{:module module-name
-                                           :path dependency-path}
-                                          module-name])))
-             items))
-
-    (set node.emit-items
-         (fn [self]
-             (local items (self:collect-items))
-             (self.items-changed:emit items)
-             items))
-
-    (set node.open-entry
-         (fn [self entry]
-             (local graph self.graph)
-             (local item (if (= (type entry) :table)
-                             (or entry (. entry 1) entry)
-                             entry))
-             (local path (and item item.path))
-             (when (and graph path)
-                 (local child (FnlModuleNode {:path path
-                                              :lua-root self.lua-root}))
-                 (graph:add-edge (GraphEdge {:source self
-                                             :target child})))))
-
-    (set node.actions
-         (fn [self]
-             (local actions
-                    [{:name "Refresh"
-                      :icon "refresh"
-                      :fn (fn [_button _event]
-                              (self:emit-items))}])
-             (local stat (and fs.stat (fs.stat self.path)))
-             (when (and stat stat.exists stat.is-file)
-                 (table.insert actions 2
-                               {:name "Edit"
-                                :icon "edit"
-                                :fn (fn [_button _event]
-                                        (ExternalEditor.open-file self.path (fn [] nil)))}))
-             actions))
-
-    (set node.drop
-         (fn [self]
-             (when self.items-changed
-                 (self.items-changed:clear))))
+    (ModuleSemantics.apply-module-semantics node semantics)
 
     node)
 
