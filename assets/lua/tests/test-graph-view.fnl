@@ -287,6 +287,30 @@
                     (assert (= (graph:edge-count) 1))
                     (graph:drop))))))
 
+(fn fs-node-actions-open-fnl-module-for-fnl-files []
+    (with-temp-data-dir
+        (fn [_root]
+            (with-temp-dir
+                (fn [root]
+                    (local path (fs.join-path root "main.fnl"))
+                    (fs.write-file path "(local x 1)\n")
+                    (local graph (Graph {:with-start false}))
+                    (local node (FsNode {:path path}))
+                    (graph:add-node node {:position (glm.vec3 0 0 0)})
+                    (local actions (node:actions))
+                    (var module-action nil)
+                    (each [_ action (ipairs actions)]
+                        (when (= action.name "Open as Fennel Module")
+                            (set module-action action)))
+                    (assert module-action
+                            "FsNode .fnl actions should include Open as Fennel Module")
+                    (module-action.fn nil {})
+                    (local module-key (.. "fnl-module:" (fs.absolute path)))
+                    (assert (graph:lookup module-key)
+                            "Open as Fennel Module should add fnl-module node")
+                    (assert (= (graph:edge-count) 1))
+                    (graph:drop))))))
+
 (fn fnl-module-node-view-adds-required-module-node []
     (with-temp-data-dir
         (fn [_root]
@@ -401,6 +425,24 @@
                             (set has-open-parent true)))
                     (assert has-edit "TextModuleNode should expose Edit action")
                     (assert has-open-parent "TextModuleNode should expose Open Parent Dir action")
+                    (var open-parent-action nil)
+                    (each [_ action (ipairs actions)]
+                        (when (= action.name "Open Parent Dir")
+                            (set open-parent-action action)))
+                    (assert open-parent-action "TextModuleNode should provide Open Parent Dir action")
+                    (open-parent-action.fn nil {})
+                    (local parent-key (.. "code-dir:" (fs.absolute docs)))
+                    (local parent-node (graph:lookup parent-key))
+                    (assert parent-node "Open Parent Dir should add parent code-dir node")
+                    (assert (= (graph:edge-count) 2)
+                            "Open Parent Dir should add one more graph edge")
+                    (var saw-parent-edge false)
+                    (each [_ edge (ipairs graph.edges)]
+                        (when (and (= edge.source parent-node)
+                                   (= edge.target node))
+                            (set saw-parent-edge true)))
+                    (assert saw-parent-edge
+                            "Open Parent Dir edge should flow downward from parent code-dir to module")
                     (view:drop)
                     (graph:drop))))))
 
@@ -1269,6 +1311,8 @@
 (table.insert tests {:name "Fs node view adds edges for entries" :fn fs-node-view-adds-child-nodes-for-entries})
 (table.insert tests {:name "Fs node actions open code-dir for directories"
                      :fn fs-node-actions-open-code-dir-for-directories})
+(table.insert tests {:name "Fs node actions open fnl-module for .fnl files"
+                     :fn fs-node-actions-open-fnl-module-for-fnl-files})
 (table.insert tests {:name "Code dir node view adds edges for dir and module entries"
                      :fn code-dir-node-view-adds-subdir-and-module-nodes})
 (table.insert tests {:name "Fnl module node view adds dependency module edge"

@@ -20,6 +20,18 @@
         (string.lower text)
         ""))
 
+(fn fnl-path? [path]
+    (and path (string.match (safe-lower path) "%.fnl$")))
+
+(fn cpp-path? [path]
+    (and path
+         (or (string.match (safe-lower path) "%.cpp$")
+             (string.match (safe-lower path) "%.cc$")
+             (string.match (safe-lower path) "%.cxx$")
+             (string.match (safe-lower path) "%.h$")
+             (string.match (safe-lower path) "%.hpp$")
+             (string.match (safe-lower path) "%.hh$"))))
+
 (fn M.resolve-path [self path]
     (normalize-path (or path self)))
 
@@ -159,6 +171,41 @@
                                              :target code-node}))
                  code-node)))
 
+    (set node.create-module-node
+         (fn [_self module-kind module-path]
+             (if (= module-kind :fnl)
+                 (do
+                     (local FnlModuleNode (require :graph/nodes/fnl-module))
+                     (local lua-root
+                            (if (and app app.engine app.engine.get-asset-path)
+                                (app.engine.get-asset-path "lua")
+                                (and fs.cwd fs.join-path (fs.join-path (fs.cwd) "assets" "lua"))))
+                     (FnlModuleNode {:path module-path
+                                     :lua-root lua-root}))
+                 (if (= module-kind :cpp)
+                     (do
+                         (local CppModuleNode (require :graph/nodes/cpp-module))
+                         (CppModuleNode {:path module-path
+                                         :project-root (if fs.cwd (fs.cwd) ".")}))
+                     (if (= module-kind :text)
+                         (do
+                             (local TextModuleNode (require :graph/nodes/text-module))
+                             (TextModuleNode {:path module-path
+                                              :project-root (if fs.cwd (fs.cwd) ".")}))
+                         nil)))))
+
+    (set node.open-module-node
+         (fn [self module-kind]
+             (local graph self.graph)
+             (assert graph "FsNode requires a mounted graph to open module nodes")
+             (local resolved-path (and self.path fs.absolute (fs.absolute self.path)))
+             (assert resolved-path "FsNode requires a path to open module nodes")
+             (local module-node (self:create-module-node module-kind resolved-path))
+             (when module-node
+                 (graph:add-edge (GraphEdge {:source self
+                                             :target module-node}))
+                 module-node)))
+
     (set node.actions
          (fn [self]
              (local actions
@@ -190,6 +237,26 @@
                                 :icon "edit"
                                 :fn (fn [_button _event]
                                         (ExternalEditor.open-file resolved-path (fn [] nil)))}))
+             (when (and stat stat.exists stat.is-file resolved-path (fnl-path? resolved-path))
+                 (table.insert actions 2
+                               {:name "Open as Fennel Module"
+                                :icon "code"
+                                :fn (fn [_button _event]
+                                        (self:open-module-node :fnl))}))
+             (when (and stat stat.exists stat.is-file resolved-path (cpp-path? resolved-path))
+                 (table.insert actions 2
+                               {:name "Open as C++ Module"
+                                :icon "code"
+                                :fn (fn [_button _event]
+                                        (self:open-module-node :cpp))}))
+             (when (and stat stat.exists stat.is-file resolved-path
+                        (not (fnl-path? resolved-path))
+                        (not (cpp-path? resolved-path)))
+                 (table.insert actions 2
+                               {:name "Open as Text Module"
+                                :icon "code"
+                                :fn (fn [_button _event]
+                                        (self:open-module-node :text))}))
              actions))
 
     (set node.drop
