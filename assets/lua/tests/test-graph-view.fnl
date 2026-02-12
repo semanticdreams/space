@@ -7,6 +7,8 @@
 (local GraphViewPersistence (require :graph/view/persistence))
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
+(local CodeDirNode (require :graph/nodes/code-dir))
+(local FnlModuleNode (require :graph/nodes/fnl-module))
 (local LlmConversationNode (require :graph/nodes/llm-conversation))
 (local LlmConversationsNode (require :graph/nodes/llm-conversations))
 (local LlmMessageNode (require :graph/nodes/llm-message))
@@ -205,6 +207,106 @@
             (assert (= (graph:edge-count) 1))
             (view:drop)
             (graph:drop))))
+
+(fn start-node-view-adds-code-dir-node []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {}))
+            (local start graph.start)
+            (local builder (start.view start))
+            (local view (builder ctx))
+            (view:refresh-items)
+            (var code-node nil)
+            (each [_ pair (ipairs view.search.items)]
+                (local candidate (. pair 1))
+                (when (and candidate
+                           (= candidate.kind "code-dir")
+                           (= (string.sub (or candidate.key "") 1 9) "code-dir:"))
+                    (set code-node candidate)))
+            (assert code-node "Start view should list code-dir node for assets/lua")
+            (view:add-edge code-node)
+            (assert (graph:lookup code-node.key))
+            (assert (= (graph:edge-count) 1))
+            (view:drop)
+            (graph:drop))))
+
+(fn code-dir-node-view-adds-subdir-and-module-nodes []
+    (with-temp-data-dir
+        (fn [_root]
+            (with-temp-dir
+                (fn [root]
+                    (local subdir (fs.join-path root "sub"))
+                    (local fnl-file (fs.join-path root "main.fnl"))
+                    (local txt-file (fs.join-path root "ignore.txt"))
+                    (fs.create-dirs subdir)
+                    (fs.write-file fnl-file "(local x 1)\n")
+                    (fs.write-file txt-file "skip")
+                    (local ctx (make-ctx))
+                    (local graph (Graph {:with-start false}))
+                    (local node (CodeDirNode {:path root :lua-root root}))
+                    (graph:add-node node {:position (glm.vec3 0 0 0)})
+                    (local builder (node.view node))
+                    (local view (builder ctx))
+                    (view:refresh-items)
+                    (var dir-entry nil)
+                    (var module-entry nil)
+                    (var txt-seen false)
+                    (each [_ pair (ipairs view.search.items)]
+                        (local entry (. pair 1))
+                        (when (= entry.path subdir)
+                            (set dir-entry entry))
+                        (when (= entry.path fnl-file)
+                            (set module-entry entry))
+                        (when (= entry.path txt-file)
+                            (set txt-seen true)))
+                    (assert dir-entry "CodeDir should include subdirectories")
+                    (assert module-entry "CodeDir should include .fnl files")
+                    (assert (not txt-seen) "CodeDir should exclude non-fnl files")
+                    (view:open-entry dir-entry)
+                    (view:open-entry module-entry)
+                    (local subdir-key (.. "code-dir:" (fs.absolute subdir)))
+                    (local module-key (.. "fnl-module:" (fs.absolute fnl-file)))
+                    (assert (graph:lookup subdir-key) "Opening dir entry should add code-dir child")
+                    (assert (graph:lookup module-key) "Opening module entry should add fnl-module child")
+                    (assert (= (graph:edge-count) 2))
+                    (view:drop)
+                    (graph:drop))))))
+
+(fn fnl-module-node-view-adds-required-module-node []
+    (with-temp-data-dir
+        (fn [_root]
+            (with-temp-dir
+                (fn [root]
+                    (local subdir (fs.join-path root "sub"))
+                    (local main-file (fs.join-path root "main.fnl"))
+                    (local dep-file (fs.join-path subdir "dep.fnl"))
+                    (fs.create-dirs subdir)
+                    (fs.write-file main-file "(local dep (require :sub/dep))\n")
+                    (fs.write-file dep-file "(local x 1)\n")
+                    (local ctx (make-ctx))
+                    (local graph (Graph {:with-start false}))
+                    (local node (FnlModuleNode {:path main-file :lua-root root}))
+                    (graph:add-node node {:position (glm.vec3 0 0 0)})
+                    (local actions (node:actions))
+                    (var has-edit false)
+                    (each [_ action (ipairs actions)]
+                        (when (= action.name "Edit")
+                            (set has-edit true)))
+                    (assert has-edit "FnlModuleNode should expose Edit action")
+                    (local builder (node.view node))
+                    (local view (builder ctx))
+                    (view:refresh-items)
+                    (assert (> (length view.search.items) 0)
+                            "FnlModule should list resolvable requires")
+                    (local entry (. (. view.search.items 1) 1))
+                    (view.search.submitted:emit [entry "sub/dep"])
+                    (local dep-key (.. "fnl-module:" (fs.absolute dep-file)))
+                    (assert (graph:lookup dep-key)
+                            "Submitting dependency should add fnl-module node")
+                    (assert (= (graph:edge-count) 1))
+                    (view:drop)
+                    (graph:drop))))))
 
 (fn nodes-default-to-center-position []
     (with-temp-data-dir
@@ -1062,6 +1164,7 @@
 (table.insert tests {:name "Start node view adds quit node edge" :fn start-node-view-adds-quit-node})
 (table.insert tests {:name "Start node view adds fs node edge" :fn start-node-view-adds-fs-node})
 (table.insert tests {:name "Start node view adds table node edge" :fn start-node-view-adds-table-node})
+(table.insert tests {:name "Start node view adds code-dir node edge" :fn start-node-view-adds-code-dir-node})
 (table.insert tests {:name "GraphView seeds new nodes at layout center" :fn nodes-default-to-center-position})
 (table.insert tests {:name "Quit node view invokes handler" :fn quit-node-view-invokes-handler})
 (table.insert tests {:name "Llm conversation view adds message node" :fn llm-conversation-view-adds-message-node})
@@ -1069,6 +1172,10 @@
 (table.insert tests {:name "Llm conversations view builds" :fn llm-conversations-view-builds})
 (table.insert tests {:name "Llm node view adds conversations" :fn llm-node-view-adds-conversations})
 (table.insert tests {:name "Fs node view adds edges for entries" :fn fs-node-view-adds-child-nodes-for-entries})
+(table.insert tests {:name "Code dir node view adds edges for dir and module entries"
+                     :fn code-dir-node-view-adds-subdir-and-module-nodes})
+(table.insert tests {:name "Fnl module node view adds dependency module edge"
+                     :fn fnl-module-node-view-adds-required-module-node})
 (table.insert tests {:name "Table node view adds edges for entries" :fn table-node-view-adds-child-nodes})
 (table.insert tests {:name "GraphView removes selected nodes and related edges" :fn graph-removes-selected-nodes-and-edges})
 (table.insert tests {:name "GraphView opens node view in HUD on double click" :fn graph-opens-node-view-in-hud-on-double-click})
