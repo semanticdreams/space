@@ -17,6 +17,231 @@
 (local ScrollWidget (require :next-app/scroll-widget))
 (local VirtualListWidget (require :next-app/virtual-list-widget))
 (local InteractionRouter (require :next-app/interaction-router))
+(local CuboidWidget (require :next-app/cuboid-widget))
+(local NextNode NextLayout.Node)
+
+(fn identity-rotation []
+  (glm.quat 1 0 0 0))
+
+(fn make-rng [seed]
+  (var state (or seed 1))
+  (fn next-float []
+    (set state (% (+ (* state 1664525) 1013904223) 4294967296))
+    (/ state 4294967296.0))
+  next-float)
+
+(fn random-range [next-float min max]
+  (+ min (* (next-float) (- max min))))
+
+(fn random-string [next-float len]
+  (local chars "ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+  (var out "")
+  (for [_ 1 len]
+    (local idx (+ 1 (math.floor (* (next-float) (# chars)))))
+    (set out (.. out (string.sub chars idx idx))))
+  out)
+
+(fn random-int-range [next-float min max]
+  (local span (+ 1 (- max min)))
+  (+ min (math.floor (* (next-float) span))))
+
+(fn random-multiline-text [next-float]
+  (local line-count (random-int-range next-float 3 20))
+  (var out "")
+  (for [line 1 line-count]
+    (local line-length (random-int-range next-float 3 28))
+    (set out (.. out (random-string next-float line-length)))
+    (when (< line line-count)
+      (set out (.. out "\n"))))
+  out)
+
+(fn random-unit-axis [next-float]
+  (local x (random-range next-float -1 1))
+  (local y (random-range next-float -1 1))
+  (local z (random-range next-float -1 1))
+  (local mag (math.sqrt (+ (* x x) (* y y) (* z z))))
+  (if (< mag 1e-6)
+      (glm.vec3 0 0 1)
+      (glm.vec3 (/ x mag) (/ y mag) (/ z mag))))
+
+(fn random-face-color [next-float]
+  (glm.vec4 (random-range next-float 0.20 0.82)
+            (random-range next-float 0.20 0.82)
+            (random-range next-float 0.20 0.82)
+            0.95))
+
+(fn fixed-ten-lines [prefix]
+  (.. prefix " 01\n"
+      prefix " 02\n"
+      prefix " 03\n"
+      prefix " 04\n"
+      prefix " 05\n"
+      prefix " 06\n"
+      prefix " 07\n"
+      prefix " 08\n"
+      prefix " 09\n"
+      prefix " 10"))
+
+(fn build-face [name text color opts]
+  (local text-scale (or (and opts opts.text-scale) 0.03))
+  (local text-padding (or (and opts opts.text-padding) [0.02 0.02]))
+  (local text-depth-offset (or (and opts opts.text-depth-offset) 0.001))
+  (local panel (PanelWidget {:name (.. name "-panel")
+                             :padding [0 0]
+                             :color color}))
+  (local label
+    (if text
+        (TextWidget {:name (.. name "-text")
+                     :text text
+                     :scale text-scale})
+        nil))
+  (local pad-x (or (. text-padding 1) 0))
+  (local pad-y (or (. text-padding 2) 0))
+  (local face
+    (NextNode.new
+      {:name name
+       :measure-fn (fn [self max-width max-height max-depth]
+                     (panel:run-measure max-width max-height max-depth)
+                     (var measured-width panel.measured-width)
+                     (var measured-height panel.measured-height)
+                     (when label
+                       (label:run-measure max-width max-height max-depth)
+                       (set measured-width (math.max measured-width
+                                                    (+ label.measured-width (* pad-x 2))))
+                       (set measured-height (math.max measured-height
+                                                     (+ label.measured-height (* pad-y 2)))))
+                     (self:set-measure measured-width measured-height 0))
+       :layout-fn (fn [self width height depth]
+                    (self:set-size width height depth {:mark-dirty? false})
+                    (panel:layout-set-frame 0 0 0 width height 0 (identity-rotation))
+                    (panel:run-layout panel.width panel.height panel.depth)
+                    (when label
+                      (local label-y (math.max pad-y (- height pad-y label.measured-height)))
+                      (label:layout-set-frame pad-x
+                                              label-y
+                                              text-depth-offset
+                                              (math.max 0 (- width (* pad-x 2)))
+                                              (math.max 0 (- height (* pad-y 2)))
+                                              0
+                                              (identity-rotation))
+                      (label:run-layout label.width label.height label.depth)))}))
+  (face:add-child panel)
+  (when label
+    (face:add-child label))
+  (set face.emit-quads
+       (fn [_self quad-batcher clip-matrix]
+         (panel:emit-quads quad-batcher clip-matrix)))
+  (set face.emit-ssbo
+       (fn [_self text-batcher clip-matrix]
+         (when label
+           (label:emit-ssbo text-batcher clip-matrix))))
+  face)
+
+(fn resolve-entry-size [entry node]
+  (if (= entry.use-measured-size true)
+      (do
+        (local measured-w (math.max 0.01 node.measured-width))
+        (local measured-h (math.max 0.01 node.measured-height))
+        (local measured-d (math.max 0.01 node.measured-depth))
+        (local measured-max (math.max measured-w measured-h measured-d))
+        (local target-max (or entry.measured-target-max
+                              (or entry.measured-fit-max measured-max)))
+        (local scale
+          (if (> measured-max 0)
+              (/ target-max measured-max)
+              1.0))
+        {:w (* measured-w scale)
+         :h (* measured-h scale)
+         :d (* measured-d scale)})
+      {:w entry.w :h entry.h :d entry.d}))
+
+(fn resolve-entry-position [entry size]
+  (if (= entry.center-on-origin true)
+      {:x (- 0 (/ size.w 2))
+       :y (- 0 (/ size.h 2))
+       :z (- 0 (/ size.d 2))}
+      {:x entry.x :y entry.y :z entry.z}))
+
+(fn build-cuboid-cloud [renderer-options]
+  (local count (or renderer-options.cuboid-count 100))
+  (if (<= count 0)
+      []
+      (do
+        (local next-float (make-rng (or renderer-options.cuboid-seed 1337)))
+        (local base-rot-y (glm.quat 0.72 (glm.vec3 0 1 0)))
+        (local base-rot-x (glm.quat -0.52 (glm.vec3 1 0 0)))
+        (if (= count 1)
+            (do
+              (local cuboid (CuboidWidget {:name "next-cuboid-1"
+                                           :children [(build-face "next-cuboid-front-1" (fixed-ten-lines "FRONT") (glm.vec4 1.0 0.1 0.1 1.0)
+                                                                  {:text-padding [0.03 0.03]})
+                                                      (build-face "next-cuboid-back-1" (fixed-ten-lines "BACK") (glm.vec4 0.1 1.0 0.1 1.0)
+                                                                  {:text-padding [0.03 0.03]})
+                                                      (build-face "next-cuboid-left-1" (fixed-ten-lines "LEFT") (glm.vec4 0.1 0.4 1.0 1.0)
+                                                                  {:text-padding [0.03 0.03]})
+                                                      (build-face "next-cuboid-right-1" (fixed-ten-lines "RIGHT") (glm.vec4 1.0 0.2 0.9 1.0)
+                                                                  {:text-padding [0.03 0.03]})
+                                                      (build-face "next-cuboid-top-1" nil (glm.vec4 1.0 1.0 0.2 1))
+                                                      (build-face "next-cuboid-bottom-1" nil (glm.vec4 0.4 0.9 1.0 1))]}))
+              [{:node cuboid
+                :x 0
+                :y 0
+                :z 0
+                :use-measured-size true
+                :measured-target-max 1.20
+                :center-on-origin true
+                :rotation (glm.quat 1 0 0 0)}])
+            (do
+              (local columns (math.max 1 (math.floor (+ 0.5 (math.sqrt count)))))
+              (local rows (math.max 1 (math.ceil (/ count columns))))
+              (local min-x -1.52)
+              (local max-x 1.52)
+              (local min-y -0.88)
+              (local max-y 0.88)
+              (local span-x (- max-x min-x))
+              (local span-y (- max-y min-y))
+              (local cell-w (/ span-x columns))
+              (local cell-h (/ span-y rows))
+              (local cuboids [])
+              (for [i 1 count]
+                (local front-text (random-multiline-text next-float))
+                (local back-text (random-multiline-text next-float))
+                (local left-text (random-multiline-text next-float))
+                (local right-text (random-multiline-text next-float))
+                (local front-color (random-face-color next-float))
+                (local back-color (random-face-color next-float))
+                (local left-color (random-face-color next-float))
+                (local right-color (random-face-color next-float))
+                (local top-color (random-face-color next-float))
+                (local bottom-color (random-face-color next-float))
+                (local cuboid
+                  (CuboidWidget {:name (.. "next-cuboid-" i)
+                                 :children [(build-face (.. "next-cuboid-front-" i) front-text front-color
+                                                        {:text-padding [0.01 0.01]})
+                                            (build-face (.. "next-cuboid-back-" i) back-text back-color
+                                                        {:text-padding [0.01 0.01]})
+                                            (build-face (.. "next-cuboid-left-" i) left-text left-color
+                                                        {:text-padding [0.01 0.01]})
+                                            (build-face (.. "next-cuboid-right-" i) right-text right-color
+                                                        {:text-padding [0.01 0.01]})
+                                            (build-face (.. "next-cuboid-top-" i) nil top-color)
+                                            (build-face (.. "next-cuboid-bottom-" i) nil bottom-color)]}))
+                (local col (% (- i 1) columns))
+                (local row (math.floor (/ (- i 1) columns)))
+                (local grid-x (+ min-x (* (+ col 0.5) cell-w)))
+                (local grid-y (- max-y (* (+ row 0.5) cell-h)))
+                (local x (+ grid-x (random-range next-float (* -0.28 cell-w) (* 0.28 cell-w))))
+                (local y (+ grid-y (random-range next-float (* -0.28 cell-h) (* 0.28 cell-h))))
+                (local z (random-range next-float -0.16 0.22))
+                (local twist (glm.quat (random-range next-float -0.28 0.28) (glm.vec3 0 0 1)))
+                (table.insert cuboids
+                              {:node cuboid
+                               :x x
+                               :y y
+                               :z z
+                               :use-measured-size true
+                               :rotation (* twist (* base-rot-y base-rot-x))}))
+              cuboids)))))
 
 (fn build-ui-root [renderer-options]
   (local router (InteractionRouter.new))
@@ -201,14 +426,50 @@
                     :gap 0.08
                     :children [(NextFlex.FlexChild card 1)
                                (NextFlex.FlexChild footer 0)]}))
+  (local cuboids (build-cuboid-cloud renderer-options))
+  (local cloud-root
+    (NextLayout.Node.new {:name "next-cuboid-cloud"
+                          :measure-fn (fn [self _mw _mh _md]
+                                        (self:set-measure 0 0 0))
+                          :layout-fn (fn [self width height depth]
+                                       (self:set-size width height depth {:mark-dirty? false})
+                                       (each [_ entry (ipairs cuboids)]
+                                         (local node entry.node)
+                                         (local size (resolve-entry-size entry node))
+                                         (local pos (resolve-entry-position entry size))
+                                         (node:layout-set-frame pos.x
+                                                                pos.y
+                                                                pos.z
+                                                                size.w
+                                                                size.h
+                                                                size.d
+                                                                entry.rotation)
+                                         (node:run-layout node.width node.height node.depth)))}))
+  (each [_ entry (ipairs cuboids)]
+    (cloud-root:add-child entry.node))
+  (local show-ui? false)
+  (local scene-root
+    (NextLayout.Node.new {:name "next-scene-root"
+                          :measure-fn (fn [self max-width max-height _max-depth]
+                                        (self:set-measure max-width max-height 0))
+                          :layout-fn (fn [self width height depth]
+                                       (self:set-size width height depth {:mark-dirty? false})
+                                       (when show-ui?
+                                         (root:layout-set-frame 0 0 0 width height 0 (identity-rotation))
+                                         (root:run-layout root.width root.height root.depth))
+                                       (cloud-root:layout-set-frame 0 0 0 width height depth (identity-rotation))
+                                       (cloud-root:run-layout cloud-root.width cloud-root.height cloud-root.depth))}))
+  (scene-root:add-child cloud-root)
+  (when show-ui?
+    (scene-root:add-child root))
   (local root-position
     (or renderer-options.root-position
-        {:x -0.9 :y -0.82 :z 0 :rotation-z 0}))
-  (root:set-local-position root-position.x
-                           root-position.y
-                           (or root-position.z 0)
-                           (or root-position.rotation-z 0))
-  {:root root
+        {:x 0 :y 0 :z 0 :rotation (glm.quat 1 0 0 0)}))
+  (scene-root:set-local-position root-position.x
+                                 root-position.y
+                                 (or root-position.z 0)
+                                 (or root-position.rotation (glm.quat 1 0 0 0)))
+  {:root scene-root
    :router router
    :focus-context focus-context
    :run-button run-button
@@ -225,7 +486,7 @@
   (local text-batcher (TextSsboBatcher {}))
   (local quad-batcher (QuadBatcher {:instance-stride quad-renderer.instance-stride}))
   (var projection (glm.mat4 1))
-  (local view (glm.mat4 1))
+  (var view (glm.mat4 1))
   (var viewport-width (or (and options.size options.size.x) 300))
   (var viewport-height (or (and options.size options.size.y) 200))
   (local ui (build-ui-root renderer-options))
@@ -248,23 +509,44 @@
     (when (not scenario-applied)
       (set scenario-applied true)
       (local scenario (or renderer-options.scenario :default))
+      (when (and (= renderer-options.cuboid-only? true)
+                 app
+                 app.lights)
+        (app.lights.set-ambient (glm.vec3 1 1 1))
+        (app.lights.set-directional [])
+        (app.lights.set-point [])
+        (app.lights.set-spot []))
       (if (= scenario :focused)
           (do
-            (ui.run-button:on-hovered true)
-            (ui.inspect-button:on-pressed true)
-            (ui.search-input:set-focused true)
-            (when (not (= (ui.search-input:get-text) "cpu > 0.7"))
-              (ui.search-input:set-text "cpu > 0.7")))
+            (when ui.run-button
+              (ui.run-button:on-hovered true))
+            (when ui.inspect-button
+              (ui.inspect-button:on-pressed true))
+            (when ui.search-input
+              (ui.search-input:set-focused true)
+              (when (not (= (ui.search-input:get-text) "cpu > 0.7"))
+                (ui.search-input:set-text "cpu > 0.7"))))
           (if (= scenario :scrolled)
               (do
-                (ui.virtual-list:set-scroll-y 6.4)
-                (when (not (= (ui.search-input:get-text) "item"))
-                  (ui.search-input:set-text "item"))
-                (ui.search-input:set-focused false))
+                (when ui.virtual-list
+                  (ui.virtual-list:set-scroll-y 6.4))
+                (when ui.search-input
+                  (when (not (= (ui.search-input:get-text) "item"))
+                    (ui.search-input:set-text "item"))
+                  (ui.search-input:set-focused false)))
               nil))))
 
   (fn update-projection []
-    (set projection (glm.mat4 1)))
+    (if (= renderer-options.cuboid-only? true)
+        (do
+          (local aspect (if (= viewport-height 0) 1 (/ viewport-width viewport-height)))
+          (set projection (glm.perspective (math.rad 52) aspect 0.01 20.0))
+          (set view (glm.lookAt (glm.vec3 1.7 1.3 3.0)
+                                (glm.vec3 0 0 0)
+                                (glm.vec3 0 1 0))))
+        (do
+          (set projection (glm.mat4 1))
+          (set view (glm.mat4 1)))))
 
   (fn emit-subtree [node inherited-clip-matrix force-reemit]
     (local subtree-version (or node._subtree-render-version 0))
@@ -314,11 +596,11 @@
     (set viewport-height (or h viewport-height))
     (update-projection))
 
-  (fn set-root-transform [_self x y z rotation-z]
+  (fn set-root-transform [_self x y z rotation]
     (root:set-local-position (or x root.local-x)
                              (or y root.local-y)
                              (or z root.local-z)
-                             (or rotation-z root.local-rotation-z)))
+                             (or rotation root.local-rotation)))
 
   (fn prerender [_self]
     (local submit-start (os.clock))

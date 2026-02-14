@@ -22,26 +22,36 @@
 
 (fn capture-scenario [ctx scenario]
   (var scenario-sub-app nil)
+  (local sub-app-size (or scenario.sub-app-size (glm.vec3 20 13 0)))
+  (local sub-app-units-per-pixel (or scenario.sub-app-units-per-pixel ctx.units-per-pixel))
+  (local sub-app-view
+    (SubAppView
+      {:name (.. "next-app-snapshot-" scenario.name)
+       :size sub-app-size
+       :units-per-pixel sub-app-units-per-pixel
+       :on-sub-app (fn [sub-app]
+                     (set scenario-sub-app sub-app))
+       :sub-app-builder NextAppSubApp
+       :sub-app-options
+       {:renderer-options
+        {:title scenario.title
+         :subtitle scenario.subtitle
+         :note scenario.note
+         :footer scenario.footer
+         :scenario scenario.scenario
+         :cuboid-only? scenario.cuboid-only?
+         :cuboid-count (or scenario.cuboid-count 100)
+         :cuboid-seed (or scenario.cuboid-seed 1337)
+         :enable-focus true
+         :root-width (or scenario.root-width 1.82)
+         :root-height (or scenario.root-height 1.66)
+         :root-position (or scenario.root-position
+                            {:x 0 :y 0 :z 0 :rotation (glm.quat 1 0 0 0)})}}}))
   (local dialog-builder
-    (DefaultDialog
-      {:title "Next App Snapshot"
-       :child (SubAppView {:name (.. "next-app-snapshot-" scenario.name)
-                           :size (glm.vec3 20 13 0)
-                           :units-per-pixel ctx.units-per-pixel
-                           :on-sub-app (fn [sub-app]
-                                         (set scenario-sub-app sub-app))
-                           :sub-app-builder NextAppSubApp
-                           :sub-app-options
-                           {:renderer-options
-                            {:title scenario.title
-                             :subtitle scenario.subtitle
-                             :note scenario.note
-                             :footer scenario.footer
-                             :scenario scenario.scenario
-                             :enable-focus true
-                             :root-width 1.82
-                             :root-height 1.66
-                             :root-position {:x -0.91 :y -0.83 :z 0 :rotation-z 0}}}})}))
+    (if (= scenario.cuboid-only? true)
+        sub-app-view
+        (DefaultDialog {:title "Next App Snapshot"
+                        :child sub-app-view})))
   (local sized
     (Sized {:size (glm.vec3 33 23 0)
             :child (fn [child-ctx]
@@ -83,7 +93,21 @@
             :title "Next App Scrolled Snapshot"
             :subtitle "Virtual list deep scroll"
             :note "Interaction state: scrolled"
-            :footer "Scrolled"}])
+            :footer "Scrolled"}
+           {:name "next-app-cuboids"
+           :scenario :default
+           :cuboid-only? true
+           :cuboid-count 1
+           :cuboid-seed 1337
+            :sub-app-size (glm.vec3 8 6 0)
+            :sub-app-units-per-pixel 0.005
+            :root-width 2.2
+            :root-height 1.8
+            :root-position {:x 0 :y 0 :z 0 :rotation (glm.quat 1 0 0 0)}
+            :title "Next App Cuboids Snapshot"
+            :subtitle "Single cuboid"
+            :note "Cuboid-only verification frame"
+            :footer "Cuboid"}])
         (each [_ scenario (ipairs scenarios)]
           (capture-scenario ctx scenario)))
       debug.traceback))
@@ -91,7 +115,8 @@
     (error err)))
 
 (fn main []
-  (Harness.with-app {}
+  (Harness.with-app {:width 1280
+                     :height 720}
                    (fn [ctx]
                      (run ctx)))
   (print "E2E next-app snapshot complete"))
