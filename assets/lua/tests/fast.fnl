@@ -24,6 +24,7 @@
     :tests.test-theme-widgets
     :tests.test-theme-switch
     :tests.test-text
+    :tests.test-text-ssbo-batcher
     :tests.test-dialog
     :tests.test-hud-control-panel
     :tests.test-deep-dialog
@@ -37,6 +38,16 @@
     :tests.test-grid
     :tests.test-padding
     :tests.test-stack
+    :tests.test-next-layout
+    :tests.test-next-app-widgets
+    :tests.test-next-app-button
+    :tests.test-next-app-core-widgets
+    :tests.test-next-app-text-widget
+    :tests.test-next-app-input-widget
+    :tests.test-next-app-scroll-and-list
+    :tests.test-next-app-interaction-router
+    :tests.test-next-app-quad-batcher
+    :tests.test-next-app-clip-stress
     :tests.test-bucket-queue
     :tests.test-layout-root-queue
     :tests.test-scroll-area

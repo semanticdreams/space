@@ -64,12 +64,17 @@
   (local gl {})
   (each [constant value (pairs
                           {:GL_ARRAY_BUFFER 0x8892
+                           :GL_SHADER_STORAGE_BUFFER 0x90D2
                            :GL_FRAMEBUFFER 0x8D40
                            :GL_RENDERBUFFER 0x8D41
                            :GL_STREAM_DRAW 0x88E0
+                           :GL_TIME_ELAPSED 0x88BF
+                           :GL_QUERY_RESULT 0x8866
+                           :GL_QUERY_RESULT_AVAILABLE 0x8867
                            :GL_FLOAT 0x1406
                            :GL_FALSE 0
                            :GL_TRUE 1
+                           :GL_UNSIGNED_INT 0x1405
                            :GL_TRIANGLES 0x0004
                            :GL_TRIANGLE_STRIP 0x0005
                            :GL_LINES 0x0001
@@ -104,6 +109,12 @@
          (record-gl "glGenBuffers" {:count count :handle handle})
          handle))
 
+  (set gl.glGenQueries
+       (fn [count]
+         (local handle (next-handle))
+         (record-gl "glGenQueries" {:count count :handle handle})
+         handle))
+
   (set gl.glDeleteVertexArrays
        (fn [count arrays]
          (record-gl "glDeleteVertexArrays" {:count count :arrays arrays})))
@@ -111,6 +122,32 @@
   (set gl.glDeleteBuffers
        (fn [count buffers]
          (record-gl "glDeleteBuffers" {:count count :buffers buffers})))
+
+  (set gl.glDeleteQueries
+       (fn [count queries]
+         (record-gl "glDeleteQueries" {:count count :queries queries})))
+
+  (set gl.glBeginQuery
+       (fn [target query]
+         (record-gl "glBeginQuery" {:target target :query query})))
+
+  (set gl.glEndQuery
+       (fn [target]
+         (record-gl "glEndQuery" {:target target})))
+
+  (set gl.glGetQueryObjectuiv
+       (fn [query pname]
+         (record-gl "glGetQueryObjectuiv" {:query query :pname pname})
+         (if (= pname gl.GL_QUERY_RESULT_AVAILABLE)
+             1
+             0)))
+
+  (set gl.glGetQueryObjectui64v
+       (fn [query pname]
+         (record-gl "glGetQueryObjectui64v" {:query query :pname pname})
+         (if (= pname gl.GL_QUERY_RESULT)
+             1000000
+             0)))
 
   (set gl.glDeleteTextures
        (fn [count textures]
@@ -123,6 +160,10 @@
   (set gl.glBindBuffer
        (fn [target buffer]
          (record-gl "glBindBuffer" {:target target :buffer buffer})))
+
+  (set gl.glBindBufferBase
+       (fn [target index buffer]
+         (record-gl "glBindBufferBase" {:target target :index index :buffer buffer})))
 
   (set gl.glBindFramebuffer
        (fn [target framebuffer]
@@ -208,6 +249,15 @@
                      :stride stride
                      :offset offset})))
 
+  (set gl.glVertexAttribIPointer
+       (fn [index size type stride offset]
+         (record-gl "glVertexAttribIPointer"
+                    {:index index
+                     :size size
+                     :type type
+                     :stride stride
+                     :offset offset})))
+
   (set gl.bufferDataFromVectorBuffer
        (fn [vector target usage]
          (record-gl "bufferDataFromVectorBuffer"
@@ -223,6 +273,23 @@
                      :vector vector
                      :offset-bytes offset-bytes
                      :size-bytes size-bytes
+                     :length (and vector (vector:length))})))
+
+  (set gl.bufferDataUIntFromVectorBuffer
+       (fn [vector target usage]
+         (record-gl "bufferDataUIntFromVectorBuffer"
+                    {:target target
+                     :usage usage
+                     :vector vector
+                     :length (and vector (vector:length))})))
+
+  (set gl.bufferSubDataUIntFromVectorBuffer
+       (fn [vector target offset-elements element-count]
+         (record-gl "bufferSubDataUIntFromVectorBuffer"
+                    {:target target
+                     :vector vector
+                     :offset-elements offset-elements
+                     :element-count element-count
                      :length (and vector (vector:length))})))
 
   (set gl.glDrawArrays

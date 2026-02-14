@@ -40,14 +40,19 @@ sol::table create_gl_table(sol::state_view lua)
     gl["GL_PROGRAM_POINT_SIZE"] = GL_PROGRAM_POINT_SIZE;
     gl["GL_LESS"] = GL_LESS;
     gl["GL_ARRAY_BUFFER"] = GL_ARRAY_BUFFER;
+    gl["GL_SHADER_STORAGE_BUFFER"] = GL_SHADER_STORAGE_BUFFER;
     gl["GL_STATIC_DRAW"] = GL_STATIC_DRAW;
     gl["GL_STREAM_DRAW"] = GL_STREAM_DRAW;
+    gl["GL_TIME_ELAPSED"] = GL_TIME_ELAPSED;
+    gl["GL_QUERY_RESULT"] = GL_QUERY_RESULT;
+    gl["GL_QUERY_RESULT_AVAILABLE"] = GL_QUERY_RESULT_AVAILABLE;
     gl["GL_FRAMEBUFFER"] = GL_FRAMEBUFFER;
     gl["GL_READ_FRAMEBUFFER"] = GL_READ_FRAMEBUFFER;
     gl["GL_DRAW_FRAMEBUFFER"] = GL_DRAW_FRAMEBUFFER;
     gl["GL_RENDERBUFFER"] = GL_RENDERBUFFER;
     gl["GL_FLOAT"] = GL_FLOAT;
     gl["GL_INT"] = GL_INT;
+    gl["GL_UNSIGNED_INT"] = GL_UNSIGNED_INT;
     gl["GL_FALSE"] = GL_FALSE;
     gl["GL_TRUE"] = GL_TRUE;
     gl["GL_CULL_FACE"] = GL_CULL_FACE;
@@ -190,8 +195,32 @@ sol::table create_gl_table(sol::state_view lua)
         glGenBuffers(n, &buffer);
         return buffer;
     });
+    gl.set_function("glGenQueries", [](GLsizei n) {
+        GLuint query;
+        glGenQueries(n, &query);
+        return query;
+    });
     gl.set_function("glDeleteBuffers", [](GLuint buffer) {
         glDeleteBuffers(1, &buffer);
+    });
+    gl.set_function("glDeleteQueries", [](GLuint query) {
+        glDeleteQueries(1, &query);
+    });
+    gl.set_function("glBeginQuery", [](GLenum target, GLuint id) {
+        glBeginQuery(target, id);
+    });
+    gl.set_function("glEndQuery", [](GLenum target) {
+        glEndQuery(target);
+    });
+    gl.set_function("glGetQueryObjectui64v", [](GLuint id, GLenum pname) {
+        GLuint64 value = 0;
+        glGetQueryObjectui64v(id, pname, &value);
+        return static_cast<lua_Integer>(value);
+    });
+    gl.set_function("glGetQueryObjectuiv", [](GLuint id, GLenum pname) {
+        GLuint value = 0;
+        glGetQueryObjectuiv(id, pname, &value);
+        return static_cast<lua_Integer>(value);
     });
 
     gl.set_function("glGenFramebuffers", [](GLsizei n) {
@@ -268,6 +297,9 @@ sol::table create_gl_table(sol::state_view lua)
     gl.set_function("glBindBuffer", [](GLenum target, GLuint buffer) {
         glBindBuffer(target, buffer);
     });
+    gl.set_function("glBindBufferBase", [](GLenum target, GLuint index, GLuint buffer) {
+        glBindBufferBase(target, index, buffer);
+    });
     gl.set_function("glBufferData", [](GLenum target, sol::as_table_t<std::vector<float>> data, GLenum usage) {
         glBufferData(target, data.value().size() * sizeof(float), data.value().data(), usage);
     });
@@ -307,6 +339,48 @@ sol::table create_gl_table(sol::state_view lua)
                                 static_cast<GLintptr>(offset_bytes),
                                 static_cast<GLsizeiptr>(size_bytes),
                                 ptr);
+            });
+    gl.set_function("bufferDataUIntFromVectorBuffer",
+            [](VectorBuffer& buffer, GLenum target, GLenum usage) {
+                const size_t count = buffer.length();
+                std::vector<uint32_t> packed;
+                packed.resize(count);
+                const float* src = buffer.raw_data();
+                for (size_t i = 0; i < count; ++i) {
+                    float value = src[i];
+                    if (value < 0.0f) {
+                        value = 0.0f;
+                    }
+                    packed[i] = static_cast<uint32_t>(value);
+                }
+                glBufferData(target,
+                             static_cast<GLsizeiptr>(packed.size() * sizeof(uint32_t)),
+                             packed.data(),
+                             usage);
+            });
+    gl.set_function("bufferSubDataUIntFromVectorBuffer",
+            [](VectorBuffer& buffer, GLenum target, size_t offset_elements, size_t element_count) {
+                if (element_count == 0) {
+                    return;
+                }
+                const size_t used = buffer.length();
+                if (offset_elements + element_count > used) {
+                    throw std::runtime_error("bufferSubDataUIntFromVectorBuffer out of bounds: exceeds used size");
+                }
+                std::vector<uint32_t> packed;
+                packed.resize(element_count);
+                const float* src = buffer.raw_data() + offset_elements;
+                for (size_t i = 0; i < element_count; ++i) {
+                    float value = src[i];
+                    if (value < 0.0f) {
+                        value = 0.0f;
+                    }
+                    packed[i] = static_cast<uint32_t>(value);
+                }
+                glBufferSubData(target,
+                                static_cast<GLintptr>(offset_elements * sizeof(uint32_t)),
+                                static_cast<GLsizeiptr>(packed.size() * sizeof(uint32_t)),
+                                packed.data());
             });
     gl.set_function("glBlitFramebuffer", [](GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1,
                 GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) {

@@ -76,9 +76,24 @@
                   :size (glm.vec3 18 12 0)
                   :units-per-pixel hud.world-units-per-pixel})}))
 
+(fn make-next-app-dialog [hud]
+  (assert hud "next-app dialog requires hud")
+  (local DefaultDialog (require :default-dialog))
+  (local SubAppView (require :sub-app-view))
+  (local NextAppSubApp (require :next-app/sub-app))
+  (DefaultDialog
+    {:title "Next App"
+     :name "next-app-dialog"
+     :child
+     (SubAppView {:name "next-app-sub-world"
+                  :size (glm.vec3 18 12 0)
+                  :units-per-pixel hud.world-units-per-pixel
+                  :sub-app-builder NextAppSubApp})}))
+
 {:make-terminal-dialog make-terminal-dialog
  :make-fennel-interpreter-dialog make-fennel-interpreter-dialog
  :make-icon-browser-dialog make-icon-browser-dialog
  :add-box-textured add-box-textured
  :make-sub-app-one-dialog make-sub-app-one-dialog
+ :make-next-app-dialog make-next-app-dialog
  :toggle-theme ThemeActions.toggle-theme}

@@ -1,10 +1,16 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/rotate_vector.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <sol/sol.hpp>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <iomanip>
+#include <sstream>
 
 namespace {
 
@@ -226,6 +232,55 @@ sol::table create_glm_table(sol::state_view lua)
     glm_table.set_function("scale", [](const glm::mat4& mat, const glm::vec3& v) {
         return glm::scale(mat, v);
     });
+    glm_table.set_function("mat4-trs-z", [](float tx, float ty, float tz, float rz) {
+        const float c = std::cos(rz);
+        const float s = std::sin(rz);
+        glm::mat4 out(1.0f);
+        out[0][0] = c;
+        out[0][1] = s;
+        out[1][0] = -s;
+        out[1][1] = c;
+        out[3][0] = tx;
+        out[3][1] = ty;
+        out[3][2] = tz;
+        return out;
+    });
+    glm_table.set_function("mat4-world-to-render", [](const glm::mat4& world, float sx, float sy, float sz) {
+        glm::mat4 out = world;
+        out[0] *= sx;
+        out[1] *= sy;
+        out[2] *= sz;
+        return out;
+    });
+    glm_table.set_function("mat4-mul", [](const glm::mat4& a, const glm::mat4& b) {
+        return a * b;
+    });
+    glm_table.set_function("mat4-clip-from-render", [](const glm::mat4& render) {
+        const float a11 = render[0][0];
+        const float a21 = render[0][1];
+        const float a12 = render[1][0];
+        const float a22 = render[1][1];
+        const float tx = render[3][0];
+        const float ty = render[3][1];
+        const float det = (a11 * a22) - (a12 * a21);
+        if (std::abs(det) < 1e-8f) {
+            return glm::mat4(0.0f);
+        }
+        const float inv11 = a22 / det;
+        const float inv12 = -a12 / det;
+        const float inv21 = -a21 / det;
+        const float inv22 = a11 / det;
+        const float invtx = (-inv11 * tx) + (-inv12 * ty);
+        const float invty = (-inv21 * tx) + (-inv22 * ty);
+        glm::mat4 out(1.0f);
+        out[0][0] = inv11;
+        out[0][1] = inv21;
+        out[1][0] = inv12;
+        out[1][1] = inv22;
+        out[3][0] = invtx;
+        out[3][1] = invty;
+        return out;
+    });
 
     glm_table.set_function("strip-translation", [](glm::mat4 mat) {
         mat[3][0] = 0.0f;
@@ -260,6 +315,30 @@ sol::table create_glm_table(sol::state_view lua)
     glm_table.set_function("value-ptr-vec3", [](glm::vec3& v) { return static_cast<void*>(glm::value_ptr(v)); });
     glm_table.set_function("value-ptr-vec4", [](glm::vec4& v) { return static_cast<void*>(glm::value_ptr(v)); });
     glm_table.set_function("value-ptr-mat4", [](glm::mat4& m) { return static_cast<void*>(glm::value_ptr(m)); });
+    glm_table.set_function("is-mat4", [](const sol::object& obj) {
+        return obj.is<glm::mat4>();
+    });
+    glm_table.set_function("mat4-key", [](const glm::mat4& m) {
+        std::ostringstream ss;
+        ss << std::setprecision(9);
+        const float* data = glm::value_ptr(m);
+        for (int i = 0; i < 16; ++i) {
+            ss << ":" << data[i];
+        }
+        return ss.str();
+    });
+    glm_table.set_function("mat4-hash-key", [](const glm::mat4& m) {
+        const float* data = glm::value_ptr(m);
+        const std::uint8_t* bytes = reinterpret_cast<const std::uint8_t*>(data);
+        std::uint64_t hash = 1469598103934665603ull;
+        for (std::size_t i = 0; i < sizeof(float) * 16; ++i) {
+            hash ^= static_cast<std::uint64_t>(bytes[i]);
+            hash *= 1099511628211ull;
+        }
+        std::ostringstream ss;
+        ss << "h" << std::hex << hash;
+        return ss.str();
+    });
     return glm_table;
 }
 

@@ -6,13 +6,18 @@
   (local options (or opts {}))
   (local view-size (or options.size (glm.vec3 18 12 0)))
   (local name (or options.name "sub-app"))
+  (local sub-app-builder (or options.sub-app-builder SubApp))
 
   (fn build [ctx]
     (assert app.renderers "SubAppView requires app.renderers")
     (assert app.renderers.add-sub-app "SubAppView requires renderers:add-sub-app")
     (assert app.renderers.remove-sub-app "SubAppView requires renderers:remove-sub-app")
-    (local sub-app (SubApp {:name name
-                            :size (glm.vec2 view-size.x view-size.y)}))
+    (local sub-app
+      (sub-app-builder {:name name
+                        :size (glm.vec2 view-size.x view-size.y)
+                        :sub-app-options options.sub-app-options}))
+    (when options.on-sub-app
+      (options.on-sub-app sub-app))
     (app.renderers:add-sub-app sub-app)
 
     (fn measurer [self]

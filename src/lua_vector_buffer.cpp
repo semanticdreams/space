@@ -1,4 +1,6 @@
 #include <cstring>
+#include <stdexcept>
+#include <vector>
 #include <sol/sol.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -90,6 +92,77 @@ sol::table create_vector_buffer_table(sol::state_view lua)
         std::copy(glm::value_ptr(vec), glm::value_ptr(vec) + 2, v + offset);
         self.markDirty(handle.index + offset, 2);
     });
+    vb_type.set_function("set-glm-mat4", [validate_handle_range](VectorBuffer& self, VectorHandle& handle, size_t offset, const glm::mat4& mat) {
+        validate_handle_range(self, handle, offset, 16, "VectorBuffer.set-glm-mat4");
+        float* v = self.view(handle);
+        std::copy(glm::value_ptr(mat), glm::value_ptr(mat) + 16, v + offset);
+        self.markDirty(handle.index + offset, 16);
+    });
+    vb_type.set_function("set-glm-mat4-diff", [validate_handle_range](VectorBuffer& self, VectorHandle& handle, size_t offset, const glm::mat4& mat) {
+        validate_handle_range(self, handle, offset, 16, "VectorBuffer.set-glm-mat4-diff");
+        float* v = self.view(handle);
+        const float* src = glm::value_ptr(mat);
+        size_t changed = 0;
+        for (size_t i = 0; i < 16; ++i) {
+            const float next = src[i];
+            if (v[offset + i] != next) {
+                v[offset + i] = next;
+                self.markDirty(handle.index + offset + i, 1);
+                changed += 1;
+            }
+        }
+        return changed;
+    });
+    vb_type.set_function("set-glm-mat4-batch", [validate_handle_range](VectorBuffer& self,
+                                                                        sol::as_table_t<std::vector<VectorHandle>> handles,
+                                                                        size_t offset,
+                                                                        sol::as_table_t<std::vector<glm::mat4>> mats) {
+        const std::vector<VectorHandle>& handle_list = handles.value();
+        const std::vector<glm::mat4>& mat_list = mats.value();
+        if (handle_list.empty()) {
+            return;
+        }
+        if (handle_list.size() != mat_list.size()) {
+            throw std::runtime_error("VectorBuffer.set-glm-mat4-batch requires equal handle and matrix counts");
+        }
+        for (size_t i = 0; i < handle_list.size(); ++i) {
+            const VectorHandle& handle = handle_list[i];
+            validate_handle_range(self, handle, offset, 16, "VectorBuffer.set-glm-mat4-batch");
+            float* v = self.view(const_cast<VectorHandle&>(handle));
+            const float* src = glm::value_ptr(mat_list[i]);
+            std::memcpy(v + offset, src, sizeof(float) * 16);
+            self.markDirty(handle.index + offset, 16);
+        }
+    });
+    vb_type.set_function("set-glm-mat4-diff-batch", [validate_handle_range](VectorBuffer& self,
+                                                                             sol::as_table_t<std::vector<VectorHandle>> handles,
+                                                                             size_t offset,
+                                                                             sol::as_table_t<std::vector<glm::mat4>> mats) {
+        const std::vector<VectorHandle>& handle_list = handles.value();
+        const std::vector<glm::mat4>& mat_list = mats.value();
+        if (handle_list.empty()) {
+            return static_cast<size_t>(0);
+        }
+        if (handle_list.size() != mat_list.size()) {
+            throw std::runtime_error("VectorBuffer.set-glm-mat4-diff-batch requires equal handle and matrix counts");
+        }
+        size_t changed = 0;
+        for (size_t i = 0; i < handle_list.size(); ++i) {
+            const VectorHandle& handle = handle_list[i];
+            validate_handle_range(self, handle, offset, 16, "VectorBuffer.set-glm-mat4-diff-batch");
+            float* v = self.view(const_cast<VectorHandle&>(handle));
+            const float* src = glm::value_ptr(mat_list[i]);
+            for (size_t j = 0; j < 16; ++j) {
+                const float next = src[j];
+                if (v[offset + j] != next) {
+                    v[offset + j] = next;
+                    self.markDirty(handle.index + offset + j, 1);
+                    changed += 1;
+                }
+            }
+        }
+        return changed;
+    });
     vb_type.set_function("set-float", [validate_handle_range](VectorBuffer& self, VectorHandle& handle, size_t offset, float value) {
         validate_handle_range(self, handle, offset, 1, "VectorBuffer.set-float");
         float* v = self.view(handle);
@@ -140,6 +213,47 @@ sol::table create_vector_buffer_table(sol::state_view lua)
             std::memcpy(v + offset, src, stride * sizeof(float));
             self.markDirty(handle.index + offset, stride);
         }
+    });
+    vb_type.set_function("set-floats-diff", [validate_handle_range](VectorBuffer& self,
+                                                                     VectorHandle& handle,
+                                                                     size_t offset,
+                                                                     sol::as_table_t<std::vector<float>> values) {
+        const std::vector<float>& value_list = values.value();
+        if (value_list.empty()) {
+            return static_cast<size_t>(0);
+        }
+        validate_handle_range(self, handle, offset, value_list.size(), "VectorBuffer.set-floats-diff");
+        float* v = self.view(handle);
+        size_t changed = 0;
+        for (size_t i = 0; i < value_list.size(); ++i) {
+            const float next = value_list[i];
+            if (v[offset + i] != next) {
+                v[offset + i] = next;
+                self.markDirty(handle.index + offset + i, 1);
+                changed += 1;
+            }
+        }
+        return changed;
+    });
+    vb_type.set_function("set-float-fill-diff", [validate_handle_range](VectorBuffer& self,
+                                                                         VectorHandle& handle,
+                                                                         size_t offset,
+                                                                         size_t count,
+                                                                         float value) {
+        if (count == 0) {
+            return static_cast<size_t>(0);
+        }
+        validate_handle_range(self, handle, offset, count, "VectorBuffer.set-float-fill-diff");
+        float* v = self.view(handle);
+        size_t changed = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (v[offset + i] != value) {
+                v[offset + i] = value;
+                self.markDirty(handle.index + offset + i, 1);
+                changed += 1;
+            }
+        }
+        return changed;
     });
 
     vector_buffer_table.set_function("VectorBuffer", sol::overload(
