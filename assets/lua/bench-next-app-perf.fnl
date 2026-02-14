@@ -78,7 +78,7 @@
                                             child.measured-width
                                             child.measured-height
                                             0
-                                            0)
+                                            (glm.quat 1 0 0 0))
                     (child:run-layout child.width child.height child.depth)
                     (set x (+ x child.width))
                     (when (< i (length self.children))
@@ -123,12 +123,12 @@
                                               child.measured-width
                                               child.measured-height
                                               0
-                                              0)
+                                              (glm.quat 1 0 0 0))
                       (child:run-layout child.width child.height child.depth)
                       (set y (+ y child.height))
                       (when (< i (length self.children))
                         (set y (+ y y-gap)))))}))
-  (root:set-local-position -0.95 -0.95 0 0)
+  (root:set-local-position -0.95 -0.95 0 (glm.quat 1 0 0 0))
   {:root root
    :leaves leaves
    :quad-batcher (QuadBatcher {})

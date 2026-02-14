@@ -85,22 +85,22 @@
   (fn layout-fn [self resolved-width resolved-height depth]
     (self:set-size resolved-width resolved-height depth {:mark-dirty? false})
 
-    (focus-ring:layout-set-frame -0.01 -0.01 -0.003 (+ resolved-width 0.02) (+ resolved-height 0.02) 0 0)
+    (focus-ring:layout-set-frame -0.01 -0.01 -0.003 (+ resolved-width 0.02) (+ resolved-height 0.02) 0 (glm.quat 1 0 0 0))
     (focus-ring:run-layout focus-ring.width focus-ring.height focus-ring.depth)
 
-    (background:layout-set-frame 0 0 -0.001 resolved-width resolved-height 0 0)
+    (background:layout-set-frame 0 0 -0.001 resolved-width resolved-height 0 (glm.quat 1 0 0 0))
     (background:run-layout background.width background.height background.depth)
 
     (local text-width (math.max 0 (- resolved-width (* padding-x 2))))
     (local text-height (math.max 0 (- resolved-height (* padding-y 2))))
-    (text-node:layout-set-frame padding-x padding-y -0.002 text-width text-height 0 0)
+    (text-node:layout-set-frame padding-x padding-y -0.002 text-width text-height 0 (glm.quat 1 0 0 0))
     (text-node:run-layout text-node.width text-node.height text-node.depth)
 
-    (placeholder-node:layout-set-frame padding-x padding-y -0.002 text-width text-height 0 0)
+    (placeholder-node:layout-set-frame padding-x padding-y -0.002 text-width text-height 0 (glm.quat 1 0 0 0))
     (placeholder-node:run-layout placeholder-node.width placeholder-node.height placeholder-node.depth)
 
     (local cx (+ padding-x (cursor-x)))
-    (caret:layout-set-frame cx (+ padding-y 0.003) -0.0025 0.008 (math.max 0.02 (- text-height 0.006)) 0 0)
+    (caret:layout-set-frame cx (+ padding-y 0.003) -0.0025 0.008 (math.max 0.02 (- text-height 0.006)) 0 (glm.quat 1 0 0 0))
     (caret:run-layout caret.width caret.height caret.depth)
 
     (update-visual-state))

@@ -245,6 +245,12 @@ sol::table create_glm_table(sol::state_view lua)
         out[3][2] = tz;
         return out;
     });
+    glm_table.set_function("mat4-trs", [](float tx, float ty, float tz, const glm::quat& rotation) {
+        glm::mat4 out(1.0f);
+        out = glm::translate(out, glm::vec3(tx, ty, tz));
+        out = out * glm::toMat4(glm::normalize(rotation));
+        return out;
+    });
     glm_table.set_function("mat4-world-to-render", [](const glm::mat4& world, float sx, float sy, float sz) {
         glm::mat4 out = world;
         out[0] *= sx;

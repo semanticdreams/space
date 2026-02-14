@@ -21,8 +21,8 @@
   (local root (NextLayout.Node.new {:name "root-v2"}))
   (local child (NextLayout.Node.new {:name "child-v2"}))
   (root:add-child child)
-  (root:set-frame 10 20 0 100 50 0 0)
-  (child:set-frame 2 3 0 4 5 0 0)
+  (root:set-frame 10 20 0 100 50 0 (glm.quat 1 0 0 0))
+  (child:set-frame 2 3 0 4 5 0 (glm.quat 1 0 0 0))
   (root:transform-pass nil)
 
   (local world-pos (matrix-position child.world-matrix))
@@ -82,7 +82,7 @@
   (assert (= counts.measure 1))
   (assert (= counts.layout 1))
 
-  (leaf:set-local-position 7 9 0 0)
+  (leaf:set-local-position 7 9 0 (glm.quat 1 0 0 0))
   (NextLayout.run-frame root 20 10 0)
   (assert (= counts.measure 1))
   (assert (= counts.layout 1))
@@ -110,7 +110,7 @@
                      (self:set-measure 4 4 0))
        :layout-fn (fn [self w h d]
                     (self:set-size w h d {:mark-dirty? false})
-                    (child:set-frame 1 2 0 child.measured-width child.measured-height 0 0 {:mark-dirty? false})
+                    (child:set-frame 1 2 0 child.measured-width child.measured-height 0 (glm.quat 1 0 0 0) {:mark-dirty? false})
                     (child:run-layout-subtree child.width child.height child.depth))}))
   (root:add-child child)
 
@@ -119,7 +119,7 @@
   (assert (> first.layout-nodes 0))
   (assert (> first.transform-nodes 0))
 
-  (root:set-local-position 3 5 0 0)
+  (root:set-local-position 3 5 0 (glm.quat 1 0 0 0))
   (local second (NextLayout.run-frame-profile root 10 10 0))
   (assert (= second.measure-nodes 0))
   (assert (= second.layout-nodes 0))

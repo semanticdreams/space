@@ -1,3 +1,4 @@
+(local glm (require :glm))
 (local NextLayout (require :next-app/layout))
 (local Node NextLayout.Node)
 
@@ -39,8 +40,8 @@
 
   (fn set-child-frame [child main-pos cross-pos main-len cross-len]
     (if (= axis :x)
-        (child:layout-set-frame main-pos cross-pos 0 main-len cross-len 0 0)
-        (child:layout-set-frame cross-pos main-pos 0 cross-len main-len 0 0)))
+        (child:layout-set-frame main-pos cross-pos 0 main-len cross-len 0 (glm.quat 1 0 0 0))
+        (child:layout-set-frame cross-pos main-pos 0 cross-len main-len 0 (glm.quat 1 0 0 0))))
 
   (fn measure-fn [self max-width max-height max-depth]
     (local count (length entries))

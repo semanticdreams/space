@@ -139,7 +139,7 @@
                   (self:set-size w h d {:mark-dirty? false})
                   (var x 0.0)
                   (each [i child (ipairs self.children)]
-                    (node-set-frame child x 0 0 child.measured-width child.measured-height 0 0)
+                    (node-set-frame child x 0 0 child.measured-width child.measured-height 0 (glm.quat 1 0 0 0))
                     (node-run-layout child child.width child.height child.depth)
                     (set x (+ x child.width))
                     (when (< i (length self.children))
@@ -174,7 +174,7 @@
                     (self:set-size w h d {:mark-dirty? false})
                     (var y 0.0)
                     (each [i child (ipairs self.children)]
-                      (node-set-frame child 0 y 0 child.measured-width child.measured-height 0 0)
+                      (node-set-frame child 0 y 0 child.measured-width child.measured-height 0 (glm.quat 1 0 0 0))
                       (node-run-layout child child.width child.height child.depth)
                       (set y (+ y child.height))
                       (when (< i (length self.children))

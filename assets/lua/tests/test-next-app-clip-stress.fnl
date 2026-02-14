@@ -75,8 +75,8 @@
                                  :width 1.0
                                  :height 0.4}))
 
-  (scroll-a:set-local-position -0.4 -0.2 0 0.25)
-  (scroll-b:set-local-position 0.4 -0.2 0 0.25)
+  (scroll-a:set-local-position -0.4 -0.2 0 (glm.quat 0.25 (glm.vec3 0 0 1)))
+  (scroll-b:set-local-position 0.4 -0.2 0 (glm.quat 0.25 (glm.vec3 0 0 1)))
   (NextLayout.run-frame scroll-a 1.0 0.4 0)
   (NextLayout.run-frame scroll-b 1.0 0.4 0)
 

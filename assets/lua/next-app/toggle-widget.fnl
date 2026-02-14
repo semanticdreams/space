@@ -47,20 +47,20 @@
     (self:set-size resolved-width resolved-height depth {:mark-dirty? false})
 
     (local y (/ (- resolved-height height) 2))
-    (track:layout-set-frame 0 y -0.001 width height 0 0)
+    (track:layout-set-frame 0 y -0.001 width height 0 (glm.quat 1 0 0 0))
     (track:run-layout track.width track.height track.depth)
 
     (local knob-size (math.max 0 (- height (* knob-padding 2))))
     (local knob-x (if checked?
                       (- width knob-size knob-padding)
                       knob-padding))
-    (knob:layout-set-frame knob-x (+ y knob-padding) -0.002 knob-size knob-size 0 0)
+    (knob:layout-set-frame knob-x (+ y knob-padding) -0.002 knob-size knob-size 0 (glm.quat 1 0 0 0))
     (knob:run-layout knob.width knob.height knob.depth)
 
     (when label
       (local label-x (+ width gap))
       (local label-y (/ (- resolved-height label.measured-height) 2))
-      (label:layout-set-frame label-x label-y 0 label.measured-width label.measured-height 0 0)
+      (label:layout-set-frame label-x label-y 0 label.measured-width label.measured-height 0 (glm.quat 1 0 0 0))
       (label:run-layout label.width label.height label.depth)))
 
   (set toggle

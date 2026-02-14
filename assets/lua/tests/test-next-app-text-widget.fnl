@@ -89,7 +89,7 @@
   (assert (= upsert-count 1))
   (assert (= transform-count 0))
 
-  (widget:set-local-position 0.1 0.2 0 0)
+  (widget:set-local-position 0.1 0.2 0 (glm.quat 1 0 0 0))
   (NextLayout.run-frame widget 10 10 0)
   (widget:emit-ssbo batcher clip-matrix)
   (assert (= upsert-count 1))
@@ -120,7 +120,7 @@
                                              (set transform-a (+ transform-a 1)))
                     :remove-text (fn [_self _key] nil)})
   (widget:emit-ssbo batcher-a clip-matrix)
-  (widget:set-local-position 0.2 0.1 0 0)
+  (widget:set-local-position 0.2 0.1 0 (glm.quat 1 0 0 0))
   (NextLayout.run-frame widget 10 10 0)
   (widget:emit-ssbo batcher-a clip-matrix)
   (assert (= upsert-a 1))

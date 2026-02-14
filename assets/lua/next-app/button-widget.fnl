@@ -213,7 +213,7 @@
                                            (+ width (* focus-outline-width 2))
                                            (+ height (* focus-outline-width 2))
                                            0
-                                           0)
+                                           (glm.quat 1 0 0 0))
       (focus-overlay-node:run-layout focus-overlay-node.width focus-overlay-node.height focus-overlay-node.depth))
 
     (background-node:layout-set-frame 0
@@ -222,7 +222,7 @@
                                       width
                                       height
                                       0
-                                      0)
+                                      (glm.quat 1 0 0 0))
     (background-node:run-layout background-node.width background-node.height background-node.depth)
 
     (local content-width (math.min content-node.measured-width (math.max 0 (- width (* padding.x 2)))))
@@ -235,7 +235,7 @@
                                    content-width
                                    content-height
                                    0
-                                   0)
+                                   (glm.quat 1 0 0 0))
     (content-node:run-layout content-node.width content-node.height content-node.depth))
 
   (set button
