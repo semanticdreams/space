@@ -88,7 +88,9 @@
      (SubAppView {:name "next-app-sub-world"
                   :size (glm.vec3 18 12 0)
                   :units-per-pixel hud.world-units-per-pixel
-                  :sub-app-builder NextAppSubApp})}))
+                  :sub-app-builder NextAppSubApp
+                  :sub-app-options {:renderer-options {:cuboid-count 100
+                                                       :cuboid-seed 1337}}})}))
 
 {:make-terminal-dialog make-terminal-dialog
  :make-fennel-interpreter-dialog make-fennel-interpreter-dialog

@@ -1,3 +1,4 @@
+(local glm (require :glm))
 (local NextLayout (require :next-app/layout))
 (local Node NextLayout.Node)
 
@@ -43,7 +44,7 @@
                                  width
                                  item-height
                                  0
-                                 0)
+                                 (glm.quat 1 0 0 0))
           (node:run-layout node.width node.height node.depth)))))
 
   (fn measure-fn [self _mw _mh _md]
@@ -71,7 +72,7 @@
                               resolved-width
                               item-height
                               0
-                              0)
+                              (glm.quat 1 0 0 0))
       (child:run-layout child.width child.height child.depth))
 
     (set self.scroll-y scroll-y)

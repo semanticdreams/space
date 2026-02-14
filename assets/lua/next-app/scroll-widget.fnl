@@ -30,7 +30,7 @@
 
   (fn layout-fn [self resolved-width resolved-height depth]
     (self:set-size resolved-width resolved-height depth {:mark-dirty? false})
-    (background:layout-set-frame 0 0 -0.001 resolved-width resolved-height 0 0)
+    (background:layout-set-frame 0 0 -0.001 resolved-width resolved-height 0 (glm.quat 1 0 0 0))
     (background:run-layout background.width background.height background.depth)
 
     (set max-scroll (math.max 0 (- child.measured-height resolved-height)))
@@ -40,7 +40,7 @@
                             (math.max child.measured-width resolved-width)
                             child.measured-height
                             0
-                            0)
+                            (glm.quat 1 0 0 0))
     (child:run-layout child.width child.height child.depth)
 
     (set self.scroll-y scroll-y)

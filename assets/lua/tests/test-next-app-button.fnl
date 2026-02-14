@@ -153,7 +153,7 @@
 
 (fn next-button-intersect-misses-outside-bounds []
   (local button (ButtonWidget {:text "Miss"}))
-  (button:set-frame 0.2 0.3 0 0.6 0.2 0 0 {:mark-dirty? false})
+  (button:set-frame 0.2 0.3 0 0.6 0.2 0 (glm.quat 1 0 0 0) {:mark-dirty? false})
   (button:run-layout 0.6 0.2 0)
   (NextLayout.run-frame button 0.6 0.2 0)
   (local ray {:origin (glm.vec3 2.0 2.0 -1)

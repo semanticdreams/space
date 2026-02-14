@@ -29,10 +29,10 @@
 
   (fn layout-fn [self resolved-width resolved-height depth]
     (self:set-size resolved-width resolved-height depth {:mark-dirty? false})
-    (background:layout-set-frame 0 0 -0.001 resolved-width resolved-height 0 0)
+    (background:layout-set-frame 0 0 -0.001 resolved-width resolved-height 0 (glm.quat 1 0 0 0))
     (background:run-layout background.width background.height background.depth)
     (local fill-width (* resolved-width value))
-    (fill:layout-set-frame 0 0 -0.002 fill-width resolved-height 0 0)
+    (fill:layout-set-frame 0 0 -0.002 fill-width resolved-height 0 (glm.quat 1 0 0 0))
     (fill:run-layout fill.width fill.height fill.depth))
 
   (set progress

@@ -1,4 +1,5 @@
 (local _ (require :main))
+(local glm (require :glm))
 (local NextLayout (require :next-app/layout))
 (local Router (require :next-app/interaction-router))
 
@@ -6,7 +7,7 @@
 
 (fn make-node [x y w h z]
   (local node (NextLayout.Node.new {:name "node"}))
-  (node:set-frame x y z w h 0 0 {:mark-dirty? false})
+  (node:set-frame x y z w h 0 (glm.quat 1 0 0 0) {:mark-dirty? false})
   (node:transform-pass nil)
   node)
 

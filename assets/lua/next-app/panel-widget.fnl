@@ -10,10 +10,10 @@
       {:x (or padding 0)
        :y (or padding 0)}))
 
-(fn set-child-frame! [child x y z w h d rz]
+(fn set-child-frame! [child x y z w h d rotation]
   (if child.layout-set-frame
-      (child:layout-set-frame x y z w h d rz)
-      (child:set-frame x y z w h d rz {:mark-dirty? false})))
+      (child:layout-set-frame x y z w h d rotation)
+      (child:set-frame x y z w h d rotation {:mark-dirty? false})))
 
 (fn PanelWidget [opts]
   (local options (or opts {}))
@@ -48,7 +48,7 @@
                         (math.max 0 (- width (* padding.x 2)))
                         (math.max 0 (- height (* padding.y 2)))
                         0
-                        0)
+                        (glm.quat 1 0 0 0))
       (child:run-layout child.width child.height child.depth)))
 
   (local panel

@@ -132,9 +132,9 @@
           :firsts [0]
           :counts [6]}])))
 
-  (fn set-root-transform [_self x y z rotation-z]
+  (fn set-root-transform [_self x y z rotation]
     (when renderers.set-root-transform
-      (renderers:set-root-transform x y z rotation-z)))
+      (renderers:set-root-transform x y z rotation)))
 
   (fn get-submit-stats [_self]
     (if renderers.get-last-submit-stats

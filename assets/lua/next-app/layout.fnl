@@ -1,6 +1,6 @@
 (local os os)
 (local glm (require :glm))
-(local glm-mat4-trs-z (. glm :mat4-trs-z))
+(local glm-mat4-trs (. glm :mat4-trs))
 (local glm-mat4-world-to-render (. glm :mat4-world-to-render))
 
 (var render-version-counter 0)
@@ -15,8 +15,28 @@
 (fn mat4-identity! [out]
   (glm.mat4 1))
 
-(fn mat4-from-translation-rotation-z! [out tx ty tz rz]
-  (glm-mat4-trs-z tx ty tz rz))
+(fn quat? [value]
+  (and value
+       (not (= (. value :w) nil))
+       (not (= (. value :x) nil))
+       (not (= (. value :y) nil))
+       (not (= (. value :z) nil))))
+
+(fn quat-equal? [a b]
+  (and (= a.w b.w)
+       (= a.x b.x)
+       (= a.y b.y)
+       (= a.z b.z)))
+
+(fn resolve-rotation [rotation]
+  (if (= rotation nil)
+      (glm.quat 1 0 0 0)
+      (do
+        (assert (quat? rotation) "next-app layout rotation must be glm.quat")
+        rotation)))
+
+(fn mat4-from-translation-rotation! [out tx ty tz rotation]
+  (glm-mat4-trs tx ty tz (resolve-rotation rotation)))
 
 (fn mat4-mul! [out a b]
   (* a b))
@@ -140,43 +160,43 @@
     (mark-layout-dirty-upward self)
     (mark-transform-dirty-root self)))
 
-(fn set-local-position [self x y z rz opts]
+(fn set-local-position [self x y z rotation opts]
   (local next-x (or x 0))
   (local next-y (or y 0))
   (local next-z (or z 0))
-  (local next-rz (or rz 0))
+  (local next-rotation (resolve-rotation rotation))
   (local changed?
     (or (not (= self.local-x next-x))
         (not (= self.local-y next-y))
         (not (= self.local-z next-z))
-        (not (= self.local-rotation-z next-rz))))
+        (not (quat-equal? self.local-rotation next-rotation))))
   (set self.local-x next-x)
   (set self.local-y next-y)
   (set self.local-z next-z)
-  (set self.local-rotation-z next-rz)
+  (set self.local-rotation next-rotation)
   (when changed?
     (set self.local-matrix
-         (mat4-from-translation-rotation-z! self.local-matrix
-                                            self.local-x
-                                            self.local-y
-                                            self.local-z
-                                            self.local-rotation-z))
+         (mat4-from-translation-rotation! self.local-matrix
+                                          self.local-x
+                                          self.local-y
+                                          self.local-z
+                                          self.local-rotation))
     (bump-render-version self))
   (when (and changed? (should-mark? opts))
     (mark-transform-dirty-root self)))
 
-(fn set-frame [self x y z w h d rz opts]
+(fn set-frame [self x y z w h d rotation opts]
   (set-size self w h d opts)
-  (set-local-position self x y z rz opts))
+  (set-local-position self x y z rotation opts))
 
-(fn layout-set-frame [self x y z w h d rz]
+(fn layout-set-frame [self x y z w h d rotation]
   (local next-w (or w 0))
   (local next-h (or h 0))
   (local next-d (or d 0))
   (local next-x (or x 0))
   (local next-y (or y 0))
   (local next-z (or z 0))
-  (local next-rz (or rz 0))
+  (local next-rotation (resolve-rotation rotation))
   (local size-changed
     (or (not (= self.width next-w))
         (not (= self.height next-h))
@@ -185,21 +205,21 @@
     (or (not (= self.local-x next-x))
         (not (= self.local-y next-y))
         (not (= self.local-z next-z))
-        (not (= self.local-rotation-z next-rz))))
+        (not (quat-equal? self.local-rotation next-rotation))))
   (set self.width next-w)
   (set self.height next-h)
   (set self.depth next-d)
   (set self.local-x next-x)
   (set self.local-y next-y)
   (set self.local-z next-z)
-  (set self.local-rotation-z next-rz)
+  (set self.local-rotation next-rotation)
   (when transform-changed
     (set self.local-matrix
-         (mat4-from-translation-rotation-z! self.local-matrix
-                                            self.local-x
-                                            self.local-y
-                                            self.local-z
-                                            self.local-rotation-z)))
+         (mat4-from-translation-rotation! self.local-matrix
+                                          self.local-x
+                                          self.local-y
+                                          self.local-z
+                                          self.local-rotation)))
   (when (or size-changed transform-changed)
     (bump-render-version self))
   (if transform-changed
@@ -320,7 +340,7 @@
                  :local-x 0
                  :local-y 0
                  :local-z 0
-                 :local-rotation-z 0
+                 :local-rotation (glm.quat 1 0 0 0)
                  :local-matrix (alloc-mat4)
                  :world-matrix (alloc-mat4)
                  :render-matrix (alloc-mat4)
@@ -338,7 +358,7 @@
   (set self.root self)
   (ensure-root-state self)
   (set-size self options.width options.height options.depth {:mark-dirty? false})
-  (set-local-position self options.x options.y options.z options.rotation-z {:mark-dirty? false})
+  (set-local-position self options.x options.y options.z options.rotation {:mark-dirty? false})
   (when options.children
     (each [_ child (ipairs options.children)]
       (self:add-child child)))
@@ -465,5 +485,5 @@
  :mat4-identity! mat4-identity!
  :mat4-copy! mat4-copy!
  :mat4-mul! mat4-mul!
- :mat4-from-translation-rotation-z! mat4-from-translation-rotation-z!
+ :mat4-from-translation-rotation! mat4-from-translation-rotation!
  :mat4-world-to-render! mat4-world-to-render!}

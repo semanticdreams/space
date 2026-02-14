@@ -16,7 +16,7 @@
 
   (for [i 1 frames]
     (when (= mode :transform)
-      (sub-app:set-root-transform (+ -0.91 (* i 0.0005)) -0.83 0 0))
+      (sub-app:set-root-transform (+ -0.91 (* i 0.0005)) -0.83 0 (glm.quat 1 0 0 0)))
     (local start (os.clock))
     (sub-app:prerender)
     (local elapsed (- (os.clock) start))
@@ -53,7 +53,7 @@
                                        :enable-focus true
                                        :root-width 1.82
                                        :root-height 1.66
-                                       :root-position {:x -0.91 :y -0.83 :z 0 :rotation-z 0}}}}))
+                                       :root-position {:x -0.91 :y -0.83 :z 0 :rotation (glm.quat 1 0 0 0)}}}}))
   (sub-app:set-size 640 360)
 
   ;; warm-up

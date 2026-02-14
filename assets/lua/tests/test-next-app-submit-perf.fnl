@@ -28,7 +28,7 @@
     (NextFlex.Flex {:name "submit-perf-root"
                     :axis :y
                     :children [(NextFlex.FlexChild panel 0)]}))
-  (root:set-local-position -0.7 -0.6 0 0)
+  (root:set-local-position -0.7 -0.6 0 (glm.quat 1 0 0 0))
   root)
 
 (fn submit-with-caches [root quad-batcher text-batcher subtree-cache transform-cache]
@@ -81,7 +81,7 @@
   (assert (= steady.upsert-count 0)
           (.. "steady frame upsert-count should be zero, got " steady.upsert-count))
 
-  (root:set-local-position -0.63 -0.58 0 0)
+  (root:set-local-position -0.63 -0.58 0 (glm.quat 1 0 0 0))
   (NextLayout.run-frame root 1.8 1.3 0)
   (local transform-only (submit-with-caches root quad-batcher text-batcher subtree-cache transform-cache))
   (assert (> transform-only.write-count 0)
