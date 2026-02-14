@@ -1,0 +1,284 @@
+(local glm (require :glm))
+(local glm-is-mat4 glm.is-mat4)
+(local glm-mat4-hash-key glm.mat4-hash-key)
+(local ClipUtils (require :clip-utils))
+(local {:VectorBuffer VectorBuffer} (require :vector-buffer))
+(local os os)
+(local string string)
+
+(fn identity-matrix []
+  (glm.mat4 1))
+
+(fn QuadBatcher [opts]
+  (local options (or opts {}))
+  (local instance-stride (or options.instance-stride 21))
+  (local vector (VectorBuffer))
+  (local clip-vector (VectorBuffer))
+  (local clip-group-vector (VectorBuffer))
+  (local handles [])
+  (local clip-handles [])
+  (local clip-group-handles [])
+  (var entries [])
+  (var entry-by-key {})
+  (var clip-index-by-key {})
+  (var clip-group-count 0)
+  (var active-count 0)
+  (var frame-id 0)
+  (var write-seconds 0.0)
+  (var write-count 0)
+  (var upsert-count 0)
+
+  (fn clip-matrix-key [matrix]
+    (if (or (= matrix nil) (= matrix false))
+        "clip:nil"
+        (if (glm-is-mat4 matrix)
+            (glm-mat4-hash-key matrix)
+            (do
+              (var key "")
+              (for [i 1 16]
+                (local value (tonumber (. matrix i)))
+                (set key (.. key ":" (string.format "%.9g" (or value 0)))))
+              key))))
+
+  (fn zero-matrix []
+    (glm.mat4 0))
+
+  (fn ensure-handle [index]
+    (var handle (. handles index))
+    (if handle
+        handle
+        (do
+          (set handle (vector:allocate instance-stride))
+          (set (. handles index) handle)
+          handle)))
+
+  (fn ensure-clip-handle [index]
+    (var handle (. clip-handles index))
+    (if handle
+        handle
+        (do
+          (set handle (clip-vector:allocate 16))
+          (set (. clip-handles index) handle)
+          handle)))
+
+  (fn ensure-clip-group-handle [index]
+    (var handle (. clip-group-handles index))
+    (if handle
+        handle
+        (do
+          (set handle (clip-group-vector:allocate 1))
+          (set (. clip-group-handles index) handle)
+          handle)))
+
+  (fn color-components [color]
+    (if color
+        [(or color.x (. color 1) 1)
+         (or color.y (. color 2) 1)
+         (or color.z (. color 3) 1)
+         (or color.w (. color 4) 1)]
+        [1 1 1 1]))
+
+  (fn write-clip-matrix [clip-index matrix]
+    (local handle (ensure-clip-handle (+ clip-index 1)))
+    (if (glm-is-mat4 matrix)
+        (clip-vector:set-glm-mat4 handle 0 matrix)
+        (for [i 1 16]
+          (clip-vector:set-float handle (- i 1) (. matrix i)))))
+
+  (fn init-clip-groups []
+    (local zero (zero-matrix))
+    (set clip-index-by-key {})
+    (set clip-group-count 1)
+    (set (. clip-index-by-key "clip:nil") 0)
+    (set (. clip-index-by-key (clip-matrix-key zero)) 0)
+    (write-clip-matrix 0 zero))
+
+  (fn ensure-entry [key]
+    (local existing (. entry-by-key key))
+    (if existing
+        existing
+        (do
+          (set active-count (+ active-count 1))
+          (ensure-handle active-count)
+          (ensure-clip-group-handle active-count)
+          (local entry {:slot active-count
+                        :key key
+                        :matrix {}
+                        :color {}
+                        :depth nil
+                        :clip-group nil
+                        :visible false
+                        :seen-frame -1})
+          (set (. entries active-count) entry)
+          (set (. entry-by-key key) entry)
+          entry)))
+
+  (var ensure-clip-group nil)
+
+  (fn write-entry [entry opts]
+    (local write-start (os.clock))
+    (local slot entry.slot)
+    (local handle (ensure-handle slot))
+    (local clip-group-handle (ensure-clip-group-handle slot))
+    (local matrix (or opts.matrix (identity-matrix)))
+    (local color (color-components (or opts.color (glm.vec4 1 1 1 1))))
+    (local depth-offset (or opts.depth-offset 0))
+    (local clip-matrix
+      (if opts.clip-matrix
+          opts.clip-matrix
+          (ClipUtils.resolve-matrix opts.clip)))
+    (local clip-group (ensure-clip-group clip-matrix))
+    (if (glm-is-mat4 matrix)
+        (do
+          (set write-count (+ write-count (vector:set-glm-mat4-diff handle 0 matrix))))
+        (for [i 1 16]
+          (local next-value (. matrix i))
+          (when (not (= (. entry.matrix i) next-value))
+            (set (. entry.matrix i) next-value)
+            (set write-count (+ write-count 1))
+            (vector:set-float handle (- i 1) next-value))))
+    (for [i 1 4]
+      (local next-value (. color i))
+      (when (not (= (. entry.color i) next-value))
+        (set (. entry.color i) next-value)
+        (set write-count (+ write-count 1))
+        (vector:set-float handle (+ 15 i) next-value)))
+    (when (not (= entry.depth depth-offset))
+      (set entry.depth depth-offset)
+      (set write-count (+ write-count 1))
+      (vector:set-float handle 20 depth-offset))
+    (when (not (= entry.clip-group clip-group))
+      (set entry.clip-group clip-group)
+      (set write-count (+ write-count 1))
+      (clip-group-vector:set-float clip-group-handle 0 clip-group))
+    (set entry.visible true)
+    (set write-seconds (+ write-seconds (- (os.clock) write-start))))
+
+  (fn hide-entry [entry]
+    (when entry.visible
+      (local slot entry.slot)
+      (local handle (ensure-handle slot))
+      (vector:set-float handle 19 0)
+      (set write-count (+ write-count 1))
+      (set (. entry.color 4) 0)
+      (set entry.visible false)))
+
+  (fn begin-frame [_self]
+    (set frame-id (+ frame-id 1))
+    (set write-seconds 0.0)
+    (set write-count 0)
+    (set upsert-count 0))
+
+  (fn upsert-quad [_self key opts]
+    (assert key "QuadBatcher.upsert-quad requires :key")
+    (set upsert-count (+ upsert-count 1))
+    (local entry (ensure-entry key))
+    (set entry.seen-frame frame-id)
+    (write-entry entry (or opts {})))
+
+  (fn end-frame [_self]
+    nil)
+
+  (fn remove-quad [_self key]
+    (local entry (. entry-by-key key))
+    (when entry
+      (hide-entry entry)
+      (set (. entry-by-key key) nil)
+      (set (. entries entry.slot) nil)))
+
+  (fn get-last-stats [_self]
+    {:write-seconds write-seconds
+     :write-count write-count
+     :upsert-count upsert-count})
+
+  (set ensure-clip-group
+       (fn [clip-matrix]
+         (if (or (= clip-matrix nil) (= clip-matrix false))
+             0
+             (do
+               (local key (clip-matrix-key clip-matrix))
+               (local existing (. clip-index-by-key key))
+               (if (not (= existing nil))
+                   existing
+                   (do
+                     (local clip-index clip-group-count)
+                     (set clip-group-count (+ clip-group-count 1))
+                     (set (. clip-index-by-key key) clip-index)
+                     (write-clip-matrix clip-index clip-matrix)
+                     clip-index))))))
+
+  (fn clear [_self]
+    (set active-count 0)
+    (set entries [])
+    (set entry-by-key {})
+    (set frame-id 0)
+    (init-clip-groups))
+
+  (fn add-quad [_self opts]
+    (local options (or opts {}))
+    (if options.key
+        (upsert-quad nil options.key options)
+        (do
+          (set active-count (+ active-count 1))
+          (local handle (ensure-handle active-count))
+          (local matrix (or options.matrix (identity-matrix)))
+          (if (glm-is-mat4 matrix)
+              (vector:set-glm-mat4 handle 0 matrix)
+              (for [i 1 16]
+                (vector:set-float handle (- i 1) (. matrix i))))
+          (vector:set-glm-vec4 handle 16 (or options.color (glm.vec4 1 1 1 1)))
+          (vector:set-float handle 20 (or options.depth-offset 0))
+          (local clip-matrix
+            (if options.clip-matrix
+                options.clip-matrix
+                (ClipUtils.resolve-matrix options.clip)))
+          (local clip-group (ensure-clip-group clip-matrix))
+          (local clip-group-handle (ensure-clip-group-handle active-count))
+          (clip-group-vector:set-float clip-group-handle 0 clip-group))))
+
+  (fn get-vector [_self]
+    vector)
+
+  (fn get-instance-count [_self]
+    active-count)
+
+  (fn get-clip-vector [_self]
+    clip-vector)
+
+  (fn get-clip-group-vector [_self]
+    clip-group-vector)
+
+  (fn get-clip-count [_self]
+    clip-group-count)
+
+  (fn get-batches [_self]
+    (if (> active-count 0)
+        [{:model nil :firsts [0] :counts [active-count]}]
+        []))
+
+  (fn drop [_self]
+    (each [_ handle (ipairs handles)]
+      (vector:delete handle))
+    (each [_ handle (ipairs clip-handles)]
+      (clip-vector:delete handle))
+    (each [_ handle (ipairs clip-group-handles)]
+      (clip-group-vector:delete handle)))
+
+  (init-clip-groups)
+
+  {:clear clear
+   :begin-frame begin-frame
+   :upsert-quad upsert-quad
+   :end-frame end-frame
+   :remove-quad remove-quad
+   :get-last-stats get-last-stats
+   :add-quad add-quad
+   :get-vector get-vector
+   :get-instance-count get-instance-count
+   :get-clip-vector get-clip-vector
+   :get-clip-group-vector get-clip-group-vector
+   :get-clip-count get-clip-count
+   :get-batches get-batches
+   :drop drop})
+
+QuadBatcher

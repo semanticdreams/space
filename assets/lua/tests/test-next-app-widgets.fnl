@@ -1,0 +1,71 @@
+(local NextLayout (require :next-app/layout))
+(local PanelWidget (require :next-app/panel-widget))
+(local ButtonWidget (require :next-app/button-widget))
+
+(local tests [])
+
+(fn approx [a b]
+  (< (math.abs (- a b)) 1e-5))
+
+(fn fixed-node [w h]
+  (NextLayout.Node.new
+    {:name "fixed"
+     :measure-fn (fn [self _mw _mh _md]
+                   (self:set-measure w h 0))
+     :layout-fn (fn [self width height depth]
+                  (self:set-size width height depth {:mark-dirty? false}))}))
+
+(fn next-panel-measures-child-and-padding []
+  (local child (fixed-node 0.6 0.2))
+  (local panel
+    (PanelWidget {:name "panel-under-test"
+                  :padding [0.1 0.05]
+                  :child child}))
+  (NextLayout.run-frame panel 1.2 0.6 0)
+  (assert (approx panel.measured-width 0.8))
+  (assert (approx panel.measured-height 0.3))
+  (assert (approx child.width 1.0))
+  (assert (approx child.height 0.5))
+  (assert (approx child.local-x 0.1))
+  (assert (approx child.local-y 0.05))
+
+  (var captured nil)
+  (local batcher {:add-quad (fn [_self payload]
+                              (set captured payload))})
+  (panel:emit-quads batcher)
+  (assert captured "panel should emit quad payload")
+  (assert captured.matrix "panel quad payload should include matrix")
+  (assert captured.color "panel quad payload should include color"))
+
+(fn next-button-measures-label-and-emits-quad []
+  (local button
+    (ButtonWidget {:name "button-under-test"
+                   :text "Launch"}))
+  (NextLayout.run-frame button 1.2 0.4 0)
+  (assert (> button.measured-width 0))
+  (assert (> button.measured-height 0))
+  (assert (approx button.label.local-x (/ (- button.width button.label.width) 2)))
+  (assert (approx button.label.local-y (/ (- button.height button.label.height) 2)))
+
+  (var captured nil)
+  (local batcher {:add-quad (fn [_self payload]
+                              (set captured payload))})
+  (button:emit-quads batcher)
+  (assert captured "button should emit quad payload")
+  (assert captured.matrix "button quad payload should include matrix")
+  (assert captured.color "button quad payload should include color"))
+
+(table.insert tests {:name "Next panel measures child and padding"
+                     :fn next-panel-measures-child-and-padding})
+(table.insert tests {:name "Next button measures label and emits quad"
+                     :fn next-button-measures-label-and-emits-quad})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "next-app-widgets"
+                       :tests tests})))
+
+{:name "next-app-widgets"
+ :tests tests
+ :main main}

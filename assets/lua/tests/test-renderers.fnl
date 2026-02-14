@@ -191,6 +191,54 @@
       (assert (= draw-call.args.count 4))
       (assert (= draw-call.args.instances (/ (vector:length) 9))))))
 
+(fn quad-renderer-draws-instanced-batches-with-clipping-and-lighting []
+  (with-open-gl
+    (fn [mock]
+      (local QuadRenderer (reload "quad-renderer"))
+      (local renderer (QuadRenderer))
+      (mock:reset)
+      (local vector (fake-vector (* 21 8)))
+      (local clip-vector (fake-vector (* 16 3)))
+      (local clip-group-vector (fake-vector 8))
+      (local model-a {:id :a})
+      (renderer:render vector
+                       {:projection true}
+                       {:view true}
+                       [{:model model-a
+                         :firsts [0 3]
+                         :counts [2 1]}
+                        {:model nil
+                         :firsts [4]
+                         :counts [4]}]
+                       clip-vector
+                       clip-group-vector)
+      (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
+      (assert (= (# draw-calls) 3))
+      (assert (= (. (. draw-calls 1) :args :mode) gl.GL_TRIANGLE_STRIP))
+      (assert (= (. (. draw-calls 1) :args :instances) 2))
+      (assert (= (. (. draw-calls 2) :args :instances) 1))
+      (assert (= (. (. draw-calls 3) :args :instances) 4))
+      (local bind-buffer-calls (mock:get-gl-calls "glBindBuffer"))
+      (var instance-bind-count 0)
+      (each [_ call (ipairs bind-buffer-calls)]
+        (when (= call.args.target gl.GL_ARRAY_BUFFER)
+          (set instance-bind-count (+ instance-bind-count 1))))
+      (assert (> instance-bind-count 1)
+              "quad renderer should rebind instance buffer when changing instance windows")
+      (local bind-base-call (only (mock:get-gl-calls "glBindBufferBase")))
+      (assert (= bind-base-call.args.target 0x90D2))
+      (assert (= bind-base-call.args.index 0))
+      (local shader renderer.shader)
+      (local model-calls (collect-calls shader.calls "setMatrix4"
+                                        (fn [args] (= args.uniform "model"))))
+      (assert (= (# model-calls) 2))
+      (assert (= (. (. model-calls 1) :args :value) model-a))
+      (local ambient-call (only (collect-calls shader.calls "setVector3f"
+                                               (fn [args] (= args.uniform "ambientLight")))))
+      (assert ambient-call "quad renderer should upload lighting uniforms")
+      (assert (>= (renderer:get-last-upload-seconds) 0)
+              "quad renderer should expose upload timing"))))
+
 (fn mesh-renderer-draws-textured-triangles []
   (with-open-gl
     (fn [mock]
@@ -255,6 +303,51 @@
       (local expected (math.floor (/ (fallback-vector:length) 10)))
       (assert (= (. default.counts 1) expected)))))
 
+(fn text-ssbo-renderer-uses-ssbo-groups-and-instanced-draws []
+  (with-open-gl
+    (fn [mock]
+      (local TextSsboRenderer (reload "text-ssbo-renderer"))
+      (local renderer (TextSsboRenderer))
+      (local glyph-vector (fake-vector (* 8 12)))
+      (local glyph-group-vector (fake-vector 12))
+      (local group-vector (fake-vector (* 16 3)))
+      (local group-clip-index-vector (fake-vector 3))
+      (local clip-vector (fake-vector (* 16 2)))
+      (local font {:metadata {:atlas {:distanceRange 3.5}}
+                   :texture {:id 42 :ready true}})
+      (renderer:render glyph-vector
+                       glyph-group-vector
+                       group-vector
+                       group-clip-index-vector
+                       clip-vector
+                       font
+                       {:projection true}
+                       {:view true}
+                       [{:firsts [0 4]
+                         :counts [3 2]}])
+      (local bind-base-calls (mock:get-gl-calls "glBindBufferBase"))
+      (assert (= (# bind-base-calls) 3))
+      (assert (= (. (. bind-base-calls 1) :args :target) 0x90D2))
+      (assert (= (. (. bind-base-calls 1) :args :index) 0))
+      (assert (= (. (. bind-base-calls 2) :args :index) 1))
+      (assert (= (. (. bind-base-calls 3) :args :index) 2))
+      (local buffer-calls (mock:get-gl-calls "bufferDataFromVectorBuffer"))
+      (assert (= (# buffer-calls) 3))
+      (local uint-buffer-calls (mock:get-gl-calls "bufferDataUIntFromVectorBuffer"))
+      (assert (= (# uint-buffer-calls) 2))
+      (local int-pointer-calls (mock:get-gl-calls "glVertexAttribIPointer"))
+      (assert (> (# int-pointer-calls) 0))
+      (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
+      (assert (= (# draw-calls) 2))
+      (assert (= (. (. draw-calls 1) :args :instances) 3))
+      (assert (= (. (. draw-calls 2) :args :instances) 2))
+      (local shader renderer.shader)
+      (local px-range (only (collect-calls shader.calls "setFloat"
+                                           (fn [args] (= args.uniform "pxRange")))))
+      (assert (= px-range.args.value 3.5))
+      (assert (>= (renderer:get-last-upload-seconds) 0)
+              "text ssbo renderer should expose upload timing"))))
+
 (table.insert tests {:name "Triangle renderer falls back to default draw" :fn triangle-resolve-batches-falls-back})
 (table.insert tests {:name "Triangle renderer uploads draw batches" :fn triangle-renderer-uploads-all-draws})
 (table.insert tests {:name "Triangle renderer uploads dirty subdata" :fn triangle-renderer-uses-dirty-subdata})
@@ -262,9 +355,13 @@
 (table.insert tests {:name "DrawBatcher splits noncontiguous runs" :fn draw-batcher-splits-noncontiguous-runs})
 (table.insert tests {:name "Line renderer draws lines and strips" :fn line-renderer-draws-lines-and-strips})
 (table.insert tests {:name "Point renderer uses instanced quads" :fn point-renderer-uses-instanced-quads})
+(table.insert tests {:name "Quad renderer draws instanced batches with clipping and lighting"
+                     :fn quad-renderer-draws-instanced-batches-with-clipping-and-lighting})
 (table.insert tests {:name "Mesh renderer draws textured triangles" :fn mesh-renderer-draws-textured-triangles})
 (table.insert tests {:name "Text renderer uploads font metadata and texture" :fn text-renderer-uploads-font-state})
 (table.insert tests {:name "Image renderer uses draw batcher and fallback draws" :fn image-renderer-respects-draw-batcher})
+(table.insert tests {:name "Text SSBO renderer uses group SSBO and instanced draws"
+                     :fn text-ssbo-renderer-uses-ssbo-groups-and-instanced-draws})
 
 (local main
   (fn []
