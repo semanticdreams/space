@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include "appdirs.h"
 #include "asset_manager.h"
 
 namespace fs = std::filesystem;
@@ -17,6 +18,14 @@ std::string AssetManager::getAssetPath(const std::string& relativePath) {
             return absEnvPath.string();
         }
     }
+
+    // Look for asset in user data assets folder
+    fs::path userDataPath = fs::path(get_user_data_dir("space")) / "assets" / relativePath;
+    fs::path absUserDataPath = fs::absolute(userDataPath);
+    if (fs::exists(absUserDataPath)) {
+        return absUserDataPath.string();
+    }
+
     // Look for asset in local assets folder
     fs::path devPath = fs::current_path() / "assets" / relativePath;
     fs::path absDevPath = fs::absolute(devPath);
