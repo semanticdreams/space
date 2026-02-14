@@ -46,6 +46,7 @@
     :tests.test-next-app-input-widget
     :tests.test-next-app-scroll-and-list
     :tests.test-next-app-interaction-router
+    :tests.test-next-app-cuboid-widget
     :tests.test-next-app-quad-batcher
     :tests.test-next-app-clip-stress
     :tests.test-bucket-queue
