@@ -14,7 +14,7 @@ Clean design is important, refactor when reasonable.
 - `archive/` contains some old python bindings that are no longer used but may be used for reference when building new features.
 
 ## OpenAI API Docs
-- OpenAI API reference lives in `doc/openai/`; start at `doc/openai/index.md` for a map to chat/responses, assistants/threads/runs, uploads/vector stores, realtime events, and project/admin endpoints.
+- OpenAI API reference lives in `docs/dev/openai/`; start at `docs/dev/openai/index.md` for a map to chat/responses, assistants/threads/runs, uploads/vector stores, realtime events, and project/admin endpoints.
 - Endpoint files follow the action name inside each folder (`create.md`, `list.md`, `object.md`, etc.). Use `rg "POST /responses"` (or similar) from the repo root to jump to the exact endpoint when wiring code to the API.
 
 ## Fennel Architecture & Widgets
