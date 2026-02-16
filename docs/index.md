@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "space"
-  text: "Realtime UI Engine + App Runtime"
-  tagline: C++ engine + Lua/Fennel widgets for fast iteration and deterministic runtime behavior.
+  text: "A 3D Computing Interface"
+  tagline: Build apps, tools, and worlds in a shared runtime where UI, code, and data stay connected.
   image:
     src: /space.png
     alt: space logo
@@ -21,17 +21,29 @@ hero:
       link: /dev/
 
 features:
-  - title: Engine + UI Architecture
-    details: Build UI with composable Fennel widgets on top of a C++17 runtime and explicit layout contracts.
-  - title: Fast Local Workflow
-    details: Use Make targets for build, run, tests, profiling, and snapshot updates with reproducible environment settings.
-  - title: Integration Reference
-    details: Navigate mirrored OpenAI API references and guides from one place when wiring responses, realtime, and tools.
+  - title: 3D-First Interface
+    details: Go beyond flat windows with spatial UI, in-world media, and workflows that benefit from depth and context.
+  - title: Fennel + C++ Runtime
+    details: Script quickly with Fennel on top of a performant C++ engine, with strong control over behavior and layout.
+  - title: Entity-Based Model
+    details: Represent code, notes, tasks, and app state as linked entities for richer organization and navigation.
+  - title: Space Graph
+    details: Use graph relationships as a common interaction model across app features, tools, and views.
+  - title: Collaboration by Design
+    details: Build toward realtime shared spaces with synchronized entities and collaborative editing workflows.
+  - title: Decentralized Pods
+    details: Run user-owned service bundles for sync, communication, and distribution without central lock-in.
 ---
+
+## What You Can Build
+
+- Workflow-oriented apps that combine code, data, and UI in one place.
+- Collaborative spaces for coding, planning, and knowledge management.
+- Visual and spatial tools for exploring complex systems.
 
 ## Start Here
 
-Use these commands from the repository root:
+From the repository root:
 
 ```bash
 make build
@@ -44,3 +56,4 @@ SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO
 - Quick Start: [/user/quick-start](/user/quick-start)
 - User documentation: [/user/](/user/)
 - Developer documentation: [/dev/](/dev/)
+- Concepts: [/dev/concepts](/dev/concepts)
