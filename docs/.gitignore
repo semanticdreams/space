@@ -1,0 +1,19 @@
+# VitePress build output
+.vitepress/dist/
+
+# VitePress cache
+.vitepress/cache/
+
+# dependencies (only if you installed packages inside docs)
+node_modules/
+
+# env files
+.env
+.env.*
+
+# logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,4 +1,4 @@
-.PHONY: build cmake debug run pack install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo
+.PHONY: build cmake debug run pack install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release ..
@@ -13,6 +13,9 @@ debug:
 
 run:
 	cd build && SPACE_FENNEL_PROFILE=1 SPACE_ASSETS_PATH=../assets ./space -m main --remote-control=ipc:///tmp/space-rc.sock
+
+docs:
+	cd docs && npm run docs:dev
 
 commit:
 	codex exec "run `git add -A` and commit with a fitting message"
