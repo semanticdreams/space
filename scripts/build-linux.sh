@@ -7,6 +7,7 @@ cmake --build build --config Release
 (
     cd build
     cpack -G DEB
+    cpack -G RPM
 )
 
 mkdir -p build/dist
