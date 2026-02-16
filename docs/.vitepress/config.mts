@@ -36,7 +36,57 @@ export default defineConfig({
         {
           text: 'Developer',
           items: [
-            { text: 'Overview', link: '/dev/' }
+            { text: 'Overview', link: '/dev/' },
+            { text: 'Concepts', link: '/dev/concepts' },
+            { text: 'Devlog', link: '/dev/devlog' }
+          ]
+        },
+        {
+          text: 'Architecture',
+          items: [
+            { text: 'aubio', link: '/dev/architecture/aubio' },
+            { text: 'audio', link: '/dev/architecture/audio' },
+            { text: 'directional-focus-traversal', link: '/dev/architecture/directional-focus-traversal' },
+            { text: 'focus-change-ordering', link: '/dev/architecture/focus-change-ordering' },
+            { text: 'force-layout-barnes-hut', link: '/dev/architecture/force-layout-barnes-hut' },
+            { text: 'gltf-async-embedded-texture-decode', link: '/dev/architecture/gltf-async-embedded-texture-decode' },
+            { text: 'graph-key-based-loaders', link: '/dev/architecture/graph-key-based-loaders' },
+            { text: 'graph-llm', link: '/dev/architecture/graph-llm' },
+            { text: 'graph-view-as-widget', link: '/dev/architecture/graph-view-as-widget' },
+            { text: 'graph-vs-entities', link: '/dev/architecture/graph-vs-entities' },
+            { text: 'graph', link: '/dev/architecture/graph' },
+            { text: 'hackernews', link: '/dev/architecture/hackernews' },
+            { text: 'icons', link: '/dev/architecture/icons' },
+            { text: 'interpreter', link: '/dev/architecture/interpreter' },
+            { text: 'layered-points-in-graph', link: '/dev/architecture/layered-points-in-graph' },
+            { text: 'lighting', link: '/dev/architecture/lighting' },
+            { text: 'link-entities', link: '/dev/architecture/link-entities' },
+            { text: 'list-entities', link: '/dev/architecture/list-entities' },
+            { text: 'loop', link: '/dev/architecture/loop' },
+            { text: 'matrix', link: '/dev/architecture/matrix' },
+            { text: 'multithreading', link: '/dev/architecture/multithreading' },
+            { text: 'mystery-layout-error', link: '/dev/architecture/mystery-layout-error' },
+            { text: 'preload', link: '/dev/architecture/preload' },
+            { text: 'process', link: '/dev/architecture/process' },
+            { text: 'prof-graph-layout', link: '/dev/architecture/prof-graph-layout' },
+            { text: 'prof-scroll', link: '/dev/architecture/prof-scroll' },
+            { text: 'prof-terminal', link: '/dev/architecture/prof-terminal' },
+            { text: 'render-architecture', link: '/dev/architecture/render-architecture' },
+            { text: 'render-capture', link: '/dev/architecture/render-capture' },
+            { text: 'resize-bugs', link: '/dev/architecture/resize-bugs' },
+            { text: 'selection', link: '/dev/architecture/selection' },
+            { text: 'string-entities', link: '/dev/architecture/string-entities' },
+            { text: 'sub-app', link: '/dev/architecture/sub-app' },
+            { text: 'sub_world', link: '/dev/architecture/sub_world' },
+            { text: 'tempfile', link: '/dev/architecture/tempfile' },
+            { text: 'terminal', link: '/dev/architecture/terminal' },
+            { text: 'testing-http-clients', link: '/dev/architecture/testing-http-clients' },
+            { text: 'transform-pass', link: '/dev/architecture/transform-pass' },
+            { text: 'wallet-core', link: '/dev/architecture/wallet-core' },
+            { text: 'wallet', link: '/dev/architecture/wallet' },
+            { text: 'wlroots-status', link: '/dev/architecture/wlroots-status' },
+            { text: 'xapian', link: '/dev/architecture/xapian' },
+            { text: 'xdg-icon-browser-and-svg-support', link: '/dev/architecture/xdg-icon-browser-and-svg-support' }
           ]
         }
       ]
