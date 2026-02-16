@@ -29,7 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' README.md | sed -n 's/^sudo apt install //p')
-          sudo apt-get install -y ${deps} ccache
+          sudo apt-get install -y ${deps} ccache rpm
 
       - name: Configure and Build
         env:
@@ -46,6 +46,7 @@ jobs:
         with:
           files: |
             build/*.deb
+            build/*.rpm
             build/dist/space-linux-x86_64-bin.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
