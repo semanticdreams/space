@@ -13,6 +13,9 @@ export default defineConfig({
     ['link', { rel: 'icon', href: '/space.png' }]
   ],
   themeConfig: {
+    search: {
+      provider: 'local'
+    },
     logo: '/space.png',
     // https://vitepress.dev/reference/default-theme-config
     nav: [
