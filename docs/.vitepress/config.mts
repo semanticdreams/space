@@ -94,6 +94,10 @@ export default defineConfig({
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/semanticdreams/space' }
-    ]
+    ],
+
+    footer: {
+      message: "Join the community on <a href='https://matrix.to/#/#spaceui.org:matrix.org' target='_blank'>Matrix</a>."
+    }
   }
 })
