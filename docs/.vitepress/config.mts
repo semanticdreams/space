@@ -4,7 +4,11 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: "space",
   description: "A VitePress Site",
+  head: [
+    ['link', { rel: 'icon', href: '/space.png' }]
+  ],
   themeConfig: {
+    logo: '/space.png',
     // https://vitepress.dev/reference/default-theme-config
     nav: [
       { text: 'Home', link: '/' },

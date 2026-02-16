@@ -4,8 +4,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "docs:dev": "vitepress dev",
-    "docs:build": "vitepress build",
+    "docs:dev": "node scripts/sync-space-icon.mjs && vitepress dev",
+    "docs:build": "node scripts/sync-space-icon.mjs && vitepress build",
     "docs:preview": "vitepress preview"
   },
   "keywords": [],
