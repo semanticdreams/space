@@ -1,0 +1,3 @@
+html:not(.dark) {
+    --vp-c-bg: #fcfcfb;
+}
