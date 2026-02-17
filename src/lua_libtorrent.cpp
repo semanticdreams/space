@@ -1856,7 +1856,10 @@ sol::table create_torrent(sol::state_view lua, sol::table opts)
     }
 
     fs::path source_fs = fs::absolute(source_path);
-    fs::path hash_root = fs::is_directory(source_fs) ? source_fs : source_fs.parent_path();
+    // set_piece_hashes expects the root containing the file-storage paths.
+    // For both single-file and directory sources, add_files() stores paths
+    // relative to the source parent.
+    fs::path hash_root = source_fs.parent_path();
     if (hash_root.empty()) {
         hash_root = fs::current_path();
     }
