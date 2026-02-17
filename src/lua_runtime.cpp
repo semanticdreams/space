@@ -52,6 +52,7 @@ void lua_bind_perlin_terrain(sol::state&);
 #if defined(SPACE_ENABLE_WALLET_CORE)
 void lua_bind_wallet_core(sol::state&);
 #endif
+void lua_bind_libtorrent(sol::state&);
 LuaRuntime::LuaRuntime() = default;
 
 void LuaRuntime::init()
@@ -173,6 +174,7 @@ void LuaRuntime::install_base_bindings()
         });
     }
 #endif
+    lua_bind_libtorrent(lua);
     lua_bind_engine(lua);
     lua_bind_ray_box(lua);
     lua_bind_tray(lua);
