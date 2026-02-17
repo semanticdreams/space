@@ -16,6 +16,6 @@ void main()
     if(length(localOffset) > 0.5)
         discard;
     FragColor = vertexColor;
-    const float depthStep = 1e-3;
+    const float depthStep = 1e-4;
     gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * depth_offset_index * depthStep));
 }

@@ -12,7 +12,7 @@ out vec4 color;
 uniform sampler2D msdf;
 uniform float pxRange;
 
-const float depthStep = 1e-3;
+const float depthStep = 1e-4;
 
 float screenPxRange() {
     vec2 unitRange = vec2(pxRange)/vec2(textureSize(msdf, 0));

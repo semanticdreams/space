@@ -9,7 +9,7 @@ flat in float depth_offset_index;
 flat in uint clipGroup;
 out vec4 fragColor;
 
-const float depthStep = 1e-3;
+const float depthStep = 1e-4;
 
 uniform vec3 viewPos;
 uniform vec3 ambientLight;
