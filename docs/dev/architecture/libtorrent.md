@@ -199,7 +199,7 @@ Primary responsibilities:
 - `dht-put-item(item-table)` -> target hex
 - `dht-get-mutable-item({:public-key ... [:salt ...]})`
 - `dht-put-mutable-item({:public-key ... :secret-key ... [:salt ...] :seq ... :item ...})`
-- `dht-direct-request({:host ... :port ... :request ...})`
+- `dht-direct-request({:host ... :port ... :request ... [:userdata ...]})`
 
 ## alert table enrichment
 
@@ -215,6 +215,7 @@ The binding enriches several alert families with additional keys (when present),
 - DHT direct response alerts
 
 Callers should treat optional fields as optional and type-check before use.
+`dht-direct-response-alert` may include `userdata` when `:userdata` was set on `dht-direct-request`.
 
 ## testing strategy
 
@@ -235,10 +236,15 @@ Typical commands:
 - `verify-mutable-item` is not available in this environment's libtorrent binary (symbol declared in headers but not exported by the installed package). The binding throws a clear runtime error.
 - `add-dht-router` is ABI-dependent and throws a clear runtime error when unavailable in the active libtorrent ABI.
 
-## review findings (open)
+## bencode container wrappers
 
-- `bencode` empty-list ambiguity: empty Lua table currently encodes as dictionary, not list. In `src/lua_libtorrent.cpp`, list detection requires at least one numeric key, so `{}` cannot be represented as an empty bencoded list (`le`).
-- `dht-direct-request` userdata gap: alert decoding exposes `userdata` on `dht-direct-response-alert`, but request submission currently has no user-facing way to set userdata, so this field is effectively always `nil`.
+Lua tables are ambiguous between list and dictionary semantics for edge cases (especially empty containers).
+The module exposes explicit wrappers for unambiguous bencoding:
+
+- `libtorrent.list(table)` -> force list encoding (supports empty list)
+- `libtorrent.dict(table)` -> force dictionary encoding
+
+Use these wrappers when a protocol payload requires exact container shape.
 
 ## source of truth
 
