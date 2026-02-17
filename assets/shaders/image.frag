@@ -10,7 +10,7 @@ out vec4 outputColor;
 
 uniform sampler2D imageTexture;
 
-const float depthStep = 1e-3;
+const float depthStep = 1e-4;
 
 void main() {
 	if (isClipped(worldPos)) {
