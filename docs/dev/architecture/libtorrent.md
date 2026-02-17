@@ -236,6 +236,46 @@ Typical commands:
 - `verify-mutable-item` is not available in this environment's libtorrent binary (symbol declared in headers but not exported by the installed package). The binding throws a clear runtime error.
 - `add-dht-router` is ABI-dependent and throws a clear runtime error when unavailable in the active libtorrent ABI.
 
+## torrent cli tools
+
+Space includes two Fennel CLI tools built on this binding:
+
+- `tools.torrent-download`
+- `tools.torrent-upload`
+
+### `tools.torrent-download`
+
+Purpose:
+- download from magnet URI, v1 info-hash, or `.torrent` file
+- continue seeding until interrupted
+- resume across restarts
+
+Run:
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tools.torrent-download:main -- <magnet|info-hash|torrent-path>`
+
+Persistence:
+- `~/.local/share/space/libtorrent/<info-hash>/` (or `$XDG_DATA_HOME/space/libtorrent/<info-hash>/`)
+- includes torrent state metadata and downloaded data path
+
+### `tools.torrent-upload`
+
+Purpose:
+- publish a file/directory as a torrent
+- print magnet URI + info-hash
+- seed until interrupted
+- reuse previous publish metadata when source is unchanged
+
+Run:
+- `SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tools.torrent-upload:main -- <source-path>`
+
+Persistence:
+- `~/.local/share/space/libtorrent/uploads/<source-id>/` (or `$XDG_DATA_HOME/space/libtorrent/uploads/<source-id>/`)
+- contains `published.torrent` and `state.json`
+
+Current source-change detection:
+- metadata-based fingerprint over path/type/size/mtime/permissions
+- this avoids full content re-hash on every start, but can miss edge cases where file bytes change without metadata change
+
 ## bencode container wrappers
 
 Lua tables are ambiguous between list and dictionary semantics for edge cases (especially empty containers).
