@@ -78,6 +78,12 @@
     (table.insert args "--max-count")
     (table.insert args (tostring options.max-count)))
 
+  (when options.max-filesize
+    (when (not (= (type options.max-filesize) :string))
+      (error "ripgrep :max-filesize must be a string (e.g. '1M')"))
+    (table.insert args "--max-filesize")
+    (table.insert args options.max-filesize))
+
   (when options.globs
     (assert-string-array ":globs" options.globs)
     (each [_ glob (ipairs options.globs)]
