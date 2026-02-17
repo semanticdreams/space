@@ -10,6 +10,8 @@
 #include "log.h"
 #include "input_mouse_state.h"
 
+#include <vector>
+
 //namespace py = pybind11;
 
 Engine::Engine() {
@@ -27,6 +29,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         window->logGlParams();
 
         initSystemCursors();
+        SDL_GameControllerEventState(SDL_ENABLE);
 
         inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
         // Clear previous state memory
@@ -37,6 +40,11 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
             Uint32 mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
             inputState.mouseState.update_from_mask(mouseMask);
             inputState.mouseState.set_motion(mouseX, mouseY, 0, 0);
+        }
+
+        const int joystick_count = SDL_NumJoysticks();
+        for (int device_index = 0; device_index < joystick_count; ++device_index) {
+            openGameController(device_index, SDL_GetTicks());
         }
     }
 
@@ -93,6 +101,7 @@ void Engine::run() {
 
         memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_NUM_SCANCODES);
         inputState.mouseState.begin_frame();
+        inputState.begin_frame();
         {
             int mouseX = inputState.mouseState.x;
             int mouseY = inputState.mouseState.y;
@@ -222,8 +231,10 @@ void Engine::run() {
                 }
 
                 case SDL_CONTROLLERBUTTONDOWN: {
+                    inputState.on_controller_button(event.cbutton.button, true, event.cbutton.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.cbutton.which);
+                    payload["instance-id"] = static_cast<int>(event.cbutton.which);
                     payload["button"] = static_cast<int>(event.cbutton.button);
                     payload["state"] = static_cast<int>(event.cbutton.state);
                     payload["timestamp"] = event.common.timestamp;
@@ -232,8 +243,10 @@ void Engine::run() {
                 }
 
                 case SDL_CONTROLLERBUTTONUP: {
+                    inputState.on_controller_button(event.cbutton.button, false, event.cbutton.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.cbutton.which);
+                    payload["instance-id"] = static_cast<int>(event.cbutton.which);
                     payload["button"] = static_cast<int>(event.cbutton.button);
                     payload["state"] = static_cast<int>(event.cbutton.state);
                     payload["timestamp"] = event.common.timestamp;
@@ -242,26 +255,34 @@ void Engine::run() {
                 }
 
                 case SDL_CONTROLLERAXISMOTION: {
+                    const float axis_value = static_cast<float>(event.caxis.value) / 32768.0f;
+                    inputState.on_controller_axis(event.caxis.axis, axis_value, event.caxis.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.caxis.which);
+                    payload["instance-id"] = static_cast<int>(event.caxis.which);
                     payload["axis"] = static_cast<int>(event.caxis.axis);
-                    payload["value"] = static_cast<float>(event.caxis.value) / 32768.0f;
+                    payload["value"] = axis_value;
                     payload["timestamp"] = event.common.timestamp;
                     emit_engine_event("controller-axis-motion", payload);
                     break;
                 }
 
                 case SDL_CONTROLLERDEVICEADDED: {
+                    const SDL_JoystickID instance_id = openGameController(event.cdevice.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.cdevice.which);
+                    payload["device-index"] = static_cast<int>(event.cdevice.which);
+                    payload["instance-id"] = static_cast<int>(instance_id);
                     payload["timestamp"] = event.common.timestamp;
                     emit_engine_event("controller-device-added", payload);
                     break;
                 }
 
                 case SDL_CONTROLLERDEVICEREMOVED: {
+                    closeGameController(event.cdevice.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.cdevice.which);
+                    payload["instance-id"] = static_cast<int>(event.cdevice.which);
                     payload["timestamp"] = event.common.timestamp;
                     emit_engine_event("controller-device-removed", payload);
                     break;
@@ -304,7 +325,68 @@ void Engine::run() {
     }
 }
 
+SDL_JoystickID Engine::openGameController(Sint32 deviceIndex, Uint32 timestamp)
+{
+    if (!SDL_IsGameController(deviceIndex)) {
+        return -1;
+    }
+
+    SDL_GameController* controller = SDL_GameControllerOpen(deviceIndex);
+    if (!controller) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to open game controller %d: %s",
+                    deviceIndex,
+                    SDL_GetError());
+        return -1;
+    }
+
+    SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
+    if (!joystick) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Failed to get joystick handle for game controller %d: %s",
+                    deviceIndex,
+                    SDL_GetError());
+        SDL_GameControllerClose(controller);
+        return -1;
+    }
+
+    const SDL_JoystickID instance_id = SDL_JoystickInstanceID(joystick);
+    auto existing = gameControllers.find(instance_id);
+    if (existing != gameControllers.end()) {
+        SDL_GameControllerClose(existing->second);
+    }
+    gameControllers[instance_id] = controller;
+    inputState.on_controller_connected(deviceIndex, instance_id, timestamp);
+    return instance_id;
+}
+
+void Engine::closeGameController(SDL_JoystickID instanceId, Uint32 timestamp)
+{
+    auto it = gameControllers.find(instanceId);
+    if (it != gameControllers.end()) {
+        if (it->second) {
+            SDL_GameControllerClose(it->second);
+        }
+        gameControllers.erase(it);
+    }
+    inputState.on_controller_disconnected(instanceId, timestamp);
+}
+
+void Engine::closeAllGameControllers(Uint32 timestamp)
+{
+    std::vector<SDL_JoystickID> instance_ids;
+    instance_ids.reserve(gameControllers.size());
+    for (const auto& [instance_id, controller] : gameControllers) {
+        (void)controller;
+        instance_ids.push_back(instance_id);
+    }
+    for (const SDL_JoystickID instance_id : instance_ids) {
+        closeGameController(instance_id, timestamp);
+    }
+}
+
 void Engine::shutdown() {
+    closeAllGameControllers(SDL_GetTicks());
     lua_jobs_clear_callbacks();
     lua_keyring_drop(*lua_state);
     lua_http_drop(*lua_state);
