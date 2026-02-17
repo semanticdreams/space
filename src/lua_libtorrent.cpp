@@ -179,7 +179,52 @@ bool try_read_positive_integer_key(const sol::object& key, std::size_t& out)
     return false;
 }
 
+struct BencodeListValue
+{
+    explicit BencodeListValue(sol::table value)
+        : values(value)
+    {
+    }
+
+    sol::table values;
+};
+
+struct BencodeDictValue
+{
+    explicit BencodeDictValue(sol::table value)
+        : values(value)
+    {
+    }
+
+    sol::table values;
+};
+
 lt::entry lua_object_to_entry(sol::object value);
+
+lt::entry lua_list_table_to_entry(sol::table table)
+{
+    lt::entry out(lt::entry::list_type {});
+    lt::entry::list_type& items = out.list();
+    std::size_t count = table.size();
+    items.reserve(count);
+    for (std::size_t i = 1; i <= count; ++i) {
+        items.push_back(lua_object_to_entry(table.get<sol::object>(i)));
+    }
+    return out;
+}
+
+lt::entry lua_dict_table_to_entry(sol::table table)
+{
+    lt::entry out(lt::entry::dictionary_type {});
+    lt::entry::dictionary_type& dict = out.dict();
+    for (const auto& kv : table) {
+        if (!kv.first.is<std::string>()) {
+            throw sol::error("bencode dictionary keys must be strings");
+        }
+        dict[kv.first.as<std::string>()] = lua_object_to_entry(kv.second.as<sol::object>());
+    }
+    return out;
+}
 
 lt::entry lua_table_to_entry(sol::table table)
 {
@@ -200,28 +245,22 @@ lt::entry lua_table_to_entry(sol::table table)
 
     bool is_array = !has_non_array_key && array_items > 0 && max_index == array_items;
     if (is_array) {
-        lt::entry out(lt::entry::list_type {});
-        lt::entry::list_type& items = out.list();
-        items.reserve(array_items);
-        for (std::size_t i = 1; i <= array_items; ++i) {
-            items.push_back(lua_object_to_entry(table.get<sol::object>(i)));
-        }
-        return out;
+        return lua_list_table_to_entry(table);
     }
 
-    lt::entry out(lt::entry::dictionary_type {});
-    lt::entry::dictionary_type& dict = out.dict();
-    for (const auto& kv : table) {
-        if (!kv.first.is<std::string>()) {
-            throw sol::error("bencode dictionary keys must be strings");
-        }
-        dict[kv.first.as<std::string>()] = lua_object_to_entry(kv.second.as<sol::object>());
-    }
-    return out;
+    return lua_dict_table_to_entry(table);
 }
 
 lt::entry lua_object_to_entry(sol::object value)
 {
+    if (value.is<std::shared_ptr<BencodeListValue>>()) {
+        auto list = value.as<std::shared_ptr<BencodeListValue>>();
+        return lua_list_table_to_entry(list->values);
+    }
+    if (value.is<std::shared_ptr<BencodeDictValue>>()) {
+        auto dict = value.as<std::shared_ptr<BencodeDictValue>>();
+        return lua_dict_table_to_entry(dict->values);
+    }
     if (value.is<sol::table>()) {
         return lua_table_to_entry(value.as<sol::table>());
     }
@@ -914,6 +953,8 @@ struct LibtorrentSession
     {
         if (!closed) {
             handles.clear();
+            direct_request_userdata_ptr_to_id.clear();
+            direct_request_userdata.clear();
             session.reset();
             closed = true;
         }
@@ -1454,6 +1495,7 @@ struct LibtorrentSession
         std::string host = opt_or<std::string>(opts, "host", "");
         int port = opt_or<int>(opts, "port", 0);
         sol::object request_obj = opts.get<sol::object>("request");
+        sol::object userdata_obj = opts.get<sol::object>("userdata");
         if (host.empty()) {
             throw sol::error("dht-direct-request requires host");
         }
@@ -1469,7 +1511,30 @@ struct LibtorrentSession
             throw sol::error("dht-direct-request invalid host: " + ec.message());
         }
         lt::entry request = lua_object_to_entry(request_obj);
-        session->dht_direct_request(lt::udp::endpoint(addr, static_cast<std::uint16_t>(port)), request);
+
+        lt::client_data_t userdata {};
+        if (userdata_obj != sol::lua_nil) {
+            if (!userdata_obj.is<std::int64_t>() && !userdata_obj.is<int>()) {
+                throw sol::error("dht-direct-request requires numeric userdata when provided");
+            }
+            std::int64_t userdata_id = userdata_obj.is<std::int64_t>()
+                                           ? userdata_obj.as<std::int64_t>()
+                                           : static_cast<std::int64_t>(userdata_obj.as<int>());
+
+            auto existing = direct_request_userdata.find(userdata_id);
+            if (existing != direct_request_userdata.end()) {
+                direct_request_userdata_ptr_to_id.erase(existing->second.get());
+                direct_request_userdata.erase(existing);
+            }
+
+            auto holder = std::make_unique<std::int64_t>(userdata_id);
+            std::int64_t* userdata_ptr = holder.get();
+            direct_request_userdata_ptr_to_id[userdata_ptr] = userdata_id;
+            direct_request_userdata[userdata_id] = std::move(holder);
+            userdata = lt::client_data_t(userdata_ptr);
+        }
+
+        session->dht_direct_request(lt::udp::endpoint(addr, static_cast<std::uint16_t>(port)), request, userdata);
     }
 
     void apply_settings(sol::table settings)
@@ -1637,7 +1702,9 @@ struct LibtorrentSession
         if (alert == nullptr) {
             return sol::make_object(lua, sol::lua_nil);
         }
-        return sol::make_object(lua, alert_to_table(lua, *alert));
+        sol::table table = alert_to_table(lua, *alert);
+        release_direct_request_userdata(*alert);
+        return sol::make_object(lua, table);
     }
 
     sol::table pop_alerts(sol::this_state ts)
@@ -1649,6 +1716,7 @@ struct LibtorrentSession
         sol::table out = lua.create_table(static_cast<int>(alerts.size()), 0);
         for (std::size_t i = 0; i < alerts.size(); ++i) {
             out[i + 1] = alert_to_table(lua, *alerts[i]);
+            release_direct_request_userdata(*alerts[i]);
         }
         return out;
     }
@@ -1672,6 +1740,25 @@ struct LibtorrentSession
     }
 
 private:
+    void release_direct_request_userdata(const lt::alert& alert)
+    {
+        auto* direct_response = lt::alert_cast<lt::dht_direct_response_alert>(&alert);
+        if (direct_response == nullptr) {
+            return;
+        }
+        const std::int64_t* userdata = direct_response->userdata.get<std::int64_t>();
+        if (userdata == nullptr) {
+            return;
+        }
+        auto id_it = direct_request_userdata_ptr_to_id.find(userdata);
+        if (id_it == direct_request_userdata_ptr_to_id.end()) {
+            return;
+        }
+        std::int64_t id = id_it->second;
+        direct_request_userdata_ptr_to_id.erase(id_it);
+        direct_request_userdata.erase(id);
+    }
+
     void ensure_open(const std::string& action) const
     {
         if (closed || session == nullptr) {
@@ -1691,6 +1778,8 @@ private:
 
     std::unique_ptr<lt::session> session;
     std::unordered_map<std::int64_t, lt::torrent_handle> handles;
+    std::unordered_map<std::int64_t, std::unique_ptr<std::int64_t>> direct_request_userdata;
+    std::unordered_map<const std::int64_t*, std::int64_t> direct_request_userdata_ptr_to_id;
     std::int64_t next_handle_id { 1 };
     bool closed { false };
 };
@@ -2224,6 +2313,10 @@ sol::table create_libtorrent_table(sol::state_view lua)
         "to-table", &SessionParamsHandle::to_table,
         "apply-settings", &SessionParamsHandle::apply_settings,
         "set-ext-state", &SessionParamsHandle::set_ext_state);
+    module.new_usertype<BencodeListValue>("BencodeListValue",
+        sol::no_constructor);
+    module.new_usertype<BencodeDictValue>("BencodeDictValue",
+        sol::no_constructor);
 
     module.set_function("Session", [](sol::table opts) {
         return std::make_shared<LibtorrentSession>(opts);
@@ -2236,6 +2329,12 @@ sol::table create_libtorrent_table(sol::state_view lua)
         return std::make_shared<LibtorrentSession>(lua.create_table());
     });
     module.set_function("session-params", &create_session_params);
+    module.set_function("list", [](sol::table values) {
+        return std::make_shared<BencodeListValue>(values);
+    });
+    module.set_function("dict", [](sol::table values) {
+        return std::make_shared<BencodeDictValue>(values);
+    });
     module.set_function("ed25519-create-seed", &ed25519_create_seed_hex);
     module.set_function("ed25519-create-keypair", &ed25519_create_keypair_hex);
     module.set_function("sign-mutable-item", &sign_mutable_item_hex);
@@ -2348,6 +2447,8 @@ void lua_bind_libtorrent(sol::state& lua)
         module.set_function("bdecode", unavailable);
         module.set_function("session", unavailable);
         module.set_function("session-params", unavailable);
+        module.set_function("list", unavailable);
+        module.set_function("dict", unavailable);
         module.set_function("parse-magnet-uri", unavailable);
         module.set_function("parse-magnet-uri-dict", unavailable);
         module.set_function("make-magnet-uri", unavailable);

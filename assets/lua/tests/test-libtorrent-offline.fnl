@@ -95,7 +95,15 @@
   (assert (= decoded.info.length payload.info.length))
   (assert (= decoded.info.pieces payload.info.pieces))
   (assert (= (. (. (. decoded.announce-list 1) 1)) payload.announce))
-  (assert (= (. (. (. decoded.announce-list 2) 1)) "udp://tracker.backup:6969/announce")))
+  (assert (= (. (. (. decoded.announce-list 2) 1)) "udp://tracker.backup:6969/announce"))
+
+  (local wrapped {:empty-list (libtorrent.list [])
+                  :empty-dict (libtorrent.dict {})})
+  (local wrapped-encoded (libtorrent.bencode wrapped))
+  (local wrapped-decoded (libtorrent.bdecode wrapped-encoded))
+  (assert (= (type wrapped-decoded.empty-list) "table"))
+  (assert (= (# wrapped-decoded.empty-list) 0))
+  (assert (= (type wrapped-decoded.empty-dict) "table")))
 
 (fn test-settings-presets []
   (utils.assert-available)
@@ -274,9 +282,20 @@
                               :target fake-hash})
   (ses:dht-direct-request {:host "1.1.1.1"
                            :port 6881
+                           :userdata 4242
                            :request {:q "ping"
                                      :y "q"
                                      :a {:id "01234567890123456789"}}})
+  (local (ok-direct-userdata err-direct-userdata)
+         (pcall (fn []
+                  (ses:dht-direct-request {:host "1.1.1.1"
+                                           :port 6881
+                                           :userdata "bad"
+                                           :request {:q "ping"
+                                                     :y "q"
+                                                     :a {:id "01234567890123456789"}}}))))
+  (assert (not ok-direct-userdata))
+  (assert (string.find err-direct-userdata "requires numeric userdata" 1 true))
   (local put-target (ses:dht-put-item {:space "dht-item"
                                        :kind "immutable"}))
   (assert (= (# put-target) 40))
@@ -308,7 +327,8 @@
                    next-alert.num-nodes
                    next-alert.num-samples
                    next-alert.announce-info-hash
-                   next-alert.response))
+                   next-alert.response
+                   next-alert.userdata))
       (set saw-dht-alert true)
       (when next-alert.target
         (assert (= (type next-alert.target) "string")))
@@ -322,7 +342,9 @@
         (assert (= (type next-alert.announce-info-hash) "string")))
       (when next-alert.response
         (assert (= (type next-alert.endpoint-host) "string"))
-        (assert (= (type next-alert.endpoint-port) "number")))))
+        (assert (= (type next-alert.endpoint-port) "number")))
+      (when next-alert.userdata
+        (assert (= next-alert.userdata 4242)))))
   (assert (= (type saw-dht-alert) "boolean"))
 
   (ses:drop))
