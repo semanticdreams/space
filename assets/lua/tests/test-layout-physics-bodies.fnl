@@ -1,0 +1,232 @@
+(local glm (require :glm))
+(local Scene (require :scene))
+(local MathUtils (require :math-utils))
+(local {: Layout} (require :layout))
+(local PerlinTerrain (require :perlin-terrain))
+(local bt (require :bt))
+
+(local tests [])
+(local approx (. MathUtils :approx))
+
+(fn vec3-approx= [a b]
+  (and (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
+
+(fn make-icons-stub []
+  (local stub {:font {:glyph-map {65533 {:advance 1.0}}
+                      :metadata {:metrics {:lineHeight 1.0
+                                           :ascender 0.5
+                                           :descender -0.5}}}})
+  (set stub.get
+       (fn [_self _name]
+         4242))
+  (set stub.resolve
+       (fn [self name]
+         (local code (self:get name))
+         {:type :font
+          :codepoint code
+          :font self.font}))
+  stub)
+
+(fn make-stub-movables []
+  (local movables {:registered [] :unregistered []})
+  (set movables.register
+       (fn [self widget opts]
+         (table.insert self.registered {:widget widget
+                                        :opts opts})))
+  (set movables.unregister
+       (fn [self key]
+         (table.insert self.unregistered key)))
+  movables)
+
+(fn setup-scene []
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (local original-movables app.movables)
+  (var scene nil)
+
+  (fn cleanup []
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables))
+
+  (let [(ok payload)
+        (pcall (fn []
+                 (local movables (make-stub-movables))
+                 (set scene (Scene {:icons (make-icons-stub)}))
+                 (set app.scene scene)
+                 (set app.layout-root scene.layout-root)
+                 (set app.movables movables)
+                 (scene:build-default)
+                 {:scene scene :movables movables}))]
+    (if ok
+        {:cleanup cleanup :scene-result payload}
+        (do
+          (cleanup)
+          (error payload)))))
+
+(fn find-physics-entry-for-element [scene element]
+  (accumulate [result nil _ entry (ipairs (or scene.entity.physics-bodies []))]
+    (if (and (not result)
+             (= entry.positioned element))
+        entry
+        result)))
+
+(fn make-probe-panel-builder [size-ref]
+  (fn [_ctx _runtime-opts]
+    (local layout
+      (Layout {:name "physics-probe-panel"
+               :measurer (fn [self]
+                           (set self.measure size-ref.value))
+               :layouter (fn [self]
+                           (set self.size self.measure))}))
+    {:layout layout
+     :drop (fn [_self]
+             (layout:drop))}))
+
+(fn physical-panels-collide-with-each-other []
+  (assert bt "Physical panel collision test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (local lower-size {:value (glm.vec3 6 3 6)})
+  (local upper-size {:value (glm.vec3 6 3 6)})
+  (local lower-builder (make-probe-panel-builder lower-size))
+  (local upper-builder (make-probe-panel-builder upper-size))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local lower (scene:add-panel-child {:builder lower-builder
+                                                 :skip-cuboid true
+                                                 :position (glm.vec3 0 10 0)}))
+            (local upper (scene:add-panel-child {:builder upper-builder
+                                                 :skip-cuboid true
+                                                 :position (glm.vec3 0 22 0)}))
+            (assert lower "Expected lower panel")
+            (assert upper "Expected upper panel")
+            (assert (find-physics-entry-for-element scene lower)
+                    "Lower panel should register a runtime physics body")
+            (assert (find-physics-entry-for-element scene upper)
+                    "Upper panel should register a runtime physics body")
+
+            (for [i 1 360]
+              (app.engine.physics:update 0)
+              (scene:update))
+
+            (assert (> upper.layout.position.y (+ lower.layout.position.y 1.0))
+                    (string.format
+                      "Upper panel should remain above lower panel after settling (lower_y=%.3f upper_y=%.3f)"
+                      lower.layout.position.y
+                      upper.layout.position.y))))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn physical-panel-collides-with-perlin-terrain []
+  (assert bt "Perlin terrain collision test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (local panel-size {:value (glm.vec3 5 3 5)})
+  (local panel-builder (make-probe-panel-builder panel-size))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (scene:add-panel-child
+              {:builder (PerlinTerrain {:position (glm.vec3 500 -100 -500)
+                                        :scale (glm.vec3 20 3.5 20)
+                                        :width 50
+                                        :length 50
+                                        :seed 424242
+                                        :n1scale 34
+                                        :n2scale 4
+                                        :n3scale 1.5})
+               :skip-cuboid true
+               :skip-physics true
+               :position (glm.vec3 500 -100 -500)
+               :rotation (glm.quat 1 0 0 0)})
+
+            (local panel (scene:add-panel-child {:builder panel-builder
+                                                 :skip-cuboid true
+                                                 :position (glm.vec3 1000 20 0)}))
+            (assert panel "Expected panel on Perlin terrain")
+            (local start-y panel.layout.position.y)
+
+            (for [i 1 240]
+              (app.engine.physics:update 0)
+              (scene:update))
+
+            (local end-y panel.layout.position.y)
+            (assert (< end-y (- start-y 10))
+                    (string.format
+                      "Panel should fall before settling on Perlin terrain (start_y=%.3f end_y=%.3f)"
+                      start-y end-y))
+            (assert (> end-y -220)
+                    (string.format
+                      "Panel likely fell through Perlin terrain (end_y=%.3f)"
+                      end-y))))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn physical-panel-rebuilds-body-on-resize []
+  (assert bt "Resize shape-refresh test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (local size-ref {:value (glm.vec3 2 2 2)})
+  (local builder (make-probe-panel-builder size-ref))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                 :skip-cuboid true
+                                                 :position (glm.vec3 0 15 0)}))
+            (assert panel "Expected panel")
+            (local entry (find-physics-entry-for-element scene panel))
+            (assert (and entry entry.rigid entry.rigid.shape)
+                    "Expected runtime body shape for panel")
+            (local initial-shape entry.rigid.shape)
+
+            (set size-ref.value (glm.vec3 9 2 2))
+            (panel.layout:mark-measure-dirty)
+            (scene:update)
+            (scene:update)
+
+            (assert (not (= entry.rigid.shape initial-shape))
+                    "Resizing panel should rebuild Bullet box shape")
+            (assert (and entry.body entry.body-active?)
+                    "Resized panel body should remain active")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(table.insert tests {:name "Physical panels collide with each other"
+                     :fn physical-panels-collide-with-each-other})
+(table.insert tests {:name "Physical panel collides with Perlin terrain"
+                     :fn physical-panel-collides-with-perlin-terrain})
+(table.insert tests {:name "Physical panel rebuilds shape on resize"
+                     :fn physical-panel-rebuilds-body-on-resize})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "layout-physics-bodies"
+                       :tests tests})))
+
+{:name "layout-physics-bodies"
+ :tests tests
+ :main main}

@@ -106,6 +106,7 @@
     :tests.test-demo-car
     :tests.test-car-state
     :tests.test-demo-browser
+    :tests.test-layout-physics-bodies
     :tests.test-widget-cuboid
     :tests.test-radial
     :tests.test-glm

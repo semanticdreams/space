@@ -144,16 +144,28 @@
 (fn PhysicsBridge.vec3->bt [value]
   (bt.Vector3 value.x value.y value.z))
 
+(fn PhysicsBridge.quat->bt [value]
+  (bt.Quaternion value.x value.y value.z value.w))
+
 (set PhysicsBridge.create-plane
      (fn [opts]
        (if (not (PhysicsBridge.available?))
            nil
-           (let [normal (PhysicsBridge.vec3->bt opts.normal)
-                  constant (or opts.constant 0)
+           (let [size (resolve-glm-vec3 opts.size (glm.vec3 1 1 1))
+                  position (resolve-glm-vec3 opts.position (glm.vec3 0 0 0))
+                  rotation (resolve-glm-quat opts.rotation (glm.quat 1 0 0 0))
+                  thickness (or opts.thickness 1.0)
+                  half-extents (glm.vec3 (* 0.5 size.x) (* 0.5 thickness) (* 0.5 size.z))
+                  center (+ position
+                            (rotation:rotate
+                              (glm.vec3 (* 0.5 size.x)
+                                        (* -0.5 thickness)
+                                        (* 0.5 size.z))))
                  transform (bt.Transform)]
              (transform:setIdentity)
-             (transform:setOrigin (PhysicsBridge.vec3->bt opts.position))
-             (local shape (bt.StaticPlaneShape normal constant))
+             (transform:setOrigin (PhysicsBridge.vec3->bt center))
+             (transform:setRotation (PhysicsBridge.quat->bt rotation))
+             (local shape (bt.BoxShape (PhysicsBridge.vec3->bt half-extents)))
              (local motion-state (bt.DefaultMotionState transform))
              (local zero (bt.Vector3 0 0 0))
              (local info (bt.RigidBodyConstructionInfo 0 motion-state shape zero))
@@ -199,9 +211,10 @@
   (fn build [ctx]
     (local renderable (RenderBuffer ctx mesh {:scale scale :opacity opacity}))
     (local plane
-      (PhysicsBridge.create-plane {:normal (resolve-glm-vec3 options.plane-normal (glm.vec3 0 1 0))
-                                   :position (resolve-glm-vec3 options.plane-position (glm.vec3 0 position.y 0))
-                                   :constant (or options.plane-constant 0)}))
+      (PhysicsBridge.create-plane {:position position
+                                   :rotation rotation
+                                   :size (glm.vec3 world-size.x 0 world-size.z)
+                                   :thickness (or options.physics-thickness 2.0)}))
 
     (fn measurer [self]
       (set self.measure world-size))

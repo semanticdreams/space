@@ -1,12 +1,14 @@
 (local glm (require :glm))
 (local {: LayoutRoot} (require :layout))
 (local DemoDialogs (require :demo-dialogs))
-(local DemoPhysicsCuboids (require :demo-physics-cuboids))
+(local DemoPhysicsBodies (require :demo-physics-bodies))
+(local LayoutPhysicsBodies (require :layout-physics-bodies))
 (local DemoLines (require :demo-lines))
 (local DemoPoints (require :demo-points))
 (local DemoAudio (require :demo-audio))
 (local Container (require :container))
 (local WidgetCuboid (require :widget-cuboid))
+(local Sized (require :sized))
 (local FlatTerrain (require :flat-terrain))
 (local Ball (require :ball))
 (local GltfMesh (require :gltf-mesh))
@@ -69,7 +71,8 @@
     (local layout (and element element.layout))
     (when layout
       (table.insert entries {:target layout
-                             :handle element})))
+                             :handle element
+                             :owner element})))
   entries)
 
 (fn resolve-min-size [layout]
@@ -85,7 +88,8 @@
       (table.insert entries {:target layout
                              :handle layout
                              :key element
-                             :min-size min-size})))
+                             :min-size min-size
+                             :owner element})))
   entries)
 
 (fn copy-movables [entries]
@@ -98,8 +102,17 @@
 (fn compute-entity-movables [self entity]
   (local base (or entity.__scene_base_movables []))
   (local entries (copy-movables base))
+  (local physics-movables (LayoutPhysicsBodies.collect-movables entity))
+  (local physics-targets {})
+  (each [_ entry (ipairs physics-movables)]
+    (when entry
+      (table.insert entries entry)))
+  (each [_ entry (ipairs physics-movables)]
+    (when (and entry entry.target)
+      (set (. physics-targets entry.target) true)))
   (each [_ entry (ipairs (collect-positioned-movables self.scene-children))]
-    (table.insert entries entry))
+    (when (not (. physics-targets entry.target))
+      (table.insert entries entry)))
   entries)
 
 (fn compute-entity-resizables [self entity]
@@ -165,6 +178,7 @@
                :builder nil
                :demo-browser nil
                :scene-children nil
+               :physics-body-count 0
                :default-position (or options.position default-position)
                :default-rotation (or options.rotation default-rotation)
                :reference-point default-position
@@ -188,12 +202,14 @@
            :handle entry.handle
            :pointer-target entry.pointer-target
            :key entry.key
+           :owner entry.owner
            :on-drag-start entry.on-drag-start
            :on-drag-end entry.on-drag-end})))
 
   (fn register-movable-entries [self entity entries]
     (when (and entity app.movables)
-      (local keys [])
+      (local keys (or entity.__scene_movable_keys []))
+      (local records (or entity.__scene_movable_records []))
       (each [_ entry (ipairs entries)]
         (local target entry.target)
         (local handle (or entry.handle target))
@@ -208,8 +224,11 @@
         (when key
           (set options.key key)
           (app.movables:register widget options)
-          (table.insert keys key)))
-      (set entity.__scene_movable_keys keys)))
+          (table.insert keys key)
+          (table.insert records {:key key
+                                 :owner entry.owner})))
+      (set entity.__scene_movable_keys keys)
+      (set entity.__scene_movable_records records)))
 
   (fn register-entity-movables [self entity]
     (when (and entity app.movables)
@@ -237,13 +256,15 @@
            :handle entry.handle
            :pointer-target entry.pointer-target
            :key entry.key
+           :owner entry.owner
            :min-size entry.min-size
            :on-resize-start entry.on-resize-start
            :on-resize-end entry.on-resize-end})))
 
   (fn register-resizable-entries [self entity entries]
     (when (and entity app.resizables)
-      (local keys [])
+      (local keys (or entity.__scene_resizable_keys []))
+      (local records (or entity.__scene_resizable_records []))
       (each [_ entry (ipairs entries)]
         (local target entry.target)
         (local handle (or entry.handle target))
@@ -259,8 +280,11 @@
         (when key
           (set options.key key)
           (app.resizables:register widget options)
-          (table.insert keys key)))
-      (set entity.__scene_resizable_keys keys)))
+          (table.insert keys key)
+          (table.insert records {:key key
+                                 :owner entry.owner})))
+      (set entity.__scene_resizable_keys keys)
+      (set entity.__scene_resizable_records records)))
 
   (fn register-entity-resizables [self entity]
     (when (and entity app.resizables)
@@ -279,7 +303,8 @@
           (each [_ key (ipairs keys)]
             (app.movables:unregister key))
           (app.movables:unregister entity))
-      (set entity.__scene_movable_keys nil)))
+      (set entity.__scene_movable_keys nil)
+      (set entity.__scene_movable_records nil)))
 
   (fn unregister-entity-resizables [self entity]
     (when (and entity app.resizables)
@@ -288,19 +313,49 @@
           (each [_ key (ipairs keys)]
             (app.resizables:unregister key))
           (app.resizables:unregister entity))
-      (set entity.__scene_resizable_keys nil)))
+      (set entity.__scene_resizable_keys nil)
+      (set entity.__scene_resizable_records nil)))
 
-  (fn refresh-panel-movables [self]
-    (when self.entity
-      (unregister-entity-movables self self.entity)
-      (set self.entity.movables (compute-entity-movables self self.entity))
-      (register-entity-movables self self.entity)))
+  (fn remove-key-once [keys key]
+    (when keys
+      (var idx-to-remove nil)
+      (each [idx value (ipairs keys)]
+        (when (and (not idx-to-remove)
+                   (= value key))
+          (set idx-to-remove idx)))
+      (when idx-to-remove
+        (table.remove keys idx-to-remove))))
 
-  (fn refresh-panel-resizables [self]
-    (when self.entity
-      (unregister-entity-resizables self self.entity)
-      (set self.entity.resizables (compute-entity-resizables self self.entity))
-      (register-entity-resizables self self.entity)))
+  (fn unregister-movables-for-owner [self entity owner]
+    (when (and entity app.movables owner)
+      (local records entity.__scene_movable_records)
+      (local keys entity.__scene_movable_keys)
+      (when records
+        (for [idx (length records) 1 -1]
+          (local record (. records idx))
+          (when (and record (= record.owner owner))
+            (app.movables:unregister record.key)
+            (remove-key-once keys record.key)
+            (table.remove records idx))))))
+
+  (fn unregister-resizables-for-owner [self entity owner]
+    (when (and entity app.resizables owner)
+      (local records entity.__scene_resizable_records)
+      (local keys entity.__scene_resizable_keys)
+      (when records
+        (for [idx (length records) 1 -1]
+          (local record (. records idx))
+          (when (and record (= record.owner owner))
+            (app.resizables:unregister record.key)
+            (remove-key-once keys record.key)
+            (table.remove records idx))))))
+
+  (fn remove-entries-for-owner [entries owner]
+    (when (and entries owner)
+      (for [idx (length entries) 1 -1]
+        (local entry (. entries idx))
+        (when (and entry (= entry.owner owner))
+          (table.remove entries idx)))))
 
   (fn remove-panel-child [self element]
     (local entity self.entity)
@@ -351,8 +406,11 @@
         (set self.demo-browser nil))
       (when (and removed-element removed-element.drop)
         (removed-element:drop))
-      (self:refresh-panel-movables)
-      (self:refresh-panel-resizables))
+      (LayoutPhysicsBodies.remove-runtime-layout-body-for-element entity removed-element)
+      (unregister-movables-for-owner self entity removed-element)
+      (unregister-resizables-for-owner self entity removed-element)
+      (remove-entries-for-owner entity.movables removed-element)
+      (remove-entries-for-owner entity.resizables removed-element))
     removed)
 
   (fn add-panel-child [self opts]
@@ -412,15 +470,76 @@
         (set metadata.position
              (parent-inverse:rotate (- centered-position parent-position)))
         (element.layout:layouter))
-      (set entity.movables (compute-entity-movables self entity))
-      (refresh-panel-movables self)
-      (refresh-panel-resizables self)
+      (when (and self.entity
+                 element
+                 element.layout
+                 (not (and opts opts.skip-physics)))
+        (local body-entry
+          (LayoutPhysicsBodies.add-runtime-layout-body self.entity {:element element
+                                                                    :metadata metadata}))
+        (var body-movable nil)
+        (each [_ movable (ipairs (LayoutPhysicsBodies.collect-movables self.entity))]
+          (when (and (not body-movable)
+                     (= movable.key body-entry))
+            (set body-movable movable)))
+        (when body-movable
+          (when (not entity.movables)
+            (set entity.movables []))
+          (table.insert entity.movables body-movable)
+          (register-movable-entries self entity
+                                    [(normalize-movable-entry self body-movable)])))
+      (when (and element element.layout)
+        (when (not entity.movables)
+          (set entity.movables []))
+        (when (not entity.resizables)
+          (set entity.resizables []))
+        (var has-physics-movable? false)
+        (each [_ entry (ipairs entity.movables)]
+          (when (and entry (= entry.owner element))
+            (set has-physics-movable? true)))
+        (when (not has-physics-movable?)
+          (local panel-movable
+            {:target element.layout
+             :handle element
+             :owner element})
+          (table.insert entity.movables panel-movable)
+          (register-movable-entries self entity
+                                    [(normalize-movable-entry self panel-movable)]))
+        (local panel-resizable
+          {:target element.layout
+           :handle element.layout
+           :key element
+           :min-size (resolve-min-size element.layout)
+           :owner element})
+        (table.insert entity.resizables panel-resizable)
+        (register-resizable-entries self entity
+                                    [(normalize-resizable-entry self panel-resizable)]))
       element))
 
   (fn add-demo-entry [self entry]
     (when (and entry entry.builder)
       (add-panel-child self {:builder entry.builder
                             :flex (or entry.flex 0)})))
+
+  (fn add-physics-body [self opts]
+    (local options (or opts {}))
+    (local size (or options.size (glm.vec3 4 4 4)))
+    (local placement (resolve-camera-placement self))
+    (local stack-index self.physics-body-count)
+    (local stacked-position
+      (+ placement.position
+         (glm.vec3 0 (+ 6 (* stack-index 4)) 0)))
+    (set self.physics-body-count (+ stack-index 1))
+    (local builder (Sized {:size size
+                           :child (DemoPhysicsBodies.new-cuboid)}))
+    (local element (add-panel-child self {:builder builder
+                                          :skip-cuboid true
+                                          :skip-physics false
+                                          :position (or options.position stacked-position)
+                                          :rotation options.rotation}))
+    (when element
+      (self:sync-physics-bodies))
+    element)
 
   (fn add-demo-browser [self]
     (if self.demo-browser
@@ -438,8 +557,8 @@
     (unregister-entity-movables self entity)
     (unregister-entity-resizables self entity))
 
-  (fn sync-physics-cuboids [self]
-    (DemoPhysicsCuboids.sync self.entity))
+  (fn sync-physics-bodies [self]
+    (LayoutPhysicsBodies.sync self.entity))
 
   (fn sync-physics-balls [self]
     (Ball.sync-all self.entity))
@@ -451,6 +570,7 @@
     (set self.entity entity)
     (set self.scene-children nil)
     (set self.demo-browser nil)
+    (set self.physics-body-count 0)
     (when entity
       (set entity.__scene_base_movables (copy-movables entity.movables))
       (when (not entity.scene-children)
@@ -465,13 +585,13 @@
       (entity.layout:set-rotation self.default-rotation)
       (entity.layout:mark-measure-dirty)
       (set self.reference-point resolved-position)
-      (DemoPhysicsCuboids.attach entity entity.__physics_cuboids_spec)
+      (LayoutPhysicsBodies.attach entity entity.__physics_bodies_spec)
       (Ball.attach-all entity)
       (set entity.movables (compute-entity-movables self entity))
       (set entity.resizables (compute-entity-resizables self entity))
       (register-entity-movables self entity)
       (register-entity-resizables self entity)
-      (self:sync-physics-cuboids)))
+      (self:sync-physics-bodies)))
 
   (fn build [self builder]
     (set self.builder builder)
@@ -485,7 +605,7 @@
   (self:build (make-default-builder)))
 
 (fn update [self]
-  (self:sync-physics-cuboids)
+  (self:sync-physics-bodies)
   (self:sync-physics-balls)
   (self.layout-root:update))
 
@@ -586,7 +706,7 @@
 (set self.build-default build-default)
 (set self.update update)
 (set self.drop drop)
-(set self.sync-physics-cuboids sync-physics-cuboids)
+(set self.sync-physics-bodies sync-physics-bodies)
 (set self.sync-physics-balls sync-physics-balls)
 (set self.reset-projection reset-projection)
 (set self.get-view-matrix get-view-matrix)
@@ -607,9 +727,7 @@
 (set self.remove-panel-child remove-panel-child)
 (set self.add-demo-entry add-demo-entry)
 (set self.add-demo-browser add-demo-browser)
-(set self.refresh-panel-movables refresh-panel-movables)
-(set self.refresh-panel-resizables refresh-panel-resizables)
-
+(set self.add-physics-body add-physics-body)
 (self:reset-projection)
 self)
 

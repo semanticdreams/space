@@ -2,7 +2,7 @@
 (local Button (require :button))
 (local {: Flex : FlexChild} (require :flex))
 (local DemoChart (require :demo-chart))
-(local DemoPhysicsCuboids (require :demo-physics-cuboids))
+(local DemoPhysicsBodies (require :demo-physics-bodies))
 (local DefaultDialog (require :default-dialog))
 (local FsView (require :fs-view))
 (local fs (require :fs))
@@ -155,10 +155,10 @@
       (child-builder ctx runtime-opts))))
 
 (local demo-entries
-  [{:key :physics-cuboid
+  [{:key :physics-body
     :label "Physics Cuboid"
     :builder (Sized {:size (glm.vec3 4 4 4)
-                     :child (DemoPhysicsCuboids.new-cuboid)})}
+                     :child (DemoPhysicsBodies.new-cuboid)})}
    {:key :space-image
     :label "Space Image"
     :builder (Image {:path "pics/space.png"
