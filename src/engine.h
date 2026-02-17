@@ -91,8 +91,12 @@ private:
     void initSystemCursors();
     void shutdownSystemCursors();
     void setSystemCursor(const std::string& name);
+    SDL_JoystickID openGameController(Sint32 deviceIndex, Uint32 timestamp);
+    void closeGameController(SDL_JoystickID instanceId, Uint32 timestamp);
+    void closeAllGameControllers(Uint32 timestamp);
 
     std::unordered_map<std::string, SDL_Cursor*> systemCursors;
+    std::unordered_map<SDL_JoystickID, SDL_GameController*> gameControllers;
     SDL_Cursor* activeCursor { nullptr };
 
     // python
