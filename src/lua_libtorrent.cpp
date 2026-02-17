@@ -367,7 +367,8 @@ lt::settings_pack make_settings(sol::table opts)
     pack.set_bool(lt::settings_pack::announce_to_all_tiers, true);
     pack.set_bool(lt::settings_pack::announce_to_all_trackers, true);
     pack.set_int(lt::settings_pack::alert_mask,
-                 static_cast<int>(lt::alert_category::error | lt::alert_category::status));
+                 static_cast<int>(lt::alert_category::error | lt::alert_category::status
+                                  | lt::alert_category::dht));
     return pack;
 }
 
