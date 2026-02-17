@@ -2,6 +2,8 @@
 (local Button (require :button))
 (local SearchView (require :search-view))
 (local ExternalEditor (require :external-editor))
+(local DefaultDialog (require :default-dialog))
+(local RipgrepView (require :ripgrep-view))
 (local fs (require :fs))
 
 (fn FsNodeView [node opts]
@@ -28,11 +30,30 @@
                                         (ExternalEditor.open-file resolved-path (fn [] nil))))})
              build-ctx))
 
+        (fn open-ripgrep-panel []
+          (assert (and app app.hud app.hud.add-panel-child)
+                  "FsNodeView ripgrep action requires app.hud:add-panel-child")
+          (when resolved-path
+            (app.hud:add-panel-child
+              {:builder
+               (DefaultDialog {:title (.. "Ripgrep: " (or target.label resolved-path))
+                               :child (RipgrepView {:path resolved-path})})
+               :builder-options {:path resolved-path}})))
+
+        (local ripgrep-button
+          ((Button {:text "Ripgrep"
+                    :variant :ghost
+                    :enabled? (not (= resolved-path nil))
+                    :on-click (fn [_button _event]
+                                (open-ripgrep-panel))})
+           build-ctx))
+
         (local action-row
             ((Flex {:axis 1
                     :xspacing 0.3
                     :yalign :center
-                    :children [(FlexChild (fn [_] edit-button) 0)]})
+                    :children [(FlexChild (fn [_] edit-button) 0)
+                               (FlexChild (fn [_] ripgrep-button) 0)]})
              build-ctx))
 
         (local search
@@ -51,6 +72,8 @@
 
         (set view.search search)
         (set view.action-row action-row)
+        (set view.ripgrep-button ripgrep-button)
+        (set view.open-ripgrep-panel (fn [_self] (open-ripgrep-panel)))
         (set view.layout layout.layout)
         (set view.set-items (fn [_self new-items]
                                  (search:set-items new-items)))
@@ -82,6 +105,7 @@
                             (when search
                                 (search:drop))
                             (action-row:drop)
+                            (ripgrep-button:drop)
                             (edit-button:drop)
                             (layout:drop)))
 

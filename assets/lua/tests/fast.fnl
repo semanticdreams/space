@@ -73,6 +73,7 @@
     :tests.test-tempfile
     :tests.test-external-editor
     :tests.test-ripgrep
+    :tests.test-ripgrep-view
     :tests.test-process
     :tests.test-flamegraph
     :tests.test-points

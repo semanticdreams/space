@@ -512,6 +512,43 @@
                     (view:drop)
                     (graph:drop))))))
 
+(fn fs-node-view-ripgrep-button-opens-ripgrep-view-with-prefilled-path []
+    (with-temp-data-dir
+        (fn [_root]
+            (with-temp-dir
+                (fn [root]
+                    (local original-hud app.hud)
+                    (local added-opts [])
+                    (set app.hud
+                         {:add-panel-child (fn [_self opts]
+                                             (table.insert added-opts opts)
+                                             {:layout {:position (glm.vec3 0 0 0)}
+                                              :drop (fn [_] nil)})})
+                    (local (ok err)
+                          (pcall
+                            (fn []
+                                (local ctx (make-ctx))
+                                (local graph (Graph {:with-start false}))
+                                (local node (FsNode {:path root}))
+                                (graph:add-node node {:position (glm.vec3 0 0 0)})
+                                (local builder (node.view node))
+                                (local view (builder ctx))
+                                (local ripgrep-button view.ripgrep-button)
+                                (assert ripgrep-button "Fs node view should expose a ripgrep-button handle")
+                                (ripgrep-button:on-click {:button 1})
+                                (assert (= (length added-opts) 1)
+                                        "Ripgrep button should open one panel child")
+                                (local opts (. added-opts 1))
+                                (assert (and opts opts.builder) "Ripgrep panel add should include a builder")
+                                (assert (= (and opts.builder-options opts.builder-options.path)
+                                           (fs.absolute root))
+                                        "Ripgrep panel should prefill FsNode absolute path")
+                                (view:drop)
+                                (graph:drop))))
+                    (set app.hud original-hud)
+                    (when (not ok)
+                        (error err)))))))
+
 (fn table-node-view-adds-child-nodes []
     (with-temp-data-dir
         (fn [_root]
@@ -1309,6 +1346,8 @@
 (table.insert tests {:name "Llm conversations view builds" :fn llm-conversations-view-builds})
 (table.insert tests {:name "Llm node view adds conversations" :fn llm-node-view-adds-conversations})
 (table.insert tests {:name "Fs node view adds edges for entries" :fn fs-node-view-adds-child-nodes-for-entries})
+(table.insert tests {:name "Fs node view ripgrep button opens prefilled view"
+                     :fn fs-node-view-ripgrep-button-opens-ripgrep-view-with-prefilled-path})
 (table.insert tests {:name "Fs node actions open code-dir for directories"
                      :fn fs-node-actions-open-code-dir-for-directories})
 (table.insert tests {:name "Fs node actions open fnl-module for .fnl files"
