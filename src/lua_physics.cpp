@@ -142,6 +142,16 @@ sol::table create_physics_table(sol::state_view lua)
         "setFriction", &btRigidBody::setFriction,
         "setRollingFriction", &btRigidBody::setRollingFriction,
         "setRestitution", &btRigidBody::setRestitution,
+        "activate", sol::overload(
+            [](btRigidBody& self) {
+                self.activate();
+            },
+            [](btRigidBody& self, bool force) {
+                self.activate(force);
+            }
+        ),
+        "setActivationState", &btRigidBody::setActivationState,
+        "forceActivationState", &btRigidBody::forceActivationState,
         "getLinearVelocity", [](btRigidBody& self) {
             return self.getLinearVelocity();
         },

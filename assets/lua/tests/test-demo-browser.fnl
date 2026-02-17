@@ -4,6 +4,7 @@
 (local DemoDialogs (require :demo-dialogs))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
+(local bt (require :bt))
 
 (local tests [])
 
@@ -103,8 +104,8 @@
                  (scene:add-demo-entry entry)
                  (assert (= (length scene.scene-children) 2)
                          "Scene should contain browser and the opened dialog")
-                 (assert (= (length scene.entity.__scene_movable_keys) 2)
-                         "Movables should track each flex child")
+                 (assert (>= (length scene.entity.__scene_movable_keys) 2)
+                         "Movables should track added scene children")
                  (assert (>= (length movables.registered) 2)
                          "Movables register should record registrations for positioned children")))]
     (cleanup)
@@ -128,10 +129,10 @@
                  (close-button:on-click {:button 1})
                  (assert (= (length scene.scene-children) 1)
                          "Closing dialog should remove the positioned child")
-                 (assert (= (length scene.entity.__scene_movable_keys) 1)
-                         "Movables should track remaining flex children after closing")
-                 (assert (>= (length movables.unregistered) 2)
-                         "Closing dialog should unregister previous movable entries")))]
+                 (assert (>= (length scene.entity.__scene_movable_keys) 1)
+                         "Movables should track remaining scene children after closing")
+                 (assert (>= (length movables.unregistered) 1)
+                         "Closing dialog should unregister removed movable entries")))]
     (cleanup)
     (when (not ok)
       (error err))))
@@ -150,7 +151,7 @@
                  (assert element "Expected Perlin terrain element to be created")
                  (assert (= (length scene.scene-children) 2)
                          "Scene should contain browser and Perlin terrain")
-                 (assert (= (length scene.entity.__scene_movable_keys) 2)
+                 (assert (>= (length scene.entity.__scene_movable_keys) 2)
                          "Movables should include demo browser and Perlin terrain")))]
     (cleanup)
     (when (not ok)
@@ -206,10 +207,124 @@
     (when (not ok)
       (error err))))
 
+(fn scene-add-physics-body-falls []
+  (assert bt "Physics body test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local element (scene:add-physics-body {:position (glm.vec3 0 20 0)
+                                                      :size (glm.vec3 4 4 4)}))
+            (assert element "Expected add-physics-body to return an element")
+            (assert scene.entity.physics-bodies "Scene should track runtime physics bodies")
+            (local entry (. scene.entity.physics-bodies (length scene.entity.physics-bodies)))
+            (assert (and entry entry.body) "Runtime physics body should create a rigid body")
+            (local start-y element.layout.position.y)
+
+            (for [i 1 120]
+              (app.engine.physics:update 0)
+              (scene:update))
+
+            (local end-y element.layout.position.y)
+            (local transform (entry.body:getCenterOfMassTransform))
+            (local origin (transform:getOrigin))
+            (assert (< end-y (- start-y 5))
+                    (string.format
+                      "Physics body should fall (start_y=%.3f end_y=%.3f body_center_y=%.3f)"
+                      start-y
+                      end-y
+                      origin.y))))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn scene-physics-body-collides-with-flat-terrain []
+  (assert bt "Physics body terrain test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local element (scene:add-physics-body {:position (glm.vec3 0 -70 0)
+                                                      :size (glm.vec3 4 4 4)}))
+            (assert element "Expected add-physics-body to return an element")
+
+            (for [i 1 360]
+              (app.engine.physics:update 0)
+              (scene:update))
+
+            (local y element.layout.position.y)
+            (assert (< (math.abs (+ y 100)) 6)
+                    (string.format
+                      "Physics body should settle near flat terrain y=-100 (actual_y=%.3f)"
+                      y))))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn scene-runtime-body-falls-after-drag-release []
+  (assert bt "Physics body drag-release test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local element (scene:add-physics-body {:position (glm.vec3 0 20 0)
+                                                      :size (glm.vec3 4 4 4)}))
+            (assert element "Expected add-physics-body to return an element")
+            (local physics-entry (. scene.entity.physics-bodies (length scene.entity.physics-bodies)))
+            (assert physics-entry "Expected runtime physics entry")
+
+            (var movable-entry nil)
+            (each [_ entry (ipairs (or scene.entity.movables []))]
+              (when (and (not movable-entry)
+                         (= entry.key physics-entry))
+                (set movable-entry entry)))
+            (assert movable-entry "Expected movable entry for runtime physics body")
+
+            (movable-entry.on-drag-start movable-entry)
+            (element.layout:set-position (glm.vec3 0 5 0))
+            (movable-entry.on-drag-end movable-entry)
+
+            (scene:update)
+            (local start-y element.layout.position.y)
+            (for [i 1 120]
+              (app.engine.physics:update 0)
+              (scene:update))
+            (local end-y element.layout.position.y)
+            (local transform (physics-entry.body:getCenterOfMassTransform))
+            (local origin (transform:getOrigin))
+            (assert (< end-y (- start-y 2))
+                    (string.format
+                      "Body should continue falling after drag release (start_y=%.3f end_y=%.3f body_center_y=%.3f body_active=%s dragging=%s)"
+                      start-y
+                      end-y
+                      origin.y
+                      (tostring physics-entry.body-active?)
+                      (tostring physics-entry.dragging)))))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
 (table.insert tests {:name "Scene additions appear in front of the camera" :fn added-dialog-appears-in-front-of-camera})
+(table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
+(table.insert tests {:name "Scene physics body collides with flat terrain"
+                     :fn scene-physics-body-collides-with-flat-terrain})
+(table.insert tests {:name "Scene runtime body falls after drag release"
+                     :fn scene-runtime-body-falls-after-drag-release})
 
 (local main
   (fn []

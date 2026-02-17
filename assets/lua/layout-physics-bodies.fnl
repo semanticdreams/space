@@ -1,0 +1,418 @@
+(local glm (require :glm))
+(local bt (require :bt))
+
+(fn physics-available? []
+  (and bt app.engine app.engine.physics))
+
+(fn bt-glm-vec3 [value]
+  (bt.Vector3 (or value.x 0) (or value.y 0) (or value.z 0)))
+
+(fn physics-glm-vec3 [value]
+  (glm.vec3 (or value.x 0) (or value.y 0) (or value.z 0)))
+
+(fn glm-bt-quat [value]
+  (bt.Quaternion (or value.x 0) (or value.y 0) (or value.z 0) (or value.w 1)))
+
+(fn bt-quat->glm-quat [rotation]
+  (local w (and rotation (rotation:w)))
+  (local x (and rotation (rotation:x)))
+  (local y (and rotation (rotation:y)))
+  (local z (and rotation (rotation:z)))
+  (if (and w x y z)
+      (glm.quat w x y z)
+      (glm.quat 1 0 0 0)))
+
+(fn clamp-size [size]
+  (glm.vec3 (math.max (or size.x 0) 0.05)
+            (math.max (or size.y 0) 0.05)
+            (math.max (or size.z 0) 0.05)))
+
+(fn resolve-layout-size [layout fallback]
+  (if layout
+      (clamp-size (or layout.size layout.measure fallback (glm.vec3 1 1 1)))
+      (clamp-size (or fallback (glm.vec3 1 1 1)))))
+
+(fn ensure-physics-configured []
+  (when (physics-available?)
+    (app.engine.physics:setGravity 0 -25 0)))
+
+(fn get-entries [entity]
+  (or (and entity entity.physics-bodies) []))
+
+(fn set-entries! [entity entries]
+  (when entity
+    (set entity.physics-bodies entries)))
+
+(var attach-movables nil)
+
+(fn create-rigid-box [size position rotation]
+  (when (and size position (physics-available?))
+    (local half-extents (bt.Vector3 (* 0.5 size.x)
+                                    (* 0.5 size.y)
+                                    (* 0.5 size.z)))
+    (local shape (bt.BoxShape half-extents))
+    (local transform (bt.Transform))
+    (transform:setIdentity)
+    (transform:setOrigin (bt-glm-vec3 position))
+    (when rotation
+      (transform:setRotation (glm-bt-quat rotation)))
+    (local motion-state (bt.DefaultMotionState transform))
+    (local inertia (bt.Vector3 0 0 0))
+    (shape:calculateLocalInertia 1.0 inertia)
+    (local info (bt.RigidBodyConstructionInfo 1.0 motion-state shape inertia))
+    (local body (bt.RigidBody info))
+    (app.engine.physics:addRigidBody body)
+    {:shape shape
+     :motion-state motion-state
+     :body body}))
+
+(fn half-size [entry]
+  (* entry.size (glm.vec3 0.5 0.5 0.5)))
+
+(fn entity-transform [entity]
+  (local layout (and entity entity.layout))
+  {:position (or (and layout layout.position) (glm.vec3 0 0 0))
+   :rotation (or (and layout layout.rotation) (glm.quat 1 0 0 0))})
+
+(fn vec3-changed? [a b eps]
+  (local e (or eps 1e-4))
+  (or (> (math.abs (- a.x b.x)) e)
+      (> (math.abs (- a.y b.y)) e)
+      (> (math.abs (- a.z b.z)) e)))
+
+(fn quat-changed? [a b eps]
+  (local e (or eps 1e-4))
+  (or (> (math.abs (- a.w b.w)) e)
+      (> (math.abs (- a.x b.x)) e)
+      (> (math.abs (- a.y b.y)) e)
+      (> (math.abs (- a.z b.z)) e)))
+
+(fn remove-body [entry]
+  (when (and entry.body entry.body-active? (physics-available?))
+    (app.engine.physics:removeRigidBody entry.body)
+    (set entry.body-active? false)))
+
+(fn apply-layout-to-body [entry]
+  (when (and entry.body entry.positioned entry.positioned.layout)
+    (local layout entry.positioned.layout)
+    (local half (half-size entry))
+    (local transform (bt.Transform))
+    (transform:setIdentity)
+    (transform:setOrigin (bt-glm-vec3 (+ layout.position
+                                       (layout.rotation:rotate half))))
+    (transform:setRotation (glm-bt-quat layout.rotation))
+    (entry.body:setWorldTransform transform)
+    (local motion (and entry.rigid entry.rigid.motion-state))
+    (when motion
+      (motion:setWorldTransform transform))
+    (entry.body:setLinearVelocity (bt.Vector3 0 0 0))))
+
+(fn local-offset-from-layout [entity entry]
+  (local base (entity-transform entity))
+  (local inverse (base.rotation:inverse))
+  (local layout (and entry.positioned entry.positioned.layout))
+  (if layout
+      (do
+        (local world-center (+ layout.position
+                               (layout.rotation:rotate (half-size entry))))
+        (local relative (- world-center base.position))
+        (local local-relative (inverse:rotate relative))
+        (- local-relative (half-size entry)))
+      entry.spawn))
+
+(fn copy-vec3-into! [dst src]
+  (when (and dst src)
+    (set dst.x src.x)
+    (set dst.y src.y)
+    (set dst.z src.z))
+  dst)
+
+(fn world-state-from-layout [entry]
+  (local layout (and entry.positioned entry.positioned.layout))
+  (if layout
+      {:position (+ layout.position (layout.rotation:rotate (half-size entry)))
+       :rotation (or layout.rotation (glm.quat 1 0 0 0))}
+      {:position (glm.vec3 0 0 0)
+       :rotation (glm.quat 1 0 0 0)}))
+
+(fn rebuild-body-for-size [entry next-size]
+  (local size (clamp-size next-size))
+  (local world-state
+    (if (and entry.body entry.body-active? (physics-available?))
+        (do
+          (local transform (entry.body:getCenterOfMassTransform))
+          (local origin (transform:getOrigin))
+          (local rotation (transform:getRotation))
+          {:position (physics-glm-vec3 origin)
+           :rotation (bt-quat->glm-quat rotation)})
+        (world-state-from-layout entry)))
+  (local should-remain-active? entry.body-active?)
+  (when entry.body
+    (remove-body entry)
+    (set entry.body nil)
+    (set entry.rigid nil)
+    (set entry.body-active? false))
+  (set entry.size size)
+  (when (physics-available?)
+    (local rigid (create-rigid-box size world-state.position world-state.rotation))
+    (when rigid
+      (set entry.body rigid.body)
+      (set entry.rigid rigid)
+      (set entry.body-active? true)
+      (if should-remain-active?
+          (do
+            (when entry.body.forceActivationState
+              (entry.body:forceActivationState 1))
+            (when entry.body.activate
+              (entry.body:activate true)))
+          (remove-body entry)))))
+
+(fn ensure-body-matches-layout-size [entry]
+  (local layout (and entry.positioned entry.positioned.layout))
+  (when layout
+    (local size (resolve-layout-size layout entry.size))
+    (when (or (not entry.body)
+              (vec3-changed? size entry.size 1e-3))
+      (rebuild-body-for-size entry size))))
+
+(fn add-body [entry]
+  (when (and entry.body (not entry.body-active?) (physics-available?))
+    (apply-layout-to-body entry)
+    (app.engine.physics:addRigidBody entry.body)
+    (when (and entry.body entry.body.forceActivationState)
+      (entry.body:forceActivationState 1))
+    (when (and entry.body entry.body.activate)
+      (entry.body:activate true))
+    (entry.body:setLinearVelocity (bt.Vector3 0 -0.01 0))
+    (entry.body:applyForce (bt.Vector3 0 -0.5 0))
+    (set entry.body-active? true)))
+
+(fn attach [entity entries-spec]
+  (local entries (or (and entries-spec entries-spec.entries) []))
+  (local count (length entries))
+  (when entity
+    (when (> count 0)
+      (ensure-physics-configured)
+      (local child-count (length entity.children))
+      (local start-index (+ 1 (- child-count count)))
+      (local base-position (or entity.layout.position (glm.vec3 0 0 0)))
+      (local base-rotation (or entity.layout.rotation (glm.quat 1 0 0 0)))
+      (each [idx entry (ipairs entries)]
+        (local metadata (. entity.children (+ start-index (- idx 1))))
+        (when metadata
+          (set entry.positioned metadata.element))
+        (when entry.positioned
+          (set entry.size (resolve-layout-size entry.positioned.layout entry.size)))
+        (when (and (not entry.body) (physics-available?))
+          (local center (+ entry.spawn (half-size entry)))
+          (local world-center (+ base-position (base-rotation:rotate center)))
+          (local rigid (create-rigid-box entry.size world-center entry.positioned.layout.rotation))
+          (when rigid
+            (set entry.body rigid.body)
+            (set entry.body-active? true)
+            (set entry.rigid rigid))))
+      (set-entries! entity entries)
+      (local original-drop entity.drop)
+      (set entity.drop
+           (fn [self]
+             (each [_ entry (ipairs entries)]
+               (when entry.body
+                 (remove-body entry)
+                 (set entry.body nil)
+                 (set entry.rigid nil)))
+             (when original-drop
+               (original-drop self))))
+      (attach-movables entity entries))
+    (when (not entity.physics-bodies)
+      (set-entries! entity [])))
+  entity)
+
+(fn ensure-runtime-state [entity]
+  (when (and entity (not entity.physics-bodies))
+    (set-entries! entity []))
+  (when (and entity (not entity.__physics-bodies-drop-wrapped))
+    (local original-drop entity.drop)
+    (set entity.drop
+         (fn [self]
+           (each [_ entry (ipairs (get-entries self))]
+             (when entry.body
+               (remove-body entry)
+               (set entry.body nil)
+               (set entry.rigid nil)
+               (set entry.body-active? false)))
+           (when original-drop
+             (original-drop self))))
+    (set entity.__physics-bodies-drop-wrapped true)))
+
+(fn add-runtime-layout-body [entity opts]
+  (local options (or opts {}))
+  (local element (assert options.element "LayoutPhysicsBodies.add-runtime-layout-body requires :element"))
+  (local layout (and element element.layout))
+  (local size (resolve-layout-size layout options.size))
+  (var metadata options.metadata)
+  (when (not metadata)
+    (each [_ child-metadata (ipairs (or entity.children []))]
+      (when (and (not metadata)
+                 child-metadata
+                 (= child-metadata.element element))
+        (set metadata child-metadata))))
+  (local metadata-position (or (and metadata metadata.position) (glm.vec3 0 0 0)))
+  (local entry {:spawn (glm.vec3 0 0 0)
+                :size size
+                :offset metadata-position
+                :positioned element
+                :metadata metadata
+                :body nil
+                :body-active? false
+                :dragging false
+                :rigid nil})
+  (ensure-runtime-state entity)
+  (set entry.spawn (local-offset-from-layout entity entry))
+  (set entry.offset.x entry.spawn.x)
+  (set entry.offset.y entry.spawn.y)
+  (set entry.offset.z entry.spawn.z)
+  (ensure-physics-configured)
+  (ensure-body-matches-layout-size entry)
+  (local entries (get-entries entity))
+  (table.insert entries entry)
+  (set-entries! entity entries)
+  entry)
+
+(fn remove-runtime-layout-body-for-element [entity element]
+  (local entries (get-entries entity))
+  (when entries
+    (var remove-idx nil)
+    (each [idx entry (ipairs entries)]
+      (when (and (not remove-idx)
+                 (= entry.positioned element))
+        (set remove-idx idx)))
+    (when remove-idx
+      (local entry (. entries remove-idx))
+      (when entry
+        (remove-body entry)
+        (set entry.body nil)
+        (set entry.rigid nil)
+        (set entry.body-active? false))
+      (table.remove entries remove-idx)
+      entry)))
+
+(fn create-movable-entry [entity entry]
+  (local target (and entry.positioned entry.positioned.layout))
+  (when target
+    {:target target
+     :handle target
+     :key entry
+     :owner entry.positioned
+     :on-drag-start
+     (fn [_movable]
+       (set entry.dragging true)
+       (ensure-body-matches-layout-size entry))
+     :on-drag-end
+     (fn [_movable]
+       (set entry.dragging false)
+       (local base (entity-transform entity))
+       (local inverse (base.rotation:inverse))
+       (local world-center (+ target.position (target.rotation:rotate (half-size entry))))
+       (local relative (- world-center base.position))
+       (local local-relative (inverse:rotate relative))
+       (local local-offset (- local-relative (half-size entry)))
+       (if entry.offset
+           (copy-vec3-into! entry.offset local-offset)
+           (set entry.offset (glm.vec3 local-offset.x local-offset.y local-offset.z)))
+       (if entry.spawn
+           (copy-vec3-into! entry.spawn local-offset)
+           (set entry.spawn (glm.vec3 local-offset.x local-offset.y local-offset.z)))
+       (when (and entry.positioned entry.positioned.layout)
+         (entry.positioned.layout:mark-layout-dirty))
+       (ensure-body-matches-layout-size entry)
+       (apply-layout-to-body entry)
+       (when (and entry.body entry.body.forceActivationState)
+         (entry.body:forceActivationState 1))
+       (when (and entry.body entry.body.activate)
+         (entry.body:activate true))
+       (when entry.body
+         (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
+     }))
+
+(fn collect-movables [entity]
+  (var entries [])
+  (each [_ entry (ipairs (get-entries entity))]
+    (local movable-entry (create-movable-entry entity entry))
+    (when movable-entry
+      (table.insert entries movable-entry)))
+  entries)
+
+(set attach-movables
+     (fn [entity entries]
+       (local movable-entries
+         (icollect [_ entry (ipairs entries)]
+           (create-movable-entry entity entry)))
+       (local existing (or entity.movables []))
+       (each [_ entry (ipairs movable-entries)]
+         (when entry
+           (table.insert existing entry)))
+       (set entity.movables existing)))
+
+(fn sync [entity]
+  (local entries (get-entries entity))
+  (when (and entries (> (length entries) 0))
+    (local container-layout entity.layout)
+    (when container-layout
+      (local base-position (or container-layout.position (glm.vec3 0 0 0)))
+      (local base-rotation (or container-layout.rotation (glm.quat 1 0 0 0)))
+      (local inverse (base-rotation:inverse))
+      (each [_ entry (ipairs entries)]
+        (local offset entry.offset)
+        (local positioned entry.positioned)
+        (when (and offset positioned positioned.layout)
+          (ensure-body-matches-layout-size entry)
+          (when (and (not entry.dragging)
+                     entry.body
+                     (not entry.body-active?)
+                     (physics-available?))
+            (add-body entry))
+          (local body entry.body)
+          (local world-position
+            (if entry.dragging
+                (do
+                  (apply-layout-to-body entry)
+                  (+ positioned.layout.position
+                     (positioned.layout.rotation:rotate (half-size entry))))
+                (if (and body entry.body-active? (physics-available?))
+                    (do
+                      (local transform (body:getCenterOfMassTransform))
+                      (local origin (transform:getOrigin))
+                      (physics-glm-vec3 origin))
+                    (+ base-position
+                       (base-rotation:rotate (+ entry.spawn (half-size entry)))))))
+          (when world-position
+            (local entry-half (half-size entry))
+            (local relative (- world-position base-position))
+            (local local-relative (inverse:rotate relative))
+            (local local-offset (- local-relative entry-half))
+            (local world-rotation
+              (if (and body entry.body-active? (physics-available?))
+                  (do
+                    (local transform (body:getCenterOfMassTransform))
+                    (local rotation (transform:getRotation))
+                    (bt-quat->glm-quat rotation))
+                  (or positioned.layout.rotation (glm.quat 1 0 0 0))))
+            (local layout-position (- world-position (world-rotation:rotate entry-half)))
+            (when (or (vec3-changed? offset local-offset 1e-3)
+                      (vec3-changed? positioned.layout.position layout-position 1e-3)
+                      (quat-changed? positioned.layout.rotation world-rotation 1e-3))
+              (set offset.x local-offset.x)
+              (set offset.y local-offset.y)
+              (set offset.z local-offset.z)
+              (when entry.metadata
+                (set entry.metadata.transform-applied? true))
+              (set positioned.layout.rotation world-rotation)
+              (set positioned.layout.position layout-position)
+              (positioned.layout:mark-layout-dirty)))))))
+  nil)
+
+{:attach attach
+ :add-runtime-layout-body add-runtime-layout-body
+ :remove-runtime-layout-body-for-element remove-runtime-layout-body-for-element
+ :collect-movables collect-movables
+ :sync sync}

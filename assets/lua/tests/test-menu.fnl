@@ -8,6 +8,10 @@
 (local LinkEntityStore (require :entities/link))
 
 (local tests [])
+(local reset-engine-events
+  (fn []
+    (when _G.reset-engine-events
+      (_G.reset-engine-events))))
 
 (fn make-icons-stub []
   (local glyph {:advance 1})
@@ -308,11 +312,47 @@
       (when (not ok)
         (error err)))))
 
+(fn menu-manager-root-add-cuboid-invokes-scene []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local calls {:add-cuboid 0})
+  (local original-scene app.scene)
+  (set app.scene {:add-physics-body (fn [_self]
+                                        (set calls.add-cuboid (+ calls.add-cuboid 1)))})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local cb clickables.state.right-void)
+        (assert cb "MenuManager should register a right-click void callback")
+        (cb {:screen {:x 10 :y 20}})
+        (local element (. (. hud.overlay-root.children 1) :element))
+        (local button (find-button-by-name element "add cuboid"))
+        (assert button "Root context menu should include 'add cuboid'")
+        (button:on-click {:button 1})
+        (assert (= calls.add-cuboid 1)
+                "add cuboid action should invoke scene:add-physics-body once"))))
+
+  (manager:drop)
+  (set app.scene original-scene)
+
+  (when (not ok)
+    (error err)))
+
 (table.insert tests {:name "Menu actions and depth offset" :fn menu-actions-fire-and-increment-depth})
 (table.insert tests {:name "Menu grows downward from click" :fn menu-grows-downward-from-click})
 (table.insert tests {:name "Menu manager opens and closes menu" :fn menu-manager-opens-and-closes})
 (table.insert tests {:name "Menu root show link entities adds related nodes"
                      :fn menu-manager-root-show-link-entities-adds-related-nodes})
+(table.insert tests {:name "Menu root add cuboid invokes scene"
+                     :fn menu-manager-root-add-cuboid-invokes-scene})
 
 (local main
   (fn []
