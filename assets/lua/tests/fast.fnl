@@ -84,6 +84,7 @@
     :tests.test-renderers
     :tests.test-focus
     :tests.test-input-model
+    :tests.test-dial-type
     :tests.test-input
     :tests.test-quit-binding
     :tests.test-input-state-binding
