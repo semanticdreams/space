@@ -337,6 +337,20 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_input_dial_type
+    tests/test_input_dial_type.cpp
+    src/dial_type.cpp
+    src/input_dial_type.cpp
+    src/input_state.cpp
+    src/input_game_controller_state.cpp
+)
+target_include_directories(test_input_dial_type PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_input_dial_type ${SDL2_LIBRARIES})
+add_test(NAME test_input_dial_type COMMAND test_input_dial_type)
+set_tests_properties(test_input_dial_type PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 
