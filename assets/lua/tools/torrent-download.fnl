@@ -9,7 +9,11 @@
   path)
 
 (fn file-exists? [path]
-  (and path (fs.exists path)))
+  (if (not path)
+      false
+      (do
+        (local (ok exists?) (pcall fs.exists path))
+        (if ok exists? false))))
 
 (fn strip-btih-prefix [value]
   (if (string.find value "urn:btih:" 1 true)
@@ -61,27 +65,28 @@
 
 (fn resolve-input [raw]
   (local maybe-hash (strip-btih-prefix raw))
-  (if (file-exists? raw)
+  (if (string.find raw "magnet:?" 1 true)
       (do
-        (local absolute-path (fs.absolute raw))
-        (local meta (info-hash-from-torrent absolute-path))
-        {:kind "torrent-file"
+        (local meta (info-hash-from-magnet raw))
+        {:kind "magnet-uri"
          :info-hash meta.info-hash
          :name meta.name
-         :magnet-uri meta.magnet-uri
-         :torrent-path absolute-path})
-      (if (string.find raw "magnet:?" 1 true)
+         :magnet-uri raw})
+      (if (is-hex-info-hash? maybe-hash)
           (do
-            (local meta (info-hash-from-magnet raw))
-            {:kind "magnet-uri"
-             :info-hash meta.info-hash
-             :name meta.name
-             :magnet-uri raw})
-          (if (is-hex-info-hash? maybe-hash)
-              {:kind "info-hash"
-               :info-hash (string.lower maybe-hash)
-               :name nil
-               :magnet-uri nil}
+            {:kind "info-hash"
+             :info-hash (string.lower maybe-hash)
+             :name nil
+             :magnet-uri nil})
+          (if (file-exists? raw)
+              (do
+                (local absolute-path (fs.absolute raw))
+                (local meta (info-hash-from-torrent absolute-path))
+                {:kind "torrent-file"
+                 :info-hash meta.info-hash
+                 :name meta.name
+                 :magnet-uri meta.magnet-uri
+                 :torrent-path absolute-path})
               (error "argument must be a valid .torrent file path, magnet URI, or 40-char hex info hash")))))
 
 (fn maybe-copy-torrent! [from-path to-path]
