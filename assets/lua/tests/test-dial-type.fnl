@@ -1,4 +1,7 @@
 (local DialTypeModule (require :dial-type))
+;; controller axis ids
+(local AXIS-LX 0)
+(local AXIS-LY 1)
 
 (local tests [])
 
@@ -34,12 +37,32 @@
   (assert (= (length (. out 2)) 1) "right tap should contain one sector")
   (assert (= (. (. out 1) 1) 1) "left dialing sequence should start from right sector in this gesture"))
 
+(fn input-dial-type-adapter-processes-only-when-updated []
+  (local input app.engine.input)
+  (local adapter (DialTypeModule.InputDialType input))
+  ;; reset controllers
+  (each [_ id (ipairs (input:controller-ids))]
+    (input:on-controller-disconnected id 0))
+
+  (input:on-controller-connected 0 101 1)
+  (input:on-controller-axis AXIS-LX 1.0 101 2)
+  ;; no update call yet, so no dial output should be present
+  (assert (not (adapter:has-input-for 101)))
+  (assert (not (adapter:update-controller 101)))
+  (input:on-controller-axis AXIS-LX 0.0 101 3)
+  (assert (adapter:update-controller 101))
+  (local out (adapter:poll-controller 101))
+  (assert out "adapter should emit dial output after explicit update")
+  (assert (> (length (. out 1)) 0) "left stack should contain emitted sectors"))
+
 (table.insert tests {:name "DialType module exposes factory"
                      :fn dial-type-module-exposes-factory})
 (table.insert tests {:name "DialType produces discrete tap input"
                      :fn dial-type-produces-discrete-tap})
 (table.insert tests {:name "DialType keeps left/right stick inputs independent"
                      :fn dial-type-keeps-sticks-independent})
+(table.insert tests {:name "InputDialType adapter updates on demand"
+                     :fn input-dial-type-adapter-processes-only-when-updated})
 
 (local main
   (fn []

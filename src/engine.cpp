@@ -13,6 +13,18 @@
 #include <vector>
 
 //namespace py = pybind11;
+namespace {
+
+sol::table make_int_array(sol::state& lua, const std::vector<int>& values)
+{
+    sol::table out = lua.create_table();
+    for (size_t i = 0; i < values.size(); ++i) {
+        out[static_cast<int>(i + 1)] = values[i];
+    }
+    return out;
+}
+
+} // namespace
 
 Engine::Engine() {
 }
@@ -76,6 +88,47 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_engine["physics"] = &physics;
     lua_engine["audio"] = &audio;
     lua_engine["input"] = &inputState;
+    inputDialType = std::make_unique<InputDialType>(inputState);
+    lua_engine.set_function("dial-type-activate", [this](int instance_id) {
+        if (inputDialType) {
+            inputDialType->activate_controller(static_cast<SDL_JoystickID>(instance_id));
+        }
+    });
+    lua_engine.set_function("dial-type-deactivate", [this](int instance_id) {
+        if (inputDialType) {
+            inputDialType->deactivate_controller(static_cast<SDL_JoystickID>(instance_id));
+        }
+    });
+    lua_engine.set_function("dial-type-on-input", [this](int instance_id, sol::function callback) {
+        if (!inputDialType) {
+            return static_cast<uint64_t>(0);
+        }
+        auto cb = std::make_shared<sol::protected_function>(callback);
+        return inputDialType->register_callback(
+            static_cast<SDL_JoystickID>(instance_id),
+            [this, cb](SDL_JoystickID controller_id, const DialTypePendingInput& input) {
+                if (!lua_state || !cb || !cb->valid()) {
+                    return;
+                }
+                sol::table payload = lua_state->create_table();
+                payload["instance-id"] = static_cast<int>(controller_id);
+                sol::table in = lua_state->create_table();
+                in[1] = make_int_array(*lua_state, input.left);
+                in[2] = make_int_array(*lua_state, input.right);
+                payload["input"] = in;
+                sol::protected_function_result result = (*cb)(payload);
+                if (!result.valid()) {
+                    sol::error err = result;
+                    std::cerr << "[dial-type] callback failed: " << err.what() << "\n";
+                }
+            });
+    });
+    lua_engine.set_function("dial-type-off-input", [this](uint64_t callback_id) {
+        if (!inputDialType) {
+            return false;
+        }
+        return inputDialType->unregister_callback(callback_id);
+    });
     lua_bind_jobs(*lua_state, lua_engine, *jobs);
     lua_bind_keyring(*lua_state, keyring);
     lua_bind_http(*lua_state, *http);
@@ -264,6 +317,9 @@ void Engine::run() {
                     payload["value"] = axis_value;
                     payload["timestamp"] = event.common.timestamp;
                     emit_engine_event("controller-axis-motion", payload);
+                    if (inputDialType) {
+                        inputDialType->process_controller(event.caxis.which);
+                    }
                     break;
                 }
 
@@ -362,6 +418,9 @@ SDL_JoystickID Engine::openGameController(Sint32 deviceIndex, Uint32 timestamp)
 
 void Engine::closeGameController(SDL_JoystickID instanceId, Uint32 timestamp)
 {
+    if (inputDialType) {
+        inputDialType->deactivate_controller(instanceId);
+    }
     auto it = gameControllers.find(instanceId);
     if (it != gameControllers.end()) {
         if (it->second) {
@@ -386,6 +445,7 @@ void Engine::closeAllGameControllers(Uint32 timestamp)
 }
 
 void Engine::shutdown() {
+    inputDialType.reset();
     closeAllGameControllers(SDL_GetTicks());
     lua_jobs_clear_callbacks();
     lua_keyring_drop(*lua_state);

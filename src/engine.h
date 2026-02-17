@@ -16,6 +16,7 @@
 #include "window_sdl.h"
 #include "timer.h"
 #include "input_state.h"
+#include "input_dial_type.h"
 #include "physics.h"
 #include "audio.h"
 #include "job_system.h"
@@ -74,6 +75,7 @@ private:
     Timer timer;
 
     InputState inputState {};
+    std::unique_ptr<InputDialType> inputDialType;
     [[nodiscard]] const InputState& getState() const;
 
     Physics physics;
@@ -87,7 +89,6 @@ private:
     sol::table lua_engine;
 
     void emit_engine_event(const std::string& signal_name, sol::table payload);
-
     void initSystemCursors();
     void shutdownSystemCursors();
     void setSystemCursor(const std::string& name);
