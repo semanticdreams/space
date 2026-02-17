@@ -36,6 +36,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -953,6 +954,12 @@ struct LibtorrentSession
     void close()
     {
         if (!closed) {
+            for (lt::alert* alert : pending_alerts) {
+                if (alert != nullptr) {
+                    release_direct_request_userdata(*alert);
+                }
+            }
+            pending_alerts.clear();
             handles.clear();
             direct_request_userdata_ptr_to_id.clear();
             direct_request_userdata.clear();
@@ -1695,16 +1702,38 @@ struct LibtorrentSession
     {
         ensure_open("wait-for-alert");
         sol::state_view lua(ts);
+
+        if (!pending_alerts.empty()) {
+            lt::alert* alert = pending_alerts.front();
+            pending_alerts.pop_front();
+            sol::table table = alert_to_table(lua, *alert);
+            release_direct_request_userdata(*alert);
+            return sol::make_object(lua, table);
+        }
+
         int timeout_ms = timeout_ms_opt.value_or(0);
         if (timeout_ms < 0) {
             timeout_ms = 0;
         }
-        lt::alert* alert = session->wait_for_alert(std::chrono::milliseconds(timeout_ms));
-        if (alert == nullptr) {
+        lt::alert* alerted = session->wait_for_alert(std::chrono::milliseconds(timeout_ms));
+        if (alerted == nullptr) {
             return sol::make_object(lua, sol::lua_nil);
         }
-        sol::table table = alert_to_table(lua, *alert);
-        release_direct_request_userdata(*alert);
+
+        std::vector<lt::alert*> alerts;
+        session->pop_alerts(&alerts);
+        if (alerts.empty()) {
+            return sol::make_object(lua, sol::lua_nil);
+        }
+
+        for (lt::alert* item : alerts) {
+            pending_alerts.push_back(item);
+        }
+
+        lt::alert* next = pending_alerts.front();
+        pending_alerts.pop_front();
+        sol::table table = alert_to_table(lua, *next);
+        release_direct_request_userdata(*next);
         return sol::make_object(lua, table);
     }
 
@@ -1714,9 +1743,17 @@ struct LibtorrentSession
         sol::state_view lua(ts);
         std::vector<lt::alert*> alerts;
         session->pop_alerts(&alerts);
-        sol::table out = lua.create_table(static_cast<int>(alerts.size()), 0);
+        std::size_t total = pending_alerts.size() + alerts.size();
+        sol::table out = lua.create_table(static_cast<int>(total), 0);
+        std::size_t out_index = 1;
+        while (!pending_alerts.empty()) {
+            lt::alert* item = pending_alerts.front();
+            pending_alerts.pop_front();
+            out[out_index++] = alert_to_table(lua, *item);
+            release_direct_request_userdata(*item);
+        }
         for (std::size_t i = 0; i < alerts.size(); ++i) {
-            out[i + 1] = alert_to_table(lua, *alerts[i]);
+            out[out_index++] = alert_to_table(lua, *alerts[i]);
             release_direct_request_userdata(*alerts[i]);
         }
         return out;
@@ -1781,6 +1818,7 @@ private:
     std::unordered_map<std::int64_t, lt::torrent_handle> handles;
     std::unordered_map<std::int64_t, std::unique_ptr<std::int64_t>> direct_request_userdata;
     std::unordered_map<const std::int64_t*, std::int64_t> direct_request_userdata_ptr_to_id;
+    std::deque<lt::alert*> pending_alerts;
     std::int64_t next_handle_id { 1 };
     bool closed { false };
 };
