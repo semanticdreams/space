@@ -174,10 +174,43 @@
       (assert node.get-notebook "should have get-notebook method")
       (assert node.update-name "should have update-name method")
       (assert node.add-item "should have add-item method")
+      (assert node.add-string-entity "should have add-string-entity method")
       (assert node.remove-item "should have remove-item method")
       (assert node.move-item "should have move-item method")
       (assert node.delete-notebook "should have delete-notebook method")
       (node:drop))))
+
+(fn notebook-node-add-string-entity-creates-item-and-edge []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local StringEntityStore (require :entities/string))
+      (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
+      (local notebook (store:create-notebook {:name "x"}))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local node (NotebookNode {:notebook-id notebook.id
+                                 :store store
+                                 :string-store string-store}))
+      (local graph (Graph {:with-start false}))
+      (graph:add-node node {})
+
+      (local entity (node:add-string-entity {:value "hello"}))
+      (assert entity "should create a string entity")
+      (assert (= (or entity.value "") "hello") "created entity should keep value")
+
+      (local current (store:get-notebook notebook.id))
+      (assert (= (length (or current.items [])) 1) "notebook should contain one item")
+      (local key (. current.items 1))
+      (assert (= key (.. "string-entity:" entity.id))
+              "notebook item should point at created string entity key")
+
+      (local loaded-entity (string-store:get-entity entity.id))
+      (assert loaded-entity "created string entity should be persisted")
+      (local entity-node (graph:lookup key))
+      (assert entity-node "graph should contain node for created string entity")
+      (assert (= (graph:edge-count) 1) "notebook should add one edge to created string entity")
+
+      (graph:drop))))
 
 (fn notebook-node-adds-item-edges-after-added []
   (with-temp-store
@@ -301,6 +334,8 @@
                      :fn notebook-node-creates-with-correct-properties})
 (table.insert tests {:name "notebook node adds item edges after added"
                      :fn notebook-node-adds-item-edges-after-added})
+(table.insert tests {:name "notebook node add-string-entity creates item and edge"
+                     :fn notebook-node-add-string-entity-creates-item-and-edge})
 (table.insert tests {:name "notebook node loads nested notebook item via load-by-key"
                      :fn notebook-node-loads-nested-notebook-item-via-load-by-key})
 (table.insert tests {:name "notebooks node loads"
