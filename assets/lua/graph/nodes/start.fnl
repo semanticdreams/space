@@ -8,6 +8,7 @@
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local EntitiesNode (require :graph/nodes/entities))
+(local NotebooksNode (require :graph/nodes/notebooks))
 (local Signal (require :signal))
 (local fs (require :fs))
 
@@ -45,6 +46,8 @@
              (table.insert produced [hn-node (or hn-node.label hn-node.key (node-id hn-node))])
              (local entities-node (EntitiesNode))
              (table.insert produced [entities-node (or entities-node.label entities-node.key)])
+             (local notebooks-node (NotebooksNode {}))
+             (table.insert produced [notebooks-node (or notebooks-node.label notebooks-node.key)])
              produced))
 
     (set node.emit-targets
@@ -66,41 +69,7 @@
                 (graph:add-edge (GraphEdge {:source self
                                                 :target node})))))
 
-    (fn add-target-by-key [self target-key]
-        (each [_ pair (ipairs (self:collect-targets))]
-            (local target (. pair 1))
-            (local key (or (and target target.key) ""))
-            (if (= target-key :fs-prefix)
-                (when (= (string.sub key 1 3) "fs:")
-                    (self:add-target target))
-                (when (= key target-key)
-                    (self:add-target target)))))
-
-    (set node.actions
-         [{:name "Add Filesystem"
-           :icon "folder"
-           :fn (fn [_button _event]
-                   (add-target-by-key node :fs-prefix))}
-          {:name "Add Globals Table"
-           :icon "table"
-           :fn (fn [_button _event]
-                   (add-target-by-key node "table:_G"))}
-          {:name "Add LLM"
-           :icon "chat"
-           :fn (fn [_button _event]
-                   (add-target-by-key node "llm"))}
-          {:name "Add HackerNews"
-           :icon "public"
-           :fn (fn [_button _event]
-                   (add-target-by-key node "hackernews-root"))}
-          {:name "Add Entities"
-           :icon "apps"
-           :fn (fn [_button _event]
-                   (add-target-by-key node "entities"))}
-          {:name "Add Quit"
-           :icon "exit_to_app"
-           :fn (fn [_button _event]
-                   (add-target-by-key node "quit"))}])
+    (set node.actions [])
 
     (set node.drop
          (fn [self]

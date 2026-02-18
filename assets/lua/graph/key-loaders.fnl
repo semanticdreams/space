@@ -20,6 +20,8 @@
 (local LlmToolsNode (require :graph/nodes/llm-tools))
 (local ListEntityListNode (require :graph/nodes/list-entity-list))
 (local {:register-loader register-list-entity-loader} (require :graph/nodes/list-entity))
+(local NotebooksNode (require :graph/nodes/notebooks))
+(local {:register-loader register-notebook-loader} (require :graph/nodes/notebook))
 (local QuitNode (require :graph/nodes/quit))
 (local StartNode (require :graph/nodes/start))
 (local {:register-loader register-string-entity-loader} (require :graph/nodes/string-entity))
@@ -27,6 +29,7 @@
 
 (local LinkEntityStore (require :entities/link))
 (local ListEntityStore (require :entities/list))
+(local NotebookStore (require :notebooks/store))
 (local StringEntityStore (require :entities/string))
 (local LlmStore (require :llm/store))
 
@@ -76,12 +79,14 @@
   (local string-store (or options.string-store options.string_store (StringEntityStore.get-default)))
   (local list-store (or options.list-store options.list_store (ListEntityStore.get-default)))
   (local link-store (or options.link-store options.link_store (LinkEntityStore.get-default)))
+  (local notebook-store (or options.notebook-store options.notebook_store (NotebookStore.get-default)))
   (local llm-store (or options.llm-store options.llm_store (LlmStore.get-default)))
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
 
   (register-string-entity-loader graph {:store string-store})
   (register-list-entity-loader graph {:store list-store})
   (register-link-entity-loader graph {:store link-store})
+  (register-notebook-loader graph {:store notebook-store})
 
   (graph:register-key-loader "string-entity-list"
     (exact-key-loader "string-entity-list"
@@ -96,6 +101,9 @@
   (graph:register-key-loader "entities"
     (exact-key-loader "entities"
       (fn [] (EntitiesNode {}))))
+  (graph:register-key-loader "notebooks"
+    (exact-key-loader "notebooks"
+      (fn [] (NotebooksNode {:store notebook-store}))))
   (graph:register-key-loader "start"
     (exact-key-loader "start"
       (fn [] (StartNode))))

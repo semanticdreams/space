@@ -210,6 +210,11 @@
   (assert module.register-loader "link-entity module should export register-loader")
   (assert (= (type module.register-loader) "function") "register-loader should be a function"))
 
+(fn notebook-node-module-exports-register-loader []
+  (local module (require :graph/nodes/notebook))
+  (assert module.register-loader "notebook module should export register-loader")
+  (assert (= (type module.register-loader) "function") "register-loader should be a function"))
+
 (fn string-entity-loader-loads-existing-entity []
   (with-temp-dir
     (fn [dir]
@@ -290,6 +295,24 @@
       (result:drop)
       (graph:drop))))
 
+(fn notebook-loader-loads-existing-notebook []
+  (with-temp-dir
+    (fn [dir]
+      (local NotebookStore (require :notebooks/store))
+      (local store (NotebookStore.NotebookStore {:base-dir dir}))
+      (local notebook (store:create-notebook {:name "rounds notes"}))
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local {:register-loader register-loader} (require :graph/nodes/notebook))
+      (register-loader graph {:store store})
+      (local key (.. "notebook:" notebook.id))
+      (local result (graph:load-by-key key))
+      (assert result "loader should create node for existing notebook")
+      (assert (= result.key key) "node key should match")
+      (assert (= result.notebook-id notebook.id) "node notebook-id should match")
+      (result:drop)
+      (graph:drop))))
+
 (fn link-entity-integration-loads-endpoints-via-load-by-key []
   (with-temp-dir
     (fn [dir]
@@ -346,10 +369,12 @@
       (local StringEntityStore (require :entities/string))
       (local ListEntityStore (require :entities/list))
       (local LinkEntityStore (require :entities/link))
+      (local NotebookStore (require :notebooks/store))
       (local LlmStore (require :llm/store))
       (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")}))
       (local list-store (ListEntityStore.ListEntityStore {:base-dir (fs.join-path dir "list")}))
       (local link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")}))
+      (local notebook-store (NotebookStore.NotebookStore {:base-dir (fs.join-path dir "notebooks")}))
       (local llm-store (LlmStore.Store {:base-dir (fs.join-path dir "llm")}))
       (local GraphKeyLoaders (require :graph/key-loaders))
       (local Graph (require :graph/init))
@@ -378,6 +403,7 @@
       (GraphKeyLoaders.register graph {:string-store string-store
                                        :list-store list-store
                                        :link-store link-store
+                                       :notebook-store notebook-store
                                        :llm-store llm-store
                                        :hackernews-ensure-client (fn [] hn-client)})
 
@@ -385,6 +411,17 @@
       (assert string-list "should load string-entity-list")
       (assert (= string-list.key "string-entity-list") "string list key should match")
       (assert (= string-list.store string-store) "string list should use provided store")
+
+      (local notebook-record (notebook-store:create-notebook {:name "surgery prep"}))
+      (local notebooks-node (graph:load-by-key "notebooks"))
+      (assert notebooks-node "should load notebooks node")
+      (assert (= notebooks-node.key "notebooks") "notebooks key should match")
+      (assert (= notebooks-node.store notebook-store) "notebooks node should use provided store")
+
+      (local notebook-node (graph:load-by-key (.. "notebook:" notebook-record.id)))
+      (assert notebook-node "should load notebook node")
+      (assert (= notebook-node.key (.. "notebook:" notebook-record.id)) "notebook key should match")
+      (assert (= notebook-node.notebook-id notebook-record.id) "notebook id should match")
 
       (local node (graph:load-by-key "class:demo"))
       (assert node "should load class node")
@@ -490,6 +527,8 @@
                      :fn list-entity-node-module-exports-register-loader})
 (table.insert tests {:name "link entity node module exports register-loader"
                      :fn link-entity-node-module-exports-register-loader})
+(table.insert tests {:name "notebook node module exports register-loader"
+                     :fn notebook-node-module-exports-register-loader})
 (table.insert tests {:name "string entity loader loads existing entity"
                      :fn string-entity-loader-loads-existing-entity})
 (table.insert tests {:name "string entity loader returns nil for missing entity"
@@ -500,6 +539,8 @@
                      :fn list-entity-loader-loads-existing-entity})
 (table.insert tests {:name "link entity loader loads existing entity"
                      :fn link-entity-loader-loads-existing-entity})
+(table.insert tests {:name "notebook loader loads existing notebook"
+                     :fn notebook-loader-loads-existing-notebook})
 (table.insert tests {:name "link entity integration loads endpoints via load-by-key"
                      :fn link-entity-integration-loads-endpoints-via-load-by-key})
 (table.insert tests {:name "list entity node loads items via load-by-key"
