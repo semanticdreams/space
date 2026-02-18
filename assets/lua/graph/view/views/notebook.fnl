@@ -167,6 +167,15 @@
                                 (target:add-item key))))})
        build-ctx))
 
+    (local add-string-entity-button
+      ((Button {:icon "add"
+                :text "Add String Entity"
+                :variant :ghost
+                :on-click (fn [_button _event]
+                            (when (and target target.add-string-entity)
+                              (target:add-string-entity {})))})
+       build-ctx))
+
     (local delete-button
       ((Button {:icon "delete"
                 :text "Delete Notebook"
@@ -181,6 +190,7 @@
               :xspacing 0.3
               :yalign :center
               :children [(FlexChild (fn [_] add-selected-button) 0)
+                         (FlexChild (fn [_] add-string-entity-button) 0)
                          (FlexChild (fn [_] delete-button) 0)]})
        build-ctx))
 
@@ -223,6 +233,7 @@
            (items-label:drop)
            (list:drop)
            (add-selected-button:drop)
+           (add-string-entity-button:drop)
            (delete-button:drop)
            (actions-row:drop)
            (flex:drop)))

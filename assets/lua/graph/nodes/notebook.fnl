@@ -4,6 +4,8 @@
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
 (local NotebookStore (require :notebooks/store))
+(local StringEntityStore (require :entities/string))
+(local {:StringEntityNode StringEntityNode} (require :graph/nodes/string-entity))
 (local Utils (require :graph/view/utils))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
 
@@ -12,6 +14,7 @@
 
 (local SCHEME "notebook")
 (local KEY_PREFIX (KeyLoaderUtils.key-prefix SCHEME))
+(local STRING_ENTITY_KEY_PREFIX (KeyLoaderUtils.key-prefix "string-entity"))
 
 (fn make-label [notebook]
   (local name (or (and notebook notebook.name) ""))
@@ -45,6 +48,7 @@
   (local options (or opts {}))
   (local notebook-id (assert options.notebook-id "NotebookNode requires notebook-id"))
   (local store (or options.store (NotebookStore.get-default)))
+  (local string-store (or options.string-store (StringEntityStore.get-default)))
   (local NotebookNodeView (require :graph/view/views/notebook))
 
   (local notebook (store:get-notebook notebook-id))
@@ -60,6 +64,7 @@
 
   (set node.notebook-id notebook-id)
   (set node.store store)
+  (set node.string-store string-store)
   (set node.notebook-deleted (Signal))
   (set node.changed (Signal))
   (set node.items-changed (Signal))
@@ -85,7 +90,8 @@
            (local items (or (and current current.items) []))
            (local desired {})
            (each [_ item-key (ipairs items)]
-             (local target (graph:load-by-key item-key))
+             (local target (or (graph:lookup item-key)
+                               (graph:load-by-key item-key)))
              (when target
                (graph:add-edge (GraphEdge {:source self :target target})
                                {:from-notebook self.notebook-id})
@@ -119,11 +125,29 @@
        (fn [self]
          (self.store:delete-notebook self.notebook-id)))
 
+  (set node.add-string-entity
+       (fn [self opts]
+         (local entity (self.string-store:create-entity (or opts {})))
+         (local entity-key (.. STRING_ENTITY_KEY_PREFIX (tostring entity.id)))
+         (self:add-item entity-key)
+         (local graph self.graph)
+         (when (and graph (not (graph:lookup entity-key)))
+           (local entity-node (StringEntityNode {:entity-id entity.id
+                                                 :store self.string-store}))
+           (graph:add-edge (GraphEdge {:source self :target entity-node})
+                           {:from-notebook self.notebook-id})
+           (set (. self.notebook-item-edge-keys (edge-key self entity-node)) true))
+         entity))
+
   (set node.actions
        [{:name "Refresh Items"
          :icon "refresh"
          :fn (fn [_button _event]
-               (node:add-item-nodes))}
+                 (node:add-item-nodes))}
+        {:name "Add String Entity"
+         :icon "add"
+         :fn (fn [_button _event]
+                 (node:add-string-entity {}))}
         {:name "Delete Notebook"
          :icon "delete"
          :fn (fn [_button _event]
