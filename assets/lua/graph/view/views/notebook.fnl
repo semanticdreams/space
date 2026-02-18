@@ -4,6 +4,7 @@
 (local Input (require :input))
 (local ListView (require :list-view))
 (local Text (require :text))
+(local TextStyle (require :text-style))
 (local Utils (require :graph/view/utils))
 
 (fn build-item-rows [items]
@@ -13,15 +14,41 @@
      :total total
      :key (tostring k)}))
 
-(fn maybe-open-or-focus-node [target item-key]
-  (when (and target target.graph)
-    (local graph target.graph)
-    (local node (or (graph:lookup item-key)
-                    (graph:load-by-key item-key)))
-    (when (and node app app.graph-view)
-      (local focus-node (. app.graph-view.focus-nodes node))
-      (when (and focus-node focus-node.request-focus)
-        (focus-node:request-focus {:reason :notebook-item})))))
+(fn key-scheme [key]
+  (when (and key (= (type key) "string"))
+    (local (start _end) (string.find key ":" 1 true))
+    (if start
+        (string.sub key 1 (- start 1))
+        key)))
+
+(fn type-label-from-key [key]
+  (local scheme (or (key-scheme key) "unknown"))
+  (tostring scheme))
+
+(fn resolve-preview-node [target item-key]
+  (local graph (and target target.graph))
+  (if (not graph)
+      nil
+      (or (graph:lookup item-key)
+          (if graph.load-by-key
+              (do
+                (local (ok loaded) (pcall (fn [] (graph:load-by-key item-key))))
+                (if ok loaded nil))
+              nil))))
+
+(fn build-preview-widget [target item-key child-ctx]
+  (local resolved (resolve-preview-node target item-key))
+  (if (not resolved)
+      (values ((Text {:text (Utils.truncate-with-ellipsis item-key 42)})
+               child-ctx)
+              nil)
+      (do
+        (assert resolved.preview (.. "Resolved notebook item is missing preview: " (tostring item-key)))
+        (local preview-widget
+          ((resolved.preview resolved {:node resolved}) child-ctx))
+        (assert (and preview-widget preview-widget.layout)
+                (.. "Notebook preview builder must return widget with layout for " (tostring item-key)))
+        (values preview-widget resolved))))
 
 (fn NotebookNodeView [node opts]
   (local options (or opts {}))
@@ -61,19 +88,23 @@
                              (local item-key (tostring (or item.key "")))
                              (local index (tonumber (or item.index 1)))
                              (local total (tonumber (or item.total 0)))
+                             (local (preview-widget resolved-node)
+                                    (build-preview-widget target item-key child-ctx))
+                             (local type-label
+                                    (if (and resolved-node resolved-node.key)
+                                        (type-label-from-key resolved-node.key)
+                                        (type-label-from-key item-key)))
 
-                             (local key-button
-                               ((Button {:text (Utils.truncate-with-ellipsis item-key 42)
-                                         :variant :ghost
-                                         :padding [0.35 0.35]
-                                         :on-click (fn [_button _event]
-                                                     (maybe-open-or-focus-node target item-key))})
+                             (local type-text
+                               ((Text {:text type-label
+                                       :style (TextStyle {:scale 0.9
+                                                          :color (glm.vec4 0.75 0.75 0.75 1)})})
                                 child-ctx))
 
                              (local up-button
                                ((Button {:icon "expand_less"
                                          :variant :ghost
-                                         :padding [0.25 0.25]
+                                         :padding [0.12 0.12]
                                          :on-click (fn [_button _event]
                                                      (when (and target target.move-item (> index 1))
                                                        (target:move-item index (- index 1))))})
@@ -82,7 +113,7 @@
                              (local down-button
                                ((Button {:icon "expand_more"
                                          :variant :ghost
-                                         :padding [0.25 0.25]
+                                         :padding [0.12 0.12]
                                          :on-click (fn [_button _event]
                                                      (when (and target target.move-item (< index total))
                                                        (target:move-item index (+ index 1))))})
@@ -91,19 +122,33 @@
                              (local remove-button
                                ((Button {:icon "delete"
                                          :variant :ghost
-                                         :padding [0.25 0.25]
+                                         :padding [0.12 0.12]
                                          :on-click (fn [_button _event]
                                                      (when (and target target.remove-item)
                                                        (target:remove-item item-key)))})
                                 child-ctx))
 
-                             ((Flex {:axis 1
-                                     :xspacing 0.25
-                                     :yalign :center
-                                     :children [(FlexChild (fn [_] key-button) 1)
-                                                (FlexChild (fn [_] up-button) 0)
-                                                (FlexChild (fn [_] down-button) 0)
-                                                (FlexChild (fn [_] remove-button) 0)]})
+                             (local controls
+                               ((Flex {:axis 2
+                                       :xalign :stretch
+                                       :yspacing 0
+                                       :children [(FlexChild (fn [_] up-button) 0)
+                                                  (FlexChild (fn [_] down-button) 0)
+                                                  (FlexChild (fn [_] remove-button) 0)]})
+                                child-ctx))
+
+                             (local content-row
+                               ((Flex {:axis 1
+                                       :yalign :stretch
+                                       :children [(FlexChild (fn [_] controls) 0)
+                                                  (FlexChild (fn [_] preview-widget) 1)]})
+                                child-ctx))
+
+                             ((Flex {:axis 2
+                                     :xalign :stretch
+                                     :yspacing 0
+                                     :children [(FlexChild (fn [_] type-text) 0)
+                                                (FlexChild (fn [_] content-row) 1)]})
                               child-ctx))})
        build-ctx))
 

@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local Utils (require :graph/core/utils))
+(local DefaultNodePreview (require :graph/view/previews/default))
 
 (fn GraphNode [opts]
     (local options (or opts {}))
@@ -10,6 +11,7 @@
                  :color color
                  :accent accent
                  :view options.view
+                 :preview (or options.preview options.view DefaultNodePreview)
                  :actions (or options.actions [])
                  :size (or options.size 8.0)
                  :graph nil})
