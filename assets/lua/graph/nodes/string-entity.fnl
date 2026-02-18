@@ -21,6 +21,7 @@
   (local entity-id (assert options.entity-id "StringEntityNode requires entity-id"))
   (local store (or options.store (StringEntityStore.get-default)))
   (local StringEntityNodeView (require :graph/view/views/string-entity))
+  (local StringEntityNodePreview (require :graph/view/previews/string-entity))
 
   (local entity (store:get-entity entity-id))
   (local initial-label (make-label entity))
@@ -31,7 +32,8 @@
                 :color DARK_BLUE
                 :sub-color DARK_BLUE_ACCENT
                 :size 8.0
-                :view StringEntityNodeView}))
+                :view StringEntityNodeView
+                :preview StringEntityNodePreview}))
 
   (set node.entity-id entity-id)
   (set node.store store)

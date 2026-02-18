@@ -407,66 +407,84 @@
                                        :llm-store llm-store
                                        :hackernews-ensure-client (fn [] hn-client)})
 
+      (fn assert-has-preview [node context]
+        (assert node (.. "missing node for preview assertion: " context))
+        (assert node.preview (.. context " should expose preview"))
+        (assert (= (type node.preview) "function") (.. context " preview should be a function")))
+
       (local string-list (graph:load-by-key "string-entity-list"))
       (assert string-list "should load string-entity-list")
       (assert (= string-list.key "string-entity-list") "string list key should match")
       (assert (= string-list.store string-store) "string list should use provided store")
+      (assert-has-preview string-list "string-entity-list")
 
       (local notebook-record (notebook-store:create-notebook {:name "surgery prep"}))
       (local notebooks-node (graph:load-by-key "notebooks"))
       (assert notebooks-node "should load notebooks node")
       (assert (= notebooks-node.key "notebooks") "notebooks key should match")
       (assert (= notebooks-node.store notebook-store) "notebooks node should use provided store")
+      (assert-has-preview notebooks-node "notebooks")
 
       (local notebook-node (graph:load-by-key (.. "notebook:" notebook-record.id)))
       (assert notebook-node "should load notebook node")
       (assert (= notebook-node.key (.. "notebook:" notebook-record.id)) "notebook key should match")
       (assert (= notebook-node.notebook-id notebook-record.id) "notebook id should match")
+      (assert-has-preview notebook-node "notebook")
 
       (local node (graph:load-by-key "class:demo"))
       (assert node "should load class node")
       (assert (= node.key "class:demo") "class node key should match")
+      (assert-has-preview node "class")
 
       (local fs-node (graph:load-by-key "fs:/tmp"))
       (assert fs-node "should load fs node")
       (assert (= fs-node.key "fs:/tmp") "fs node key should match")
       (assert (= fs-node.path "/tmp") "fs node should use parsed path")
+      (assert-has-preview fs-node "fs")
 
       (local table-node (graph:load-by-key "table:_G"))
       (assert table-node "should load table:_G")
       (assert (= table-node.key "table:_G") "table node key should match")
       (assert (= table-node.table _G) "table node should resolve _G")
+      (assert-has-preview table-node "table")
 
       (local tool-node (graph:load-by-key "llm-tool:test-tool"))
       (assert tool-node "should load llm-tool node")
       (assert (= tool-node.key "llm-tool:test-tool") "llm-tool node key should match")
       (assert (= tool-node.name "test-tool") "llm-tool node should use parsed name")
+      (assert-has-preview tool-node "llm-tool")
 
       (llm-store:create-conversation {:name "demo"} "c1")
       (local convo-node (graph:load-by-key "llm-conversation:c1"))
       (assert convo-node "should load llm conversation")
       (assert (= convo-node.key "llm-conversation:c1") "llm conversation key should match")
+      (assert-has-preview convo-node "llm-conversation")
 
       (llm-store:create-item {:type "message" :content "hi"} "m1")
       (local msg-node (graph:load-by-key "llm-message:m1"))
       (assert msg-node "should load llm message")
       (assert (= msg-node.key "llm-message:m1") "llm message key should match")
+      (assert-has-preview msg-node "llm-message")
 
       (local hn-root (graph:load-by-key "hackernews-root"))
       (assert hn-root "should load hackernews root node")
       (assert (= hn-root.key "hackernews-root") "hackernews root key should match")
+      (assert-has-preview hn-root "hackernews-root")
 
       (local hn-list (graph:load-by-key "hackernews-story-list:topstories"))
       (assert hn-list "should load hackernews story list node")
       (assert (= hn-list.key "hackernews-story-list:topstories") "hackernews story list key should match")
+      (assert-has-preview hn-list "hackernews-story-list")
 
       (local hn-story (graph:load-by-key "hackernews-story:42"))
       (assert hn-story "should load hackernews story node")
       (assert (= hn-story.key "hackernews-story:42") "hackernews story key should match")
+      (assert-has-preview hn-story "hackernews-story")
 
       (local hn-user (graph:load-by-key "hackernews-user:jl"))
       (assert hn-user "should load hackernews user node")
       (assert (= hn-user.key "hackernews-user:jl") "hackernews user key should match")
+      (assert-has-preview hn-user "hackernews-user")
 
       (graph:drop))))
 

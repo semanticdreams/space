@@ -150,6 +150,12 @@
       (store:add-item notebook.id "a")
       (assert (= payload-id notebook.id) "items-changed should include notebook id"))))
 
+(fn graph-node-defaults-preview-to-view []
+  (local {:GraphNode GraphNode} (require :graph/node-base))
+  (local view-fn (fn [_node _opts] (fn [_ctx] {:layout {} :drop (fn [_] nil)})))
+  (local node (GraphNode {:key "preview-default" :view view-fn}))
+  (assert (= node.preview view-fn) "GraphNode should default preview to view"))
+
 (fn notebook-node-loads []
   (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
   (assert NotebookNode "NotebookNode should load")
@@ -234,6 +240,18 @@
   (assert NotebookNodeView "NotebookNodeView should load")
   (assert (= (type NotebookNodeView) "function") "NotebookNodeView should be a function"))
 
+(fn string-entity-node-provides-preview []
+  (local {:StringEntityNode StringEntityNode} (require :graph/nodes/string-entity))
+  (local StringEntityStore (require :entities/string))
+  (with-temp-dir
+    (fn [root]
+      (local store (StringEntityStore.StringEntityStore {:base-dir root}))
+      (local entity (store:create-entity {:value "abc"}))
+      (local node (StringEntityNode {:entity-id entity.id :store store}))
+      (assert node.preview "StringEntityNode should provide a preview constructor")
+      (assert (= (type node.preview) "function") "StringEntityNode preview should be a function")
+      (node:drop))))
+
 (fn notebooks-node-view-loads []
   (local NotebooksNodeView (require :graph/view/views/notebooks))
   (assert NotebooksNodeView "NotebooksNodeView should load")
@@ -275,6 +293,8 @@
                      :fn notebook-store-moves-items})
 (table.insert tests {:name "notebook store emits items-changed signal"
                      :fn notebook-store-emits-items-changed-signal})
+(table.insert tests {:name "graph node defaults preview to view"
+                     :fn graph-node-defaults-preview-to-view})
 (table.insert tests {:name "notebook node loads"
                      :fn notebook-node-loads})
 (table.insert tests {:name "notebook node creates with correct properties"
@@ -289,6 +309,8 @@
                      :fn notebooks-node-creates-with-correct-properties})
 (table.insert tests {:name "notebook node view loads"
                      :fn notebook-node-view-loads})
+(table.insert tests {:name "string entity node provides preview"
+                     :fn string-entity-node-provides-preview})
 (table.insert tests {:name "notebooks node view loads"
                      :fn notebooks-node-view-loads})
 (table.insert tests {:name "start node collect-targets includes notebooks"
