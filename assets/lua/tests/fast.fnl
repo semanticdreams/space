@@ -149,6 +149,7 @@
     :tests.test-string-entities
     :tests.test-link-entities
     :tests.test-list-entities
+    :tests.test-notebooks
     :tests.test-link-entity-crash
     :tests.test-graph-loaders]})
 

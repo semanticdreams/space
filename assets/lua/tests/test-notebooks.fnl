@@ -1,0 +1,297 @@
+(local fs (require :fs))
+
+(local tests [])
+
+(var temp-counter 0)
+(local temp-root (fs.join-path "/tmp/space/tests" "notebooks"))
+
+(fn make-temp-dir []
+  (set temp-counter (+ temp-counter 1))
+  (fs.join-path temp-root (.. "notebooks-" (os.time) "-" temp-counter)))
+
+(fn with-temp-dir [f]
+  (local dir (make-temp-dir))
+  (when (fs.exists dir)
+    (fs.remove-all dir))
+  (fs.create-dirs dir)
+  (local (ok result) (pcall f dir))
+  (fs.remove-all dir)
+  (if ok
+      result
+      (error result)))
+
+(fn with-temp-store [f]
+  (with-temp-dir
+    (fn [root]
+      (local NotebookStore (require :notebooks/store))
+      (local store (NotebookStore.NotebookStore {:base-dir root}))
+      (f store root))))
+
+(fn notebook-store-creates-notebooks []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "Ward rounds"
+                                              :items ["node-a" "node-b"]}))
+      (assert notebook "notebook should be created")
+      (assert notebook.id "notebook should have id")
+      (assert (= notebook.name "Ward rounds") "notebook should have correct name")
+      (assert (= (length notebook.items) 2) "notebook should have two items")
+      (assert (= (. notebook.items 1) "node-a") "items should preserve ordering")
+      (assert notebook.created-at "notebook should have created-at")
+      (assert notebook.updated-at "notebook should have updated-at"))))
+
+(fn notebook-store-retrieves-notebooks []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "Checklist"
+                                              :items ["node-a" "node-b"]}))
+      (local retrieved (store:get-notebook notebook.id))
+      (assert retrieved "notebook should be retrieved")
+      (assert (= retrieved.id notebook.id) "retrieved notebook should have same id")
+      (assert (= retrieved.name "Checklist") "retrieved notebook should have correct name")
+      (assert (= (length retrieved.items) 2) "retrieved notebook should have items"))))
+
+(fn notebook-store-updates-notebooks []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "Old"
+                                              :items ["a"]}))
+      (local updated (store:update-notebook notebook.id {:name "New"}))
+      (assert updated "notebook should be updated")
+      (assert (= updated.name "New") "name should be updated")
+      (local retrieved (store:get-notebook notebook.id))
+      (assert (= retrieved.name "New") "persisted name should be updated"))))
+
+(fn notebook-store-deletes-notebooks []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "Delete Me"}))
+      (local deleted (store:delete-notebook notebook.id))
+      (assert deleted "notebook should be deleted")
+      (local retrieved (store:get-notebook notebook.id))
+      (assert (= retrieved nil) "notebook should no longer be retrievable"))))
+
+(fn notebook-store-lists-notebooks-sorted []
+  (with-temp-store
+    (fn [store _root]
+      (store:create-notebook {:name "old" :updated-at 10})
+      (store:create-notebook {:name "mid" :updated-at 20})
+      (store:create-notebook {:name "new" :updated-at 30})
+      (local notebooks (store:list-notebooks))
+      (assert (= (length notebooks) 3) "should list three notebooks")
+      (assert (= (. notebooks 1 :updated-at) 30) "should sort by updated-at desc"))))
+
+(fn notebook-store-emits-created-signal []
+  (with-temp-store
+    (fn [store _root]
+      (var created-count 0)
+      (store.notebook-created:connect (fn [_] (set created-count (+ created-count 1))))
+      (store:create-notebook {:name "x"})
+      (assert (= created-count 1) "created signal should be emitted"))))
+
+(fn notebook-store-emits-updated-signal []
+  (with-temp-store
+    (fn [store _root]
+      (var updated-count 0)
+      (store.notebook-updated:connect (fn [_] (set updated-count (+ updated-count 1))))
+      (local notebook (store:create-notebook {:name "x"}))
+      (store:update-notebook notebook.id {:name "y"})
+      (assert (= updated-count 1) "updated signal should be emitted"))))
+
+(fn notebook-store-emits-deleted-signal []
+  (with-temp-store
+    (fn [store _root]
+      (var deleted-count 0)
+      (store.notebook-deleted:connect (fn [_] (set deleted-count (+ deleted-count 1))))
+      (local notebook (store:create-notebook {:name "x"}))
+      (store:delete-notebook notebook.id)
+      (assert (= deleted-count 1) "deleted signal should be emitted"))))
+
+(fn notebook-store-adds-items-and-prevents-duplicates []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "x" :items ["a"]}))
+      (var items-count 0)
+      (store.notebook-items-changed:connect (fn [_] (set items-count (+ items-count 1))))
+      (store:add-item notebook.id "b")
+      (store:add-item notebook.id "b")
+      (local retrieved (store:get-notebook notebook.id))
+      (assert (= (length retrieved.items) 2) "should not add duplicates")
+      (assert (= items-count 1) "items-changed should emit once for one actual change"))))
+
+(fn notebook-store-removes-items []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "x" :items ["a" "b" "c"]}))
+      (store:remove-item notebook.id "b")
+      (local retrieved (store:get-notebook notebook.id))
+      (assert (= (length retrieved.items) 2) "should remove one item")
+      (assert (= (. retrieved.items 1) "a") "should preserve order after removal")
+      (assert (= (. retrieved.items 2) "c") "should preserve order after removal"))))
+
+(fn notebook-store-moves-items []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "x" :items ["a" "b" "c"]}))
+      (store:move-item notebook.id 1 3)
+      (local retrieved (store:get-notebook notebook.id))
+      (assert (= (. retrieved.items 1) "b") "move should reorder items")
+      (assert (= (. retrieved.items 2) "c") "move should reorder items")
+      (assert (= (. retrieved.items 3) "a") "move should reorder items"))))
+
+(fn notebook-store-emits-items-changed-signal []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "x"}))
+      (var payload-id nil)
+      (store.notebook-items-changed:connect
+        (fn [payload]
+          (set payload-id (or (and payload payload.id) nil))))
+      (store:add-item notebook.id "a")
+      (assert (= payload-id notebook.id) "items-changed should include notebook id"))))
+
+(fn notebook-node-loads []
+  (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+  (assert NotebookNode "NotebookNode should load")
+  (assert (= (type NotebookNode) "function") "NotebookNode should be a function"))
+
+(fn notebook-node-creates-with-correct-properties []
+  (with-temp-store
+    (fn [store _root]
+      (local notebook (store:create-notebook {:name "x"}))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local node (NotebookNode {:notebook-id notebook.id :store store}))
+      (assert (= node.key (.. "notebook:" notebook.id)) "key should be prefixed notebook id")
+      (assert node.color "should have color")
+      (assert node.items-changed "should have items-changed signal")
+      (assert node.notebook-deleted "should have notebook-deleted signal")
+      (assert node.get-notebook "should have get-notebook method")
+      (assert node.update-name "should have update-name method")
+      (assert node.add-item "should have add-item method")
+      (assert node.remove-item "should have remove-item method")
+      (assert node.move-item "should have move-item method")
+      (assert node.delete-notebook "should have delete-notebook method")
+      (node:drop))))
+
+(fn notebook-node-adds-item-edges-after-added []
+  (with-temp-store
+    (fn [store _root]
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local a (Graph.GraphNode {:key "node-a"}))
+      (local b (Graph.GraphNode {:key "node-b"}))
+      (graph:add-node a {})
+      (graph:add-node b {})
+      (local notebook (store:create-notebook {:name "x"
+                                              :items ["node-a" "node-b"]}))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local node (NotebookNode {:notebook-id notebook.id :store store}))
+      (graph:add-node node {})
+      (assert (= (graph:edge-count) 2)
+              "notebook node should add edges to existing item nodes")
+      (graph:drop))))
+
+(fn notebook-node-loads-nested-notebook-item-via-load-by-key []
+  (with-temp-store
+    (fn [store _root]
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local {:NotebookNode NotebookNode :register-loader register-loader} (require :graph/nodes/notebook))
+      (register-loader graph {:store store})
+      (local child (store:create-notebook {:name "child"}))
+      (local parent (store:create-notebook {:name "parent"
+                                            :items [(.. "notebook:" child.id)]}))
+      (local parent-node (NotebookNode {:notebook-id parent.id :store store}))
+      (graph:add-node parent-node {})
+      (local child-node (graph:lookup (.. "notebook:" child.id)))
+      (assert child-node "notebook node should load nested notebook item node")
+      (assert (= (graph:edge-count) 1)
+              "notebook node should add one edge to nested notebook")
+      (graph:drop))))
+
+(fn notebooks-node-loads []
+  (local NotebooksNode (require :graph/nodes/notebooks))
+  (assert NotebooksNode "NotebooksNode should load")
+  (assert (= (type NotebooksNode) "function") "NotebooksNode should be a function"))
+
+(fn notebooks-node-creates-with-correct-properties []
+  (with-temp-store
+    (fn [store _root]
+      (local NotebooksNode (require :graph/nodes/notebooks))
+      (local node (NotebooksNode {:store store}))
+      (assert (= node.key "notebooks") "key should be notebooks")
+      (assert (= node.label "notebooks") "label should be notebooks")
+      (assert node.color "should have color")
+      (assert node.items-changed "should have items-changed signal")
+      (assert node.collect-items "should have collect-items method")
+      (assert node.emit-items "should have emit-items method")
+      (assert node.add-notebook-node "should have add-notebook-node method")
+      (assert node.create-notebook "should have create-notebook method")
+      (node:drop))))
+
+(fn notebook-node-view-loads []
+  (local NotebookNodeView (require :graph/view/views/notebook))
+  (assert NotebookNodeView "NotebookNodeView should load")
+  (assert (= (type NotebookNodeView) "function") "NotebookNodeView should be a function"))
+
+(fn notebooks-node-view-loads []
+  (local NotebooksNodeView (require :graph/view/views/notebooks))
+  (assert NotebooksNodeView "NotebooksNodeView should load")
+  (assert (= (type NotebooksNodeView) "function") "NotebooksNodeView should be a function"))
+
+(fn start-node-collect-targets-includes-notebooks []
+  (local StartNode (require :graph/nodes/start))
+  (local start (StartNode))
+  (local targets (start:collect-targets))
+  (var found false)
+  (each [_ pair (ipairs targets)]
+    (local target (and pair (. pair 1)))
+    (when (and target (= target.key "notebooks"))
+      (set found true)))
+  (assert found "start node search targets should include notebooks")
+  (start:drop))
+
+(table.insert tests {:name "notebook store creates notebooks"
+                     :fn notebook-store-creates-notebooks})
+(table.insert tests {:name "notebook store retrieves notebooks"
+                     :fn notebook-store-retrieves-notebooks})
+(table.insert tests {:name "notebook store updates notebooks"
+                     :fn notebook-store-updates-notebooks})
+(table.insert tests {:name "notebook store deletes notebooks"
+                     :fn notebook-store-deletes-notebooks})
+(table.insert tests {:name "notebook store lists notebooks sorted"
+                     :fn notebook-store-lists-notebooks-sorted})
+(table.insert tests {:name "notebook store emits created signal"
+                     :fn notebook-store-emits-created-signal})
+(table.insert tests {:name "notebook store emits updated signal"
+                     :fn notebook-store-emits-updated-signal})
+(table.insert tests {:name "notebook store emits deleted signal"
+                     :fn notebook-store-emits-deleted-signal})
+(table.insert tests {:name "notebook store adds items and prevents duplicates"
+                     :fn notebook-store-adds-items-and-prevents-duplicates})
+(table.insert tests {:name "notebook store removes items"
+                     :fn notebook-store-removes-items})
+(table.insert tests {:name "notebook store moves items"
+                     :fn notebook-store-moves-items})
+(table.insert tests {:name "notebook store emits items-changed signal"
+                     :fn notebook-store-emits-items-changed-signal})
+(table.insert tests {:name "notebook node loads"
+                     :fn notebook-node-loads})
+(table.insert tests {:name "notebook node creates with correct properties"
+                     :fn notebook-node-creates-with-correct-properties})
+(table.insert tests {:name "notebook node adds item edges after added"
+                     :fn notebook-node-adds-item-edges-after-added})
+(table.insert tests {:name "notebook node loads nested notebook item via load-by-key"
+                     :fn notebook-node-loads-nested-notebook-item-via-load-by-key})
+(table.insert tests {:name "notebooks node loads"
+                     :fn notebooks-node-loads})
+(table.insert tests {:name "notebooks node creates with correct properties"
+                     :fn notebooks-node-creates-with-correct-properties})
+(table.insert tests {:name "notebook node view loads"
+                     :fn notebook-node-view-loads})
+(table.insert tests {:name "notebooks node view loads"
+                     :fn notebooks-node-view-loads})
+(table.insert tests {:name "start node collect-targets includes notebooks"
+                     :fn start-node-collect-targets-includes-notebooks})
+
+tests
