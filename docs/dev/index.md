@@ -4,7 +4,7 @@ This section contains internal architecture, implementation notes, and integrati
 
 - [Concepts](/dev/concepts)
 - [Devlog](/dev/devlog)
-- [Architecture](/dev/architecture/aubio)
-- [Graph Identity Nodes](/dev/architecture/graph-identity)
-- [Morphs Architecture](/dev/architecture/morphs)
-- [Libtorrent Architecture](/dev/architecture/libtorrent)
+- [Notes](/dev/notes/aubio)
+- [Graph Identity Notes](/dev/notes/graph-identity)
+- [Morphs Notes](/dev/notes/morphs)
+- [Libtorrent Notes](/dev/notes/libtorrent)
