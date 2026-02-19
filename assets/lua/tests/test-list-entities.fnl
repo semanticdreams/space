@@ -192,6 +192,42 @@
               "list entity node should add edges to existing item nodes")
       (graph:drop))))
 
+(fn list-entity-node-add-item-wraps-non-identity-key-and-dedupes []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local entity (store:create-entity {:name "x"}))
+      (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
+      (local node (ListEntityNode {:entity-id entity.id
+                                   :store store
+                                   :identity-store identity-store}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
+      (graph:add-node node {})
+
+      (node:add-item "node-a")
+      (node:add-item "node-a")
+
+      (local current (store:get-entity entity.id))
+      (assert (= (length (or current.items [])) 1)
+              "adding same target twice should dedupe to one identity key")
+      (local stored-key (. current.items 1))
+      (assert (= (string.sub stored-key 1 9) "identity:")
+              "list entity should wrap non-identity keys with identity")
+      (local identity-id (string.sub stored-key 10))
+      (local identity-entity (identity-store:get-entity identity-id))
+      (assert identity-entity "identity entity should be persisted")
+      (assert (= identity-entity.target-key "node-a")
+              "identity target key should match added key")
+
+      (local identities (identity-store:list-entities))
+      (assert (= (length identities) 1)
+              "identity wrapping should reuse existing identity for same target")
+
+      (graph:drop))))
+
 (fn list-entity-list-node-loads []
   (local ListEntityListNode (require :graph/nodes/list-entity-list))
   (assert ListEntityListNode "ListEntityListNode should load")
@@ -259,6 +295,8 @@
                      :fn list-entity-node-creates-with-correct-properties})
 (table.insert tests {:name "list entity node adds item edges after added"
                      :fn list-entity-node-adds-item-edges-after-added})
+(table.insert tests {:name "list entity node add-item wraps non-identity key and dedupes"
+                     :fn list-entity-node-add-item-wraps-non-identity-key-and-dedupes})
 (table.insert tests {:name "list entity list node loads"
                      :fn list-entity-list-node-loads})
 (table.insert tests {:name "list entity list node creates with correct properties"

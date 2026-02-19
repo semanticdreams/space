@@ -3,6 +3,7 @@
         :node-id node-id} (require :graph/node-base))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
+(local IdentityStore (require :entities/identity))
 (local ListEntityStore (require :entities/list))
 (local Utils (require :graph/view/utils))
 (local KeyLoaderUtils (require :graph/key-loader-utils))
@@ -12,6 +13,7 @@
 
 (local SCHEME "list-entity")
 (local KEY_PREFIX (KeyLoaderUtils.key-prefix SCHEME))
+(local IDENTITY_KEY_PREFIX (KeyLoaderUtils.key-prefix "identity"))
 
 (fn make-label [entity]
   (local name (or (and entity entity.name) ""))
@@ -44,6 +46,7 @@
 (fn ListEntityNode [opts]
   (local options (or opts {}))
   (local entity-id (assert options.entity-id "ListEntityNode requires entity-id"))
+  (local identity-store (or options.identity-store (IdentityStore.get-default)))
   (local store (or options.store (ListEntityStore.get-default)))
   (local ListEntityNodeView (require :graph/view/views/list-entity))
 
@@ -59,6 +62,7 @@
                 :view ListEntityNodeView}))
 
   (set node.entity-id entity-id)
+  (set node.identity-store identity-store)
   (set node.store store)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
@@ -76,6 +80,26 @@
   (set node.get-entity
        (fn [self]
          (self.store:get-entity self.entity-id)))
+
+  (fn ensure-identity-key [self node-key]
+    (local key (tostring (or node-key "")))
+    (if (= (string.len key) 0)
+        key
+        (if (= (string.sub key 1 (string.len IDENTITY_KEY_PREFIX)) IDENTITY_KEY_PREFIX)
+            key
+            (do
+              (local graph self.graph)
+              (if (and graph graph.ensure-identity-key)
+                  (graph:ensure-identity-key key)
+                  (do
+                    (local existing
+                      (if self.identity-store.find-by-target-key
+                          (self.identity-store:find-by-target-key key)
+                          nil))
+                    (if existing
+                        (.. IDENTITY_KEY_PREFIX (tostring existing.id))
+                        (.. IDENTITY_KEY_PREFIX
+                            (tostring (. (self.identity-store:create-entity {:target-key key}) :id))))))))))
 
   (set node.add-item-nodes
        (fn [self]
@@ -105,7 +129,8 @@
 
   (set node.add-item
        (fn [self node-key]
-         (self.store:add-item self.entity-id node-key)
+         (local stable-key (ensure-identity-key self node-key))
+         (self.store:add-item self.entity-id stable-key)
          (self:add-item-nodes)))
 
   (set node.remove-item
