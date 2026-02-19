@@ -75,6 +75,7 @@
     :tests.test-ripgrep
     :tests.test-ripgrep-view
     :tests.test-process
+    :tests.test-sysinfo
     :tests.test-flamegraph
     :tests.test-points
     :tests.test-layered-point
