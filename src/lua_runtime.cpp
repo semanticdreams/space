@@ -48,6 +48,7 @@ void lua_bind_logging(sol::state&);
 void lua_bind_uuid(sol::state&);
 void lua_bind_shell(sol::state&);
 void lua_bind_process(sol::state&);
+void lua_bind_sysinfo(sol::state&);
 void lua_bind_perlin_terrain(sol::state&);
 void lua_bind_dial_type(sol::state&);
 #if defined(SPACE_ENABLE_WALLET_CORE)
@@ -148,6 +149,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_uuid(lua);
     lua_bind_shell(lua);
     lua_bind_process(lua);
+    lua_bind_sysinfo(lua);
     lua_bind_perlin_terrain(lua);
     lua_bind_dial_type(lua);
     lua_bind_xapian(lua);
