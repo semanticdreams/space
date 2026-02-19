@@ -148,10 +148,12 @@
     :tests.test-string-utils
     :tests.test-xdg-icon-browser
     :tests.test-string-entities
+    :tests.test-code-entities
     :tests.test-identity-entities
     :tests.test-link-entities
     :tests.test-list-entities
     :tests.test-notebooks
+    :tests.test-morphs
     :tests.test-link-entity-crash
     :tests.test-graph-loaders]})
 
