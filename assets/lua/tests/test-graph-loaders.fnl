@@ -200,6 +200,11 @@
   (assert module.register-loader "string-entity module should export register-loader")
   (assert (= (type module.register-loader) "function") "register-loader should be a function"))
 
+(fn code-entity-node-module-exports-register-loader []
+  (local module (require :graph/nodes/code-entity))
+  (assert module.register-loader "code-entity module should export register-loader")
+  (assert (= (type module.register-loader) "function") "register-loader should be a function"))
+
 (fn list-entity-node-module-exports-register-loader []
   (local module (require :graph/nodes/list-entity))
   (assert module.register-loader "list-entity module should export register-loader")
@@ -275,6 +280,24 @@
       (local {:register-loader register-loader} (require :graph/nodes/list-entity))
       (register-loader graph {:store store})
       (local key (.. "list-entity:" entity.id))
+      (local result (graph:load-by-key key))
+      (assert result "loader should create node for existing entity")
+      (assert (= result.key key) "node key should match")
+      (assert (= result.entity-id entity.id) "node entity-id should match")
+      (result:drop)
+      (graph:drop))))
+
+(fn code-entity-loader-loads-existing-entity []
+  (with-temp-dir
+    (fn [dir]
+      (local CodeEntityStore (require :entities/code))
+      (local store (CodeEntityStore.CodeEntityStore {:base-dir dir}))
+      (local entity (store:create-entity {:source "(+ 1 2)"}))
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local {:register-loader register-loader} (require :graph/nodes/code-entity))
+      (register-loader graph {:store store})
+      (local key (.. "code-entity:" entity.id))
       (local result (graph:load-by-key key))
       (assert result "loader should create node for existing entity")
       (assert (= result.key key) "node key should match")
@@ -566,6 +589,8 @@
                      :fn load-by-key-rejects-mismatched-node-key})
 (table.insert tests {:name "string entity node module exports register-loader"
                      :fn string-entity-node-module-exports-register-loader})
+(table.insert tests {:name "code entity node module exports register-loader"
+                     :fn code-entity-node-module-exports-register-loader})
 (table.insert tests {:name "list entity node module exports register-loader"
                      :fn list-entity-node-module-exports-register-loader})
 (table.insert tests {:name "link entity node module exports register-loader"
@@ -582,6 +607,8 @@
                      :fn string-entity-loader-returns-nil-for-bare-scheme-key})
 (table.insert tests {:name "list entity loader loads existing entity"
                      :fn list-entity-loader-loads-existing-entity})
+(table.insert tests {:name "code entity loader loads existing entity"
+                     :fn code-entity-loader-loads-existing-entity})
 (table.insert tests {:name "link entity loader loads existing entity"
                      :fn link-entity-loader-loads-existing-entity})
 (table.insert tests {:name "notebook loader loads existing notebook"

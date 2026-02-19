@@ -9,6 +9,7 @@
 (local Signal (require :signal))
 (local LinkEntityStore (require :entities/link))
 (local IdentityStore (require :entities/identity))
+(local Morphs (require :morphs/init))
 
 (local GraphNode NodeBase.GraphNode)
 (local GraphEdge Edge.GraphEdge)
@@ -24,6 +25,7 @@
     (local node-added (Signal))
     (local node-removed (Signal))
     (local node-replaced (Signal))
+    (local node-morphed (Signal))
     (local edge-added (Signal))
     (local edge-removed (Signal))
 
@@ -36,6 +38,7 @@
                  :node-added node-added
                  :node-removed node-removed
                  :node-replaced node-replaced
+                 :node-morphed node-morphed
                  :edge-added edge-added
                  :edge-removed edge-removed})
 
@@ -248,6 +251,10 @@
     ;; Link entity integration
     (local link-store (or options.link-store (LinkEntityStore.get-default)))
     (local identity-store (or options.identity-store (IdentityStore.get-default)))
+    (local morphs (or options.morphs (Morphs.get-default)))
+    (set self.link-store link-store)
+    (set self.identity-store identity-store)
+    (set self.morphs morphs)
     (local link-edge-map {}) ;; entity-id -> edge-key
     (local link-edge-loading {}) ;; entity-id -> true
 
@@ -381,6 +388,7 @@
 
     (var identity-updated-handler nil)
     (var identity-deleted-handler nil)
+    (var morph-handler nil)
 
     (set identity-updated-handler
         (identity-store.identity-updated:connect
@@ -393,6 +401,22 @@
             (fn [entity]
                 (local key (.. "identity:" (tostring entity.id)))
                 (refresh-link-edges-for-key key))))
+
+    (when (and morphs morphs.morphed)
+        (set morph-handler
+            (morphs.morphed:connect
+                (fn [payload]
+                    (local result (or (and payload payload.result) {}))
+                    (local source-key (or payload.source-key result.source-key))
+                    (local target-key (or result.target-key result.code-key))
+                    (local source-node (and source-key (. nodes source-key)))
+                    (when (and source-node self.remove-nodes)
+                        (self:remove-nodes [source-node]))
+                    (when (and target-key self.load-by-key)
+                        (self:load-by-key target-key))
+                    (node-morphed:emit {:source-key source-key
+                                        :target-key target-key
+                                        :payload payload})))))
 
     ;; Removed node-added listener as it is now called directly in add-node
 
@@ -411,7 +435,10 @@
             (set identity-updated-handler nil))
         (when identity-deleted-handler
             (identity-store.identity-deleted:disconnect identity-deleted-handler true)
-            (set identity-deleted-handler nil)))
+            (set identity-deleted-handler nil))
+        (when (and morphs morphs.morphed morph-handler)
+            (morphs.morphed:disconnect morph-handler true)
+            (set morph-handler nil)))
 
     (set self.drop
         (fn [_self]
@@ -429,6 +456,7 @@
             (node-added:clear)
             (node-removed:clear)
             (node-replaced:clear)
+            (node-morphed:clear)
             (edge-added:clear)
             (edge-removed:clear)
             (disconnect-link-entity-handlers)))

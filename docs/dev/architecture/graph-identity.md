@@ -1,5 +1,8 @@
 # Graph Identity Nodes
 
+See also:
+- [Morphs Architecture](/dev/architecture/morphs)
+
 ## Purpose
 
 Identity nodes provide stable references for graph content whose concrete key/type may change over time.
@@ -106,13 +109,13 @@ This gives notebooks stable references by default.
 
 ## What Is Still Left To Do
 
-### 1. Define and implement morph contract
-- Add an explicit morph operation contract that updates identity `target-key` whenever a target node is transformed/rekeyed.
-- Without this, identities are stable references only if callers manually update target keys.
+### 1. Add more morph targets
+- Current morph infra exists and includes `string-entity -> code-entity`.
+- Next work is adding additional type-to-type morphs using the same event contract.
 
-### 2. Auto-refresh notebook/list edges on identity target changes
-- Current behavior: notebook/list edges update on normal item refresh/update paths.
-- Remaining work: subscribe to identity update events and proactively refresh affected notebook/list nodes.
+### 2. Expand morph e2e coverage
+- Notebook/list now refresh on identity updates and post-morph graph events.
+- Add explicit end-to-end visual regression coverage for notebook/list preview/type-label updates after morph.
 
 ### 3. Decide list-entity write policy
 - List add-item now auto-wraps to identity keys.

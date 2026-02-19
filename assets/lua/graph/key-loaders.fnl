@@ -1,5 +1,6 @@
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local ClassNode (require :graph/nodes/class))
+(local {:register-loader register-code-entity-loader} (require :graph/nodes/code-entity))
 (local EntitiesNode (require :graph/nodes/entities))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
@@ -29,6 +30,7 @@
 (local StringEntityListNode (require :graph/nodes/string-entity-list))
 
 (local LinkEntityStore (require :entities/link))
+(local CodeEntityStore (require :entities/code))
 (local IdentityStore (require :entities/identity))
 (local ListEntityStore (require :entities/list))
 (local NotebookStore (require :notebooks/store))
@@ -79,6 +81,7 @@
   (local options (or opts {}))
 
   (local string-store (or options.string-store options.string_store (StringEntityStore.get-default)))
+  (local code-store (or options.code-store (CodeEntityStore.get-default)))
   (local list-store (or options.list-store options.list_store (ListEntityStore.get-default)))
   (local link-store (or options.link-store options.link_store (LinkEntityStore.get-default)))
   (local identity-store (or options.identity-store (IdentityStore.get-default)))
@@ -87,10 +90,14 @@
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
 
   (register-string-entity-loader graph {:store string-store})
-  (register-list-entity-loader graph {:store list-store})
+  (register-code-entity-loader graph {:store code-store})
+  (register-list-entity-loader graph {:store list-store
+                                      :identity-store identity-store})
   (register-link-entity-loader graph {:store link-store})
   (register-identity-loader graph {:store identity-store})
-  (register-notebook-loader graph {:store notebook-store})
+  (register-notebook-loader graph {:store notebook-store
+                                   :identity-store identity-store
+                                   :string-store string-store})
 
   (graph:register-key-loader "string-entity-list"
     (exact-key-loader "string-entity-list"

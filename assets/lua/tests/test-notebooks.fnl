@@ -292,6 +292,127 @@
               "notebook node should add one edge to nested notebook")
       (graph:drop))))
 
+(fn notebook-node-removes-direct-item-when-node-disappears []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
+      (local StringEntityStore (require :entities/string))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
+      (local string-entity (string-store:create-entity {:value "soon gone"}))
+      (local source-key (.. "string-entity:" string-entity.id))
+      (local notebook (store:create-notebook {:name "x"
+                                              :items [source-key]}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
+      (local {:register-loader register-string-loader} (require :graph/nodes/string-entity))
+      (register-string-loader graph {:store string-store})
+      (local source-node (graph:load-by-key source-key))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local notebook-node (NotebookNode {:notebook-id notebook.id
+                                          :store store
+                                          :identity-store identity-store}))
+      (graph:add-node notebook-node {})
+      (assert (= (length (or (. (store:get-notebook notebook.id) :items) [])) 1)
+              "notebook should start with direct key item")
+      (graph:remove-nodes [source-node])
+      (local current (store:get-notebook notebook.id))
+      (assert (= (length (or current.items [])) 0)
+              "notebook should remove direct key item when node disappears")
+      (graph:drop))))
+
+(fn notebook-node-refreshes-identity-item-edges-on-target-change []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
+      (local StringEntityStore (require :entities/string))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
+      (local a (string-store:create-entity {:value "a"}))
+      (local b (string-store:create-entity {:value "b"}))
+      (local key-a (.. "string-entity:" a.id))
+      (local key-b (.. "string-entity:" b.id))
+      (local identity (identity-store:create-entity {:target-key key-a}))
+      (local identity-key (.. "identity:" identity.id))
+      (local notebook (store:create-notebook {:name "x"
+                                              :items [identity-key]}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
+      (local {:register-loader register-string-loader} (require :graph/nodes/string-entity))
+      (register-string-loader graph {:store string-store})
+      (graph:load-by-key key-a)
+      (graph:load-by-key key-b)
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local notebook-node (NotebookNode {:notebook-id notebook.id
+                                          :store store
+                                          :identity-store identity-store}))
+      (graph:add-node notebook-node {})
+      (assert (= (graph:edge-count) 1) "notebook should have one item edge")
+      (assert (= (. graph.edges 1 :target :key) key-a) "initial edge should point to original target")
+      (identity-store:update-entity identity.id {:target-key key-b})
+      (assert (= (graph:edge-count) 1) "notebook should keep one item edge after identity target change")
+      (assert (= (. graph.edges 1 :target :key) key-b) "edge should retarget to updated identity target")
+      (graph:drop))))
+
+(fn notebook-node-refreshes-identity-item-edges-when-target-node-added-late []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local {:GraphNode GraphNode} (require :graph/node-base))
+      (local IdentityStore (require :entities/identity))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local target-key "manual-target:late")
+      (local identity (identity-store:create-entity {:target-key "manual-target:old"}))
+      (local identity-key (.. "identity:" identity.id))
+      (local notebook (store:create-notebook {:name "x"
+                                              :items [identity-key]}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local notebook-node (NotebookNode {:notebook-id notebook.id
+                                          :store store
+                                          :identity-store identity-store}))
+      (graph:add-node notebook-node {})
+      (identity-store:update-entity identity.id {:target-key target-key})
+      (assert (= (graph:edge-count) 0)
+              "edge should not exist until target node is present")
+      (graph:add-node (GraphNode {:key target-key
+                                  :label "late target"})
+                      {})
+      (assert (= (graph:edge-count) 1)
+              "identity-backed notebook edge should appear when target node is added")
+      (assert (= (. graph.edges 1 :target :key) target-key)
+              "late-added target should become notebook edge target")
+      (graph:drop))))
+
+(fn notebook-node-emits-items-changed-on-node-morphed-for-identity-item []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local identity (identity-store:create-entity {:target-key "string-entity:s1"}))
+      (local identity-key (.. "identity:" identity.id))
+      (local notebook (store:create-notebook {:name "x"
+                                              :items [identity-key]}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local notebook-node (NotebookNode {:notebook-id notebook.id
+                                          :store store
+                                          :identity-store identity-store}))
+      (graph:add-node notebook-node {})
+      (var refresh-count 0)
+      (notebook-node.items-changed:connect (fn [_] (set refresh-count (+ refresh-count 1))))
+      (graph.node-morphed:emit {:source-key "string-entity:s1"
+                                :target-key "code-entity:c1"
+                                :payload {:result {:updated-identity-keys [identity-key]}}})
+      (assert (= refresh-count 1)
+              "node-morphed should trigger notebook items refresh for affected identity item")
+      (graph:drop))))
+
 (fn notebooks-node-loads []
   (local NotebooksNode (require :graph/nodes/notebooks))
   (assert NotebooksNode "NotebooksNode should load")
@@ -384,6 +505,14 @@
                      :fn notebook-node-add-item-wraps-non-identity-key-and-dedupes})
 (table.insert tests {:name "notebook node loads nested notebook item via load-by-key"
                      :fn notebook-node-loads-nested-notebook-item-via-load-by-key})
+(table.insert tests {:name "notebook node removes direct item when node disappears"
+                     :fn notebook-node-removes-direct-item-when-node-disappears})
+(table.insert tests {:name "notebook node refreshes identity item edges on target change"
+                     :fn notebook-node-refreshes-identity-item-edges-on-target-change})
+(table.insert tests {:name "notebook node refreshes identity item edges when target node added late"
+                     :fn notebook-node-refreshes-identity-item-edges-when-target-node-added-late})
+(table.insert tests {:name "notebook node emits items-changed on node-morphed for identity item"
+                     :fn notebook-node-emits-items-changed-on-node-morphed-for-identity-item})
 (table.insert tests {:name "notebooks node loads"
                      :fn notebooks-node-loads})
 (table.insert tests {:name "notebooks node creates with correct properties"
