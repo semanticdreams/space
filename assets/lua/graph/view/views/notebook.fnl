@@ -29,12 +29,16 @@
   (local graph (and target target.graph))
   (if (not graph)
       nil
-      (or (graph:lookup item-key)
-          (if graph.load-by-key
-              (do
-                (local (ok loaded) (pcall (fn [] (graph:load-by-key item-key))))
-                (if ok loaded nil))
-              nil))))
+      (if graph.resolve-node
+          (do
+            (local (ok resolved) (pcall (fn [] (graph:resolve-node item-key))))
+            (if ok resolved nil))
+          (or (graph:lookup item-key)
+              (if graph.load-by-key
+                  (do
+                    (local (ok loaded) (pcall (fn [] (graph:load-by-key item-key))))
+                    (if ok loaded nil))
+                  nil)))))
 
 (fn build-preview-widget [target item-key child-ctx]
   (local resolved (resolve-preview-node target item-key))

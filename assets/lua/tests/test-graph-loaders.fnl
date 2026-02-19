@@ -215,6 +215,11 @@
   (assert module.register-loader "notebook module should export register-loader")
   (assert (= (type module.register-loader) "function") "register-loader should be a function"))
 
+(fn identity-node-module-exports-register-loader []
+  (local module (require :graph/nodes/identity))
+  (assert module.register-loader "identity module should export register-loader")
+  (assert (= (type module.register-loader) "function") "register-loader should be a function"))
+
 (fn string-entity-loader-loads-existing-entity []
   (with-temp-dir
     (fn [dir]
@@ -310,6 +315,26 @@
       (assert result "loader should create node for existing notebook")
       (assert (= result.key key) "node key should match")
       (assert (= result.notebook-id notebook.id) "node notebook-id should match")
+      (result:drop)
+      (graph:drop))))
+
+(fn identity-loader-loads-existing-identity []
+  (with-temp-dir
+    (fn [dir]
+      (local IdentityStore (require :entities/identity))
+      (local store (IdentityStore.IdentityStore {:base-dir dir}))
+      (local entity (store:create-entity {:target-key "string-entity:abc"}))
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (local {:register-loader register-loader} (require :graph/nodes/identity))
+      (register-loader graph {:store store})
+      (local key (.. "identity:" entity.id))
+      (local result (graph:load-by-key key))
+      (assert result "loader should create node for existing identity")
+      (assert (= result.key key) "node key should match")
+      (assert (= result.identity-id entity.id) "node identity-id should match")
+      (assert (= result.identity-target-key "string-entity:abc")
+              "node should expose identity target key")
       (result:drop)
       (graph:drop))))
 
@@ -547,6 +572,8 @@
                      :fn link-entity-node-module-exports-register-loader})
 (table.insert tests {:name "notebook node module exports register-loader"
                      :fn notebook-node-module-exports-register-loader})
+(table.insert tests {:name "identity node module exports register-loader"
+                     :fn identity-node-module-exports-register-loader})
 (table.insert tests {:name "string entity loader loads existing entity"
                      :fn string-entity-loader-loads-existing-entity})
 (table.insert tests {:name "string entity loader returns nil for missing entity"
@@ -559,6 +586,8 @@
                      :fn link-entity-loader-loads-existing-entity})
 (table.insert tests {:name "notebook loader loads existing notebook"
                      :fn notebook-loader-loads-existing-notebook})
+(table.insert tests {:name "identity loader loads existing identity"
+                     :fn identity-loader-loads-existing-identity})
 (table.insert tests {:name "link entity integration loads endpoints via load-by-key"
                      :fn link-entity-integration-loads-endpoints-via-load-by-key})
 (table.insert tests {:name "list entity node loads items via load-by-key"

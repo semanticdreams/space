@@ -6,6 +6,7 @@
 (local HackerNewsStoryListNode (require :graph/nodes/hackernews-story-list))
 (local HackerNewsStoryNode (require :graph/nodes/hackernews-story))
 (local HackerNewsUserNode (require :graph/nodes/hackernews-user))
+(local {:register-loader register-identity-loader} (require :graph/nodes/identity))
 (local {:register-loader register-link-entity-loader} (require :graph/nodes/link-entity))
 (local LinkEntityListNode (require :graph/nodes/link-entity-list))
 (local LlmConversationNode (require :graph/nodes/llm-conversation))
@@ -28,6 +29,7 @@
 (local StringEntityListNode (require :graph/nodes/string-entity-list))
 
 (local LinkEntityStore (require :entities/link))
+(local IdentityStore (require :entities/identity))
 (local ListEntityStore (require :entities/list))
 (local NotebookStore (require :notebooks/store))
 (local StringEntityStore (require :entities/string))
@@ -79,6 +81,7 @@
   (local string-store (or options.string-store options.string_store (StringEntityStore.get-default)))
   (local list-store (or options.list-store options.list_store (ListEntityStore.get-default)))
   (local link-store (or options.link-store options.link_store (LinkEntityStore.get-default)))
+  (local identity-store (or options.identity-store (IdentityStore.get-default)))
   (local notebook-store (or options.notebook-store options.notebook_store (NotebookStore.get-default)))
   (local llm-store (or options.llm-store options.llm_store (LlmStore.get-default)))
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
@@ -86,6 +89,7 @@
   (register-string-entity-loader graph {:store string-store})
   (register-list-entity-loader graph {:store list-store})
   (register-link-entity-loader graph {:store link-store})
+  (register-identity-loader graph {:store identity-store})
   (register-notebook-loader graph {:store notebook-store})
 
   (graph:register-key-loader "string-entity-list"

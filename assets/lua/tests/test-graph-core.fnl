@@ -1,6 +1,25 @@
 (local Graph (require :graph/init))
+(local fs (require :fs))
 
 (local tests [])
+
+(var temp-counter 0)
+(local temp-root (fs.join-path "/tmp/space/tests" "graph-core"))
+
+(fn make-temp-dir []
+    (set temp-counter (+ temp-counter 1))
+    (fs.join-path temp-root (.. "graph-core-" (os.time) "-" temp-counter)))
+
+(fn with-temp-dir [f]
+    (local dir (make-temp-dir))
+    (when (fs.exists dir)
+        (fs.remove-all dir))
+    (fs.create-dirs dir)
+    (local (ok result) (pcall f dir))
+    (fs.remove-all dir)
+    (if ok
+        result
+        (error result)))
 
 (fn graph-core-adds-nodes-and-edges []
     (local graph (Graph {:with-start false}))
@@ -76,10 +95,100 @@
     (graph.edge-added:disconnect edge-handler true)
     (graph:drop))
 
+(fn graph-core-resolves-identity-key-to-target []
+    (with-temp-dir
+        (fn [dir]
+            (local IdentityStore (require :entities/identity))
+            (local store (IdentityStore.IdentityStore {:base-dir dir}))
+            (local entity (store:create-entity {:id "id-a"
+                                                :target-key "target-a"}))
+            (local {:IdentityNode IdentityNode} (require :graph/nodes/identity))
+            (local graph (Graph {:with-start false
+                                 :identity-store store}))
+            (local target (Graph.GraphNode {:key "target-a"}))
+            (local identity (IdentityNode {:entity-id entity.id
+                                           :store store}))
+            (graph:add-node target {})
+            (graph:add-node identity {})
+            (local resolved (graph:resolve-key "identity:id-a"))
+            (assert (= resolved "target-a")
+                    "Graph core should resolve identity key to target key")
+            (graph:drop))))
+
+(fn graph-core-link-edges-resolve-identity-endpoints []
+    (with-temp-dir
+        (fn [dir]
+            (local IdentityStore (require :entities/identity))
+            (local LinkEntityStore (require :entities/link))
+            (local identity-store (IdentityStore.IdentityStore {:base-dir dir}))
+            (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+            (local identity (identity-store:create-entity {:id "id-link"
+                                                           :target-key "a"}))
+            (link-store:create-entity {:id "edge-1"
+                                       :source-key (.. "identity:" identity.id)
+                                       :target-key "b"})
+            (local {:IdentityNode IdentityNode} (require :graph/nodes/identity))
+            (local graph (Graph {:with-start false
+                                 :link-store link-store
+                                 :identity-store identity-store}))
+            (local node-a (Graph.GraphNode {:key "a"}))
+            (local node-b (Graph.GraphNode {:key "b"}))
+            (local identity-node (IdentityNode {:entity-id identity.id
+                                                :store identity-store}))
+            (graph:add-node node-a {})
+            (graph:add-node node-b {})
+            (graph:add-node identity-node {})
+            (assert (= (graph:edge-count) 1)
+                    "Link edge should be created for identity-backed endpoint")
+            (local edge (. graph.edges 1))
+            (assert (= edge.source node-a)
+                    "Link edge source should resolve through identity target")
+            (assert (= edge.target node-b)
+                    "Link edge target should remain direct endpoint")
+            (graph:drop))))
+
+(fn graph-core-create-identity-creates-node-and-resolves []
+    (with-temp-dir
+        (fn [dir]
+            (local IdentityStore (require :entities/identity))
+            (local identity-store (IdentityStore.IdentityStore {:base-dir dir}))
+            (local graph (Graph {:with-start false
+                                 :identity-store identity-store}))
+            (local target (Graph.GraphNode {:key "target-create"}))
+            (graph:add-node target {})
+            (local identity-node (graph:create-identity "target-create"))
+            (assert identity-node "create-identity should return a node")
+            (assert (string.find identity-node.key "identity:" 1 true)
+                    "create-identity should create identity key")
+            (local resolved (graph:resolve-key identity-node.key))
+            (assert (= resolved "target-create")
+                    "create-identity node should resolve to target key")
+            (graph:drop))))
+
+(fn graph-core-ensure-identity-key-reuses-existing-identity []
+    (with-temp-dir
+        (fn [dir]
+            (local IdentityStore (require :entities/identity))
+            (local identity-store (IdentityStore.IdentityStore {:base-dir dir}))
+            (local graph (Graph {:with-start false
+                                 :identity-store identity-store}))
+            (local key-1 (graph:ensure-identity-key "target-z"))
+            (local key-2 (graph:ensure-identity-key "target-z"))
+            (assert (= key-1 key-2)
+                    "ensure-identity-key should reuse identity for same target")
+            (local entities (identity-store:list-entities))
+            (assert (= (length entities) 1)
+                    "ensure-identity-key should create only one identity entity per target")
+            (graph:drop))))
+
 (table.insert tests {:name "Graph core adds nodes and edges" :fn graph-core-adds-nodes-and-edges})
 (table.insert tests {:name "Graph core replaces nodes and updates edges" :fn graph-core-replaces-node-and-updates-edges})
 (table.insert tests {:name "Graph core removes nodes and edges" :fn graph-core-removes-nodes-and-edges})
 (table.insert tests {:name "Graph core emits node and edge added signals" :fn graph-core-emits-node-and-edge-added})
+(table.insert tests {:name "Graph core resolves identity key to target" :fn graph-core-resolves-identity-key-to-target})
+(table.insert tests {:name "Graph core link edges resolve identity endpoints" :fn graph-core-link-edges-resolve-identity-endpoints})
+(table.insert tests {:name "Graph core create-identity creates node and resolves" :fn graph-core-create-identity-creates-node-and-resolves})
+(table.insert tests {:name "Graph core ensure-identity-key reuses existing identity" :fn graph-core-ensure-identity-key-reuses-existing-identity})
 
 (local main
   (fn []
