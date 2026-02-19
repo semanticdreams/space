@@ -8,6 +8,7 @@
 (local QuitNode (require :graph/nodes/quit))
 (local Signal (require :signal))
 (local LinkEntityStore (require :entities/link))
+(local IdentityStore (require :entities/identity))
 
 (local GraphNode NodeBase.GraphNode)
 (local GraphEdge Edge.GraphEdge)
@@ -162,6 +163,47 @@
     (set self.node-count (fn [_self] (length (icollect [_ _ (pairs nodes)] true))))
     (set self.lookup (fn [_self key] (lookup self key)))
 
+    (set self.resolve-key
+        (fn [_self key opts]
+            (local options (or opts {}))
+            (if (or (not key) (not (= (type key) "string")))
+                key
+                (do
+                    (local visited (or options.visited {}))
+                    (local max-depth (or options.max-depth 32))
+                    (var current key)
+                    (var depth 0)
+                    (while true
+                        (when (>= depth max-depth)
+                            (lua "return current"))
+                        (when (. visited current)
+                            (error (.. "resolve-key identity cycle detected at " current)))
+                        (set (. visited current) true)
+                        (local node (or (. nodes current)
+                                        (self:load-by-key current)))
+                        (if (not (and node node.identity-target-key))
+                            (lua "return current")
+                            (do
+                                (local next-key (tostring (or node.identity-target-key "")))
+                                (if (> (string.len next-key) 0)
+                                    (do
+                                        (set current next-key)
+                                        (set depth (+ depth 1)))
+                                    (lua "return current")))))))))
+
+    (set self.resolve-node
+        (fn [_self key-or-node opts]
+            (local options (or opts {}))
+            (local key
+                (if (= (type key-or-node) "table")
+                    (and key-or-node key-or-node.key)
+                    key-or-node))
+            (local resolved-key (self:resolve-key key options))
+            (if (not resolved-key)
+                nil
+                (or (. nodes resolved-key)
+                    (self:load-by-key resolved-key)))))
+
     (fn key-scheme [key]
         (when (and key (= (type key) "string"))
             (local (start _end) (string.find key ":" 1 true))
@@ -205,16 +247,61 @@
 
     ;; Link entity integration
     (local link-store (or options.link-store (LinkEntityStore.get-default)))
+    (local identity-store (or options.identity-store (IdentityStore.get-default)))
     (local link-edge-map {}) ;; entity-id -> edge-key
     (local link-edge-loading {}) ;; entity-id -> true
 
+    (set self.create-identity
+        (fn [_self target-key opts]
+            (local create-opts (or opts {}))
+            (local entity (identity-store:create-entity {:id create-opts.id
+                                                         :target-key (or target-key "")
+                                                         :metadata (or create-opts.metadata {})}))
+            (local key (.. "identity:" (tostring entity.id)))
+            (var node (. nodes key))
+            (when (not node)
+                (if self.load-by-key
+                    (set node (self:load-by-key key))
+                    nil)
+                (when (not node)
+                    (local {:IdentityNode IdentityNode} (require :graph/nodes/identity))
+                    (set node (IdentityNode {:entity-id entity.id
+                                             :store identity-store}))
+                    (self:add-node node create-opts)))
+            (when (and create-opts.source-node node self.add-edge)
+                (self:add-edge (GraphEdge {:source create-opts.source-node
+                                           :target node})))
+            node))
+
+    (set self.ensure-identity-key
+        (fn [_self target-key opts]
+            (local options (or opts {}))
+            (local key (tostring (or target-key "")))
+            (if (or (= (string.len key) 0)
+                    (= (string.sub key 1 9) "identity:"))
+                key
+                (do
+                    (local existing
+                        (if identity-store.find-by-target-key
+                            (identity-store:find-by-target-key key)
+                            nil))
+                    (if existing
+                        (.. "identity:" (tostring existing.id))
+                        (do
+                            (local node (self:create-identity key options))
+                            (if (and node node.key)
+                                node.key
+                                key)))))))
+
     (fn add-link-edge-for-entity [entity entity-id]
-        (var source-node (. nodes entity.source-key))
-        (var target-node (. nodes entity.target-key))
-        (when (not source-node)
-            (set source-node (self:load-by-key entity.source-key)))
-        (when (not target-node)
-            (set target-node (self:load-by-key entity.target-key)))
+        (local source-key (self:resolve-key entity.source-key))
+        (local target-key (self:resolve-key entity.target-key))
+        (var source-node (. nodes source-key))
+        (var target-node (. nodes target-key))
+        (when (and (not source-node) source-key)
+            (set source-node (self:load-by-key source-key)))
+        (when (and (not target-node) target-key)
+            (set target-node (self:load-by-key target-key)))
         (when (and source-node target-node)
             (local label (or (and entity.metadata entity.metadata.name) ""))
             (local edge (GraphEdge {:source source-node
@@ -284,6 +371,29 @@
             (fn [entity]
                 (maybe-remove-link-edge entity))))
 
+    (fn refresh-link-edges-for-key [key]
+        (local key-str (tostring (or key "")))
+        (when (> (string.len key-str) 0)
+            (local entities (link-store:find-entities-for-key key-str))
+            (each [_ entity (ipairs (or entities []))]
+                (maybe-remove-link-edge entity)
+                (maybe-add-link-edge entity))))
+
+    (var identity-updated-handler nil)
+    (var identity-deleted-handler nil)
+
+    (set identity-updated-handler
+        (identity-store.identity-updated:connect
+            (fn [entity]
+                (local key (.. "identity:" (tostring entity.id)))
+                (refresh-link-edges-for-key key))))
+
+    (set identity-deleted-handler
+        (identity-store.identity-deleted:connect
+            (fn [entity]
+                (local key (.. "identity:" (tostring entity.id)))
+                (refresh-link-edges-for-key key))))
+
     ;; Removed node-added listener as it is now called directly in add-node
 
     (fn disconnect-link-entity-handlers []
@@ -295,7 +405,13 @@
             (set link-updated-handler nil))
         (when link-deleted-handler
             (link-store.link-entity-deleted:disconnect link-deleted-handler true)
-            (set link-deleted-handler nil)))
+            (set link-deleted-handler nil))
+        (when identity-updated-handler
+            (identity-store.identity-updated:disconnect identity-updated-handler true)
+            (set identity-updated-handler nil))
+        (when identity-deleted-handler
+            (identity-store.identity-deleted:disconnect identity-deleted-handler true)
+            (set identity-deleted-handler nil)))
 
     (set self.drop
         (fn [_self]

@@ -184,14 +184,18 @@
   (with-temp-store
     (fn [store root]
       (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
       (local StringEntityStore (require :entities/string))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
       (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path root "string")}))
       (local notebook (store:create-notebook {:name "x"}))
       (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
       (local node (NotebookNode {:notebook-id notebook.id
                                  :store store
+                                 :identity-store identity-store
                                  :string-store string-store}))
-      (local graph (Graph {:with-start false}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
       (graph:add-node node {})
 
       (local entity (node:add-string-entity {:value "hello"}))
@@ -201,14 +205,54 @@
       (local current (store:get-notebook notebook.id))
       (assert (= (length (or current.items [])) 1) "notebook should contain one item")
       (local key (. current.items 1))
-      (assert (= key (.. "string-entity:" entity.id))
-              "notebook item should point at created string entity key")
+      (assert (= (string.sub key 1 9) "identity:")
+              "notebook item should store an identity key")
+      (local identity-entity (identity-store:get-entity (string.sub key 10)))
+      (assert identity-entity "identity entity should exist")
+      (assert (= identity-entity.target-key (.. "string-entity:" entity.id))
+              "identity should point at created string entity key")
 
       (local loaded-entity (string-store:get-entity entity.id))
       (assert loaded-entity "created string entity should be persisted")
-      (local entity-node (graph:lookup key))
+      (local entity-node (graph:lookup (.. "string-entity:" entity.id)))
       (assert entity-node "graph should contain node for created string entity")
       (assert (= (graph:edge-count) 1) "notebook should add one edge to created string entity")
+
+      (graph:drop))))
+
+(fn notebook-node-add-item-wraps-non-identity-key-and-dedupes []
+  (with-temp-store
+    (fn [store root]
+      (local Graph (require :graph/init))
+      (local IdentityStore (require :entities/identity))
+      (local identity-store (IdentityStore.IdentityStore {:base-dir (fs.join-path root "identity")}))
+      (local notebook (store:create-notebook {:name "x"}))
+      (local {:NotebookNode NotebookNode} (require :graph/nodes/notebook))
+      (local node (NotebookNode {:notebook-id notebook.id
+                                 :store store
+                                 :identity-store identity-store}))
+      (local graph (Graph {:with-start false
+                           :identity-store identity-store}))
+      (graph:add-node node {})
+
+      (node:add-item "node-a")
+      (node:add-item "node-a")
+
+      (local current (store:get-notebook notebook.id))
+      (assert (= (length (or current.items [])) 1)
+              "adding same target twice should dedupe to one identity key")
+      (local stored-key (. current.items 1))
+      (assert (= (string.sub stored-key 1 9) "identity:")
+              "notebook should wrap non-identity keys with identity")
+      (local identity-id (string.sub stored-key 10))
+      (local identity-entity (identity-store:get-entity identity-id))
+      (assert identity-entity "identity entity should be persisted")
+      (assert (= identity-entity.target-key "node-a")
+              "identity target key should match added key")
+
+      (local identities (identity-store:list-entities))
+      (assert (= (length identities) 1)
+              "identity wrapping should reuse existing identity for same target")
 
       (graph:drop))))
 
@@ -336,6 +380,8 @@
                      :fn notebook-node-adds-item-edges-after-added})
 (table.insert tests {:name "notebook node add-string-entity creates item and edge"
                      :fn notebook-node-add-string-entity-creates-item-and-edge})
+(table.insert tests {:name "notebook node add-item wraps non-identity key and dedupes"
+                     :fn notebook-node-add-item-wraps-non-identity-key-and-dedupes})
 (table.insert tests {:name "notebook node loads nested notebook item via load-by-key"
                      :fn notebook-node-loads-nested-notebook-item-via-load-by-key})
 (table.insert tests {:name "notebooks node loads"

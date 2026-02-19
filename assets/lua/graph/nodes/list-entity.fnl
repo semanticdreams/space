@@ -85,7 +85,10 @@
            (local items (or (and current current.items) []))
            (local desired {})
            (each [_ item-key (ipairs items)]
-             (local target (graph:load-by-key item-key))
+             (local target
+               (if graph.resolve-node
+                   (graph:resolve-node item-key)
+                   (graph:load-by-key item-key)))
              (when target
                (graph:add-edge (GraphEdge {:source self :target target})
                                {:from-list-entity self.entity-id})
