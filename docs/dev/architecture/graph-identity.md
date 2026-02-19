@@ -69,6 +69,8 @@ Example:
   - File: `assets/lua/graph/view/views/notebook.fnl`
 - List entity node:
   - item-edge construction resolves via `graph:resolve-node`.
+  - add-item now auto-wraps non-identity keys into identity keys.
+  - dedupes by reusing existing identity for same target key.
   - File: `assets/lua/graph/nodes/list-entity.fnl`
 
 ## Notebook Auto-Wrap Policy (Current)
@@ -96,6 +98,9 @@ This gives notebooks stable references by default.
   - notebook add-item wraps non-identity key
   - notebook dedupes identity wrapper for same target
   - notebook add-string-entity now expects stored identity key
+- `assets/lua/tests/test-list-entities.fnl`
+  - list add-item wraps non-identity key
+  - list dedupes identity wrapper for same target
 - Included in fast suite:
   - `assets/lua/tests/fast.fnl` includes `:tests.test-identity-entities`
 
@@ -110,11 +115,8 @@ This gives notebooks stable references by default.
 - Remaining work: subscribe to identity update events and proactively refresh affected notebook/list nodes.
 
 ### 3. Decide list-entity write policy
-- List edges already resolve identity at read time.
-- Not yet auto-wrapping list item keys to identity on write.
-- Choose one:
-  - keep list as raw keys (current)
-  - auto-wrap list entries like notebook for stable-by-default behavior
+- List add-item now auto-wraps to identity keys.
+- Remaining decision: whether to migrate existing list rows that still contain raw keys.
 
 ### 4. Migration strategy for persisted data
 - Existing notebook/list/link data may contain direct non-identity keys.
