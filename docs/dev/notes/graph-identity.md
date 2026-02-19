@@ -1,7 +1,7 @@
 # Graph Identity Nodes
 
 See also:
-- [Morphs Architecture](/dev/architecture/morphs)
+- [Morphs Notes](/dev/notes/morphs)
 
 ## Purpose
 
