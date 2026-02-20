@@ -1,6 +1,7 @@
 (local StateBase (require :state-base))
 (local InputState (require :input-state-router))
 
+(local SDLK_RETURN 13)
 (local SDLK_LEFT 1073741904)
 (local SDLK_RIGHT 1073741903)
 
@@ -406,17 +407,31 @@
               false
               (handle-key-command state input key))))))
 
+(fn handle-submit [payload]
+  (local input (active-input))
+  (if (not input)
+      false
+      (if (and payload
+               (= payload.key SDLK_RETURN)
+               (StateBase.ctrl-held? payload))
+          (do
+            (input:submit payload)
+            true)
+          false)))
+
 (fn on-key-down [state payload]
-  (if (InputState.dispatch-input :on-key-down payload)
+  (if (handle-submit payload)
       true
-      (if (handle-text-key state payload)
-      true
-      (if (StateBase.handle-focus-tab payload)
+      (if (InputState.dispatch-input :on-key-down payload)
           true
-          (if (active-input)
+          (if (handle-text-key state payload)
               true
-              (and app.first-person-controls
-                   (app.first-person-controls:on-key-down payload)))))))
+              (if (StateBase.handle-focus-tab payload)
+                  true
+                  (if (active-input)
+                      true
+                      (and app.first-person-controls
+                           (app.first-person-controls:on-key-down payload))))))))
 
 (fn sync-mode []
   (local input (active-input))

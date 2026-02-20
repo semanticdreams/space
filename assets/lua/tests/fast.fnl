@@ -149,6 +149,7 @@
     :tests.test-xdg-icon-browser
     :tests.test-string-entities
     :tests.test-code-entities
+    :tests.test-kernels
     :tests.test-identity-entities
     :tests.test-link-entities
     :tests.test-list-entities

@@ -162,7 +162,7 @@
 
   (flex:drop))
 
-(fn flex-clamps-children-when-constrained []
+(fn flex-keeps-non-flex-child-sizes-when-constrained []
   (local child-a (make-test-child (glm.vec3 5 1 0)))
   (local child-b (make-test-child (glm.vec3 3 1 0)))
   (local flex ((Flex {:axis :x
@@ -174,11 +174,11 @@
   (set flex.layout.position (glm.vec3 0 0 0))
   (flex.layout:layouter)
 
-  (local total-spacing 0.5)
-  (local available (- flex.layout.size.x total-spacing))
-  (local sum-sizes (+ child-a.state.last-size.x child-b.state.last-size.x))
-  (assert (approx sum-sizes available))
-  (assert (<= (+ child-b.state.last-position.x child-b.state.last-size.x) (+ flex.layout.position.x flex.layout.size.x 1e-4)))
+  (assert (approx child-a.state.last-size.x 5))
+  (assert (approx child-b.state.last-size.x 3))
+  (assert (approx child-b.state.last-position.x 5.5))
+  (assert (> (+ child-b.state.last-position.x child-b.state.last-size.x)
+             (+ flex.layout.position.x flex.layout.size.x)))
 
   (flex:drop))
 
@@ -205,7 +205,7 @@
 (table.insert tests {:name "Flex stretch alignment stretches cross axes" :fn flex-stretch-align-stretches-cross-axes})
 (table.insert tests {:name "Flex respects reverse and cross-axis alignment" :fn flex-respects-reverse-and-cross-alignments})
 (table.insert tests {:name "Flex propagates rotation to offsets" :fn flex-propagates-rotation-to-offsets})
-(table.insert tests {:name "Flex clamps child sizes when engine is constrained" :fn flex-clamps-children-when-constrained})
+(table.insert tests {:name "Flex keeps non-flex child sizes when engine is constrained" :fn flex-keeps-non-flex-child-sizes-when-constrained})
 (table.insert tests {:name "Flex prefers shrinking flex children" :fn flex-prefers-shrinking-flex-children})
 
 (local main

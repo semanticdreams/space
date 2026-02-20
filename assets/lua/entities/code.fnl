@@ -28,6 +28,15 @@
       ""
       (tostring value)))
 
+(fn normalize-kernel [value]
+  (if (or (= value nil) (= value :nil))
+      0
+      (if (= (type value) "number")
+          value
+          (do
+            (local text (tostring value))
+            (if (> (string.len text) 0) text 0)))))
+
 (fn CodeEntityStore [opts]
   (local options (or opts {}))
   (local base-dir (or options.base-dir
@@ -55,6 +64,7 @@
            :name (normalize-name data.name)
            :language (normalize-language data.language)
            :source (normalize-source data.source)
+           :kernel (normalize-kernel data.kernel)
            :created-at (tonumber (or data.created-at 0))
            :updated-at (tonumber (or data.updated-at 0))}))))
 
@@ -67,6 +77,7 @@
                      :name (normalize-name entity.name)
                      :language (normalize-language entity.language)
                      :source (normalize-source entity.source)
+                     :kernel (normalize-kernel entity.kernel)
                      :created-at entity.created-at
                      :updated-at entity.updated-at})
         (JsonUtils.write-json! path data)))
@@ -93,6 +104,7 @@
                    :name (normalize-name create-opts.name)
                    :language (normalize-language create-opts.language)
                    :source (normalize-source create-opts.source)
+                   :kernel (normalize-kernel create-opts.kernel)
                    :created-at (or create-opts.created-at now)
                    :updated-at (or create-opts.updated-at now)})
     (set (. cache id) entity)
@@ -111,7 +123,9 @@
                 (normalize-language v)
                 (if (or (= k :source) (= k "source"))
                     (normalize-source v)
-                    v))))
+                    (if (or (= k :kernel) (= k "kernel"))
+                        (normalize-kernel v)
+                        v)))))
       (when (not (= current next-value))
         (set changed? true)
         (set (. entity k) next-value)))

@@ -65,6 +65,7 @@
             (local offset (glm.vec3 (- (/ measure.x 2.0))
                                 (- (+ half-point 1.0 measure.y))
                                 0.05))
+            (set span.layout.size measure)
             (set span.layout.depth-offset-index label-depth-offset)
             (set span.layout.position (+ point.position offset))
             (set span.layout.rotation (glm.quat 1 0 0 0))

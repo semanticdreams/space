@@ -84,6 +84,7 @@
   (set text.layout.depth-offset-index 2.0)
   (set text.layout.clip-region clip-region)
   (text.layout:measurer)
+  (set text.layout.size text.layout.measure)
   (local original-compute text.layout.compute-clip-visibility)
   (var force-culled false)
   (set text.layout.compute-clip-visibility
@@ -162,6 +163,7 @@
   (set text.layout.position (glm.vec3 0 0 0))
   (set text.layout.rotation (glm.quat 1 0 0 0))
   (text.layout:measurer)
+  (set text.layout.size text.layout.measure)
   (text.layout:layouter)
   (local handle builder-state.state.last-handle)
   (local data (builder-state.vector:view handle))

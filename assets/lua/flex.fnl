@@ -132,15 +132,7 @@
             (local metadata (. e.children i))
             (when (> metadata.flex 0)
               (set (. child.size axis) (* (. child.size axis) shrink-factor)))))
-        (var resolved-size 0)
-        (each [_ child (ipairs self.children)]
-          (incf resolved-size (. child.size axis)))
-        (when (> resolved-size available-size)
-          (local shrink (if (> resolved-size 0)
-                           (/ available-size resolved-size)
-                           0))
-          (each [_ child (ipairs self.children)]
-            (set (. child.size axis) (* (. child.size axis) shrink)))))
+        )
 
       (var offset 0)
       (each [i child (ipairs self.children)]

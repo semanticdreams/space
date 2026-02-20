@@ -3,6 +3,7 @@
 (local Text (require :text))
 (local TextStyle (require :text-style))
 (local InputModel (require :input-model))
+(local Signal (require :signal))
 (local colors (require :colors))
 (local gl (require :gl))
 (local {: Layout : resolve-mark-flag} (require :layout))
@@ -512,7 +513,8 @@
           :virtual-dirty? true
           :colors colors
           :pointer-target pointer-target
-          :changed model.changed})
+          :changed model.changed
+          :submitted (Signal)})
 
     (set input.get-text
          (fn [_self]
@@ -601,6 +603,10 @@
          (fn [self]
            (when self.focus-node
              (self.focus-node:request-focus))))
+
+    (set input.submit
+         (fn [self payload]
+           (self.submitted:emit payload)))
 
     (set input.on-click
          (fn [self _event]
@@ -751,7 +757,9 @@
               (set self.__model-changed nil))
             (when self.__mode-changed
              (self.model.mode-changed:disconnect self.__mode-changed true)
-             (set self.__mode-changed nil))
+            (set self.__mode-changed nil))
+           (when self.submitted
+             (self.submitted:clear))
            (self.model:drop)
            (when self.__focus-listener
              (local manager self.focus-manager)

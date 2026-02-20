@@ -24,6 +24,9 @@
 (local {:register-loader register-list-entity-loader} (require :graph/nodes/list-entity))
 (local NotebooksNode (require :graph/nodes/notebooks))
 (local {:register-loader register-notebook-loader} (require :graph/nodes/notebook))
+(local KernelsNode (require :graph/nodes/kernels))
+(local {:KernelNode KernelNode} (require :graph/nodes/kernel))
+(local {:KernelInstanceNode KernelInstanceNode} (require :graph/nodes/kernel-instance))
 (local QuitNode (require :graph/nodes/quit))
 (local StartNode (require :graph/nodes/start))
 (local {:register-loader register-string-entity-loader} (require :graph/nodes/string-entity))
@@ -36,6 +39,7 @@
 (local NotebookStore (require :notebooks/store))
 (local StringEntityStore (require :entities/string))
 (local LlmStore (require :llm/store))
+(local Kernels (require :kernels))
 
 (local M {})
 
@@ -87,6 +91,7 @@
   (local identity-store (or options.identity-store (IdentityStore.get-default)))
   (local notebook-store (or options.notebook-store options.notebook_store (NotebookStore.get-default)))
   (local llm-store (or options.llm-store options.llm_store (LlmStore.get-default)))
+  (local kernels (or options.kernels (Kernels.get-default)))
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
 
   (register-string-entity-loader graph {:store string-store})
@@ -115,6 +120,9 @@
   (graph:register-key-loader "notebooks"
     (exact-key-loader "notebooks"
       (fn [] (NotebooksNode {:store notebook-store}))))
+  (graph:register-key-loader "kernels"
+    (exact-key-loader "kernels"
+      (fn [] (KernelsNode {:kernels kernels}))))
   (graph:register-key-loader "start"
     (exact-key-loader "start"
       (fn [] (StartNode))))
@@ -223,6 +231,22 @@
       (fn [id _key]
         (HackerNewsUserNode {:id id
                              :ensure-client hackernews-ensure-client}))))
+
+  (graph:register-key-loader "kernel"
+    (prefix-loader "kernel:"
+      (fn [id _key]
+        (local kernel (kernels:get-kernel id))
+        (when kernel
+          (KernelNode {:kernel-id kernel.id
+                       :kernels kernels})))))
+
+  (graph:register-key-loader "kernel-instance"
+    (prefix-loader "kernel-instance:"
+      (fn [id _key]
+        (local instance (kernels:get-instance id))
+        (when instance
+          (KernelInstanceNode {:instance-id instance.id
+                               :kernels kernels})))))
   true)
 
 M

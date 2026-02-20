@@ -364,6 +364,7 @@
 (set app.tray-manager nil)
 (set app.menu-manager nil)
 (set app.notify nil)
+(set app.kernels nil)
 (set app.settings nil)
 (set app.volume-settings-handler nil)
 (set app.camera-settings-handler nil)
@@ -436,6 +437,12 @@
   (when app.remote-control-endpoint
     (local RemoteControl (require :remote-control))
     (set app.remote-control (RemoteControl {:endpoint app.remote-control-endpoint})))
+
+  (when (and app.kernels app.kernels.drop)
+    (app.kernels:drop)
+    (set app.kernels nil))
+  (local Kernels (require :kernels))
+  (set app.kernels (Kernels.get-default))
 
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
@@ -582,6 +589,8 @@
     (profiler.begin-frame delta))
   (when app.remote-control
     (app.remote-control:tick))
+  (when (and app.kernels app.kernels.tick)
+    (app.kernels:tick))
   (when (and app.engine.audio app.camera)
     (local cam app.camera)
     (local forward (cam:get-forward))
@@ -664,6 +673,9 @@
   (when app.remote-control
     (app.remote-control:drop)
     (set app.remote-control nil))
+  (when (and app.kernels app.kernels.drop)
+    (app.kernels:drop)
+    (set app.kernels nil))
   (set app.next-frame-queue [])
   (set app.next-frame-pending [])
   (set app.projection nil)
