@@ -72,6 +72,9 @@
 (fn shift-held? [payload]
   (Modifiers.shift-held? (and payload payload.mod)))
 
+(fn ctrl-held? [payload]
+  (Modifiers.ctrl-held? (and payload payload.mod)))
+
 (fn alt-held? [payload]
   (Modifiers.alt-held? (and payload payload.mod)))
 
@@ -331,11 +334,13 @@
    :disconnect-input InputState.disconnect-input
    :active-input (fn [] (InputState.active-input))
    :handle-focus-tab handle-focus-tab
-   :shift-held? shift-held?})
+   :shift-held? shift-held?
+   :ctrl-held? ctrl-held?})
 
 {:make-state make-state
  :handle-focus-tab handle-focus-tab
  :shift-held? shift-held?
+ :ctrl-held? ctrl-held?
  :movables-active? movables-active?
  :clickables-active? clickables-active?
  :hover-eligible? hover-eligible?

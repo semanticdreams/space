@@ -253,9 +253,13 @@
              :layouter (fn [self]
                          (set self.size self.measure)
                          (local child-size (or element.layout.measure (glm.vec3 0 0 0)))
-                         (set element.layout.size child-size)
-                         (local offset (glm.vec3 (/ (- self.size.x child-size.x) 2)
-                                                 (/ (- self.size.y child-size.y) 2)
+                         (local constrained-size
+                           (glm.vec3 (math.min child-size.x self.size.x)
+                                     (math.min child-size.y self.size.y)
+                                     (math.min child-size.z self.size.z)))
+                         (set element.layout.size constrained-size)
+                         (local offset (glm.vec3 (/ (- self.size.x constrained-size.x) 2)
+                                                 (/ (- self.size.y constrained-size.y) 2)
                                                  0))
                          (set element.layout.position (+ self.position offset))
                          (set element.layout.rotation self.rotation)

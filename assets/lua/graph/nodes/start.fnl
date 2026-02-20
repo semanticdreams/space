@@ -9,6 +9,7 @@
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local EntitiesNode (require :graph/nodes/entities))
 (local NotebooksNode (require :graph/nodes/notebooks))
+(local KernelsNode (require :graph/nodes/kernels))
 (local Signal (require :signal))
 (local fs (require :fs))
 
@@ -48,6 +49,8 @@
              (table.insert produced [entities-node (or entities-node.label entities-node.key)])
              (local notebooks-node (NotebooksNode {}))
              (table.insert produced [notebooks-node (or notebooks-node.label notebooks-node.key)])
+             (local kernels-node (KernelsNode {}))
+             (table.insert produced [kernels-node (or kernels-node.label kernels-node.key)])
              produced))
 
     (set node.emit-targets

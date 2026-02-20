@@ -24,6 +24,7 @@
   (local entity-id (assert options.entity-id "CodeEntityNode requires entity-id"))
   (local store (or options.store (CodeEntityStore.get-default)))
   (local CodeEntityNodeView (require :graph/view/views/code-entity))
+  (local CodeEntityNodePreview (require :graph/view/previews/code-entity))
 
   (local entity (store:get-entity entity-id))
   (local initial-label (make-label entity))
@@ -34,12 +35,28 @@
                 :color CODE_BLUE
                 :sub-color CODE_BLUE_ACCENT
                 :size 8.0
-                :view CodeEntityNodeView}))
+                :view CodeEntityNodeView
+                :preview CodeEntityNodePreview}))
 
   (set node.entity-id entity-id)
   (set node.store store)
   (set node.entity-deleted (Signal))
   (set node.changed (Signal))
+  (set node.run-result-changed (Signal))
+  (set node.last-run-result "")
+
+  (fn format-run-result [result]
+    (if (not result)
+        ""
+        (do
+          (local err (or result.error ""))
+          (if (> (string.len err) 0)
+              (.. "Error: " err)
+              (do
+                (local output (or result.output ""))
+                (if (> (string.len output) 0)
+                    output
+                    "OK"))))))
 
   (fn refresh-label [self]
     (local current (self.store:get-entity self.entity-id))
@@ -67,6 +84,60 @@
        (fn [self new-source]
          (self.store:update-entity self.entity-id {:source new-source})
          (self:refresh-label)))
+
+  (set node.update-kernel
+       (fn [self kernel]
+         (self.store:update-entity self.entity-id {:kernel kernel})
+         (self:refresh-label)))
+
+  (set node.set-kernel-from-selection
+       (fn [self]
+         (local selected (or (and app.graph-view
+                                  app.graph-view.selection
+                                  app.graph-view.selection.selected-nodes)
+                             []))
+         (if (not (= (length selected) 1))
+             (do
+               (set self.last-run-result "Error: Select exactly one kernel node")
+               (self.run-result-changed:emit self.last-run-result)
+               false)
+             (do
+               (local selected-node (. selected 1))
+               (local kernel-id
+                 (or (and selected-node selected-node.kernel-id)
+                     (and selected-node selected-node.kernel_id)))
+               (if (= kernel-id nil)
+                   (do
+                     (set self.last-run-result "Error: Selected node is not a kernel")
+                     (self.run-result-changed:emit self.last-run-result)
+                     false)
+                   (do
+                     (self:update-kernel kernel-id)
+                     (set self.last-run-result (.. "Kernel set: " (tostring kernel-id)))
+                     (self.run-result-changed:emit self.last-run-result)
+                     true))))))
+
+  (set node.run-entity
+       (fn [self]
+         (local entity-current (self:get-entity))
+         (if (not (and app app.kernels app.kernels.run-code))
+             (do
+               (set self.last-run-result "Error: app.kernels is not available")
+               (self.run-result-changed:emit self.last-run-result)
+               false)
+             (do
+               (set self.last-run-result "Running...")
+               (self.run-result-changed:emit self.last-run-result)
+               (app.kernels:run-code
+                 {:source (or (and entity-current entity-current.source) "")
+                  :language (or (and entity-current entity-current.language) "fnl")
+                  :name (or (and entity-current entity-current.name) "")
+                  :id (and entity-current entity-current.id)
+                  :kernel (if entity-current entity-current.kernel 0)}
+                 (fn [result]
+                   (set self.last-run-result (format-run-result result))
+                   (self.run-result-changed:emit self.last-run-result)))
+               true))))
 
   (set node.delete-entity
        (fn [self]
@@ -105,7 +176,9 @@
            (set updated-handler nil))
          (self.entity-deleted:clear)
          (when self.changed
-           (self.changed:clear))))
+           (self.changed:clear))
+         (when self.run-result-changed
+           (self.run-result-changed:clear))))
 
   node)
 

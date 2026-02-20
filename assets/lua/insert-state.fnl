@@ -15,6 +15,18 @@
 (fn active-input []
   (and InputState InputState.active-input (InputState.active-input)))
 
+(fn handle-submit [payload]
+  (local input (active-input))
+  (if (not input)
+      false
+      (if (and payload
+               (= payload.key SDLK_RETURN)
+               (StateBase.ctrl-held? payload))
+          (do
+            (input:submit payload)
+            true)
+          false)))
+
 (fn exit-insert-mode [input]
   (when input
     (input:enter-normal-mode))
@@ -52,9 +64,11 @@
                                     false))))))))))
 
 (fn on-key-down [payload]
-  (if (InputState.dispatch-input :on-key-down payload)
+  (if (handle-submit payload)
       true
-      (handle-insert-key payload))
+      (if (InputState.dispatch-input :on-key-down payload)
+          true
+          (handle-insert-key payload)))
   true)
 
 (fn sync-insert-mode []

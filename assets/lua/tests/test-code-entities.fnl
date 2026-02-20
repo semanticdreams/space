@@ -35,7 +35,8 @@
       (assert entity.id "entity should have id")
       (assert (= entity.name "") "default name should be empty")
       (assert (= entity.language "fnl") "default language should be fnl")
-      (assert (= entity.source "(print :ok)") "source should be stored"))))
+      (assert (= entity.source "(print :ok)") "source should be stored")
+      (assert (= entity.kernel 0) "default kernel should be id 0"))))
 
 (fn code-entity-store-updates-entities []
   (with-temp-store
@@ -43,11 +44,13 @@
       (local entity (store:create-entity {:source ""}))
       (store:update-entity entity.id {:name "sample"
                                       :language "lua"
-                                      :source "print('ok')"})
+                                      :source "print('ok')"
+                                      :kernel "python-default"})
       (local updated (store:get-entity entity.id))
       (assert (= updated.name "sample") "name should update")
       (assert (= updated.language "lua") "language should update")
-      (assert (= updated.source "print('ok')") "source should update"))))
+      (assert (= updated.source "print('ok')") "source should update")
+      (assert (= updated.kernel "python-default") "kernel should update"))))
 
 (fn code-entity-store-emits-signals []
   (with-temp-store

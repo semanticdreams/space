@@ -351,6 +351,7 @@
           (local measure-caret
                  (fn []
                    (input.layout:measurer)
+                   (set input.layout.size input.layout.measure)
                    (input.layout:layouter)
                    input.caret.layout.size.x))
           (local font (and input.text input.text.style input.text.style.font))
@@ -415,13 +416,51 @@
       (local input ((Input {:column-count 4}) ctx-info.ctx))
       (input:set-text "ABCDEFGH")
       (input.layout:measurer)
-      (set input.layout.size (glm.vec3 8 2 0))
+      (set input.layout.size (glm.vec3 8 input.layout.measure.y 0))
       (input.layout:layouter)
       (input:move-caret-to (length input.codepoints))
       (input.layout:layouter)
       (assert (= input.visible-column-count 4))
       (assert (= input.scroll.column 4))
       (assert (= (string-from-text input.text) "EFGH"))
+      (input:drop))))
+
+(fn input-emits-submitted-on-ctrl-enter []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (local text-state (TextState))
+      (var submitted 0)
+      (local listener
+        (input.submitted:connect
+          (fn [_payload]
+            (set submitted (+ submitted 1)))))
+      (InputState.connect-input input)
+      (text-state.on-key-down {:key 13 :mod 64})
+      (assert (= submitted 1))
+      (InputState.disconnect-input input)
+      (input.submitted:disconnect listener true)
+      (input:drop))))
+
+(fn input-insert-state-ctrl-enter-submits-without-newline []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (local insert-state (InsertState))
+      (var submitted 0)
+      (local listener
+        (input.submitted:connect
+          (fn [_payload]
+            (set submitted (+ submitted 1)))))
+      (input:set-text "line")
+      (InputState.connect-input input)
+      (insert-state.on-key-down {:key 13 :mod 64})
+      (assert (= submitted 1))
+      (assert (= (input:get-text) "line"))
+      (InputState.disconnect-input input)
+      (input.submitted:disconnect listener true)
       (input:drop))))
 
 (fn input-caret-move-only-dirties-caret-layout []
@@ -431,6 +470,8 @@
                                 :hoverables stubs.hoverables}))
       (local root (LayoutRoot))
       (local input ((Input {:text "abc" :column-count 5}) ctx))
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
       (input.layout:set-root root)
       (input.layout:mark-measure-dirty)
       (root:update)
@@ -452,6 +493,8 @@
                                 :hoverables stubs.hoverables}))
       (local root (LayoutRoot))
       (local input ((Input {:text "ABCDEFGH" :column-count 4}) ctx))
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
       (input.layout:set-root root)
       (input.layout:mark-measure-dirty)
       (root:update)
@@ -598,6 +641,8 @@
 (table.insert tests {:name "Input auto computes visible lines and columns" :fn input-auto-computes-visible-lines-and-columns})
 (table.insert tests {:name "Input scrolls vertically to keep caret visible" :fn input-scrolls-text-vertically-when-caret-moves})
 (table.insert tests {:name "Input scrolls horizontally when exceeding columns" :fn input-scrolls-text-horizontally-when-exceeding-columns})
+(table.insert tests {:name "Input emits submitted signal on ctrl enter" :fn input-emits-submitted-on-ctrl-enter})
+(table.insert tests {:name "Insert state ctrl enter submits without newline" :fn input-insert-state-ctrl-enter-submits-without-newline})
 (table.insert tests {:name "Input caret move dirties only caret layout" :fn input-caret-move-only-dirties-caret-layout})
 (table.insert tests {:name "Input scroll dirties caret and text layouts" :fn input-scroll-dirties-text-and-caret-layouts})
 

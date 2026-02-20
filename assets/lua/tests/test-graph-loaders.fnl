@@ -418,11 +418,14 @@
       (local ListEntityStore (require :entities/list))
       (local LinkEntityStore (require :entities/link))
       (local NotebookStore (require :notebooks/store))
+      (local Kernels (require :kernels))
       (local LlmStore (require :llm/store))
       (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")}))
       (local list-store (ListEntityStore.ListEntityStore {:base-dir (fs.join-path dir "list")}))
       (local link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")}))
       (local notebook-store (NotebookStore.NotebookStore {:base-dir (fs.join-path dir "notebooks")}))
+      (local kernels (Kernels.Kernels {:base-dir (fs.join-path dir "kernels")
+                                       :defer-callbacks false}))
       (local llm-store (LlmStore.Store {:base-dir (fs.join-path dir "llm")}))
       (local GraphKeyLoaders (require :graph/key-loaders))
       (local Graph (require :graph/init))
@@ -452,6 +455,7 @@
                                        :list-store list-store
                                        :link-store link-store
                                        :notebook-store notebook-store
+                                       :kernels kernels
                                        :llm-store llm-store
                                        :hackernews-ensure-client (fn [] hn-client)})
 
@@ -478,6 +482,18 @@
       (assert (= notebook-node.key (.. "notebook:" notebook-record.id)) "notebook key should match")
       (assert (= notebook-node.notebook-id notebook-record.id) "notebook id should match")
       (assert-has-preview notebook-node "notebook")
+
+      (local kernels-node (graph:load-by-key "kernels"))
+      (assert kernels-node "should load kernels node")
+      (assert (= kernels-node.key "kernels") "kernels key should match")
+      (assert-has-preview kernels-node "kernels")
+
+      (local created-kernel (kernels:create-kernel {:name "test-kernel"}))
+      (local kernel-node (graph:load-by-key (.. "kernel:" (tostring created-kernel.id))))
+      (assert kernel-node "should load kernel node")
+      (assert (= kernel-node.key (.. "kernel:" (tostring created-kernel.id)))
+              "kernel key should match")
+      (assert-has-preview kernel-node "kernel")
 
       (local node (graph:load-by-key "class:demo"))
       (assert node "should load class node")
@@ -534,7 +550,8 @@
       (assert (= hn-user.key "hackernews-user:jl") "hackernews user key should match")
       (assert-has-preview hn-user "hackernews-user")
 
-      (graph:drop))))
+      (graph:drop)
+      (kernels:drop))))
 
 (fn hackernews-ensure-client-propagates-to-child-nodes []
   (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
