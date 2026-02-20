@@ -155,7 +155,8 @@
         (set self.virtual-dirty? false)
         (self.text:set-codepoints
           (self.model:get-visible-codepoints)
-          {:mark-measure-dirty? false})))
+          {:mark-measure-dirty? false})
+        true))
 
     (fn resolve-line-count [self inner-height]
       (if self.explicit-line-count
@@ -164,8 +165,8 @@
                 available (or inner-height 0)
                 computed (if (> line-height 0)
                              (math.max 1 (math.floor (/ available line-height)))
-                             self.min-lines)]
-            (math.max self.min-lines (math.min self.max-lines computed)))))
+                             1)]
+            (math.max 1 (math.min self.max-lines computed)))))
 
     (fn resolve-column-count [self inner-width]
       (if self.explicit-column-count
@@ -174,8 +175,8 @@
                 available (or inner-width 0)
                 computed (if (> column-width 0)
                              (math.max 1 (math.floor (/ available column-width)))
-                             self.min-columns)]
-            (math.max self.min-columns (math.min self.max-columns computed)))))
+                             1)]
+            (math.max 1 (math.min self.max-columns computed)))))
 
     (fn apply-viewport [self inner-size]
       (local next-lines (resolve-line-count self inner-size.y))
@@ -403,7 +404,9 @@
       (local inner-size (glm.vec3 inner-width inner-height size.z))
       (set self.inner-size inner-size)
       (apply-viewport self inner-size)
-      (refresh-virtual-text self)
+      (local refreshed? (refresh-virtual-text self))
+      (when refreshed?
+        (self.text.layout:measurer))
       (fn apply-layout [node depth]
         (when node
           (set node.layout.size size)
