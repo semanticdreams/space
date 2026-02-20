@@ -11,6 +11,13 @@ Scope: immediate-mode style UI/scene renderers that write vertices into `VectorB
 - **Clip region**: a layout-derived region that bounds visibility. We resolve it to a matrix via `assets/lua/clip-utils.fnl` and use it in shaders (`uClipMatrix`) to discard fragments outside the region.
 - **Model matrix**: a per-object transform (layout node owned) applied in the vertex shader (`model`).
 
+## Clip/Culling Invariant
+
+- Shader clipping is currently 2D (`x/y`) for UI paths (`clipping.glsl`), not 3D volume clipping.
+- Layout-side clip culling must use the same dimensionality (`x/y` only) when classifying `inside/partial/outside`.
+- If layout culling includes `z` while shaders clip only `x/y`, rows/items can disappear nondeterministically when moved (CPU marks nodes `outside` even though GPU clip test would keep fragments).
+- Keep CPU and GPU clip rules aligned whenever clipping code changes.
+
 ## Previous System (Per-handle draws + clip tracking)
 
 ### Data flow

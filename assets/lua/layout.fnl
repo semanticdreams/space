@@ -150,7 +150,8 @@
         (local epsilon position-epsilon)
         (var outside? false)
         (var fully-inside? true)
-        (for [axis 1 3]
+        ;; Clip regions are 2D in shader space (x/y only). Keep layout culling consistent.
+        (for [axis 1 2]
           (local axis-min (. min-corner axis))
           (local axis-max (. max-corner axis))
           (local axis-size (. clip-size axis))
