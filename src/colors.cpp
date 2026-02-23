@@ -3,12 +3,8 @@
 #include <cmath>
 #include <cctype>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <map>
-#include <optional>
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -20,6 +16,7 @@
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include "colormath_data_generated.h"
 #include "colors.h"
 
 namespace {
@@ -724,12 +721,6 @@ std::vector<float> deltaECmcMatrix(const glm::vec3& lab, const std::vector<glm::
 
 namespace {
 
-struct ParsedArrayTables {
-    std::unordered_map<std::string, std::vector<float>> arrays;
-    std::unordered_map<std::string, std::string> named_refs;
-    float visual_density_thresh = 0.08f;
-};
-
 std::string trim(const std::string& s)
 {
     size_t start = 0;
@@ -741,122 +732,6 @@ std::string trim(const std::string& s)
         end--;
     }
     return s.substr(start, end - start);
-}
-
-std::optional<std::filesystem::path> resolve_assets_python_path()
-{
-    if (const char* env = std::getenv("SPACE_ASSETS_PATH")) {
-        std::filesystem::path p(env);
-        if (std::filesystem::exists(p / "python/lib/colormath")) {
-            return p / "python/lib/colormath";
-        }
-    }
-    std::filesystem::path cwd = std::filesystem::current_path();
-    if (std::filesystem::exists(cwd / "assets/python/lib/colormath")) {
-        return cwd / "assets/python/lib/colormath";
-    }
-    if (std::filesystem::exists(cwd / "../assets/python/lib/colormath")) {
-        return cwd / "../assets/python/lib/colormath";
-    }
-    return std::nullopt;
-}
-
-ParsedArrayTables parse_python_arrays(const std::filesystem::path& path, const std::string& array_prefix)
-{
-    ParsedArrayTables tables;
-    std::ifstream in(path);
-    if (!in.is_open()) {
-        throw std::runtime_error("failed to open " + path.string());
-    }
-
-    const std::regex number_re(R"(([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?))");
-    std::string line;
-    std::string current_name;
-    std::vector<float> current_values;
-    bool in_array = false;
-    bool in_ref_table = false;
-
-    while (std::getline(in, line)) {
-        std::string t = trim(line);
-        if (t.rfind("VISUAL_DENSITY_THRESH", 0) == 0) {
-            size_t eq = t.find('=');
-            if (eq != std::string::npos) {
-                tables.visual_density_thresh = std::stof(trim(t.substr(eq + 1)));
-            }
-        }
-
-        if (!in_array) {
-            size_t eq = t.find('=');
-            if (eq != std::string::npos && t.find(array_prefix) != std::string::npos) {
-                current_name = trim(t.substr(0, eq));
-                current_values.clear();
-                in_array = true;
-                continue;
-            }
-        } else {
-            if (t == "))" || t == "))," || t == "))}") {
-                tables.arrays[to_lower(current_name)] = current_values;
-                in_array = false;
-                current_name.clear();
-                current_values.clear();
-                continue;
-            }
-            auto begin = std::sregex_iterator(t.begin(), t.end(), number_re);
-            auto end = std::sregex_iterator();
-            for (auto it = begin; it != end; ++it) {
-                current_values.push_back(std::stof((*it).str()));
-            }
-            continue;
-        }
-
-        if (t.rfind("REF_ILLUM_TABLE", 0) == 0) {
-            in_ref_table = true;
-            continue;
-        }
-        if (in_ref_table) {
-            if (t == "}") {
-                in_ref_table = false;
-                continue;
-            }
-            size_t key_start = t.find('\'');
-            size_t key_end = key_start == std::string::npos ? std::string::npos : t.find('\'', key_start + 1);
-            size_t colon = t.find(':');
-            if (key_start != std::string::npos && key_end != std::string::npos && colon != std::string::npos) {
-                std::string key = t.substr(key_start + 1, key_end - key_start - 1);
-                std::string value = trim(t.substr(colon + 1));
-                if (!value.empty() && value.back() == ',') {
-                    value.pop_back();
-                }
-                tables.named_refs[to_lower(key)] = to_lower(trim(value));
-            }
-        }
-    }
-
-    return tables;
-}
-
-const ParsedArrayTables& spectral_tables()
-{
-    static ParsedArrayTables tables = []() {
-        auto base = resolve_assets_python_path();
-        if (!base.has_value()) {
-            throw std::runtime_error("assets/python/lib/colormath not found; cannot load spectral constants");
-        }
-        return parse_python_arrays(base.value() / "spectral_constants.py", "numpy.array((");
-    }();
-    return tables;
-}
-
-const ParsedArrayTables& density_tables()
-{
-    static ParsedArrayTables tables = []() {
-        auto base = resolve_assets_python_path();
-        if (!base.has_value()) {
-            throw std::runtime_error("assets/python/lib/colormath not found; cannot load density standards");
-        }
-        return parse_python_arrays(base.value() / "density_standards.py", "array((");
-    }();
-    return tables;
 }
 
 const std::vector<float>& require_array(const std::unordered_map<std::string, std::vector<float>>& arrays, const std::string& name)
@@ -957,16 +832,17 @@ glm::vec3 spectralToXyz(const std::vector<float>& spectral, const std::string& o
         throw std::invalid_argument("spectral sample must have 50 values (340-830nm @ 10nm)");
     }
 
-    const ParsedArrayTables& tables = spectral_tables();
-    const auto ref_it = tables.named_refs.find(to_lower(illuminant));
-    if (ref_it == tables.named_refs.end()) {
+    const auto& ref_table = colormath_data::spectral_ref_illum_table();
+    const auto ref_it = ref_table.find(to_lower(illuminant));
+    if (ref_it == ref_table.end()) {
         throw std::invalid_argument("unknown spectral illuminant: " + illuminant);
     }
 
-    const std::vector<float>& ref_illum = require_array(tables.arrays, ref_it->second);
-    const std::vector<float>& std_x = require_array(tables.arrays, observer == "10" ? "stdobserv_x10" : "stdobserv_x2");
-    const std::vector<float>& std_y = require_array(tables.arrays, observer == "10" ? "stdobserv_y10" : "stdobserv_y2");
-    const std::vector<float>& std_z = require_array(tables.arrays, observer == "10" ? "stdobserv_z10" : "stdobserv_z2");
+    const auto& arrays = colormath_data::spectral_arrays();
+    const std::vector<float>& ref_illum = require_array(arrays, ref_it->second);
+    const std::vector<float>& std_x = require_array(arrays, observer == "10" ? "stdobserv_x10" : "stdobserv_x2");
+    const std::vector<float>& std_y = require_array(arrays, observer == "10" ? "stdobserv_y10" : "stdobserv_y2");
+    const std::vector<float>& std_z = require_array(arrays, observer == "10" ? "stdobserv_z10" : "stdobserv_z2");
 
     float denom = 0.0f;
     float x_num = 0.0f;
@@ -987,8 +863,8 @@ float ansiDensity(const std::vector<float>& spectral, const std::string& density
     if (spectral.size() != 50) {
         throw std::invalid_argument("spectral sample must have 50 values (340-830nm @ 10nm)");
     }
-    const ParsedArrayTables& tables = density_tables();
-    const std::vector<float>& standard = require_array(tables.arrays, densityStandard);
+    const auto& arrays = colormath_data::density_arrays();
+    const std::vector<float>& standard = require_array(arrays, densityStandard);
     if (standard.size() != spectral.size()) {
         throw std::runtime_error("density standard/sample size mismatch");
     }
@@ -1004,7 +880,6 @@ float ansiDensity(const std::vector<float>& spectral, const std::string& density
 
 float autoDensity(const std::vector<float>& spectral)
 {
-    const ParsedArrayTables& tables = density_tables();
     const float blue = ansiDensity(spectral, "ansi_status_t_blue");
     const float green = ansiDensity(spectral, "ansi_status_t_green");
     const float red = ansiDensity(spectral, "ansi_status_t_red");
@@ -1012,7 +887,7 @@ float autoDensity(const std::vector<float>& spectral)
     const float min_d = std::min({blue, green, red});
     const float max_d = std::max({blue, green, red});
     const float range = max_d - min_d;
-    if (range <= tables.visual_density_thresh) {
+    if (range <= colormath_data::visual_density_thresh()) {
         return ansiDensity(spectral, "iso_visual");
     }
     if (blue > green && blue > red) {
