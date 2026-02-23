@@ -77,6 +77,32 @@ set(SPACE_HAS_VTERM OFF)
 if(UNIX AND NOT APPLE)
     pkg_check_modules(VTERM REQUIRED IMPORTED_TARGET vterm)
     set(SPACE_HAS_VTERM ON)
+    pkg_check_modules(LIBGCCJIT IMPORTED_TARGET libgccjit)
+    if(NOT LIBGCCJIT_FOUND)
+        find_path(LIBGCCJIT_INCLUDE_DIR
+            NAMES libgccjit.h
+            PATHS
+                /usr/lib/gcc/x86_64-linux-gnu/11/include
+                /usr/lib/gcc/x86_64-linux-gnu/12/include
+                /usr/lib/gcc/x86_64-linux-gnu/13/include
+                /usr/include
+        )
+        find_library(LIBGCCJIT_LIBRARY
+            NAMES gccjit libgccjit
+            PATHS
+                /usr/lib/gcc/x86_64-linux-gnu/11
+                /usr/lib/gcc/x86_64-linux-gnu/12
+                /usr/lib/gcc/x86_64-linux-gnu/13
+                /usr/lib/x86_64-linux-gnu
+                /usr/lib
+        )
+        if(NOT LIBGCCJIT_INCLUDE_DIR OR NOT LIBGCCJIT_LIBRARY)
+            message(FATAL_ERROR "libgccjit not found. Install libgccjit-11-dev (or equivalent).")
+        endif()
+        add_library(space_gccjit INTERFACE)
+        target_include_directories(space_gccjit SYSTEM INTERFACE ${LIBGCCJIT_INCLUDE_DIR})
+        target_link_libraries(space_gccjit INTERFACE ${LIBGCCJIT_LIBRARY})
+    endif()
 endif()
 pkg_check_modules(ZMQ REQUIRED IMPORTED_TARGET libzmq)
 pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
@@ -237,6 +263,13 @@ target_link_libraries(${PROJECT_NAME}_lib
 )
 if(SPACE_HAS_VTERM)
     target_link_libraries(${PROJECT_NAME}_lib PkgConfig::VTERM)
+endif()
+if(UNIX AND NOT APPLE)
+    if(LIBGCCJIT_FOUND)
+        target_link_libraries(${PROJECT_NAME}_lib PkgConfig::LIBGCCJIT)
+    else()
+        target_link_libraries(${PROJECT_NAME}_lib space_gccjit)
+    endif()
 endif()
 target_link_libraries(${PROJECT_NAME}_lib PkgConfig::EPOXY)
 if(SPACE_ENABLE_WALLET_CORE)
@@ -414,6 +447,26 @@ add_executable(test_video_telemetry
 target_include_directories(test_video_telemetry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_test(NAME test_video_telemetry COMMAND test_video_telemetry)
 set_tests_properties(test_video_telemetry PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_lua_gccjit_binding
+    tests/test_lua_gccjit_binding.cpp
+    src/lua_gccjit.cpp
+)
+target_include_directories(test_lua_gccjit_binding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(test_lua_gccjit_binding lua)
+if(UNIX AND NOT APPLE)
+    if(LIBGCCJIT_FOUND)
+        target_link_libraries(test_lua_gccjit_binding PkgConfig::LIBGCCJIT)
+    else()
+        target_link_libraries(test_lua_gccjit_binding space_gccjit)
+    endif()
+endif()
+add_test(NAME test_lua_gccjit_binding COMMAND test_lua_gccjit_binding)
+set_tests_properties(test_lua_gccjit_binding PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 

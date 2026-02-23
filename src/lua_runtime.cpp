@@ -11,6 +11,7 @@
 #include "lua_tray.h"
 #include "lua_video.h"
 #include "lua_webbrowser.h"
+#include "lua_gccjit.h"
 #include "lua_xapian.h"
 #if defined(SPACE_ENABLE_WALLET_CORE)
 #include "lua_wallet_core.h"
@@ -49,6 +50,7 @@ void lua_bind_logging(sol::state&);
 void lua_bind_uuid(sol::state&);
 void lua_bind_shell(sol::state&);
 void lua_bind_process(sol::state&);
+void lua_bind_gccjit(sol::state&);
 void lua_bind_sysinfo(sol::state&);
 void lua_bind_perlin_terrain(sol::state&);
 void lua_bind_dial_type(sol::state&);
@@ -150,6 +152,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_uuid(lua);
     lua_bind_shell(lua);
     lua_bind_process(lua);
+    lua_bind_gccjit(lua);
     lua_bind_sysinfo(lua);
     lua_bind_perlin_terrain(lua);
     lua_bind_dial_type(lua);
