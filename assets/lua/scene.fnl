@@ -8,6 +8,7 @@
 (local DemoAudio (require :demo-audio))
 (local Container (require :container))
 (local WidgetCuboid (require :widget-cuboid))
+(local GraphNodeCube (require :graph-node-cube))
 (local Sized (require :sized))
 (local FlatTerrain (require :flat-terrain))
 (local Ball (require :ball))
@@ -77,6 +78,11 @@
 
 (fn resolve-min-size [layout]
   (and layout layout.min-size))
+
+(fn to-graph-position [position]
+  (if position
+      (glm.vec3 position.x position.y 0)
+      (glm.vec3 0 0 0)))
 
 (fn collect-positioned-resizables [children]
   (var entries [])
@@ -541,6 +547,50 @@
       (self:sync-physics-bodies))
     element)
 
+  (fn add-graph-node-cube [self opts]
+    (local options (or opts {}))
+    (local node options.node)
+    (assert node "Scene.add-graph-node-cube requires :node")
+    (local key (tostring (or options.node-key (and node node.key) "")))
+    (local label (or options.label (and node node.label) key))
+    (local size (or options.size (glm.vec3 4 4 4)))
+    (local placement (resolve-camera-placement self))
+    (local stack-index self.physics-body-count)
+    (local stacked-position
+      (+ placement.position
+         (glm.vec3 0 (+ 6 (* stack-index 4)) 0)))
+    (set self.physics-body-count (+ stack-index 1))
+    (fn on-graph-action [_cube _button _event payload]
+      (local graph app.graph)
+      (when graph
+        (local node-key (or (and payload payload.node-key) key))
+        (local existing (and node-key (graph:lookup node-key)))
+        (when (not existing)
+          (local loaded
+            (if (and node-key graph.load-by-key)
+                (graph:load-by-key node-key)
+                nil))
+          (when (and (not loaded) node)
+            (graph:add-node
+              node
+              {:position (to-graph-position
+                           (and payload payload.cube-position))})))))
+    (local cube-builder
+      (Sized {:size size
+              :child (GraphNodeCube {:node node
+                                     :node-key key
+                                     :label label
+                                     :on-graph on-graph-action})}))
+    (local element
+      (add-panel-child self {:builder cube-builder
+                             :skip-cuboid true
+                             :skip-physics false
+                             :position (or options.position stacked-position)
+                             :rotation options.rotation}))
+    (when element
+      (self:sync-physics-bodies))
+    element)
+
   (fn add-demo-browser [self]
     (if self.demo-browser
         self.demo-browser
@@ -728,6 +778,7 @@
 (set self.add-demo-entry add-demo-entry)
 (set self.add-demo-browser add-demo-browser)
 (set self.add-physics-body add-physics-body)
+(set self.add-graph-node-cube add-graph-node-cube)
 (self:reset-projection)
 self)
 

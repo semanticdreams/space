@@ -2,6 +2,15 @@
 (fn resolve-theme-font [theme key]
   (and theme (. theme key)))
 
+(fn resolve-active-theme []
+  (and app
+       app.themes
+       app.themes.get-active-theme
+       (app.themes.get-active-theme)))
+
+(fn resolve-theme-text-color [theme]
+  (and theme theme.text (or theme.text.foreground theme.text.color)))
+
 (fn resolve-fonts [opts theme]
   (local options (or opts {}))
   (local base (or options.font (resolve-theme-font theme :font)))
@@ -32,10 +41,11 @@
 
 (fn TextStyle [opts]
   (local options (or opts {}))
-  (local theme (app.themes.get-active-theme))
+  (local theme (resolve-active-theme))
   (local fonts (resolve-fonts options theme))
+  (local theme-color (resolve-theme-text-color theme))
   (local theme-text (and theme theme.text))
-  {:color (or options.color (glm.vec4 1 0 0 1))
+  {:color (or options.color theme-color (glm.vec4 1 0 0 1))
    :scale (or options.scale (and theme-text theme-text.scale) 1.6)
    :font fonts.font
    :italic-font fonts.italic-font

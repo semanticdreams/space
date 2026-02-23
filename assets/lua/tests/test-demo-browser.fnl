@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local Scene (require :scene))
 (local Camera (require :camera))
+(local Graph (require :graph))
 (local DemoDialogs (require :demo-dialogs))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
@@ -316,6 +317,49 @@
     (when (not ok)
       (error err))))
 
+(fn scene-add-graph-node-cube-adds-physics-and-readds-node []
+  (assert bt "Graph node cube test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph app.graph)
+  (local graph (Graph {:with-start false}))
+  (set app.graph graph)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local node (Graph.GraphNode {:key "cube-node"
+                                          :label "Node cube label for lod checks and wrapping"}))
+            (local element
+              (scene:add-graph-node-cube {:node node
+                                          :position (glm.vec3 0 16 0)}))
+            (assert element "Expected add-graph-node-cube to return an element")
+            (assert scene.entity.physics-bodies
+                    "Scene should track runtime physics bodies for graph node cubes")
+            (local entry (. scene.entity.physics-bodies (length scene.entity.physics-bodies)))
+            (assert (and entry entry.body)
+                    "Graph node cube should create a runtime rigid body")
+            (assert (and element.child element.child.open-graph)
+                    "Graph node cube should expose an open-graph action")
+            (assert (not (graph:lookup "cube-node"))
+                    "Node should not exist in graph before graph action")
+            (element.child:open-graph nil nil)
+            (assert (graph:lookup "cube-node")
+                    "Graph action should add node to graph")
+            (graph:remove-nodes [(graph:lookup "cube-node")])
+            (assert (not (graph:lookup "cube-node"))
+                    "Node should be removable from graph")
+            (element.child:open-graph nil nil)
+            (assert (graph:lookup "cube-node")
+                    "Graph action should re-add node after removal")))]
+    (set app.graph original-graph)
+    (graph:drop)
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
@@ -325,6 +369,8 @@
                      :fn scene-physics-body-collides-with-flat-terrain})
 (table.insert tests {:name "Scene runtime body falls after drag release"
                      :fn scene-runtime-body-falls-after-drag-release})
+(table.insert tests {:name "Scene graph node cube adds physics and graph action"
+                     :fn scene-add-graph-node-cube-adds-physics-and-readds-node})
 
 (local main
   (fn []
