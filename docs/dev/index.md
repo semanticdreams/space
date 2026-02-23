@@ -8,6 +8,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [Devlog](/dev/devlog)
 - [Notes](/dev/notes/aubio)
 - [C Builder Notes](/dev/notes/c-builder)
+- [C IR Notes](/dev/notes/c-ir)
 - [GCCJIT Notes](/dev/notes/gccjit)
 - [Native Build Notes](/dev/notes/native-build)
 - [Graph Identity Notes](/dev/notes/graph-identity)
