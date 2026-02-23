@@ -6,6 +6,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include "dotenv.h"
 #include "lua_callbacks.h"
 #include "lua_jobs.h"
 #include "lua_keyring.h"
@@ -86,6 +87,9 @@ int main(int argc, char *argv[])
     log_init(LOG_CONFIG);
 
     bool run_repl = false;
+    bool no_dotenv = false;
+    bool dotenv_override = false;
+    std::string dotenv_path = ".env";
     std::string command_source;
     std::string module_name;
 
@@ -106,6 +110,9 @@ int main(int argc, char *argv[])
     CLI::App app("space");
     app.usage("space [option] ... [-c cmd | -m mod[:fn] | file | -] [arg] ...");
     app.add_flag("--repl", run_repl, "Start embedded Fennel REPL");
+    app.add_option("--dotenv", dotenv_path, "Path to dotenv file to load before startup")->expected(1);
+    app.add_flag("--no-dotenv", no_dotenv, "Disable dotenv loading");
+    app.add_flag("--dotenv-override", dotenv_override, "Allow dotenv values to override existing environment variables");
     app.add_option("-c", command_source, "Program passed in as string")->expected(1);
     app.add_option("-m", module_name, "Run library module or module function")->expected(1);
 
@@ -121,6 +128,21 @@ int main(int argc, char *argv[])
                 entry_set = true;
             }
             break;
+        }
+        if (arg == "--dotenv") {
+            if (i + 1 >= argc) {
+                std::cerr << "error: --dotenv requires a path\n";
+                std::cerr << app.help() << "\n";
+                return 2;
+            }
+            cli_args.push_back(arg);
+            cli_args.push_back(argv[i + 1]);
+            i++;
+            continue;
+        }
+        if (arg.rfind("--dotenv=", 0) == 0) {
+            cli_args.push_back(arg);
+            continue;
         }
         if (arg == "-c") {
             if (i + 1 >= argc) {
@@ -173,6 +195,14 @@ int main(int argc, char *argv[])
     }
     catch (const CLI::ParseError &e) {
         return app.exit(e);
+    }
+
+    bool load_dotenv = !no_dotenv;
+    if (load_dotenv) {
+        bool dotenv_loaded = dotenv::load_dotenv_file(dotenv_path, dotenv_override);
+        if (!dotenv_loaded && dotenv_path != ".env") {
+            std::cerr << "warning: failed to load dotenv file: " << dotenv_path << "\n";
+        }
     }
 
     std::string module_name_target = entry_target;
