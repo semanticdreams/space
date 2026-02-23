@@ -1,6 +1,6 @@
 (local suite
   {:name "slow"
-   :modules []})
+   :modules [:tests.test-gccjit]})
 
 (local main
   (fn []
