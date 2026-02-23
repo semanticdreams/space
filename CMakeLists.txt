@@ -351,6 +351,24 @@ set_tests_properties(test_input_dial_type PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_dotenv
+    tests/test_dotenv.cpp
+    src/dotenv.cpp
+)
+target_include_directories(test_dotenv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_dotenv COMMAND test_dotenv)
+set_tests_properties(test_dotenv PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_dotenv_integration
+    tests/test_dotenv_integration.cpp
+)
+add_test(NAME test_dotenv_integration COMMAND test_dotenv_integration)
+set_tests_properties(test_dotenv_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 
