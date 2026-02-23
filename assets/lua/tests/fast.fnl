@@ -144,6 +144,7 @@
     :tests.test-openai-tools-offline
     :tests.test-llm-tools
     :tests.test-toml
+    :tests.test-sql-builder
     :tests.test-cgltf
     :tests.test-string-utils
     :tests.test-xdg-icon-browser
