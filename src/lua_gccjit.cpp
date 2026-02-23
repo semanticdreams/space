@@ -45,7 +45,6 @@ struct GccJitContext
     gcc_jit_context* ptr { nullptr };
     bool owns_ptr { true };
     std::vector<std::unique_ptr<DumpCapture>> dumps;
-    FILE* logfile { nullptr };
 
     void require_alive() const
     {
@@ -57,10 +56,9 @@ struct GccJitContext
     void release()
     {
         if (ptr) {
-            if (logfile) {
-                fclose(logfile);
-                logfile = nullptr;
-            }
+            // Detach logfile from context first. Do not fclose here: libgccjit may
+            // still own/close the FILE*, and double-close is undefined.
+            gcc_jit_context_set_logfile(ptr, nullptr, 0, 0);
             for (const auto& item : dumps) {
                 if (item && item->data) {
                     free(item->data);
@@ -515,24 +513,16 @@ sol::table create_gccjit_table(sol::state_view lua)
         },
         "set-logfile", [](GccJitContext& self, const std::string& path, sol::optional<int> flags, sol::optional<int> verbosity) {
             self.require_alive();
-            if (self.logfile) {
-                fclose(self.logfile);
-                self.logfile = nullptr;
-            }
+            gcc_jit_context_set_logfile(self.ptr, nullptr, 0, 0);
             FILE* f = fopen(path.c_str(), "w");
             if (!f) {
                 throw sol::error("failed to open logfile path");
             }
-            self.logfile = f;
             gcc_jit_context_set_logfile(self.ptr, f, flags.value_or(0), verbosity.value_or(0));
             check_context(self.ptr, "set-logfile");
         },
         "clear-logfile", [](GccJitContext& self) {
             self.require_alive();
-            if (self.logfile) {
-                fclose(self.logfile);
-                self.logfile = nullptr;
-            }
             gcc_jit_context_set_logfile(self.ptr, nullptr, 0, 0);
             check_context(self.ptr, "clear-logfile");
         },
