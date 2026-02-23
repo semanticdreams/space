@@ -7,6 +7,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [SQL Builder (SQLite)](/dev/sql-builder)
 - [Devlog](/dev/devlog)
 - [Notes](/dev/notes/aubio)
+- [C Builder Notes](/dev/notes/c-builder)
 - [Native Build Notes](/dev/notes/native-build)
 - [Graph Identity Notes](/dev/notes/graph-identity)
 - [Morphs Notes](/dev/notes/morphs)
