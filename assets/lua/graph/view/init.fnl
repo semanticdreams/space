@@ -156,6 +156,12 @@
                                (views:open node)
                                (when focus-manager
                                    (focus-manager:clear-auto-focus)))})
+        (table.insert actions
+                      {:name "cube"
+                       :fn (fn [_button _event]
+                               (local scene app.scene)
+                               (when (and scene scene.add-graph-node-cube)
+                                   (scene:add-graph-node-cube {:node node})))})
         (each [_ action (ipairs (or configured-actions []))]
             (when (and action action.name action.fn)
                 (table.insert actions action)))

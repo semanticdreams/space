@@ -770,9 +770,16 @@
             (local graph (Graph {:with-start false}))
             (var opened nil)
             (var custom-invoked 0)
+            (var cube-invoked 0)
             (local original-menu-manager app.menu-manager)
+            (local original-scene app.scene)
             (set app.menu-manager {:open (fn [_self opts]
                                            (set opened opts))})
+            (set app.scene {:add-graph-node-cube (fn [_self opts]
+                                                   (set cube-invoked (+ cube-invoked 1))
+                                                   (assert (and opts opts.node
+                                                                (= opts.node.key "menu-node"))
+                                                           "Cube action should forward the selected graph node"))})
             (local node (Graph.GraphNode {:key "menu-node"
                                           :actions [{:name "Custom Action"
                                                      :icon "build"
@@ -785,20 +792,25 @@
             (assert point.on-right-click "GraphView should attach right click handler to node point")
             (point:on-right-click {:point (glm.vec3 3 4 0)})
             (assert opened "Right click should open a menu")
-            (assert (= (length opened.actions) 3)
-                    "Node menu should include Open, custom actions, and Remove")
+            (assert (= (length opened.actions) 4)
+                    "Node menu should include Open, cube, custom actions, and Remove")
             (assert (= (. opened.actions 1 :name) "Open"))
-            (assert (= (. opened.actions 2 :name) "Custom Action"))
-            (assert (= (. opened.actions 3 :name) "Remove"))
+            (assert (= (. opened.actions 2 :name) "cube"))
+            (assert (= (. opened.actions 3 :name) "Custom Action"))
+            (assert (= (. opened.actions 4 :name) "Remove"))
             ((. opened.actions 2 :fn) nil {})
+            (assert (= cube-invoked 1)
+                    "Cube action should create one scene graph-node cube")
+            ((. opened.actions 3 :fn) nil {})
             (assert (= custom-invoked 1)
                     "Custom node action should be callable from the context menu")
-            ((. opened.actions 3 :fn) nil {})
+            ((. opened.actions 4 :fn) nil {})
             (assert (not (graph:lookup "menu-node"))
                     "Remove action should remove the node from the graph")
             (view:drop)
             (graph:drop)
-            (set app.menu-manager original-menu-manager))))
+            (set app.menu-manager original-menu-manager)
+            (set app.scene original-scene))))
 
 (fn graph-point-right-click-uses-menu-manager-created-later []
     (with-temp-data-dir
