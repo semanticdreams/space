@@ -41,8 +41,9 @@ Primary files:
 
 - Spectral -> XYZ: `spectral-to-xyz`.
 - ANSI/auto density: `ansi-density`, `auto-density`.
-- Spectral and density tables are loaded from the canonical Python data files in
-  `assets/python/lib/colormath`.
+- Spectral and density tables are embedded in generated C++ data
+  (`src/colormath_data_generated.h`) so runtime no longer depends on legacy
+  Python colormath sources.
 
 `color_appearance_models.py`
 
