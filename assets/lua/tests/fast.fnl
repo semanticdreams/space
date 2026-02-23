@@ -92,6 +92,7 @@
     :tests.test-input-state-binding
     :tests.test-mouse-state-binding
     :tests.test-colors
+    :tests.test-colorspacious
     :tests.test-graph-view
     :tests.test-graph-core
     :tests.test-graph-view-registry
