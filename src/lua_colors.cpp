@@ -1,11 +1,15 @@
+#include <algorithm>
+#include <cctype>
 #include <map>
 #include <sol/sol.hpp>
 #include <string>
 #include <vector>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
 
 #include "colors.h"
+#include "colorspacious.h"
 
 namespace {
 
@@ -266,6 +270,313 @@ sol::table colors_conversion_path(sol::this_state ts, const std::string& source_
     return string_vector_to_table(ts, getConversionPath(source_space, target_space));
 }
 
+std::string to_lower(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return value;
+}
+
+sol::table mat3_to_table(sol::this_state ts, const glm::mat3& matrix)
+{
+    sol::state_view lua(ts);
+    sol::table out = lua.create_table(3, 0);
+    for (int row = 0; row < 3; ++row) {
+        sol::table row_t = lua.create_table(3, 0);
+        for (int col = 0; col < 3; ++col) {
+            row_t[col + 1] = matrix[col][row];
+        }
+        out[row + 1] = row_t;
+    }
+    return out;
+}
+
+sol::table ciecam_space_to_table(sol::this_state ts, const Ciecam02Space& space)
+{
+    sol::state_view lua(ts);
+    sol::table t = lua.create_table();
+    t["XYZ100_w"] = space.XYZ100_w;
+    t["Y_b"] = space.Y_b;
+    t["L_A"] = space.L_A;
+    t["F"] = space.surround.F;
+    t["c"] = space.surround.c;
+    t["N_c"] = space.surround.N_c;
+    return t;
+}
+
+sol::table ciecam_correlates_to_table(sol::this_state ts, const Ciecam02Correlates& c)
+{
+    sol::state_view lua(ts);
+    sol::table t = lua.create_table();
+    t["J"] = c.J;
+    t["C"] = c.C;
+    t["h"] = c.h;
+    t["Q"] = c.Q;
+    t["M"] = c.M;
+    t["s"] = c.s;
+    t["H"] = c.H;
+    return t;
+}
+
+glm::vec3 parse_whitepoint(const sol::object& value)
+{
+    if (value.is<std::string>()) {
+        return getIlluminant("2", value.as<std::string>());
+    }
+    if (value.is<glm::vec3>()) {
+        return value.as<glm::vec3>();
+    }
+    if (value.is<sol::table>()) {
+        sol::table t = value.as<sol::table>();
+        return glm::vec3(t.get_or(1, 0.0f), t.get_or(2, 0.0f), t.get_or(3, 0.0f));
+    }
+    throw std::invalid_argument("XYZ100_w must be illuminant name, vec3, or [x y z]");
+}
+
+Ciecam02Surround parse_surround(const sol::object& value)
+{
+    if (!value.valid() || value == sol::nil) {
+        return ciecam02SurroundAverage();
+    }
+    if (value.is<std::string>()) {
+        const std::string key = to_lower(value.as<std::string>());
+        if (key == "average") {
+            return ciecam02SurroundAverage();
+        }
+        if (key == "dim") {
+            return ciecam02SurroundDim();
+        }
+        if (key == "dark") {
+            return ciecam02SurroundDark();
+        }
+        throw std::invalid_argument("unknown surround: " + value.as<std::string>());
+    }
+    if (value.is<sol::table>()) {
+        sol::table t = value.as<sol::table>();
+        return Ciecam02Surround {
+            t.get_or("F", 1.0f),
+            t.get_or("c", 0.69f),
+            t.get_or("N_c", 1.0f),
+        };
+    }
+    throw std::invalid_argument("surround must be string or table");
+}
+
+Ciecam02Space parse_ciecam02_space(const sol::object& value)
+{
+    Ciecam02Space out = ciecam02SpaceSrgb();
+    if (!value.valid() || value == sol::nil) {
+        return out;
+    }
+    if (!value.is<sol::table>()) {
+        throw std::invalid_argument("ciecam02 space must be a table");
+    }
+    sol::table t = value.as<sol::table>();
+    sol::optional<sol::object> white = t["XYZ100_w"];
+    if (white) {
+        out.XYZ100_w = parse_whitepoint(*white);
+    }
+    out.Y_b = t.get_or("Y_b", out.Y_b);
+    out.L_A = t.get_or("L_A", out.L_A);
+    out.surround = parse_surround(t["surround"]);
+    sol::optional<float> F = t["F"];
+    if (F) {
+        out.surround.F = *F;
+    }
+    sol::optional<float> c = t["c"];
+    if (c) {
+        out.surround.c = *c;
+    }
+    sol::optional<float> N_c = t["N_c"];
+    if (N_c) {
+        out.surround.N_c = *N_c;
+    }
+    return out;
+}
+
+LuoEtAl2006UniformSpace parse_luo_space(const sol::object& value)
+{
+    if (!value.valid() || value == sol::nil) {
+        return cam02UcsSpace();
+    }
+    if (value.is<std::string>()) {
+        const std::string key = to_lower(value.as<std::string>());
+        if (key == "cam02-ucs" || key == "ucs") {
+            return cam02UcsSpace();
+        }
+        if (key == "cam02-lcd" || key == "lcd") {
+            return cam02LcdSpace();
+        }
+        if (key == "cam02-scd" || key == "scd") {
+            return cam02ScdSpace();
+        }
+        throw std::invalid_argument("unknown LuoEtAl2006 space: " + value.as<std::string>());
+    }
+    if (value.is<sol::table>()) {
+        sol::table t = value.as<sol::table>();
+        return LuoEtAl2006UniformSpace {
+            t.get_or("KL", 1.0f),
+            t.get_or("c1", 0.007f),
+            t.get_or("c2", 0.0228f),
+        };
+    }
+    throw std::invalid_argument("LuoEtAl2006 space must be a string or table");
+}
+
+sol::table luo_space_to_table(sol::this_state ts, const LuoEtAl2006UniformSpace& space)
+{
+    sol::state_view lua(ts);
+    sol::table t = lua.create_table();
+    t["KL"] = space.KL;
+    t["c1"] = space.c1;
+    t["c2"] = space.c2;
+    return t;
+}
+
+sol::table colors_ciecam02_space(sol::this_state ts)
+{
+    return ciecam_space_to_table(ts, ciecam02SpaceSrgb());
+}
+
+sol::table colors_ciecam02_space_opts(sol::this_state ts, const sol::table& options)
+{
+    return ciecam_space_to_table(ts, parse_ciecam02_space(options));
+}
+
+sol::table colors_xyz100_to_ciecam02(sol::this_state ts, const glm::vec3& xyz100)
+{
+    return ciecam_correlates_to_table(ts, xyz100ToCiecam02(xyz100, ciecam02SpaceSrgb(), "raise"));
+}
+
+sol::table colors_xyz100_to_ciecam02_space(sol::this_state ts, const glm::vec3& xyz100, const sol::table& space)
+{
+    return ciecam_correlates_to_table(ts, xyz100ToCiecam02(xyz100, parse_ciecam02_space(space), "raise"));
+}
+
+sol::table colors_xyz100_to_ciecam02_full(sol::this_state ts, const glm::vec3& xyz100, const sol::table& space,
+                                          const std::string& on_negative_a)
+{
+    return ciecam_correlates_to_table(ts, xyz100ToCiecam02(xyz100, parse_ciecam02_space(space), on_negative_a));
+}
+
+glm::vec3 colors_ciecam02_to_xyz100(const sol::table& correlates)
+{
+    std::map<std::string, float> args;
+    auto read_number = [&](const std::string& key, float& out) -> bool {
+        sol::object value = correlates[key];
+        if (value.valid() && !value.is<sol::nil_t>() && (value.is<float>() || value.is<double>() || value.is<int>())) {
+            out = static_cast<float>(value.as<double>());
+            return true;
+        }
+        return false;
+    };
+
+    float v = 0.0f;
+    if (read_number("J", v) || read_number("j", v)) {
+        args["J"] = v;
+    } else if (read_number("Q", v) || read_number("q", v)) {
+        args["Q"] = v;
+    }
+    if (read_number("C", v) || read_number("c", v)) {
+        args["C"] = v;
+    } else if (read_number("M", v) || read_number("m", v)) {
+        args["M"] = v;
+    } else if (read_number("s", v)) {
+        args["s"] = v;
+    }
+    if (read_number("h", v)) {
+        args["h"] = v;
+    } else if (read_number("H", v)) {
+        args["H"] = v;
+    }
+    return ciecam02ToXyz100(ciecam02SpaceSrgb(), args);
+}
+
+glm::vec3 colors_ciecam02_to_xyz100_space(const sol::table& correlates, const sol::table& space)
+{
+    std::map<std::string, float> args;
+    auto read_number = [&](const std::string& key, float& out) -> bool {
+        sol::object value = correlates[key];
+        if (value.valid() && !value.is<sol::nil_t>() && (value.is<float>() || value.is<double>() || value.is<int>())) {
+            out = static_cast<float>(value.as<double>());
+            return true;
+        }
+        return false;
+    };
+
+    float v = 0.0f;
+    if (read_number("J", v) || read_number("j", v)) {
+        args["J"] = v;
+    } else if (read_number("Q", v) || read_number("q", v)) {
+        args["Q"] = v;
+    }
+    if (read_number("C", v) || read_number("c", v)) {
+        args["C"] = v;
+    } else if (read_number("M", v) || read_number("m", v)) {
+        args["M"] = v;
+    } else if (read_number("s", v)) {
+        args["s"] = v;
+    }
+    if (read_number("h", v)) {
+        args["h"] = v;
+    } else if (read_number("H", v)) {
+        args["H"] = v;
+    }
+    return ciecam02ToXyz100(parse_ciecam02_space(space), args);
+}
+
+sol::table colors_machado_matrix(sol::this_state ts, const std::string& cvd_type, float severity)
+{
+    return mat3_to_table(ts, machadoEtAl2009Matrix(cvd_type, severity));
+}
+
+glm::vec3 colors_cvd_forward(const glm::vec3& rgb, const std::string& cvd_type, float severity)
+{
+    return applyMatrix3x3(machadoEtAl2009Matrix(cvd_type, severity), rgb);
+}
+
+glm::vec3 colors_cvd_inverse(const glm::vec3& rgb, const std::string& cvd_type, float severity)
+{
+    const glm::mat3 fwd = machadoEtAl2009Matrix(cvd_type, severity);
+    return applyMatrix3x3(glm::inverse(fwd), rgb);
+}
+
+sol::table colors_cam02_space(sol::this_state ts, const std::string& name)
+{
+    const std::string key = to_lower(name);
+    if (key == "cam02-ucs" || key == "ucs") {
+        return luo_space_to_table(ts, cam02UcsSpace());
+    }
+    if (key == "cam02-lcd" || key == "lcd") {
+        return luo_space_to_table(ts, cam02LcdSpace());
+    }
+    if (key == "cam02-scd" || key == "scd") {
+        return luo_space_to_table(ts, cam02ScdSpace());
+    }
+    throw std::invalid_argument("unknown CAM02 space name: " + name);
+}
+
+glm::vec3 colors_jmh_to_jab(const glm::vec3& jmh)
+{
+    return jmhToJab(jmh, cam02UcsSpace());
+}
+
+glm::vec3 colors_jmh_to_jab_space(const glm::vec3& jmh, const sol::object& space)
+{
+    return jmhToJab(jmh, parse_luo_space(space));
+}
+
+glm::vec3 colors_jab_to_jmh(const glm::vec3& jab)
+{
+    return jabToJmh(jab, cam02UcsSpace());
+}
+
+glm::vec3 colors_jab_to_jmh_space(const glm::vec3& jab, const sol::object& space)
+{
+    return jabToJmh(jab, parse_luo_space(space));
+}
+
 } // namespace
 
 namespace {
@@ -377,6 +688,37 @@ sol::table create_colors_table(sol::state_view lua)
     colors_table.set_function("rgb-to-hex", &rgbToHex);
     colors_table.set_function("rgb-from-hex", &rgbFromHex);
     colors_table.set_function("clamp-rgb", &clampRgb);
+    colors_table.set_function(
+        "ciecam02-space",
+        sol::overload(
+            static_cast<sol::table(*)(sol::this_state)>(&colors_ciecam02_space),
+            static_cast<sol::table(*)(sol::this_state, const sol::table&)>(&colors_ciecam02_space_opts)));
+    colors_table.set_function(
+        "xyz100-to-ciecam02",
+        sol::overload(
+            static_cast<sol::table(*)(sol::this_state, const glm::vec3&)>(&colors_xyz100_to_ciecam02),
+            static_cast<sol::table(*)(sol::this_state, const glm::vec3&, const sol::table&)>(&colors_xyz100_to_ciecam02_space),
+            static_cast<sol::table(*)(sol::this_state, const glm::vec3&, const sol::table&, const std::string&)>(
+                &colors_xyz100_to_ciecam02_full)));
+    colors_table.set_function(
+        "ciecam02-to-xyz100",
+        sol::overload(
+            static_cast<glm::vec3(*)(const sol::table&)>(&colors_ciecam02_to_xyz100),
+            static_cast<glm::vec3(*)(const sol::table&, const sol::table&)>(&colors_ciecam02_to_xyz100_space)));
+    colors_table.set_function("machado-et-al-2009-matrix", &colors_machado_matrix);
+    colors_table.set_function("cvd-forward", &colors_cvd_forward);
+    colors_table.set_function("cvd-inverse", &colors_cvd_inverse);
+    colors_table.set_function("cam02-space", &colors_cam02_space);
+    colors_table.set_function(
+        "jmh-to-jab",
+        sol::overload(
+            static_cast<glm::vec3(*)(const glm::vec3&)>(&colors_jmh_to_jab),
+            static_cast<glm::vec3(*)(const glm::vec3&, const sol::object&)>(&colors_jmh_to_jab_space)));
+    colors_table.set_function(
+        "jab-to-jmh",
+        sol::overload(
+            static_cast<glm::vec3(*)(const glm::vec3&)>(&colors_jab_to_jmh),
+            static_cast<glm::vec3(*)(const glm::vec3&, const sol::object&)>(&colors_jab_to_jmh_space)));
     return colors_table;
 }
 
