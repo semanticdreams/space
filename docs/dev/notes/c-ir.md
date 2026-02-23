@@ -139,3 +139,92 @@ Function-pointer-style invocation is supported via `FunctionRef` + `CallPtr`.
   - Use `c-ir` for authoring, emit reviewable `.c` files in CI or release builds, and keep JIT only for local/interactive workflows.
 - Incremental migration:
   - Start by wrapping existing generated C snippets in IR nodes, then gradually replace stringly codegen with structured `Type`/`Function`/`If`/`Binary` forms.
+
+## Why No Macro DSL
+
+We intentionally did not keep a compile-time macro DSL layer for `c-ir`.
+
+Reason:
+- In this runtime/compiler setup, macro expansion forms were not stable enough for a production codegen API.
+- Macro implementations repeatedly hit shape-sensitive expansion failures (argument/list structure and delimiter/parse fragility).
+- That created correctness risk in the code generator surface itself, which is unacceptable for this module.
+
+Observed failure patterns (examples):
+- Length/index assumptions on macro input were unreliable:
+  - checks like `#node` and loops like `for [i 2 #node]` produced inconsistent behavior in macro scope for some forms.
+  - practical effect: operator folds (for forms like `(+ a b c)`) occasionally expanded as if operand counts were zero/invalid.
+- Deeply nested macro parsers were fragile under iterative edits:
+  - small grammar changes caused delimiter/parse breakage (`unexpected closing delimiter`) in expansion code.
+  - practical effect: harmless syntax extension work could break unrelated macro paths at compile time.
+- Reserved-name collisions in macro/runtime authoring amplified fragility:
+  - common identifiers such as `values`, `var`, `global` conflicted with compiler special forms/macros in this environment.
+  - practical effect: code that is otherwise straightforward failed at compile time due to binding rules rather than IR semantics.
+
+Concrete examples from failed macro attempts:
+
+```fennel
+;; Intended macro input
+(+ a b c)
+
+;; Expected lowered shape
+(IR.Binary "+"
+  (IR.Binary "+" (IR.Var "a") (IR.Var "b"))
+  (IR.Var "c"))
+```
+
+Observed mismatch in macro path:
+- the fold helper sometimes received an operand list that behaved as empty in macro scope, producing:
+  - `c-ir-macros binary op + needs at least one operand`
+
+```fennel
+;; Macro parser implementation pattern that was unstable in this setup
+(fn fold-binary [IR op args]
+  (assert (>= #args 1))
+  (var out (parse-expr IR (. args 1)))
+  (for [i 2 #args]
+    (set out `(,IR.Binary ,op ,out ,(parse-expr IR (. args i)))))
+  out)
+```
+
+Observed mismatch:
+- `#args`/indexed traversal in macro-expansion context did not behave consistently for all forms, so expansion diverged from the expected IR tree.
+
+```fennel
+;; Nested parser edits around expression/statement forms
+(if (= head "call")
+    ...
+    (if (= head "cast")
+        ...
+        (if (= head "init")
+            ...
+            ...)))
+```
+
+Observed mismatch:
+- small edits in nested branches produced parse breakage:
+  - `Parse error: unexpected closing delimiter )`
+- practical result: unrelated forms failed to compile after local parser changes.
+
+```fennel
+;; Innocent helper names in parser code
+(fn fold-binary [IR op values] ...)
+(fn var [name] ...)
+(fn global [name type init opts] ...)
+```
+
+Observed mismatch:
+- compile-time binding failures due to special-form/macro name collisions:
+  - `local values was overshadowed by a special form or macro`
+  - `local var was overshadowed by a special form or macro`
+  - `local global was overshadowed by a special form or macro`
+
+Decision:
+- Keep `c-ir` as the canonical, explicit runtime API.
+- Prefer direct constructor composition over macro syntax sugar for reliability and debuggability.
+
+When to reconsider a macro DSL:
+- Macro AST shape is demonstrably stable in this runtime (with targeted regression tests).
+- Parser/expander implementation is factored into small helpers (no deep delimiter-fragile nests).
+- Reserved-name/binding rules are codified and enforced by tests.
+- A dedicated test module compiles representative macro programs and runs both backends (`gccjit` + native compile/run).
+- The macro layer stays thin and deterministic (syntax sugar only; no semantic divergence from canonical `c-ir`).
