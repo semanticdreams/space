@@ -174,6 +174,12 @@ Audio::Audio() {
 }
 
 Audio::~Audio() {
+    std::vector<ALuint> sources = activeSources;
+    for (ALuint source : sources) {
+        if (streamingSources.find(source) != streamingSources.end()) {
+            destroyStreamingSource(source);
+        }
+    }
     for (auto& pair : buffers) {
         alDeleteBuffers(1, &pair.second);
     }
@@ -297,6 +303,29 @@ ALuint Audio::createSource(ALuint buffer, const glm::vec3& position, bool loop, 
     return source;
 }
 
+ALuint Audio::createSourceWithoutBuffer(const glm::vec3& position, bool loop, bool positional) {
+    ALuint source;
+    alGenSources(1, &source);
+    alSourcef(source, AL_PITCH, 1);
+    alSourcef(source, AL_GAIN, 1.0f);
+    alSourcei(source, AL_LOOPING, loop ? AL_TRUE : AL_FALSE);
+
+    if (positional) {
+        alSourcef(source, AL_MAX_DISTANCE, 300.0f);
+        alSourcef(source, AL_ROLLOFF_FACTOR, 0.05f);
+        alSourcef(source, AL_REFERENCE_DISTANCE, 10.0f);
+        alSource3f(source, AL_POSITION, position.x, position.y, position.z);
+        alSource3f(source, AL_VELOCITY, 0.f, 0.f, 0.f);
+        alSource3f(source, AL_DIRECTION, 0.f, 0.f, 0.f);
+        alSourcei(source, AL_SOURCE_RELATIVE, AL_FALSE);
+    } else {
+        alSourcei(source, AL_SOURCE_RELATIVE, AL_TRUE);
+        alSource3f(source, AL_POSITION, 0.f, 0.f, 0.f);
+    }
+
+    return source;
+}
+
 void Audio::waitForSoundToFinish(ALuint source) {
     ALint state;
     do {
@@ -320,6 +349,196 @@ ALuint Audio::playSound(const std::string& name, const glm::vec3& position, bool
 
 void Audio::stopSound(ALuint sourceId) {
     alSourceStop(sourceId);
+}
+
+ALuint Audio::createStreamingSource(const glm::vec3& position, bool positional) {
+    ALuint source = createSourceWithoutBuffer(position, false, positional);
+    if (source == 0) {
+        return 0;
+    }
+    activeSources.push_back(source);
+    streamingSources.insert(source);
+    {
+        std::lock_guard<std::mutex> lock(streamMutex);
+        streamQueuedBuffers[source] = {};
+    }
+    return source;
+}
+
+bool Audio::queueStreamPcm16(ALuint sourceId,
+                             const std::int16_t* samples,
+                             std::size_t sample_count,
+                             int channels,
+                             int sample_rate,
+                             double pts_seconds) {
+    if (sourceId == 0 || !samples || sample_count == 0 || sample_rate <= 0) {
+        return false;
+    }
+    if (channels != 1 && channels != 2) {
+        return false;
+    }
+    if (streamingSources.find(sourceId) == streamingSources.end()) {
+        return false;
+    }
+
+    ALenum format = channels == 1 ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
+    ALuint buffer = 0;
+    alGenBuffers(1, &buffer);
+    if (buffer == 0) {
+        return false;
+    }
+
+    const ALsizei bytes = static_cast<ALsizei>(sample_count * sizeof(std::int16_t));
+    alBufferData(buffer, format, samples, bytes, static_cast<ALsizei>(sample_rate));
+    ALenum err = alGetError();
+    if (err != AL_NO_ERROR) {
+        alDeleteBuffers(1, &buffer);
+        return false;
+    }
+
+    alSourceQueueBuffers(sourceId, 1, &buffer);
+    err = alGetError();
+    if (err != AL_NO_ERROR) {
+        alDeleteBuffers(1, &buffer);
+        return false;
+    }
+
+    const double duration_seconds =
+        static_cast<double>(sample_count) / static_cast<double>(std::max(1, channels * sample_rate));
+    {
+        std::lock_guard<std::mutex> lock(streamMutex);
+        auto& queued = streamQueuedBuffers[sourceId];
+        double resolved_pts = pts_seconds;
+        if (resolved_pts < 0.0 && !queued.empty()) {
+            const StreamChunkMeta& tail = queued.back();
+            resolved_pts = tail.pts_seconds + tail.duration_seconds;
+        }
+        StreamChunkMeta chunk;
+        chunk.buffer = buffer;
+        chunk.duration_seconds = duration_seconds;
+        chunk.pts_seconds = resolved_pts;
+        queued.push_back(chunk);
+    }
+    ALint state = AL_STOPPED;
+    alGetSourcei(sourceId, AL_SOURCE_STATE, &state);
+    if (state != AL_PLAYING) {
+        alSourcePlay(sourceId);
+    }
+    return true;
+}
+
+void Audio::reclaimProcessedStreamBuffers(ALuint sourceId) {
+    if (streamingSources.find(sourceId) == streamingSources.end()) {
+        return;
+    }
+
+    ALint processed = 0;
+    alGetSourcei(sourceId, AL_BUFFERS_PROCESSED, &processed);
+    while (processed-- > 0) {
+        ALuint processedBuffer = 0;
+        alSourceUnqueueBuffers(sourceId, 1, &processedBuffer);
+        if (processedBuffer != 0) {
+            alDeleteBuffers(1, &processedBuffer);
+            std::lock_guard<std::mutex> lock(streamMutex);
+            auto queued_it = streamQueuedBuffers.find(sourceId);
+            if (queued_it != streamQueuedBuffers.end()) {
+                auto& queued = queued_it->second;
+                auto it = std::find_if(
+                    queued.begin(), queued.end(),
+                    [processedBuffer](const StreamChunkMeta& chunk) { return chunk.buffer == processedBuffer; });
+                if (it != queued.end()) {
+                    queued.erase(it);
+                }
+            }
+        }
+    }
+}
+
+void Audio::destroyStreamingSource(ALuint sourceId) {
+    if (sourceId == 0) {
+        return;
+    }
+    if (streamingSources.find(sourceId) == streamingSources.end()) {
+        return;
+    }
+
+    alSourceStop(sourceId);
+    reclaimProcessedStreamBuffers(sourceId);
+
+    ALint queuedCount = 0;
+    alGetSourcei(sourceId, AL_BUFFERS_QUEUED, &queuedCount);
+    while (queuedCount-- > 0) {
+        ALuint queuedBuffer = 0;
+        alSourceUnqueueBuffers(sourceId, 1, &queuedBuffer);
+        if (queuedBuffer != 0) {
+            alDeleteBuffers(1, &queuedBuffer);
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(streamMutex);
+        auto queuedIt = streamQueuedBuffers.find(sourceId);
+        if (queuedIt != streamQueuedBuffers.end()) {
+            queuedIt->second.clear();
+            streamQueuedBuffers.erase(queuedIt);
+        }
+    }
+
+    streamingSources.erase(sourceId);
+    auto activeIt = std::find(activeSources.begin(), activeSources.end(), sourceId);
+    if (activeIt != activeSources.end()) {
+        activeSources.erase(activeIt);
+    }
+    alDeleteSources(1, &sourceId);
+}
+
+void Audio::pauseSource(ALuint sourceId) {
+    if (sourceId == 0) {
+        return;
+    }
+    alSourcePause(sourceId);
+}
+
+void Audio::playSource(ALuint sourceId) {
+    if (sourceId == 0) {
+        return;
+    }
+    alSourcePlay(sourceId);
+}
+
+double Audio::getSourceOffsetSeconds(ALuint sourceId) const {
+    if (sourceId == 0) {
+        return 0.0;
+    }
+    ALfloat offset = 0.0f;
+    alGetSourcef(sourceId, AL_SEC_OFFSET, &offset);
+    if (offset < 0.0f) {
+        return 0.0;
+    }
+    return static_cast<double>(offset);
+}
+
+double Audio::getStreamingClockSeconds(ALuint sourceId, double fallback_seconds) const {
+    if (sourceId == 0) {
+        return fallback_seconds;
+    }
+
+    ALfloat offset = 0.0f;
+    alGetSourcef(sourceId, AL_SEC_OFFSET, &offset);
+    const double local_offset = std::max(0.0, static_cast<double>(offset));
+
+    std::lock_guard<std::mutex> lock(streamMutex);
+    auto queued_it = streamQueuedBuffers.find(sourceId);
+    if (queued_it == streamQueuedBuffers.end() || queued_it->second.empty()) {
+        return std::max(0.0, fallback_seconds);
+    }
+
+    const StreamChunkMeta& front = queued_it->second.front();
+    if (front.pts_seconds >= 0.0) {
+        return std::max(0.0, front.pts_seconds + local_offset);
+    }
+
+    return std::max(0.0, fallback_seconds + local_offset);
 }
 
 void Audio::setListenerPosition(const glm::vec3& position) {
@@ -358,6 +577,11 @@ float Audio::getMasterVolume() const {
 void Audio::cleanupStoppedSources() {
     auto it = activeSources.begin();
     while (it != activeSources.end()) {
+        if (streamingSources.find(*it) != streamingSources.end()) {
+            reclaimProcessedStreamBuffers(*it);
+            ++it;
+            continue;
+        }
         ALint state;
         alGetSourcei(*it, AL_SOURCE_STATE, &state);
         if (state == AL_STOPPED) {
@@ -371,11 +595,21 @@ void Audio::cleanupStoppedSources() {
 
 void Audio::reset() {
     // 1. Stop and delete all sources
-    for (auto& source : activeSources) {
-        alSourceStop(source);
-        alDeleteSources(1, &source);
+    std::vector<ALuint> sources = activeSources;
+    for (ALuint source : sources) {
+        if (streamingSources.find(source) != streamingSources.end()) {
+            destroyStreamingSource(source);
+        } else {
+            alSourceStop(source);
+            alDeleteSources(1, &source);
+        }
     }
     activeSources.clear();
+    streamingSources.clear();
+    {
+        std::lock_guard<std::mutex> lock(streamMutex);
+        streamQueuedBuffers.clear();
+    }
 
     // 2. Delete all buffers (if you plan to reload them)
     for (auto& pair : buffers) {

@@ -22,6 +22,7 @@
 #include "job_system.h"
 #include "http_client.h"
 #include "keyring.h"
+#include "video_player.h"
 
 //namespace py = pybind11;
 
@@ -80,6 +81,7 @@ private:
 
     Physics physics;
     Audio audio;
+    VideoManager video_manager;
     std::unique_ptr<JobSystem> jobs;
     std::unique_ptr<HttpClient> http;
     Keyring keyring;

@@ -13,7 +13,9 @@
 
 (fn make-label [entity]
   (if (and entity entity.value (> (string.len entity.value) 0))
-      (Utils.truncate-with-ellipsis entity.value 50)
+      (do
+        (local first-line (or (string.match entity.value "([^\r\n]+)") entity.value))
+        (Utils.truncate-with-ellipsis first-line 50))
       (or (and entity entity.id) "string entity")))
 
 (fn StringEntityNode [opts]

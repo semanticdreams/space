@@ -6,6 +6,7 @@
 
 #include "audio.h"
 #include "lua_callbacks.h"
+#include "lua_video.h"
 #include "resource_manager.h"
 
 namespace {
@@ -51,7 +52,11 @@ sol::table create_audio_table(sol::state_view lua)
         "setSourceVelocity", &Audio::setSourceVelocity,
         "setMasterVolume", &Audio::setMasterVolume,
         "getMasterVolume", &Audio::getMasterVolume,
-        "reset", &Audio::reset,
+        "reset", [](Audio& self, sol::this_state state) {
+            sol::state_view lua(state);
+            lua_video_notify_audio_reset(lua, &self);
+            self.reset();
+        },
         "update", &Audio::update);
     return audio_table;
 }

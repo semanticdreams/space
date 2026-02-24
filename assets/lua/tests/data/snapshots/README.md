@@ -6,6 +6,7 @@ Current e2e outputs:
 - `button.png`: isolated widget-only render.
 - `button-hover.png`: hover state triggered by hoverables/intersectables.
 - `image.png`: image widget rendering `assets/pics/test.png`.
+- `video-frame.png`: paused in-world video frame captured from `test-videos/00_baseline...mp4` via `video-widget`.
 - `hud-button.png`: stable HUD-only render.
 - `scroll-view.png`: scroll view mid-scroll with clipped items and scrollbar.
 - `scroll-view-top.png`: scroll view after simulated wheel events return to top.

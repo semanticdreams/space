@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (local Scene (require :scene))
 (local Camera (require :camera))
-(local Graph (require :graph))
+(local Graph (require :graph/init))
 (local DemoDialogs (require :demo-dialogs))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
