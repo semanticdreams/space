@@ -96,6 +96,20 @@ VideoPlayer::VideoPlayer(VideoManager& manager, const std::string& path, Options
     : path_(resolve_media_path(path))
     , loop_(options.loop)
     , muted_(options.muted)
+    , positional_audio_(options.positional_audio)
+    , audio_position_(options.audio_position)
+    , audio_velocity_(options.audio_velocity)
+    , audio_direction_(options.audio_direction)
+    , audio_gain_(options.audio_gain)
+    , audio_pitch_(options.audio_pitch)
+    , audio_max_distance_(options.audio_max_distance)
+    , audio_rolloff_factor_(options.audio_rolloff_factor)
+    , audio_reference_distance_(options.audio_reference_distance)
+    , audio_min_gain_(options.audio_min_gain)
+    , audio_max_gain_(options.audio_max_gain)
+    , audio_cone_inner_angle_(options.audio_cone_inner_angle)
+    , audio_cone_outer_angle_(options.audio_cone_outer_angle)
+    , audio_cone_outer_gain_(options.audio_cone_outer_gain)
 {
 #if !defined(SPACE_HAS_FFMPEG)
     (void) options;
@@ -176,6 +190,7 @@ void VideoPlayer::stop() {
     if (audio_source_ != 0 && audio) {
         audio->destroyStreamingSource(audio_source_);
         audio_source_ = 0;
+        source_positional_audio_ = false;
     }
 }
 
@@ -202,6 +217,7 @@ void VideoPlayer::seek(double seconds) {
     if (audio_source_ != 0 && audio) {
         audio->destroyStreamingSource(audio_source_);
         audio_source_ = 0;
+        source_positional_audio_ = false;
     }
 }
 
@@ -215,11 +231,15 @@ void VideoPlayer::update(uint32_t dt_ms) {
     }
     double playback_position = 0.0;
     bool is_playing = false;
+    bool positional_audio_enabled = false;
+    glm::vec3 audio_position(0.0f);
     double known_duration = duration_seconds_.load();
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
         playback_position = base_position_seconds_;
         is_playing = play_active_;
+        positional_audio_enabled = positional_audio_;
+        audio_position = audio_position_;
         if (is_playing) {
             std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - play_started_at_;
             playback_position = clamp_non_negative(playback_position + elapsed.count());
@@ -231,9 +251,19 @@ void VideoPlayer::update(uint32_t dt_ms) {
     if (has_audio_stream_.load() && audio) {
         std::lock_guard<std::mutex> source_lock(audio_source_mutex_);
         if (audio_source_ == 0) {
-            audio_source_ = audio->createStreamingSource(glm::vec3(0.0f), false);
+            audio_source_ = audio->createStreamingSource(audio_position, positional_audio_enabled);
+            source_positional_audio_ = positional_audio_enabled;
+            apply_audio_source_parameters(*audio);
         }
         if (audio_source_ != 0) {
+            if (source_positional_audio_ != positional_audio_enabled) {
+                audio->setSourcePositional(audio_source_, positional_audio_enabled);
+                source_positional_audio_ = positional_audio_enabled;
+                apply_audio_source_parameters(*audio);
+            }
+            if (positional_audio_enabled) {
+                audio->setSourcePosition(audio_source_, audio_position);
+            }
             audio->reclaimProcessedStreamBuffers(audio_source_);
             if (is_playing) {
                 bool dequeued_audio = false;
@@ -427,6 +457,39 @@ std::uint64_t VideoPlayer::decode_loop_iterations() const {
 
 std::uint64_t VideoPlayer::decode_wait_milliseconds() const {
     return decode_wait_milliseconds_.load(std::memory_order_relaxed);
+}
+
+void VideoPlayer::apply_audio_source_parameters(Audio& audio) {
+    if (audio_source_ == 0) {
+        return;
+    }
+    audio.setSourceGain(audio_source_, audio_gain_);
+    audio.setSourcePitch(audio_source_, audio_pitch_);
+    audio.setSourceMaxDistance(audio_source_, audio_max_distance_);
+    audio.setSourceRolloffFactor(audio_source_, audio_rolloff_factor_);
+    audio.setSourceReferenceDistance(audio_source_, audio_reference_distance_);
+    audio.setSourceMinGain(audio_source_, audio_min_gain_);
+    audio.setSourceMaxGain(audio_source_, audio_max_gain_);
+    audio.setSourceConeInnerAngle(audio_source_, audio_cone_inner_angle_);
+    audio.setSourceConeOuterAngle(audio_source_, audio_cone_outer_angle_);
+    audio.setSourceConeOuterGain(audio_source_, audio_cone_outer_gain_);
+    audio.setSourceVelocity(audio_source_, audio_velocity_);
+    audio.setSourceDirection(audio_source_, audio_direction_);
+}
+
+void VideoPlayer::set_positional_audio(bool enabled) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    positional_audio_ = enabled;
+}
+
+bool VideoPlayer::positional_audio() const {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return positional_audio_;
+}
+
+void VideoPlayer::set_audio_position(const glm::vec3& position) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    audio_position_ = position;
 }
 
 void VideoPlayer::set_last_error(const std::string& message) {
@@ -717,8 +780,10 @@ void VideoPlayer::decode_loop() {
 
             std::uint8_t* dst_data[4] = { nullptr, nullptr, nullptr, nullptr };
             int dst_linesize[4] = { 0, 0, 0, 0 };
-            dst_data[0] = out.rgba.data();
-            dst_linesize[0] = width * 4;
+            // Render UVs assume OpenGL-style bottom-left texture origin. Write converted rows with a negative
+            // destination stride so FFmpeg emits vertically flipped RGBA directly, avoiding an extra per-frame pass.
+            dst_data[0] = out.rgba.data() + (static_cast<std::size_t>(height - 1) * static_cast<std::size_t>(width) * 4);
+            dst_linesize[0] = -width * 4;
 
             sws_ctx = sws_getCachedContext(sws_ctx,
                                            width,
@@ -975,6 +1040,7 @@ void VideoPlayer::shutdown_player() {
     if (audio_source_ != 0 && audio) {
         audio->destroyStreamingSource(audio_source_);
         audio_source_ = 0;
+        source_positional_audio_ = false;
     }
     if (manager_) {
         manager_->unregister_player(this);
@@ -987,6 +1053,7 @@ void VideoPlayer::on_audio_reset(Audio* previous_audio) {
     std::lock_guard<std::mutex> source_lock(audio_source_mutex_);
     if (!previous_audio || audio_source_ == 0) {
         audio_source_ = 0;
+        source_positional_audio_ = false;
         has_audio_clock_.store(false, std::memory_order_relaxed);
         return;
     }
@@ -999,6 +1066,7 @@ void VideoPlayer::on_audio_reset(Audio* previous_audio) {
     }
     previous_audio->destroyStreamingSource(audio_source_);
     audio_source_ = 0;
+    source_positional_audio_ = false;
     has_audio_clock_.store(false, std::memory_order_relaxed);
 }
 

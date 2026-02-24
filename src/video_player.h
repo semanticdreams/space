@@ -13,6 +13,7 @@
 #include <unordered_set>
 
 #include <AL/al.h>
+#include <glm/vec3.hpp>
 
 #include "texture.h"
 #include "video_telemetry.h"
@@ -26,6 +27,20 @@ public:
         bool loop { false };
         bool autoplay { true };
         bool muted { false };
+        bool positional_audio { false };
+        glm::vec3 audio_position { 0.0f, 0.0f, 0.0f };
+        glm::vec3 audio_velocity { 0.0f, 0.0f, 0.0f };
+        glm::vec3 audio_direction { 0.0f, 0.0f, 0.0f };
+        float audio_gain { 1.0f };
+        float audio_pitch { 1.0f };
+        float audio_max_distance { 300.0f };
+        float audio_rolloff_factor { 0.05f };
+        float audio_reference_distance { 10.0f };
+        float audio_min_gain { 0.0f };
+        float audio_max_gain { 1.0f };
+        float audio_cone_inner_angle { 360.0f };
+        float audio_cone_outer_angle { 360.0f };
+        float audio_cone_outer_gain { 0.0f };
     };
 
     VideoPlayer(VideoManager& manager, const std::string& path);
@@ -63,6 +78,9 @@ public:
     std::uint64_t flushed_audio_chunks() const;
     std::uint64_t decode_loop_iterations() const;
     std::uint64_t decode_wait_milliseconds() const;
+    void set_positional_audio(bool enabled);
+    bool positional_audio() const;
+    void set_audio_position(const glm::vec3& position);
 
     Texture2D& texture();
 
@@ -87,6 +105,7 @@ private:
     void clear_queued_frames();
     void clear_queued_audio_chunks(bool count_as_flush);
     void update_av_drift_metrics(double av_drift_seconds);
+    void apply_audio_source_parameters(Audio& audio);
 
     std::string path_;
     bool loop_ { false };
@@ -125,6 +144,7 @@ private:
     double displayed_pts_seconds_ { -1.0 };
     mutable std::mutex audio_source_mutex_;
     ALuint audio_source_ { 0 };
+    bool source_positional_audio_ { false };
     mutable std::mutex error_mutex_;
     std::string last_error_;
 
@@ -147,6 +167,20 @@ private:
     VideoAvDriftTracker drift_tracker_ { kRecentAvDriftWindowSeconds };
     std::atomic<std::uint64_t> decode_loop_iterations_ { 0 };
     std::atomic<std::uint64_t> decode_wait_milliseconds_ { 0 };
+    bool positional_audio_ { false };
+    glm::vec3 audio_position_ { 0.0f, 0.0f, 0.0f };
+    glm::vec3 audio_velocity_ { 0.0f, 0.0f, 0.0f };
+    glm::vec3 audio_direction_ { 0.0f, 0.0f, 0.0f };
+    float audio_gain_ { 1.0f };
+    float audio_pitch_ { 1.0f };
+    float audio_max_distance_ { 300.0f };
+    float audio_rolloff_factor_ { 0.05f };
+    float audio_reference_distance_ { 10.0f };
+    float audio_min_gain_ { 0.0f };
+    float audio_max_gain_ { 1.0f };
+    float audio_cone_inner_angle_ { 360.0f };
+    float audio_cone_outer_angle_ { 360.0f };
+    float audio_cone_outer_gain_ { 0.0f };
 };
 
 class VideoManager {

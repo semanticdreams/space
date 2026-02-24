@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <string>
 
+#include <glm/vec3.hpp>
 #include <sol/sol.hpp>
 
 #include "lua_video.h"
@@ -41,6 +42,20 @@ VideoPlayer::Options parse_options(const sol::object& options_obj, std::string& 
     sol::optional<bool> loop = table["loop"];
     sol::optional<bool> autoplay = table["autoplay"];
     sol::optional<bool> muted = table["muted"];
+    sol::optional<bool> positional_audio = table["positional-audio"];
+    sol::optional<glm::vec3> audio_position = table["audio-position"];
+    sol::optional<glm::vec3> audio_velocity = table["audio-velocity"];
+    sol::optional<glm::vec3> audio_direction = table["audio-direction"];
+    sol::optional<float> audio_gain = table["audio-gain"];
+    sol::optional<float> audio_pitch = table["audio-pitch"];
+    sol::optional<float> audio_max_distance = table["audio-max-distance"];
+    sol::optional<float> audio_rolloff_factor = table["audio-rolloff-factor"];
+    sol::optional<float> audio_reference_distance = table["audio-reference-distance"];
+    sol::optional<float> audio_min_gain = table["audio-min-gain"];
+    sol::optional<float> audio_max_gain = table["audio-max-gain"];
+    sol::optional<float> audio_cone_inner_angle = table["audio-cone-inner-angle"];
+    sol::optional<float> audio_cone_outer_angle = table["audio-cone-outer-angle"];
+    sol::optional<float> audio_cone_outer_gain = table["audio-cone-outer-gain"];
     if (loop) {
         parsed.loop = *loop;
     }
@@ -49,6 +64,48 @@ VideoPlayer::Options parse_options(const sol::object& options_obj, std::string& 
     }
     if (muted) {
         parsed.muted = *muted;
+    }
+    if (positional_audio) {
+        parsed.positional_audio = *positional_audio;
+    }
+    if (audio_position) {
+        parsed.audio_position = *audio_position;
+    }
+    if (audio_velocity) {
+        parsed.audio_velocity = *audio_velocity;
+    }
+    if (audio_direction) {
+        parsed.audio_direction = *audio_direction;
+    }
+    if (audio_gain) {
+        parsed.audio_gain = *audio_gain;
+    }
+    if (audio_pitch) {
+        parsed.audio_pitch = *audio_pitch;
+    }
+    if (audio_max_distance) {
+        parsed.audio_max_distance = *audio_max_distance;
+    }
+    if (audio_rolloff_factor) {
+        parsed.audio_rolloff_factor = *audio_rolloff_factor;
+    }
+    if (audio_reference_distance) {
+        parsed.audio_reference_distance = *audio_reference_distance;
+    }
+    if (audio_min_gain) {
+        parsed.audio_min_gain = *audio_min_gain;
+    }
+    if (audio_max_gain) {
+        parsed.audio_max_gain = *audio_max_gain;
+    }
+    if (audio_cone_inner_angle) {
+        parsed.audio_cone_inner_angle = *audio_cone_inner_angle;
+    }
+    if (audio_cone_outer_angle) {
+        parsed.audio_cone_outer_angle = *audio_cone_outer_angle;
+    }
+    if (audio_cone_outer_gain) {
+        parsed.audio_cone_outer_gain = *audio_cone_outer_gain;
     }
 
     return parsed;
@@ -84,6 +141,7 @@ sol::table create_video_table(sol::state_view lua)
             status["has-audio-clock"] = player.has_audio_clock();
             status["audio-available"] = player.audio_available();
             status["audio-active"] = player.audio_active();
+            status["positional-audio"] = player.positional_audio();
             status["queued-audio-chunks"] = static_cast<std::int64_t>(player.queued_audio_chunks());
             status["dropped-audio-chunks"] = static_cast<std::int64_t>(player.dropped_audio_chunks());
             status["flushed-audio-chunks"] = static_cast<std::int64_t>(player.flushed_audio_chunks());
@@ -99,6 +157,11 @@ sol::table create_video_table(sol::state_view lua)
         "duration", &VideoPlayer::duration,
         "position", &VideoPlayer::position,
         "last_error", &VideoPlayer::last_error,
+        "set-positional-audio", &VideoPlayer::set_positional_audio,
+        "positional-audio", &VideoPlayer::positional_audio,
+        "set-audio-position", [](VideoPlayer& player, const glm::vec3& position) {
+            player.set_audio_position(position);
+        },
         "texture", &VideoPlayer::texture
     );
 

@@ -276,6 +276,7 @@
   (assert (= (type (. status "has-audio-clock")) :boolean) "status.has-audio-clock should be boolean")
   (assert (= (type (. status "audio-available")) :boolean) "status.audio-available should be boolean")
   (assert (= (type (. status "audio-active")) :boolean) "status.audio-active should be boolean")
+  (assert (= (type (. status "positional-audio")) :boolean) "status.positional-audio should be boolean")
   (assert (= (type (. status "queued-audio-chunks")) :number) "status.queued-audio-chunks should be number")
   (assert (= (type (. status "dropped-audio-chunks")) :number) "status.dropped-audio-chunks should be number")
   (assert (= (type (. status "flushed-audio-chunks")) :number) "status.flushed-audio-chunks should be number")
@@ -309,6 +310,10 @@
   (player:pause)
   (local status-paused (player:status))
   (assert (not status-paused.playing) "status.playing should be false after pause")
+  (player:set-positional-audio true)
+  (assert (player:positional-audio) "player should report positional audio true after enabling")
+  (player:set-positional-audio false)
+  (assert (not (player:positional-audio)) "player should report positional audio false after disabling")
   (player:drop))
 
 (fn audio-queue-flush-telemetry-increments-on-seek []
