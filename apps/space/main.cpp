@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -14,6 +16,7 @@
 #include "lua_engine.h"
 #include "log.h"
 #include "resource_manager.h"
+#include "cef_runtime.h"
 
 LogConfig LOG_CONFIG = {};
 
@@ -80,11 +83,41 @@ std::string read_stdin()
     return input;
 }
 
+std::string sibling_path(const std::string& file_path, const std::string& sibling_name)
+{
+    if (file_path.empty()) {
+        return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
+    }
+    std::filesystem::path path = std::filesystem::absolute(std::filesystem::path(file_path));
+    std::filesystem::path parent = path.parent_path();
+    if (parent.empty()) {
+        return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
+    }
+    return std::filesystem::absolute(parent / sibling_name).string();
+}
+
 int main(int argc, char *argv[])
 {
     LOG_CONFIG.reporting_level = Debug;
     LOG_CONFIG.restart = true;
     log_init(LOG_CONFIG);
+
+#if defined(SPACE_ENABLE_CEF)
+    bool skip_cef = false;
+    if (const char* skip_cef_env = std::getenv("SPACE_SKIP_CEF")) {
+        std::string value(skip_cef_env);
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        skip_cef = (value == "1" || value == "true" || value == "on");
+    }
+    if (!skip_cef) {
+        int cef_process_exit_code = cef_runtime::maybe_execute_subprocess(argc, argv);
+        if (cef_process_exit_code >= 0) {
+            return cef_process_exit_code;
+        }
+    }
+#endif
 
     bool run_repl = false;
     bool no_dotenv = false;
@@ -227,6 +260,23 @@ int main(int argc, char *argv[])
     }
     configure_audio_env(audio_tag);
 
+#if defined(SPACE_ENABLE_CEF)
+    if (!skip_cef) {
+        cef_runtime::Config cef_config;
+        cef_config.argc = argc;
+        cef_config.argv = argv;
+#if defined(__linux__)
+        cef_config.helper_executable_path.clear();
+#else
+        cef_config.helper_executable_path = sibling_path(argv[0], "space_cef_helper");
+#endif
+        if (!cef_runtime::initialize_browser_process(cef_config)) {
+            std::cerr << "error: failed to initialize CEF\n";
+            return 1;
+        }
+    }
+#endif
+
     LuaRuntime runtime;
     runtime.init();
     runtime.install_fennel(true);
@@ -324,5 +374,8 @@ int main(int argc, char *argv[])
         lua_callbacks_shutdown();
         ResourceManager::clearPending();
     }
+#if defined(SPACE_ENABLE_CEF)
+    cef_runtime::shutdown();
+#endif
 	return 0;
 }

@@ -81,6 +81,73 @@ void Texture2D::load_from_pixels(int w,
     }
 }
 
+void Texture2D::allocate(int w, int h, int channels)
+{
+    if (w <= 0 || h <= 0 || channels <= 0) {
+        return;
+    }
+    width = w;
+    height = h;
+    n = channels;
+    if (n == 4) {
+        internalFormat = GL_RGBA;
+        imageFormat = GL_RGBA;
+    } else {
+        internalFormat = GL_RGB;
+        imageFormat = GL_RGB;
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, imageFormat, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filterMin);
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filterMax);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    ready = true;
+    upload_in_progress = false;
+    upload_row = 0;
+}
+
+void Texture2D::update_full(const std::uint8_t* pixels, std::size_t byte_count)
+{
+    if (!pixels || width <= 0 || height <= 0 || n <= 0) {
+        return;
+    }
+    const std::size_t expected = static_cast<std::size_t>(width) *
+                                 static_cast<std::size_t>(height) *
+                                 static_cast<std::size_t>(n);
+    if (byte_count < expected) {
+        return;
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, imageFormat, GL_UNSIGNED_BYTE, pixels);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    ready = true;
+}
+
+void Texture2D::update_sub_rect(int x, int y, int w, int h, const std::uint8_t* pixels, std::size_t byte_count)
+{
+    if (!pixels || width <= 0 || height <= 0 || n <= 0 || w <= 0 || h <= 0) {
+        return;
+    }
+    const std::size_t expected = static_cast<std::size_t>(w) *
+                                 static_cast<std::size_t>(h) *
+                                 static_cast<std::size_t>(n);
+    if (byte_count < expected) {
+        return;
+    }
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, id);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, imageFormat, GL_UNSIGNED_BYTE, pixels);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    ready = true;
+}
+
 void Texture2D::generate() {
     if (!image_data || image_size == 0) {
         return;

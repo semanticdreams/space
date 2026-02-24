@@ -1,7 +1,7 @@
 .PHONY: build cmake debug run pack install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs
 
 cmake:
-	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release ..
+	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
 
 build: cmake
 	cd build && $(MAKE) -j$(shell nproc)

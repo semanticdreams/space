@@ -20,6 +20,8 @@
 
 (fn capture-bytes [width height]
   (gl.glFinish)
+  (gl.glBindFramebuffer gl.GL_READ_FRAMEBUFFER 0)
+  (gl.glReadBuffer gl.GL_BACK)
   (local bytes (gl.glReadPixels 0 0 width height gl.GL_RGBA gl.GL_UNSIGNED_BYTE))
   (ImageIO.flip-vertical width height 4 bytes))
 

@@ -61,6 +61,9 @@ public:
                           PixelBuffer&& pixels,
                           std::size_t byte_count,
                           bool already_flipped = false);
+    void allocate(int w, int h, int channels);
+    void update_full(const std::uint8_t* pixels, std::size_t byte_count);
+    void update_sub_rect(int x, int y, int w, int h, const std::uint8_t* pixels, std::size_t byte_count);
 
     // Generates texture from image data
     void generate();

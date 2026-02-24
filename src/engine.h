@@ -23,6 +23,7 @@
 #include "http_client.h"
 #include "keyring.h"
 #include "video_player.h"
+#include "browser_system.h"
 
 //namespace py = pybind11;
 
@@ -85,6 +86,7 @@ private:
     std::unique_ptr<JobSystem> jobs;
     std::unique_ptr<HttpClient> http;
     Keyring keyring;
+    browser::BrowserSystem browser_system;
 
     // lua
     sol::state* lua_state { nullptr };

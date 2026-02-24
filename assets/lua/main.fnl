@@ -372,6 +372,7 @@
 (set app.update-handler nil)
 (set app.remote-control nil)
 (set app.remote-control-endpoint nil)
+(set app.browser-cube-surface nil)
 (set app.next-frame-queue [])
 (set app.next-frame-pending [])
 
@@ -461,6 +462,10 @@
   (connect-camera-settings)
   (set app.first-person-controls (FirstPersonControls {:camera app.camera}))
   (AppBootstrap.init-input-systems)
+  (local initial-width (or (and app.engine app.engine.width) 0))
+  (local initial-height (or (and app.engine app.engine.height) 0))
+  (when (and (> initial-width 0) (> initial-height 0))
+    (app.set-viewport {:width initial-width :height initial-height}))
   (AppBootstrap.init-renderers {:viewport app.viewport})
   (AppBootstrap.init-icons)
   (local profiler-env (os.getenv "SPACE_FENNEL_PROFILE"))
@@ -547,6 +552,18 @@
     (app.scene:build-default))
   (when app.hud
     (app.hud:build-default))
+  (local browser-cube-demo-env (os.getenv "SPACE_BROWSER_CUBE_DEMO"))
+  (local browser-cube-demo?
+    (and browser-cube-demo-env
+         (not (or (= browser-cube-demo-env "0")
+                  (= (string.lower browser-cube-demo-env) "false")
+                  (= (string.lower browser-cube-demo-env) "off")))))
+  (when app.browser-cube-surface
+    (app.browser-cube-surface:drop)
+    (set app.browser-cube-surface nil))
+  (when browser-cube-demo?
+    (local BrowserCubeSurface (require :browser-cube-surface))
+    (set app.browser-cube-surface (BrowserCubeSurface {})))
   (when app.menu-manager
     (app.menu-manager:drop)
     (set app.menu-manager nil))
@@ -644,6 +661,9 @@
   (when app.system-cursors
     (app.system-cursors:drop)
     (set app.system-cursors nil))
+  (when app.browser-cube-surface
+    (app.browser-cube-surface:drop)
+    (set app.browser-cube-surface nil))
   (when app.scene
     (app.scene:drop)
     (set app.scene nil))

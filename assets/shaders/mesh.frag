@@ -7,6 +7,8 @@ in vec3 worldPos;
 in vec3 worldNormal;
 
 uniform sampler2D myTexture;
+uniform int unlit;
+uniform int forceOpaque;
 uniform vec3 viewPos;
 uniform vec3 ambientLight;
 uniform int dirLightCount;
@@ -20,6 +22,13 @@ out vec4 fragColor;
 
 void main () {
     vec4 baseColor = texture(myTexture, vec2(theUv.x, 1-theUv.y));
+    if (forceOpaque == 1) {
+        baseColor.a = 1.0;
+    }
+    if (unlit == 1) {
+        fragColor = baseColor;
+        return;
+    }
     vec3 normal = normalize(worldNormal);
     vec3 viewDir = normalize(viewPos - worldPos);
     vec3 light = ambientLight;

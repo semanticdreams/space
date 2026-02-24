@@ -1,6 +1,10 @@
 (local glm (require :glm))
 
 (fn create-default-projection []
-  (glm.perspective -5.0 2.0 10 2000.0))
+  (local viewport (and app app.viewport))
+  (local width (math.max 1 (or (and viewport viewport.width) 1)))
+  (local height (math.max 1 (or (and viewport viewport.height) 1)))
+  (local aspect (/ width height))
+  (glm.perspective 0.7853982 aspect 0.1 2000.0))
 
 {:create-default-projection create-default-projection}
