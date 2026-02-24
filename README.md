@@ -98,7 +98,18 @@ Use the `video` Lua module to decode frames into a regular texture, then pass th
 (local player
   (Video.VideoPlayer {:path "lua/tests/data/test-videos/sample.mp4"
                       :loop true
-                      :muted false}))
+                      :muted false
+                      :positional-audio true
+                      :audio-gain 1.0
+                      :audio-pitch 1.0
+                      :audio-max-distance 300.0
+                      :audio-rolloff-factor 0.05
+                      :audio-reference-distance 10.0
+                      :audio-min-gain 0.0
+                      :audio-max-gain 1.0
+                      :audio-cone-inner-angle 360.0
+                      :audio-cone-outer-angle 360.0
+                      :audio-cone-outer-gain 0.0}))
 
 ;; anywhere you build widgets:
 ((Image {:texture (player:texture)
@@ -110,7 +121,7 @@ Implementation details and operations guide: `docs/dev/video-playback.md`.
 
 `player:status()` returns playback and telemetry fields, including:
 `ready`, `ended`, `playing`, `has-error`, `clock-seconds`, `has-audio-clock`,
-`audio-available`, `audio-active`, `queued-audio-chunks`, `dropped-audio-chunks`,
+`audio-available`, `audio-active`, `positional-audio`, `queued-audio-chunks`, `dropped-audio-chunks`,
 `flushed-audio-chunks`, `av-drift-seconds`, `max-av-drift-seconds`,
 `recent-max-av-drift-seconds`, `av-drift-window-seconds`, `dropped-video-frames`,
 `decode-loop-iterations`, and `decode-wait-ms`.
@@ -121,7 +132,10 @@ You can also use the built-in wrapper widget:
 (local VideoWidget (require :video-widget))
 ((VideoWidget {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
                :width 32
-               :loop true}) ctx)
+               :loop true
+               :positional-audio true
+               :audio-rolloff-factor 0.08
+               :audio-reference-distance 8.0}) ctx)
 ```
 
 For long-duration drift checks, run the manual soak module (default is 600 seconds / 10 minutes):

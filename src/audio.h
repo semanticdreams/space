@@ -56,6 +56,18 @@ public:
     // Source manipulation
     void setSourcePosition(ALuint sourceId, const glm::vec3& position);
     void setSourceVelocity(ALuint sourceId, const glm::vec3& velocity);
+    void setSourceDirection(ALuint sourceId, const glm::vec3& direction);
+    void setSourceGain(ALuint sourceId, float gain);
+    void setSourcePitch(ALuint sourceId, float pitch);
+    void setSourceMaxDistance(ALuint sourceId, float distance);
+    void setSourceRolloffFactor(ALuint sourceId, float factor);
+    void setSourceReferenceDistance(ALuint sourceId, float distance);
+    void setSourceMinGain(ALuint sourceId, float gain);
+    void setSourceMaxGain(ALuint sourceId, float gain);
+    void setSourceConeInnerAngle(ALuint sourceId, float angle_degrees);
+    void setSourceConeOuterAngle(ALuint sourceId, float angle_degrees);
+    void setSourceConeOuterGain(ALuint sourceId, float gain);
+    void setSourcePositional(ALuint sourceId, bool positional);
 
     void setMasterVolume(float gain);
     float getMasterVolume() const;

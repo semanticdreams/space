@@ -84,7 +84,8 @@ This avoids coupling playback lifecycle to individual widget update hooks and al
   (Video.VideoPlayer {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
                       :loop true
                       :autoplay true
-                      :muted false}))
+                      :muted false
+                      :positional-audio false}))
 ```
 
 Options:
@@ -93,6 +94,20 @@ Options:
 - `:loop` (optional, default `false`)
 - `:autoplay` (optional, default `true`)
 - `:muted` (optional, default `false`)
+- `:positional-audio` (optional, default `false`)
+- `:audio-position` (optional `glm.vec3`, default `(0 0 0)`)
+- `:audio-velocity` (optional `glm.vec3`, default `(0 0 0)`)
+- `:audio-direction` (optional `glm.vec3`, default `(0 0 0)`)
+- `:audio-gain` (optional, default `1.0`)
+- `:audio-pitch` (optional, default `1.0`)
+- `:audio-max-distance` (optional, default `300.0`)
+- `:audio-rolloff-factor` (optional, default `0.05`)
+- `:audio-reference-distance` (optional, default `10.0`)
+- `:audio-min-gain` (optional, default `0.0`)
+- `:audio-max-gain` (optional, default `1.0`)
+- `:audio-cone-inner-angle` (optional, default `360.0`)
+- `:audio-cone-outer-angle` (optional, default `360.0`)
+- `:audio-cone-outer-gain` (optional, default `0.0`)
 
 ## Methods
 
@@ -109,6 +124,9 @@ Options:
 - `position()`
 - `texture()`
 - `status()`
+- `set-positional-audio(enabled)`
+- `positional-audio()`
+- `set-audio-position(position-vec3)`
 
 ## Status Telemetry Fields
 
@@ -145,6 +163,7 @@ Audio presence:
 
 - `audio-available`
 - `audio-active`
+- `positional-audio`
 
 ## Telemetry Semantics
 

@@ -565,6 +565,59 @@ void Audio::setSourceVelocity(ALuint sourceId, const glm::vec3& velocity) {
     alSource3f(sourceId, AL_VELOCITY, velocity.x, velocity.y, velocity.z);
 }
 
+void Audio::setSourceDirection(ALuint sourceId, const glm::vec3& direction) {
+    alSource3f(sourceId, AL_DIRECTION, direction.x, direction.y, direction.z);
+}
+
+void Audio::setSourceGain(ALuint sourceId, float gain) {
+    alSourcef(sourceId, AL_GAIN, gain);
+}
+
+void Audio::setSourcePitch(ALuint sourceId, float pitch) {
+    alSourcef(sourceId, AL_PITCH, pitch);
+}
+
+void Audio::setSourceMaxDistance(ALuint sourceId, float distance) {
+    alSourcef(sourceId, AL_MAX_DISTANCE, distance);
+}
+
+void Audio::setSourceRolloffFactor(ALuint sourceId, float factor) {
+    alSourcef(sourceId, AL_ROLLOFF_FACTOR, factor);
+}
+
+void Audio::setSourceReferenceDistance(ALuint sourceId, float distance) {
+    alSourcef(sourceId, AL_REFERENCE_DISTANCE, distance);
+}
+
+void Audio::setSourceMinGain(ALuint sourceId, float gain) {
+    alSourcef(sourceId, AL_MIN_GAIN, gain);
+}
+
+void Audio::setSourceMaxGain(ALuint sourceId, float gain) {
+    alSourcef(sourceId, AL_MAX_GAIN, gain);
+}
+
+void Audio::setSourceConeInnerAngle(ALuint sourceId, float angle_degrees) {
+    alSourcef(sourceId, AL_CONE_INNER_ANGLE, angle_degrees);
+}
+
+void Audio::setSourceConeOuterAngle(ALuint sourceId, float angle_degrees) {
+    alSourcef(sourceId, AL_CONE_OUTER_ANGLE, angle_degrees);
+}
+
+void Audio::setSourceConeOuterGain(ALuint sourceId, float gain) {
+    alSourcef(sourceId, AL_CONE_OUTER_GAIN, gain);
+}
+
+void Audio::setSourcePositional(ALuint sourceId, bool positional) {
+    if (positional) {
+        alSourcei(sourceId, AL_SOURCE_RELATIVE, AL_FALSE);
+    } else {
+        alSourcei(sourceId, AL_SOURCE_RELATIVE, AL_TRUE);
+        alSource3f(sourceId, AL_POSITION, 0.f, 0.f, 0.f);
+    }
+}
+
 void Audio::setMasterVolume(float gain) {
     masterVolume = std::clamp(gain, 0.0f, 1.0f);
     applyMasterVolume();
