@@ -49,6 +49,8 @@ sol::table create_gl_table(sol::state_view lua)
     gl["GL_FRAMEBUFFER"] = GL_FRAMEBUFFER;
     gl["GL_READ_FRAMEBUFFER"] = GL_READ_FRAMEBUFFER;
     gl["GL_DRAW_FRAMEBUFFER"] = GL_DRAW_FRAMEBUFFER;
+    gl["GL_FRONT"] = GL_FRONT;
+    gl["GL_BACK"] = GL_BACK;
     gl["GL_RENDERBUFFER"] = GL_RENDERBUFFER;
     gl["GL_FLOAT"] = GL_FLOAT;
     gl["GL_INT"] = GL_INT;
@@ -155,6 +157,30 @@ sol::table create_gl_table(sol::state_view lua)
         glReadPixels(x, y, width, height, format, type, buffer.data());
         return buffer;
     });
+    gl.set_function("glGetTexImage",
+        [](GLenum target, GLint level, GLenum format, GLenum type, GLsizei width, GLsizei height) {
+            if (width <= 0 || height <= 0) {
+                return std::string();
+            }
+            if (type != GL_UNSIGNED_BYTE) {
+                throw std::runtime_error("glGetTexImage only supports GL_UNSIGNED_BYTE");
+            }
+            int channels = 0;
+            if (format == GL_RGBA) {
+                channels = 4;
+            } else if (format == GL_RGB) {
+                channels = 3;
+            } else {
+                throw std::runtime_error("glGetTexImage only supports GL_RGBA or GL_RGB");
+            }
+            std::size_t size = static_cast<std::size_t>(width) *
+                               static_cast<std::size_t>(height) *
+                               static_cast<std::size_t>(channels);
+            std::string buffer;
+            buffer.resize(size);
+            glGetTexImage(target, level, format, type, buffer.data());
+            return buffer;
+        });
     gl.set_function("glFinish", []() {
         glFinish();
     });
@@ -233,6 +259,9 @@ sol::table create_gl_table(sol::state_view lua)
     });
     gl.set_function("glBindFramebuffer", [](GLenum target, GLuint framebuffer) {
         glBindFramebuffer(target, framebuffer);
+    });
+    gl.set_function("glReadBuffer", [](GLenum src) {
+        glReadBuffer(src);
     });
 
     gl.set_function("glGenRenderbuffers", [](GLsizei n) {

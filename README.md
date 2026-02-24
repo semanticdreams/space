@@ -34,6 +34,39 @@ with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MAT
 Wallet-core integration is disabled by default. Enable it by configuring with `-DSPACE_ENABLE_WALLET_CORE=ON`
 (e.g. `make cmake` then `cmake -DSPACE_ENABLE_WALLET_CORE=ON ..`).
 
+CEF embedded browser integration is Linux-only right now and enabled by default in the project `make cmake` flow.
+The pinned defaults are baked into CMake, so no extra flags are required for standard builds:
+
+```bash
+make cmake
+make build
+```
+
+If you need to override the pinned build, you can still pass:
+`-DSPACE_CEF_VERSION=... -DSPACE_CEF_URL=... -DSPACE_CEF_SHA256=...`
+
+CEF setup in `cmake/cef.cmake` is structured with a platform dispatcher (`space_setup_cef_for_target`) and Linux-specific implementation (`space_setup_cef_for_target_linux`) so Windows/macOS support can be added as separate platform handlers later.
+
+At runtime, browser surfaces are created from Fennel via `app.engine.browser`:
+
+```fennel
+(app.engine.browser:create-surface {:id "cube-face-1"
+                                    :url "https://example.com"
+                                    :texture-name "browser/cube-face-1"
+                                    :width 1024
+                                    :height 1024
+                                    :max-fps 30})
+```
+
+Bind `:texture-name` to any mesh/material texture slot to render web content on arbitrary geometry (planes, cube faces, UV-mapped meshes).
+Use `app.engine.browser:send-mouse-move`, `:send-mouse-click`, `:send-mouse-wheel`, and `:set-focus` to route world-space hit input into the surface.
+
+For an opt-in in-world cube demo (6 browser faces), run with:
+
+```bash
+SPACE_BROWSER_CUBE_DEMO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m main
+```
+
 ## Remote Control (Debugging)
 
 Run the app with a ZeroMQ endpoint to evaluate Fennel code inside the live process:

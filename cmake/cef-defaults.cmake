@@ -1,0 +1,12 @@
+if(NOT DEFINED SPACE_DEFAULT_ENABLE_CEF)
+    if(UNIX AND NOT APPLE)
+        set(SPACE_DEFAULT_ENABLE_CEF ON)
+    else()
+        set(SPACE_DEFAULT_ENABLE_CEF OFF)
+    endif()
+endif()
+
+set(SPACE_CEF_LINUX_VERSION_DEFAULT "145.0.26+g6ed7554+chromium-145.0.7632.110")
+set(SPACE_CEF_LINUX_URL_DEFAULT
+    "https://cef-builds.spotifycdn.com/cef_binary_145.0.26%2Bg6ed7554%2Bchromium-145.0.7632.110_linux64.tar.bz2")
+set(SPACE_CEF_LINUX_SHA256_DEFAULT "053737388d81d8d82a95cf7025ae700594fbe4791c494d8ce614dc11093d860d")

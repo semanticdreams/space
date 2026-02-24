@@ -35,7 +35,7 @@
       (LightUtils.apply-lights shader lights)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
-      (shader:setVector3f "viewPos" (glm.vec3 0.0))
+      (shader:setVector3f "viewPos" (or (and app app.camera app.camera.position) (glm.vec3 0.0)))
       (each [_ batch (ipairs batches)]
         (when (not (= batch.visible? false))
           (local vector batch.vector)
@@ -45,6 +45,8 @@
                     "Mesh renderer requires a texture with an id")
             (when (or (= texture.ready nil) texture.ready)
               (shader:setMatrix4 "model" (or batch.model (glm.mat4 1)))
+              (shader:setInteger "unlit" (if batch.unlit 1 0))
+              (shader:setInteger "forceOpaque" (if batch.force-opaque 1 0))
               (gl.bufferDataFromVectorBuffer vector gl.GL_ARRAY_BUFFER gl.GL_STREAM_DRAW)
               (gl.glActiveTexture gl.GL_TEXTURE0)
               (gl.glBindTexture gl.GL_TEXTURE_2D texture.id)

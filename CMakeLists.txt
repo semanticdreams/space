@@ -5,12 +5,31 @@ set(OpenGL_GL_PREFERENCE "GLVND")
 
 include(CTest)
 enable_testing()
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cef-defaults.cmake)
 
 option(SPACE_BUILD_MATRIX "Build Matrix Rust library" ON)
 option(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS "Suppress warnings from third-party libraries" ON)
 option(SPACE_ENABLE_WALLET_CORE "Build wallet-core integration" OFF)
 option(SPACE_ENABLE_LIBTORRENT "Build libtorrent-rasterbar integration" ON)
 option(SPACE_ENABLE_FFMPEG "Build FFmpeg-backed in-world video support" ON)
+option(SPACE_ENABLE_CEF "Enable CEF embedded browser support" ${SPACE_DEFAULT_ENABLE_CEF})
+set(SPACE_CEF_VERSION "${SPACE_CEF_LINUX_VERSION_DEFAULT}" CACHE STRING "Pinned CEF build version")
+set(SPACE_CEF_URL "${SPACE_CEF_LINUX_URL_DEFAULT}" CACHE STRING "Pinned CEF archive URL")
+set(SPACE_CEF_SHA256 "${SPACE_CEF_LINUX_SHA256_DEFAULT}" CACHE STRING "Pinned CEF archive SHA256")
+set(SPACE_CEF_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps/cef" CACHE PATH "Directory used to cache downloaded CEF archives")
+if(SPACE_ENABLE_CEF)
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    if(NOT SPACE_CEF_VERSION)
+        set(SPACE_CEF_VERSION "${SPACE_CEF_LINUX_VERSION_DEFAULT}" CACHE STRING "Pinned CEF build version" FORCE)
+    endif()
+    if(NOT SPACE_CEF_URL)
+        set(SPACE_CEF_URL "${SPACE_CEF_LINUX_URL_DEFAULT}" CACHE STRING "Pinned CEF archive URL" FORCE)
+    endif()
+    if(NOT SPACE_CEF_SHA256)
+        set(SPACE_CEF_SHA256 "${SPACE_CEF_LINUX_SHA256_DEFAULT}" CACHE STRING "Pinned CEF archive SHA256" FORCE)
+    endif()
+endif()
 
 function(space_suppress_target_warnings target_name)
     if(TARGET ${target_name})
@@ -218,6 +237,14 @@ add_library(${PROJECT_NAME}_lib ${SOURCES})
 if(SPACE_HAS_VTERM)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_HAS_VTERM=1)
 endif()
+if(SPACE_ENABLE_CEF)
+    if(NOT UNIX OR APPLE)
+        message(FATAL_ERROR "SPACE_ENABLE_CEF currently supports Linux only")
+    endif()
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cef.cmake)
+    target_compile_features(${PROJECT_NAME}_lib PUBLIC cxx_std_20)
+    space_setup_cef_for_target(${PROJECT_NAME}_lib)
+endif()
 target_include_directories(${PROJECT_NAME}_lib
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -387,6 +414,20 @@ endif()
 add_executable(${PROJECT_NAME} apps/space/main.cpp)
 target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib)
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/CLI11/include)
+if(SPACE_ENABLE_CEF)
+    target_compile_definitions(${PROJECT_NAME} PUBLIC SPACE_ENABLE_CEF=1)
+    space_setup_cef_for_target(${PROJECT_NAME})
+endif()
+
+if(SPACE_ENABLE_CEF)
+    add_executable(space_cef_helper
+        apps/space/cef_subprocess_main.cpp
+        src/cef_runtime.cpp
+    )
+    target_include_directories(space_cef_helper PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_definitions(space_cef_helper PUBLIC SPACE_ENABLE_CEF=1)
+    space_setup_cef_for_target(space_cef_helper)
+endif()
 
 add_test(NAME ${PROJECT_NAME}_fnl_tests
     COMMAND space -m tests.fast:main

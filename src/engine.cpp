@@ -11,7 +11,9 @@
 #include "input_mouse_state.h"
 #include "lua_video.h"
 #include "video_player.h"
+#include "cef_runtime.h"
 
+#include <optional>
 #include <vector>
 
 //namespace py = pybind11;
@@ -145,12 +147,130 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         mouse_buttons["x2"] = SDL_BUTTON_X2;
         lua_engine["mouse-buttons"] = mouse_buttons;
     }
+    {
+        sol::table browser_table = lua_state->create_table();
+        browser_table.set_function("create-surface", [this](sol::table options) {
+            browser::SurfaceConfig config;
+            sol::optional<std::string> id = options["id"];
+            sol::optional<std::string> url = options["url"];
+            if (!id || id->empty()) {
+                throw sol::error("engine.browser.create-surface requires id");
+            }
+            if (!url || url->empty()) {
+                throw sol::error("engine.browser.create-surface requires url");
+            }
+            config.id = *id;
+            config.url = *url;
+            if (sol::optional<std::string> texture_name = options["texture-name"]) {
+                config.texture_name = *texture_name;
+            }
+            if (sol::optional<int> width = options["width"]) {
+                if (*width <= 0) {
+                    throw sol::error("engine.browser.create-surface width must be > 0");
+                }
+                config.width = static_cast<std::uint32_t>(*width);
+            }
+            if (sol::optional<int> height = options["height"]) {
+                if (*height <= 0) {
+                    throw sol::error("engine.browser.create-surface height must be > 0");
+                }
+                config.height = static_cast<std::uint32_t>(*height);
+            }
+            if (sol::optional<int> max_fps = options["max-fps"]) {
+                if (*max_fps <= 0) {
+                    throw sol::error("engine.browser.create-surface max-fps must be > 0");
+                }
+                config.max_fps = static_cast<std::uint32_t>(*max_fps);
+            }
+            return browser_system.create_surface(config);
+        });
+        browser_table.set_function("destroy-surface", [this](const std::string& id) {
+            return browser_system.destroy_surface(id);
+        });
+        browser_table.set_function("set-url", [this](const std::string& id, const std::string& url) {
+            return browser_system.set_surface_url(id, url);
+        });
+        browser_table.set_function("set-visible", [this](const std::string& id, bool visible) {
+            browser_system.set_surface_visible(id, visible);
+        });
+        browser_table.set_function("set-focus", [this](const std::string& id, bool focused) {
+            return browser_system.set_surface_focus(id, focused);
+        });
+        browser_table.set_function("send-mouse-move", [this](const std::string& id, int x, int y, sol::object leave_opt) {
+            bool leave = false;
+            if (leave_opt.is<bool>()) {
+                leave = leave_opt.as<bool>();
+            }
+            return browser_system.send_mouse_move(id, x, y, leave);
+        });
+        browser_table.set_function("send-mouse-click",
+            [this](const std::string& id, int x, int y, int button, bool mouse_up, sol::optional<int> click_count) {
+                return browser_system.send_mouse_click(id, x, y, button, mouse_up, click_count.value_or(1));
+            });
+        browser_table.set_function("send-mouse-wheel", [this](const std::string& id, int x, int y, int dx, int dy) {
+            return browser_system.send_mouse_wheel(id, x, y, dx, dy);
+        });
+        browser_table.set_function("texture-name", [this](const std::string& id) -> sol::object {
+            std::optional<std::string> texture_name = browser_system.get_surface_texture_name(id);
+            if (!texture_name) {
+                return sol::make_object(*lua_state, sol::nil);
+            }
+            return sol::make_object(*lua_state, *texture_name);
+        });
+        browser_table.set_function("texture-info", [this](const std::string& id) -> sol::object {
+            std::optional<std::string> texture_name = browser_system.get_surface_texture_name(id);
+            if (!texture_name) {
+                return sol::make_object(*lua_state, sol::nil);
+            }
+            auto it = ResourceManager::textures.find(*texture_name);
+            if (it == ResourceManager::textures.end()) {
+                return sol::make_object(*lua_state, sol::nil);
+            }
+            const Texture2D& texture = it->second;
+            sol::table table = lua_state->create_table();
+            table["name"] = *texture_name;
+            table["id"] = static_cast<int>(texture.id);
+            table["width"] = texture.width;
+            table["height"] = texture.height;
+            table["channels"] = texture.n;
+            table["ready"] = texture.ready;
+            return sol::make_object(*lua_state, table);
+        });
+        browser_table.set_function("surface-stats", [this](const std::string& id) -> sol::object {
+            std::optional<browser::BrowserSystem::SurfaceStats> stats = browser_system.get_surface_stats(id);
+            if (!stats) {
+                return sol::make_object(*lua_state, sol::nil);
+            }
+            sol::table table = lua_state->create_table();
+            table["exists"] = stats->exists;
+            table["visible"] = stats->visible;
+            table["texture-allocated"] = stats->texture_allocated;
+            table["width"] = static_cast<int>(stats->width);
+            table["height"] = static_cast<int>(stats->height);
+            table["paint-count"] = static_cast<double>(stats->paint_count);
+            table["upload-count"] = static_cast<double>(stats->upload_count);
+            table["last-upload-frame"] = static_cast<double>(stats->last_upload_frame);
+            return sol::make_object(*lua_state, table);
+        });
+        browser_table.set_function("list-surfaces", [this]() -> sol::table {
+            std::vector<std::string> ids = browser_system.list_surface_ids();
+            sol::table out = lua_state->create_table(static_cast<int>(ids.size()), 0);
+            int index = 1;
+            for (const std::string& id : ids) {
+                out[index] = id;
+                ++index;
+            }
+            return out;
+        });
+        lua_engine["browser"] = browser_table;
+    }
     isRunning = !config.headless;
     return true;
 }
 
 void Engine::run() {
     while (isRunning) {
+        cef_runtime::do_message_loop_work();
         dt = timer.computeDeltaTime();
         window->updateFpsCounter(dt);
 
@@ -364,6 +484,8 @@ void Engine::run() {
             ResourceManager::processAudioJobs();
         }
 
+        browser_system.tick(frame_id.load(std::memory_order_relaxed));
+
         lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
         if (jobs) {
             lua_jobs_dispatch(*lua_state, *jobs);
@@ -450,6 +572,7 @@ void Engine::closeAllGameControllers(Uint32 timestamp)
 }
 
 void Engine::shutdown() {
+    browser_system.shutdown();
     inputDialType.reset();
     closeAllGameControllers(SDL_GetTicks());
     lua_jobs_clear_callbacks();
