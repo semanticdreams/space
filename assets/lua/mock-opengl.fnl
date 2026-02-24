@@ -90,6 +90,7 @@
                            :GL_DEPTH_BUFFER_BIT 0x0100
                            :GL_COLOR_BUFFER_BIT 0x4000
                            :GL_NEAREST 0x2600
+                           :GL_BACK 0x0405
                            :GL_READ_FRAMEBUFFER 0x8CA8
                            :GL_DRAW_FRAMEBUFFER 0x8CA9
                            :GL_DEPTH_TEST 0x0B71
@@ -225,6 +226,10 @@
   (set gl.glFinish
        (fn []
          (record-gl "glFinish" {})))
+
+  (set gl.glReadBuffer
+       (fn [src]
+         (record-gl "glReadBuffer" {:src src})))
 
   (set gl.glReadPixels
        (fn [x y width height format _type]
