@@ -9,6 +9,7 @@
 #include "lua_ray_box.h"
 #include "lua_notify.h"
 #include "lua_tray.h"
+#include "lua_video.h"
 #include "lua_webbrowser.h"
 #include "lua_xapian.h"
 #if defined(SPACE_ENABLE_WALLET_CORE)
@@ -152,6 +153,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_sysinfo(lua);
     lua_bind_perlin_terrain(lua);
     lua_bind_dial_type(lua);
+    lua_bind_video(lua);
     lua_bind_xapian(lua);
 #if defined(SPACE_ENABLE_WALLET_CORE)
     lua_bind_wallet_core(lua);

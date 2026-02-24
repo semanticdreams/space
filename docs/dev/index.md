@@ -3,6 +3,7 @@
 This section contains internal architecture, implementation notes, and integration references.
 
 - [Concepts](/dev/concepts)
+- [Video Playback (FFmpeg)](/dev/video-playback)
 - [SQL Builder (SQLite)](/dev/sql-builder)
 - [Devlog](/dev/devlog)
 - [Notes](/dev/notes/aubio)

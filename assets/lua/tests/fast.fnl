@@ -127,6 +127,8 @@
     :tests.test-terminal-renderer
     :tests.test-terminal-scrollback
     :tests.test-jobs
+    :tests.test-video
+    :tests.test-video-widget
     :tests.test-jpeg-texture-decode
     :tests.test-callbacks
     :tests.test-logging

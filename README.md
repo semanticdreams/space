@@ -20,7 +20,7 @@ Check out the <a href="https://spaceui.org/" target="_blank">docs</a> for more i
 
 <!-- CI_DEPS_START -->
 ```
-sudo apt install cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep
+sudo apt install cmake libsdl2-dev libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
 make build
 make run
 ```
@@ -86,6 +86,69 @@ scripts/remote-control-heavy.sh ipc:///tmp/space-rc.sock
 - Update goldens with `SPACE_SNAPSHOT_UPDATE=name1,name2 SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test-e2e`.
 - Individual tests can be run via `./build/space -m tests.e2e.<module>:main` (e.g. `tests.e2e.test-image:main`).
 - Snapshot images live in `assets/lua/tests/data/snapshots/` and should be inspected directly when adding/debugging tests.
+
+## In-World Video (FFmpeg)
+
+Use the `video` Lua module to decode frames into a regular texture, then pass that texture to any widget that already accepts textures (`Image`, `RawImage`, mesh batches, etc.):
+
+```fennel
+(local Video (require :video))
+(local Image (require :image))
+
+(local player
+  (Video.VideoPlayer {:path "lua/tests/data/test-videos/sample.mp4"
+                      :loop true
+                      :muted false}))
+
+;; anywhere you build widgets:
+((Image {:texture (player:texture)
+         :width 32}) ctx)
+```
+
+The engine-owned `VideoManager` updates all active players every frame, so playback stays in sync without per-widget update hooks.
+Implementation details and operations guide: `docs/dev/video-playback.md`.
+
+`player:status()` returns playback and telemetry fields, including:
+`ready`, `ended`, `playing`, `has-error`, `clock-seconds`, `has-audio-clock`,
+`audio-available`, `audio-active`, `queued-audio-chunks`, `dropped-audio-chunks`,
+`flushed-audio-chunks`, `av-drift-seconds`, `max-av-drift-seconds`,
+`recent-max-av-drift-seconds`, `av-drift-window-seconds`, `dropped-video-frames`,
+`decode-loop-iterations`, and `decode-wait-ms`.
+
+You can also use the built-in wrapper widget:
+
+```fennel
+(local VideoWidget (require :video-widget))
+((VideoWidget {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
+               :width 32
+               :loop true}) ctx)
+```
+
+For long-duration drift checks, run the manual soak module (default is 600 seconds / 10 minutes):
+
+```bash
+SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-video-soak:main
+```
+
+For real audio-clock validation on a machine with working audio output, run the same soak without
+`SPACE_DISABLE_AUDIO=1`:
+
+```bash
+SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-video-soak:main
+```
+
+Override duration (seconds) and polling interval:
+
+```bash
+SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets \
+SPACE_VIDEO_SOAK_SECONDS=120 SPACE_VIDEO_SOAK_SLEEP_SECONDS=0.01 \
+./build/space -m tests.test-video-soak:main
+```
+
+Soak thresholds (optional):
+
+- `SPACE_VIDEO_SOAK_MAX_RECENT_DRIFT_SECONDS` (default `0.35`)
+- `SPACE_VIDEO_SOAK_MAX_DECODE_WAIT_MS` (default disabled)
 
 ## Contribute
 

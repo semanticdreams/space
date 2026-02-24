@@ -10,6 +10,7 @@ option(SPACE_BUILD_MATRIX "Build Matrix Rust library" ON)
 option(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS "Suppress warnings from third-party libraries" ON)
 option(SPACE_ENABLE_WALLET_CORE "Build wallet-core integration" OFF)
 option(SPACE_ENABLE_LIBTORRENT "Build libtorrent-rasterbar integration" ON)
+option(SPACE_ENABLE_FFMPEG "Build FFmpeg-backed in-world video support" ON)
 
 function(space_suppress_target_warnings target_name)
     if(TARGET ${target_name})
@@ -93,6 +94,20 @@ if(SPACE_ENABLE_LIBTORRENT)
         set(SPACE_HAS_LIBTORRENT ON)
     else()
         message(WARNING "libtorrent-rasterbar-dev not found (pkg-config: libtorrent-rasterbar); libtorrent Lua module will be unavailable.")
+    endif()
+endif()
+
+set(SPACE_HAS_FFMPEG OFF)
+if(SPACE_ENABLE_FFMPEG)
+    pkg_check_modules(FFMPEG_AVFORMAT IMPORTED_TARGET libavformat)
+    pkg_check_modules(FFMPEG_AVCODEC IMPORTED_TARGET libavcodec)
+    pkg_check_modules(FFMPEG_AVUTIL IMPORTED_TARGET libavutil)
+    pkg_check_modules(FFMPEG_SWSCALE IMPORTED_TARGET libswscale)
+    pkg_check_modules(FFMPEG_SWRESAMPLE IMPORTED_TARGET libswresample)
+    if(FFMPEG_AVFORMAT_FOUND AND FFMPEG_AVCODEC_FOUND AND FFMPEG_AVUTIL_FOUND AND FFMPEG_SWSCALE_FOUND AND FFMPEG_SWRESAMPLE_FOUND)
+        set(SPACE_HAS_FFMPEG ON)
+    else()
+        message(WARNING "FFmpeg dev packages not found (need libavformat/libavcodec/libavutil/libswscale/libswresample); video module will be unavailable.")
     endif()
 endif()
 
@@ -232,6 +247,16 @@ if(SPACE_HAS_LIBTORRENT)
     target_link_libraries(${PROJECT_NAME}_lib PkgConfig::LIBTORRENT_RASTERBAR)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_ENABLE_LIBTORRENT=1)
 endif()
+if(SPACE_HAS_FFMPEG)
+    target_link_libraries(${PROJECT_NAME}_lib
+        PkgConfig::FFMPEG_AVFORMAT
+        PkgConfig::FFMPEG_AVCODEC
+        PkgConfig::FFMPEG_AVUTIL
+        PkgConfig::FFMPEG_SWSCALE
+        PkgConfig::FFMPEG_SWRESAMPLE
+    )
+    target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_HAS_FFMPEG=1)
+endif()
 
 if(WIN32)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC TRAY_WINAPI=1)
@@ -366,6 +391,29 @@ add_executable(test_dotenv_integration
 )
 add_test(NAME test_dotenv_integration COMMAND test_dotenv_integration)
 set_tests_properties(test_dotenv_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_audio_stream_clock
+    tests/test_audio_stream_clock.cpp
+    src/audio.cpp
+)
+target_include_directories(test_audio_stream_clock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_audio_stream_clock
+    ${OPENAL_LIBRARY}
+    glm::glm
+)
+add_test(NAME test_audio_stream_clock COMMAND test_audio_stream_clock)
+set_tests_properties(test_audio_stream_clock PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_video_telemetry
+    tests/test_video_telemetry.cpp
+)
+target_include_directories(test_video_telemetry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_video_telemetry COMMAND test_video_telemetry)
+set_tests_properties(test_video_telemetry PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 

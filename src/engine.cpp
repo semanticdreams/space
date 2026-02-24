@@ -9,6 +9,8 @@
 #include "lua_keyring.h"
 #include "log.h"
 #include "input_mouse_state.h"
+#include "lua_video.h"
+#include "video_player.h"
 
 #include <vector>
 
@@ -68,6 +70,8 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     register_cgltf_job_handlers(*jobs);
     ResourceManager::setJobSystem(jobs.get());
     ResourceManager::setAudio(&audio);
+    video_manager.set_audio(&audio);
+    lua_video_set_manager(lua, &video_manager);
 
     lua_state = &lua;
     lua_engine = engine_table;
@@ -353,6 +357,7 @@ void Engine::run() {
         physics.update(dt);
 
         audio.update(dt);
+        video_manager.update_all(dt);
 
         if (jobs) {
             ResourceManager::processTextureJobs();
@@ -452,6 +457,9 @@ void Engine::shutdown() {
     lua_http_drop(*lua_state);
     lua_process_drop(*lua_state);
     lua_callbacks_shutdown();
+    video_manager.drop_all();
+    video_manager.set_audio(nullptr);
+    lua_video_set_manager(*lua_state, nullptr);
     ResourceManager::clearPending();
     ResourceManager::clear();
     log_set_frame_id_provider(nullptr);

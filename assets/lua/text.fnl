@@ -63,13 +63,6 @@
     (fn layouter [self]
       (local size (or self.size (glm.vec3 0 0 0)))
       (local measure (or self.measure (glm.vec3 0 0 0)))
-      (local epsilon 0.0001)
-      (when (or (< size.x (- measure.x epsilon))
-                (< size.y (- measure.y epsilon)))
-        (error
-          (.. "Text layout underflow: size=("
-              size.x "," size.y ") measure=("
-              measure.x "," measure.y ")")))
       (if (self:effective-culled?)
           (untrack-handle)
           (do
