@@ -16,15 +16,31 @@ WindowSdl::~WindowSdl() {
     LOG(Info) << "Bye :)";
 }
 
-bool WindowSdl::init(int width, int height, bool maximized) {
-    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if (maximized) {
-        flags |= SDL_WINDOW_MAXIMIZED;
-    }
+namespace {
 
-    if (isFullscreen) {
-        flags |= SDL_WINDOW_FULLSCREEN;
+void log_sdl_warning(const char* context)
+{
+    const char* error = SDL_GetError();
+    if (error && error[0] != '\0') {
+        LOG(Warning) << context << ": " << error;
     }
+    SDL_ClearError();
+}
+
+void sync_window_if_possible(SDL_Window* window, const char* context)
+{
+    if (!SDL_SyncWindow(window)) {
+        log_sdl_warning(context);
+    }
+}
+
+} // namespace
+
+bool WindowSdl::init(int width, int height, WindowStartupMode startup_mode) {
+    SDL_WindowFlags flags = SDL_WINDOW_OPENGL
+                            | SDL_WINDOW_RESIZABLE
+                            | SDL_WINDOW_HIGH_PIXEL_DENSITY
+                            | SDL_WINDOW_HIDDEN;
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
@@ -57,13 +73,51 @@ bool WindowSdl::init(int width, int height, bool maximized) {
 
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 
+        int create_width = width;
+        int create_height = height;
+        if (startup_mode != WindowStartupMode::Windowed) {
+            SDL_DisplayID primary_display = SDL_GetPrimaryDisplay();
+            SDL_Rect usable_bounds {};
+            if (primary_display != 0 && SDL_GetDisplayUsableBounds(primary_display, &usable_bounds)) {
+                create_width = usable_bounds.w;
+                create_height = usable_bounds.h;
+            } else {
+                SDL_ClearError();
+            }
+        }
+
         // WindowSdl
         window = std::unique_ptr<SDL_Window, SdlWindowDestroyer>(
-                SDL_CreateWindow(title.c_str(), width, height, flags));
+                SDL_CreateWindow(title.c_str(), create_width, create_height, flags));
         if (window) {
             LOG(Info) << "WindowSdl initialised";
         } else
             return false;
+
+        if (startup_mode == WindowStartupMode::Windowed) {
+            if (!SDL_SetWindowSize(window.get(), width, height)) {
+                log_sdl_warning("Failed to set startup window size");
+            }
+        }
+
+        if (startup_mode == WindowStartupMode::Maximized) {
+            if (!SDL_MaximizeWindow(window.get())) {
+                LOG(Error) << "Failed to request maximized startup mode: " << SDL_GetError();
+                return false;
+            }
+        } else if (startup_mode == WindowStartupMode::Fullscreen) {
+            if (!SDL_SetWindowFullscreen(window.get(), true)) {
+                LOG(Error) << "Failed to request fullscreen startup mode: " << SDL_GetError();
+                return false;
+            }
+        }
+
+        sync_window_if_possible(window.get(), "Failed to sync startup window state");
+        if (!SDL_ShowWindow(window.get())) {
+            LOG(Error) << "Failed to show window: " << SDL_GetError();
+            return false;
+        }
+        sync_window_if_possible(window.get(), "Failed to sync shown window state");
 
         // Set icon
         auto iconPath = AssetManager::getAssetPath("pics/space.png");
@@ -217,8 +271,16 @@ std::unique_ptr<WindowSdl> WindowSdl::create() {
 }
 
 void WindowSdl::toggleFullscreen() {
-    isFullscreen = !isFullscreen;
-    SDL_SetWindowFullscreen(window.get(), isFullscreen);
+    if (!window) {
+        return;
+    }
+    SDL_WindowFlags window_flags = SDL_GetWindowFlags(window.get());
+    bool is_fullscreen = (window_flags & SDL_WINDOW_FULLSCREEN) != 0;
+    if (!SDL_SetWindowFullscreen(window.get(), !is_fullscreen)) {
+        log_sdl_warning("Failed to toggle fullscreen");
+        return;
+    }
+    sync_window_if_possible(window.get(), "Failed to sync fullscreen toggle");
 }
 
 void WindowSdl::setTextInputEnabled(bool enabled)
@@ -245,6 +307,37 @@ bool WindowSdl::isTextInputEnabled() const
         return false;
     }
     return SDL_TextInputActive(window.get());
+}
+
+WindowStartupMode WindowSdl::currentStartupMode() const
+{
+    if (!window) {
+        return WindowStartupMode::Windowed;
+    }
+    SDL_WindowFlags window_flags = SDL_GetWindowFlags(window.get());
+    if ((window_flags & SDL_WINDOW_FULLSCREEN) != 0) {
+        return WindowStartupMode::Fullscreen;
+    }
+    if ((window_flags & SDL_WINDOW_MAXIMIZED) != 0) {
+        return WindowStartupMode::Maximized;
+    }
+    return WindowStartupMode::Windowed;
+}
+
+bool WindowSdl::getWindowSize(int& out_width, int& out_height) const
+{
+    if (!window) {
+        return false;
+    }
+    return SDL_GetWindowSize(window.get(), &out_width, &out_height);
+}
+
+bool WindowSdl::getWindowSizeInPixels(int& out_width, int& out_height) const
+{
+    if (!window) {
+        return false;
+    }
+    return SDL_GetWindowSizeInPixels(window.get(), &out_width, &out_height);
 }
 
 void WindowSdl::updateViewportFromWindowPixels()

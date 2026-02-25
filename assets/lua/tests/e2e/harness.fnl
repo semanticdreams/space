@@ -70,7 +70,7 @@
   (set app.engine (EngineModule.Engine {:headless false
                                         :width width
                                         :height height
-                                        :maximized false}))
+                                        :window-mode "windowed"}))
   (when (not (app.engine:start))
     (error "[e2e] engine failed to start (window/GL init failed)"))
   (set app.engine.audio nil)

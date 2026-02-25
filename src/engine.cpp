@@ -34,6 +34,17 @@ Uint64 ns_to_ms(Uint64 timestamp_ns)
     return timestamp_ns / 1000000ULL;
 }
 
+const char* startup_mode_to_string(WindowStartupMode mode)
+{
+    if (mode == WindowStartupMode::Windowed) {
+        return "windowed";
+    }
+    if (mode == WindowStartupMode::Maximized) {
+        return "maximized";
+    }
+    return "fullscreen";
+}
+
 } // namespace
 
 Engine::Engine() {
@@ -45,7 +56,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         window = WindowSdl::create();
         int target_width = config.width > 0 ? config.width : screenWidth;
         int target_height = config.height > 0 ? config.height : screenHeight;
-        if (!window->init(target_width, target_height, config.maximized)) {
+        if (!window->init(target_width, target_height, config.window_mode)) {
             return false;
         }
         window->setTextInputEnabled(false);
@@ -87,11 +98,28 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_state = &lua;
     lua_engine = engine_table;
     lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
+    lua_engine["window-mode"] = startup_mode_to_string(config.window_mode);
     if (!config.headless) {
-        int target_width = config.width > 0 ? config.width : screenWidth;
-        int target_height = config.height > 0 ? config.height : screenHeight;
-        lua_engine["width"] = target_width;
-        lua_engine["height"] = target_height;
+        int actual_width = 0;
+        int actual_height = 0;
+        int actual_pixel_width = 0;
+        int actual_pixel_height = 0;
+        if (window && window->getWindowSize(actual_width, actual_height)) {
+            lua_engine["width"] = actual_width;
+            lua_engine["height"] = actual_height;
+        } else {
+            int target_width = config.width > 0 ? config.width : screenWidth;
+            int target_height = config.height > 0 ? config.height : screenHeight;
+            lua_engine["width"] = target_width;
+            lua_engine["height"] = target_height;
+        }
+        if (window && window->getWindowSizeInPixels(actual_pixel_width, actual_pixel_height)) {
+            lua_engine["pixel-width"] = actual_pixel_width;
+            lua_engine["pixel-height"] = actual_pixel_height;
+        } else {
+            lua_engine["pixel-width"] = lua_engine["width"];
+            lua_engine["pixel-height"] = lua_engine["height"];
+        }
     }
     lua_engine.set_function("quit", [this]() {
         this->quit();
@@ -308,6 +336,8 @@ void Engine::run() {
 
                 case SDL_EVENT_WINDOW_RESIZED:
                     {
+                        Uint64 resize_started = SDL_GetPerformanceCounter();
+                        Uint64 perf_frequency = SDL_GetPerformanceFrequency();
                         int width = event.window.data1;
                         int height = event.window.data2;
                         window->updateViewportFromWindowPixels();
@@ -318,11 +348,66 @@ void Engine::run() {
                         payload["height"] = height;
                         payload["timestamp"] = ns_to_ms(event.common.timestamp);
                         emit_engine_event("window-resized", payload);
+                        Uint64 resize_finished = SDL_GetPerformanceCounter();
+                        double resize_ms = 0.0;
+                        if (perf_frequency > 0) {
+                            resize_ms = (static_cast<double>(resize_finished - resize_started) * 1000.0)
+                                        / static_cast<double>(perf_frequency);
+                        }
+                        LOG(Info) << "window-resized handled in " << resize_ms << "ms"
+                                  << " (" << width << "x" << height << ")";
                     }
                     break;
 
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    lua_engine["pixel-width"] = event.window.data1;
+                    lua_engine["pixel-height"] = event.window.data2;
                     window->updateViewportFromWindowPixels();
+                    break;
+
+                case SDL_EVENT_WINDOW_MAXIMIZED:
+                    {
+                        lua_engine["window-mode"] = "maximized";
+                        sol::table payload = lua_state->create_table();
+                        payload["mode"] = "maximized";
+                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                        emit_engine_event("window-mode-changed", payload);
+                    }
+                    break;
+
+                case SDL_EVENT_WINDOW_RESTORED:
+                    {
+                        lua_engine["window-mode"] = "windowed";
+                        sol::table payload = lua_state->create_table();
+                        payload["mode"] = "windowed";
+                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                        emit_engine_event("window-mode-changed", payload);
+                    }
+                    break;
+
+                case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                    {
+                        lua_engine["window-mode"] = "fullscreen";
+                        sol::table payload = lua_state->create_table();
+                        payload["mode"] = "fullscreen";
+                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                        emit_engine_event("window-mode-changed", payload);
+                    }
+                    break;
+
+                case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                    {
+                        WindowStartupMode current_mode = WindowStartupMode::Windowed;
+                        if (window) {
+                            current_mode = window->currentStartupMode();
+                        }
+                        const char* mode = startup_mode_to_string(current_mode);
+                        lua_engine["window-mode"] = mode;
+                        sol::table payload = lua_state->create_table();
+                        payload["mode"] = mode;
+                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                        emit_engine_event("window-mode-changed", payload);
+                    }
                     break;
 
                 case SDL_EVENT_KEY_DOWN: {

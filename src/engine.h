@@ -31,7 +31,7 @@ struct EngineConfig {
     bool headless { false };
     int width { 0 };
     int height { 0 };
-    bool maximized { true };
+    WindowStartupMode window_mode { WindowStartupMode::Maximized };
 };
 
 class Engine {
