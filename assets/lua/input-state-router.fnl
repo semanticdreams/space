@@ -4,6 +4,10 @@
   (when (and app.engine app.states app.states.set-state)
     (app.states.set-state name)))
 
+(fn set-text-input-enabled [enabled?]
+  (when (and app.engine app.engine.set-text-input-enabled)
+    (app.engine.set-text-input-enabled enabled?)))
+
 (fn current-state-name []
   (and app.engine
        app.states
@@ -16,6 +20,7 @@
     (when handler
       (active-input:on-state-disconnected {:state (current-state-name)}))
     (set active-input nil)
+    (set-text-input-enabled false)
     (when (or (= (current-state-name) :text)
               (= (current-state-name) :insert))
       (set-state :normal))))
@@ -25,6 +30,7 @@
     (release-active-input)
     (when input
       (set active-input input)
+      (set-text-input-enabled true)
       (local handler input.on-state-connected)
       (when handler
         (input:on-state-connected {:state (current-state-name)}))))

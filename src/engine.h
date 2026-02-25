@@ -99,6 +99,7 @@ private:
     SDL_JoystickID openGamepad(SDL_JoystickID instanceId, Uint64 timestamp);
     void closeGamepad(SDL_JoystickID instanceId, Uint64 timestamp);
     void closeAllGamepads(Uint64 timestamp);
+    void setTextInputEnabled(bool enabled);
 
     std::unordered_map<std::string, SDL_Cursor*> systemCursors;
     std::unordered_map<SDL_JoystickID, SDL_Gamepad*> gamepads;

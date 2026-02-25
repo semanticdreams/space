@@ -111,7 +111,7 @@
 
     (fn on-mouse-button [self payload]
         (when (= payload.button 1)
-            (if (= payload.state 1)
+            (if payload.state
                 (start-selection self payload)
                 (stop-selection self))))
 

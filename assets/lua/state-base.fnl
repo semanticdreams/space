@@ -126,8 +126,14 @@
       true
       (InputState.dispatch-input :on-text-input payload)))
 
+(fn dispatch-text-editing [payload]
+  (InputState.dispatch-input :on-text-editing payload))
+
 (fn default-on-text-input [payload]
   (dispatch-text-input payload))
+
+(fn default-on-text-editing [payload]
+  (dispatch-text-editing payload))
 
 (fn default-on-key-up [payload]
   (local handled (InputState.dispatch-input :on-key-up payload))
@@ -274,6 +280,7 @@
   (assert opts "state-base requires opts")
   (local handlers
     {:on-text-input (or opts.on-text-input default-on-text-input)
+     :on-text-editing (or opts.on-text-editing default-on-text-editing)
      :on-key-down (or opts.on-key-down default-on-key-down)
      :on-key-up (or opts.on-key-up default-on-key-up)
      :on-mouse-button-up (or opts.on-mouse-button-up default-on-mouse-button-up)
@@ -287,6 +294,7 @@
 
   (fn on-enter []
     (app.engine.events.text-input.connect handlers.on-text-input)
+    (app.engine.events.text-editing.connect handlers.on-text-editing)
     (app.engine.events.key-up.connect handlers.on-key-up)
     (app.engine.events.key-down.connect handlers.on-key-down)
     (app.engine.events.mouse-button-up.connect handlers.on-mouse-button-up)
@@ -303,6 +311,7 @@
 
   (fn on-leave []
     (app.engine.events.text-input.disconnect handlers.on-text-input)
+    (app.engine.events.text-editing.disconnect handlers.on-text-editing)
     (app.engine.events.key-up.disconnect handlers.on-key-up)
     (app.engine.events.key-down.disconnect handlers.on-key-down)
     (app.engine.events.mouse-button-up.disconnect handlers.on-mouse-button-up)
@@ -330,6 +339,7 @@
    :on-gamepad-removed handlers.on-gamepad-removed
    :on-updated handlers.on-updated
    :on-text-input handlers.on-text-input
+   :on-text-editing handlers.on-text-editing
    :connect-input InputState.connect-input
    :disconnect-input InputState.disconnect-input
    :active-input (fn [] (InputState.active-input))
@@ -347,6 +357,7 @@
  :selection-active? selection-active?
  :ignore-next-text-input ignore-next-text-input
  :dispatch-text-input dispatch-text-input
+ :dispatch-text-editing dispatch-text-editing
  :dispatch-mouse-wheel dispatch-mouse-wheel}
 
 ;

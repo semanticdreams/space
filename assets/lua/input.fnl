@@ -740,6 +740,10 @@
          (fn [_self payload]
            (model:on-text-input payload)))
 
+    (set input.on-text-editing
+         (fn [_self payload]
+           (model:on-text-editing payload)))
+
     (set input.on-key-up
          (fn [_self payload]
            (model:on-key-up payload)))

@@ -51,6 +51,9 @@ public:
     static std::unique_ptr<WindowSdl> create();
 
     void toggleFullscreen();
+    void setTextInputEnabled(bool enabled);
+    [[nodiscard]] bool isTextInputEnabled() const;
+    void updateViewportFromWindowPixels();
 
 private:
     std::unique_ptr<SDL_Window, SdlWindowDestroyer> window;
