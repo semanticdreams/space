@@ -5,10 +5,10 @@
 void MouseState::begin_frame()
 {
     std::copy(std::begin(currentButtons), std::end(currentButtons), std::begin(previousButtons));
-    xrel = 0;
-    yrel = 0;
-    wheelX = 0;
-    wheelY = 0;
+    xrel = 0.0F;
+    yrel = 0.0F;
+    wheelX = 0.0F;
+    wheelY = 0.0F;
 }
 
 void MouseState::update_from_mask(SDL_MouseButtonFlags mask)
@@ -19,7 +19,7 @@ void MouseState::update_from_mask(SDL_MouseButtonFlags mask)
     }
 }
 
-void MouseState::set_motion(int newX, int newY, int deltaX, int deltaY)
+void MouseState::set_motion(float newX, float newY, float deltaX, float deltaY)
 {
     x = newX;
     y = newY;
@@ -27,7 +27,7 @@ void MouseState::set_motion(int newX, int newY, int deltaX, int deltaY)
     yrel += deltaY;
 }
 
-void MouseState::add_wheel(int deltaX, int deltaY)
+void MouseState::add_wheel(float deltaX, float deltaY)
 {
     wheelX += deltaX;
     wheelY += deltaY;

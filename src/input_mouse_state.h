@@ -9,17 +9,17 @@ class MouseState {
 public:
     static constexpr int MAX_BUTTONS = 8;
 
-    int x {0};
-    int y {0};
-    int xrel {0};
-    int yrel {0};
-    int wheelX {0};
-    int wheelY {0};
+    float x {0.0F};
+    float y {0.0F};
+    float xrel {0.0F};
+    float yrel {0.0F};
+    float wheelX {0.0F};
+    float wheelY {0.0F};
 
     void begin_frame();
     void update_from_mask(SDL_MouseButtonFlags mask);
-    void set_motion(int newX, int newY, int deltaX, int deltaY);
-    void add_wheel(int deltaX, int deltaY);
+    void set_motion(float newX, float newY, float deltaX, float deltaY);
+    void add_wheel(float deltaX, float deltaY);
     void set_button(Uint8 button, bool pressed);
 
     [[nodiscard]] KeyStatus getButtonState(Uint8 button) const;

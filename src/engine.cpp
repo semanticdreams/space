@@ -48,6 +48,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         if (!window->init(target_width, target_height, config.maximized)) {
             return false;
         }
+        window->setTextInputEnabled(false);
         window->logGlParams();
 
         initSystemCursors();
@@ -61,7 +62,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
             float mouseY = 0.0F;
             SDL_MouseButtonFlags mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
             inputState.mouseState.update_from_mask(mouseMask);
-            inputState.mouseState.set_motion(static_cast<int>(mouseX), static_cast<int>(mouseY), 0, 0);
+            inputState.mouseState.set_motion(mouseX, mouseY, 0.0F, 0.0F);
         }
 
         int gamepad_count = 0;
@@ -97,6 +98,9 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     });
     lua_engine.set_function("set-system-cursor", [this](const std::string& name) {
         this->setSystemCursor(name);
+    });
+    lua_engine.set_function("set-text-input-enabled", [this](bool enabled) {
+        this->setTextInputEnabled(enabled);
     });
     lua_bind_callbacks(*lua_state, lua_engine);
     lua_engine["physics"] = &physics;
@@ -292,7 +296,7 @@ void Engine::run() {
             float mouseY = static_cast<float>(inputState.mouseState.y);
             SDL_MouseButtonFlags mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
             inputState.mouseState.update_from_mask(mouseMask);
-            inputState.mouseState.set_motion(static_cast<int>(mouseX), static_cast<int>(mouseY), 0, 0);
+            inputState.mouseState.set_motion(mouseX, mouseY, 0.0F, 0.0F);
         }
 
         SDL_Event event;
@@ -306,7 +310,7 @@ void Engine::run() {
                     {
                         int width = event.window.data1;
                         int height = event.window.data2;
-                        glViewport(0, 0, width, height);
+                        window->updateViewportFromWindowPixels();
                         lua_engine["width"] = width;
                         lua_engine["height"] = height;
                         sol::table payload = lua_state->create_table();
@@ -315,6 +319,10 @@ void Engine::run() {
                         payload["timestamp"] = ns_to_ms(event.common.timestamp);
                         emit_engine_event("window-resized", payload);
                     }
+                    break;
+
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    window->updateViewportFromWindowPixels();
                     break;
 
                 case SDL_EVENT_KEY_DOWN: {
@@ -346,10 +354,10 @@ void Engine::run() {
 
                 case SDL_EVENT_MOUSE_MOTION: {
                     inputState.mouseState.set_motion(
-                        static_cast<int>(event.motion.x),
-                        static_cast<int>(event.motion.y),
-                        static_cast<int>(event.motion.xrel),
-                        static_cast<int>(event.motion.yrel));
+                        event.motion.x,
+                        event.motion.y,
+                        event.motion.xrel,
+                        event.motion.yrel);
                     sol::table payload = lua_state->create_table();
                     payload["x"] = event.motion.x;
                     payload["y"] = event.motion.y;
@@ -363,7 +371,7 @@ void Engine::run() {
                 }
 
                 case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-                    inputState.mouseState.set_motion(static_cast<int>(event.button.x), static_cast<int>(event.button.y), 0, 0);
+                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
                     inputState.mouseState.set_button(event.button.button, true);
                     sol::table payload = lua_state->create_table();
                     payload["button"] = static_cast<int>(event.button.button);
@@ -379,7 +387,7 @@ void Engine::run() {
                 }
 
                 case SDL_EVENT_MOUSE_BUTTON_UP: {
-                    inputState.mouseState.set_motion(static_cast<int>(event.button.x), static_cast<int>(event.button.y), 0, 0);
+                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
                     inputState.mouseState.set_button(event.button.button, false);
                     sol::table payload = lua_state->create_table();
                     payload["button"] = static_cast<int>(event.button.button);
@@ -395,10 +403,16 @@ void Engine::run() {
                 }
 
                 case SDL_EVENT_MOUSE_WHEEL: {
-                    inputState.mouseState.add_wheel(static_cast<int>(event.wheel.x), static_cast<int>(event.wheel.y));
+                    float wheel_x = event.wheel.x;
+                    float wheel_y = event.wheel.y;
+                    if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+                        wheel_x = -wheel_x;
+                        wheel_y = -wheel_y;
+                    }
+                    inputState.mouseState.add_wheel(wheel_x, wheel_y);
                     sol::table payload = lua_state->create_table();
-                    payload["x"] = event.wheel.x;
-                    payload["y"] = event.wheel.y;
+                    payload["x"] = wheel_x;
+                    payload["y"] = wheel_y;
                     payload["direction"] = static_cast<int>(event.wheel.direction);
                     payload["which"] = static_cast<int>(event.wheel.which);
                     payload["mod"] = static_cast<int>(SDL_GetModState());
@@ -415,8 +429,18 @@ void Engine::run() {
                     break;
                 }
 
+                case SDL_EVENT_TEXT_EDITING: {
+                    sol::table payload = lua_state->create_table();
+                    payload["text"] = std::string(event.edit.text);
+                    payload["start"] = static_cast<int>(event.edit.start);
+                    payload["length"] = static_cast<int>(event.edit.length);
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("text-editing", payload);
+                    break;
+                }
+
                 case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
-                    inputState.on_gamepad_button(event.gbutton.button, true, event.gbutton.which, event.common.timestamp);
+                    inputState.on_gamepad_button(event.gbutton.button, true, event.gbutton.which, ns_to_ms(event.common.timestamp));
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.gbutton.which);
                     payload["instance-id"] = static_cast<int>(event.gbutton.which);
@@ -428,7 +452,7 @@ void Engine::run() {
                 }
 
                 case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-                    inputState.on_gamepad_button(event.gbutton.button, false, event.gbutton.which, event.common.timestamp);
+                    inputState.on_gamepad_button(event.gbutton.button, false, event.gbutton.which, ns_to_ms(event.common.timestamp));
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.gbutton.which);
                     payload["instance-id"] = static_cast<int>(event.gbutton.which);
@@ -441,7 +465,7 @@ void Engine::run() {
 
                 case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
                     const float axis_value = static_cast<float>(event.gaxis.value) / 32768.0f;
-                    inputState.on_gamepad_axis(event.gaxis.axis, axis_value, event.gaxis.which, event.common.timestamp);
+                    inputState.on_gamepad_axis(event.gaxis.axis, axis_value, event.gaxis.which, ns_to_ms(event.common.timestamp));
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.gaxis.which);
                     payload["instance-id"] = static_cast<int>(event.gaxis.which);
@@ -456,7 +480,7 @@ void Engine::run() {
                 }
 
                 case SDL_EVENT_GAMEPAD_ADDED: {
-                    const SDL_JoystickID instance_id = openGamepad(event.gdevice.which, event.common.timestamp);
+                    const SDL_JoystickID instance_id = openGamepad(event.gdevice.which, ns_to_ms(event.common.timestamp));
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.gdevice.which);
                     payload["instance-id"] = static_cast<int>(instance_id);
@@ -466,7 +490,7 @@ void Engine::run() {
                 }
 
                 case SDL_EVENT_GAMEPAD_REMOVED: {
-                    closeGamepad(event.gdevice.which, event.common.timestamp);
+                    closeGamepad(event.gdevice.which, ns_to_ms(event.common.timestamp));
                     sol::table payload = lua_state->create_table();
                     payload["which"] = static_cast<int>(event.gdevice.which);
                     payload["instance-id"] = static_cast<int>(event.gdevice.which);
@@ -682,4 +706,15 @@ void Engine::setSystemCursor(const std::string& name) {
 
     SDL_SetCursor(cursor);
     activeCursor = cursor;
+}
+
+void Engine::setTextInputEnabled(bool enabled)
+{
+    if (!window) {
+        return;
+    }
+    if (window->isTextInputEnabled() == enabled) {
+        return;
+    }
+    window->setTextInputEnabled(enabled);
 }

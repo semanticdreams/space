@@ -105,7 +105,7 @@ bool WindowSdl::init(int width, int height, bool maximized) {
         LOG(Info) << "Renderer: " << renderer;
         LOG(Info) << "OpenGL version supported " << version;
 
-        glViewport(0, 0, width, height);
+        updateViewportFromWindowPixels();
         //glEnable(GL_CULL_FACE);
         glEnable(GL_BLEND);
         //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -207,6 +207,7 @@ void WindowSdl::swapBuffer() {
 
 void WindowSdl::clean() {
     // SDL_DestroyWindow(window); Handled by unique_ptr
+    setTextInputEnabled(false);
     SDL_GL_DestroyContext(context);
 }
 
@@ -218,4 +219,45 @@ std::unique_ptr<WindowSdl> WindowSdl::create() {
 void WindowSdl::toggleFullscreen() {
     isFullscreen = !isFullscreen;
     SDL_SetWindowFullscreen(window.get(), isFullscreen);
+}
+
+void WindowSdl::setTextInputEnabled(bool enabled)
+{
+    if (!window) {
+        return;
+    }
+    if (enabled) {
+        if (!SDL_StartTextInput(window.get())) {
+            LOG(Warning) << "Failed to start SDL text input: " << SDL_GetError();
+            SDL_ClearError();
+        }
+        return;
+    }
+    if (!SDL_StopTextInput(window.get())) {
+        LOG(Warning) << "Failed to stop SDL text input: " << SDL_GetError();
+        SDL_ClearError();
+    }
+}
+
+bool WindowSdl::isTextInputEnabled() const
+{
+    if (!window) {
+        return false;
+    }
+    return SDL_TextInputActive(window.get());
+}
+
+void WindowSdl::updateViewportFromWindowPixels()
+{
+    if (!window) {
+        return;
+    }
+    int pixel_width = 0;
+    int pixel_height = 0;
+    if (!SDL_GetWindowSizeInPixels(window.get(), &pixel_width, &pixel_height)) {
+        LOG(Warning) << "Failed to query window pixel size: " << SDL_GetError();
+        SDL_ClearError();
+        return;
+    }
+    glViewport(0, 0, pixel_width, pixel_height);
 }

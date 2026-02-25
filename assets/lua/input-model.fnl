@@ -303,6 +303,9 @@
           true)
         false))
 
+  (fn on-text-editing [self _payload]
+    (= self.mode :insert))
+
   (fn on-key-up [_self _payload]
     false)
 
@@ -344,6 +347,7 @@
   (set model.enter-normal-mode enter-normal-mode)
   (set model.set-mode set-mode)
   (set model.on-text-input on-text-input)
+  (set model.on-text-editing on-text-editing)
   (set model.on-key-up on-key-up)
   (set model.on-state-connected on-state-connected)
   (set model.on-state-disconnected on-state-disconnected)

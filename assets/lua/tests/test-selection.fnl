@@ -78,7 +78,7 @@
        :on-mouse-button (fn [_self payload]
                           (when (= payload.button 1)
                             (set selector-state.buttons (+ selector-state.buttons 1))
-                            (set selector-state.active (= payload.state 1))))
+                            (set selector-state.active payload.state)))
        :on-mouse-motion (fn [_self _payload]
                           (when selector-state.active
                               (set selector-state.motions (+ selector-state.motions 1))))})
@@ -113,12 +113,12 @@
     (assert move "State missing mouse-motion handler")
     (assert up "State missing mouse-button-up handler")
     (assert update "State missing update handler")
-    (down {:button 1 :state 1 :x 0 :y 0})
+    (down {:button 1 :state true :x 0 :y 0})
     (move {:x 10 :y 10})
-    (up {:button 1 :state 0 :x 10 :y 10})
-    (down {:button 3 :state 1 :x 20 :y 20})
+    (up {:button 1 :state false :x 10 :y 10})
+    (down {:button 3 :state true :x 20 :y 20})
     (move {:x 25 :y 25})
-    (up {:button 3 :state 0 :x 25 :y 25})
+    (up {:button 3 :state false :x 25 :y 25})
     (update 0.016)
     (set app.object-selector original-selector)
     (set app.first-person-controls original-first-person)
@@ -163,7 +163,7 @@
                     :viewport viewport
                     :rectangle-builder rectangle-builder}))
     (assert (= (type selector) :table) "BoxSelector should return a selector table")
-    (selector:on-mouse-button {:button 1 :state 1 :x 0 :y 0})
+    (selector:on-mouse-button {:button 1 :state true :x 0 :y 0})
     (selector:on-mouse-motion {:x 2 :y 1})
     (assert captured-rectangle "Selection rectangle should be created")
     (local epsilon 0.0001)
@@ -204,7 +204,7 @@
                     :unproject (fn [point _depth _opts] (glm.vec3 point.x point.y 0))
                     :rectangle-builder rectangle-builder}))
     (assert (= (type selector) :table) "BoxSelector should return a selector table")
-    (selector:on-mouse-button {:button 1 :state 1 :x 0 :y 0})
+    (selector:on-mouse-button {:button 1 :state true :x 0 :y 0})
     (selector:on-mouse-motion {:x 1 :y 1})
     (assert captured-rectangle "Selection rectangle should be created")
     (assert (>= captured-rectangle.depth-offset-index 1000)

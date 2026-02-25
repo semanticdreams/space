@@ -183,23 +183,25 @@
       ;; Event handlers handle rotation/drag; snapshot keeps last position in sync.
       ))
 
-  (fn handle-mouse-button [self payload fallback-state]
+  (fn handle-mouse-button [self payload fallback-down?]
     (update-mouse-pos self payload)
-    (local state (or payload.state fallback-state))
+    (local down? (if (= payload.state nil)
+                     fallback-down?
+                     payload.state))
     (when (= payload.button SDL_BUTTON_LEFT)
-      (if (= state 1)
+      (if down?
           (set self.drag-look-start {:x payload.x :y payload.y})
           (set self.drag-look-start nil)))
     (when (= payload.button SDL_BUTTON_RIGHT)
-      (if (= state 1)
+      (if down?
           (set self.drag-move-start {:x payload.x :y payload.y})
           (set self.drag-move-start nil))))
 
   (fn on-mouse-button-down [self payload]
-    (handle-mouse-button self payload 1))
+    (handle-mouse-button self payload true))
 
   (fn on-mouse-button-up [self payload]
-    (handle-mouse-button self payload 0))
+    (handle-mouse-button self payload false))
 
   (fn on-mouse-motion [self payload]
     (update-mouse-pos self payload)
