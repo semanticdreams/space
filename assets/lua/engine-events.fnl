@@ -2,11 +2,11 @@
 
 
 {:updated (Signal)
- :controller-device-added (Signal)
- :controller-device-removed (Signal)
- :controller-axis-motion (Signal)
- :controller-button-up (Signal)
- :controller-button-down (Signal)
+ :gamepad-added (Signal)
+ :gamepad-removed (Signal)
+ :gamepad-axis-motion (Signal)
+ :gamepad-button-up (Signal)
+ :gamepad-button-down (Signal)
  :text-input (Signal)
  :mouse-wheel (Signal)
  :mouse-button-up (Signal)

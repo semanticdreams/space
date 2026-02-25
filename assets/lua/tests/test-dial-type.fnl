@@ -1,5 +1,5 @@
 (local DialTypeModule (require :dial-type))
-;; controller axis ids
+;; gamepad axis ids
 (local AXIS-LX 0)
 (local AXIS-LY 1)
 
@@ -40,18 +40,18 @@
 (fn input-dial-type-adapter-processes-only-when-updated []
   (local input app.engine.input)
   (local adapter (DialTypeModule.InputDialType input))
-  ;; reset controllers
-  (each [_ id (ipairs (input:controller-ids))]
-    (input:on-controller-disconnected id 0))
+  ;; reset gamepads
+  (each [_ id (ipairs (input:gamepad-ids))]
+    (input:on-gamepad-disconnected id 0))
 
-  (input:on-controller-connected 0 101 1)
-  (input:on-controller-axis AXIS-LX 1.0 101 2)
+  (input:on-gamepad-connected 0 101 1)
+  (input:on-gamepad-axis AXIS-LX 1.0 101 2)
   ;; no update call yet, so no dial output should be present
   (assert (not (adapter:has-input-for 101)))
-  (assert (not (adapter:update-controller 101)))
-  (input:on-controller-axis AXIS-LX 0.0 101 3)
-  (assert (adapter:update-controller 101))
-  (local out (adapter:poll-controller 101))
+  (assert (not (adapter:update-gamepad 101)))
+  (input:on-gamepad-axis AXIS-LX 0.0 101 3)
+  (assert (adapter:update-gamepad 101))
+  (local out (adapter:poll-gamepad 101))
   (assert out "adapter should emit dial output after explicit update")
   (assert (> (length (. out 1)) 0) "left stack should contain emitted sectors"))
 

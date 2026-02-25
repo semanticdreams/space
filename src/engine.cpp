@@ -14,6 +14,7 @@
 #include "cef_runtime.h"
 
 #include <optional>
+#include <cinttypes>
 #include <vector>
 
 //namespace py = pybind11;
@@ -28,6 +29,11 @@ sol::table make_int_array(sol::state& lua, const std::vector<int>& values)
     return out;
 }
 
+Uint64 ns_to_ms(Uint64 timestamp_ns)
+{
+    return timestamp_ns / 1000000ULL;
+}
+
 } // namespace
 
 Engine::Engine() {
@@ -39,29 +45,31 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         window = WindowSdl::create();
         int target_width = config.width > 0 ? config.width : screenWidth;
         int target_height = config.height > 0 ? config.height : screenHeight;
-        if (!window->init(SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, target_width, target_height, config.maximized)) {
+        if (!window->init(target_width, target_height, config.maximized)) {
             return false;
         }
         window->logGlParams();
 
         initSystemCursors();
-        SDL_GameControllerEventState(SDL_ENABLE);
+        SDL_SetGamepadEventsEnabled(true);
 
         inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
         // Clear previous state memory
-        memset(inputState.keyboardState.previousValue, 0, SDL_NUM_SCANCODES);
+        memset(inputState.keyboardState.previousValue, 0, SDL_SCANCODE_COUNT);
         {
-            int mouseX = 0;
-            int mouseY = 0;
-            Uint32 mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
+            float mouseX = 0.0F;
+            float mouseY = 0.0F;
+            SDL_MouseButtonFlags mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
             inputState.mouseState.update_from_mask(mouseMask);
-            inputState.mouseState.set_motion(mouseX, mouseY, 0, 0);
+            inputState.mouseState.set_motion(static_cast<int>(mouseX), static_cast<int>(mouseY), 0, 0);
         }
 
-        const int joystick_count = SDL_NumJoysticks();
-        for (int device_index = 0; device_index < joystick_count; ++device_index) {
-            openGameController(device_index, SDL_GetTicks());
+        int gamepad_count = 0;
+        SDL_JoystickID* gamepad_ids = SDL_GetGamepads(&gamepad_count);
+        for (int i = 0; i < gamepad_count; ++i) {
+            openGamepad(gamepad_ids[i], SDL_GetTicks());
         }
+        SDL_free(gamepad_ids);
     }
 
     http = std::make_unique<HttpClient>();
@@ -97,12 +105,12 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     inputDialType = std::make_unique<InputDialType>(inputState);
     lua_engine.set_function("dial-type-activate", [this](int instance_id) {
         if (inputDialType) {
-            inputDialType->activate_controller(static_cast<SDL_JoystickID>(instance_id));
+            inputDialType->activate_gamepad(static_cast<SDL_JoystickID>(instance_id));
         }
     });
     lua_engine.set_function("dial-type-deactivate", [this](int instance_id) {
         if (inputDialType) {
-            inputDialType->deactivate_controller(static_cast<SDL_JoystickID>(instance_id));
+            inputDialType->deactivate_gamepad(static_cast<SDL_JoystickID>(instance_id));
         }
     });
     lua_engine.set_function("dial-type-on-input", [this](int instance_id, sol::function callback) {
@@ -112,12 +120,12 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         auto cb = std::make_shared<sol::protected_function>(callback);
         return inputDialType->register_callback(
             static_cast<SDL_JoystickID>(instance_id),
-            [this, cb](SDL_JoystickID controller_id, const DialTypePendingInput& input) {
+            [this, cb](SDL_JoystickID gamepad_id, const DialTypePendingInput& input) {
                 if (!lua_state || !cb || !cb->valid()) {
                     return;
                 }
                 sol::table payload = lua_state->create_table();
-                payload["instance-id"] = static_cast<int>(controller_id);
+                payload["instance-id"] = static_cast<int>(gamepad_id);
                 sol::table in = lua_state->create_table();
                 in[1] = make_int_array(*lua_state, input.left);
                 in[2] = make_int_array(*lua_state, input.right);
@@ -276,72 +284,72 @@ void Engine::run() {
 
         window->clear();
 
-        memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_NUM_SCANCODES);
+        memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_SCANCODE_COUNT);
         inputState.mouseState.begin_frame();
         inputState.begin_frame();
         {
-            int mouseX = inputState.mouseState.x;
-            int mouseY = inputState.mouseState.y;
-            Uint32 mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
+            float mouseX = static_cast<float>(inputState.mouseState.x);
+            float mouseY = static_cast<float>(inputState.mouseState.y);
+            SDL_MouseButtonFlags mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
             inputState.mouseState.update_from_mask(mouseMask);
-            inputState.mouseState.set_motion(mouseX, mouseY, 0, 0);
+            inputState.mouseState.set_motion(static_cast<int>(mouseX), static_cast<int>(mouseY), 0, 0);
         }
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
-                case SDL_QUIT:
+                case SDL_EVENT_QUIT:
                     isRunning = false;
                     break;
 
-                case SDL_WINDOWEVENT:
-                    switch (event.window.event) {
-                        case SDL_WINDOWEVENT_RESIZED:
-                            int width = event.window.data1;
-                            int height = event.window.data2;
-                            glViewport(0, 0, width, height);
-                            lua_engine["width"] = width;
-                            lua_engine["height"] = height;
-                            {
-                                sol::table payload = lua_state->create_table();
-                                payload["width"] = width;
-                                payload["height"] = height;
-                                payload["timestamp"] = event.common.timestamp;
-                                emit_engine_event("window-resized", payload);
-                            }
-                            break;
+                case SDL_EVENT_WINDOW_RESIZED:
+                    {
+                        int width = event.window.data1;
+                        int height = event.window.data2;
+                        glViewport(0, 0, width, height);
+                        lua_engine["width"] = width;
+                        lua_engine["height"] = height;
+                        sol::table payload = lua_state->create_table();
+                        payload["width"] = width;
+                        payload["height"] = height;
+                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                        emit_engine_event("window-resized", payload);
                     }
                     break;
 
-                case SDL_KEYDOWN: {
-                    switch(event.key.keysym.sym) {
+                case SDL_EVENT_KEY_DOWN: {
+                    switch(event.key.key) {
                         case SDLK_F11:
                             window->toggleFullscreen();
                             break;
 
                     }
                     sol::table payload = lua_state->create_table();
-                    payload["key"] = static_cast<int>(event.key.keysym.sym);
-                    payload["scancode"] = static_cast<int>(event.key.keysym.scancode);
-                    payload["mod"] = static_cast<int>(event.key.keysym.mod);
+                    payload["key"] = static_cast<int>(event.key.key);
+                    payload["scancode"] = static_cast<int>(event.key.scancode);
+                    payload["mod"] = static_cast<int>(event.key.mod);
                     payload["repeat"] = event.key.repeat != 0;
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("key-down", payload);
                     break;
                 }
 
-                case SDL_KEYUP: {
+                case SDL_EVENT_KEY_UP: {
                     sol::table payload = lua_state->create_table();
-                    payload["key"] = static_cast<int>(event.key.keysym.sym);
-                    payload["scancode"] = static_cast<int>(event.key.keysym.scancode);
-                    payload["mod"] = static_cast<int>(event.key.keysym.mod);
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["key"] = static_cast<int>(event.key.key);
+                    payload["scancode"] = static_cast<int>(event.key.scancode);
+                    payload["mod"] = static_cast<int>(event.key.mod);
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("key-up", payload);
                     break;
                 }
 
-                case SDL_MOUSEMOTION: {
-                    inputState.mouseState.set_motion(event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel);
+                case SDL_EVENT_MOUSE_MOTION: {
+                    inputState.mouseState.set_motion(
+                        static_cast<int>(event.motion.x),
+                        static_cast<int>(event.motion.y),
+                        static_cast<int>(event.motion.xrel),
+                        static_cast<int>(event.motion.yrel));
                     sol::table payload = lua_state->create_table();
                     payload["x"] = event.motion.x;
                     payload["y"] = event.motion.y;
@@ -349,122 +357,121 @@ void Engine::run() {
                     payload["yrel"] = event.motion.yrel;
                     payload["which"] = static_cast<int>(event.motion.which);
                     payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("mouse-motion", payload);
                     break;
                 }
 
-                case SDL_MOUSEBUTTONDOWN: {
-                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0, 0);
+                case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+                    inputState.mouseState.set_motion(static_cast<int>(event.button.x), static_cast<int>(event.button.y), 0, 0);
                     inputState.mouseState.set_button(event.button.button, true);
                     sol::table payload = lua_state->create_table();
                     payload["button"] = static_cast<int>(event.button.button);
-                    payload["state"] = static_cast<int>(event.button.state);
+                    payload["state"] = event.button.down;
                     payload["clicks"] = static_cast<int>(event.button.clicks);
                     payload["x"] = event.button.x;
                     payload["y"] = event.button.y;
                     payload["which"] = static_cast<int>(event.button.which);
                     payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("mouse-button-down", payload);
                     break;
                 }
 
-                case SDL_MOUSEBUTTONUP: {
-                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0, 0);
+                case SDL_EVENT_MOUSE_BUTTON_UP: {
+                    inputState.mouseState.set_motion(static_cast<int>(event.button.x), static_cast<int>(event.button.y), 0, 0);
                     inputState.mouseState.set_button(event.button.button, false);
                     sol::table payload = lua_state->create_table();
                     payload["button"] = static_cast<int>(event.button.button);
-                    payload["state"] = static_cast<int>(event.button.state);
+                    payload["state"] = event.button.down;
                     payload["clicks"] = static_cast<int>(event.button.clicks);
                     payload["x"] = event.button.x;
                     payload["y"] = event.button.y;
                     payload["which"] = static_cast<int>(event.button.which);
                     payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("mouse-button-up", payload);
                     break;
                 }
 
-                case SDL_MOUSEWHEEL: {
-                    inputState.mouseState.add_wheel(event.wheel.x, event.wheel.y);
+                case SDL_EVENT_MOUSE_WHEEL: {
+                    inputState.mouseState.add_wheel(static_cast<int>(event.wheel.x), static_cast<int>(event.wheel.y));
                     sol::table payload = lua_state->create_table();
                     payload["x"] = event.wheel.x;
                     payload["y"] = event.wheel.y;
                     payload["direction"] = static_cast<int>(event.wheel.direction);
                     payload["which"] = static_cast<int>(event.wheel.which);
                     payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("mouse-wheel", payload);
                     break;
                 }
 
-                case SDL_TEXTINPUT: {
+                case SDL_EVENT_TEXT_INPUT: {
                     sol::table payload = lua_state->create_table();
                     payload["text"] = std::string(event.text.text);
-                    payload["timestamp"] = event.common.timestamp;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("text-input", payload);
                     break;
                 }
 
-                case SDL_CONTROLLERBUTTONDOWN: {
-                    inputState.on_controller_button(event.cbutton.button, true, event.cbutton.which, event.common.timestamp);
+                case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+                    inputState.on_gamepad_button(event.gbutton.button, true, event.gbutton.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.cbutton.which);
-                    payload["instance-id"] = static_cast<int>(event.cbutton.which);
-                    payload["button"] = static_cast<int>(event.cbutton.button);
-                    payload["state"] = static_cast<int>(event.cbutton.state);
-                    payload["timestamp"] = event.common.timestamp;
-                    emit_engine_event("controller-button-down", payload);
+                    payload["which"] = static_cast<int>(event.gbutton.which);
+                    payload["instance-id"] = static_cast<int>(event.gbutton.which);
+                    payload["button"] = static_cast<int>(event.gbutton.button);
+                    payload["state"] = event.gbutton.down;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("gamepad-button-down", payload);
                     break;
                 }
 
-                case SDL_CONTROLLERBUTTONUP: {
-                    inputState.on_controller_button(event.cbutton.button, false, event.cbutton.which, event.common.timestamp);
+                case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+                    inputState.on_gamepad_button(event.gbutton.button, false, event.gbutton.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.cbutton.which);
-                    payload["instance-id"] = static_cast<int>(event.cbutton.which);
-                    payload["button"] = static_cast<int>(event.cbutton.button);
-                    payload["state"] = static_cast<int>(event.cbutton.state);
-                    payload["timestamp"] = event.common.timestamp;
-                    emit_engine_event("controller-button-up", payload);
+                    payload["which"] = static_cast<int>(event.gbutton.which);
+                    payload["instance-id"] = static_cast<int>(event.gbutton.which);
+                    payload["button"] = static_cast<int>(event.gbutton.button);
+                    payload["state"] = event.gbutton.down;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("gamepad-button-up", payload);
                     break;
                 }
 
-                case SDL_CONTROLLERAXISMOTION: {
-                    const float axis_value = static_cast<float>(event.caxis.value) / 32768.0f;
-                    inputState.on_controller_axis(event.caxis.axis, axis_value, event.caxis.which, event.common.timestamp);
+                case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+                    const float axis_value = static_cast<float>(event.gaxis.value) / 32768.0f;
+                    inputState.on_gamepad_axis(event.gaxis.axis, axis_value, event.gaxis.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.caxis.which);
-                    payload["instance-id"] = static_cast<int>(event.caxis.which);
-                    payload["axis"] = static_cast<int>(event.caxis.axis);
+                    payload["which"] = static_cast<int>(event.gaxis.which);
+                    payload["instance-id"] = static_cast<int>(event.gaxis.which);
+                    payload["axis"] = static_cast<int>(event.gaxis.axis);
                     payload["value"] = axis_value;
-                    payload["timestamp"] = event.common.timestamp;
-                    emit_engine_event("controller-axis-motion", payload);
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("gamepad-axis-motion", payload);
                     if (inputDialType) {
-                        inputDialType->process_controller(event.caxis.which);
+                        inputDialType->process_gamepad(event.gaxis.which);
                     }
                     break;
                 }
 
-                case SDL_CONTROLLERDEVICEADDED: {
-                    const SDL_JoystickID instance_id = openGameController(event.cdevice.which, event.common.timestamp);
+                case SDL_EVENT_GAMEPAD_ADDED: {
+                    const SDL_JoystickID instance_id = openGamepad(event.gdevice.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.cdevice.which);
-                    payload["device-index"] = static_cast<int>(event.cdevice.which);
+                    payload["which"] = static_cast<int>(event.gdevice.which);
                     payload["instance-id"] = static_cast<int>(instance_id);
-                    payload["timestamp"] = event.common.timestamp;
-                    emit_engine_event("controller-device-added", payload);
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("gamepad-added", payload);
                     break;
                 }
 
-                case SDL_CONTROLLERDEVICEREMOVED: {
-                    closeGameController(event.cdevice.which, event.common.timestamp);
+                case SDL_EVENT_GAMEPAD_REMOVED: {
+                    closeGamepad(event.gdevice.which, event.common.timestamp);
                     sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.cdevice.which);
-                    payload["instance-id"] = static_cast<int>(event.cdevice.which);
-                    payload["timestamp"] = event.common.timestamp;
-                    emit_engine_event("controller-device-removed", payload);
+                    payload["which"] = static_cast<int>(event.gdevice.which);
+                    payload["instance-id"] = static_cast<int>(event.gdevice.which);
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("gamepad-removed", payload);
                     break;
                 }
 
@@ -474,10 +481,10 @@ void Engine::run() {
 
         }
 
-        physics.update(dt);
+        physics.update(static_cast<uint32_t>(dt));
 
-        audio.update(dt);
-        video_manager.update_all(dt);
+        audio.update(static_cast<uint32_t>(dt));
+        video_manager.update_all(static_cast<uint32_t>(dt));
 
         if (jobs) {
             ResourceManager::processTextureJobs();
@@ -497,7 +504,7 @@ void Engine::run() {
             sol::table events = lua_engine["events"];
             sol::table signal = events["updated"];
             sol::function emit = signal["emit"];
-            fennel_call_fatal(emit, dt);
+            fennel_call_fatal(emit, static_cast<uint32_t>(dt));
         }
         frame_id.fetch_add(1, std::memory_order_relaxed);
 
@@ -508,73 +515,73 @@ void Engine::run() {
     }
 }
 
-SDL_JoystickID Engine::openGameController(Sint32 deviceIndex, Uint32 timestamp)
+SDL_JoystickID Engine::openGamepad(SDL_JoystickID instanceId, Uint64 timestamp)
 {
-    if (!SDL_IsGameController(deviceIndex)) {
-        return -1;
+    if (!SDL_IsGamepad(instanceId)) {
+        return 0;
     }
 
-    SDL_GameController* controller = SDL_GameControllerOpen(deviceIndex);
-    if (!controller) {
+    SDL_Gamepad* gamepad = SDL_OpenGamepad(instanceId);
+    if (!gamepad) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Failed to open game controller %d: %s",
-                    deviceIndex,
+                    "Failed to open gamepad %" SDL_PRIu32 ": %s",
+                    instanceId,
                     SDL_GetError());
-        return -1;
+        return 0;
     }
 
-    SDL_Joystick* joystick = SDL_GameControllerGetJoystick(controller);
+    SDL_Joystick* joystick = SDL_GetGamepadJoystick(gamepad);
     if (!joystick) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Failed to get joystick handle for game controller %d: %s",
-                    deviceIndex,
+                    "Failed to get joystick handle for gamepad %" SDL_PRIu32 ": %s",
+                    instanceId,
                     SDL_GetError());
-        SDL_GameControllerClose(controller);
-        return -1;
+        SDL_CloseGamepad(gamepad);
+        return 0;
     }
 
-    const SDL_JoystickID instance_id = SDL_JoystickInstanceID(joystick);
-    auto existing = gameControllers.find(instance_id);
-    if (existing != gameControllers.end()) {
-        SDL_GameControllerClose(existing->second);
+    const SDL_JoystickID instance_id = SDL_GetJoystickID(joystick);
+    auto existing = gamepads.find(instance_id);
+    if (existing != gamepads.end()) {
+        SDL_CloseGamepad(existing->second);
     }
-    gameControllers[instance_id] = controller;
-    inputState.on_controller_connected(deviceIndex, instance_id, timestamp);
+    gamepads[instance_id] = gamepad;
+    inputState.on_gamepad_connected(static_cast<Sint32>(instance_id), instance_id, timestamp);
     return instance_id;
 }
 
-void Engine::closeGameController(SDL_JoystickID instanceId, Uint32 timestamp)
+void Engine::closeGamepad(SDL_JoystickID instanceId, Uint64 timestamp)
 {
     if (inputDialType) {
-        inputDialType->deactivate_controller(instanceId);
+        inputDialType->deactivate_gamepad(instanceId);
     }
-    auto it = gameControllers.find(instanceId);
-    if (it != gameControllers.end()) {
+    auto it = gamepads.find(instanceId);
+    if (it != gamepads.end()) {
         if (it->second) {
-            SDL_GameControllerClose(it->second);
+            SDL_CloseGamepad(it->second);
         }
-        gameControllers.erase(it);
+        gamepads.erase(it);
     }
-    inputState.on_controller_disconnected(instanceId, timestamp);
+    inputState.on_gamepad_disconnected(instanceId, timestamp);
 }
 
-void Engine::closeAllGameControllers(Uint32 timestamp)
+void Engine::closeAllGamepads(Uint64 timestamp)
 {
     std::vector<SDL_JoystickID> instance_ids;
-    instance_ids.reserve(gameControllers.size());
-    for (const auto& [instance_id, controller] : gameControllers) {
-        (void)controller;
+    instance_ids.reserve(gamepads.size());
+    for (const auto& [instance_id, gamepad] : gamepads) {
+        (void)gamepad;
         instance_ids.push_back(instance_id);
     }
     for (const SDL_JoystickID instance_id : instance_ids) {
-        closeGameController(instance_id, timestamp);
+        closeGamepad(instance_id, timestamp);
     }
 }
 
 void Engine::shutdown() {
     browser_system.shutdown();
     inputDialType.reset();
-    closeAllGameControllers(SDL_GetTicks());
+    closeAllGamepads(SDL_GetTicks());
     lua_jobs_clear_callbacks();
     lua_keyring_drop(*lua_state);
     lua_http_drop(*lua_state);
@@ -629,9 +636,9 @@ void Engine::initSystemCursors() {
     };
 
     static const CursorDesc cursorDescs[] = {
-        {"arrow", SDL_SYSTEM_CURSOR_ARROW},
-        {"hand", SDL_SYSTEM_CURSOR_HAND},
-        {"ibeam", SDL_SYSTEM_CURSOR_IBEAM},
+        {"arrow", SDL_SYSTEM_CURSOR_DEFAULT},
+        {"hand", SDL_SYSTEM_CURSOR_POINTER},
+        {"ibeam", SDL_SYSTEM_CURSOR_TEXT},
     };
 
     for (const auto& desc : cursorDescs) {
@@ -652,7 +659,7 @@ void Engine::initSystemCursors() {
 void Engine::shutdownSystemCursors() {
     for (auto& pair : systemCursors) {
         if (pair.second) {
-            SDL_FreeCursor(pair.second);
+            SDL_DestroyCursor(pair.second);
         }
     }
     systemCursors.clear();

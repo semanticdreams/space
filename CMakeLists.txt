@@ -160,9 +160,6 @@ find_package(glm REQUIRED)
 
 find_package(OpenGL REQUIRED COMPONENTS OpenGL)
 
-find_package(SDL2 REQUIRED)
-include_directories(${SDL2_INCLUDE_DIRS})
-
 find_package(OpenGL)
 
 find_package(Bullet REQUIRED)
@@ -185,6 +182,13 @@ set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "Disable spdlog tests" FORCE)
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Disable spdlog examples" FORCE)
 set(SPDLOG_INSTALL OFF CACHE BOOL "Disable spdlog install" FORCE)
 add_subdirectory(external/spdlog)
+set(SDL_SHARED ON CACHE BOOL "Build SDL3 shared library" FORCE)
+set(SDL_STATIC OFF CACHE BOOL "Disable SDL3 static library build" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "Disable SDL3 test helper library" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "Disable SDL3 tests" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "Disable SDL3 examples" FORCE)
+set(SDL_INSTALL OFF CACHE BOOL "Disable SDL3 install rules" FORCE)
+add_subdirectory(external/sdl)
 if(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS)
     space_suppress_target_warnings(lua)
     space_suppress_target_warnings(lua-header)
@@ -212,9 +216,6 @@ if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 find_package(Boost CONFIG REQUIRED)
-
-# Executable and link
-string(STRIP ${SDL2_LIBRARIES} SDL2_LIBRARIES)
 
 file( GLOB SOURCES src/*.cpp src/*.c)
 if(NOT SPACE_HAS_VTERM)
@@ -261,7 +262,7 @@ target_include_directories(${PROJECT_NAME}_lib
     ${CMAKE_CURRENT_BINARY_DIR}/external/libjpeg-turbo
 )
 target_link_libraries(${PROJECT_NAME}_lib
-    ${SDL2_LIBRARIES}
+    SDL3::SDL3
     ${BULLET_LIBRARIES}
     ${OPENAL_LIBRARY}
     PNG::PNG
@@ -441,10 +442,10 @@ add_executable(test_input_dial_type
     src/dial_type.cpp
     src/input_dial_type.cpp
     src/input_state.cpp
-    src/input_game_controller_state.cpp
+    src/input_gamepad_state.cpp
 )
 target_include_directories(test_input_dial_type PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(test_input_dial_type ${SDL2_LIBRARIES})
+target_link_libraries(test_input_dial_type SDL3::SDL3)
 add_test(NAME test_input_dial_type COMMAND test_input_dial_type)
 set_tests_properties(test_input_dial_type PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -592,7 +593,7 @@ set(CPACK_GENERATOR "DEB;RPM")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "space")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 #set(CPACK_DEBIAN_PACKAGE_DEPENDS
-#"libsdl2-2.0-0, libepoxy0, libbullet-dev, libopenal1"
+#"libsdl3-0, libepoxy0, libbullet-dev, libopenal1"
 #)
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "space")
 set(CPACK_DEBIAN_PACKAGE_SECTION "games")

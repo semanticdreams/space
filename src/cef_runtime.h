@@ -14,6 +14,8 @@ struct Config {
 // Returns -1 when the caller should continue normal app startup.
 int maybe_execute_subprocess(int argc, char** argv);
 
+void configure_browser_process(const Config& config);
+bool ensure_initialized();
 bool initialize_browser_process(const Config& config);
 void do_message_loop_work();
 void shutdown();

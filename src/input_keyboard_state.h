@@ -1,13 +1,7 @@
 #ifndef INPUT_KEYBOARD_STATE_H
 #define INPUT_KEYBOARD_STATE_H
 
-#ifdef __linux__
-#include <SDL2/SDL.h>
-#elif _WIN32
-
-#include <SDL.h>
-
-#endif
+#include <SDL3/SDL.h>
 
 enum KeyStatus {
     None,
@@ -43,8 +37,8 @@ public:
     [[nodiscard]] KeyStatus getKeyState(SDL_Scancode) const;
 
 private:
-    const Uint8* currentValue;
-    Uint8 previousValue[SDL_NUM_SCANCODES];
+    const bool* currentValue;
+    bool previousValue[SDL_SCANCODE_COUNT];
 
     // Get the boolean value of key
     [[nodiscard]] bool getKeyValue(SDL_Scancode) const;

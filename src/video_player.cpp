@@ -10,11 +10,7 @@
 #include <thread>
 
 #include <epoxy/gl.h>
-#ifdef __linux__
-#include <SDL2/SDL.h>
-#elif _WIN32
-#include <SDL.h>
-#endif
+#include <SDL3/SDL.h>
 
 #include "asset_manager.h"
 #include "audio.h"

@@ -1,13 +1,7 @@
 #ifndef WINDOW_SDL_H
 #define WINDOW_SDL_H
 
-#ifdef __linux__
-#include <SDL2/SDL.h>
-#elif _WIN32
-
-#include <SDL.h>
-
-#endif
+#include <SDL3/SDL.h>
 
 #include <memory>
 #include <string>
@@ -42,11 +36,11 @@ public:
 
     WindowSdl& operator=(const WindowSdl&) = delete;
 
-    bool init(int xPos, int yPos, int width, int height, bool maximized);
+    bool init(int width, int height, bool maximized);
 
     void logGlParams() ;
 
-    void updateFpsCounter(uint32_t dt) ;
+    void updateFpsCounter(Uint64 dt) ;
 
     void clear() ;
 

@@ -2,11 +2,7 @@
 #include <glm/glm.hpp>
 #include <epoxy/gl.h>
 
-#ifdef __linux__
-#include <SDL2/SDL.h>
-#elif _WIN32
-#include <SDL.h>
-#endif
+#include <SDL3/SDL.h>
 
 #include <iostream>
 #include <string>
@@ -418,7 +414,7 @@ sol::table create_gl_table(sol::state_view lua)
     gl.set_function("glGetError", glGetError);
 
     gl.set_function("clipboard-has", []() {
-        return SDL_HasClipboardText() == SDL_TRUE;
+        return SDL_HasClipboardText();
     });
 
     gl.set_function("clipboard-get", []() {

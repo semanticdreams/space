@@ -221,12 +221,38 @@ function(space_setup_cef_for_target_linux target_name)
         message(FATAL_ERROR "CEF shared library not found at ${_cef_lib_path}")
     endif()
 
+    # Chromium resolves icudtl.dat from the libcef module directory on Linux.
+    # Ensure required runtime payloads are staged next to libcef.so.
+    set(_cef_release_dir "${SPACE_CEF_ROOT}/Release")
+    set(_cef_resource_dir "${SPACE_CEF_ROOT}/Resources")
+    set(_cef_release_payloads
+        "icudtl.dat"
+        "resources.pak"
+        "v8_context_snapshot.bin"
+        "snapshot_blob.bin"
+        "chrome_100_percent.pak"
+        "chrome_200_percent.pak"
+    )
+    foreach(_cef_payload IN LISTS _cef_release_payloads)
+        if(EXISTS "${_cef_resource_dir}/${_cef_payload}")
+            file(COPY_FILE
+                "${_cef_resource_dir}/${_cef_payload}"
+                "${_cef_release_dir}/${_cef_payload}"
+                ONLY_IF_DIFFERENT
+            )
+        endif()
+    endforeach()
+    if(EXISTS "${_cef_resource_dir}/locales")
+        file(COPY "${_cef_resource_dir}/locales" DESTINATION "${_cef_release_dir}")
+    endif()
+
     if(NOT TARGET space_cef_linux)
         add_library(space_cef_linux SHARED IMPORTED GLOBAL)
     endif()
     set_target_properties(space_cef_linux PROPERTIES IMPORTED_LOCATION "${_cef_lib_path}")
 
     if(NOT TARGET libcef_dll_wrapper)
+        set(USE_SANDBOX OFF CACHE BOOL "Disable CEF sandbox for Linux runtime" FORCE)
         set(CEF_ROOT "${SPACE_CEF_ROOT}")
         list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
         find_package(CEF REQUIRED)

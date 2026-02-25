@@ -16,8 +16,8 @@ WindowSdl::~WindowSdl() {
     LOG(Info) << "Bye :)";
 }
 
-bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) {
-    int flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+bool WindowSdl::init(int width, int height, bool maximized) {
+    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (maximized) {
         flags |= SDL_WINDOW_MAXIMIZED;
     }
@@ -28,8 +28,25 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) 
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
-    if (SDL_Init(SDL_INIT_EVERYTHING) == 0) {
+    const SDL_InitFlags init_flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS;
+    if (!SDL_Init(init_flags)) {
+        LOG(Error) << "SDL initialisation failed";
+        LOG(Error) << SDL_GetError();
+        return false;
+    } else {
         LOG(Info) << "Subsystems initialised";
+        if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+            LOG(Warning) << "SDL gamepad subsystem unavailable: " << SDL_GetError();
+            SDL_ClearError();
+        }
+        if (!SDL_InitSubSystem(SDL_INIT_JOYSTICK)) {
+            LOG(Warning) << "SDL joystick subsystem unavailable: " << SDL_GetError();
+            SDL_ClearError();
+        }
+        if (!SDL_InitSubSystem(SDL_INIT_HAPTIC)) {
+            LOG(Warning) << "SDL haptic subsystem unavailable: " << SDL_GetError();
+            SDL_ClearError();
+        }
 
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -42,7 +59,7 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) 
 
         // WindowSdl
         window = std::unique_ptr<SDL_Window, SdlWindowDestroyer>(
-                SDL_CreateWindow(title.c_str(), xPos, yPos, width, height, flags));
+                SDL_CreateWindow(title.c_str(), width, height, flags));
         if (window) {
             LOG(Info) << "WindowSdl initialised";
         } else
@@ -54,21 +71,16 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) 
         std::string error;
         if (load_png_file(iconPath, icon, error)) {
             // Create an SDL_Surface from pixel data
-            SDL_Surface* iconSurface = SDL_CreateRGBSurfaceFrom(
-                    icon.pixels.get(),            // pixel data
-                    icon.width,              // width
-                    icon.height,             // height
-                    32,                 // depth (bits per pixel)
-                    icon.width * 4,          // pitch (bytes per row)
-                    0x000000FF,         // red mask
-                    0x0000FF00,         // green mask
-                    0x00FF0000,         // blue mask
-                    0xFF000000          // alpha mask
-                    );
+            SDL_Surface* iconSurface = SDL_CreateSurfaceFrom(
+                    icon.width,
+                    icon.height,
+                    SDL_PIXELFORMAT_RGBA32,
+                    icon.pixels.get(),
+                    icon.width * 4);
 
             if (iconSurface) {
                 SDL_SetWindowIcon(window.get(), iconSurface);
-                SDL_FreeSurface(iconSurface);
+                SDL_DestroySurface(iconSurface);
             } else {
                 LOG(Warning) << "Failed to create SDL surface from icon pixels!";
             }
@@ -106,10 +118,6 @@ bool WindowSdl::init(int xPos, int yPos, int width, int height, bool maximized) 
         }
 
         return true;
-    } else {
-        LOG(Error) << "SDL initialisation failed";
-        LOG(Error) << SDL_GetError();
-        return false;
     }
 }
 
@@ -161,10 +169,10 @@ void WindowSdl::logGlParams() {
     LOG(Info) << "";
 }
 
-void WindowSdl::updateFpsCounter(uint32_t dt) {
+void WindowSdl::updateFpsCounter(Uint64 dt) {
     double elapsedSeconds;
 
-    currentSeconds += dt / 1000.0;
+    currentSeconds += static_cast<double>(dt) / 1000.0;
     elapsedSeconds = currentSeconds - previousSeconds;
     /* limit text updates to 4 per second */
     if (elapsedSeconds > 0.25) {
@@ -199,7 +207,7 @@ void WindowSdl::swapBuffer() {
 
 void WindowSdl::clean() {
     // SDL_DestroyWindow(window); Handled by unique_ptr
-    SDL_GL_DeleteContext(context);
+    SDL_GL_DestroyContext(context);
 }
 
 std::unique_ptr<WindowSdl> WindowSdl::create() {

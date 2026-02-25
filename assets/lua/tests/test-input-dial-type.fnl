@@ -7,16 +7,16 @@
                 :deactivate 0
                 :on-input 0
                 :off-input 0
-                :controller-id nil
+                :gamepad-id nil
                 :callback nil
                 :off-token nil})
   (local engine
-    {:dial-type-activate (fn [_self controller-id]
+    {:dial-type-activate (fn [_self gamepad-id]
                            (set calls.activate (+ calls.activate 1))
-                           (set calls.controller-id controller-id))
-     :dial-type-deactivate (fn [_self _controller-id]
+                           (set calls.gamepad-id gamepad-id))
+     :dial-type-deactivate (fn [_self _gamepad-id]
                              (set calls.deactivate (+ calls.deactivate 1)))
-     :dial-type-on-input (fn [_self _controller-id callback]
+     :dial-type-on-input (fn [_self _gamepad-id callback]
                            (set calls.on-input (+ calls.on-input 1))
                            (set calls.callback callback)
                            77)
@@ -28,32 +28,32 @@
   (local notifier
     (InputDialTypeModule.InputDialType
       {:engine engine
-       :controller-id 101
+       :gamepad-id 101
        :on-input (fn [payload]
                    (set received payload))}))
-  (assert (= calls.activate 1) "notifier should activate controller once")
+  (assert (= calls.activate 1) "notifier should activate gamepad once")
   (assert (= calls.on-input 1) "notifier should register callback once")
-  (assert (= calls.controller-id 101) "notifier should activate requested controller")
+  (assert (= calls.gamepad-id 101) "notifier should activate requested gamepad")
   (assert (= notifier.callback-id 77) "notifier should keep callback registration token")
   (calls.callback {:instance-id 101 :input [[1] []]})
   (assert received "callback registered through engine should be callable")
   (notifier:drop)
   (assert (= calls.off-input 1) "drop should unregister callback")
   (assert (= calls.off-token 77) "drop should unregister using stored token")
-  (assert (= calls.deactivate 1) "drop should deactivate controller by default"))
+  (assert (= calls.deactivate 1) "drop should deactivate gamepad by default"))
 
-(fn input-dial-type-can-keep-controller-active-on-drop []
+(fn input-dial-type-can-keep-gamepad-active-on-drop []
   (local calls {:deactivate 0})
   (local engine
-    {:dial-type-activate (fn [_self _controller-id] nil)
-     :dial-type-deactivate (fn [_self _controller-id]
+    {:dial-type-activate (fn [_self _gamepad-id] nil)
+     :dial-type-deactivate (fn [_self _gamepad-id]
                              (set calls.deactivate (+ calls.deactivate 1)))
-     :dial-type-on-input (fn [_self _controller-id _callback] 88)
+     :dial-type-on-input (fn [_self _gamepad-id _callback] 88)
      :dial-type-off-input (fn [_self _token] true)})
   (local notifier
     (InputDialTypeModule.InputDialType
       {:engine engine
-       :controller-id 202
+       :gamepad-id 202
        :deactivate-on-drop false
        :on-input (fn [_payload] nil)}))
   (notifier:drop)
@@ -62,7 +62,7 @@
 (table.insert tests {:name "InputDialType registers/unregisters via engine API"
                      :fn input-dial-type-registers-and-unregisters-through-engine-api})
 (table.insert tests {:name "InputDialType can skip deactivate on drop"
-                     :fn input-dial-type-can-keep-controller-active-on-drop})
+                     :fn input-dial-type-can-keep-gamepad-active-on-drop})
 
 (local main
   (fn []

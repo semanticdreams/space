@@ -11,10 +11,10 @@ void MouseState::begin_frame()
     wheelY = 0;
 }
 
-void MouseState::update_from_mask(Uint32 mask)
+void MouseState::update_from_mask(SDL_MouseButtonFlags mask)
 {
     for (int button = 1; button < MAX_BUTTONS; ++button) {
-        bool pressed = (mask & SDL_BUTTON(button)) != 0;
+        bool pressed = (mask & SDL_BUTTON_MASK(button)) != 0;
         currentButtons[index_for_button(static_cast<Uint8>(button))] = pressed ? 1 : 0;
     }
 }
