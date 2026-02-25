@@ -26,7 +26,7 @@
     (local pinned (or options.pinned {}))
     (local make-line options.make-line)
     (local ctx options.ctx)
-    (local edge-thickness (or options.edge-thickness 2.0))
+    (local base-edge-thickness (or options.edge-thickness 2.0))
     (local default-edge-color (ensure-glm-vec4 options.edge-color (glm.vec4 0.6 0.6 0.6 1)))
     (local label-color (ensure-glm-vec4 options.label-color (glm.vec4 0.8 0.8 0.8 1)))
     (local label-depth-offset (or options.label-depth-offset 1.0))
@@ -217,8 +217,15 @@
         (assert (and source-idx target-idx)
                 "GraphViewLayout.add-edge requires indexed source and target nodes")
         (layout:add-edge source-idx target-idx true)
+        (local source-size (or (and edge edge.source edge.source.size) 0))
+        (local target-size (or (and edge edge.target edge.target.size) 0))
+        (local min-node-size (math.min source-size target-size))
+        (local scaled-edge-thickness
+               (if (> min-node-size 0)
+                   (math.max base-edge-thickness (* min-node-size 0.35))
+                   base-edge-thickness))
         (local line (make-line ctx {:color (ensure-glm-vec4 edge.color default-edge-color)
-                                    :thickness edge-thickness
+                                    :thickness scaled-edge-thickness
                                     :label (edge-key edge)}))
         (assert line (string.format "GraphViewLayout.add-edge failed to create line for %s->%s"
                                     (node-id edge.source)

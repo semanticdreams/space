@@ -13,5 +13,6 @@ Current e2e outputs:
 - `list-view.png`: list view default scroll position inside a constrained viewport.
 - `scene-button.png`: stable scene-only render.
 - `scene-hud-button.png`: combined scene + HUD render.
+- `graph-edges.png`: dedicated graph-edge visibility render.
 
 When adding or updating tests, view the PNGs directly to confirm the visuals match the intended scenario.

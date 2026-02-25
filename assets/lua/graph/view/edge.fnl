@@ -8,7 +8,7 @@
     (local options (or opts {}))
     (var color (Utils.ensure-glm-vec4 options.color (glm.vec4 0.4 0.4 0.4 1)))
     (local thickness (or options.thickness 2.0))
-    (local depth-offset (or options.depth-offset -10.0))
+    (local depth-offset (or options.depth-offset 1.0))
     (local label (or options.label options.key "edge"))
     (var handle nil)
 

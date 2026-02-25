@@ -89,6 +89,9 @@
     (local graph-theme (and theme theme.graph))
     (local resolved-label-color (or options.label-color (and graph-theme graph-theme.label-color)))
     (local resolved-edge-color (or options.edge-color (and graph-theme graph-theme.edge-color)))
+    (local resolved-edge-thickness (or options.edge-thickness
+                                      (and graph-theme graph-theme.edge-thickness)
+                                      2.0))
     (local selection-border-color (or options.selection-border-color
                                       (and graph-theme graph-theme.selection-border-color)))
     (assert selection-border-color "GraphView requires theme graph.selection-border-color")
@@ -310,7 +313,7 @@
                         :make-line new-triangle-line
                         :ctx ctx
                         :edge-color resolved-edge-color
-                        :edge-thickness (or options.edge-thickness 2.0)
+                        :edge-thickness resolved-edge-thickness
                         :label-color (or resolved-label-color (glm.vec4 0.8 0.8 0.8 1))
                         :label-depth-offset (or options.label-depth-offset 1.0)
                         :set-point-position set-point-position
