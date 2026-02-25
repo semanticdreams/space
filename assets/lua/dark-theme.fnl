@@ -32,6 +32,7 @@
    :list-view {:header {:foreground text-color}}
    :combo-box {:items-per-page 10}
    :graph {:edge-color (glm.vec4 0.36 0.45 0.68 0.9)
+           :edge-thickness 4.0
            :label-color text-color
            :selection-border-color (glm.vec4 0.2 0.55 0.95 0.95)}
    :lights {:ambient (glm.vec3 0 0 0)

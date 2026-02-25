@@ -7,11 +7,10 @@
 (local fs (require :fs))
 
 (fn run [ctx]
-  (local focus-manager (FocusManager {:root-name "e2e-graph"}))
+  (local focus-manager (FocusManager {:root-name "e2e-graph-edges"}))
   (var view nil)
   (var graph nil)
-  (local world-size ctx.world-size)
-  (local data-root (fs.join-path "/tmp/space/tests" "graph-node-points"))
+  (local data-root (fs.join-path "/tmp/space/tests" "graph-edges"))
   (when (fs.exists data-root)
     (fs.remove-all data-root))
   (fs.create-dirs data-root)
@@ -22,37 +21,28 @@
                   (set graph (Graph {:with-start false}))
                   (set view (GraphView {:graph graph
                                         :ctx ctx
+                                        :edge-color (glm.vec4 1.0 0.2 0.1 1.0)
+                                        :edge-thickness 8.0
                                         :data-dir data-root}))
                   (local node-a (Graph.GraphNode {:key "node-a"
-                                                  :label "Selected + Focused"
-                                                  :color (glm.vec4 0.32 0.62 0.98 1)
-                                                  :size 12}))
+                                                  :label "A"
+                                                  :color (glm.vec4 0.3 0.55 0.95 1)
+                                                  :size 6}))
                   (local node-b (Graph.GraphNode {:key "node-b"
-                                                  :label "Selected"
-                                                  :color (glm.vec4 0.58 0.86 0.32 1)
-                                                  :size 12}))
-                  (local node-c (Graph.GraphNode {:key "node-c"
-                                                  :label "Idle"
-                                                  :color (glm.vec4 0.78 0.46 0.25 1)
-                                                  :size 12}))
-                  (graph:add-node node-a {:position (glm.vec3 8 9 0)
+                                                  :label "B"
+                                                  :color (glm.vec4 0.62 0.88 0.35 1)
+                                                  :size 6}))
+                  (graph:add-node node-a {:position (glm.vec3 6 9 0)
                                           :run-force? false})
-                  (graph:add-node node-b {:position (glm.vec3 16 6 0)
-                                          :run-force? false})
-                  (graph:add-node node-c {:position (glm.vec3 24 12 0)
+                  (graph:add-node node-b {:position (glm.vec3 26 10 0)
                                           :run-force? false})
                   (graph:add-edge (Graph.GraphEdge {:source node-a
-                                                    :target node-b})
+                                                    :target node-b
+                                                    :color (glm.vec4 1.0 0.2 0.1 1.0)})
                                   {:run-force? false})
-                  (view.selection:set-selection [node-a node-b])
-                  (local focus-node (. view.focus-nodes node-a))
-                  (when focus-node
-                    (focus-node:request-focus))
                   (view:update 0.016)
-                  (assert (> (ctx.point-vector:length) 0)
-                          "Graph node points should emit point data")
                   (local layout
-                    (Layout {:name "graph-node-points"
+                    (Layout {:name "graph-edges"
                              :measurer (fn [self]
                                          (set self.measure (glm.vec3 0 0 0)))
                              :layouter (fn [self]
@@ -65,18 +55,17 @@
                              (graph:drop))
                            (layout:drop))})}))
   (Harness.draw-targets ctx.width ctx.height [{:target screen-target}])
-  (Harness.capture-snapshot {:name "graph-node-points"
+  (Harness.capture-snapshot {:name "graph-edges"
                              :width ctx.width
                              :height ctx.height
                              :tolerance 3})
-  (Harness.cleanup-target screen-target)
-  )
+  (Harness.cleanup-target screen-target))
 
 (fn main []
   (Harness.with-app {}
                    (fn [ctx]
                      (run ctx)))
-  (print "E2E graph-node-points snapshot complete"))
+  (print "E2E graph-edges snapshot complete"))
 
 {:run run
  :main main}
