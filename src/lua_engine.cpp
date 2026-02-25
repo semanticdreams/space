@@ -71,9 +71,17 @@ EngineConfig parse_engine_config(const sol::object& options)
         if (height && *height > 0) {
             config.height = *height;
         }
-        sol::optional<bool> maximized = opts["maximized"];
-        if (maximized) {
-            config.maximized = *maximized;
+        sol::optional<std::string> window_mode = opts["window-mode"];
+        if (window_mode) {
+            if (*window_mode == "windowed") {
+                config.window_mode = WindowStartupMode::Windowed;
+            } else if (*window_mode == "maximized") {
+                config.window_mode = WindowStartupMode::Maximized;
+            } else if (*window_mode == "fullscreen") {
+                config.window_mode = WindowStartupMode::Fullscreen;
+            } else {
+                throw sol::error("engine.Engine options.window-mode must be one of: windowed, maximized, fullscreen");
+            }
         }
     }
     return config;

@@ -102,9 +102,23 @@
             "camera rotation should roundtrip")
     true)))
 
+(fn settings-window-roundtrip []
+  (with-temp-dir (fn [root]
+    (local settings (Settings {:config-dir root :filename "settings.toml"}))
+    (settings.set-value "window.mode" "fullscreen" {:save? false})
+    (settings.set-value "window.width" 1366 {:save? false})
+    (settings.set-value "window.height" 768 {:save? false})
+    (settings.save)
+    (local reload (Settings {:config-dir root :filename "settings.toml"}))
+    (assert (= (reload.get-value "window.mode" nil) "fullscreen"))
+    (assert (= (reload.get-value "window.width" nil) 1366))
+    (assert (= (reload.get-value "window.height" nil) 768))
+    true)))
+
 (table.insert tests {:name "Settings merge system then user" :fn settings-merge-order})
 (table.insert tests {:name "Settings write only user config" :fn settings-write-user-only})
 (table.insert tests {:name "Settings camera roundtrip" :fn settings-camera-roundtrip})
+(table.insert tests {:name "Settings window roundtrip" :fn settings-window-roundtrip})
 
 (local main
   (fn []

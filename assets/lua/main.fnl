@@ -13,8 +13,10 @@
 (local AppConfig (require :app-config))
 (local CliArgs (require :cli-args))
 
+(set app.engine-autocreated false)
 (when (not app.engine)
-  (set app.engine (EngineModule.Engine {})))
+  (set app.engine (EngineModule.Engine {}))
+  (set app.engine-autocreated true))
 
 (local glm (require :glm))
 (global fennel (require :fennel))
@@ -262,6 +264,61 @@
   (disconnect-camera-settings)
   (connect-volume-settings))
 
+(fn normalize-window-mode [mode]
+  (if (= mode "windowed")
+      "windowed"
+      (= mode "fullscreen")
+      "fullscreen"
+      "maximized"))
+
+(fn sanitize-window-dimension [value]
+  (if (and (= (type value) :number) (> value 0))
+      (math.floor value)
+      nil))
+
+(fn load-window-startup-options []
+  (local settings (Settings {:app-name "space"}))
+  (local mode (normalize-window-mode (settings.get-value "window.mode" "maximized")))
+  (local width (sanitize-window-dimension (settings.get-value "window.width" nil)))
+  (local height (sanitize-window-dimension (settings.get-value "window.height" nil)))
+  (settings.drop)
+  (local options {:window-mode mode})
+  (when width
+    (set (. options :width) width))
+  (when height
+    (set (. options :height) height))
+  options)
+
+(fn schedule-window-settings-save []
+  (set app.window-settings-dirty true)
+  (set app.window-settings-save-deadline (+ (os.clock) 0.25)))
+
+(fn flush-window-settings-save []
+  (when (and app.window-settings-dirty
+             app.settings
+             app.settings.save
+             (>= (os.clock) app.window-settings-save-deadline))
+    (app.settings.save)
+    (set app.window-settings-dirty false)))
+
+(fn persist-window-size [width height]
+  (when (and app.settings app.settings.set-value)
+    (local safe-width (sanitize-window-dimension width))
+    (local safe-height (sanitize-window-dimension height))
+    (when (and safe-width safe-height)
+      (app.settings.set-value "window.width" safe-width {:save? false})
+      (app.settings.set-value "window.height" safe-height {:save? false})
+      (schedule-window-settings-save))))
+
+(fn persist-window-mode [mode]
+  (when (and app.settings app.settings.set-value)
+    (local safe-mode (normalize-window-mode mode))
+    (app.settings.set-value "window.mode" safe-mode {:save? false})
+    (if (= safe-mode "windowed")
+        (persist-window-size (and app.engine app.engine.width)
+                             (and app.engine app.engine.height)))
+    (schedule-window-settings-save)))
+
 (fn matches-filters? [target filters]
   (or
     (= filters nil)
@@ -369,12 +426,15 @@
 (set app.volume-settings-handler nil)
 (set app.camera-settings-handler nil)
 (set app.window-resized-handler nil)
+(set app.window-mode-handler nil)
 (set app.update-handler nil)
 (set app.remote-control nil)
 (set app.remote-control-endpoint nil)
 (set app.browser-cube-surface nil)
 (set app.next-frame-queue [])
 (set app.next-frame-pending [])
+(set app.window-settings-dirty false)
+(set app.window-settings-save-deadline 0)
 
 (fn app.next-frame [cb]
   (assert cb "app.next-frame requires callback")
@@ -420,12 +480,24 @@
   (when (and app.window-resized-handler app.engine.events app.engine.events.window-resized)
     (app.engine.events.window-resized:disconnect app.window-resized-handler true)
     (set app.window-resized-handler nil))
+  (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
+    (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
+    (set app.window-mode-handler nil))
   (when (and app.engine.events app.engine.events.window-resized)
     (set app.window-resized-handler
          (app.engine.events.window-resized:connect
            (fn [e]
              (app.set-viewport {:width e.width :height e.height})
-             (app.reset-projection)))))
+             (app.reset-projection)
+             (if (= (normalize-window-mode (and app.engine (. app.engine "window-mode"))) "windowed")
+                 (persist-window-size e.width e.height))))))
+  (when (and app.engine.events app.engine.events.window-mode-changed)
+    (set app.window-mode-handler
+         (app.engine.events.window-mode-changed:connect
+           (fn [e]
+             (when app.engine
+               (set (. app.engine "window-mode") (normalize-window-mode e.mode)))
+             (persist-window-mode e.mode)))))
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)
     (set app.update-handler nil))
@@ -606,6 +678,7 @@
     (profiler.begin-frame delta))
   (when app.remote-control
     (app.remote-control:tick))
+  (flush-window-settings-save)
   (when (and app.kernels app.kernels.tick)
     (app.kernels:tick))
   (when (and app.engine.audio app.camera)
@@ -635,6 +708,9 @@
   (when (and app.window-resized-handler app.engine.events app.engine.events.window-resized)
     (app.engine.events.window-resized:disconnect app.window-resized-handler true)
     (set app.window-resized-handler nil))
+  (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
+    (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
+    (set app.window-mode-handler nil))
   (when app.first-person-controls
     (app.first-person-controls:drop)
     (set app.first-person-controls nil))
@@ -707,12 +783,18 @@
   (when (and app.volume-settings-handler VolumeControl.volume-settings-changed-debounced)
     (VolumeControl.volume-settings-changed-debounced:disconnect app.volume-settings-handler true)
     (set app.volume-settings-handler nil))
+  (when (and app.window-settings-dirty app.settings app.settings.save)
+    (app.settings.save)
+    (set app.window-settings-dirty false))
   (when (and app.settings app.settings.drop)
     (app.settings.drop)
     (set app.settings nil))
   )
 
 (when (and app.engine AppConfig.run-main)
+  (when app.engine-autocreated
+    (set app.engine (EngineModule.Engine (load-window-startup-options)))
+    (set app.engine-autocreated false))
   (when (not (app.engine:start))
     (error "[space] engine failed to start (window/GL init failed)"))
   (app.init)

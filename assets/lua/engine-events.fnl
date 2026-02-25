@@ -15,4 +15,5 @@
  :mouse-motion (Signal)
  :key-up (Signal)
  :key-down (Signal)
- :window-resized (Signal)}
+ :window-resized (Signal)
+ :window-mode-changed (Signal)}

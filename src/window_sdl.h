@@ -21,6 +21,12 @@ struct SdlWindowDestroyer {
     }
 };
 
+enum class WindowStartupMode {
+    Windowed,
+    Maximized,
+    Fullscreen,
+};
+
 // Manage game's window and drawing in this window.
 // The window title bar gives some info, as game's title
 // or FPS counter.
@@ -36,7 +42,7 @@ public:
 
     WindowSdl& operator=(const WindowSdl&) = delete;
 
-    bool init(int width, int height, bool maximized);
+    bool init(int width, int height, WindowStartupMode startup_mode);
 
     void logGlParams() ;
 
@@ -53,6 +59,9 @@ public:
     void toggleFullscreen();
     void setTextInputEnabled(bool enabled);
     [[nodiscard]] bool isTextInputEnabled() const;
+    [[nodiscard]] WindowStartupMode currentStartupMode() const;
+    [[nodiscard]] bool getWindowSize(int& out_width, int& out_height) const;
+    [[nodiscard]] bool getWindowSizeInPixels(int& out_width, int& out_height) const;
     void updateViewportFromWindowPixels();
 
 private:
@@ -63,8 +72,6 @@ private:
     double previousSeconds { 0 };
     double currentSeconds { 0 };
     int frameCount { 0 };
-
-    bool isFullscreen = { false };
 
     /*
     void debugGlErrorCallback(  GLenum        source,
