@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <SDL3/SDL_main.h>
 
 #include <CLI/CLI.hpp>
 
@@ -110,12 +111,6 @@ int main(int argc, char *argv[])
             return static_cast<char>(std::tolower(ch));
         });
         skip_cef = (value == "1" || value == "true" || value == "on");
-    }
-    if (!skip_cef) {
-        int cef_process_exit_code = cef_runtime::maybe_execute_subprocess(argc, argv);
-        if (cef_process_exit_code >= 0) {
-            return cef_process_exit_code;
-        }
     }
 #endif
 
@@ -265,15 +260,8 @@ int main(int argc, char *argv[])
         cef_runtime::Config cef_config;
         cef_config.argc = argc;
         cef_config.argv = argv;
-#if defined(__linux__)
-        cef_config.helper_executable_path.clear();
-#else
         cef_config.helper_executable_path = sibling_path(argv[0], "space_cef_helper");
-#endif
-        if (!cef_runtime::initialize_browser_process(cef_config)) {
-            std::cerr << "error: failed to initialize CEF\n";
-            return 1;
-        }
+        cef_runtime::configure_browser_process(cef_config);
     }
 #endif
 

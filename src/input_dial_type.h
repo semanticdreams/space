@@ -21,35 +21,35 @@ public:
     void reset();
     bool update();
     bool update_primary();
-    bool update_controller(SDL_JoystickID instanceId);
+    bool update_gamepad(SDL_JoystickID instanceId);
 
     [[nodiscard]] bool has_input() const;
     [[nodiscard]] bool has_input_for(SDL_JoystickID instanceId) const;
     std::optional<DialTypePendingInput> poll_primary();
-    std::optional<DialTypePendingInput> poll_controller(SDL_JoystickID instanceId);
-    [[nodiscard]] std::vector<SDL_JoystickID> controller_ids() const;
-    void activate_controller(SDL_JoystickID instanceId);
-    void deactivate_controller(SDL_JoystickID instanceId);
-    [[nodiscard]] bool is_controller_active(SDL_JoystickID instanceId) const;
-    [[nodiscard]] bool process_controller(SDL_JoystickID instanceId);
+    std::optional<DialTypePendingInput> poll_gamepad(SDL_JoystickID instanceId);
+    [[nodiscard]] std::vector<SDL_JoystickID> gamepad_ids() const;
+    void activate_gamepad(SDL_JoystickID instanceId);
+    void deactivate_gamepad(SDL_JoystickID instanceId);
+    [[nodiscard]] bool is_gamepad_active(SDL_JoystickID instanceId) const;
+    [[nodiscard]] bool process_gamepad(SDL_JoystickID instanceId);
     CallbackId register_callback(SDL_JoystickID instanceId, CallbackFn callback);
     bool unregister_callback(CallbackId callbackId);
 
 private:
     struct Subscription
     {
-        SDL_JoystickID instanceId {-1};
+        SDL_JoystickID instanceId {0};
         CallbackFn callback {};
     };
 
     void dispatch(SDL_JoystickID instanceId, const DialTypePendingInput& input);
-    void remove_controller_subscriptions(SDL_JoystickID instanceId);
+    void remove_gamepad_subscriptions(SDL_JoystickID instanceId);
 
     InputState* inputState;
-    std::unordered_map<SDL_JoystickID, DialType> dialByController;
-    std::unordered_set<SDL_JoystickID> activeControllers;
+    std::unordered_map<SDL_JoystickID, DialType> dialByGamepad;
+    std::unordered_set<SDL_JoystickID> activeGamepads;
     std::unordered_map<CallbackId, Subscription> subscriptions;
-    std::unordered_map<SDL_JoystickID, std::unordered_set<CallbackId>> subscriptionIdsByController;
+    std::unordered_map<SDL_JoystickID, std::unordered_set<CallbackId>> subscriptionIdsByGamepad;
     CallbackId nextCallbackId {1};
 };
 

@@ -242,17 +242,17 @@
       true
       (dispatch-mouse-wheel payload)))
 
-(fn default-on-controller-button-down [payload]
+(fn default-on-gamepad-button-down [payload]
   (when app.first-person-controls
-    (app.first-person-controls:on-controller-button-down payload)))
+    (app.first-person-controls:on-gamepad-button-down payload)))
 
-(fn default-on-controller-axis-motion [payload]
+(fn default-on-gamepad-axis-motion [payload]
   (when app.first-person-controls
-    (app.first-person-controls:on-controller-axis-motion payload)))
+    (app.first-person-controls:on-gamepad-axis-motion payload)))
 
-(fn default-on-controller-device-removed [payload]
+(fn default-on-gamepad-removed [payload]
   (when app.first-person-controls
-    (app.first-person-controls:on-controller-device-removed payload)))
+    (app.first-person-controls:on-gamepad-removed payload)))
 
 (fn default-on-updated [delta]
   (when app.first-person-controls
@@ -280,9 +280,9 @@
      :on-mouse-button-down (or opts.on-mouse-button-down default-on-mouse-button-down)
      :on-mouse-motion (or opts.on-mouse-motion default-on-mouse-motion)
      :on-mouse-wheel (or opts.on-mouse-wheel default-on-mouse-wheel)
-     :on-controller-button-down (or opts.on-controller-button-down default-on-controller-button-down)
-     :on-controller-axis-motion (or opts.on-controller-axis-motion default-on-controller-axis-motion)
-     :on-controller-device-removed (or opts.on-controller-device-removed default-on-controller-device-removed)
+     :on-gamepad-button-down (or opts.on-gamepad-button-down default-on-gamepad-button-down)
+     :on-gamepad-axis-motion (or opts.on-gamepad-axis-motion default-on-gamepad-axis-motion)
+     :on-gamepad-removed (or opts.on-gamepad-removed default-on-gamepad-removed)
      :on-updated (or opts.on-updated default-on-updated)})
 
   (fn on-enter []
@@ -293,9 +293,9 @@
     (app.engine.events.mouse-button-down.connect handlers.on-mouse-button-down)
     (app.engine.events.mouse-motion.connect handlers.on-mouse-motion)
     (app.engine.events.mouse-wheel.connect handlers.on-mouse-wheel)
-    (app.engine.events.controller-button-down.connect handlers.on-controller-button-down)
-    (app.engine.events.controller-axis-motion.connect handlers.on-controller-axis-motion)
-    (app.engine.events.controller-device-removed.connect handlers.on-controller-device-removed)
+    (app.engine.events.gamepad-button-down.connect handlers.on-gamepad-button-down)
+    (app.engine.events.gamepad-axis-motion.connect handlers.on-gamepad-axis-motion)
+    (app.engine.events.gamepad-removed.connect handlers.on-gamepad-removed)
     (app.engine.events.updated.connect handlers.on-updated)
     (register-hover-enter)
     (when opts.on-enter
@@ -309,9 +309,9 @@
     (app.engine.events.mouse-button-down.disconnect handlers.on-mouse-button-down)
     (app.engine.events.mouse-motion.disconnect handlers.on-mouse-motion)
     (app.engine.events.mouse-wheel.disconnect handlers.on-mouse-wheel)
-    (app.engine.events.controller-button-down.disconnect handlers.on-controller-button-down)
-    (app.engine.events.controller-axis-motion.disconnect handlers.on-controller-axis-motion)
-    (app.engine.events.controller-device-removed.disconnect handlers.on-controller-device-removed)
+    (app.engine.events.gamepad-button-down.disconnect handlers.on-gamepad-button-down)
+    (app.engine.events.gamepad-axis-motion.disconnect handlers.on-gamepad-axis-motion)
+    (app.engine.events.gamepad-removed.disconnect handlers.on-gamepad-removed)
     (app.engine.events.updated.disconnect handlers.on-updated)
     (register-hover-leave)
     (when opts.on-leave
@@ -325,9 +325,9 @@
    :on-mouse-button-down handlers.on-mouse-button-down
    :on-mouse-motion handlers.on-mouse-motion
    :on-mouse-wheel handlers.on-mouse-wheel
-   :on-controller-button-down handlers.on-controller-button-down
-   :on-controller-axis-motion handlers.on-controller-axis-motion
-   :on-controller-device-removed handlers.on-controller-device-removed
+   :on-gamepad-button-down handlers.on-gamepad-button-down
+   :on-gamepad-axis-motion handlers.on-gamepad-axis-motion
+   :on-gamepad-removed handlers.on-gamepad-removed
    :on-updated handlers.on-updated
    :on-text-input handlers.on-text-input
    :connect-input InputState.connect-input

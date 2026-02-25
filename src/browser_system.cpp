@@ -150,8 +150,8 @@ bool BrowserSystem::create_surface(const SurfaceConfig& config)
     std::cerr << "Browser surface requires build with SPACE_ENABLE_CEF=ON\n";
     return false;
 #else
-    if (!cef_runtime::is_initialized()) {
-        std::cerr << "Cannot create browser surface before CEF initialization\n";
+    if (!cef_runtime::is_initialized() && !cef_runtime::ensure_initialized()) {
+        std::cerr << "Failed to initialize CEF browser process\n";
         return false;
     }
 

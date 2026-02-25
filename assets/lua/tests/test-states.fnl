@@ -86,9 +86,9 @@
      :mouse_motion nil
      :mouse_button_down nil
      :mouse_button_up nil
-     :controller_button nil
-     :controller_axis nil
-     :controller_removed false
+     :gamepad_button nil
+     :gamepad_axis nil
+     :gamepad_removed false
      :updated nil})
   (local controls
     {:record record
@@ -98,9 +98,9 @@
      :on-mouse-motion (fn [self payload] (set record.mouse_motion {:x payload.x :y payload.y}))
      :on-mouse-button-down (fn [self payload] (set record.mouse_button_down payload.button))
      :on-mouse-button-up (fn [self payload] (set record.mouse_button_up payload.button))
-     :on-controller-button-down (fn [self payload] (set record.controller_button payload.button))
-     :on-controller-axis-motion (fn [self payload] (set record.controller_axis payload.value))
-     :on-controller-device-removed (fn [self payload] (set record.controller_removed payload.which))
+     :on-gamepad-button-down (fn [self payload] (set record.gamepad_button payload.button))
+     :on-gamepad-axis-motion (fn [self payload] (set record.gamepad_axis payload.value))
+     :on-gamepad-removed (fn [self payload] (set record.gamepad_removed payload.which))
      :drag-active? (fn [_self] false)
      :update (fn [self delta] (set record.updated delta))})
   controls)
@@ -139,9 +139,9 @@
   (app.engine.events.mouse-motion.emit {:x 10 :y 20})
   (app.engine.events.mouse-button-down.emit {:button 1 :x 0 :y 0})
   (app.engine.events.mouse-button-up.emit {:button 1 :x 0 :y 0})
-  (app.engine.events.controller-button-down.emit {:button 5 :which 1})
-  (app.engine.events.controller-axis-motion.emit {:axis 0 :value 0.5 :which 1})
-  (app.engine.events.controller-device-removed.emit {:which 1})
+  (app.engine.events.gamepad-button-down.emit {:button 5 :which 1})
+  (app.engine.events.gamepad-axis-motion.emit {:axis 0 :value 0.5 :which 1})
+  (app.engine.events.gamepad-removed.emit {:which 1})
   (app.engine.events.updated.emit 0.25)
   (assert (= controls.record.key_down nil))
   (assert (= controls.record.key_up nil))
@@ -149,9 +149,9 @@
   (assert (= controls.record.mouse_motion.x 10))
   (assert (= controls.record.mouse_button_down 1))
   (assert (= controls.record.mouse_button_up 1))
-  (assert (= controls.record.controller_button 5))
-  (assert (= controls.record.controller_axis 0.5))
-  (assert (= controls.record.controller_removed 1))
+  (assert (= controls.record.gamepad_button 5))
+  (assert (= controls.record.gamepad_axis 0.5))
+  (assert (= controls.record.gamepad_removed 1))
   (assert (= controls.record.updated 0.25))
 
   (assert (= hoverables.record.enter 1) "hoverables should receive on-enter")

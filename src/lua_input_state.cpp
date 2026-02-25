@@ -44,21 +44,21 @@ sol::table create_input_state_table(sol::state_view lua)
         "is-just-released", &MouseState::isJustReleased,
         "button-state", &MouseState::getButtonState);
 
-    input_state_table.new_usertype<GameControllerState>(
-        "GameControllerState",
+    input_state_table.new_usertype<GamepadState>(
+        "GamepadState",
         sol::no_constructor,
-        "connected", &GameControllerState::connected,
-        "instance-id", &GameControllerState::instanceId,
-        "device-index", &GameControllerState::deviceIndex,
-        "update-timestamp", &GameControllerState::updateTimestamp,
-        "axis", &GameControllerState::axis,
-        "is-up", &GameControllerState::isUp,
-        "is-free", &GameControllerState::isFree,
-        "is-just-pressed", &GameControllerState::isJustPressed,
-        "is-down", &GameControllerState::isDown,
-        "is-held", &GameControllerState::isHeld,
-        "is-just-released", &GameControllerState::isJustReleased,
-        "button-state", &GameControllerState::getButtonState);
+        "connected", &GamepadState::connected,
+        "instance-id", &GamepadState::instanceId,
+        "device-index", &GamepadState::deviceIndex,
+        "update-timestamp", &GamepadState::updateTimestamp,
+        "axis", &GamepadState::axis,
+        "is-up", &GamepadState::isUp,
+        "is-free", &GamepadState::isFree,
+        "is-just-pressed", &GamepadState::isJustPressed,
+        "is-down", &GamepadState::isDown,
+        "is-held", &GamepadState::isHeld,
+        "is-just-released", &GamepadState::isJustReleased,
+        "button-state", &GamepadState::getButtonState);
 
     sol::usertype<InputState> input_state_type = input_state_table.new_usertype<InputState>(
         "InputState",
@@ -67,45 +67,39 @@ sol::table create_input_state_table(sol::state_view lua)
     input_state_type["keyboard-state"] = &InputState::keyboardState;
     input_state_type["mouse"] = &InputState::mouseState;
     input_state_type["mouse-state"] = &InputState::mouseState;
-    input_state_type["controller-count"] = &InputState::controller_count;
-    input_state_type["primary-controller-id"] = &InputState::primary_controller_id;
+    input_state_type["gamepad-count"] = &InputState::gamepad_count;
+    input_state_type["primary-gamepad-id"] = &InputState::primary_gamepad_id;
     input_state_type["begin-frame"] = &InputState::begin_frame;
-    input_state_type["on-controller-connected"] = &InputState::on_controller_connected;
-    input_state_type["on-controller-disconnected"] = &InputState::on_controller_disconnected;
-    input_state_type["on-controller-button"] = &InputState::on_controller_button;
-    input_state_type["on-controller-axis"] = &InputState::on_controller_axis;
-    input_state_type["controller"] = sol::property([](InputState& input) {
-        return input.primary_controller();
+    input_state_type["on-gamepad-connected"] = &InputState::on_gamepad_connected;
+    input_state_type["on-gamepad-disconnected"] = &InputState::on_gamepad_disconnected;
+    input_state_type["on-gamepad-button"] = &InputState::on_gamepad_button;
+    input_state_type["on-gamepad-axis"] = &InputState::on_gamepad_axis;
+    input_state_type["gamepad"] = sol::property([](InputState& input) {
+        return input.primary_gamepad();
     });
-    input_state_type["controller-state"] = sol::property([](InputState& input) {
-        return input.primary_controller();
+    input_state_type["gamepad-state"] = sol::property([](InputState& input) {
+        return input.primary_gamepad();
     });
-    input_state_type["game-controller"] = sol::property([](InputState& input) {
-        return input.primary_controller();
+    input_state_type.set_function("gamepad-by-id", [](InputState& input, int instance_id) {
+        return input.gamepad_by_id(static_cast<SDL_JoystickID>(instance_id));
     });
-    input_state_type["game-controller-state"] = sol::property([](InputState& input) {
-        return input.primary_controller();
-    });
-    input_state_type.set_function("controller-by-id", [](InputState& input, int instance_id) {
-        return input.controller_by_id(static_cast<SDL_JoystickID>(instance_id));
-    });
-    input_state_type.set_function("controller-ids", [](InputState& input, sol::this_state state) {
+    input_state_type.set_function("gamepad-ids", [](InputState& input, sol::this_state state) {
         sol::state_view lua(state);
         sol::table ids = lua.create_table();
         int index = 1;
-        for (const SDL_JoystickID instance_id : input.controller_ids()) {
+        for (const SDL_JoystickID instance_id : input.gamepad_ids()) {
             ids[index] = instance_id;
             ++index;
         }
         return ids;
     });
-    input_state_type.set_function("controllers", [](InputState& input, sol::this_state state) {
+    input_state_type.set_function("gamepads", [](InputState& input, sol::this_state state) {
         sol::state_view lua(state);
-        sol::table controllers = lua.create_table();
-        for (const SDL_JoystickID instance_id : input.controller_ids()) {
-            controllers[instance_id] = input.controller_by_id(instance_id);
+        sol::table gamepads = lua.create_table();
+        for (const SDL_JoystickID instance_id : input.gamepad_ids()) {
+            gamepads[instance_id] = input.gamepad_by_id(instance_id);
         }
-        return controllers;
+        return gamepads;
     });
     input_state_table.set_function("InputState", []() {
         return InputState();

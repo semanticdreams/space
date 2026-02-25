@@ -80,7 +80,7 @@ jobs:
           VCPKG_TARGET_TRIPLET: x64-mingw
         run: scripts/build-windows.sh
 
-      - name: Bundle SDL2 DLLs
+      - name: Bundle runtime DLLs
         shell: msys2 {0}
         run: |
           mkdir -p dist

@@ -1,13 +1,7 @@
 #ifndef INPUT_MOUSE_STATE_H
 #define INPUT_MOUSE_STATE_H
 
-#ifdef __linux__
-#include <SDL2/SDL.h>
-#elif _WIN32
-
-#include <SDL.h>
-
-#endif
+#include <SDL3/SDL.h>
 
 #include "input_keyboard_state.h"
 
@@ -23,7 +17,7 @@ public:
     int wheelY {0};
 
     void begin_frame();
-    void update_from_mask(Uint32 mask);
+    void update_from_mask(SDL_MouseButtonFlags mask);
     void set_motion(int newX, int newY, int deltaX, int deltaY);
     void add_wheel(int deltaX, int deltaY);
     void set_button(Uint8 button, bool pressed);

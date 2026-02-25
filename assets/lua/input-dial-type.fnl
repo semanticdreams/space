@@ -6,8 +6,8 @@
   (assert engine.dial-type-deactivate "InputDialType requires engine.dial-type-deactivate")
   (assert engine.dial-type-on-input "InputDialType requires engine.dial-type-on-input")
   (assert engine.dial-type-off-input "InputDialType requires engine.dial-type-off-input")
-  (local controller-id options.controller-id)
-  (assert controller-id "InputDialType requires :controller-id")
+  (local gamepad-id options.gamepad-id)
+  (assert gamepad-id "InputDialType requires :gamepad-id")
   (local on-input (or options.on-input options.callback))
   (assert (= (type on-input) :function) "InputDialType requires :on-input callback")
   (local deactivate-on-drop?
@@ -15,8 +15,8 @@
         true
         options.deactivate-on-drop))
 
-  (engine:dial-type-activate controller-id)
-  (var callback-id (engine:dial-type-on-input controller-id on-input))
+  (engine:dial-type-activate gamepad-id)
+  (var callback-id (engine:dial-type-on-input gamepad-id on-input))
   (var dropped? false)
 
   (fn drop [_self]
@@ -26,10 +26,10 @@
         (engine:dial-type-off-input callback-id)
         (set callback-id nil))
       (when deactivate-on-drop?
-        (engine:dial-type-deactivate controller-id))))
+        (engine:dial-type-deactivate gamepad-id))))
 
   {:engine engine
-   :controller-id controller-id
+   :gamepad-id gamepad-id
    :callback-id callback-id
    :drop drop})
 

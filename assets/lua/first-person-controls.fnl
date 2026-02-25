@@ -75,11 +75,11 @@
      :key-mapping key-mapping
      :mouse-pos nil
      :on-exit options.on-exit
-     :controller {:which nil :axes {}}})
+     :gamepad {:which nil :axes {}}})
 
-  (fn reset-controller [self]
-    (set self.controller.which nil)
-    (set self.controller.axes {}))
+  (fn reset-gamepad [self]
+    (set self.gamepad.which nil)
+    (set self.gamepad.axes {}))
 
   (fn action-active? [self action]
     (local key (. self.key-mapping action))
@@ -141,14 +141,14 @@
         (set self.scroll-speed (glm.vec2 0 0)))
       (set self.scroll-speed (vec2-clamp self.scroll-speed self.max-scroll-speed))))
 
-  (fn controller-axes [self idx]
-    (or (. self.controller.axes idx) 0.0))
+  (fn gamepad-axes [self idx]
+    (or (. self.gamepad.axes idx) 0.0))
 
-  (fn update-controller [self delta]
-    (when self.controller.which
+  (fn update-gamepad [self delta]
+    (when self.gamepad.which
       (local threshold 0.1)
       (fn filtered [axis]
-        (local value (controller-axes self axis))
+        (local value (gamepad-axes self axis))
         (if (and (> value (- threshold)) (< value threshold))
             0.0
             value))
@@ -217,27 +217,27 @@
       (self.camera:right (* (- dx) speed))
       (self.camera:up (* dy speed))))
 
-  (fn on-controller-button-down [self payload]
-    (when (and (not self.controller.which) payload.which)
-      (set self.controller.which payload.which))
+  (fn on-gamepad-button-down [self payload]
+    (when (and (not self.gamepad.which) payload.which)
+      (set self.gamepad.which payload.which))
     (when (and self.on-exit (= payload.button 20))
       (self.on-exit payload)))
 
-  (fn on-controller-axis-motion [self payload]
-    (when (or (not self.controller.which) (= self.controller.which payload.which))
-      (when (not self.controller.which)
-        (set self.controller.which payload.which))
-      (set (. self.controller.axes payload.axis) payload.value)))
+  (fn on-gamepad-axis-motion [self payload]
+    (when (or (not self.gamepad.which) (= self.gamepad.which payload.which))
+      (when (not self.gamepad.which)
+        (set self.gamepad.which payload.which))
+      (set (. self.gamepad.axes payload.axis) payload.value)))
 
-  (fn on-controller-device-removed [self payload]
-    (when (= self.controller.which payload.which)
-      (reset-controller self)))
+  (fn on-gamepad-removed [self payload]
+    (when (= self.gamepad.which payload.which)
+      (reset-gamepad self)))
 
   (fn drag-active? [self]
     (or self.drag-look-start self.drag-move-start))
 
   (fn drop [self]
-    (reset-controller self)
+    (reset-gamepad self)
     (self:reset-scroll)
     (set self.drag-look-start nil)
     (set self.drag-move-start nil)
@@ -277,7 +277,7 @@
     (when (self:action-active? :roll-right)
       (self.camera:roll (* -1 delta self.look-speed self.look-speed-multiplier)))
     (apply-mouse-state self)
-    (update-controller self delta))
+    (update-gamepad self delta))
 
   (set self.add-scroll add-scroll)
   (set self.reset-scroll reset-scroll)
@@ -292,9 +292,9 @@
   (set self.on-mouse-button-down on-mouse-button-down)
   (set self.on-mouse-button-up on-mouse-button-up)
   (set self.on-mouse-motion on-mouse-motion)
-  (set self.on-controller-button-down on-controller-button-down)
-  (set self.on-controller-axis-motion on-controller-axis-motion)
-  (set self.on-controller-device-removed on-controller-device-removed)
+  (set self.on-gamepad-button-down on-gamepad-button-down)
+  (set self.on-gamepad-axis-motion on-gamepad-axis-motion)
+  (set self.on-gamepad-removed on-gamepad-removed)
 
   self)
 

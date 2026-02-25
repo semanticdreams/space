@@ -45,16 +45,16 @@ sol::object input_dial_type_poll_primary(InputDialType& dial, sol::this_state st
     return dial_pending_to_lua(dial.poll_primary(), state);
 }
 
-sol::object input_dial_type_poll_controller(InputDialType& dial, int instanceId, sol::this_state state)
+sol::object input_dial_type_poll_gamepad(InputDialType& dial, int instanceId, sol::this_state state)
 {
-    return dial_pending_to_lua(dial.poll_controller(static_cast<SDL_JoystickID>(instanceId)), state);
+    return dial_pending_to_lua(dial.poll_gamepad(static_cast<SDL_JoystickID>(instanceId)), state);
 }
 
-sol::table input_dial_type_controller_ids(InputDialType& dial, sol::this_state state)
+sol::table input_dial_type_gamepad_ids(InputDialType& dial, sol::this_state state)
 {
     sol::state_view lua(state);
     sol::table out = lua.create_table();
-    const std::vector<SDL_JoystickID> ids = dial.controller_ids();
+    const std::vector<SDL_JoystickID> ids = dial.gamepad_ids();
     for (size_t i = 0; i < ids.size(); ++i) {
         out[static_cast<int>(i + 1)] = ids[i];
     }
@@ -110,16 +110,16 @@ sol::table create_dial_type_table(sol::state_view lua)
         sol::constructors<InputDialType(InputState&)>(),
         "update", &InputDialType::update,
         "update-primary", &InputDialType::update_primary,
-        "update-controller", [](InputDialType& dial, int instanceId) {
-            return dial.update_controller(static_cast<SDL_JoystickID>(instanceId));
+        "update-gamepad", [](InputDialType& dial, int instanceId) {
+            return dial.update_gamepad(static_cast<SDL_JoystickID>(instanceId));
         },
         "has-input", &InputDialType::has_input,
         "has-input-for", [](InputDialType& dial, int instanceId) {
             return dial.has_input_for(static_cast<SDL_JoystickID>(instanceId));
         },
         "poll-primary", &input_dial_type_poll_primary,
-        "poll-controller", &input_dial_type_poll_controller,
-        "controller-ids", &input_dial_type_controller_ids,
+        "poll-gamepad", &input_dial_type_poll_gamepad,
+        "gamepad-ids", &input_dial_type_gamepad_ids,
         "reset", &InputDialType::reset);
 
     dial_type_table.set_function("DialType", []() {

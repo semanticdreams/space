@@ -96,9 +96,9 @@
   (set stub.on-mouse-button-up (fn [_self _payload] nil))
   (set stub.on-mouse-motion (fn [_self _payload] nil))
   (set stub.on-mouse-wheel (fn [_self _payload] nil))
-  (set stub.on-controller-button-down (fn [_self _payload] nil))
-  (set stub.on-controller-axis-motion (fn [_self _payload] nil))
-  (set stub.on-controller-device-removed (fn [_self _payload] nil))
+  (set stub.on-gamepad-button-down (fn [_self _payload] nil))
+  (set stub.on-gamepad-axis-motion (fn [_self _payload] nil))
+  (set stub.on-gamepad-removed (fn [_self _payload] nil))
   (set stub.update (fn [_self _delta] nil))
   stub)
 

@@ -2,26 +2,26 @@
 
 bool KeyboardState::getKeyValue(SDL_Scancode keyCode) const
 {
-    if (keyCode < 0 || keyCode >= SDL_NUM_SCANCODES || currentValue == nullptr) {
+    if (keyCode < 0 || keyCode >= SDL_SCANCODE_COUNT || currentValue == nullptr) {
         return false;
     }
-    return currentValue[keyCode] == 1;
+    return currentValue[keyCode];
 }
 
 KeyStatus KeyboardState::getKeyState(SDL_Scancode keyCode) const
 {
-    if (keyCode < 0 || keyCode >= SDL_NUM_SCANCODES || currentValue == nullptr) {
+    if (keyCode < 0 || keyCode >= SDL_SCANCODE_COUNT || currentValue == nullptr) {
         return None;
     }
 
-    if (previousValue[keyCode] == 0) {
-        if (currentValue[keyCode] == 0) {
+    if (!previousValue[keyCode]) {
+        if (!currentValue[keyCode]) {
             return None;
         } else {
             return JustPressed;
         }
     } else {
-        if (currentValue[keyCode] == 0) {
+        if (!currentValue[keyCode]) {
             return JustReleased;
         } else {
             return Held;
