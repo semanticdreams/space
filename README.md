@@ -8,11 +8,44 @@ Check out the <a href="https://spaceui.org/" target="_blank">docs</a> for more i
 
 ## Setup
 
-<!--
-### AppImage for Linux
+### Install from latest GitHub release (Linux)
 
-*Tested on: Pop!_OS 22.04 LTS*
--->
+Use prebuilt packages from the latest release:
+https://github.com/semanticdreams/space/releases/latest
+
+Direct downloads:
+- AppImage: https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage
+- Debian/Ubuntu: https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb
+- Fedora/RHEL/openSUSE: https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm
+
+#### AppImage (recommended for most users)
+
+```bash
+mkdir -p ~/.local/bin
+curl -fL https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage -o ~/.local/bin/space.AppImage
+chmod +x ~/.local/bin/space.AppImage
+~/.local/bin/space.AppImage
+```
+
+#### Debian/Ubuntu (.deb)
+
+```bash
+tmp_deb="$(mktemp --suffix=.deb)"
+curl -fL https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb -o "$tmp_deb"
+sudo apt install -y "$tmp_deb"
+rm -f "$tmp_deb"
+space
+```
+
+#### Fedora/RHEL/openSUSE (.rpm)
+
+```bash
+tmp_rpm="$(mktemp --suffix=.rpm)"
+curl -fL https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm -o "$tmp_rpm"
+sudo rpm -Uvh "$tmp_rpm"
+rm -f "$tmp_rpm"
+space
+```
 
 ### Build from source
 
@@ -36,6 +69,14 @@ sudo apt install dpkg-dev rpm
 
 - `dpkg-dev` is needed for `.deb` dependency scanning (`dpkg-shlibdeps`).
 - `rpm` is needed for `.rpm` output (`rpmbuild`).
+
+Build an AppImage (portable Linux bundle):
+
+```
+make appimage
+```
+
+This writes `build/space-<version>-x86_64.AppImage`.
 
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).

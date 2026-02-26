@@ -1,4 +1,4 @@
-.PHONY: build cmake debug run pack install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs
+.PHONY: build cmake debug run pack appimage install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
@@ -22,6 +22,9 @@ commit:
 
 pack:
 	cd build && cpack
+
+appimage: build
+	./scripts/build-appimage.sh
 
 install:
 	dpkg -i ./build/space-*-Linux.deb

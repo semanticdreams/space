@@ -15,3 +15,5 @@ rm -rf build/dist/assets
 cp -r assets build/dist/assets
 cp build/space build/dist/
 tar -czf build/dist/space-linux-x86_64-bin.tar.gz -C build/dist space assets
+
+scripts/build-appimage.sh
