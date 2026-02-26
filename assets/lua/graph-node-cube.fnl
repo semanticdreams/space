@@ -1,9 +1,11 @@
 (local glm (require :glm))
-(local {: Layout} (require :layout))
 (local Cuboid (require :cuboid))
 (local Rectangle (require :rectangle))
 (local Text (require :text))
 (local TextStyle (require :text-style))
+(local Stack (require :stack))
+(local Padding (require :padding))
+(local Aligned (require :aligned))
 
 (local GraphViewUtils (require :graph/view/utils))
 (local truncate-with-ellipsis GraphViewUtils.truncate-with-ellipsis)
@@ -55,64 +57,34 @@
   (local base-color (or options.color (glm.vec4 0.18 0.22 0.28 1)))
   (local base-scale (or options.scale 0.45))
   (fn build [ctx]
-    (local background ((Rectangle {:color base-color}) ctx))
-    (local label ((Text {:text (or options.text "")
-                         :style (TextStyle {:scale base-scale})}) ctx))
-
-    (fn measurer [self]
-      (background.layout:measurer)
-      (label.layout:measurer)
-      (set self.measure (glm.vec3 0 0 0)))
-
-    (fn layouter [self]
-      (set background.layout.size self.size)
-      (set background.layout.position self.position)
-      (set background.layout.rotation self.rotation)
-      (set background.layout.depth-offset-index self.depth-offset-index)
-      (set background.layout.clip-region self.clip-region)
-      (background.layout:layouter)
-
-      (label.layout:measurer)
-      (local measure (or label.layout.measure (glm.vec3 0 0 0)))
-      (set label.layout.size measure)
-      (set label.layout.rotation self.rotation)
-      (set label.layout.depth-offset-index (+ self.depth-offset-index 1))
-      (set label.layout.clip-region self.clip-region)
-      (local inset 0.1)
-      (local available (glm.vec3 (math.max 0 (- self.size.x (* inset 2)))
-                                 (math.max 0 (- self.size.y (* inset 2)))
-                                 0))
-      (local center-offset (glm.vec3 (* 0.5 (- available.x measure.x))
-                                     (* 0.5 (- available.y measure.y))
-                                     0.01))
-      (local world-offset (glm.vec3 (+ inset center-offset.x)
-                                    (+ inset center-offset.y)
-                                    center-offset.z))
-      (set label.layout.position (+ self.position (self.rotation:rotate world-offset)))
-      (label.layout:layouter))
-
-    (local layout
-      (Layout {:name (or options.name "graph-node-cube-face")
-               :children [background.layout label.layout]
-               : measurer
-               : layouter}))
+    (var label-text nil)
+    (local stack
+      ((Stack {:children
+               [(Rectangle {:color base-color})
+                (Padding {:edge-insets [0.1 0.1]
+                          :child (Aligned {:xalign :center
+                                           :yalign :center
+                                           :child (fn [child-ctx]
+                                                    (set label-text
+                                                         ((Text {:text (or options.text "")
+                                                                 :style (TextStyle {:scale base-scale})}) child-ctx))
+                                                    label-text)})})]})
+       ctx))
+    (assert label-text "GraphNodeCube face requires label text widget")
 
     (fn set-display-text [self value scale]
-      (label:set-text (or value "") {:mark-measure-dirty? true})
-      (set label.style.scale (or scale base-scale))
-      (self.layout:mark-measure-dirty)
-      (self.layout:mark-layout-dirty))
+      (label-text:set-text (or value "") {:mark-measure-dirty? true})
+      (set label-text.style.scale (or scale base-scale))
+      (self.layout:mark-measure-dirty))
 
     (fn drop [self]
       (self.layout:drop)
-      (background:drop)
-      (label:drop))
+      (stack:drop))
 
-    {:layout layout
+    {:layout stack.layout
      :drop drop
      :set-display-text set-display-text
-     :label-text label
-     :background background}))
+     :label-text label-text}))
 
 (fn GraphNodeCube [opts]
   (local options (or opts {}))

@@ -4,6 +4,7 @@
 (local {: Layout} (require :layout))
 
 (fn Stack [opts]
+  (local depth-offset-step (or opts.depth-offset-step 0.001))
   (fn build [ctx]
     (local children
       (icollect [_ x (ipairs opts.children)] (x ctx)))
@@ -20,7 +21,7 @@
         (set child.size self.size)
         (set child.position self.position)
         (set child.rotation self.rotation)
-        (set child.depth-offset-index (+ self.depth-offset-index i))
+        (set child.depth-offset-index (+ self.depth-offset-index (* depth-offset-step i)))
         (set child.clip-region self.clip-region)
         (child:layouter)
         ))
