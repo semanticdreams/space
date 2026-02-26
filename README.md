@@ -28,6 +28,15 @@ make run
 
 To run the app directly, use `./build/space -m main`.
 
+Optional packaging dependencies (only needed for `make pack`):
+
+```
+sudo apt install dpkg-dev rpm
+```
+
+- `dpkg-dev` is needed for `.deb` dependency scanning (`dpkg-shlibdeps`).
+- `rpm` is needed for `.rpm` output (`rpmbuild`).
+
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).
 

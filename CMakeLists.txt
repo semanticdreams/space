@@ -567,6 +567,33 @@ install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
 
+# Install private runtime shared libraries used by the app.
+if(TARGET SDL3-shared)
+    install(TARGETS SDL3-shared
+        LIBRARY DESTINATION lib
+    )
+endif()
+
+if(SPACE_ENABLE_CEF AND DEFINED SPACE_CEF_ROOT)
+    set(_space_cef_runtime_files
+        "${SPACE_CEF_ROOT}/Release/libcef.so"
+        "${SPACE_CEF_ROOT}/Resources/chrome_100_percent.pak"
+        "${SPACE_CEF_ROOT}/Resources/chrome_200_percent.pak"
+        "${SPACE_CEF_ROOT}/Resources/icudtl.dat"
+        "${SPACE_CEF_ROOT}/Resources/resources.pak"
+        "${SPACE_CEF_ROOT}/Resources/v8_context_snapshot.bin"
+        "${SPACE_CEF_ROOT}/Resources/snapshot_blob.bin"
+    )
+    foreach(_space_cef_file IN LISTS _space_cef_runtime_files)
+        if(EXISTS "${_space_cef_file}")
+            install(FILES "${_space_cef_file}" DESTINATION lib)
+        endif()
+    endforeach()
+    if(EXISTS "${SPACE_CEF_ROOT}/Resources/locales")
+        install(DIRECTORY "${SPACE_CEF_ROOT}/Resources/locales" DESTINATION lib)
+    endif()
+endif()
+
 # Install the assets folder to /usr/share/space/assets
 install(DIRECTORY assets/ DESTINATION share/${PROJECT_NAME}/assets)
 
@@ -592,6 +619,7 @@ install(FILES assets/pics/space.png DESTINATION share/icons/hicolor/256x256/apps
 set(CPACK_GENERATOR "DEB;RPM")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "space")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "/usr/lib")
 #set(CPACK_DEBIAN_PACKAGE_DEPENDS
 #"libsdl3-0, libepoxy0, libbullet-dev, libopenal1"
 #)
