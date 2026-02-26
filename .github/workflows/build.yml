@@ -22,7 +22,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'Makefile') }}
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
           restore-keys: |
             ccache-${{ runner.os }}-${{ github.ref }}-
             ccache-${{ runner.os }}-
@@ -39,8 +39,53 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: scripts/build-linux.sh
 
+      - name: Smoke test AppImage (host)
+        run: |
+          appimage=$(ls build/space-*-x86_64.AppImage | head -n1)
+          test -n "${appimage}"
+          chmod +x "${appimage}"
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" --help >/dev/null
+          rm -rf /tmp/space-appimage-smoke
+          mkdir -p /tmp/space-appimage-smoke
+          (
+            cd /tmp/space-appimage-smoke
+            "${appimage}" --appimage-extract >/dev/null
+            test -x squashfs-root/AppRun
+            test -x squashfs-root/usr/bin/space
+            test -f squashfs-root/usr/share/space/assets/lua/main.fnl
+          )
+
+      - name: Smoke test AppImage (Ubuntu 22.04/24.04)
+        run: |
+          appimage=$(basename "$(ls build/space-*-x86_64.AppImage | head -n1)")
+          for image in ubuntu:22.04 ubuntu:24.04; do
+            docker run --rm \
+              -e APPIMAGE_NAME="${appimage}" \
+              -v "$PWD/build:/work" \
+              "${image}" bash -lc '
+              set -euo pipefail
+              rm -rf /tmp/appimage-check
+              mkdir -p /tmp/appimage-check
+              cd /tmp/appimage-check
+              "/work/${APPIMAGE_NAME}" --appimage-extract >/dev/null
+              test -x squashfs-root/AppRun
+              test -x squashfs-root/usr/bin/space
+              test -f squashfs-root/usr/share/space/assets/lua/main.fnl
+            '
+          done
+
       - name: ccache stats
         run: ccache -s
+
+      - name: Prepare stable release asset names
+        run: |
+          set -euo pipefail
+          appimage_src=$(ls -t build/space-*-x86_64.AppImage | head -n1)
+          deb_src=$(ls -t build/space-*-Linux.deb | head -n1)
+          rpm_src=$(ls -t build/space-*-Linux.rpm | head -n1)
+          cp "${appimage_src}" build/space-linux-x86_64.AppImage
+          cp "${deb_src}" build/space-linux-amd64.deb
+          cp "${rpm_src}" build/space-linux-x86_64.rpm
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
@@ -49,6 +94,10 @@ jobs:
           files: |
             build/*.deb
             build/*.rpm
+            build/*.AppImage
+            build/space-linux-amd64.deb
+            build/space-linux-x86_64.rpm
+            build/space-linux-x86_64.AppImage
             build/dist/space-linux-x86_64-bin.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
