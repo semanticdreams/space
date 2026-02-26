@@ -137,7 +137,7 @@ int main(int argc, char *argv[])
 
     CLI::App app("space");
     app.usage("space [option] ... [-c cmd | -m mod[:fn] | file | -] [arg] ...");
-    app.add_flag("--repl", run_repl, "Start embedded Fennel REPL");
+    app.add_flag("--repl", run_repl, "Start embedded Fennel REPL (default entrypoint is -m main)");
     app.add_option("--dotenv", dotenv_path, "Path to dotenv file to load before startup")->expected(1);
     app.add_flag("--no-dotenv", no_dotenv, "Disable dotenv loading");
     app.add_flag("--dotenv-override", dotenv_override, "Allow dotenv values to override existing environment variables");
@@ -211,10 +211,9 @@ int main(int argc, char *argv[])
     }
 
     if (!entry_set) {
-        entry_target.clear();
-        entry_display = argv[0];
+        entry_target = "main";
+        entry_display = entry_target;
         entry_mode = EntryMode::Module;
-        run_repl = true;
     }
 
     try {
