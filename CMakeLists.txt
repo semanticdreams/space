@@ -3,6 +3,51 @@ set(CMAKE_CXX_STANDARD 17)
 project(space VERSION 0.1.0)
 set(OpenGL_GL_PREFERENCE "GLVND")
 
+set(SPACE_VERSION "" CACHE STRING "Override app/package version (defaults to git tag-derived version)")
+set(SPACE_PACKAGE_VERSION "")
+
+if(NOT SPACE_VERSION)
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" describe --tags --match "v*" --abbrev=8 --dirty
+            OUTPUT_VARIABLE SPACE_GIT_DESCRIBE
+            RESULT_VARIABLE SPACE_GIT_DESCRIBE_RESULT
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(SPACE_GIT_DESCRIBE_RESULT EQUAL 0 AND SPACE_GIT_DESCRIBE)
+            if(SPACE_GIT_DESCRIBE MATCHES "^v(.+)-([0-9]+)-g([0-9a-f]+)(-dirty)?$")
+                set(_space_version_base "${CMAKE_MATCH_1}")
+                set(_space_version_count "${CMAKE_MATCH_2}")
+                set(_space_version_sha "${CMAKE_MATCH_3}")
+                set(_space_version_dirty "${CMAKE_MATCH_4}")
+                if(_space_version_dirty)
+                    set(_space_version_dirty ".dirty")
+                endif()
+                set(SPACE_VERSION "${_space_version_base}+git.${_space_version_count}.g${_space_version_sha}${_space_version_dirty}")
+            elseif(SPACE_GIT_DESCRIBE MATCHES "^v(.+)$")
+                set(SPACE_VERSION "${CMAKE_MATCH_1}")
+            else()
+                set(SPACE_VERSION "${SPACE_GIT_DESCRIBE}")
+            endif()
+        endif()
+    endif()
+endif()
+
+if(NOT SPACE_VERSION)
+    set(SPACE_VERSION "${PROJECT_VERSION}+unknown")
+endif()
+
+set(SPACE_PACKAGE_VERSION "${SPACE_VERSION}")
+string(REPLACE "-" "." SPACE_PACKAGE_VERSION "${SPACE_PACKAGE_VERSION}")
+string(REGEX REPLACE "[^0-9A-Za-z.+~]" "." SPACE_PACKAGE_VERSION "${SPACE_PACKAGE_VERSION}")
+if(NOT SPACE_PACKAGE_VERSION MATCHES "^[0-9]")
+    set(SPACE_PACKAGE_VERSION "0.${SPACE_PACKAGE_VERSION}")
+endif()
+
+message(STATUS "space version: ${SPACE_VERSION} (package: ${SPACE_PACKAGE_VERSION})")
+
 include(CTest)
 enable_testing()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cef-defaults.cmake)
@@ -560,7 +605,8 @@ add_custom_command(
 )
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
-set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
+set(CPACK_PROJECT_VERSION ${SPACE_PACKAGE_VERSION})
+set(CPACK_PACKAGE_VERSION ${SPACE_PACKAGE_VERSION})
 
 # Install the executable to /usr/bin
 install(TARGETS ${PROJECT_NAME}
@@ -618,6 +664,7 @@ install(FILES assets/pics/space.png DESTINATION share/icons/hicolor/256x256/apps
 
 set(CPACK_GENERATOR "DEB;RPM")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "space")
+set(CPACK_DEBIAN_PACKAGE_VERSION ${SPACE_PACKAGE_VERSION})
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "/usr/lib")
 #set(CPACK_DEBIAN_PACKAGE_DEPENDS
@@ -625,6 +672,7 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "/usr/lib")
 #)
 set(CPACK_DEBIAN_PACKAGE_DESCRIPTION "space")
 set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+set(CPACK_RPM_PACKAGE_VERSION ${SPACE_PACKAGE_VERSION})
 set(CPACK_RPM_PACKAGE_LICENSE "GPLv3")
 set(CPACK_RPM_PACKAGE_RELEASE "1")
 set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
