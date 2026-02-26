@@ -10,7 +10,8 @@
 (fn make-test-child []
   (local state {:layouter-called false
                 :last-position nil
-                :last-rotation nil})
+                :last-rotation nil
+                :last-depth nil})
   (local builder
     (fn [_ctx]
       (local layout
@@ -20,7 +21,8 @@
                  :layouter (fn [self]
                              (set state.layouter-called true)
                              (set state.last-position self.position)
-                             (set state.last-rotation self.rotation))}))
+                             (set state.last-rotation self.rotation)
+                             (set state.last-depth self.depth-offset-index))}))
       (local child {:layout layout})
       (set child.drop (fn [_self]))
       child))
@@ -55,12 +57,30 @@
 
   (local first-child (. stack.layout.children 1))
   (local second-child (. stack.layout.children 2))
-  (assert (= first-child.depth-offset-index (+ stack.layout.depth-offset-index 1)))
-  (assert (= second-child.depth-offset-index (+ stack.layout.depth-offset-index 2)))
+  (assert (approx first-child.depth-offset-index (+ stack.layout.depth-offset-index 0.001)))
+  (assert (approx second-child.depth-offset-index (+ stack.layout.depth-offset-index 0.002)))
 
   (stack:drop))
 
 (table.insert tests {:name "Stack propagates rotation offsets" :fn stack-propagates-rotation})
+
+(fn stack-allows-custom-depth-step []
+  (local child-a (make-test-child))
+  (local child-b (make-test-child))
+  (local stack ((Stack {:depth-offset-step 0.001
+                        :children [child-a.builder child-b.builder]}) {}))
+  (stack.layout:measurer)
+  (set stack.layout.size (glm.vec3 2 2 2))
+  (set stack.layout.position (glm.vec3 0 0 0))
+  (set stack.layout.rotation (glm.quat 1 0 0 0))
+  (set stack.layout.depth-offset-index 5)
+  (stack.layout:layouter)
+  (assert (approx child-a.state.last-depth 5.001))
+  (assert (approx child-b.state.last-depth 5.002))
+  (stack:drop))
+
+(table.insert tests {:name "Stack supports custom depth offset step"
+                     :fn stack-allows-custom-depth-step})
 
 (local main
   (fn []
