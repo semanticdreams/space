@@ -60,6 +60,7 @@ make run
 <!-- CI_DEPS_END -->
 
 To run the app directly, use `./build/space -m main`.
+By default, `./build/space` also starts the main app; use `./build/space --repl` for the embedded Fennel REPL.
 
 Optional packaging dependencies (only needed for `make pack`):
 
