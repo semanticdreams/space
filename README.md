@@ -11,44 +11,20 @@ Check out the <a href="https://spaceui.org/" target="_blank">docs</a> for more i
 ### Install from latest GitHub release (Linux)
 
 Use prebuilt packages from the latest release:
-https://github.com/semanticdreams/space/releases/latest
+[Latest release page](https://github.com/semanticdreams/space/releases/latest)
 
 Direct downloads:
-- AppImage: https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage
-- Debian/Ubuntu: https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb
-- Fedora/RHEL/openSUSE: https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm
-- Minimal AppImage (no CEF): https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.AppImage
-- Minimal Debian/Ubuntu (no CEF): https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-amd64.deb
-- Minimal Fedora/RHEL/openSUSE (no CEF): https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm
+- AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage)
+- Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb)
+- Fedora/RHEL/openSUSE (.rpm): [space-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm)
+- Minimal AppImage: [space-minimal-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.AppImage)
+- Minimal Debian/Ubuntu (.deb): [space-minimal-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-amd64.deb)
+- Minimal Fedora/RHEL/openSUSE (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm)
 
-#### AppImage (recommended for most users)
-
-```bash
-mkdir -p ~/.local/bin
-curl -fL https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage -o ~/.local/bin/space.AppImage
-chmod +x ~/.local/bin/space.AppImage
-~/.local/bin/space.AppImage
-```
-
-#### Debian/Ubuntu (.deb)
-
-```bash
-tmp_deb="$(mktemp --suffix=.deb)"
-curl -fL https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb -o "$tmp_deb"
-sudo apt install -y "$tmp_deb"
-rm -f "$tmp_deb"
-space
-```
-
-#### Fedora/RHEL/openSUSE (.rpm)
-
-```bash
-tmp_rpm="$(mktemp --suffix=.rpm)"
-curl -fL https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm -o "$tmp_rpm"
-sudo rpm -Uvh "$tmp_rpm"
-rm -f "$tmp_rpm"
-space
-```
+Install guidance:
+- AppImage: mark executable and run it (`chmod +x <file>.AppImage`, then `./<file>.AppImage`).
+- Debian/Ubuntu: install the downloaded `.deb` with your standard package workflow (`apt`/`dpkg`).
+- Fedora/RHEL/openSUSE: install the downloaded `.rpm` with your standard package workflow (`dnf`/`yum`/`zypper`/`rpm`).
 
 ### Build from source
 
