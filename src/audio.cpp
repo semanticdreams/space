@@ -165,8 +165,19 @@ Audio::Audio() {
     }
 
     context = alcCreateContext(device, nullptr);
-    if (!context || !alcMakeContextCurrent(context)) {
-        std::cerr << "Failed to create or activate OpenAL context." << std::endl;
+    if (!context) {
+        std::cerr << "Failed to create OpenAL context." << std::endl;
+        alcCloseDevice(device);
+        device = nullptr;
+        return;
+    }
+
+    if (!alcMakeContextCurrent(context)) {
+        std::cerr << "Failed to activate OpenAL context." << std::endl;
+        alcDestroyContext(context);
+        context = nullptr;
+        alcCloseDevice(device);
+        device = nullptr;
         return;
     }
 
@@ -279,8 +290,15 @@ void Audio::unloadSound(const std::string& name) {
     }
 }
 ALuint Audio::createSource(ALuint buffer, const glm::vec3& position, bool loop, bool positional) {
-    ALuint source;
+    if (!context) {
+        return 0;
+    }
+    ALuint source = 0;
     alGenSources(1, &source);
+    ALenum err = alGetError();
+    if (err != AL_NO_ERROR || source == 0) {
+        return 0;
+    }
     alSourcei(source, AL_BUFFER, buffer);
     alSourcef(source, AL_PITCH, 1);
     alSourcef(source, AL_GAIN, 1.0f);
@@ -304,8 +322,15 @@ ALuint Audio::createSource(ALuint buffer, const glm::vec3& position, bool loop, 
 }
 
 ALuint Audio::createSourceWithoutBuffer(const glm::vec3& position, bool loop, bool positional) {
-    ALuint source;
+    if (!context) {
+        return 0;
+    }
+    ALuint source = 0;
     alGenSources(1, &source);
+    ALenum err = alGetError();
+    if (err != AL_NO_ERROR || source == 0) {
+        return 0;
+    }
     alSourcef(source, AL_PITCH, 1);
     alSourcef(source, AL_GAIN, 1.0f);
     alSourcei(source, AL_LOOPING, loop ? AL_TRUE : AL_FALSE);

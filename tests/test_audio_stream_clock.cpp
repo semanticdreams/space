@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -36,6 +37,12 @@ void fill_sine(std::vector<std::int16_t>& out, int channels, int sample_rate, do
 
 int main()
 {
+#if defined(_WIN32)
+    _putenv_s("ALSOFT_DRIVERS", "null");
+#else
+    setenv("ALSOFT_DRIVERS", "null", 1);
+#endif
+
     constexpr int channels = 2;
     constexpr int sample_rate = 48000;
     constexpr int chunk_frames = 480; // 10ms
