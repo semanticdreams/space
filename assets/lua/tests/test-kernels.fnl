@@ -168,7 +168,15 @@
           (fn []
             (local current (kernels:get-instance instance.id))
             (and current (= current.status "running")))))
-      (assert running? "launcher instance should reach running status")
+      (local current-instance (kernels:get-instance instance.id))
+      (assert running?
+              (.. "launcher instance should reach running status"
+                  (if current-instance
+                      (.. "; status="
+                          (tostring current-instance.status)
+                          ", error="
+                          (tostring (or current-instance.last-error "")))
+                      "; instance disappeared")))
 
       (var success-result nil)
       (kernels:run-code
