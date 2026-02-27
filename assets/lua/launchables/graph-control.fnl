@@ -1,6 +1,31 @@
 (local GraphViewControlView (require :graph-view-control-view))
+(local Persistence (require :hud-panel-persistence))
+
+(local kind "graph-control-view-dialog")
+(local restorer-module "launchables/graph-control")
+
+(fn open-panel [opts]
+  (local options (or opts {}))
+  (local target (assert (or options.hud options.target)
+                        "Graph Control requires HUD target"))
+  (local placement (Persistence.panel-placement-options options.panel))
+  (target:add-panel-child {:builder (GraphViewControlView {})
+                           :location placement.location
+                           :align-x placement.align-x
+                           :align-y placement.align-y
+                           :position placement.position
+                           :rotation placement.rotation
+                           :size placement.size
+                           :persistence {:kind kind
+                                         :restorer-module restorer-module}}))
+
+(fn restore [opts]
+  (open-panel opts))
 
 {:name "Graph Control"
+ :kind kind
+ :restorer-module restorer-module
+ :open-panel open-panel
+ :restore restore
  :run (fn []
-        (assert (and app.hud app.hud.add-panel-child) "Graph Control requires app.hud.add-panel-child")
-        (app.hud:add-panel-child {:builder (GraphViewControlView {})}))}
+        (open-panel {:hud app.hud}))}

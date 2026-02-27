@@ -295,8 +295,9 @@
     (fn attach-to-target [target]
       (when (and target target.add-panel-child)
         (target:add-panel-child {:builder (DeepDialog options)
-                                :builder-options (copy-table base-runtime-opts)
-                                :skip-cuboid true})))
+                                 :builder-options (copy-table base-runtime-opts)
+                                 :skip-cuboid true
+                                 :persistence options.persistence})))
 
     (each [key value (pairs options)]
       (when (and (not (= key :actions))

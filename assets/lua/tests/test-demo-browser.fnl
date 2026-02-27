@@ -158,6 +158,80 @@
     (when (not ok)
       (error err))))
 
+(fn demo-browser-capture-and-restore-roundtrip []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local browser (scene:add-demo-browser))
+            (assert browser "Expected demo browser element")
+            (local captured (scene:capture-state))
+            (local panels (or captured.panels []))
+            (assert (= (length panels) 1)
+                    "Expected one persisted scene panel for demo browser")
+            (local panel (. panels 1))
+            (assert (= panel.kind "demo-browser")
+                    "Demo browser persistence kind should be demo-browser")
+
+            (scene:remove-panel-child browser)
+            (assert (= (length scene.scene-children) 0)
+                    "Expected demo browser removal before restore")
+
+            (scene:restore-state captured)
+            (assert (= (length scene.scene-children) 1)
+                    "Demo browser should restore from captured scene state")
+            (assert scene.demo-browser
+                    "Scene.demo-browser handle should be re-established after restore")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn scene-capture-state-requires-panel-persistence []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:add-panel-child {:builder (fn [_ctx]
+                                           {:layout (Layout {:name "scene-missing-persistence"
+                                                             :measurer (fn [self]
+                                                                         (set self.measure (glm.vec3 1 1 1)))
+                                                             :layouter (fn [self]
+                                                                         (set self.size self.measure))})
+                                            :drop (fn [_self])})})
+        (scene:capture-state))))
+  (cleanup)
+  (assert (not ok) "Scene.capture-state should fail when panel persistence is missing")
+  (assert (string.find (tostring err) "without persistence")
+          "Scene.capture-state should report missing persistence")
+  true)
+
+(fn scene-capture-state-requires-restore-strategy []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:add-panel-child {:builder (fn [_ctx]
+                                           {:layout (Layout {:name "scene-missing-restore"
+                                                             :measurer (fn [self]
+                                                                         (set self.measure (glm.vec3 1 1 1)))
+                                                             :layouter (fn [self]
+                                                                         (set self.size self.measure))})
+                                            :drop (fn [_self])})
+                               :persistence {:kind "scene-missing-restore"}})
+        (scene:capture-state))))
+  (cleanup)
+  (assert (not ok) "Scene.capture-state should fail when restore strategy is missing")
+  (assert (string.find (tostring err) "no restore strategy")
+          "Scene.capture-state should report missing restore strategy")
+  true)
+
 (fn added-dialog-appears-in-front-of-camera []
   (local camera (Camera {:position (glm.vec3 2 3 4)}))
   (camera:yaw (math.rad 45))
@@ -360,9 +434,47 @@
     (when (not ok)
       (error err))))
 
+(fn scene-restore-graph-node-cube-uses-scene-graph-before-app-binding []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph app.graph)
+  (set app.graph nil)
+  (local graph (Graph {:with-start false}))
+  (scene:set-graph graph)
+  (local node (Graph.GraphNode {:key "test-node"
+                                :label "restore target"}))
+  (graph:add-node node {})
+  (local initial-count (length (or scene.entity.children [])))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels [{:kind "graph-node-cube"
+                                        :node-key "test-node"
+                                        :label "restore target"
+                                        :size [4 4 4]
+                                        :position [0 16 0]
+                                        :rotation [1 0 0 0]}]}))))
+  (local final-count (length (or scene.entity.children [])))
+  (set app.graph original-graph)
+  (graph:drop)
+  (cleanup)
+  (assert ok
+          (.. "Expected scene restore to use scene.graph before app binding, got: "
+              (tostring err)))
+  (assert (= final-count (+ initial-count 1))
+          "Scene restore should add graph node cube using scene-owned graph")
+  true)
+
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
+(table.insert tests {:name "Demo browser capture/restore roundtrip" :fn demo-browser-capture-and-restore-roundtrip})
+(table.insert tests {:name "Scene capture-state requires panel persistence"
+                     :fn scene-capture-state-requires-panel-persistence})
+(table.insert tests {:name "Scene capture-state requires restore strategy"
+                     :fn scene-capture-state-requires-restore-strategy})
 (table.insert tests {:name "Scene additions appear in front of the camera" :fn added-dialog-appears-in-front-of-camera})
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
 (table.insert tests {:name "Scene physics body collides with flat terrain"
@@ -371,6 +483,8 @@
                      :fn scene-runtime-body-falls-after-drag-release})
 (table.insert tests {:name "Scene graph node cube adds physics and graph action"
                      :fn scene-add-graph-node-cube-adds-physics-and-readds-node})
+(table.insert tests {:name "Scene restore graph node cube uses scene graph before app binding"
+                     :fn scene-restore-graph-node-cube-uses-scene-graph-before-app-binding})
 
 (local main
   (fn []

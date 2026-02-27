@@ -14,6 +14,8 @@
 (local tests [])
 
 (local approx (. MathUtils :approx))
+(local array->vec3 (. MathUtils :array->vec3))
+(local array->quat (. MathUtils :array->quat))
 
 (fn color= [a b]
   (and (approx a.x b.x)
@@ -901,6 +903,147 @@
         (fn []
           (set scene (run-scene-resize-test env)))))))
 
+(fn hud-capture-state-requires-panel-persistence []
+  (with-dialog-stubs
+    (fn [env]
+      (local resources (make-scene-and-hud {:icons env.icons}))
+      (local cleanup resources.cleanup)
+      (local hud resources.hud)
+      (local child (make-probe-widget "hud-persistence-required"))
+      (local dialog-builder
+        (DefaultDialog {:title "No Persistence"
+                        :child child.builder}))
+      (local (ok err)
+        (pcall
+          (fn []
+            (hud:add-panel-child {:builder dialog-builder})
+            (hud:capture-state))))
+      (cleanup)
+      (assert (not ok) "Hud.capture-state should fail when a panel has no persistence")
+      (assert (string.find (tostring err) "without persistence")
+              "Hud.capture-state should report missing persistence")
+      true)))
+
+(fn hud-capture-and-restore-persistent-panel []
+  (with-dialog-stubs
+    (fn [env]
+      (local resources (make-scene-and-hud {:icons env.icons}))
+      (local cleanup resources.cleanup)
+      (local hud resources.hud)
+      (local child (make-probe-widget "hud-persist-dialog"))
+      (local dialog-builder
+        (DefaultDialog {:title "Persisted HUD Dialog"
+                        :child child.builder}))
+      (local kind "dialog-test-probe")
+      (hud:register-panel-restorer
+        kind
+        (fn [panel]
+          (local position (array->vec3 panel.position))
+          (local rotation (array->quat panel.rotation))
+          (local size (array->vec3 panel.size))
+          (hud:add-panel-child {:builder dialog-builder
+                                :location (if (= panel.layer "float") :float :tiles)
+                                :position position
+                                :rotation rotation
+                                :size size
+                                :align-x panel.align-x
+                                :align-y panel.align-y
+                                :persistence {:kind kind}})))
+      (local element
+        (hud:add-panel-child {:builder dialog-builder
+                              :location :float
+                              :position (glm.vec3 2 3 0)
+                              :rotation (glm.quat 1 0 0 0)
+                              :size (glm.vec3 12 8 0)
+                              :persistence {:kind kind}}))
+      (local captured (hud:capture-state))
+      (assert (= (length (or captured.panels [])) 1)
+              "Hud.capture-state should persist one panel")
+      (hud:remove-panel-child element)
+      (assert (= (length (or hud.float.children [])) 0))
+      (hud:restore-state captured)
+      (assert (= (length (or hud.float.children [])) 1)
+              "Hud.restore-state should recreate persisted float panel")
+      (hud:unregister-panel-restorer kind)
+      (cleanup)
+      true)))
+
+(fn hud-capture-state-requires-restore-strategy []
+  (with-dialog-stubs
+    (fn [env]
+      (local resources (make-scene-and-hud {:icons env.icons}))
+      (local cleanup resources.cleanup)
+      (local hud resources.hud)
+      (local child (make-probe-widget "hud-missing-restore-strategy"))
+      (local dialog-builder
+        (DefaultDialog {:title "Missing Restore Strategy"
+                        :child child.builder}))
+      (local (ok err)
+        (pcall
+          (fn []
+            (hud:add-panel-child {:builder dialog-builder
+                                  :persistence {:kind "missing-restore-strategy"}})
+            (hud:capture-state))))
+      (cleanup)
+      (assert (not ok) "Hud.capture-state should fail when restore strategy is missing")
+      (assert (string.find (tostring err) "no restore strategy")
+              "Hud.capture-state should report missing restore strategy")
+      true)))
+
+(fn hud-restore-state-uses-restorer-module []
+  (with-dialog-stubs
+    (fn [env]
+      (local resources (make-scene-and-hud {:icons env.icons}))
+      (local cleanup resources.cleanup)
+      (local hud resources.hud)
+      (local module-name "launchables/launcher")
+      (local captured {:panels [{:kind "launcher-view-dialog"
+                                 :layer "tiles"
+                                 :align-x :start
+                                 :align-y :start
+                                 :restorer-module module-name}]})
+      (hud:restore-state captured)
+      (assert (= (length (or hud.tiles.children [])) 1)
+              "Hud.restore-state should restore panel from module")
+      (cleanup)
+      true)))
+
+(fn hud-restore-state-builds-roots-before-float-restore []
+  (with-dialog-stubs
+    (fn [env]
+      (local originals {:scene app.scene
+                        :layout-root app.layout-root
+                        :hud app.hud})
+      (local scene (Scene {:icons env.icons}))
+      (local hud (Hud {:scene scene
+                       :icons env.icons}))
+      (set app.scene scene)
+      (set app.layout-root scene.layout-root)
+      (set app.hud hud)
+      (local captured {:panels [{:kind "launcher-view-dialog"
+                                 :layer "float"
+                                 :position [1 2 0]
+                                 :rotation [1 0 0 0]
+                                 :size [12 8 0]
+                                 :restorer-module "launchables/launcher"}]})
+      (hud:restore-state captured)
+      (scene.layout-root:update)
+      (assert (= (length (or hud.float.children [])) 1)
+              "Hud.restore-state should build roots before restoring float panels")
+      (local restored (hud:capture-state))
+      (local panel (. (or restored.panels []) 1))
+      (assert panel "Hud.restore-state should produce restorable float panel")
+      (assert (= panel.layer "float")
+              "Hud.restore-state should preserve float panel layer")
+      (assert (= (type panel.position) :table)
+              "Hud.restore-state should preserve float panel position")
+      (hud:drop)
+      (scene:drop)
+      (set app.scene originals.scene)
+      (set app.layout-root originals.layout-root)
+      (set app.hud originals.hud)
+      true)))
+
 (table.insert tests {:name "Dialog requires a title" :fn dialog-requires-title})
 (table.insert tests {:name "Dialog requires a child" :fn dialog-requires-child})
 (table.insert tests {:name "Dialog wraps titlebar and body in cards" :fn dialog-wraps-titlebar-and-body-in-cards})
@@ -914,6 +1057,11 @@
 (table.insert tests {:name "HUD tiles promote to float on resize" :fn hud-tiles-promote-to-float-on-resize})
 (table.insert tests {:name "HUD float resize updates layout" :fn hud-float-resize-updates-layout})
 (table.insert tests {:name "Scene resize updates layout" :fn scene-resize-updates-layout})
+(table.insert tests {:name "Hud capture-state requires panel persistence" :fn hud-capture-state-requires-panel-persistence})
+(table.insert tests {:name "Hud capture and restore persistent panel" :fn hud-capture-and-restore-persistent-panel})
+(table.insert tests {:name "Hud capture-state requires restore strategy" :fn hud-capture-state-requires-restore-strategy})
+(table.insert tests {:name "Hud restore-state uses restorer module" :fn hud-restore-state-uses-restorer-module})
+(table.insert tests {:name "Hud restore-state builds roots before float restore" :fn hud-restore-state-builds-roots-before-float-restore})
 
 (local main
   (fn []

@@ -245,6 +245,63 @@
                 (add-node self node))
             node))
 
+    (set self.capture-state
+        (fn [_self]
+            (local node-keys
+                (icollect [key _ (pairs nodes)]
+                    key))
+            (table.sort node-keys)
+            (local edge-keys {})
+            (local edge-list [])
+            (each [_ edge (ipairs edges)]
+                (local source-key (and edge edge.source edge.source.key))
+                (local target-key (and edge edge.target edge.target.key))
+                (when (and source-key target-key)
+                    (local composite (.. source-key "->" target-key))
+                    (when (not (. edge-keys composite))
+                        (set (. edge-keys composite) true)
+                        (table.insert edge-list {:source source-key
+                                                 :target target-key}))))
+            (table.sort edge-list
+                        (fn [a b]
+                            (local a-key (.. (or a.source "") "->" (or a.target "")))
+                            (local b-key (.. (or b.source "") "->" (or b.target "")))
+                            (< a-key b-key)))
+            {:nodes node-keys
+             :edges edge-list}))
+
+    (set self.restore-state
+        (fn [_self state]
+            (local payload (or state {}))
+            (local node-keys (or payload.nodes []))
+            (local edge-list (or payload.edges []))
+            (assert (= (type node-keys) :table) "Graph.restore-state requires :nodes table")
+            (assert (= (type edge-list) :table) "Graph.restore-state requires :edges table")
+            (each [_ key (ipairs node-keys)]
+                (assert (= (type key) :string) "Graph.restore-state node keys must be strings")
+                (when (not (lookup self key))
+                    (local loaded (self:load-by-key key))
+                    (assert loaded (.. "Graph.restore-state could not load node: " key))))
+            (each [_ edge (ipairs edge-list)]
+                (assert (= (type edge) :table) "Graph.restore-state edge entries must be tables")
+                (local source-key edge.source)
+                (local target-key edge.target)
+                (assert (= (type source-key) :string)
+                        "Graph.restore-state edge.source must be a string")
+                (assert (= (type target-key) :string)
+                        "Graph.restore-state edge.target must be a string")
+                (local source-node (or (lookup self source-key)
+                                       (self:load-by-key source-key)))
+                (local target-node (or (lookup self target-key)
+                                       (self:load-by-key target-key)))
+                (assert source-node
+                        (.. "Graph.restore-state could not resolve source node: " source-key))
+                (assert target-node
+                        (.. "Graph.restore-state could not resolve target node: " target-key))
+                (self:add-edge (GraphEdge {:source source-node
+                                           :target target-node})))
+            true))
+
     (set Graph.GraphNode GraphNode)
     (set Graph.GraphEdge GraphEdge)
 

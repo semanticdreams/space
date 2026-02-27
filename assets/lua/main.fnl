@@ -51,12 +51,6 @@
 (local VolumeControl (require :volume-control))
 (local MenuManager (require :menu-manager))
 (local WalletManager (require :wallet-manager))
-(local MathUtils (require :math-utils))
-
-(local vec3->array (. MathUtils :vec3->array))
-(local quat->array (. MathUtils :quat->array))
-(local array->vec3 (. MathUtils :array->vec3))
-(local array->quat (. MathUtils :array->quat))
 
 (var fennel-cache-dir nil)
 (local bytecode-enabled
@@ -204,9 +198,14 @@
 (when (and app.engine appdirs)
     (local data-dir (appdirs.user-data-dir "space"))
     (assert data-dir "appdirs.user-data-dir must return a directory")
+    (set app.user-data-dir data-dir)
     (local apps-dir (fs.join-path data-dir "apps"))
+    (local worlds-dir (fs.join-path data-dir "worlds"))
     (when (and fs fs.create-dirs)
       (fs.create-dirs apps-dir))
+    (when (and fs fs.create-dirs)
+      (fs.create-dirs worlds-dir))
+    (set app.worlds-dir worlds-dir)
     (set app.get-app-dir
          (fn [name]
            (assert (and name (> (string.len name) 0)) "app.get-app-dir requires a name")
@@ -222,11 +221,6 @@
     (VolumeControl.volume-settings-changed-debounced:disconnect app.volume-settings-handler true)
     (set app.volume-settings-handler nil)))
 
-(fn disconnect-camera-settings []
-  (when (and app.camera-settings-handler app.camera app.camera.debounced-changed)
-    (app.camera.debounced-changed:disconnect app.camera-settings-handler true)
-    (set app.camera-settings-handler nil)))
-
 (fn connect-volume-settings []
   (when VolumeControl.volume-settings-changed-debounced
     (set app.volume-settings-handler
@@ -240,18 +234,6 @@
                (app.settings.set-value "audio.muted" muted? {:save? false})
                (app.settings.save)))))))
 
-(fn connect-camera-settings []
-  (when (and app.camera app.camera.debounced-changed)
-    (set app.camera-settings-handler
-         (app.camera.debounced-changed:connect
-           (fn [_payload]
-             (when (and app.settings app.settings.set-value app.settings.save)
-               (local position (vec3->array app.camera.position))
-               (local rotation (quat->array app.camera.rotation))
-               (app.settings.set-value "camera.position" position {:save? false})
-               (app.settings.set-value "camera.rotation" rotation {:save? false})
-               (app.settings.save)))))))
-
 (fn init-settings []
   (when (and app.settings app.settings.drop)
     (app.settings.drop))
@@ -261,7 +243,6 @@
   (when (or (not (= stored-volume nil)) (not (= stored-muted nil)))
     (VolumeControl.apply-settings {:volume stored-volume :muted? stored-muted}))
   (disconnect-volume-settings)
-  (disconnect-camera-settings)
   (connect-volume-settings))
 
 (fn normalize-window-mode [mode]
@@ -327,21 +308,18 @@
         (lua "return false")))
     true))
 
-(local Camera (require :camera))
 (local {:to-table viewport->table :to-glm-vec4 viewport->glm-vec4} (require :viewport-utils))
-(local Scene (require :scene))
 (local Hud (require :hud))
-(local {: FirstPersonControls} (require :first-person-controls))
 (local AppViewport (require :app-viewport))
 (local AppProjection (require :app-projection))
 (local {: FocusManager} (require :focus))
-(local Graph (require :graph/init))
-(local GraphView (require :graph/view))
-(local GraphKeyLoaders (require :graph/key-loaders))
-(local ObjectSelector (require :object-selector))
 (local Tray (require :tray-manager))
 (local Notify (require :notify-manager))
 (local AppBootstrap (require :app-bootstrap))
+(local WorldManager (require :world-manager))
+(local WorldTabsWidget (require :world-tabs-widget))
+(local InputState (require :input-state-router))
+(local Modifiers (require :input-modifiers))
 
 (local FrameProfiler (require :frame-profiler))
 
@@ -424,10 +402,10 @@
 (set app.kernels nil)
 (set app.settings nil)
 (set app.volume-settings-handler nil)
-(set app.camera-settings-handler nil)
 (set app.window-resized-handler nil)
 (set app.window-mode-handler nil)
 (set app.update-handler nil)
+(set app.global-shortcuts-handler nil)
 (set app.remote-control nil)
 (set app.remote-control-endpoint nil)
 (set app.browser-cube-surface nil)
@@ -435,6 +413,10 @@
 (set app.next-frame-pending [])
 (set app.window-settings-dirty false)
 (set app.window-settings-save-deadline 0)
+(set app.world-manager nil)
+(set app.world-tabs-builder nil)
+(set app.active-world-hud-contrib nil)
+(set app.active-world-hud-overlay nil)
 
 (fn app.next-frame [cb]
   (assert cb "app.next-frame requires callback")
@@ -471,6 +453,126 @@
 
 (set app.remote-control-endpoint (parse-remote-control-endpoint))
 
+(local SDLK_TAB 9)
+(local KEY_W_LOWER (string.byte "w"))
+(local KEY_W_UPPER (string.byte "W"))
+(local KEY_1 (string.byte "1"))
+(local KEY_9 (string.byte "9"))
+
+(fn world-tab-status-builder []
+  (assert app.world-manager "world-tab-status-builder requires app.world-manager")
+  (fn [ctx]
+    ((WorldTabsWidget {:world-manager app.world-manager
+                       :tab-spacing 0.1}) ctx)))
+
+(fn world-runtime-context []
+  {:hud app.hud
+   :focus-manager app.focus
+   :focus-root (and app.focus (app.focus:get-root-scope))
+   :icons app.icons
+   :states app.states
+   :movables app.movables})
+
+(fn resolve-active-world-hud-contrib []
+  (local entry (and app.world-manager (app.world-manager:active-world)))
+  (local world (and entry entry.world))
+  (if (and world world.get-hud-contrib)
+      (or (world:get-hud-contrib) {})
+      {}))
+
+(fn clear-active-world-hud-overlay []
+  (when (and app.hud app.active-world-hud-overlay)
+    (app.hud:remove-overlay-child app.active-world-hud-overlay)
+    (set app.active-world-hud-overlay nil)))
+
+(fn apply-active-world-hud-contrib []
+  (when app.hud
+    (local contrib (resolve-active-world-hud-contrib))
+    (set app.active-world-hud-contrib contrib)
+    (local control-panel-opts {:status-builder app.world-tabs-builder})
+    (local status-panel-opts {})
+    (when contrib.control_panel_body
+      (set control-panel-opts.body-builder contrib.control_panel_body))
+    (when contrib.status_panel_body
+      (set status-panel-opts.body-builder contrib.status_panel_body))
+    (local hud-opts {:control-panel-opts control-panel-opts})
+    (when (or status-panel-opts.body-builder)
+      (set hud-opts.status-panel-opts status-panel-opts))
+    (app.hud:build-default hud-opts)
+    (clear-active-world-hud-overlay)
+    (when contrib.overlay
+      (set app.active-world-hud-overlay
+           (app.hud:add-overlay-child {:builder contrib.overlay})))
+    (app.reset-projection)))
+
+(fn bind-active-world-runtime [entry runtime]
+  (set app.active-world-entry entry)
+  (set app.camera (and runtime runtime.camera))
+  (set app.first-person-controls (and runtime runtime.first-person-controls))
+  (set app.scene-focus-scope (and runtime runtime.scene-scope))
+  (set app.scene (and runtime runtime.scene))
+  (set app.object-selector (and runtime runtime.object-selector))
+  (set app.graph (and runtime runtime.graph))
+  (set app.graph-view (and runtime runtime.graph-view))
+  (set app.layout-root (and app.scene app.scene.layout-root))
+  (when app.hud
+    (set app.hud.scene app.scene)
+    (when app.hud.build-context
+      (set app.hud.build-context.object-selector app.object-selector)
+      (set app.hud.build-context.layout-root app.layout-root)))
+  (when (and app.scene app.scene.build-context)
+    (set app.scene.build-context.object-selector app.object-selector)
+    (set app.scene.build-context.layout-root app.layout-root))
+  (apply-active-world-hud-contrib)
+  (when (and runtime runtime.restore-hud-state app.hud)
+    (runtime:restore-hud-state app.hud)))
+
+(fn init-world-manager []
+  (when (and app.world-manager app.world-manager.drop)
+    (app.world-manager:drop))
+  (assert app.worlds-dir "init-world-manager requires app.worlds-dir")
+  (set app.world-manager
+       (WorldManager {:root-dir app.worlds-dir
+                      :context-fn world-runtime-context
+                      :on-active-runtime bind-active-world-runtime
+                      :on-empty (fn []
+                                  (when (and app.engine app.engine.quit)
+                                    (app.engine.quit)))
+                      :suspend-delay-ms 3000}))
+  (set app.world-tabs-builder (world-tab-status-builder))
+  app.world-manager)
+
+(fn world-shortcut-conflict? []
+  (and InputState InputState.active-input (InputState.active-input)))
+
+(fn handle-global-world-shortcut [payload]
+  (if (or (not payload) (not app.world-manager))
+      false
+      (do
+        (local key payload.key)
+        (local ctrl? (Modifiers.ctrl-held? payload.mod))
+        (local shift? (Modifiers.shift-held? payload.mod))
+        (local alt? (Modifiers.alt-held? payload.mod))
+        (local tab-shortcut? (and ctrl? (= key SDLK_TAB)))
+        (local close-shortcut? (and ctrl? (or (= key KEY_W_LOWER) (= key KEY_W_UPPER))))
+        (local alt-number-shortcut?
+          (and alt? (= (type key) :number) (>= key KEY_1) (<= key KEY_9)))
+        (if (or tab-shortcut? close-shortcut? alt-number-shortcut?)
+            (do
+              (when (world-shortcut-conflict?)
+                (error "World shortcut conflict: input widget has focus"))
+              (if tab-shortcut?
+                  (if shift?
+                      (app.world-manager:activate-previous)
+                      (app.world-manager:activate-next))
+                  close-shortcut?
+                  (app.world-manager:close-active-world)
+                  alt-number-shortcut?
+                  (app.world-manager:activate-by-tab-number (+ 1 (- key KEY_1)))
+                  false)
+              true)
+            false))))
+
 (fn app.init []
   (local init-start (os.clock))
   (assert (and app.engine app.engine.events) "app.engine.events missing; load engine-events before app.init")
@@ -503,6 +605,12 @@
     (set app.update-handler nil))
   (when (and app.engine.events app.engine.events.updated)
     (set app.update-handler (app.engine.events.updated:connect app.update)))
+  (when (and app.global-shortcuts-handler app.engine.events app.engine.events.key-down)
+    (app.engine.events.key-down:disconnect app.global-shortcuts-handler true)
+    (set app.global-shortcuts-handler nil))
+  (when (and app.engine.events app.engine.events.key-down)
+    (set app.global-shortcuts-handler
+         (app.engine.events.key-down:connect handle-global-world-shortcut)))
 
   (when app.remote-control
     (app.remote-control:drop)
@@ -519,20 +627,6 @@
 
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
-
-  (set app.camera (Camera {:position (glm.vec3 0 0 30)}))
-  (when (and app.settings app.camera)
-    (local stored-position (app.settings.get-value "camera.position" nil))
-    (local stored-rotation (app.settings.get-value "camera.rotation" nil))
-    (local pos (array->vec3 stored-position))
-    (local rot (array->quat stored-rotation))
-    (when pos
-      (app.camera:set-position pos))
-    (when rot
-      (app.camera:set-rotation rot)))
-  (disconnect-camera-settings)
-  (connect-camera-settings)
-  (set app.first-person-controls (FirstPersonControls {:camera app.camera}))
   (AppBootstrap.init-input-systems)
   (local initial-width (or (and app.engine app.engine.width) 0))
   (local initial-height (or (and app.engine app.engine.height) 0))
@@ -557,14 +651,10 @@
     (app.focus:drop))
   (set app.focus (FocusManager {:root-name "space-focus"}))
   (local focus-manager app.focus)
-  (local focus-root (focus-manager:get-root-scope))
-  (local scene-scope (focus-manager:create-scope {:name "scene"
-                                                  :directional-traversal-boundary? true}))
-  (focus-manager:attach scene-scope focus-root)
   (local hud-scope (focus-manager:create-scope {:name "hud"
                                                 :directional-traversal-boundary? true}))
-  (focus-manager:attach hud-scope focus-root)
-  (set app.scene-focus-scope scene-scope)
+  (focus-manager:attach hud-scope (focus-manager:get-root-scope))
+  (set app.scene-focus-scope nil)
   (set app.hud-focus-scope hud-scope)
   (when app.clickables
     (when app.focus-void-callback
@@ -575,55 +665,24 @@
              (when app.focus
                (app.focus:clear-focus))))
     (app.clickables:register-left-click-void-callback app.focus-void-callback))
+  (set app.scene nil)
+  (set app.camera nil)
+  (set app.first-person-controls nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.object-selector nil)
+  (set app.layout-root nil)
 
-  (set app.scene (Scene {:focus-manager focus-manager
-                           :focus-scope scene-scope
-                           :icons app.icons
-                           :states app.states
-                           :movables app.movables}))
-  (set app.hud (Hud {:scene app.scene
-                       :focus-manager focus-manager
-                       :focus-scope hud-scope
-                       :icons app.icons
-                       :states app.states
-                       :movables app.movables}))
-  (when app.object-selector
-    (app.object-selector:drop)
-    (set app.object-selector nil))
-  (set app.object-selector
-       (ObjectSelector {:ctx (and app.hud app.hud.build-context)
-                        :enabled? true}))
-  (when (and app.scene app.scene.build-context)
-    (set app.scene.build-context.object-selector app.object-selector))
-  (when (and app.hud app.hud.build-context)
-    (set app.hud.build-context.object-selector app.object-selector))
-  (when app.graph
-    (app.graph:drop)
-    (set app.graph nil))
-  (set app.graph (Graph {}))
-  (GraphKeyLoaders.register app.graph)
-  (when app.graph-view
-    (app.graph-view:drop)
-    (set app.graph-view nil))
-  (set app.graph-view (GraphView {:graph app.graph
-                                  :ctx (and app.scene app.scene.build-context)
-                                  :movables app.movables
-                                  :selector app.object-selector
-                                  :view-target app.hud
-                                  :camera app.camera
-                                  :pointer-target app.scene}))
-  (set app.layout-root (and app.scene app.scene.layout-root))
-  (when (and app.scene app.scene.build-context)
-    (set app.scene.build-context.layout-root app.layout-root))
-  (when (and app.hud app.hud.build-context)
-    (set app.hud.build-context.layout-root app.layout-root))
-
+  (set app.hud (Hud {:scene nil
+                     :focus-manager focus-manager
+                     :focus-scope hud-scope
+                     :icons app.icons
+                     :states app.states
+                     :movables app.movables}))
+  (init-world-manager)
+  (when app.world-manager
+    (app.world-manager:activate-first))
   (app.reset-projection)
-
-  (when app.scene
-    (app.scene:build-default))
-  (when app.hud
-    (app.hud:build-default))
   (local browser-cube-demo-env (os.getenv "SPACE_BROWSER_CUBE_DEMO"))
   (local browser-cube-demo?
     (and browser-cube-demo-env
@@ -679,6 +738,8 @@
   (when app.remote-control
     (app.remote-control:tick))
   (flush-window-settings-save)
+  (when (and app.world-manager app.world-manager.update)
+    (app.world-manager:update delta))
   (when (and app.kernels app.kernels.tick)
     (app.kernels:tick))
   (when (and app.engine.audio app.camera)
@@ -711,12 +772,22 @@
   (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
     (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
     (set app.window-mode-handler nil))
-  (when app.first-person-controls
-    (app.first-person-controls:drop)
-    (set app.first-person-controls nil))
-  (when app.camera
-    (app.camera:drop)
-    (set app.camera nil))
+  (when (and app.global-shortcuts-handler app.engine.events app.engine.events.key-down)
+    (app.engine.events.key-down:disconnect app.global-shortcuts-handler true)
+    (set app.global-shortcuts-handler nil))
+  (when (and app.world-manager app.world-manager.drop)
+    (app.world-manager:drop)
+    (set app.world-manager nil))
+  (set app.active-world-entry nil)
+  (set app.first-person-controls nil)
+  (set app.camera nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.object-selector nil)
+  (set app.scene nil)
+  (set app.world-tabs-builder nil)
+  (set app.active-world-hud-contrib nil)
+  (set app.active-world-hud-overlay nil)
   (app.hoverables:drop)
   (set app.hoverables nil)
   (when app.movables
@@ -728,27 +799,16 @@
   (when app.intersectables
     (app.intersectables:drop)
     (set app.intersectables nil))
-  (when app.graph-view
-    (app.graph-view:drop)
-    (set app.graph-view nil))
-  (when app.object-selector
-    (app.object-selector:drop)
-    (set app.object-selector nil))
   (when app.system-cursors
     (app.system-cursors:drop)
     (set app.system-cursors nil))
   (when app.browser-cube-surface
     (app.browser-cube-surface:drop)
     (set app.browser-cube-surface nil))
-  (when app.scene
-    (app.scene:drop)
-    (set app.scene nil))
   (when app.hud
+    (clear-active-world-hud-overlay)
     (app.hud:drop)
     (set app.hud nil))
-  (when app.graph
-    (app.graph:drop)
-    (set app.graph nil))
   (when app.renderers
     (app.renderers:drop)
     (set app.renderers nil))

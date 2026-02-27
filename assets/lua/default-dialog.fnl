@@ -49,7 +49,8 @@
     (fn attach-to-target [target]
       (when (and target target.add-panel-child)
         (target:add-panel-child {:builder (DefaultDialog options)
-                                :builder-options (copy-table base-runtime-opts)})))
+                                 :builder-options (copy-table base-runtime-opts)
+                                 :persistence options.persistence})))
 
     (each [key value (pairs options)]
       (when (and (not (= key :actions))

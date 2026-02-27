@@ -29,6 +29,7 @@
                  trimmed))
 
 (fn StatusPanel [_opts]
+  (local options (or _opts {}))
   (fn build [ctx]
     (local hud (or ctx.pointer-target {}))
     (local focus-manager (or hud.focus-manager (and ctx ctx.focus ctx.focus.manager)))
@@ -89,8 +90,9 @@
         (set focus-blur-listener nil)))
 
     (local panel
-      ((StatusPanelLayout {:state-builder build-state-text
-                           :focus-builder build-focus-text}) ctx))
+      ((StatusPanelLayout {:state-builder (or options.state-builder build-state-text)
+                           :focus-builder (or options.focus-builder build-focus-text)
+                           :body-builder options.body-builder}) ctx))
 
     (update-state-label)
     (update-focus-label)

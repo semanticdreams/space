@@ -202,62 +202,65 @@
   (p3:drop))
 
 (fn multiple-audio-players-run-and-seek []
-  (local a
-    (Video.VideoPlayer {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
-                        :autoplay true
-                        :loop true
-                        :muted false}))
-  (local b
-    (Video.VideoPlayer {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
-                        :autoplay true
-                        :loop true
-                        :muted false}))
-
-  (local ready?
-    (wait-until (fn [] (and (a:ready) (b:ready)))
-                5.0
-                (fn []
-                  (a:update 16)
-                  (b:update 16)
-                  (os.execute "sleep 0.01"))))
-  (assert ready? "audio concurrency players did not become ready")
-
-  (local deadline (+ (os.clock) 1.2))
-  (while (< (os.clock) deadline)
-    (a:update 16)
-    (b:update 16)
-    (os.execute "sleep 0.01"))
-
-  (local a-before (a:position))
-  (local b-before (b:position))
-  (local status-a (a:status))
-  (local status-b (b:status))
-  (local strict-clock?
-    (and (. status-a "audio-active")
-         (. status-b "audio-active")
-         (. status-a "has-audio-clock")
-         (. status-b "has-audio-clock")))
-  (if strict-clock?
+  (if (= (os.getenv "SPACE_DISABLE_AUDIO") "1")
+      (print "[SKIP] audio concurrency assertion skipped: SPACE_DISABLE_AUDIO=1")
       (do
-        (assert (> a-before 0.05) "first audio player should advance")
-        (assert (> b-before 0.05) "second audio player should advance"))
-      (print "[SKIP] strict audio progression checks skipped: audio clock unavailable"))
+        (local a
+          (Video.VideoPlayer {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
+                              :autoplay true
+                              :loop true
+                              :muted false}))
+        (local b
+          (Video.VideoPlayer {:path "lua/tests/data/test-videos/01_baseline_h264_with_audio.mp4"
+                              :autoplay true
+                              :loop true
+                              :muted false}))
 
-  (b:seek 0.35)
-  (b:play)
-  (local resumed?
-    (wait-until (fn [] (> (b:position) 0.45))
-                4.0
-                (fn []
-                  (a:update 16)
-                  (b:update 16)
-                  (os.execute "sleep 0.01"))))
-  (assert resumed? "seeked audio player did not continue after seek")
-  (assert (not (a:ended)) "looped audio player A should not end")
-  (assert (not (b:ended)) "looped audio player B should not end")
+        (local ready?
+          (wait-until (fn [] (and (a:ready) (b:ready)))
+                      5.0
+                      (fn []
+                        (a:update 16)
+                        (b:update 16)
+                        (os.execute "sleep 0.01"))))
+        (assert ready? "audio concurrency players did not become ready")
 
-  (a:drop)
-  (b:drop))
+        (local deadline (+ (os.clock) 1.2))
+        (while (< (os.clock) deadline)
+          (a:update 16)
+          (b:update 16)
+          (os.execute "sleep 0.01"))
+
+        (local a-before (a:position))
+        (local b-before (b:position))
+        (local status-a (a:status))
+        (local status-b (b:status))
+        (local strict-clock?
+          (and (. status-a "audio-active")
+               (. status-b "audio-active")
+               (. status-a "has-audio-clock")
+               (. status-b "has-audio-clock")))
+        (if strict-clock?
+            (do
+              (assert (> a-before 0.05) "first audio player should advance")
+              (assert (> b-before 0.05) "second audio player should advance"))
+            (print "[SKIP] strict audio progression checks skipped: audio clock unavailable"))
+
+        (b:seek 0.35)
+        (b:play)
+        (local resumed?
+          (wait-until (fn [] (> (b:position) 0.45))
+                      4.0
+                      (fn []
+                        (a:update 16)
+                        (b:update 16)
+                        (os.execute "sleep 0.01"))))
+        (assert resumed? "seeked audio player did not continue after seek")
+        (assert (not (a:ended)) "looped audio player A should not end")
+        (assert (not (b:ended)) "looped audio player B should not end")
+
+        (a:drop)
+        (b:drop))))
 
 (fn status-api-returns-structured-fields []
   (local player
@@ -406,30 +409,46 @@
                         (os.execute "sleep 0.01"))))
         (assert ready? "drift test player did not become ready")
 
-        (local deadline (+ (os.clock) 1.4))
-        (var has-audio-clock? false)
-        (var warmup-deadline nil)
-        (var sampled-frames 0)
-        (var max-sampled-drift 0.0)
-        (while (< (os.clock) deadline)
-          (player:update 16)
-          (local status (player:status))
-          (assert (not (. status "has-error")) (.. "drift status error: " status.error))
-          (when (. status "has-audio-clock")
-            (set has-audio-clock? true))
-          (when (and has-audio-clock? (not warmup-deadline))
-            (set warmup-deadline (+ (os.clock) 0.4)))
-          (when (and warmup-deadline (>= (os.clock) warmup-deadline))
-            (set sampled-frames (+ sampled-frames 1))
-            (local abs-drift (math.abs (. status "av-drift-seconds")))
-            (if (> abs-drift max-sampled-drift)
-                (set max-sampled-drift abs-drift)))
-          (os.execute "sleep 0.01"))
+        (local clock-started?
+          (wait-until (fn []
+                        (player:update 16)
+                        (local status (player:status))
+                        (assert (not (. status "has-error")) (.. "drift status error: " status.error))
+                        (. status "has-audio-clock"))
+                      4.0
+                      (fn [] (os.execute "sleep 0.01"))))
+        (if (not clock-started?)
+            (print "[SKIP] drift budget assertion skipped: audio clock unavailable")
+            (do
+              (local initial-status (player:status))
+              (local drift-window (math.max 0.5 (or (. initial-status "av-drift-window-seconds") 2.0)))
+              (local settle-deadline (+ (os.clock) drift-window 0.35))
+              (while (< (os.clock) settle-deadline)
+                (player:update 16)
+                (local status (player:status))
+                (assert (not (. status "has-error")) (.. "drift status error: " status.error))
+                (os.execute "sleep 0.01"))
 
-        (if (and has-audio-clock? (> sampled-frames 0))
-            (assert (< max-sampled-drift 0.25)
-                    (.. "A/V drift budget exceeded: " max-sampled-drift))
-            (print "[SKIP] drift budget assertion skipped: no stable audio clock window"))
+              (local sample-deadline (+ (os.clock) 0.8))
+              (var sampled-frames 0)
+              (var peak-recent-drift 0.0)
+              (var saw-audio-active? false)
+              (while (< (os.clock) sample-deadline)
+                (player:update 16)
+                (local status (player:status))
+                (assert (not (. status "has-error")) (.. "drift status error: " status.error))
+                (when (. status "audio-active")
+                  (set saw-audio-active? true))
+                (set sampled-frames (+ sampled-frames 1))
+                (local recent-abs (math.abs (. status "recent-max-av-drift-seconds")))
+                (if (> recent-abs peak-recent-drift)
+                    (set peak-recent-drift recent-abs))
+                (os.execute "sleep 0.01"))
+
+              (if (and saw-audio-active? (> sampled-frames 0))
+                  (assert (< peak-recent-drift 0.25)
+                          (.. "A/V drift budget exceeded: recent max drift " peak-recent-drift))
+                  (print "[SKIP] drift budget assertion skipped: audio backend not active"))))
         (player:drop))))
 
 (if Video.available

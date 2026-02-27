@@ -7,6 +7,8 @@
 (local Aligned (require :aligned))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local ScrollView (require :scroll-view))
+(local LlmConversationMessagesDialog
+  (require :graph/view/views/llm-conversation-messages-dialog))
 
 (fn LlmConversationView [node]
     (assert node "LlmConversationView requires a node")
@@ -55,8 +57,10 @@
         (fn open-messages-view [_self]
             (assert (and app app.hud app.hud.add-panel-child)
                     "LlmConversationView requires app.hud:add-panel-child")
-            (local LlmConversationMessagesView (require :llm-conversation-messages-view))
-            (app.hud:add-panel-child {:builder (LlmConversationMessagesView {:node node})}))
+            (LlmConversationMessagesDialog.open-panel {:hud app.hud
+                                                       :graph (and node node.graph)
+                                                       :node node
+                                                       :node-key node.key}))
 
         (local button
             ((Button {:text "Add message"

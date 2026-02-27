@@ -41,8 +41,33 @@
              (local builder (and opts opts.builder))
              (assert builder "builder required")
              (local element (builder self.build-context {}))
+             (set element.__test_panel_opts opts)
              (table.insert self.children element)
+             (set self.last-add-panel-opts opts)
              element))
+    (set target.remove-panel-child
+         (fn [self element]
+             (var removed false)
+             (local kept [])
+             (each [_ existing (ipairs self.children)]
+                 (if (and (not removed) (= existing element))
+                     (set removed true)
+                     (table.insert kept existing)))
+             (set self.children kept)
+             removed))
+    (set target.capture-panel-element-state
+         (fn [_self element]
+             (and element element.__test_panel_state)))
+    (set target.register-panel-restorer
+         (fn [self kind restorer owner]
+             (set self.restorer {:kind kind :restorer restorer :owner owner})
+             true))
+    (set target.unregister-panel-restorer
+         (fn [self _kind owner]
+             (when (or (= owner nil)
+                       (and self.restorer (= self.restorer.owner owner)))
+                 (set self.restorer nil))
+             true))
     target)
 
 (fn make-simple-view []
@@ -90,7 +115,51 @@
           (assert (and dialog dialog.layout)
                   "dialog should expose a layout even when unwrapped from nested builders")
           (when dialog.drop
-            (dialog:drop)))}])
+            (dialog:drop)))}
+ {:name "graph view node-views persist panel placement and restore"
+  :fn (fn []
+          (local ctx (make-ctx))
+          (local target (make-view-target ctx))
+          (local node {:key "persist-node"
+                       :label "Persist node"
+                       :view (fn [_node]
+                                 (fn [_builder-ctx _opts]
+                                     (make-simple-view)))})
+          (local graph {:nodes {}})
+          (set (. graph.nodes node.key) node)
+          (set graph.lookup (fn [_self key] (. graph.nodes key)))
+          (set graph.load-by-key (fn [_self key] (. graph.nodes key)))
+          (local views (GraphViewNodeViews {:ctx ctx
+                                            :graph graph
+                                            :view-target target}))
+          (views:open node)
+          (local dialog (. target.children 1))
+          (set dialog.__test_panel_state {:layer "float"
+                                          :position [1 2 3]
+                                          :rotation [1 0 0 0]
+                                          :size [7 8 9]})
+          (local state (views:capture-state))
+          (assert (= (length (or state.open-views [])) 1)
+                  "capture-state should record one open node view")
+          (local captured (. state.open-views 1))
+          (assert (= captured.node-key node.key))
+          (assert (= (and captured.panel captured.panel.layer) "float")
+                  "capture-state should include panel placement")
+          (views:drop-all)
+          (target:remove-panel-child dialog)
+          (views:restore-state {:open-views [{:node-key node.key
+                                              :panel {:layer "tiles"
+                                                      :align-x :end
+                                                      :align-y :start}}]})
+          (assert (= (length target.children) 1)
+                  "restore-state should reopen persisted node view")
+          (assert (= (and target.last-add-panel-opts target.last-add-panel-opts.location) :tiles))
+          (assert (= (and target.last-add-panel-opts target.last-add-panel-opts.align-x) :end))
+          (assert (= (and target.last-add-panel-opts target.last-add-panel-opts.align-y) :start))
+          (assert (= (and target.last-add-panel-opts
+                          target.last-add-panel-opts.persistence
+                          target.last-add-panel-opts.persistence.kind)
+                     "graph-node-view")))}])
 
 (local main
   (fn []

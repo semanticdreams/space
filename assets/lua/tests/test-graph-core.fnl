@@ -181,6 +181,39 @@
                     "ensure-identity-key should create only one identity entity per target")
             (graph:drop))))
 
+(fn graph-core-captures-state []
+    (local graph (Graph {:with-start false}))
+    (local a (Graph.GraphNode {:key "a"}))
+    (local b (Graph.GraphNode {:key "b"}))
+    (graph:add-node a {})
+    (graph:add-edge (Graph.GraphEdge {:source a
+                                      :target b}))
+    (local state (graph:capture-state))
+    (assert (= (length state.nodes) 2) "Graph capture-state should include both nodes")
+    (assert (= (. state.nodes 1) "a"))
+    (assert (= (. state.nodes 2) "b"))
+    (assert (= (length state.edges) 1) "Graph capture-state should include one edge")
+    (assert (= (and (. state.edges 1) (. (. state.edges 1) :source)) "a"))
+    (assert (= (and (. state.edges 1) (. (. state.edges 1) :target)) "b"))
+    (graph:drop))
+
+(fn graph-core-restores-state []
+    (local graph (Graph {:with-start false}))
+    (local created {})
+    (graph:register-key-loader "test"
+      (fn [key]
+        (set (. created key) true)
+        (Graph.GraphNode {:key key})))
+    (graph:restore-state {:nodes ["test:a" "test:b"]
+                          :edges [{:source "test:a"
+                                   :target "test:b"}]})
+    (assert (graph:lookup "test:a") "Graph restore-state should load source node")
+    (assert (graph:lookup "test:b") "Graph restore-state should load target node")
+    (assert (= (graph:edge-count) 1) "Graph restore-state should recreate edges")
+    (assert (. created "test:a"))
+    (assert (. created "test:b"))
+    (graph:drop))
+
 (table.insert tests {:name "Graph core adds nodes and edges" :fn graph-core-adds-nodes-and-edges})
 (table.insert tests {:name "Graph core replaces nodes and updates edges" :fn graph-core-replaces-node-and-updates-edges})
 (table.insert tests {:name "Graph core removes nodes and edges" :fn graph-core-removes-nodes-and-edges})
@@ -189,6 +222,8 @@
 (table.insert tests {:name "Graph core link edges resolve identity endpoints" :fn graph-core-link-edges-resolve-identity-endpoints})
 (table.insert tests {:name "Graph core create-identity creates node and resolves" :fn graph-core-create-identity-creates-node-and-resolves})
 (table.insert tests {:name "Graph core ensure-identity-key reuses existing identity" :fn graph-core-ensure-identity-key-reuses-existing-identity})
+(table.insert tests {:name "Graph core captures node and edge state" :fn graph-core-captures-state})
+(table.insert tests {:name "Graph core restores node and edge state" :fn graph-core-restores-state})
 
 (local main
   (fn []

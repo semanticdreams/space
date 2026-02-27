@@ -15,11 +15,21 @@
 (local GltfMesh (require :gltf-mesh))
 (local BuildContext (require :build-context))
 (local viewport-utils (require :viewport-utils))
+(local MathUtils (require :math-utils))
 
 (local default-position (glm.vec3 -5 0 0))
 (local default-rotation (glm.quat (math.rad 30) (glm.vec3 0 1 0)))
 (local default-depth-scale 0)
 (local default-camera-distance 100.0)
+
+(local vec3->array (. MathUtils :vec3->array))
+(local quat->array (. MathUtils :quat->array))
+(local array->vec3 (. MathUtils :array->vec3))
+(local array->quat (. MathUtils :array->quat))
+
+(local built-in-scene-kinds {:graph-node-cube true
+                             :physics-cuboid true
+                             :demo-browser true})
 
 (fn normalize-or [value fallback]
   (if (and value (> (glm.length value) 1e-6))
@@ -83,6 +93,35 @@
   (if position
       (glm.vec3 position.x position.y 0)
       (glm.vec3 0 0 0)))
+
+(fn clone-table [value]
+  (if (= (type value) :table)
+      (do
+        (local out {})
+        (each [k v (pairs value)]
+          (set (. out k) (clone-table v)))
+        out)
+      value))
+
+(fn capture-panel-layout-state [metadata]
+  (local element (and metadata metadata.element))
+  (local layout (and element element.layout))
+  (if (not (and element layout))
+      nil
+      (do
+        (local size (or layout.size layout.measure))
+        {:position (vec3->array layout.position)
+         :rotation (quat->array layout.rotation)
+         :size (and size (vec3->array size))})))
+
+(fn find-scene-metadata-by-element [children element]
+  (var found nil)
+  (when (and children element)
+    (each [_ metadata (ipairs children)]
+      (when (and (not found)
+                 (= (and metadata metadata.element) element))
+        (set found metadata))))
+  found)
 
 (fn collect-positioned-resizables [children]
   (var entries [])
@@ -182,6 +221,8 @@
                :projection nil
                :entity nil
                :builder nil
+               :graph options.graph
+               :panel-restorers {}
                :demo-browser nil
                :scene-children nil
                :physics-body-count 0
@@ -419,6 +460,36 @@
       (remove-entries-for-owner entity.resizables removed-element))
     removed)
 
+  (fn capture-panel-element-state [self element]
+    (local metadata (find-scene-metadata-by-element self.scene-children element))
+    (if (not metadata)
+        nil
+        (do
+          (local layout-state (capture-panel-layout-state metadata))
+          (if (not layout-state)
+              nil
+              {:layer "scene"
+               :position layout-state.position
+               :rotation layout-state.rotation
+               :size layout-state.size}))))
+
+  (fn register-panel-restorer [self kind restorer owner]
+    (assert (= (type kind) :string) "Scene.register-panel-restorer requires string kind")
+    (assert (= (type restorer) :function) "Scene.register-panel-restorer requires function restorer")
+    (set (. self.panel-restorers kind) {:restore restorer
+                                        :owner owner})
+    true)
+
+  (fn unregister-panel-restorer [self kind owner]
+    (assert (= (type kind) :string) "Scene.unregister-panel-restorer requires string kind")
+    (local current (. self.panel-restorers kind))
+    (when current
+      (if (or (= owner nil)
+              (= current.owner nil)
+              (= current.owner owner))
+          (set (. self.panel-restorers kind) nil)))
+    true)
+
   (fn add-panel-child [self opts]
     (local entity self.entity)
     (var builder (and opts opts.builder))
@@ -453,7 +524,9 @@
       (local metadata {:flex (or opts.flex 0)
                        :element element
                        :position offset
-                       :rotation local-rotation})
+                       :rotation local-rotation
+                       :persistence (and opts.persistence
+                                         (clone-table opts.persistence))})
       (local children (or entity.children []))
       (when (not entity.children)
         (set entity.children children))
@@ -538,20 +611,28 @@
     (set self.physics-body-count (+ stack-index 1))
     (local builder (Sized {:size size
                            :child (DemoPhysicsBodies.new-cuboid)}))
+    (local spawn-position (or options.position stacked-position))
     (local element (add-panel-child self {:builder builder
                                           :skip-cuboid true
                                           :skip-physics false
-                                          :position (or options.position stacked-position)
-                                          :rotation options.rotation}))
+                                          :position spawn-position
+                                          :rotation options.rotation
+                                          :persistence {:kind "physics-cuboid"
+                                                        :size (vec3->array size)}}))
     (when element
       (self:sync-physics-bodies))
     element)
 
   (fn add-graph-node-cube [self opts]
     (local options (or opts {}))
-    (local node options.node)
-    (assert node "Scene.add-graph-node-cube requires :node")
-    (local key (tostring (or options.node-key (and node node.key) "")))
+    (local key (tostring (or options.node-key (and options.node options.node.key) "")))
+    (assert (> (string.len key) 0)
+            "Scene.add-graph-node-cube requires :node or :node-key")
+    (local graph (or self.graph app.graph))
+    (local node (or options.node
+                    (and graph graph.lookup (graph:lookup key))
+                    (and graph graph.load-by-key (graph:load-by-key key))))
+    (assert node (.. "Scene.add-graph-node-cube could not resolve node for key: " key))
     (local label (or options.label (and node node.label) key))
     (local size (or options.size (glm.vec3 4 4 4)))
     (local placement (resolve-camera-placement self))
@@ -561,7 +642,7 @@
          (glm.vec3 0 (+ 6 (* stack-index 4)) 0)))
     (set self.physics-body-count (+ stack-index 1))
     (fn on-graph-action [_cube _button _event payload]
-      (local graph app.graph)
+      (local graph (or self.graph app.graph))
       (when graph
         (local node-key (or (and payload payload.node-key) key))
         (local existing (and node-key (graph:lookup node-key)))
@@ -581,24 +662,33 @@
                                      :node-key key
                                      :label label
                                      :on-graph on-graph-action})}))
+    (local spawn-position (or options.position stacked-position))
     (local element
       (add-panel-child self {:builder cube-builder
                              :skip-cuboid true
                              :skip-physics false
-                             :position (or options.position stacked-position)
-                             :rotation options.rotation}))
+                             :position spawn-position
+                             :rotation options.rotation
+                             :persistence {:kind "graph-node-cube"
+                                           :node-key key
+                                           :label label
+                                           :size (vec3->array size)}}))
     (when element
       (self:sync-physics-bodies))
     element)
 
-  (fn add-demo-browser [self]
+  (fn add-demo-browser [self opts]
     (if self.demo-browser
         self.demo-browser
-        (let [browser
+        (let [options (or opts {})
+              browser
               (DemoDialogs.new-browser-dialog
                 {:on-open (fn [entry]
                             (self:add-demo-entry entry))})
-              element (add-panel-child self {:builder browser})]
+              element (add-panel-child self {:builder browser
+                                             :position options.position
+                                             :rotation options.rotation
+                                             :persistence {:kind "demo-browser"}})]
           (when element
             (set self.demo-browser element))
           element)))
@@ -750,6 +840,93 @@
 (fn on-viewport-changed [_self _viewport]
   nil)
 
+  (fn capture-state [self]
+    (local panels [])
+    (each [_ metadata (ipairs (or self.scene-children []))]
+      (local persistence (and metadata metadata.persistence))
+      (assert persistence
+              "Scene.capture-state found panel without persistence")
+      (local kind (and persistence persistence.kind))
+      (assert (= (type kind) :string)
+              "Scene.capture-state panel persistence requires string :kind")
+      (local module-name (and persistence persistence.restorer-module))
+      (when (not (= module-name nil))
+        (assert (= (type module-name) :string)
+                (.. "Scene.capture-state panel persistence for kind "
+                    kind
+                    " requires string :restorer-module")))
+      (local registered (and (. self.panel-restorers kind)
+                             (. (. self.panel-restorers kind) :restore)))
+      (local built-in? (. built-in-scene-kinds kind))
+      (assert (or built-in? registered (= (type module-name) :string))
+              (.. "Scene.capture-state panel kind has no restore strategy: "
+                  kind
+                  " (register restorer or set :restorer-module)"))
+      (local layout-state (capture-panel-layout-state metadata))
+      (when layout-state
+        (local record (clone-table persistence))
+        (set record.position layout-state.position)
+        (set record.rotation layout-state.rotation)
+        (set record.size (or layout-state.size record.size))
+        (table.insert panels record)))
+    {:panels panels})
+
+  (fn resolve-panel-restorer [self panel]
+    (local kind panel.kind)
+    (local registered-record (. self.panel-restorers kind))
+    (local registered (and registered-record registered-record.restore))
+    (if registered
+        registered
+        (do
+          (local module-name panel.restorer-module)
+          (assert (= (type module-name) :string)
+                  (.. "Scene.restore-state panel kind "
+                      kind
+                      " requires string :restorer-module or registered restorer"))
+          (local (ok module-or-error) (pcall require module-name))
+          (assert ok
+                  (.. "Scene.restore-state failed requiring panel restorer module "
+                      module-name
+                      ": "
+                      (tostring module-or-error)))
+          (local module module-or-error)
+          (local restore (and module module.restore))
+          (assert (= (type restore) :function)
+                  (.. "Scene.restore-state module "
+                      module-name
+                      " must export function :restore"))
+          (fn [payload]
+            (restore {:scene self
+                      :target self
+                      :panel payload})))))
+
+  (fn restore-state [self state]
+    (local payload (or state {}))
+    (local panels (or payload.panels []))
+    (assert (= (type panels) :table) "Scene.restore-state requires :panels table")
+    (each [_ panel (ipairs panels)]
+      (assert (= (type panel) :table) "Scene.restore-state panel entries must be tables")
+      (local kind panel.kind)
+      (if (= kind "graph-node-cube")
+          (self:add-graph-node-cube {:node-key panel.node-key
+                                     :label panel.label
+                                     :size (or (array->vec3 panel.size)
+                                               (glm.vec3 4 4 4))
+                                     :position (array->vec3 panel.position)
+                                     :rotation (array->quat panel.rotation)})
+          (= kind "physics-cuboid")
+          (self:add-physics-body {:size (or (array->vec3 panel.size)
+                                            (glm.vec3 4 4 4))
+                                  :position (array->vec3 panel.position)
+                                  :rotation (array->quat panel.rotation)})
+          (= kind "demo-browser")
+          (self:add-demo-browser {:position (array->vec3 panel.position)
+                                  :rotation (array->quat panel.rotation)})
+          (do
+            (local restorer (resolve-panel-restorer self panel))
+            (restorer panel))))
+    true)
+
 (set self.unregister-entity unregister-entity)
 (set self.attach-entity attach-entity)
 (set self.build build)
@@ -772,6 +949,11 @@
 (set self.get-reference-point get-reference-point)
 (set self.screen-pos-ray screen-pos-ray)
 (set self.on-viewport-changed on-viewport-changed)
+(set self.capture-state capture-state)
+(set self.restore-state restore-state)
+(set self.capture-panel-element-state capture-panel-element-state)
+(set self.register-panel-restorer register-panel-restorer)
+(set self.unregister-panel-restorer unregister-panel-restorer)
 (set self.add-widget-as-cuboid add-widget-as-cuboid)
 (set self.add-panel-child add-panel-child)
 (set self.remove-panel-child remove-panel-child)
@@ -779,6 +961,7 @@
 (set self.add-demo-browser add-demo-browser)
 (set self.add-physics-body add-physics-body)
 (set self.add-graph-node-cube add-graph-node-cube)
+(set self.set-graph (fn [_self graph] (set self.graph graph)))
 (self:reset-projection)
 self)
 

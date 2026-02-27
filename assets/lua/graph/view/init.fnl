@@ -112,7 +112,8 @@
                                 :label-color resolved-label-color
                                 :label-depth-offset (or options.label-depth-offset 1.0)
                                 :camera-debounce-distance (or options.camera-debounce-distance 10.0)}))
-    (local views (GraphViewNodeViews {:ctx ctx
+    (local views (GraphViewNodeViews {:graph graph
+                                      :ctx ctx
                                       :view-target view-target
                                       :view-context view-context}))
     (local selection (GraphViewSelection {:selector selector
@@ -733,6 +734,38 @@
     (set view.update update)
     (set view.get-position get-position)
     (set view.start-layout (fn [_self] (graph-layout:start)))
+    (set view.capture-state
+         (fn [_self]
+             (local graph-state
+                 (if (and graph graph.capture-state)
+                     (graph:capture-state)
+                     {:nodes [] :edges []}))
+             (local views-state
+                 (if (and views views.capture-state)
+                     (views:capture-state)
+                     {:open-node-keys []}))
+             {:graph graph-state
+              :views views-state}))
+    (set view.restore-graph-state
+         (fn [_self state]
+             (when (and graph graph.restore-state state)
+                 (graph:restore-state state))
+             true))
+    (set view.restore-views-state
+         (fn [_self state]
+             (when (and views views.restore-state state)
+                 (views:restore-state state))
+             true))
+    (set view.restore-state
+         (fn [self state]
+             (local payload (or state {}))
+             (if payload.graph
+                 (self:restore-graph-state payload.graph)
+                 (self:restore-graph-state payload))
+             (if payload.views
+                 (self:restore-views-state payload.views)
+                 (self:restore-views-state {}))
+             true))
     (set view.drop
          (fn [_self]
              (detach-graph)

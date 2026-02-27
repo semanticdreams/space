@@ -6,11 +6,23 @@
 (local Rectangle (require :rectangle))
 (local Padding (require :padding))
 (local Stack (require :stack))
+(local MathUtils (require :math-utils))
 
 (local identity-view (glm.mat4 1))
 (local default-world-scale 0.05)
 (local default-size-scale 2.0) ; enlarge orthographic bounds so HUD renders smaller on screen
 (local panel-border-size 0.2)
+(local vec3->array (. MathUtils :vec3->array))
+(local quat->array (. MathUtils :quat->array))
+
+(fn clone-table [value]
+  (if (= (type value) :table)
+      (do
+        (local out {})
+        (each [k v (pairs value)]
+          (set (. out k) (clone-table v)))
+        out)
+      value))
 
 (fn resolve-active-theme []
   (and app.engine app.themes app.themes.get-active-theme
@@ -25,6 +37,10 @@
   (or (and theme theme.panel-border)
       (and theme theme.hud theme.hud.panel-border)
       (glm.vec4 0.72 0.75 0.79 0.85)))
+
+(fn make-empty-hud-slot-builder []
+  (fn [ctx]
+    ((Stack {:children []}) ctx)))
 
 (fn Hud [opts]
   (local options (or opts {}))
@@ -55,6 +71,7 @@
                :tiles nil
                :float nil
                :overlay-root nil
+               :panel-restorers {}
                :scene options.scene
                :margin-px (or options.margin-px 0)
                :scale-factor (or options.scale-factor default-size-scale)
@@ -178,6 +195,33 @@
             element
             (or element.__hud_wrapper element))))
 
+  (fn find-panel-metadata [self wrapper]
+    (local result {:layer nil :metadata nil})
+    (when (and self.tiles wrapper)
+      (each [_ metadata (ipairs self.tiles.children)]
+        (when (and (not result.metadata)
+                   (= (and metadata metadata.element) wrapper))
+          (set result.layer "tiles")
+          (set result.metadata metadata))))
+    (when (and (not result.metadata) self.float wrapper)
+      (each [_ metadata (ipairs self.float.children)]
+        (when (and (not result.metadata)
+                   (= (and metadata metadata.element) wrapper))
+          (set result.layer "float")
+          (set result.metadata metadata))))
+    result)
+
+  (fn capture-panel-layout-state [metadata]
+    (local element (and metadata metadata.element))
+    (local layout (and element element.layout))
+    (if (not layout)
+        nil
+        (do
+          (local size (or layout.size layout.measure))
+          {:position (vec3->array layout.position)
+           :rotation (quat->array layout.rotation)
+           :size (and size (vec3->array size))})))
+
   (fn wrap-panel-element [self element]
     (local wrapper (resolve-panel-wrapper element))
     (if (and wrapper wrapper.__hud_inner)
@@ -215,6 +259,8 @@
             (set float-meta (self.float:attach-child wrapper {:position position
                                                               :rotation rotation
                                                               :size size}))
+            (when (and tile-metadata tile-metadata.persistence)
+              (set float-meta.persistence (clone-table tile-metadata.persistence)))
             (when entry
               (set entry.target (self.float:ensure-movable-target float-meta)))
             
@@ -408,13 +454,20 @@
       (set builder-options.on-close handle-close)
       (set element (builder self.build-context builder-options))
       (local wrapper (wrap-panel-element self element))
+      (local persistence (and options.persistence
+                             (clone-table options.persistence)))
+      (var metadata nil)
       (if (or (= destination :float) (= destination "float"))
-          (self.float:attach-child wrapper {:position options.position
-                                            :rotation options.rotation
-                                            :size options.size
-                                            :depth-offset-index options.depth-offset-index})
-          (self.tiles:attach-child wrapper {:align-x options.align-x
-                                            :align-y options.align-y}))
+          (set metadata
+               (self.float:attach-child wrapper {:position options.position
+                                                 :rotation options.rotation
+                                                 :size options.size
+                                                 :depth-offset-index options.depth-offset-index}))
+          (set metadata
+               (self.tiles:attach-child wrapper {:align-x options.align-x
+                                                 :align-y options.align-y})))
+      (when metadata
+        (set metadata.persistence persistence))
       (self:refresh-panel-movables)
       (self:refresh-panel-resizables)
       element))
@@ -471,6 +524,137 @@
       (root.layout:mark-measure-dirty)
       (root.layout:mark-layout-dirty)
       element))
+
+  (fn capture-panel-element-state [self element]
+    (local wrapper (resolve-panel-wrapper element))
+    (local located (find-panel-metadata self wrapper))
+    (local layer located.layer)
+    (local metadata located.metadata)
+    (if (not metadata)
+        nil
+        (if (= layer "tiles")
+            {:layer "tiles"
+             :align-x metadata.align-x
+             :align-y metadata.align-y}
+            (do
+              (local layout-state (capture-panel-layout-state metadata))
+              (if (not layout-state)
+                  nil
+                  {:layer "float"
+                   :position layout-state.position
+                   :rotation layout-state.rotation
+                   :size layout-state.size})))))
+
+  (fn register-panel-restorer [self kind restorer owner]
+    (assert (= (type kind) :string) "Hud.register-panel-restorer requires string kind")
+    (assert (= (type restorer) :function) "Hud.register-panel-restorer requires function restorer")
+    (set (. self.panel-restorers kind) {:restore restorer
+                                        :owner owner})
+    true)
+
+  (fn unregister-panel-restorer [self kind owner]
+    (assert (= (type kind) :string) "Hud.unregister-panel-restorer requires string kind")
+    (local current (. self.panel-restorers kind))
+    (when current
+      (if (or (= owner nil)
+              (= current.owner nil)
+              (= current.owner owner))
+          (set (. self.panel-restorers kind) nil)))
+    true)
+
+  (fn capture-state [self]
+    (local panels [])
+    (fn collect-record [layer metadata]
+      (local persistence (and metadata metadata.persistence))
+      (assert persistence
+              (.. "Hud.capture-state found panel without persistence in layer " layer))
+      (local record (clone-table persistence))
+      (local kind record.kind)
+      (assert (= (type kind) :string)
+              "Hud.capture-state panel persistence requires string :kind")
+      (local module-name record.restorer-module)
+      (when (not (= module-name nil))
+        (assert (= (type module-name) :string)
+                (.. "Hud.capture-state panel persistence for kind "
+                    kind
+                    " requires string :restorer-module")))
+      (local registered (and (. self.panel-restorers kind)
+                             (. (. self.panel-restorers kind) :restore)))
+      (assert (or registered (= (type module-name) :string))
+              (.. "Hud.capture-state panel kind has no restore strategy: "
+                  kind
+                  " (register restorer or set :restorer-module)"))
+      (if (= layer "tiles")
+          (do
+            (set record.layer "tiles")
+            (set record.align-x metadata.align-x)
+            (set record.align-y metadata.align-y))
+          (do
+            (set record.layer "float")
+            (local layout-state (capture-panel-layout-state metadata))
+            (assert layout-state
+                    (.. "Hud.capture-state missing layout for float panel kind: " kind))
+            (set record.position layout-state.position)
+            (set record.rotation layout-state.rotation)
+            (set record.size layout-state.size)))
+      (table.insert panels record))
+    (when self.tiles
+      (each [_ metadata (ipairs (or self.tiles.children []))]
+        (collect-record "tiles" metadata)))
+    (when self.float
+      (each [_ metadata (ipairs (or self.float.children []))]
+        (collect-record "float" metadata)))
+    {:panels panels})
+
+  (fn resolve-panel-restorer [self panel]
+    (local kind panel.kind)
+    (local registered-record (. self.panel-restorers kind))
+    (local registered (and registered-record registered-record.restore))
+    (if registered
+        registered
+        (do
+          (local module-name panel.restorer-module)
+          (assert (= (type module-name) :string)
+                  (.. "Hud.restore-state panel kind "
+                      kind
+                      " requires string :restorer-module or registered restorer"))
+          (local (ok module-or-error)
+            (pcall require module-name))
+          (assert ok
+                  (.. "Hud.restore-state failed requiring panel restorer module "
+                      module-name
+                      ": "
+                      (tostring module-or-error)))
+          (local module module-or-error)
+          (local restore (and module module.restore))
+          (assert (= (type restore) :function)
+                  (.. "Hud.restore-state module "
+                      module-name
+                      " must export function :restore"))
+          (fn [payload]
+            (restore {:hud self
+                      :target self
+                      :panel payload})))))
+
+  (fn restore-state [self state]
+    (local payload (or state {}))
+    (local panels (or payload.panels []))
+    (assert (= (type panels) :table) "Hud.restore-state requires :panels table")
+    (when (and (> (length panels) 0)
+               (or (not self.tiles) (not self.float)))
+      (local empty-slot (make-empty-hud-slot-builder))
+      (self:build-default {:control-builder empty-slot
+                           :status-builder empty-slot}))
+    (when (> (length panels) 0)
+      (assert (and self.tiles self.float)
+              "Hud.restore-state requires HUD roots (tiles and float)"))
+    (each [_ panel (ipairs panels)]
+      (assert (= (type panel) :table) "Hud.restore-state panel entries must be tables")
+      (local kind panel.kind)
+      (assert (= (type kind) :string) "Hud.restore-state panel kind must be a string")
+      (local restorer (resolve-panel-restorer self panel))
+      (restorer panel))
+    true)
 
   (fn drop [self]
     (when self.entity
@@ -591,6 +775,11 @@
   (set self.remove-panel-child remove-panel-child)
   (set self.add-overlay-child add-overlay-child)
   (set self.remove-overlay-child remove-overlay-child)
+  (set self.capture-panel-element-state capture-panel-element-state)
+  (set self.register-panel-restorer register-panel-restorer)
+  (set self.unregister-panel-restorer unregister-panel-restorer)
+  (set self.capture-state capture-state)
+  (set self.restore-state restore-state)
   (set self.refresh-panel-movables refresh-panel-movables)
   (set self.refresh-panel-resizables refresh-panel-resizables)
 
