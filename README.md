@@ -17,6 +17,9 @@ Direct downloads:
 - AppImage: https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage
 - Debian/Ubuntu: https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb
 - Fedora/RHEL/openSUSE: https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm
+- Minimal AppImage (no CEF): https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.AppImage
+- Minimal Debian/Ubuntu (no CEF): https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-amd64.deb
+- Minimal Fedora/RHEL/openSUSE (no CEF): https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm
 
 #### AppImage (recommended for most users)
 
@@ -78,6 +81,20 @@ make appimage
 ```
 
 This writes `build/space-<version>-x86_64.AppImage`.
+
+Build Linux release artifacts with selectable profiles:
+
+```bash
+# full profile (default)
+scripts/build-linux.sh --profile full
+
+# minimal profile (currently disables CEF; extend via SPACE_MINIMAL_DISABLED_OPTIONS)
+scripts/build-linux.sh --profile minimal
+```
+
+Stable outputs are written as:
+- Full: `build/space-linux-x86_64.AppImage`, `build/space-linux-amd64.deb`, `build/space-linux-x86_64.rpm`
+- Minimal: `build/space-minimal-linux-x86_64.AppImage`, `build/space-minimal-linux-amd64.deb`, `build/space-minimal-linux-x86_64.rpm`
 
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).

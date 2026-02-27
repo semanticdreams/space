@@ -9,6 +9,27 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: full
+            stable_appimage: space-linux-x86_64.AppImage
+            release_files: |
+              build/*.deb
+              build/*.rpm
+              build/*.AppImage
+              build/space-linux-amd64.deb
+              build/space-linux-x86_64.rpm
+              build/space-linux-x86_64.AppImage
+              build/dist/space-linux-x86_64-bin.tar.gz
+          - profile: minimal
+            stable_appimage: space-minimal-linux-x86_64.AppImage
+            release_files: |
+              build/space-minimal-linux-amd64.deb
+              build/space-minimal-linux-x86_64.rpm
+              build/space-minimal-linux-x86_64.AppImage
+              build/dist/space-minimal-linux-x86_64-bin.tar.gz
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
@@ -22,9 +43,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
+          key: ccache-${{ runner.os }}-${{ matrix.profile }}-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ github.ref }}-
+            ccache-${{ runner.os }}-${{ matrix.profile }}-${{ github.ref }}-
+            ccache-${{ runner.os }}-${{ matrix.profile }}-
             ccache-${{ runner.os }}-
 
       - name: Install dependencies
@@ -37,11 +59,11 @@ jobs:
         env:
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: scripts/build-linux.sh
+        run: scripts/build-linux.sh --profile ${{ matrix.profile }}
 
       - name: Smoke test AppImage (host)
         run: |
-          appimage=$(ls build/space-*-x86_64.AppImage | head -n1)
+          appimage="build/${{ matrix.stable_appimage }}"
           test -n "${appimage}"
           chmod +x "${appimage}"
           APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" --help >/dev/null
@@ -57,7 +79,7 @@ jobs:
 
       - name: Smoke test AppImage (Ubuntu 22.04/24.04)
         run: |
-          appimage=$(basename "$(ls build/space-*-x86_64.AppImage | head -n1)")
+          appimage="${{ matrix.stable_appimage }}"
           for image in ubuntu:22.04 ubuntu:24.04; do
             docker run --rm \
               -e APPIMAGE_NAME="${appimage}" \
@@ -77,32 +99,16 @@ jobs:
       - name: ccache stats
         run: ccache -s
 
-      - name: Prepare stable release asset names
-        run: |
-          set -euo pipefail
-          appimage_src=$(ls -t build/space-*-x86_64.AppImage | head -n1)
-          deb_src=$(ls -t build/space-*-Linux.deb | head -n1)
-          rpm_src=$(ls -t build/space-*-Linux.rpm | head -n1)
-          cp "${appimage_src}" build/space-linux-x86_64.AppImage
-          cp "${deb_src}" build/space-linux-amd64.deb
-          cp "${rpm_src}" build/space-linux-x86_64.rpm
-
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
-          files: |
-            build/*.deb
-            build/*.rpm
-            build/*.AppImage
-            build/space-linux-amd64.deb
-            build/space-linux-x86_64.rpm
-            build/space-linux-x86_64.AppImage
-            build/dist/space-linux-x86_64-bin.tar.gz
+          files: ${{ matrix.release_files }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
+    if: ${{ false }} # Temporarily disabled; keep job definition for future re-enable.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v3

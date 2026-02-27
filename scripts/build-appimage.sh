@@ -2,10 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="${ROOT_DIR}/build"
+BUILD_DIR="${SPACE_BUILD_DIR:-${ROOT_DIR}/build}"
 APPIMAGE_WORK_DIR="${BUILD_DIR}/appimage"
 APPDIR="${APPIMAGE_WORK_DIR}/AppDir"
 TOOLS_DIR="${APPIMAGE_WORK_DIR}/tools"
+APPIMAGE_BASENAME="${SPACE_APPIMAGE_BASENAME:-space}"
 LINUXDEPLOY_URL="${LINUXDEPLOY_URL:-https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20240109-1/linuxdeploy-x86_64.AppImage}"
 APPIMAGETOOL_URL="${APPIMAGETOOL_URL:-https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage}"
 
@@ -129,7 +130,7 @@ VERSION="$(sed -n 's/^set(CPACK_PACKAGE_VERSION \"\\(.*\\)\")/\\1/p' "${BUILD_DI
 if [[ -z "${VERSION}" ]]; then
     VERSION="0.1.0"
 fi
-OUT_APPIMAGE="${BUILD_DIR}/space-${VERSION}-x86_64.AppImage"
+OUT_APPIMAGE="${BUILD_DIR}/${APPIMAGE_BASENAME}-${VERSION}-x86_64.AppImage"
 APPIMAGE_MARKER="${BUILD_DIR}/.appimage-build-start"
 
 rm -f "${OUT_APPIMAGE}"
