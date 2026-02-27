@@ -1,5 +1,5 @@
 (local StateBase (require :state-base))
-(local LauncherView (require :launcher-view))
+(local LauncherLaunchable (require :launchables/launcher))
 
 (local KEY
   {:escape 27
@@ -12,17 +12,7 @@
     (app.states.set-state name)))
 
 (fn open-launcher []
-  (assert (and app app.hud app.hud.add-panel-child)
-          "Leader state launcher requires app.hud:add-panel-child")
-  (var element nil)
-  (set element
-       (app.hud:add-panel-child
-         {:builder
-          (LauncherView {:title "Launcher"})
-          :builder-options {:on-close (fn [_dialog _button _event]
-                                        (when (and element app.hud)
-                                          (app.hud:remove-panel-child element)))}}))
-  element)
+  (LauncherLaunchable.open-panel {:hud app.hud}))
 
 (fn LeaderState []
   (StateBase.make-state

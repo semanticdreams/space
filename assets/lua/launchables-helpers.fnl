@@ -44,23 +44,28 @@
      :child (FennelInterpreterView {:name "fennel-interpreter"})}))
 
 (var box-textured-element nil)
-(fn add-box-textured []
-  (local scene app.scene)
+(fn add-box-textured [opts]
+  (local options (or opts {}))
+  (local scene (or options.scene app.scene))
   (assert (and scene scene.add-panel-child) "box-textured requires app.scene.add-panel-child")
   (local GltfMesh (require :gltf-mesh))
+  (local position (or options.position (glm.vec3 5 -100 5)))
+  (local rotation (or options.rotation (glm.quat (math.rad -90) (glm.vec3 1 0 0))))
   (if box-textured-element
       box-textured-element
       (do
         (local box-textured
           (GltfMesh {:path "models/BoxTextured.glb"
-                     :position (glm.vec3 5 -100 5)
-                     :rotation (glm.quat (math.rad -90) (glm.vec3 1 0 0))
+                     :position position
+                     :rotation rotation
                      :scale (glm.vec3 100)
                      :name "box-textured-model"}))
         (set box-textured-element
              (scene:add-panel-child {:builder box-textured
-                                     :position (glm.vec3 5 -100 5)
-                                     :rotation (glm.quat (math.rad -90) (glm.vec3 1 0 0))
+                                     :position position
+                                     :rotation rotation
+                                     :persistence {:kind "scene-box-textured"
+                                                   :restorer-module "launchables/box-textured"}
                                      :skip-cuboid true}))
         box-textured-element)))
 

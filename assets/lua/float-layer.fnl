@@ -49,16 +49,17 @@
           (local element (and metadata metadata.element))
           (local layout (and element element.layout))
           (when layout
+            (when metadata.world-position
+              (set metadata.position (compute-local-position self metadata.world-position)))
+            (when metadata.world-rotation
+              (set metadata.rotation (compute-local-rotation self metadata.world-rotation)))
             (local rotation (or metadata.rotation (glm.quat 1 0 0 0)))
             (local depth-offset-index
               (if (= metadata.depth-offset-index nil)
                   self.depth-offset-index
                   metadata.depth-offset-index))
-            ; Use world-position if set (from resize/move), otherwise compute from local-offset
             (local new-pos
-              (if metadata.world-position
-                  metadata.world-position
-                  (+ parent-position (parent-rotation:rotate (or metadata.position (glm.vec3 0 0 0))))))
+              (+ parent-position (parent-rotation:rotate (or metadata.position (glm.vec3 0 0 0)))))
             (set layout.size (or metadata.size layout.measure layout.size))
             (set layout.position new-pos)
             (set layout.rotation (* parent-rotation rotation))
@@ -81,9 +82,13 @@
         (local position (or options.position element.layout.position (glm.vec3 0 0 0)))
         (local rotation (or options.rotation element.layout.rotation (glm.quat 1 0 0 0)))
         (local size (or options.size element.layout.size element.layout.measure (glm.vec3 0 0 0)))
+        (local has-world-position (not (= options.position nil)))
+        (local has-world-rotation (not (= options.rotation nil)))
         (local metadata {:element element
                          :position (compute-local-position self.layout position)
                          :rotation (compute-local-rotation self.layout rotation)
+                         :world-position (if has-world-position position nil)
+                         :world-rotation (if has-world-rotation rotation nil)
                          :size size
                          :depth-offset-index options.depth-offset-index})
         (table.insert self.children metadata)

@@ -118,6 +118,7 @@
     :tests.test-glm
     :tests.test-volume
     :tests.test-settings
+    :tests.test-world-manager
     :tests.test-skybox-settings
     :tests.test-flat-terrain-theme
     :tests.test-perlin-terrain

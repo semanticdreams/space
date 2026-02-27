@@ -4,31 +4,18 @@
 (local VolumeControl (require :volume-control))
 (local ThemeActions (require :theme-actions))
 (local {: ControlPanelLayout} (require :hud-control-panel-layout))
-(local LauncherView (require :launcher-view))
-(local WalletView (require :wallet-view))
-(local LaunchablesHelpers (require :launchables-helpers))
+(local LauncherLaunchable (require :launchables/launcher))
+(local WalletLaunchable (require :launchables/wallet))
+(local TerminalLaunchable (require :launchables/terminal))
 
 (fn open-wallet []
-  (local scene app.scene)
-  (assert (and scene scene.add-panel-child) "Wallet button requires app.scene.add-panel-child")
-  (scene:add-panel-child {:builder (WalletView {})}))
+  (WalletLaunchable.open-panel {:scene app.scene}))
 
 (fn open-terminal []
-  (local scene app.scene)
-  (assert (and scene scene.add-panel-child) "Terminal button requires app.scene.add-panel-child")
-  (scene:add-panel-child {:builder (LaunchablesHelpers.make-terminal-dialog {})}))
+  (TerminalLaunchable.open-panel {:scene app.scene}))
 
 (fn open-launcher []
-  (assert (and app app.hud app.hud.add-panel-child)
-          "Apps button requires app.hud:add-panel-child")
-  (var element nil)
-  (set element
-       (app.hud:add-panel-child
-         {:builder (LauncherView {:title "Launcher"})
-          :builder-options {:on-close (fn [_dialog _button _event]
-                                        (when (and element app.hud)
-                                          (app.hud:remove-panel-child element)))}}))
-  element)
+  (LauncherLaunchable.open-panel {:hud app.hud}))
 
 (fn make-button-row [_opts]
   (local volume-button (VolumeControl.make-volume-button))
@@ -64,18 +51,18 @@
       ]}))
 
 (fn ControlPanel [_opts]
+  (local options (or _opts {}))
   (fn build [ctx]
     (local button-row
-      (make-button-row
-        {}))
-    (local title-builder
-      (fn [child-ctx]
-        ((Text {:text "CONTROL PANEL"}) child-ctx)))
+      (or options.button-row-builder
+          (make-button-row {})))
     (local status-builder
-      (fn [child-ctx]
-        ((Text {:text "Status: Nominal"}) child-ctx)))
-    ((ControlPanelLayout {:title-builder title-builder
-                          :status-builder status-builder
+      (or options.status-builder
+          (fn [child-ctx]
+            ((Text {:text "Status: Nominal"}) child-ctx))))
+    (local body-builder options.body-builder)
+    ((ControlPanelLayout {:status-builder status-builder
+                          :body-builder body-builder
                           :button-row-builder button-row})
      ctx))
   build)

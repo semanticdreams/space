@@ -43,11 +43,10 @@
         (> (graph-view:remove-selected-nodes) 0)))
 
   (fn open-fennel-interpreter []
-    (local scene app.scene)
-    (assert (and scene scene.add-panel-child)
-            "NormalState fennel interpreter requires app.scene.add-panel-child")
-    (local helpers (require :launchables-helpers))
-    (scene:add-panel-child {:builder (helpers.make-fennel-interpreter-dialog {})})
+    (local launchable (require :launchables/fennel-interpreter))
+    (assert (and launchable launchable.open-panel)
+            "NormalState fennel interpreter requires launchables/fennel-interpreter.open-panel")
+    (launchable.open-panel {:scene app.scene})
     true)
 
   (fn handle-key-down [payload]

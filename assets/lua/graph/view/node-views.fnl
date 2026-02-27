@@ -3,13 +3,38 @@
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local fs (require :fs))
+(local MathUtils (require :math-utils))
+
+(local array->vec3 (. MathUtils :array->vec3))
+(local array->quat (. MathUtils :array->quat))
 
 (fn GraphViewNodeViews [opts]
     (local options (or opts {}))
+    (local graph options.graph)
     (local ctx options.ctx)
     (local view-target options.view-target)
     (local view-context (or options.view-context ctx))
     (local node-views {})
+    (local persistence-kind "graph-node-view")
+    (var restorer-targets [])
+    (local restorer-owner {})
+
+    (var open-node-view nil)
+
+    (fn panel-placement-options [panel]
+        (local layer (or (and panel panel.layer) "tiles"))
+        (if (= layer "float")
+            {:location :float
+             :position (array->vec3 (and panel panel.position))
+             :rotation (array->quat (and panel panel.rotation))
+             :size (array->vec3 (and panel panel.size))}
+            {:location :tiles
+             :align-x (and panel panel.align-x)
+             :align-y (and panel panel.align-y)}))
+
+    (fn build-persistence [node-key]
+        {:kind persistence-kind
+         :node-key node-key})
 
     (fn resolve-node-view-builder [node]
         (local view-fn (and node node.view))
@@ -70,7 +95,7 @@
                                                                                :label (.. "node view: "
                                                                                          (or node.label node.key))})))
                                              (graph:add-edge (GraphEdge {:source node
-                                                                         :target table-node})))}
+                                                                         :target table-node}))) }
                                  {:name "code"
                                   :icon "code"
                                   :handler (fn [_button _event]
@@ -83,7 +108,7 @@
                                                                 (FsNode {:path (fs.absolute module-path)
                                                                          :key key})))
                                              (graph:add-edge (GraphEdge {:source node
-                                                                         :target fs-node})))}
+                                                                         :target fs-node}))) }
                                  {:name "close"
                                   :icon "close"
                                   :handler (fn [_button _event]
@@ -92,24 +117,106 @@
             (set dialog-instance (dialog-builder ctx))
             dialog-instance))
 
-    (fn ensure-node-view [node]
-        (when (and node (not (. node-views node)))
-            (local builder (resolve-node-view-builder node))
-            (local target view-target)
-            (local dialog-builder (and builder (wrap-node-view node builder)))
-            (when dialog-builder
-                (if (and target target.add-panel-child)
-                    (do
-                        (local element (target:add-panel-child {:builder dialog-builder}))
-                        (set (. node-views node) {:target target
-                                                  :element element}))
-                    (when view-context
-                        (local dialog (dialog-builder view-context))
-                        (set (. node-views node) {:dialog dialog
-                                                  :target nil})))))) 
+    (fn ensure-node-view [node opts]
+        (if (or (not node) (. node-views node))
+            nil
+            (do
+                (local local-opts (or opts {}))
+                (local builder (resolve-node-view-builder node))
+                (local target (or local-opts.target view-target))
+                (local dialog-builder (and builder (wrap-node-view node builder)))
+                (when dialog-builder
+                    (local panel (or local-opts.panel {}))
+                    (local placement (panel-placement-options panel))
+                    (local persistence (build-persistence node.key))
+                    (if (and target target.add-panel-child)
+                        (do
+                            (local panel-opts {:builder dialog-builder
+                                               :location placement.location
+                                               :align-x placement.align-x
+                                               :align-y placement.align-y
+                                               :position placement.position
+                                               :rotation placement.rotation
+                                               :size placement.size
+                                               :persistence persistence})
+                            (local element (target:add-panel-child panel-opts))
+                            (set (. node-views node) {:target target
+                                                      :element element}))
+                        (when view-context
+                            (local dialog (dialog-builder view-context))
+                            (set (. node-views node) {:dialog dialog
+                                                      :target nil})))))))
 
-    (fn open-node-view [_self node]
-        (ensure-node-view node))
+    (set open-node-view
+         (fn [_self node opts]
+             (ensure-node-view node opts)))
+
+    (fn register-target-restorer [target]
+        (when (and target
+                   target.register-panel-restorer
+                   target.unregister-panel-restorer)
+            (var exists? false)
+            (each [_ existing (ipairs restorer-targets)]
+                (when (= existing target)
+                    (set exists? true)))
+            (when (not exists?)
+                (target:register-panel-restorer
+                    persistence-kind
+                    (fn [panel]
+                        (local key panel.node-key)
+                        (assert (= (type key) :string)
+                                "graph-node-view restorer requires string :node-key")
+                        (local node (or (and graph graph.lookup (graph:lookup key))
+                                        (and graph graph.load-by-key (graph:load-by-key key))))
+                        (assert node
+                                (.. "graph-node-view restorer could not resolve node: " key))
+                        (open-node-view nil node {:target target
+                                                  :panel panel}))
+                    restorer-owner)
+                (table.insert restorer-targets target))))
+
+    (fn unregister-target-restorers []
+        (each [_ target (ipairs restorer-targets)]
+            (target:unregister-panel-restorer persistence-kind restorer-owner))
+        (set restorer-targets []))
+
+    (fn capture-state [_self]
+        (local records [])
+        (each [node record (pairs node-views)]
+            (when (and node node.key)
+                (local entry {:node-key node.key})
+                (local target (and record record.target))
+                (local element (and record record.element))
+                (when (and target element target.capture-panel-element-state)
+                    (local panel (target:capture-panel-element-state element))
+                    (when panel
+                        (set entry.panel panel)))
+                (table.insert records entry)))
+        (table.sort records
+                    (fn [a b]
+                        (< (or a.node-key "") (or b.node-key ""))))
+        {:open-views records})
+
+    (fn restore-state [_self state]
+        (local payload (or state {}))
+        (local open-views
+            (if (and payload.open-views (= (type payload.open-views) :table))
+                payload.open-views
+                (icollect [_ key (ipairs (or payload.open-node-keys []))]
+                    {:node-key key})))
+        (assert (= (type open-views) :table)
+                "GraphViewNodeViews.restore-state requires :open-views table")
+        (each [_ entry (ipairs open-views)]
+            (assert (= (type entry) :table)
+                    "GraphViewNodeViews.restore-state entries must be tables")
+            (local key entry.node-key)
+            (assert (= (type key) :string)
+                    "GraphViewNodeViews.restore-state node-key must be a string")
+            (local node (or (and graph graph.lookup (graph:lookup key))
+                            (and graph graph.load-by-key (graph:load-by-key key))))
+            (assert node (.. "GraphViewNodeViews.restore-state could not resolve node: " key))
+            (ensure-node-view node {:panel entry.panel}))
+        true)
 
     (fn move-view [_self old new]
         (when (and old new (. node-views old))
@@ -121,10 +228,17 @@
 
     (fn drop-all [_self]
         (each [node _ (pairs node-views)]
-            (drop-node-view node)))
+            (drop-node-view node))
+        (unregister-target-restorers))
+
+    (register-target-restorer view-target)
+    (register-target-restorer app.hud)
+    (register-target-restorer app.scene)
 
     {:node-views node-views
      :open open-node-view
+     :capture-state capture-state
+     :restore-state restore-state
      :move-view move-view
      :drop-node drop-node
      :drop-all drop-all})

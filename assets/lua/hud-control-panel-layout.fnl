@@ -17,11 +17,16 @@
 
 (fn ControlPanelLayout [opts]
   (local options (or opts {}))
-  (local title-builder (assert options.title-builder "ControlPanelLayout requires :title-builder"))
   (local status-builder (assert options.status-builder "ControlPanelLayout requires :status-builder"))
   (local button-row-builder (assert options.button-row-builder "ControlPanelLayout requires :button-row-builder"))
+  (local body-builder options.body-builder)
   (fn build [ctx]
     (local spacer (make-flex-spacer))
+    (local children [(FlexChild status-builder)])
+    (when body-builder
+      (table.insert children (FlexChild body-builder)))
+    (table.insert children (FlexChild spacer 1))
+    (table.insert children (FlexChild button-row-builder))
     ((Card
        {:child
         (Padding
@@ -31,13 +36,7 @@
              {:axis 1
               :xspacing 0.5
               :yalign :center
-              :children
-              [(FlexChild (Padding {:child title-builder
-                                    :edge-insets [0.1 0.1]}))
-               (FlexChild (Padding {:child status-builder
-                                    :edge-insets [0.1 0.1]}))
-               (FlexChild spacer 1)
-               (FlexChild button-row-builder)]})})})
+              :children children})})})
      ctx)))
 
 {:ControlPanelLayout ControlPanelLayout}

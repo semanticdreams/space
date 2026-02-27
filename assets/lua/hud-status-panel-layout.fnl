@@ -19,6 +19,7 @@
   (local options (or opts {}))
   (local state-builder (assert options.state-builder "StatusPanelLayout requires :state-builder"))
   (local focus-builder (assert options.focus-builder "StatusPanelLayout requires :focus-builder"))
+  (local body-builder options.body-builder)
   (fn build [ctx]
     (local spacer (make-flex-spacer))
     (local state-column
@@ -37,10 +38,19 @@
          :yspacing 0.1
          :children [(FlexChild (Padding {:edge-insets [0.1 0.1]
                                          :child focus-builder}))]}))
-    (local children
-      [(FlexChild state-column)
-       (FlexChild spacer 1)
-       (FlexChild focus-column)])
+    (local children [(FlexChild state-column)])
+    (when body-builder
+      (local body-column
+        (Flex
+          {:axis 2
+           :xalign :start
+           :yalign :start
+           :yspacing 0.1
+           :children [(FlexChild (Padding {:edge-insets [0.1 0.1]
+                                           :child body-builder}))]}))
+      (table.insert children (FlexChild body-column)))
+    (table.insert children (FlexChild spacer 1))
+    (table.insert children (FlexChild focus-column))
     ((Card
        {:child
         (Padding

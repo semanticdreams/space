@@ -79,7 +79,11 @@
   (Modifiers.alt-held? (and payload payload.mod)))
 
 (fn handle-focus-tab [payload]
-  (if (and app.focus payload (= payload.key SDLK_TAB))
+  (if (and app.focus
+           payload
+           (= payload.key SDLK_TAB)
+           (not (ctrl-held? payload))
+           (not (alt-held? payload)))
       (do
         (app.focus:focus-next {:backwards? (shift-held? payload)})
         true)

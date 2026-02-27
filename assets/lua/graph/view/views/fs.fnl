@@ -2,8 +2,7 @@
 (local Button (require :button))
 (local SearchView (require :search-view))
 (local ExternalEditor (require :external-editor))
-(local DefaultDialog (require :default-dialog))
-(local RipgrepView (require :ripgrep-view))
+(local FsRipgrepDialog (require :graph/view/views/fs-ripgrep-dialog))
 (local fs (require :fs))
 
 (fn FsNodeView [node opts]
@@ -34,11 +33,9 @@
           (assert (and app app.hud app.hud.add-panel-child)
                   "FsNodeView ripgrep action requires app.hud:add-panel-child")
           (when resolved-path
-            (app.hud:add-panel-child
-              {:builder
-               (DefaultDialog {:title (.. "Ripgrep: " (or target.label resolved-path))
-                               :child (RipgrepView {:path resolved-path})})
-               :builder-options {:path resolved-path}})))
+            (FsRipgrepDialog.open-panel {:hud app.hud
+                                         :path resolved-path
+                                         :label (or target.label resolved-path)})))
 
         (local ripgrep-button
           ((Button {:text "Ripgrep"
