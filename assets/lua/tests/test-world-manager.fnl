@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local WorldManager (require :world-manager))
 (local HomeWorld (require :home-world))
+(local PhysicsFloor (require :physics-floor))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "world-manager-test-tmp"))
@@ -183,6 +184,75 @@
       (assert (= (. position 3) 30) "Sanitized camera z should reset to default")
       true)))
 
+(fn home-world-loads-persisted-physics-floor []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"physics\":{\"floor-y\":-1234},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local floor-y (and world.state world.state.physics world.state.physics.floor-y))
+      (assert (= floor-y -1234) "Expected persisted physics.floor-y to load")
+      true)))
+
+(fn home-world-sanitizes-invalid-physics-floor []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"physics\":{\"floor-y\":\"invalid\"},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local floor-y (and world.state world.state.physics world.state.physics.floor-y))
+      (assert (= floor-y PhysicsFloor.default-floor-y)
+              "Invalid physics.floor-y should reset to default")
+      true)))
+
+(fn home-world-activate-reapplies-runtime-floor []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"physics\":{\"floor-y\":-1450},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime {:physics-floor-y -1450})
+      (set app.physics-floor-y -777)
+      (world:activate {})
+      (assert (= app.physics-floor-y -1450)
+              "World activation should reapply runtime floor to app.physics-floor-y")
+      true)))
+
+(fn home-world-captures-runtime-floor-on-drop []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime {:physics-floor-y -1666})
+      (world:drop {} "test")
+      (local floor-y (and world.state world.state.physics world.state.physics.floor-y))
+      (assert (= floor-y -1666)
+              "World drop should capture runtime floor into persisted state")
+      true)))
+
 (table.insert tests {:name "WorldManager creates and activates default home world"
                      :fn manager-creates-and-activates-default-home})
 (table.insert tests {:name "WorldManager adds and switches home tabs"
@@ -197,6 +267,14 @@
                      :fn home-world-errors-on-corrupt-state})
 (table.insert tests {:name "HomeWorld sanitizes poisoned camera position"
                      :fn home-world-sanitizes-poisoned-camera-position})
+(table.insert tests {:name "HomeWorld loads persisted physics floor"
+                     :fn home-world-loads-persisted-physics-floor})
+(table.insert tests {:name "HomeWorld sanitizes invalid physics floor"
+                     :fn home-world-sanitizes-invalid-physics-floor})
+(table.insert tests {:name "HomeWorld activate reapplies runtime floor"
+                     :fn home-world-activate-reapplies-runtime-floor})
+(table.insert tests {:name "HomeWorld captures runtime floor on drop"
+                     :fn home-world-captures-runtime-floor-on-drop})
 
 (local main
   (fn []
