@@ -63,8 +63,9 @@ jobs:
 
       - name: Smoke test AppImage (host)
         run: |
-          appimage="build/${{ matrix.stable_appimage }}"
+          appimage="$(realpath "build/${{ matrix.stable_appimage }}")"
           test -n "${appimage}"
+          test -f "${appimage}"
           chmod +x "${appimage}"
           APPIMAGE_EXTRACT_AND_RUN=1 "${appimage}" --help >/dev/null
           rm -rf /tmp/space-appimage-smoke
