@@ -129,9 +129,17 @@ APPIMAGELAUNCHER_DISABLE=1 APPIMAGE_EXTRACT_AND_RUN=1 "${LINUXDEPLOY}" \
     --desktop-file "${APPDIR}/usr/share/applications/space.desktop" \
     --icon-file "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
 
-VERSION="$(sed -n 's/^set(CPACK_PACKAGE_VERSION \"\\(.*\\)\")/\\1/p' "${BUILD_DIR}/CPackConfig.cmake" | head -n1)"
+if [[ ! -f "${BUILD_DIR}/CPackConfig.cmake" ]]; then
+    echo "error: ${BUILD_DIR}/CPackConfig.cmake not found; package metadata is required for AppImage versioning" >&2
+    exit 1
+fi
+VERSION="$(
+    sed -nE 's/^set\(CPACK_PACKAGE_VERSION[[:space:]]+"?([^")]+)"?\)$/\1/p' "${BUILD_DIR}/CPackConfig.cmake" \
+        | head -n1
+)"
 if [[ -z "${VERSION}" ]]; then
-    VERSION="0.1.0"
+    echo "error: failed to resolve CPACK_PACKAGE_VERSION from ${BUILD_DIR}/CPackConfig.cmake" >&2
+    exit 1
 fi
 OUT_APPIMAGE="${BUILD_DIR}/${APPIMAGE_BASENAME}-${VERSION}-x86_64.AppImage"
 APPIMAGE_MARKER="${BUILD_DIR}/.appimage-build-start"
