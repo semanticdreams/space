@@ -19,9 +19,6 @@ jobs:
               build/*.deb
               build/*.rpm
               build/*.AppImage
-              build/space-linux-amd64.deb
-              build/space-linux-x86_64.rpm
-              build/space-linux-x86_64.AppImage
               build/dist/space-linux-x86_64-bin.tar.gz
           - profile: minimal
             stable_appimage: space-minimal-linux-x86_64.AppImage
