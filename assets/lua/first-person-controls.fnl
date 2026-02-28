@@ -51,9 +51,27 @@
       0
       (* value (^ (math.abs value) exponent))))
 
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn delta->seconds [delta delta-unit]
+  (if (not (finite-number? delta))
+      0
+      (if (= delta-unit :milliseconds)
+          (/ delta 1000.0)
+          (= delta-unit :seconds)
+          delta
+          (error (.. "FirstPersonControls invalid :delta-unit "
+                     (tostring delta-unit)
+                     " (expected :milliseconds or :seconds)")))))
+
 (fn FirstPersonControls [opts]
   (local options (or opts {}))
   (local camera (or options.camera app.camera))
+  (local delta-unit (or options.delta-unit :milliseconds))
   (assert camera "FirstPersonControls requires a camera")
 
   (local key-mapping (merge-key-mappings options.key-mapping))
@@ -135,7 +153,8 @@
                 (self.camera:forward zoom-y))
               (self.camera:forward zoom-y))
           (self.camera:up zoom-y))
-      (local decay (^ self.scroll-deceleration delta))
+      (local delta-ms (* delta 1000.0))
+      (local decay (^ self.scroll-deceleration delta-ms))
       (set self.scroll-speed (vec2-scale self.scroll-speed decay))
       (when (< (vec2-length self.scroll-speed) 0.01)
         (set self.scroll-speed (glm.vec2 0 0)))
@@ -144,7 +163,7 @@
   (fn gamepad-axes [self idx]
     (or (. self.gamepad.axes idx) 0.0))
 
-  (fn update-gamepad [self delta]
+  (fn update-gamepad [self delta-seconds]
     (when self.gamepad.which
       (local threshold 0.1)
       (fn filtered [axis]
@@ -155,12 +174,12 @@
       (local move-speed 0.4)
       (local look-speed 0.003)
       (local trigger-move-speed 0.8)
-      (self.camera:right (* delta move-speed (filtered 0)))
-      (self.camera:forward (* delta move-speed (- 0 (filtered 1))))
-      (self.camera:yaw (* delta look-speed (- 0 (filtered 2))))
-      (self.camera:pitch (* delta look-speed (- 0 (filtered 3))))
-      (self.camera:forward (* delta trigger-move-speed (* 0.5 (+ (filtered 5) 1.0))))
-      (self.camera:forward (* delta trigger-move-speed (* -0.5 (+ (filtered 4) 1.0))))))
+      (self.camera:right (* delta-seconds move-speed (filtered 0)))
+      (self.camera:forward (* delta-seconds move-speed (- 0 (filtered 1))))
+      (self.camera:yaw (* delta-seconds look-speed (- 0 (filtered 2))))
+      (self.camera:pitch (* delta-seconds look-speed (- 0 (filtered 3))))
+      (self.camera:forward (* delta-seconds trigger-move-speed (* 0.5 (+ (filtered 5) 1.0))))
+      (self.camera:forward (* delta-seconds trigger-move-speed (* -0.5 (+ (filtered 4) 1.0))))))
 
   (fn on-key-down [self payload]
     (set (. self.keys payload.key) true)
@@ -246,40 +265,41 @@
     (set self.keys {}))
 
   (fn update [self delta]
+    (local delta-seconds (delta->seconds delta delta-unit))
     (if (self:action-active? :speed)
         (do
-          (set self.speed-multiplier (+ self.speed-multiplier (* delta 20)))
+          (set self.speed-multiplier (+ self.speed-multiplier (* delta-seconds 20)))
           (set self.look-speed-multiplier 2))
         (do
-          (set self.speed-multiplier (math.max 1 (- self.speed-multiplier (* delta 100))))
+          (set self.speed-multiplier (math.max 1 (- self.speed-multiplier (* delta-seconds 100))))
           (set self.look-speed-multiplier 1)))
-    (self:scroll-update delta)
+    (self:scroll-update delta-seconds)
     (when (self:action-active? :move-left)
-      (self.camera:right (* -1 delta self.movement-speed self.speed-multiplier)))
+      (self.camera:right (* -1 delta-seconds self.movement-speed self.speed-multiplier)))
     (when (self:action-active? :move-right)
-      (self.camera:right (* delta self.movement-speed self.speed-multiplier)))
+      (self.camera:right (* delta-seconds self.movement-speed self.speed-multiplier)))
     (when (self:action-active? :move-forward)
-      (self.camera:forward (* delta self.movement-speed self.speed-multiplier)))
+      (self.camera:forward (* delta-seconds self.movement-speed self.speed-multiplier)))
     (when (self:action-active? :move-backward)
-      (self.camera:forward (* -1 delta self.movement-speed self.speed-multiplier)))
+      (self.camera:forward (* -1 delta-seconds self.movement-speed self.speed-multiplier)))
     (when (self:action-active? :move-up)
-      (self.camera:up (* delta self.movement-speed self.speed-multiplier)))
+      (self.camera:up (* delta-seconds self.movement-speed self.speed-multiplier)))
     (when (self:action-active? :move-down)
-      (self.camera:up (* -1 delta self.movement-speed self.speed-multiplier)))
+      (self.camera:up (* -1 delta-seconds self.movement-speed self.speed-multiplier)))
     (when (self:action-active? :look-up)
-      (self.camera:pitch (* delta self.look-speed self.look-speed-multiplier)))
+      (self.camera:pitch (* delta-seconds self.look-speed self.look-speed-multiplier)))
     (when (self:action-active? :look-down)
-      (self.camera:pitch (* -1 delta self.look-speed self.look-speed-multiplier)))
+      (self.camera:pitch (* -1 delta-seconds self.look-speed self.look-speed-multiplier)))
     (when (self:action-active? :look-right)
-      (self.camera:yaw (* delta self.look-speed self.look-speed-multiplier)))
+      (self.camera:yaw (* delta-seconds self.look-speed self.look-speed-multiplier)))
     (when (self:action-active? :look-left)
-      (self.camera:yaw (* -1 delta self.look-speed self.look-speed-multiplier)))
+      (self.camera:yaw (* -1 delta-seconds self.look-speed self.look-speed-multiplier)))
     (when (self:action-active? :roll-left)
-      (self.camera:roll (* delta self.look-speed self.look-speed-multiplier)))
+      (self.camera:roll (* delta-seconds self.look-speed self.look-speed-multiplier)))
     (when (self:action-active? :roll-right)
-      (self.camera:roll (* -1 delta self.look-speed self.look-speed-multiplier)))
+      (self.camera:roll (* -1 delta-seconds self.look-speed self.look-speed-multiplier)))
     (apply-mouse-state self)
-    (update-gamepad self delta))
+    (update-gamepad self delta-seconds))
 
   (set self.add-scroll add-scroll)
   (set self.reset-scroll reset-scroll)

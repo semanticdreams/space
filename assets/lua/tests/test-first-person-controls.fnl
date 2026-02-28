@@ -5,9 +5,16 @@
 
 (local tests [])
 
+(local reset-engine-events
+  (fn []
+    (when _G.reset-engine-events
+      (_G.reset-engine-events))))
+
 (fn reset-env []
   (reset-engine-events)
-  (app.set-viewport {:width 100 :height 100})
+  (if app.set-viewport
+      (app.set-viewport {:x 0 :y 0 :width 100 :height 100})
+      (set app.viewport {:x 0 :y 0 :width 100 :height 100}))
   (when app.first-person-controls
     (app.first-person-controls:drop)
     (set app.first-person-controls nil)))
@@ -15,7 +22,8 @@
 (fn keyboard-move-updates-camera-position []
   (reset-env)
   (local camera (Camera {:position (glm.vec3 0 0 0)}))
-  (local controls (FirstPersonControls {:camera camera}))
+  (local controls (FirstPersonControls {:camera camera
+                                        :delta-unit :seconds}))
   (controls:on-key-down {:key 44})
   (controls:update 0.5)
   (assert (< camera.position.z 0))
@@ -26,7 +34,8 @@
 (fn scroll-wheel-zooms-camera []
   (reset-env)
   (local camera (Camera {:position (glm.vec3 0 0 0)}))
-  (local controls (FirstPersonControls {:camera camera}))
+  (local controls (FirstPersonControls {:camera camera
+                                        :delta-unit :seconds}))
   (local original-screen-ray app.screen-pos-ray)
   (set app.screen-pos-ray (fn [_ _]
                                    {:origin (glm.vec3 0 0 0)
@@ -37,8 +46,25 @@
   (set app.screen-pos-ray original-screen-ray)
   (controls:drop))
 
+(fn millisecond-delta-under-10ms-is-not-treated-as-seconds []
+  (reset-env)
+  (local camera (Camera {:position (glm.vec3 0 0 0)}))
+  (local controls (FirstPersonControls {:camera camera
+                                        :delta-unit :milliseconds}))
+  (controls:on-key-down {:key 44})
+  (controls:update 5)
+  (controls:on-key-up {:key 44})
+  (local moved-z camera.position.z)
+  (controls:drop)
+  (assert (< moved-z 0)
+          "Camera should move forward for positive movement delta")
+  (assert (> moved-z -1)
+          "5ms delta should produce a small movement, not seconds-scale movement"))
+
 (table.insert tests {:name "First-person controls move forward on key press" :fn keyboard-move-updates-camera-position})
 (table.insert tests {:name "Mouse wheel drives camera zoom" :fn scroll-wheel-zooms-camera})
+(table.insert tests {:name "First-person controls treat sub-10ms delta as milliseconds"
+                     :fn millisecond-delta-under-10ms-is-not-treated-as-seconds})
 
 (local main
   (fn []

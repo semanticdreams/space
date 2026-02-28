@@ -1,5 +1,7 @@
 (local glm (require :glm))
 (local Scene (require :scene))
+(local Camera (require :camera))
+(local {: FirstPersonControls} (require :first-person-controls))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
 (local PerlinTerrain (require :perlin-terrain))
@@ -214,12 +216,43 @@
     (when (not ok)
       (error err))))
 
+(fn graph-node-cube-add-does-not-crash-after-ms-fpc-update []
+  (assert bt "Graph-node cube large-camera test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-camera app.camera)
+  (local camera (Camera {:position (glm.vec3 0 0 0)}))
+  (local controls (FirstPersonControls {:camera camera}))
+  (controls:on-key-down {:key 44})
+  ;; Engine emits frame delta in ms on events.updated.
+  (for [_ 1 140]
+    (controls:update 1000))
+  (controls:on-key-up {:key 44})
+  (set app.camera camera)
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local node {:key "layout-physics-bodies-test-node"
+                         :label "layout-physics-bodies-test-node"})
+            (local cube (scene:add-graph-node-cube {:node node}))
+            (assert cube "Expected graph-node cube element")))]
+    (controls:drop)
+    (set app.camera original-camera)
+    (cleanup)
+    (assert ok
+            (.. "Adding graph-node cube should not crash after ms FPC update, but got: "
+                (tostring err)))))
+
 (table.insert tests {:name "Physical panels collide with each other"
                      :fn physical-panels-collide-with-each-other})
 (table.insert tests {:name "Physical panel collides with Perlin terrain"
                      :fn physical-panel-collides-with-perlin-terrain})
 (table.insert tests {:name "Physical panel rebuilds shape on resize"
                      :fn physical-panel-rebuilds-body-on-resize})
+(table.insert tests {:name "Graph-node cube add tolerates ms FPC update"
+                     :fn graph-node-cube-add-does-not-crash-after-ms-fpc-update})
 
 (local main
   (fn []

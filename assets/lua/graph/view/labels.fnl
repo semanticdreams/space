@@ -42,6 +42,13 @@
     (fn current-camera-position []
         (and camera camera.position))
 
+    (fn camera-position-changed? [a b]
+        (if (or (not a) (not b))
+            true
+            (or (> (math.abs (- a.x b.x)) 1e-4)
+                (> (math.abs (- a.y b.y)) 1e-4)
+                (> (math.abs (- a.z b.z)) 1e-4))))
+
     (when (and camera camera.debounced-changed)
         (set camera-handler
              (camera.debounced-changed:connect
@@ -110,21 +117,20 @@
             (local force? (or (and opts opts.force?) false))
             (var should-run force?)
             (when (not should-run)
-                (set should-run (or camera-dirty? (not last-camera-position))))
+                (set should-run (or camera-dirty?
+                                    (not last-camera-position)
+                                    (camera-position-changed? camera-pos last-camera-position))))
             (when should-run
                 (set camera-dirty? false)
-                (when force?
-                    (set last-camera-position camera-pos))
-                (when (not last-camera-position)
-                    (set last-camera-position camera-pos))
-                (local effective-pos (or last-camera-position camera-pos))
+                (local effective-pos camera-pos)
                 (if nodes
                     (each [_ node (ipairs nodes)]
                         (local point (. points node))
                         (when point
                             (update-node-label node point effective-pos force?)))
                     (each [node point (pairs points)]
-                        (update-node-label node point effective-pos force?))))))
+                        (update-node-label node point effective-pos force?)))
+                (set last-camera-position camera-pos))))
 
     (fn refresh-positions [_self points nodes]
         (local targets (or nodes []))

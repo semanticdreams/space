@@ -47,8 +47,26 @@
     (assert (not (. labels.labels second)) "Drop-node should clear reassigned span")
     (labels:drop-all))
 
+(fn labels-update-when-camera-moves-without-debounced-signal []
+    (local ctx (make-ctx))
+    (local camera {:position (glm.vec3 0 0 900)})
+    (local labels (GraphViewLabels {:ctx ctx :camera camera}))
+    (local node (GraphNode {:key "camera-move" :label "Camera Move"}))
+    (local point {:position (glm.vec3 0 0 0) :size 4})
+    (local points {node point})
+    (labels:update points [node] {:force? true})
+    (assert (not (. labels.labels node))
+            "Node should start hidden when camera is far enough for LOD3")
+    (set camera.position (glm.vec3 0 0 0))
+    (labels:update points [node] nil)
+    (assert (. labels.labels node)
+            "Label should appear when camera moves close, even without debounced camera signal")
+    (labels:drop-all))
+
 (table.insert tests {:name "GraphView labels create spans with defaults" :fn labels-create-span-with-defaults})
 (table.insert tests {:name "GraphView labels move and drop reassigned spans" :fn labels-move-reassigns-span})
+(table.insert tests {:name "GraphView labels update when camera moves without debounce signal"
+                     :fn labels-update-when-camera-moves-without-debounced-signal})
 
 (local main
   (fn []
