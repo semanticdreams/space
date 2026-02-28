@@ -11,11 +11,14 @@
 (local GraphKeyLoaders (require :graph/key-loaders))
 (local ObjectSelector (require :object-selector))
 (local MathUtils (require :math-utils))
+(local CoordinateGuard (require :coordinate-guard))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
 (local array->vec3 (. MathUtils :array->vec3))
 (local array->quat (. MathUtils :array->quat))
+(local safe-vec3? CoordinateGuard.safe-vec3?)
+(local sanitize-vec3 CoordinateGuard.sanitize-vec3)
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -91,7 +94,22 @@
 
   (fn load-state [world]
     (local persisted (read-world-state world.state-path))
-    (set world.state (merge-state-defaults (default-state) persisted)))
+    (set world.state (merge-state-defaults (default-state) persisted))
+    (local camera-state (or (and world.state world.state.camera) {}))
+    (local raw-position camera-state.position)
+    (local (ok parsed-position) (pcall array->vec3 raw-position))
+    (local camera-position
+      (if ok
+          parsed-position
+          nil))
+    (if (safe-vec3? camera-position)
+        (set camera-state.position (vec3->array camera-position))
+        (do
+          (logging.warn (string.format
+                          "[world] %s invalid persisted camera.position; resetting to default"
+                          world.id))
+          (set camera-state.position [0 0 30])))
+    (set world.state.camera camera-state))
 
   (fn save-state [world]
     (ensure-world-dir)
@@ -107,8 +125,13 @@
     (local graph-view (and runtime runtime.graph-view))
     (local hud (and ctx ctx.hud))
     (when camera
+      (local position (sanitize-vec3 camera.position (glm.vec3 0 0 30)))
+      (when (not (= position camera.position))
+        (logging.warn (string.format
+                        "[world] %s camera position out of bounds during capture; resetting to default"
+                        world.id)))
       (set world.state.camera
-           {:position (vec3->array camera.position)
+           {:position (vec3->array position)
             :rotation (quat->array camera.rotation)}))
     (when (and graph-view graph-view.capture-state)
       (set world.state.graph (graph-view:capture-state)))
@@ -119,8 +142,19 @@
 
   (fn create-runtime [world ctx]
     (local camera-state (or (and world.state world.state.camera) {}))
-    (local camera (Camera {:position (or (array->vec3 camera-state.position)
-                                         (glm.vec3 0 0 30))}))
+    (local (ok parsed-camera-position) (pcall array->vec3 camera-state.position))
+    (local loaded-camera-position
+      (if ok
+          parsed-camera-position
+          nil))
+    (local camera-position
+      (sanitize-vec3 loaded-camera-position
+                     (glm.vec3 0 0 30)))
+    (when (not (= camera-position loaded-camera-position))
+      (logging.warn (string.format
+                      "[world] %s invalid camera restore position; using default"
+                      world.id)))
+    (local camera (Camera {:position camera-position}))
     (local rotation (array->quat camera-state.rotation))
     (when rotation
       (camera:set-rotation rotation))

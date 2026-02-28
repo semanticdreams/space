@@ -467,6 +467,84 @@
           "Scene restore should add graph node cube using scene-owned graph")
   true)
 
+(fn scene-restore-graph-node-cube-sanitizes-poisoned-position []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph app.graph)
+  (set app.graph nil)
+  (local graph (Graph {:with-start false}))
+  (scene:set-graph graph)
+  (local node (Graph.GraphNode {:key "poisoned-node"
+                                :label "poisoned restore target"}))
+  (graph:add-node node {})
+  (local initial-count (length (or scene.entity.children [])))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels [{:kind "graph-node-cube"
+                                        :node-key "poisoned-node"
+                                        :label "poisoned restore target"
+                                        :size [4 4 4]
+                                        :position [1001000 0 0]
+                                        :rotation [1 0 0 0]}]}))))
+  (local final-count (length (or scene.entity.children [])))
+  (local restored-metadata (. (or scene.entity.children []) final-count))
+  (local restored-element (and restored-metadata restored-metadata.element))
+  (local restored-layout (and restored-element restored-element.layout))
+  (set app.graph original-graph)
+  (graph:drop)
+  (cleanup)
+  (assert ok
+          (.. "Expected scene restore to sanitize poisoned positions, got: "
+              (tostring err)))
+  (assert (= final-count (+ initial-count 1))
+          "Scene restore should still add graph node cube after position sanitization")
+  (assert restored-layout "Restored graph node should have a layout")
+  (assert (< (glm.length restored-layout.position) 1000000)
+          "Restored graph node position should be kept within vec3 safety threshold")
+  true)
+
+(fn scene-restore-graph-node-cube-sanitizes-poisoned-size []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph app.graph)
+  (set app.graph nil)
+  (local graph (Graph {:with-start false}))
+  (scene:set-graph graph)
+  (local node (Graph.GraphNode {:key "poisoned-size-node"
+                                :label "poisoned size restore target"}))
+  (graph:add-node node {})
+  (local initial-count (length (or scene.entity.children [])))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels [{:kind "graph-node-cube"
+                                        :node-key "poisoned-size-node"
+                                        :label "poisoned size restore target"
+                                        :size [1001000 4 4]
+                                        :position [0 0 0]
+                                        :rotation [1 0 0 0]}]}))))
+  (local final-count (length (or scene.entity.children [])))
+  (local restored-metadata (. (or scene.entity.children []) final-count))
+  (local restored-element (and restored-metadata restored-metadata.element))
+  (local restored-layout (and restored-element restored-element.layout))
+  (set app.graph original-graph)
+  (graph:drop)
+  (cleanup)
+  (assert ok
+          (.. "Expected scene restore to sanitize poisoned sizes, got: "
+              (tostring err)))
+  (assert (= final-count (+ initial-count 1))
+          "Scene restore should still add graph node cube after size sanitization")
+  (assert restored-layout "Restored graph node should have a layout")
+  (assert (< restored-layout.size.x 1000000)
+          "Restored graph node size should be kept within vec3 safety threshold")
+  true)
+
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
@@ -485,6 +563,10 @@
                      :fn scene-add-graph-node-cube-adds-physics-and-readds-node})
 (table.insert tests {:name "Scene restore graph node cube uses scene graph before app binding"
                      :fn scene-restore-graph-node-cube-uses-scene-graph-before-app-binding})
+(table.insert tests {:name "Scene restore graph node cube sanitizes poisoned position"
+                     :fn scene-restore-graph-node-cube-sanitizes-poisoned-position})
+(table.insert tests {:name "Scene restore graph node cube sanitizes poisoned size"
+                     :fn scene-restore-graph-node-cube-sanitizes-poisoned-size})
 
 (local main
   (fn []

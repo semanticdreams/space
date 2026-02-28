@@ -164,6 +164,25 @@
               "Expected parse failure for invalid world state")
       true)))
 
+(fn home-world-sanitizes-poisoned-camera-position []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[1001000,0,0],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local position (and world.state world.state.camera world.state.camera.position))
+      (assert (= (type position) :table) "Expected sanitized camera position table")
+      (assert (= (. position 1) 0) "Sanitized camera x should reset to default")
+      (assert (= (. position 2) 0) "Sanitized camera y should reset to default")
+      (assert (= (. position 3) 30) "Sanitized camera z should reset to default")
+      true)))
+
 (table.insert tests {:name "WorldManager creates and activates default home world"
                      :fn manager-creates-and-activates-default-home})
 (table.insert tests {:name "WorldManager adds and switches home tabs"
@@ -176,6 +195,8 @@
                      :fn manager-errors-on-corrupt-index})
 (table.insert tests {:name "HomeWorld errors on corrupt state"
                      :fn home-world-errors-on-corrupt-state})
+(table.insert tests {:name "HomeWorld sanitizes poisoned camera position"
+                     :fn home-world-sanitizes-poisoned-camera-position})
 
 (local main
   (fn []

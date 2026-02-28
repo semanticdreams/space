@@ -16,6 +16,8 @@
 (local BuildContext (require :build-context))
 (local viewport-utils (require :viewport-utils))
 (local MathUtils (require :math-utils))
+(local CoordinateGuard (require :coordinate-guard))
+(local logging (require :logging))
 
 (local default-position (glm.vec3 -5 0 0))
 (local default-rotation (glm.quat (math.rad 30) (glm.vec3 0 1 0)))
@@ -26,6 +28,7 @@
 (local quat->array (. MathUtils :quat->array))
 (local array->vec3 (. MathUtils :array->vec3))
 (local array->quat (. MathUtils :array->quat))
+(local safe-vec3? CoordinateGuard.safe-vec3?)
 
 (local built-in-scene-kinds {:graph-node-cube true
                              :physics-cuboid true
@@ -904,23 +907,41 @@
     (local payload (or state {}))
     (local panels (or payload.panels []))
     (assert (= (type panels) :table) "Scene.restore-state requires :panels table")
-    (each [_ panel (ipairs panels)]
+    (each [panel-idx panel (ipairs panels)]
       (assert (= (type panel) :table) "Scene.restore-state panel entries must be tables")
       (local kind panel.kind)
+      (local (ok parsed-position) (pcall array->vec3 panel.position))
+      (local restored-position
+        (if (and ok (safe-vec3? parsed-position))
+            parsed-position
+            nil))
+      (local (ok-size parsed-size) (pcall array->vec3 panel.size))
+      (local restored-size
+        (if (and ok-size (safe-vec3? parsed-size))
+            parsed-size
+            (glm.vec3 4 4 4)))
+      (when (and panel.position (not restored-position))
+        (logging.warn (string.format
+                        "[scene] dropping invalid restored panel position at index %d (kind=%s)"
+                        panel-idx
+                        (tostring kind))))
+      (when (and panel.size (not (and ok-size (safe-vec3? parsed-size))))
+        (logging.warn (string.format
+                        "[scene] replacing invalid restored panel size at index %d (kind=%s)"
+                        panel-idx
+                        (tostring kind))))
       (if (= kind "graph-node-cube")
           (self:add-graph-node-cube {:node-key panel.node-key
                                      :label panel.label
-                                     :size (or (array->vec3 panel.size)
-                                               (glm.vec3 4 4 4))
-                                     :position (array->vec3 panel.position)
+                                     :size restored-size
+                                     :position restored-position
                                      :rotation (array->quat panel.rotation)})
           (= kind "physics-cuboid")
-          (self:add-physics-body {:size (or (array->vec3 panel.size)
-                                            (glm.vec3 4 4 4))
-                                  :position (array->vec3 panel.position)
+          (self:add-physics-body {:size restored-size
+                                  :position restored-position
                                   :rotation (array->quat panel.rotation)})
           (= kind "demo-browser")
-          (self:add-demo-browser {:position (array->vec3 panel.position)
+          (self:add-demo-browser {:position restored-position
                                   :rotation (array->quat panel.rotation)})
           (do
             (local restorer (resolve-panel-restorer self panel))
