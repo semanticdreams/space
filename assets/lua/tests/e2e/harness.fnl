@@ -224,6 +224,8 @@
                  :get-line-strips (fn [self] self.build-context.line-strips)
                  :get-text-vectors (fn [self] self.build-context.text-vectors)
                  :get-text-batches (fn [self] (self.build-context:get-text-batches))
+                 :get-quad-draw-list (fn [self] (self.build-context:get-quad-draw-list))
+                 :get-text-ssbo-draw-list (fn [self] (self.build-context:get-text-ssbo-draw-list))
                  :get-image-batches (fn [self] self.build-context.image-batches)
                  :get-mesh-batches (fn [self] (self.build-context:get-mesh-batches))
                  :drop (fn [self]
@@ -298,6 +300,8 @@
                  :get-line-strips (fn [self] self.build-context.line-strips)
                  :get-text-vectors (fn [self] self.build-context.text-vectors)
                  :get-text-batches (fn [self] (self.build-context:get-text-batches))
+                 :get-quad-draw-list (fn [self] (self.build-context:get-quad-draw-list))
+                 :get-text-ssbo-draw-list (fn [self] (self.build-context:get-text-ssbo-draw-list))
                  :get-image-batches (fn [self] self.build-context.image-batches)
                  :get-mesh-batches (fn [self] (self.build-context:get-mesh-batches))
                  :drop (fn [self]

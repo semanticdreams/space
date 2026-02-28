@@ -16,8 +16,24 @@
 (local Text (require :text))
 (local logging (require :logging))
 (local PerlinTerrain (require :perlin-terrain))
+(local Persistence (require :scene-panel-persistence))
 
 (local DemoDialogs {})
+(local restorer-module "demo-dialogs")
+
+(fn entry-key-string [entry]
+  (local key (and entry entry.key))
+  (assert key "DemoDialogs entry requires :key for persistence")
+  (assert (= (type key) :string) "DemoDialogs entry :key must be a string")
+  key)
+
+(fn entry-kind [entry]
+  (.. "demo-entry-" (entry-key-string entry)))
+
+(fn entry-persistence [entry]
+  {:kind (entry-kind entry)
+   :restorer-module restorer-module
+   :entry-key (entry-key-string entry)})
 
 (fn new-checklist-dialog [opts]
   (local options (or opts {}))
@@ -154,7 +170,7 @@
     (fn [ctx runtime-opts]
       (child-builder ctx runtime-opts))))
 
-(local demo-entries
+(local raw-demo-entries
   [{:key :physics-body
     :label "Physics Cuboid"
     :builder (Sized {:size (glm.vec3 4 4 4)
@@ -183,7 +199,7 @@
     :builder (dialog-padding (new-fs-dialog))}
    {:key :object-browser
     :label "Object Browser"
-   :builder (dialog-padding (new-object-browser-dialog))}
+    :builder (dialog-padding (new-object-browser-dialog))}
    {:key :mission-log
     :label "Mission Log Inputs"
     :builder (dialog-padding (new-input-dialog))}
@@ -198,6 +214,12 @@
                     :n1scale 34
                     :n2scale 4
                     :n3scale 1.5})}])
+
+(local demo-entries
+  (icollect [_ entry (ipairs raw-demo-entries)]
+    (do
+      (set entry.persistence (entry-persistence entry))
+      entry)))
 
 (fn DemoDialogs.list []
   demo-entries)
@@ -214,6 +236,33 @@
         {:target metadata.element.layout
          :handle metadata.element})
       []))
+
+(fn DemoDialogs.open-entry-panel [opts]
+  (local options (or opts {}))
+  (local scene (assert (or options.scene options.target app.scene)
+                       "DemoDialogs.open-entry-panel requires scene target"))
+  (assert scene.add-panel-child "DemoDialogs.open-entry-panel target requires :add-panel-child")
+  (local panel (or options.panel {}))
+  (local key (or options.entry-key (and panel panel.entry-key)))
+  (assert (= (type key) :string) "DemoDialogs.open-entry-panel requires string :entry-key")
+  (local entry (DemoDialogs.find-entry key))
+  (assert entry (.. "DemoDialogs.open-entry-panel unknown entry key: " key))
+  (local persistence (and entry entry.persistence))
+  (assert persistence (.. "DemoDialogs entry missing :persistence for key: " key))
+  (local transform (Persistence.panel-transform-options panel))
+  (scene:add-panel-child {:builder entry.builder
+                          :flex (or entry.flex 0)
+                          :position transform.position
+                          :rotation transform.rotation
+                          :persistence persistence}))
+
+(fn DemoDialogs.restore [opts]
+  (local options (or opts {}))
+  (local panel (or options.panel {}))
+  (DemoDialogs.open-entry-panel {:scene options.scene
+                                 :target options.target
+                                 :panel panel
+                                 :entry-key panel.entry-key}))
 
 (fn DemoDialogs.new-browser-dialog [opts]
   (local options (or opts {}))

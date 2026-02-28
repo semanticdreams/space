@@ -600,8 +600,12 @@
 
   (fn add-demo-entry [self entry]
     (when (and entry entry.builder)
+      (assert entry.persistence
+              (.. "Scene.add-demo-entry requires :persistence for demo entry key "
+                  (tostring entry.key)))
       (add-panel-child self {:builder entry.builder
-                            :flex (or entry.flex 0)})))
+                             :flex (or entry.flex 0)
+                             :persistence entry.persistence})))
 
   (fn add-physics-body [self opts]
     (local options (or opts {}))
@@ -799,6 +803,16 @@
 (fn get-image-batches [self]
   self.build-context.image-batches)
 
+(fn get-quad-draw-list [self]
+  (and self.build-context
+       self.build-context.get-quad-draw-list
+       (self.build-context:get-quad-draw-list)))
+
+(fn get-text-ssbo-draw-list [self]
+  (and self.build-context
+       self.build-context.get-text-ssbo-draw-list
+       (self.build-context:get-text-ssbo-draw-list)))
+
 (fn get-mesh-batches [self]
   (and self.build-context
        self.build-context.get-mesh-batches
@@ -966,6 +980,8 @@
 (set self.get-text-vectors get-text-vectors)
 (set self.get-text-batches get-text-batches)
 (set self.get-image-batches get-image-batches)
+(set self.get-quad-draw-list get-quad-draw-list)
+(set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
 (set self.get-mesh-batches get-mesh-batches)
 (set self.get-reference-point get-reference-point)
 (set self.screen-pos-ray screen-pos-ray)

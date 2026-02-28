@@ -37,8 +37,8 @@
   (assert (= (# draws) 1))
   (local entry (. draws 1))
   (assert (= entry.font font))
-  ;; 4 glyph instances, each 8 floats
-  (assert (= (entry.glyph-vector:length) 32))
+  ;; 4 glyph instances, each 12 floats
+  (assert (= (entry.glyph-vector:length) 48))
   ;; 4 glyph group indices
   (assert (= (entry.glyph-group-vector:length) 4))
   ;; 2 group matrices
@@ -48,6 +48,8 @@
               (= (entry.clip-vector:length) 32)))
   ;; 2 group->clip index entries
   (assert (= (entry.group-clip-index-vector:length) 2))
+  ;; 2 group depth-offset index entries
+  (assert (= (entry.group-depth-index-vector:length) 2))
   ;; clip is handled per-group; draws stay contiguous
   (assert (= (# entry.batches) 1)))
 
@@ -57,12 +59,13 @@
   (batcher:add-text {:font font :text "AB"})
   (var calls 0)
   (local renderer
-    {:render (fn [_self glyph-vector glyph-group-vector group-vector group-clip-index-vector clip-vector passed-font projection view batches]
+    {:render (fn [_self glyph-vector glyph-group-vector group-vector group-clip-index-vector group-depth-index-vector clip-vector passed-font projection view batches]
                (set calls (+ calls 1))
                (assert (> (glyph-vector:length) 0))
                (assert (> (glyph-group-vector:length) 0))
                (assert (> (group-vector:length) 0))
                (assert (> (group-clip-index-vector:length) 0))
+               (assert (> (group-depth-index-vector:length) 0))
                (assert (> (clip-vector:length) 0))
                (assert (= passed-font font))
                (assert projection)

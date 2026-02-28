@@ -4,6 +4,8 @@
 (local TextRenderer (require :text-renderer))
 (local ImageRenderer (require :image-renderer))
 (local MeshRenderer (require :mesh-renderer))
+(local QuadRenderer (require :quad-renderer))
+(local TextSsboRenderer (require :text-ssbo-renderer))
 (local SkyboxRenderer (require :skybox-renderer))
 (local Fxaa (require :fxaa))
 
@@ -24,6 +26,8 @@
   (local text-renderer (TextRenderer))
   (local image-renderer (ImageRenderer))
   (local mesh-renderer (MeshRenderer))
+  (local quad-renderer (QuadRenderer))
+  (local text-ssbo-renderer (TextSsboRenderer))
   (local skybox-renderer (SkyboxRenderer {:brightness 0.1}))
   (local fxaa (Fxaa))
   (var sub-apps [])
@@ -76,6 +80,16 @@
         (local image-batches (and target.get-image-batches (target:get-image-batches)))
         (when image-batches
           (image-renderer:render image-batches projection view))
+        (local quad-draw-list (and target.get-quad-draw-list (target:get-quad-draw-list)))
+        (when quad-draw-list
+          (each [_ entry (ipairs quad-draw-list)]
+            (when (and entry entry.vector entry.batches entry.clip-vector entry.clip-group-vector)
+              (quad-renderer:render entry.vector
+                                    projection
+                                    view
+                                    entry.batches
+                                    entry.clip-vector
+                                    entry.clip-group-vector))))
         (local line-vector (and target.get-line-vector (target:get-line-vector)))
         (when line-vector
           (line-renderer:render-lines line-vector projection view))
@@ -89,7 +103,31 @@
         (local text-batches (and target.get-text-batches (target:get-text-batches)))
         (each [font vector (pairs (target:get-text-vectors))]
           (local batches (and text-batches (. text-batches font)))
-          (text-renderer:render vector font projection view batches)))))
+          (text-renderer:render vector font projection view batches))
+        (local text-ssbo-draw-list
+          (and target.get-text-ssbo-draw-list
+               (target:get-text-ssbo-draw-list)))
+        (when text-ssbo-draw-list
+          (each [_ entry (ipairs text-ssbo-draw-list)]
+            (assert entry "text ssbo draw entry is nil")
+            (assert entry.glyph-vector "text ssbo draw entry missing :glyph-vector")
+            (assert entry.glyph-group-vector "text ssbo draw entry missing :glyph-group-vector")
+            (assert entry.group-vector "text ssbo draw entry missing :group-vector")
+            (assert entry.group-clip-index-vector "text ssbo draw entry missing :group-clip-index-vector")
+            (assert entry.group-depth-index-vector "text ssbo draw entry missing :group-depth-index-vector")
+            (assert entry.clip-vector "text ssbo draw entry missing :clip-vector")
+            (assert entry.font "text ssbo draw entry missing :font")
+            (assert entry.batches "text ssbo draw entry missing :batches")
+            (text-ssbo-renderer:render entry.glyph-vector
+                                       entry.glyph-group-vector
+                                       entry.group-vector
+                                       entry.group-clip-index-vector
+                                       entry.group-depth-index-vector
+                                       entry.clip-vector
+                                       entry.font
+                                       projection
+                                       view
+                                       entry.batches))))))
 
   (fn prerender-sub-apps [_self]
     (when (> (length sub-apps) 0)

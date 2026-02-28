@@ -20,8 +20,6 @@
   (local col opts.col)
   (local color opts.color)
   (local depth opts.depth)
-  (local rotation opts.rotation)
-  (local position opts.position)
   (local base opts.base)
   (local y0 opts.y0)
   (local y1 opts.y1)
@@ -38,8 +36,7 @@
      vector
      handle
      (+ base (* (- i 1) 8))
-     (+ (rotation:rotate (+ offset local-pos))
-        position))
+     (+ offset local-pos))
     (vector:set-glm-vec4 handle (+ base (* (- i 1) 8) 3) color)
     (vector:set-float handle (+ base (* (- i 1) 8) 7) depth)))
 
