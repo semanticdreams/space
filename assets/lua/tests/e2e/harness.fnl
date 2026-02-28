@@ -150,19 +150,13 @@
   (local theme (app.themes.get-active-theme))
   (local text-color (and theme theme.text theme.text.foreground))
   (assert text-color "e2e HUD builder requires theme text color")
-  (local control-title-style (TextStyle {:scale 1.6
-                                         :color text-color}))
   (local control-status-style (TextStyle {:scale 1.6
                                           :color text-color}))
   (local status-style (TextStyle {:scale 1.6
                                   :color text-color}))
-  (local title-builder
-    (fn [child-ctx]
-      ((Text {:text "CONTROL"
-              :style control-title-style}) child-ctx)))
   (local status-builder
     (fn [child-ctx]
-      ((Text {:text "Status: OK"
+      ((Text {:text "CONTROL Status: OK"
               :style control-status-style}) child-ctx)))
   (local state-builder
     (fn [child-ctx]
@@ -173,8 +167,7 @@
       ((Text {:text "Focus: none"
               :style status-style}) child-ctx)))
   (local control-builder
-    (ControlPanelLayout {:title-builder title-builder
-                         :status-builder status-builder
+    (ControlPanelLayout {:status-builder status-builder
                          :button-row-builder (make-test-button-row)}))
   (local status-builder-node
     (StatusPanelLayout {:state-builder state-builder

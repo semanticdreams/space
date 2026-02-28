@@ -17,12 +17,16 @@
 
 (fn ControlPanelLayout [opts]
   (local options (or opts {}))
+  (local title-builder options.title-builder)
   (local status-builder (assert options.status-builder "ControlPanelLayout requires :status-builder"))
   (local button-row-builder (assert options.button-row-builder "ControlPanelLayout requires :button-row-builder"))
   (local body-builder options.body-builder)
   (fn build [ctx]
     (local spacer (make-flex-spacer))
-    (local children [(FlexChild status-builder)])
+    (local children [])
+    (when title-builder
+      (table.insert children (FlexChild title-builder)))
+    (table.insert children (FlexChild status-builder))
     (when body-builder
       (table.insert children (FlexChild body-builder)))
     (table.insert children (FlexChild spacer 1))

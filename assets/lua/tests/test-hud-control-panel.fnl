@@ -1,5 +1,8 @@
 (local BuildContext (require :build-context))
 (local HudControlPanel (require :hud-control-panel))
+(local HudControlPanelLayout (require :hud-control-panel-layout))
+(local Text (require :text))
+(local Button (require :button))
 
 (local tests [])
 
@@ -124,8 +127,44 @@
   (set app.hud original-hud)
   (set app.engine original-engine))
 
+(fn control-panel-layout-renders-custom-title []
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local icons (make-icons-stub))
+  (local ctx
+    (BuildContext {:clickables clickables
+                   :hoverables hoverables
+                   :icons icons
+                   :pointer-target {}}))
+  (local panel-without-title
+    ((HudControlPanelLayout.ControlPanelLayout
+       {:status-builder (fn [child-ctx]
+                          ((Text {:text "Status: OK"}) child-ctx))
+        :button-row-builder (fn [child-ctx]
+                              ((Button {:text "Run"}) child-ctx))})
+     ctx))
+  (panel-without-title.layout:measurer)
+  (local width-without-title (. panel-without-title.layout.measure 1))
+  (local panel-with-title
+    ((HudControlPanelLayout.ControlPanelLayout
+       {:title-builder (fn [child-ctx]
+                         ((Text {:text "CONTROL"}) child-ctx))
+        :status-builder (fn [child-ctx]
+                          ((Text {:text "Status: OK"}) child-ctx))
+        :button-row-builder (fn [child-ctx]
+                              ((Button {:text "Run"}) child-ctx))})
+     ctx))
+  (panel-with-title.layout:measurer)
+  (local width-with-title (. panel-with-title.layout.measure 1))
+  (assert (> width-with-title width-without-title)
+          "Control panel layout should include custom title in measured width")
+  (panel-without-title:drop)
+  (panel-with-title:drop))
+
 (table.insert tests {:name "Control panel apps button opens launcher"
                      :fn control-panel-has-apps-button})
+(table.insert tests {:name "Control panel layout renders custom title"
+                     :fn control-panel-layout-renders-custom-title})
 
 (local main
   (fn []
