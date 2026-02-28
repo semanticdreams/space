@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${SPACE_BUILD_DIR:-${ROOT_DIR}/build}"
+if [[ "${BUILD_DIR}" != /* ]]; then
+    BUILD_DIR="${ROOT_DIR}/${BUILD_DIR}"
+fi
 APPIMAGE_WORK_DIR="${BUILD_DIR}/appimage"
 APPDIR="${APPIMAGE_WORK_DIR}/AppDir"
 TOOLS_DIR="${APPIMAGE_WORK_DIR}/tools"
