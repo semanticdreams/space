@@ -189,6 +189,42 @@
     (when (not ok)
       (error err))))
 
+(fn demo-entry-capture-state-persists-entry-persistence []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (local browser (scene:add-demo-browser))
+        (local entry (DemoDialogs.find-entry :welcome-dialog))
+        (assert entry "Expected Welcome Dialog demo entry")
+        (local demo-element (scene:add-demo-entry entry))
+        (local captured (scene:capture-state))
+        (local panels (or captured.panels []))
+        (assert (= (length panels) 2)
+                "Expected demo browser + demo entry to be persisted")
+        (var found-demo-entry false)
+        (each [_ panel (ipairs panels)]
+          (when (= panel.kind "demo-entry-welcome-dialog")
+            (set found-demo-entry true)
+            (assert (= panel.restorer-module "demo-dialogs")
+                    "Demo entry should restore through demo-dialogs module")
+            (assert (= panel.entry-key "welcome-dialog")
+                    "Demo entry should persist its key for restore")))
+        (assert found-demo-entry
+                "Captured scene state should include welcome-dialog entry persistence")
+        (scene:remove-panel-child browser)
+        (scene:remove-panel-child demo-element)
+        (assert (= (length scene.scene-children) 0)
+                "Scene should be empty before restore")
+        (scene:restore-state captured)
+        (assert (= (length scene.scene-children) 2)
+                "Scene.restore-state should recreate both browser and demo entry"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn scene-capture-state-requires-panel-persistence []
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
@@ -549,6 +585,8 @@
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
 (table.insert tests {:name "Demo browser capture/restore roundtrip" :fn demo-browser-capture-and-restore-roundtrip})
+(table.insert tests {:name "Demo entry capture-state persists entry metadata"
+                     :fn demo-entry-capture-state-persists-entry-persistence})
 (table.insert tests {:name "Scene capture-state requires panel persistence"
                      :fn scene-capture-state-requires-panel-persistence})
 (table.insert tests {:name "Scene capture-state requires restore strategy"

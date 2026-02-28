@@ -15,9 +15,10 @@
 
 (local os os)
 (local string string)
-(local glyph-stride 8)
+(local glyph-stride 12)
 (local group-matrix-stride 16)
 (local clip-matrix-stride 16)
+(local group-depth-index-stride 1)
 
 (fn copy-matrix [matrix]
   matrix)
@@ -37,7 +38,8 @@
   (local options (or opts {}))
   {:font options.font
    :scale (or options.scale 1.0)
-   :line-height (or options.line-height nil)})
+   :line-height (or options.line-height nil)
+   :color (or options.color (glm.vec4 1 1 1 1))})
 
 (fn clip-matrix-key [matrix]
   (if (or (= matrix nil) (= matrix false))
@@ -76,6 +78,13 @@
           (when (not (= value (. b i)))
             (set equal? false)))
         equal?)))
+
+(fn colors-equal? [a b]
+  (and a b
+       (= a.x b.x)
+       (= a.y b.y)
+       (= a.z b.z)
+       (= a.w b.w)))
 
 (fn TextSsboBatcher [_opts]
   (local buckets {})
@@ -133,12 +142,15 @@
       (bucket.group-vector:delete handle))
     (each [_ handle (ipairs bucket.group-clip-index-handles)]
       (bucket.group-clip-index-vector:delete handle))
+    (each [_ handle (ipairs bucket.group-depth-index-handles)]
+      (bucket.group-depth-index-vector:delete handle))
     (each [_ handle (ipairs bucket.clip-handles)]
       (bucket.clip-vector:delete handle))
     (set bucket.glyph-handles [])
     (set bucket.group-index-handles [])
     (set bucket.group-handles [])
     (set bucket.group-clip-index-handles [])
+    (set bucket.group-depth-index-handles [])
     (set bucket.clip-handles [])
     (set bucket.clip-index-by-key {})
     (set bucket.glyph-layout-cache {})
@@ -163,12 +175,14 @@
                        :glyph-group-vector (VectorBuffer)
                        :group-vector (VectorBuffer)
                        :group-clip-index-vector (VectorBuffer)
+                       :group-depth-index-vector (VectorBuffer)
                        :clip-vector (VectorBuffer)
                        :draw-batcher (DrawBatcher {:stride glyph-stride})
                        :glyph-handles []
                        :group-index-handles []
                        :group-handles []
                        :group-clip-index-handles []
+                       :group-depth-index-handles []
                        :clip-handles []
                        :clip-index-by-key {}
                        :glyph-layout-cache {}
@@ -208,8 +222,11 @@
           (local bucket (ensure-bucket style.font))
           (local group-handle (bucket.group-vector:allocate group-matrix-stride))
           (local group-clip-index-handle (bucket.group-clip-index-vector:allocate 1))
+          (local group-depth-index-handle
+            (bucket.group-depth-index-vector:allocate group-depth-index-stride))
           (table.insert bucket.group-handles group-handle)
           (table.insert bucket.group-clip-index-handles group-clip-index-handle)
+          (table.insert bucket.group-depth-index-handles group-depth-index-handle)
           (local entry {:key key
                         :font style.font
                         :bucket bucket
@@ -217,9 +234,11 @@
                         :glyph-group-handle nil
                         :group-handle group-handle
                         :group-clip-index-handle group-clip-index-handle
+                        :group-depth-index-handle group-depth-index-handle
                         :group-index (math.floor (/ group-handle.index group-matrix-stride))
                         :clip-index nil
                         :clip-key nil
+                        :depth-offset-index nil
                         :renderable-count 0
                         :visible false
                         :matrix-cache {}
@@ -252,6 +271,17 @@
       (set transform-write-count (+ transform-write-count 1))
       (entry.bucket.group-clip-index-vector:set-float entry.group-clip-index-handle 0 clip-index)))
 
+  (fn write-group-depth-index [entry depth-offset-index]
+    (local next-index (or depth-offset-index 0))
+    (when (not (= entry.depth-offset-index next-index))
+      (set entry.depth-offset-index next-index)
+      (set write-count (+ write-count 1))
+      (set transform-write-count (+ transform-write-count 1))
+      (entry.bucket.group-depth-index-vector:set-float
+       entry.group-depth-index-handle
+       0
+       next-index)))
+
   (fn ensure-glyph-capacity [entry renderable-count]
     (if (= renderable-count entry.renderable-count)
         nil
@@ -274,7 +304,7 @@
               (table.insert entry.bucket.group-index-handles entry.glyph-group-handle))
             (entry.bucket.draw-batcher:track-handle entry.glyph-handle nil nil)))))
 
-  (fn build-glyph-layout [codepoints style]
+(fn build-glyph-layout [codepoints style]
     (local font style.font)
     (local metrics (and font.metadata font.metadata.metrics))
     (local resolved-line-height (or style.line-height (line-height style)))
@@ -286,6 +316,11 @@
     (var renderable-index 0)
     (local glyph-values [])
     (local atlas font.metadata.atlas)
+    (local color style.color)
+    (local cr (or color.x 1.0))
+    (local cg (or color.y 1.0))
+    (local cb (or color.z 1.0))
+    (local ca (or color.w 1.0))
     (local total (length codepoints))
     (var i 1)
     (while (<= i total)
@@ -322,6 +357,10 @@
               (set (. glyph-values (+ offset 6)) t0)
               (set (. glyph-values (+ offset 7)) s1)
               (set (. glyph-values (+ offset 8)) t1)
+              (set (. glyph-values (+ offset 9)) cr)
+              (set (. glyph-values (+ offset 10)) cg)
+              (set (. glyph-values (+ offset 11)) cb)
+              (set (. glyph-values (+ offset 12)) ca)
               (set renderable-index (+ renderable-index 1)))
             (local advance (if (and glyph glyph.advance)
                                (* glyph.advance style.scale)
@@ -338,6 +377,7 @@
     (if (and existing
              (= existing.scale style.scale)
              (= existing.line-height style.line-height)
+             (colors-equal? existing.color style.color)
              (codepoints-equal? existing.codepoints codepoints))
         existing
         (do
@@ -345,6 +385,7 @@
           (set built.codepoints (copy-codepoints codepoints))
           (set built.scale style.scale)
           (set built.line-height style.line-height)
+          (set built.color style.color)
           (set (. bucket.glyph-layout-cache layout-key) built)
           built)))
 
@@ -397,6 +438,7 @@
         (do
           (ensure-glyph-capacity entry renderable-count)
           (write-group-matrix entry (matrix-from-opts options))
+          (write-group-depth-index entry options.depth-offset-index)
           (local clip-matrix (resolve-clip-matrix options))
           (local next-clip-key (clip-matrix-key clip-matrix))
           (local clip-index (ensure-clip-index entry.bucket clip-matrix))
@@ -416,6 +458,7 @@
       (set transform-update-count (+ transform-update-count 1))
       (local options (or opts {}))
       (write-group-matrix entry (matrix-from-opts options))
+      (write-group-depth-index entry options.depth-offset-index)
       (local clip-matrix (resolve-clip-matrix options))
       (local next-clip-key (clip-matrix-key clip-matrix))
       (local clip-index (ensure-clip-index entry.bucket clip-matrix))
@@ -473,6 +516,7 @@
                              :glyph-group-vector bucket.glyph-group-vector
                              :group-vector bucket.group-vector
                              :group-clip-index-vector bucket.group-clip-index-vector
+                             :group-depth-index-vector bucket.group-depth-index-vector
                              :clip-vector bucket.clip-vector
                              :batches batches}))))
     out)
@@ -483,6 +527,7 @@
                        entry.glyph-group-vector
                        entry.group-vector
                        entry.group-clip-index-vector
+                       entry.group-depth-index-vector
                        entry.clip-vector
                        entry.font
                        projection

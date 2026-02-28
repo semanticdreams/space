@@ -2,13 +2,14 @@
 
 in vec2 texCoord;
 in vec3 worldPos;
+in vec4 textColor;
 flat in uint groupIndex;
 
 out vec4 color;
 
 uniform sampler2D msdf;
 uniform float pxRange;
-uniform vec3 textColor;
+uniform vec3 textColorMul;
 uniform float textAlpha;
 
 layout(std430, binding = 1) readonly buffer GroupClips {
@@ -18,6 +19,12 @@ layout(std430, binding = 1) readonly buffer GroupClips {
 layout(std430, binding = 2) readonly buffer GroupClipIndex {
     uint groupClipIndex[];
 };
+
+layout(std430, binding = 3) readonly buffer GroupDepthOffsetIndex {
+    float groupDepthOffsetIndex[];
+};
+
+const float depthStep = 1e-3;
 
 float screenPxRange() {
     vec2 unitRange = vec2(pxRange) / vec2(textureSize(msdf, 0));
@@ -40,5 +47,8 @@ void main() {
     float sd = median(msd.r, msd.g, msd.b);
     float screenPxDistance = screenPxRange() * (sd - 0.5);
     float opacity = clamp(screenPxDistance + 0.5, 0.0, 1.0);
-    color = vec4(textColor * opacity, textAlpha * opacity);
+    color = vec4(textColor.rgb * textColorMul * opacity,
+                 textColor.a * textAlpha * opacity);
+    float depthOffset = groupDepthOffsetIndex[groupIndex];
+    gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * depthOffset * depthStep));
 }

@@ -2,7 +2,7 @@
 (local shaders (require :shaders))
 (local os os)
 
-(local glyph-stride 8)
+(local glyph-stride 12)
 (local group-matrix-stride 16)
 (local clip-matrix-stride 16)
 (local stream-ring-size 3)
@@ -36,6 +36,7 @@
   (local groups-ssbos (make-buffer-ring))
   (local clips-ssbos (make-buffer-ring))
   (local group-clip-index-ssbos (make-buffer-ring))
+  (local group-depth-index-ssbos (make-buffer-ring))
   (local gpu-query-supported?
     (and gl.glGenQueries
          gl.glBeginQuery
@@ -58,6 +59,7 @@
   (var active-groups-ssbo (. groups-ssbos active-stream-slot))
   (var active-clips-ssbo (. clips-ssbos active-stream-slot))
   (var active-group-clip-index-ssbo (. group-clip-index-ssbos active-stream-slot))
+  (var active-group-depth-index-ssbo (. group-depth-index-ssbos active-stream-slot))
 
   (gl.glBindVertexArray vao)
   (gl.glBindBuffer gl.GL_ARRAY_BUFFER quad-buffer)
@@ -75,7 +77,7 @@
 
   (gl.glBindBuffer gl.GL_ARRAY_BUFFER active-glyph-buffer)
   (local stride-bytes (* glyph-stride 4))
-  ;; glyphOffset.xy glyphSize.xy glyphUV.xyzw
+  ;; glyphOffset.xy glyphSize.xy glyphUV.xyzw glyphColor.rgba
   (gl.glEnableVertexAttribArray 2)
   (gl.glVertexAttribPointer 2 2 gl.GL_FLOAT gl.GL_FALSE stride-bytes 0)
   (gl.glVertexAttribDivisor 2 1)
@@ -85,6 +87,9 @@
   (gl.glEnableVertexAttribArray 4)
   (gl.glVertexAttribPointer 4 4 gl.GL_FLOAT gl.GL_FALSE stride-bytes (* 4 4))
   (gl.glVertexAttribDivisor 4 1)
+  (gl.glEnableVertexAttribArray 6)
+  (gl.glVertexAttribPointer 6 4 gl.GL_FLOAT gl.GL_FALSE stride-bytes (* 8 4))
+  (gl.glVertexAttribDivisor 6 1)
 
   (gl.glBindBuffer gl.GL_ARRAY_BUFFER active-glyph-group-buffer)
   (local group-stride-bytes 4)
@@ -244,6 +249,8 @@
 
   (var uploaded-group-clip-index-vectors {})
   (var uploaded-group-clip-index-counts {})
+  (var uploaded-group-depth-index-vectors {})
+  (var uploaded-group-depth-index-counts {})
   (var last-upload-seconds 0.0)
   (var last-draw-seconds 0.0)
   (var last-gpu-upload-seconds 0.0)
@@ -293,6 +300,39 @@
             (when (. group-clip-index-vector :clear-dirty)
               (group-clip-index-vector:clear-dirty))))))
 
+  (fn upload-group-depth-indices [_self group-depth-index-vector stale-slot?]
+    (local element-count (and group-depth-index-vector (group-depth-index-vector:length)))
+    (when (and element-count (> element-count 0))
+      (local slot active-stream-slot)
+      (local uploaded-group-depth-index-vector (. uploaded-group-depth-index-vectors slot))
+      (local uploaded-group-depth-index-count (. uploaded-group-depth-index-counts slot))
+      (var dirty-from nil)
+      (var dirty-to nil)
+      (when (. group-depth-index-vector :dirty-range)
+        (local (from to) (group-depth-index-vector:dirty-range))
+        (set dirty-from from)
+        (set dirty-to to))
+      (local dirty? (and dirty-from dirty-to (> dirty-to dirty-from)))
+      (local needs-full?
+        (or (and stale-slot? dirty?)
+            (not (= group-depth-index-vector uploaded-group-depth-index-vector))
+            (not (= element-count uploaded-group-depth-index-count))))
+      (if needs-full?
+          (do
+            (gl.bufferDataFromVectorBuffer group-depth-index-vector gl.GL_SHADER_STORAGE_BUFFER gl.GL_STREAM_DRAW)
+            (set (. uploaded-group-depth-index-vectors slot) group-depth-index-vector)
+            (set (. uploaded-group-depth-index-counts slot) element-count)
+            (when (. group-depth-index-vector :clear-dirty)
+              (group-depth-index-vector:clear-dirty)))
+          (when dirty?
+            (gl.bufferSubDataFromVectorBuffer
+              group-depth-index-vector
+              gl.GL_SHADER_STORAGE_BUFFER
+              (* dirty-from 4)
+              (* (- dirty-to dirty-from) 4))
+            (when (. group-depth-index-vector :clear-dirty)
+              (group-depth-index-vector:clear-dirty))))))
+
   (var active-instance-first nil)
   (fn bind-instance-window [_self first]
     (when (not (= first active-instance-first))
@@ -303,6 +343,7 @@
       (gl.glVertexAttribPointer 2 2 gl.GL_FLOAT gl.GL_FALSE stride-bytes base-bytes)
       (gl.glVertexAttribPointer 3 2 gl.GL_FLOAT gl.GL_FALSE stride-bytes (+ base-bytes (* 2 4)))
       (gl.glVertexAttribPointer 4 4 gl.GL_FLOAT gl.GL_FALSE stride-bytes (+ base-bytes (* 4 4)))
+      (gl.glVertexAttribPointer 6 4 gl.GL_FLOAT gl.GL_FALSE stride-bytes (+ base-bytes (* 8 4)))
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER active-glyph-group-buffer)
       (gl.glVertexAttribIPointer 5 1 gl.GL_UNSIGNED_INT 4 group-base-bytes)))
 
@@ -312,13 +353,15 @@
     (set active-glyph-group-buffer (. glyph-group-buffers active-stream-slot))
     (set active-groups-ssbo (. groups-ssbos active-stream-slot))
     (set active-clips-ssbo (. clips-ssbos active-stream-slot))
-    (set active-group-clip-index-ssbo (. group-clip-index-ssbos active-stream-slot)))
+    (set active-group-clip-index-ssbo (. group-clip-index-ssbos active-stream-slot))
+    (set active-group-depth-index-ssbo (. group-depth-index-ssbos active-stream-slot)))
 
-  (fn render [self glyph-vector glyph-group-vector group-vector group-clip-index-vector clip-vector font projection view batches]
+  (fn render [self glyph-vector glyph-group-vector group-vector group-clip-index-vector group-depth-index-vector clip-vector font projection view batches]
     (when (and glyph-vector
                glyph-group-vector
                group-vector
                group-clip-index-vector
+               group-depth-index-vector
                clip-vector
                font
                font.texture
@@ -327,6 +370,7 @@
                (>= (glyph-group-vector:length) (math.floor (/ (glyph-vector:length) glyph-stride)))
                (>= (group-vector:length) group-matrix-stride)
                (>= (group-clip-index-vector:length) 1)
+               (>= (group-depth-index-vector:length) 1)
                (>= (clip-vector:length) clip-matrix-stride))
       (gl.glBindVertexArray vao)
       (set stream-frame-id (+ stream-frame-id 1))
@@ -365,6 +409,10 @@
       (gl.glBindBuffer gl.GL_SHADER_STORAGE_BUFFER active-group-clip-index-ssbo)
       (self:upload-group-clip-indices group-clip-index-vector stale-slot?)
       (gl.glBindBufferBase gl.GL_SHADER_STORAGE_BUFFER 2 active-group-clip-index-ssbo)
+
+      (gl.glBindBuffer gl.GL_SHADER_STORAGE_BUFFER active-group-depth-index-ssbo)
+      (self:upload-group-depth-indices group-depth-index-vector stale-slot?)
+      (gl.glBindBufferBase gl.GL_SHADER_STORAGE_BUFFER 3 active-group-depth-index-ssbo)
       (when gpu-query-supported?
         (gl.glEndQuery gl.GL_TIME_ELAPSED)
         (set (. upload-query-submitted active-query-slot) true))
@@ -380,7 +428,7 @@
       (shader:setMatrix4 "view" view)
       (shader:setFloat "pxRange" font.metadata.atlas.distanceRange)
       (shader:setInteger "msdf" 0)
-      (shader:setVector3f "textColor" 1 1 1)
+      (shader:setVector3f "textColorMul" 1 1 1)
       (shader:setFloat "textAlpha" 1)
 
       (gl.glActiveTexture gl.GL_TEXTURE0)
@@ -406,6 +454,7 @@
    :upload-groups upload-groups
    :upload-clips upload-clips
    :upload-group-clip-indices upload-group-clip-indices
+   :upload-group-depth-indices upload-group-depth-indices
    :bind-instance-window bind-instance-window
    :rotate-query-slot rotate-query-slot
    :update-gpu-query-result update-gpu-query-result

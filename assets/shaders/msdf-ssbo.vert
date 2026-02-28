@@ -6,6 +6,7 @@ layout(location = 2) in vec2 glyphOffset;
 layout(location = 3) in vec2 glyphSize;
 layout(location = 4) in vec4 glyphUV;
 layout(location = 5) in uint glyphGroup;
+layout(location = 6) in vec4 glyphColor;
 
 layout(std430, binding = 0) readonly buffer Groups {
     mat4 groupModel[];
@@ -16,6 +17,7 @@ uniform mat4 view;
 
 out vec2 texCoord;
 out vec3 worldPos;
+out vec4 textColor;
 flat out uint groupIndex;
 
 void main() {
@@ -25,5 +27,6 @@ void main() {
     gl_Position = projection * view * world;
     worldPos = world.xyz;
     groupIndex = glyphGroup;
+    textColor = glyphColor;
     texCoord = mix(glyphUV.xy, glyphUV.zw, quadUV);
 }

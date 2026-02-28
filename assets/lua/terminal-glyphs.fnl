@@ -81,8 +81,6 @@
   (local fallback-glyph opts.fallback-glyph)
   (local resolve-color opts.resolve-color)
   (local apply-bold opts.apply-bold)
-  (local rotation opts.rotation)
-  (local position opts.position)
   (local depth opts.depth)
   (local font (and state state.font))
   (local glyph (and font (fallback-glyph font cell.codepoint)))
@@ -121,8 +119,7 @@
            vector
            handle
            offset
-           (+ (rotation:rotate (+ (cell-origin row col) local-pos))
-              position))
+           (+ (cell-origin row col) local-pos))
           (vector:set-glm-vec2 handle (+ offset 3) (glm.vec2 (table.unpack uv)))
           (vector:set-glm-vec4 handle (+ offset 5) fg)
           (vector:set-float handle (+ offset 9) depth)))))

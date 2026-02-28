@@ -312,6 +312,7 @@
       (local glyph-group-vector (fake-vector 12))
       (local group-vector (fake-vector (* 16 3)))
       (local group-clip-index-vector (fake-vector 3))
+      (local group-depth-index-vector (fake-vector 3))
       (local clip-vector (fake-vector (* 16 2)))
       (local font {:metadata {:atlas {:distanceRange 3.5}}
                    :texture {:id 42 :ready true}})
@@ -319,6 +320,7 @@
                        glyph-group-vector
                        group-vector
                        group-clip-index-vector
+                       group-depth-index-vector
                        clip-vector
                        font
                        {:projection true}
@@ -326,13 +328,14 @@
                        [{:firsts [0 4]
                          :counts [3 2]}])
       (local bind-base-calls (mock:get-gl-calls "glBindBufferBase"))
-      (assert (= (# bind-base-calls) 3))
+      (assert (= (# bind-base-calls) 4))
       (assert (= (. (. bind-base-calls 1) :args :target) 0x90D2))
       (assert (= (. (. bind-base-calls 1) :args :index) 0))
       (assert (= (. (. bind-base-calls 2) :args :index) 1))
       (assert (= (. (. bind-base-calls 3) :args :index) 2))
+      (assert (= (. (. bind-base-calls 4) :args :index) 3))
       (local buffer-calls (mock:get-gl-calls "bufferDataFromVectorBuffer"))
-      (assert (= (# buffer-calls) 3))
+      (assert (= (# buffer-calls) 4))
       (local uint-buffer-calls (mock:get-gl-calls "bufferDataUIntFromVectorBuffer"))
       (assert (= (# uint-buffer-calls) 2))
       (local int-pointer-calls (mock:get-gl-calls "glVertexAttribIPointer"))

@@ -696,6 +696,14 @@
          (self.build-context:get-text-batches)))
   (fn get-image-batches [self]
     self.build-context.image-batches)
+  (fn get-quad-draw-list [self]
+    (and self.build-context
+         self.build-context.get-quad-draw-list
+         (self.build-context:get-quad-draw-list)))
+  (fn get-text-ssbo-draw-list [self]
+    (and self.build-context
+         self.build-context.get-text-ssbo-draw-list
+         (self.build-context:get-text-ssbo-draw-list)))
 
   (fn screen-pos-ray [self pos opts]
     (local options (or opts {}))
@@ -766,6 +774,8 @@
   (set self.get-text-vectors get-text-vectors)
   (set self.get-text-batches get-text-batches)
   (set self.get-image-batches get-image-batches)
+  (set self.get-quad-draw-list get-quad-draw-list)
+  (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
   (set self.reset-projection reset-projection)
   (set self.on-viewport-changed on-viewport-changed)
   (set self.update update)

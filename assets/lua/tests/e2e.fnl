@@ -32,6 +32,7 @@
 (local TetrisDeepDialogTest (require :tests.e2e.test-tetris-deep-dialog))
 (local LightingTest (require :tests.e2e.test-lighting))
 (local InputCursorAlignmentTest (require :tests.e2e.test-input-cursor-alignment))
+(local TerminalRendererTransformTest (require :tests.e2e.test-terminal-renderer-transform))
 
 (fn run-all []
   (ButtonTest.main)
@@ -66,6 +67,7 @@
   (TetrisDeepDialogTest.main)
   (LightingTest.main)
   (InputCursorAlignmentTest.main)
+  (TerminalRendererTransformTest.main)
   (RenderCaptureTest.main))
 
 (fn main []

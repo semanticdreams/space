@@ -14,6 +14,8 @@
   (local line-strips [])
   (local triangle-batches (DrawBatcher {:stride 8}))
   (local text-draw-batchers {})
+  (local quad-sources [])
+  (local text-ssbo-sources [])
   (fn register-line-strip [vector]
     (table.insert line-strips vector)
     vector)
@@ -83,6 +85,52 @@
            (local batcher (. text-draw-batchers font))
            (set (. batches font) (and batcher (batcher:get-batches))))
          batches))
+  (set ctx.register-quad-source
+       (fn [_self source]
+         (when source
+           (table.insert quad-sources source))
+         source))
+  (set ctx.unregister-quad-source
+       (fn [_self source]
+         (when source
+           (for [i 1 (length quad-sources)]
+             (when (= (. quad-sources i) source)
+               (table.remove quad-sources i)
+               (lua "break"))))
+         nil))
+  (set ctx.get-quad-draw-list
+       (fn [_self]
+         (local out [])
+         (each [_ source (ipairs quad-sources)]
+           (when (and source source.get-draw-list)
+             (local entries (source:get-draw-list))
+             (when entries
+               (each [_ entry (ipairs entries)]
+                 (table.insert out entry)))))
+         out))
+  (set ctx.register-text-ssbo-source
+       (fn [_self source]
+         (when source
+           (table.insert text-ssbo-sources source))
+         source))
+  (set ctx.unregister-text-ssbo-source
+       (fn [_self source]
+         (when source
+           (for [i 1 (length text-ssbo-sources)]
+             (when (= (. text-ssbo-sources i) source)
+               (table.remove text-ssbo-sources i)
+               (lua "break"))))
+         nil))
+  (set ctx.get-text-ssbo-draw-list
+       (fn [_self]
+         (local out [])
+         (each [_ source (ipairs text-ssbo-sources)]
+           (when (and source source.get-draw-list)
+             (local entries (source:get-draw-list))
+             (when entries
+               (each [_ entry (ipairs entries)]
+                 (table.insert out entry)))))
+         out))
   (set ctx.get-image-batch
        (fn [_self texture]
          (assert (and texture texture.id)
