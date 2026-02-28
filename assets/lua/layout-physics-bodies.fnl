@@ -1,5 +1,10 @@
 (local glm (require :glm))
 (local bt (require :bt))
+(local CoordinateGuard (require :coordinate-guard))
+(local logging (require :logging))
+(local PhysicsFloor (require :physics-floor))
+
+(local safe-vec3? CoordinateGuard.safe-vec3?)
 
 (fn physics-available? []
   (and bt app.engine app.engine.physics))
@@ -34,7 +39,8 @@
 
 (fn ensure-physics-configured []
   (when (physics-available?)
-    (app.engine.physics:setGravity 0 -25 0)))
+    (app.engine.physics:setGravity 0 -25 0)
+    (PhysicsFloor.ensure-installed {})))
 
 (fn get-entries [entity]
   (or (and entity entity.physics-bodies) []))
@@ -86,6 +92,65 @@
       (> (math.abs (- a.x b.x)) e)
       (> (math.abs (- a.y b.y)) e)
       (> (math.abs (- a.z b.z)) e)))
+
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn safe-quat? [value]
+  (and value
+       (finite-number? value.w)
+       (finite-number? value.x)
+       (finite-number? value.y)
+       (finite-number? value.z)))
+
+(fn sanitize-rotation [candidate fallback]
+  (if (safe-quat? candidate)
+      candidate
+      (if (safe-quat? fallback)
+          fallback
+          (glm.quat 1 0 0 0))))
+
+(fn recover-entry-transform! [entry body base-position base-rotation positioned offset]
+  (local entry-half (half-size entry))
+  (local safe-base-rotation (sanitize-rotation base-rotation (glm.quat 1 0 0 0)))
+  (local safe-entry-spawn
+    (if (safe-vec3? entry.spawn)
+        entry.spawn
+        (glm.vec3 0 0 0)))
+  (local fallback-center
+    (+ base-position
+       (safe-base-rotation:rotate (+ safe-entry-spawn entry-half))))
+  (local fallback-rotation
+    (sanitize-rotation positioned.layout.rotation safe-base-rotation))
+  (local fallback-position
+    (- fallback-center (fallback-rotation:rotate entry-half)))
+  (set offset.x safe-entry-spawn.x)
+  (set offset.y safe-entry-spawn.y)
+  (set offset.z safe-entry-spawn.z)
+  (when entry.metadata
+    (set entry.metadata.transform-applied? true)
+    (set entry.metadata.physics-transform-recovered? true))
+  (set positioned.layout.rotation fallback-rotation)
+  (set positioned.layout.position fallback-position)
+  (positioned.layout:mark-layout-dirty)
+  (when body
+    (local reset-transform (bt.Transform))
+    (reset-transform:setIdentity)
+    (reset-transform:setOrigin (bt-glm-vec3 fallback-center))
+    (reset-transform:setRotation (glm-bt-quat fallback-rotation))
+    (body:setWorldTransform reset-transform)
+    (when (and entry.rigid entry.rigid.motion-state)
+      (entry.rigid.motion-state:setWorldTransform reset-transform))
+    (body:setLinearVelocity (bt.Vector3 0 0 0))
+    (when body.setAngularVelocity
+      (body:setAngularVelocity (bt.Vector3 0 0 0)))
+    (when body.forceActivationState
+      (body:forceActivationState 1))
+    (when body.activate
+      (body:activate true))))
 
 (fn remove-body [entry]
   (when (and entry.body entry.body-active? (physics-available?))
@@ -364,51 +429,63 @@
       (each [_ entry (ipairs entries)]
         (local offset entry.offset)
         (local positioned entry.positioned)
-        (when (and offset positioned positioned.layout)
-          (ensure-body-matches-layout-size entry)
-          (when (and (not entry.dragging)
-                     entry.body
-                     (not entry.body-active?)
-                     (physics-available?))
-            (add-body entry))
-          (local body entry.body)
-          (local world-position
-            (if entry.dragging
-                (do
-                  (apply-layout-to-body entry)
-                  (+ positioned.layout.position
-                     (positioned.layout.rotation:rotate (half-size entry))))
-                (if (and body entry.body-active? (physics-available?))
-                    (do
-                      (local transform (body:getCenterOfMassTransform))
-                      (local origin (transform:getOrigin))
-                      (physics-glm-vec3 origin))
-                    (+ base-position
-                       (base-rotation:rotate (+ entry.spawn (half-size entry)))))))
-          (when world-position
-            (local entry-half (half-size entry))
-            (local relative (- world-position base-position))
-            (local local-relative (inverse:rotate relative))
-            (local local-offset (- local-relative entry-half))
-            (local world-rotation
+          (when (and offset positioned positioned.layout)
+            (ensure-body-matches-layout-size entry)
+            (when (and (not entry.dragging)
+                       entry.body
+                       (not entry.body-active?)
+                       (physics-available?))
+              (add-body entry))
+            (local body entry.body)
+            (local transform
               (if (and body entry.body-active? (physics-available?))
+                  (body:getCenterOfMassTransform)
+                  nil))
+            (local world-position
+              (if entry.dragging
                   (do
-                    (local transform (body:getCenterOfMassTransform))
+                    (apply-layout-to-body entry)
+                    (+ positioned.layout.position
+                       (positioned.layout.rotation:rotate (half-size entry))))
+                  (if transform
+                      (do
+                        (local origin (transform:getOrigin))
+                        (physics-glm-vec3 origin))
+                      (+ base-position
+                         (base-rotation:rotate (+ entry.spawn (half-size entry)))))))
+            (local world-rotation
+              (if transform
+                  (do
                     (local rotation (transform:getRotation))
                     (bt-quat->glm-quat rotation))
                   (or positioned.layout.rotation (glm.quat 1 0 0 0))))
-            (local layout-position (- world-position (world-rotation:rotate entry-half)))
-            (when (or (vec3-changed? offset local-offset 1e-3)
-                      (vec3-changed? positioned.layout.position layout-position 1e-3)
-                      (quat-changed? positioned.layout.rotation world-rotation 1e-3))
-              (set offset.x local-offset.x)
-              (set offset.y local-offset.y)
-              (set offset.z local-offset.z)
-              (when entry.metadata
-                (set entry.metadata.transform-applied? true))
-              (set positioned.layout.rotation world-rotation)
-              (set positioned.layout.position layout-position)
-              (positioned.layout:mark-layout-dirty)))))))
+            (if (or (not (safe-vec3? world-position))
+                    (not (safe-quat? world-rotation)))
+                (do
+                  (logging.error "[physics-bodies] invalid physics transform; recovered entry to safe spawn")
+                  (recover-entry-transform! entry body base-position base-rotation positioned offset))
+                (when world-position
+                (local entry-half (half-size entry))
+                (local relative (- world-position base-position))
+                (local local-relative (inverse:rotate relative))
+                (local local-offset (- local-relative entry-half))
+                (local layout-position (- world-position (world-rotation:rotate entry-half)))
+                (if (or (not (safe-vec3? local-offset))
+                        (not (safe-vec3? layout-position)))
+                    (do
+                      (logging.error "[physics-bodies] unsafe derived layout transform; recovered entry to safe spawn")
+                      (recover-entry-transform! entry body base-position base-rotation positioned offset))
+                    (when (or (vec3-changed? offset local-offset 1e-3)
+                              (vec3-changed? positioned.layout.position layout-position 1e-3)
+                              (quat-changed? positioned.layout.rotation world-rotation 1e-3))
+                      (set offset.x local-offset.x)
+                      (set offset.y local-offset.y)
+                      (set offset.z local-offset.z)
+                      (when entry.metadata
+                        (set entry.metadata.transform-applied? true))
+                      (set positioned.layout.rotation world-rotation)
+                      (set positioned.layout.position layout-position)
+                      (positioned.layout:mark-layout-dirty)))))))))
   nil)
 
 {:attach attach

@@ -216,6 +216,71 @@
     (when (not ok)
       (error err))))
 
+(fn physical-panel-stops-at-global-floor-plane []
+  (assert bt "Global floor test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local panel-size {:value (glm.vec3 5 3 5)})
+  (local panel-builder (make-probe-panel-builder panel-size))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder panel-builder
+                                                 :skip-cuboid true
+                                                 :position (glm.vec3 5000 40 0)}))
+            (assert panel "Expected panel on global floor test")
+            (for [_ 1 1200]
+              (app.engine.physics:update 0)
+              (scene:update))
+            (assert (> panel.layout.position.y -1005)
+                    (string.format
+                      "Panel should not fall through global floor at y=-1000 (y=%.3f)"
+                      panel.layout.position.y))
+            (assert (< panel.layout.position.y -900)
+                    (string.format
+                      "Panel should settle near floor, not remain high (y=%.3f)"
+                      panel.layout.position.y))))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn physical-panel-respects-configured-floor-height []
+  (assert bt "Configured floor test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-floor app.physics-floor-y)
+  (set app.physics-floor-y -1500)
+  (local panel-size {:value (glm.vec3 5 3 5)})
+  (local panel-builder (make-probe-panel-builder panel-size))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local panel (scene:add-panel-child {:builder panel-builder
+                                             :skip-cuboid true
+                                             :position (glm.vec3 8000 40 0)}))
+        (assert panel "Expected panel on configured floor test")
+        (for [_ 1 1500]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (assert (> panel.layout.position.y -1510)
+                (string.format
+                  "Panel should not fall through configured floor at y=-1500 (y=%.3f)"
+                  panel.layout.position.y))
+        (assert (< panel.layout.position.y -1400)
+                (string.format
+                  "Panel should settle near configured floor, not remain high (y=%.3f)"
+                  panel.layout.position.y)))))
+  (set app.physics-floor-y original-floor)
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn graph-node-cube-add-does-not-crash-after-ms-fpc-update []
   (assert bt "Graph-node cube large-camera test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -245,14 +310,59 @@
             (.. "Adding graph-node cube should not crash after ms FPC update, but got: "
                 (tostring err)))))
 
+(fn physics-sync-recovers-from-out-of-bounds-body-transform []
+  (assert bt "Out-of-bounds transform test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local panel (scene:add-panel-child {:builder builder
+                                             :skip-cuboid true
+                                             :position (glm.vec3 0 12 0)}))
+        (assert panel "Expected panel")
+        (local entry (find-physics-entry-for-element scene panel))
+        (assert (and entry entry.body) "Expected runtime physics body")
+        (local transform (bt.Transform))
+        (transform:setIdentity)
+        (transform:setOrigin (bt.Vector3 0 1001000 0))
+        (transform:setRotation (bt.Quaternion 0 0 0 1))
+        (entry.body:setWorldTransform transform)
+        (when (and entry.rigid entry.rigid.motion-state)
+          (entry.rigid.motion-state:setWorldTransform transform))
+        (scene:update)
+        (assert (< (math.abs panel.layout.position.y) 1000000)
+                "Scene update should keep layout position in vec3-safe range")
+        (assert (< (math.abs entry.offset.y) 1000000)
+                "Recovered entry offset should remain in vec3-safe range")
+        (local transform (entry.body:getCenterOfMassTransform))
+        (local center (transform:getOrigin))
+        (assert (< (math.abs center.y) 1000000)
+                "Recovered body center should remain in vec3-safe range"))))
+  (cleanup)
+  (assert ok
+          (.. "Scene update should recover from out-of-bounds physics transform, got: "
+              (tostring err))))
+
 (table.insert tests {:name "Physical panels collide with each other"
                      :fn physical-panels-collide-with-each-other})
 (table.insert tests {:name "Physical panel collides with Perlin terrain"
                      :fn physical-panel-collides-with-perlin-terrain})
 (table.insert tests {:name "Physical panel rebuilds shape on resize"
                      :fn physical-panel-rebuilds-body-on-resize})
+(table.insert tests {:name "Physical panel stops at global floor plane"
+                     :fn physical-panel-stops-at-global-floor-plane})
+(table.insert tests {:name "Physical panel respects configured floor height"
+                     :fn physical-panel-respects-configured-floor-height})
 (table.insert tests {:name "Graph-node cube add tolerates ms FPC update"
                      :fn graph-node-cube-add-does-not-crash-after-ms-fpc-update})
+(table.insert tests {:name "Physics sync recovers from out-of-bounds body transform"
+                     :fn physics-sync-recovers-from-out-of-bounds-body-transform})
 
 (local main
   (fn []

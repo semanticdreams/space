@@ -12,6 +12,7 @@
 (local ObjectSelector (require :object-selector))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
+(local PhysicsFloor (require :physics-floor))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -19,6 +20,9 @@
 (local array->quat (. MathUtils :array->quat))
 (local safe-vec3? CoordinateGuard.safe-vec3?)
 (local sanitize-vec3 CoordinateGuard.sanitize-vec3)
+(local finite-number? CoordinateGuard.finite-number?)
+
+(local default-floor-y PhysicsFloor.default-floor-y)
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -48,6 +52,7 @@
 (fn default-state []
   {:camera {:position [0 0 30]
             :rotation [1 0 0 0]}
+   :physics {:floor-y default-floor-y}
    :graph {:graph {:nodes []
                    :edges []}
            :views {:open-node-keys []}}
@@ -109,7 +114,17 @@
                           "[world] %s invalid persisted camera.position; resetting to default"
                           world.id))
           (set camera-state.position [0 0 30])))
-    (set world.state.camera camera-state))
+    (set world.state.camera camera-state)
+    (local physics-state (or (and world.state world.state.physics) {}))
+    (local floor-y physics-state.floor-y)
+    (if (finite-number? floor-y)
+        (set physics-state.floor-y floor-y)
+        (do
+          (logging.warn (string.format
+                          "[world] %s invalid persisted physics.floor-y; resetting to default"
+                          world.id))
+          (set physics-state.floor-y default-floor-y)))
+    (set world.state.physics physics-state))
 
   (fn save-state [world]
     (ensure-world-dir)
@@ -117,6 +132,28 @@
     (when (not ok)
       (error (string.format "HomeWorld failed to write %s: %s" world.state-path err)))
     true)
+
+  (fn resolve-runtime-floor-y [world]
+    (local runtime world.runtime)
+    (local runtime-floor (and runtime runtime.physics-floor-y))
+    (local state-floor (and world.state world.state.physics world.state.physics.floor-y))
+    (if (finite-number? runtime-floor)
+        runtime-floor
+        (if (finite-number? state-floor)
+            state-floor
+            default-floor-y)))
+
+  (fn apply-runtime-floor! [world]
+    (local floor-y (resolve-runtime-floor-y world))
+    (set app.physics-floor-y floor-y)
+    (PhysicsFloor.ensure-installed {:floor-y floor-y})
+    (when world.state
+      (when (not world.state.physics)
+        (set world.state.physics {}))
+      (set world.state.physics.floor-y floor-y))
+    (when world.runtime
+      (set world.runtime.physics-floor-y floor-y))
+    floor-y)
 
   (fn capture-runtime-state [world ctx]
     (local runtime world.runtime)
@@ -138,10 +175,15 @@
     (when (and scene scene.capture-state)
       (set world.state.scene (scene:capture-state)))
     (when (and hud hud.capture-state)
-      (set world.state.hud (hud:capture-state))))
+      (set world.state.hud (hud:capture-state)))
+    (local floor-y (resolve-runtime-floor-y world))
+    (local physics-state (or world.state.physics {}))
+    (set physics-state.floor-y floor-y)
+    (set world.state.physics physics-state))
 
   (fn create-runtime [world ctx]
     (local camera-state (or (and world.state world.state.camera) {}))
+    (local floor-y (apply-runtime-floor! world))
     (local (ok parsed-camera-position) (pcall array->vec3 camera-state.position))
     (local loaded-camera-position
       (if ok
@@ -212,6 +254,7 @@
       (scene:restore-state world.state.scene))
     (local runtime
       {:camera camera
+       :physics-floor-y floor-y
        :first-person-controls controls
        :scene-scope scene-scope
        :scene scene
@@ -269,6 +312,7 @@
     (world:init ctx)
     (when (not world.runtime)
       (set world.runtime (create-runtime world ctx)))
+    (apply-runtime-floor! world)
     (set world.active? true))
 
   (fn deactivate [world _ctx reason]
@@ -282,6 +326,7 @@
   (fn resume [world ctx]
     (when (not world.runtime)
       (set world.runtime (create-runtime world ctx)))
+    (apply-runtime-floor! world)
     (set world.active? true))
 
   (fn drop [world ctx reason]
