@@ -788,8 +788,9 @@
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)
   (set app.active-world-hud-overlay nil)
-  (app.hoverables:drop)
-  (set app.hoverables nil)
+  (when app.hoverables
+    (app.hoverables:drop)
+    (set app.hoverables nil))
   (when app.movables
     (app.movables:drop)
     (set app.movables nil))

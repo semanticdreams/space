@@ -21,21 +21,6 @@
        (approx a.z b.z)
        (approx a.w b.w)))
 
-(fn make-vector-buffer []
-  (local state {:allocate 0
-                :delete 0})
-  (local buffer {:state state})
-  (set buffer.allocate (fn [_self _count]
-                         (set state.allocate (+ state.allocate 1))
-                         state.allocate))
-  (set buffer.delete (fn [_self _handle]
-                       (set state.delete (+ state.delete 1))))
-  (set buffer.set-glm-vec3 (fn [_self _handle _offset _value] nil))
-  (set buffer.set-glm-vec4 (fn [_self _handle _offset _value] nil))
-  (set buffer.set-glm-vec2 (fn [_self _handle _offset _value] nil))
-  (set buffer.set-float (fn [_self _handle _offset _value] nil))
-  buffer)
-
 (fn make-test-ctx [opts]
   (local AppBootstrap (require :app-bootstrap))
   (AppBootstrap.init-themes)
@@ -43,21 +28,11 @@
   (local intersector (or options.intersectables (Intersectables)))
   (local clickables (or options.clickables (Clickables {:intersectables intersector})))
   (local hoverables (or options.hoverables (Hoverables {:intersectables intersector})))
-  (local triangle (make-vector-buffer))
-  (local text-buffer (make-vector-buffer))
-  (local ctx {:triangle-vector triangle})
-  (set ctx.get-text-vector (fn [_self _font] text-buffer))
-  (set ctx.get-text-ssbo-batcher
-       (fn [_self]
-         {:upsert-text (fn [_batcher _key _opts] nil)
-          :update-text-transform (fn [_batcher _key _opts] nil)
-          :remove-text (fn [_batcher _key] nil)}))
-  (set ctx.theme options.theme)
-  (set ctx.clickables clickables)
-  (set ctx.hoverables hoverables)
-  (set ctx.system-cursors options.system-cursors)
-  (set ctx.icons options.icons)
-  ctx)
+  (BuildContext {:theme options.theme
+                 :clickables clickables
+                 :hoverables hoverables
+                 :system-cursors options.system-cursors
+                 :icons options.icons}))
 
 (fn make-focus-build-ctx [opts]
   (local options (or opts {}))
@@ -244,7 +219,6 @@
           (button.layout:layouter)
           (local padding-size button.padding.layout.size)
           (local expected-offset (/ (- button.layout.size.y padding-size.y) 2))
-          (print (.. "DEBUG: Button Y=" button.layout.size.y " PaddingContent Y=" padding-size.y " Expected=" expected-offset " Actual=" button.padding.layout.position.y))
           (assert (approx button.padding.layout.position.y expected-offset))
           (button:drop))))))
 
@@ -397,15 +371,21 @@
         (fn [click]
           (local ctx (make-test-ctx {:clickables click :hoverables hover}))
           (local button ((Button {:text "Rect"}) ctx))
-          (local state ctx.triangle-vector.state)
-          (assert (= state.allocate 1))
-          (assert (= state.delete 0))
+          (local quad-batcher (ctx:get-rectangle-quad-batcher))
+          (local baseline-count (quad-batcher:get-instance-count))
+          (button.layout:measurer)
+          (set button.layout.size button.layout.measure)
+          (set button.layout.position (glm.vec3 0 0 0))
+          (set button.layout.rotation (glm.quat 1 0 0 0))
+          (button.layout:layouter)
+          (local visible-count (quad-batcher:get-instance-count))
+          (assert (> visible-count baseline-count))
           (button.rectangle:set-visible false)
-          (assert (= state.delete 1))
+          (assert (< (quad-batcher:get-instance-count) visible-count))
           (button.rectangle:set-visible true)
-          (assert (= state.allocate 2))
+          (assert (= (quad-batcher:get-instance-count) visible-count))
           (button:drop)
-          (assert (= state.delete 2)))))))
+          (assert (= (quad-batcher:get-instance-count) baseline-count)))))))
 
 (fn button-renders-icon-and-label []
   (with-icons-stub

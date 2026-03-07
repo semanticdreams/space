@@ -1,21 +1,12 @@
 (local QuadBatcher (require :next-app/quad-batcher))
+(local glm (require :glm))
 
 (local tests [])
 
-(fn matrix-copy [m]
-  [(. m 1) (. m 2) (. m 3) (. m 4)
-   (. m 5) (. m 6) (. m 7) (. m 8)
-   (. m 9) (. m 10) (. m 11) (. m 12)
-   (. m 13) (. m 14) (. m 15) (. m 16)])
-
 (fn next-app-quad-batcher-compacts-identical-clip-groups []
   (local batcher (QuadBatcher {}))
-  (local clip-a
-    [1 0 0 0
-     0 1 0 0
-     0 0 1 0
-     2 3 0 1])
-  (local clip-b (matrix-copy clip-a))
+  (local clip-a (glm.mat4-trs-z 2 3 0 0))
+  (local clip-b (glm.mat4-trs-z 2 3 0 0))
 
   (batcher:add-quad {:clip-matrix clip-a})
   (batcher:add-quad {:clip-matrix clip-b})

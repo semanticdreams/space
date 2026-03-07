@@ -1,9 +1,9 @@
 (local glm (require :glm))
 (local glm-is-mat4 glm.is-mat4)
+(local glm-mat4-bytes-key glm.mat4-bytes-key)
 (local ClipUtils (require :clip-utils))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (local os os)
-(local string string)
 
 (fn identity-matrix []
   (glm.mat4 1))
@@ -31,13 +31,9 @@
     (if (or (= matrix nil) (= matrix false))
         "clip:nil"
         (do
-          ;; Use matrix values (not object identity/hash) because clip matrices are
-          ;; frequently mutated in place across frames.
-          (var key "")
-          (for [i 1 16]
-            (local value (tonumber (. matrix i)))
-            (set key (.. key ":" (string.format "%.17g" (or value 0)))))
-          key)))
+          (assert (glm-is-mat4 matrix)
+                  "QuadBatcher.clip-matrix-key requires clip matrix to be glm.mat4")
+          (glm-mat4-bytes-key matrix))))
 
   (fn zero-matrix []
     (glm.mat4 0))
@@ -106,7 +102,6 @@
                         :matrix {}
                         :color {}
                         :depth nil
-                        :clip-matrix nil
                         :clip-group nil
                         :visible false})
           (set (. entries slot) entry)
@@ -131,7 +126,6 @@
       (if opts.clip-matrix
           opts.clip-matrix
           (ClipUtils.resolve-matrix opts.clip)))
-    (set entry.clip-matrix clip-matrix)
     ;; Clip matrices can be updated in place, so identity checks are unsafe.
     ;; Always resolve the clip group from current matrix values.
     (local clip-group (ensure-clip-group clip-matrix))

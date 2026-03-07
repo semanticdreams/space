@@ -3,7 +3,6 @@
 (local glm (require :glm))
 (local os os)
 (local string string)
-(local math math)
 (local debug debug)
 (local logging (require :logging))
 (local FlamegraphProfiler (require :flamegraph-profiler))
@@ -19,12 +18,13 @@
 (app.engine:start)
 
 (local rectangle-count 2000)
-(local frame-count 60)
-(local default-output-path "prof/rectangles.folded")
+(local frame-count 120)
+(local mover-stride 10)
+(local default-output-path "prof/rectangles-idle.folded")
 (local output-path (ProfOutputPath.resolve default-output-path))
 
 (when (not output-path)
-  (logging.info "SPACE_FENNEL_FLAMEGRAPH disabled; not recording rectangles profile.")
+  (logging.info "SPACE_FENNEL_FLAMEGRAPH disabled; not recording rectangles-idle profile.")
   (os.exit 0))
 
 (local profiler (FlamegraphProfiler {:output-path output-path}))
@@ -43,8 +43,9 @@
   out)
 
 (fn update-rectangles [rectangles phase]
-  (each [_ rect (ipairs rectangles)]
-    (set rect.position (+ rect.position (glm.vec3 0.0002 (* 0.0004 (math.sin (+ phase rect.position.x))) 0)))
+  (each [i rect (ipairs rectangles)]
+    (when (= (% i mover-stride) 0)
+      (set rect.position (+ rect.position (glm.vec3 0.0002 (* 0.0004 (math.sin (+ phase rect.position.x))) 0))))
     (rect:update)))
 
 (fn run-profile []
@@ -56,9 +57,10 @@
   (local elapsed-ms (* (- (os.clock) t0) 1000.0))
   (each [_ rect (ipairs rectangles)]
     (rect:drop))
-  (logging.info (.. "[prof-rectangles] elapsed-ms=" (string.format "%.3f" elapsed-ms)
+  (logging.info (.. "[prof-rectangles-idle] elapsed-ms=" (string.format "%.3f" elapsed-ms)
                     " rectangles=" rectangle-count
-                    " frames=" frame-count))
+                    " frames=" frame-count
+                    " mover-stride=" mover-stride))
   elapsed-ms)
 
 (profiler.start)
@@ -71,6 +73,6 @@
 
 (if ok
     (do
-      (logging.info (.. "Rectangles profile written to " output-path))
+      (logging.info (.. "Rectangles-idle profile written to " output-path))
       true)
     (error value))
