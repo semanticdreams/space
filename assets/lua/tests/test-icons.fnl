@@ -45,6 +45,10 @@
 
   (local ctx {:icons icons
               :get-text-vector (fn [] mock-vector)
+              :get-text-ssbo-batcher (fn []
+                                       {:upsert-text (fn [_batcher _key _opts] nil)
+                                        :update-text-transform (fn [_batcher _key _opts] nil)
+                                        :remove-text (fn [_batcher _key] nil)})
               :track-text-handle (fn [])
               :untrack-text-handle (fn [])})
   

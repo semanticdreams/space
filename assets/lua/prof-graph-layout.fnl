@@ -21,11 +21,25 @@
       (when (and vector vector.length)
         (vector:length)))
 
+    (fn consume-draw-list [entries]
+      (when entries
+        (each [_ entry (ipairs entries)]
+          (consume-vector (and entry entry.vector))
+          (consume-vector (and entry entry.clip-vector))
+          (consume-vector (and entry entry.clip-group-vector))
+          (consume-vector (and entry entry.glyph-vector))
+          (consume-vector (and entry entry.glyph-group-vector))
+          (consume-vector (and entry entry.group-vector))
+          (consume-vector (and entry entry.group-clip-index-vector))
+          (consume-vector (and entry entry.group-depth-index-vector)))))
+
     (fn draw-target [_self target]
       (when (and target target.get-triangle-vector)
         (consume-vector (target:get-triangle-vector))
-        (each [_ vector (pairs (target:get-text-vectors))]
-          (consume-vector vector))))
+        (when target.get-quad-draw-list
+          (consume-draw-list (target:get-quad-draw-list)))
+        (when target.get-text-ssbo-draw-list
+          (consume-draw-list (target:get-text-ssbo-draw-list)))))
 
     (fn update [self]
       (when app.scene

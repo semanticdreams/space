@@ -85,6 +85,11 @@
     (local ctx {:triangle-vector triangle
                 :pointer-target {}})
     (set ctx.get-text-vector (fn [_self _font] text-buffer))
+  (set ctx.get-text-ssbo-batcher
+       (fn [_self]
+         {:upsert-text (fn [_batcher _key _opts] nil)
+          :update-text-transform (fn [_batcher _key _opts] nil)
+          :remove-text (fn [_batcher _key] nil)}))
     (set ctx.track-text-handle (fn [_self _font _handle _clip] nil))
     (set ctx.untrack-text-handle (fn [_self _font _handle] nil))
     (set ctx.clickables (make-clickables-stub))

@@ -17,6 +17,11 @@
     (local text-buffer (make-vector-buffer))
     (local ctx {:triangle-vector triangle})
     (set ctx.get-text-vector (fn [_self _font] text-buffer))
+  (set ctx.get-text-ssbo-batcher
+       (fn [_self]
+         {:upsert-text (fn [_batcher _key _opts] nil)
+          :update-text-transform (fn [_batcher _key _opts] nil)
+          :remove-text (fn [_batcher _key] nil)}))
     (set ctx.clickables (assert app.clickables "test requires app.clickables"))
     (set ctx.hoverables (assert app.hoverables "test requires app.hoverables"))
     ctx)

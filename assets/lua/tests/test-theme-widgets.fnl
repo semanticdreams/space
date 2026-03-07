@@ -25,12 +25,19 @@
   (set buffer.set-float (fn [_self _handle _offset _value] nil))
   buffer)
 
+(fn make-text-ssbo-batcher []
+  {:upsert-text (fn [_self _key _opts] nil)
+   :update-text-transform (fn [_self _key _opts] nil)
+   :remove-text (fn [_self _key] nil)})
+
 (fn make-test-ctx [opts]
   (local options (or opts {}))
   (local triangle (make-vector-buffer))
   (local text-buffer (make-vector-buffer))
+  (local text-ssbo-batcher (make-text-ssbo-batcher))
   (local ctx {:triangle-vector triangle})
   (set ctx.get-text-vector (fn [_self _font] text-buffer))
+  (set ctx.get-text-ssbo-batcher (fn [_self] text-ssbo-batcher))
   (set ctx.theme options.theme)
   ctx)
 

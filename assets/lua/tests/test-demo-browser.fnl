@@ -30,7 +30,9 @@
   (local stub {:font {:glyph-map {65533 {:advance 1.0}}
                       :metadata {:metrics {:lineHeight 1.0
                                            :ascender 0.5
-                                           :descender -0.5}}}})
+                                           :descender -0.5}
+                                 :atlas {:width 1
+                                         :height 1}}}})
   (set stub.get
        (fn [_self _name]
          4242))

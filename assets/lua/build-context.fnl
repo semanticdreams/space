@@ -1,21 +1,21 @@
 (local Lines (require :lines))
 (local Points (require :points))
 (local DrawBatcher (require :draw-batcher))
+(local TextSsboBatcher (require :text-ssbo-batcher))
 
-(local {:VectorBuffer VectorBuffer :VectorHandle VectorHandle} (require :vector-buffer))
+(local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (fn BuildContext [opts]
   (local options (or opts {}))
   (local triangle-vector (VectorBuffer))
   (local line-vector (VectorBuffer))
   (local point-vector (VectorBuffer))
-  (local text-vectors {})
   (local image-batches {})
   (local mesh-batches [])
   (local line-strips [])
   (local triangle-batches (DrawBatcher {:stride 8}))
-  (local text-draw-batchers {})
   (local quad-sources [])
   (local text-ssbo-sources [])
+  (local text-ssbo-batcher (TextSsboBatcher {}))
   (fn register-line-strip [vector]
     (table.insert line-strips vector)
     vector)
@@ -29,7 +29,6 @@
     {:triangle-vector triangle-vector
      :line-vector line-vector
      :point-vector point-vector
-     :text-vectors text-vectors
      :image-batches image-batches
      :mesh-batches mesh-batches
      :line-strips line-strips
@@ -42,13 +41,7 @@
      :object-selector options.object-selector
      :layout-root options.layout-root
      :movables options.movables
-     :theme options.theme
-     :get-text-vector (fn [self font]
-	                        (when (not (. self.text-vectors font))
-	                          (set (. self.text-vectors font) (VectorBuffer)))
-	                        (when (not (. text-draw-batchers font))
-	                          (set (. text-draw-batchers font) (DrawBatcher {:stride 10})))
-	                        (. self.text-vectors font))})
+     :theme options.theme})
   (set ctx.set-theme (fn [self theme]
                        (set self.theme theme)))
   (set ctx.register-line-strip (fn [_self vector]
@@ -68,23 +61,6 @@
   (set ctx.get-triangle-batches
        (fn [_self]
          (triangle-batches:get-batches)))
-  (set ctx.track-text-handle
-       (fn [_self font handle clip-region model]
-         (local batcher (. text-draw-batchers font))
-         (when batcher
-           (batcher:track-handle handle clip-region model))))
-  (set ctx.untrack-text-handle
-       (fn [_self font handle]
-         (local batcher (. text-draw-batchers font))
-         (when batcher
-           (batcher:untrack-handle handle))))
-  (set ctx.get-text-batches
-       (fn [_self]
-         (local batches {})
-         (each [font vector (pairs text-vectors)]
-           (local batcher (. text-draw-batchers font))
-           (set (. batches font) (and batcher (batcher:get-batches))))
-         batches))
   (set ctx.register-quad-source
        (fn [_self source]
          (when source
@@ -131,6 +107,13 @@
                (each [_ entry (ipairs entries)]
                  (table.insert out entry)))))
          out))
+  (set ctx.get-text-ssbo-batcher
+       (fn [_self]
+         text-ssbo-batcher))
+  ;; Core widget text rendering always feeds this shared SSBO batcher source.
+  (table.insert text-ssbo-sources
+                {:get-draw-list (fn []
+                                  (text-ssbo-batcher:get-draw-list))})
   (set ctx.get-image-batch
        (fn [_self texture]
          (assert (and texture texture.id)

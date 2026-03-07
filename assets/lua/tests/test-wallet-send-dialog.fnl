@@ -67,6 +67,11 @@
             (local icons (make-icons-stub))
             (local ctx {:triangle-vector triangle})
             (set ctx.get-text-vector (fn [_self _font] text-buffer))
+  (set ctx.get-text-ssbo-batcher
+       (fn [_self]
+         {:upsert-text (fn [_batcher _key _opts] nil)
+          :update-text-transform (fn [_batcher _key _opts] nil)
+          :remove-text (fn [_batcher _key] nil)}))
             (set ctx.clickables clickables)
             (set ctx.hoverables hoverables)
             (set ctx.icons icons)

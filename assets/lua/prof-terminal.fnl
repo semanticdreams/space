@@ -11,11 +11,9 @@
 (set app.engine (EngineModule.Engine {:headless true}))
 
 (local _ (require :main))
-(local DrawBatcher (require :draw-batcher))
 (local TerminalRenderer (require :terminal-renderer))
 (local FlamegraphProfiler (require :flamegraph-profiler))
 
-(local {:VectorBuffer VectorBuffer :VectorHandle VectorHandle} (require :vector-buffer))
 (set app.disable_font_textures false)
 (app.engine:start)
 
@@ -26,8 +24,6 @@
 (local spam-width 120)
 (local frame-count 30)
 (local frame-delta (/ 1.0 60.0))
-(local triangle-vector (VectorBuffer))
-(local text-vectors {})
 
 (fn to-lower [value]
   (and value (string.lower value)))
@@ -125,16 +121,10 @@
    :bold-italic-font font})
 
 (fn make-context []
-  (local text-draw-batchers {})
-  {:triangle-vector triangle-vector
-   :get-text-vector (fn [_ font]
-                      (when (not (. text-vectors font))
-                        (set (. text-vectors font) (VectorBuffer)))
-                      (when (not (. text-draw-batchers font))
-                        (set (. text-draw-batchers font) (DrawBatcher {:stride 10})))
-                      (. text-vectors font))
-   :untrack-triangle-handle (fn [_ _] nil)
-   :untrack-text-handle (fn [_ _ _] nil)})
+  {:register-quad-source (fn [_ _] nil)
+   :unregister-quad-source (fn [_ _] nil)
+   :register-text-ssbo-source (fn [_ _] nil)
+   :unregister-text-ssbo-source (fn [_ _] nil)})
 
 (fn make-layout []
   (local layout {:position (glm.vec3 0 0 0)

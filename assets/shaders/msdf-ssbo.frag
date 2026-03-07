@@ -39,8 +39,8 @@ float median(float r, float g, float b) {
 void main() {
     uint clipIndex = groupClipIndex[groupIndex];
     vec4 clipPos = clipMatrix[clipIndex] * vec4(worldPos, 1.0);
-    if (clipPos.x < 0.0 || clipPos.x > 1.0 ||
-        clipPos.y < 0.0 || clipPos.y > 1.0) {
+    if (clipPos.x < -1.0 || clipPos.x > 1.0 ||
+        clipPos.y < -1.0 || clipPos.y > 1.0) {
         discard;
     }
     vec3 msd = texture(msdf, texCoord).rgb;
