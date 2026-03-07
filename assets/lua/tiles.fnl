@@ -13,6 +13,7 @@
 (fn Tiles [opts]
   (fn build [ctx]
     (local options (or opts {}))
+    (local depth-layer-step (or options.depth-layer-step 0))
     (local grid-builder
       (Grid {:rows (or options.rows 4)
              :columns (or options.columns 4)
@@ -27,9 +28,13 @@
     (fn attach-child [self element opts]
       (when (and self element element.layout)
         (local options (or opts {}))
+        (local next-index (+ (length self.children) 1))
+        (local depth-base (or options.depth-offset-index 0))
         (local metadata {:element element
                          :align-x options.align-x
-                         :align-y options.align-y})
+                         :align-y options.align-y
+                         :depth-offset-index (+ depth-base
+                                                (* (- next-index 1) depth-layer-step))})
         (table.insert self.children metadata)
         (self.layout:add-child element.layout)
         (self.layout:mark-measure-dirty)

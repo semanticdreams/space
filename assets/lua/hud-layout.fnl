@@ -6,6 +6,8 @@
 (local StatusPanel (require :hud-status-panel))
 
 (local default-world-scale 0.05)
+(local panel-depth-layer-step 8)
+(local tiles-depth-layer-step 0)
 
 (fn hud-content-width [hud]
   (local target (or hud {}))
@@ -65,6 +67,7 @@
 
 (fn make-overlay-root []
   (fn build [_ctx]
+    (local depth-layer-step panel-depth-layer-step)
     (local overlay {:children []})
 
     (fn measurer [self]
@@ -79,7 +82,7 @@
               (set (. self.measure axis) (. layout.measure axis)))))))
 
     (fn layouter [self]
-      (each [_ metadata (ipairs overlay.children)]
+      (each [idx metadata (ipairs overlay.children)]
         (local child (and metadata metadata.element))
         (local layout (and child child.layout))
         (when layout
@@ -87,9 +90,10 @@
           (local offset (or metadata.position (glm.vec3 0 0 0)))
           (local rotation (or metadata.rotation (glm.quat 1 0 0 0)))
           (local depth-offset-index
-            (if (= metadata.depth-offset-index nil)
-                self.depth-offset-index
-                metadata.depth-offset-index))
+            (+ (if (= metadata.depth-offset-index nil)
+                   self.depth-offset-index
+                   metadata.depth-offset-index)
+               (* (- idx 1) depth-layer-step)))
           (set layout.position (+ self.position (self.rotation:rotate offset)))
           (set layout.rotation (* self.rotation rotation))
           (set layout.depth-offset-index depth-offset-index)
@@ -122,8 +126,9 @@
   (local tiles-root (Tiles {:rows 4
                             :columns 4
                             :xspacing 0
-                            :yspacing 0}))
-  (local float-root (FloatLayer {}))
+                            :yspacing 0
+                            :depth-layer-step tiles-depth-layer-step}))
+  (local float-root (FloatLayer {:depth-layer-step panel-depth-layer-step}))
   (local overlay-root (make-overlay-root))
   (local control-wrapper (FullWidth {:name "control-panel-wrapper"
                                      :child control-builder}))
@@ -185,13 +190,13 @@
       (set float.layout.position (glm.vec3 base-position.x flex-bottom base-position.z))
       (set float.layout.rotation self.rotation)
       (set float.layout.clip-region self.clip-region)
-      (set float.layout.depth-offset-index (+ self.depth-offset-index 2))
+      (set float.layout.depth-offset-index (+ self.depth-offset-index 16))
       (float.layout:layouter)
       (set overlay.layout.size self.size)
       (set overlay.layout.position base-position)
       (set overlay.layout.rotation self.rotation)
       (set overlay.layout.clip-region self.clip-region)
-      (set overlay.layout.depth-offset-index (+ self.depth-offset-index 5))
+      (set overlay.layout.depth-offset-index (+ self.depth-offset-index 64))
       (overlay.layout:layouter))
 
     (local layout
