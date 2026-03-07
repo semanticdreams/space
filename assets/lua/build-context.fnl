@@ -2,6 +2,7 @@
 (local Points (require :points))
 (local DrawBatcher (require :draw-batcher))
 (local TextSsboBatcher (require :text-ssbo-batcher))
+(local QuadBatcher (require :next-app/quad-batcher))
 
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (fn BuildContext [opts]
@@ -14,6 +15,7 @@
   (local line-strips [])
   (local triangle-batches (DrawBatcher {:stride 8}))
   (local quad-sources [])
+  (local rectangle-quad-batcher (QuadBatcher {}))
   (local text-ssbo-sources [])
   (local text-ssbo-batcher (TextSsboBatcher {}))
   (fn register-line-strip [vector]
@@ -84,6 +86,9 @@
                (each [_ entry (ipairs entries)]
                  (table.insert out entry)))))
          out))
+  (set ctx.get-rectangle-quad-batcher
+       (fn [_self]
+         rectangle-quad-batcher))
   (set ctx.register-text-ssbo-source
        (fn [_self source]
          (when source
@@ -114,6 +119,20 @@
   (table.insert text-ssbo-sources
                 {:get-draw-list (fn []
                                   (text-ssbo-batcher:get-draw-list))})
+  (table.insert quad-sources
+                {:get-draw-list
+                 (fn []
+                   (local vector (rectangle-quad-batcher:get-vector))
+                   (local batches (rectangle-quad-batcher:get-batches))
+                   (if (or (not vector)
+                           (<= (vector:length) 0)
+                           (not batches)
+                           (<= (# batches) 0))
+                       []
+                       [{:vector vector
+                         :clip-vector (rectangle-quad-batcher:get-clip-vector)
+                         :clip-group-vector (rectangle-quad-batcher:get-clip-group-vector)
+                         :batches batches}]))})
   (set ctx.get-image-batch
        (fn [_self texture]
          (assert (and texture texture.id)

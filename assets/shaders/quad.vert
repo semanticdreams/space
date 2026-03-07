@@ -15,7 +15,6 @@ uniform mat4 model;
 
 smooth out vec4 theColor;
 smooth out vec3 worldPos;
-smooth out vec3 worldNormal;
 flat out float depth_offset_index;
 flat out uint clipGroup;
 
@@ -27,7 +26,6 @@ void main()
     gl_Position = projection * view * world;
     theColor = aColor;
     worldPos = world.xyz;
-    worldNormal = mat3(worldTransform) * vec3(0.0, 0.0, 1.0);
     depth_offset_index = aDepthOffsetIndex;
     clipGroup = aClipGroup;
 }

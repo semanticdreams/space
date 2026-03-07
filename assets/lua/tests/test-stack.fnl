@@ -57,8 +57,8 @@
 
   (local first-child (. stack.layout.children 1))
   (local second-child (. stack.layout.children 2))
-  (assert (approx first-child.depth-offset-index (+ stack.layout.depth-offset-index 0.001)))
-  (assert (approx second-child.depth-offset-index (+ stack.layout.depth-offset-index 0.002)))
+  (assert (approx first-child.depth-offset-index (+ stack.layout.depth-offset-index 1)))
+  (assert (approx second-child.depth-offset-index (+ stack.layout.depth-offset-index 2)))
 
   (stack:drop))
 

@@ -143,10 +143,13 @@ def main() -> None:
 
     prof_dir = repo_root / "prof"
     prof_dir.mkdir(parents=True, exist_ok=True)
+    prof_data_home = Path("/tmp/space/prof/xdg-data")
+    prof_data_home.mkdir(parents=True, exist_ok=True)
 
     folded_path = prof_dir / f"{target}.folded"
     env = os.environ.copy()
     env["SPACE_FENNEL_FLAMEGRAPH"] = str(folded_path)
+    env["XDG_DATA_HOME"] = str(prof_data_home)
 
     profiler_script = f"prof-{target}"
     print(f"Running {profiler_script} -> {folded_path.relative_to(repo_root)}")

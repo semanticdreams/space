@@ -1,5 +1,7 @@
 #version 430 core
 
+#include "depth-bias.glsl"
+
 in vec2 texCoord;
 in vec3 worldPos;
 in vec4 textColor;
@@ -23,8 +25,6 @@ layout(std430, binding = 2) readonly buffer GroupClipIndex {
 layout(std430, binding = 3) readonly buffer GroupDepthOffsetIndex {
     float groupDepthOffsetIndex[];
 };
-
-const float depthStep = 1e-3;
 
 float screenPxRange() {
     vec2 unitRange = vec2(pxRange) / vec2(textureSize(msdf, 0));
@@ -50,5 +50,5 @@ void main() {
     color = vec4(textColor.rgb * textColorMul * opacity,
                  textColor.a * textAlpha * opacity);
     float depthOffset = groupDepthOffsetIndex[groupIndex];
-    gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * depthOffset * depthStep));
+    gl_FragDepth = applyDepthOffset(gl_FragCoord.z, depthOffset);
 }
