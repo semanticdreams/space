@@ -5,6 +5,7 @@
 (local debug debug)
 (local package package)
 (local logging (require :logging))
+(local ProfOutputPath (require :prof-output-path))
 
 (fn install-fake-renderers []
   (fn FakeRenderers []
@@ -43,11 +44,33 @@
      :on-viewport-changed (fn [_ _] nil)
      :drop (fn [_] nil)})
 
-  (set (. package.preload "renderers") (fn [] FakeRenderers)))
+  (set (. package.preload "renderers") (fn [] FakeRenderers))
+  (set (. package.loaded "renderers") FakeRenderers))
+
+(fn install-fake-font []
+  (fn FakeFont [_opts]
+    (local glyph {:advance 1.0
+                  :planeBounds {:left 0 :bottom 0 :right 1 :top 1}
+                  :atlasBounds {:left 0 :bottom 0 :right 1 :top 1}})
+    {:metadata {:metrics {:lineHeight 1.0
+                          :ascender 0.5
+                          :descender -0.5}
+                :atlas {:width 1 :height 1}}
+     :glyph-map {32 glyph
+                 63 glyph
+                 65533 glyph}
+     :advance 1.0})
+  (set (. package.preload "font") (fn [] FakeFont))
+  (set (. package.loaded "font") nil))
 
 (install-fake-renderers)
+(install-fake-font)
 
-(set app.disable_font_textures true)
+(local MockOpenGL (require :mock-opengl))
+(local global-mock (MockOpenGL))
+(global-mock:install)
+
+(set app.disable_font_textures false)
 
 (local FlamegraphProfiler (require :flamegraph-profiler))
 
@@ -60,32 +83,7 @@
 (local viewport {:width 450 :height 680})
 (local frame-delta (/ 1.0 60.0))
 
-(fn to-lower [value]
-  (and value (string.lower value)))
-
-(fn use-default-output? [value]
-  (local lower (to-lower value))
-  (or (= value nil)
-      (= value "")
-      (= value "1")
-      (= lower "true")
-      (= lower "on")))
-
-(fn flamegraph-disabled? [value]
-  (local lower (to-lower value))
-  (and value (or (= value "0")
-                 (= lower "false")
-                 (= lower "off"))))
-
-(fn resolve-output-path []
-  (local env (os.getenv "SPACE_FENNEL_FLAMEGRAPH"))
-  (if (flamegraph-disabled? env)
-      nil
-      (if (use-default-output? env)
-          default-output-path
-          env)))
-
-(local output-path (resolve-output-path))
+(local output-path (ProfOutputPath.resolve default-output-path))
 
 (when (not output-path)
   (logging.info "SPACE_FENNEL_FLAMEGRAPH disabled; not recording scene profile.")

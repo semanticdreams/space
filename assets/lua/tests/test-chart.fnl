@@ -16,6 +16,7 @@
 
 (fn chart-renders-series-into-buffers []
     (local ctx (make-ui-context))
+    (local quad-batcher (ctx:get-rectangle-quad-batcher))
     (local chart ((Chart {:size (glm.vec3 9 5 0)
                           :series [(BarSeries {:data [2 4 3]})
                                    (LineSeries {:points [[0 1] [1 2] [2 1]]})
@@ -31,7 +32,7 @@
     (assert (= (length bar-series.bars) 3))
     (local first-bar (. bar-series.bars 1))
     (assert (> first-bar.layout.size.y 0))
-    (assert (> (ctx.triangle-vector:length) 0))
+    (assert (> (quad-batcher:get-instance-count) 0))
     (assert (= (length ctx.line-strips) 1))
     (assert (> (ctx.point-vector:length) 0))
     (local scatter (. chart.series 3))

@@ -106,11 +106,7 @@
 (fn text-ssbo-batcher-dedups-identical-clip-matrices []
   (local font (make-font))
   (local batcher (TextSsboBatcher {}))
-  (local clip
-    [1 0 0 0
-     0 1 0 0
-     0 0 1 0
-     2 3 0 1])
+  (local clip (glm.mat4-trs-z 2 3 0 0))
   (batcher:begin-frame)
   (batcher:upsert-text :a {:font font :text "AB" :clip-matrix clip})
   (batcher:upsert-text :b {:font font :text "BA" :clip-matrix clip})
