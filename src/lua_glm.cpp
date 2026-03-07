@@ -251,6 +251,16 @@ sol::table create_glm_table(sol::state_view lua)
         out = out * glm::toMat4(glm::normalize(rotation));
         return out;
     });
+    glm_table.set_function("mat4-render-trs", [](float tx, float ty, float tz, const glm::quat& rotation,
+                                                 float sx, float sy, float sz) {
+        glm::mat4 out(1.0f);
+        out = glm::translate(out, glm::vec3(tx, ty, tz));
+        out = out * glm::toMat4(glm::normalize(rotation));
+        out[0] *= sx;
+        out[1] *= sy;
+        out[2] *= sz;
+        return out;
+    });
     glm_table.set_function("mat4-world-to-render", [](const glm::mat4& world, float sx, float sy, float sz) {
         glm::mat4 out = world;
         out[0] *= sx;
@@ -262,6 +272,39 @@ sol::table create_glm_table(sol::state_view lua)
         return a * b;
     });
     glm_table.set_function("mat4-clip-from-render", [](const glm::mat4& render) {
+        const float a11 = render[0][0];
+        const float a21 = render[0][1];
+        const float a12 = render[1][0];
+        const float a22 = render[1][1];
+        const float tx = render[3][0];
+        const float ty = render[3][1];
+        const float det = (a11 * a22) - (a12 * a21);
+        if (std::abs(det) < 1e-8f) {
+            return glm::mat4(0.0f);
+        }
+        const float inv11 = a22 / det;
+        const float inv12 = -a12 / det;
+        const float inv21 = -a21 / det;
+        const float inv22 = a11 / det;
+        const float invtx = (-inv11 * tx) + (-inv12 * ty);
+        const float invty = (-inv21 * tx) + (-inv22 * ty);
+        glm::mat4 out(1.0f);
+        out[0][0] = inv11;
+        out[0][1] = inv21;
+        out[1][0] = inv12;
+        out[1][1] = inv22;
+        out[3][0] = invtx;
+        out[3][1] = invty;
+        return out;
+    });
+    glm_table.set_function("mat4-clip-from-bounds", [](const glm::vec3& position, const glm::quat& rotation, const glm::vec3& size) {
+        glm::mat4 render(1.0f);
+        render = glm::translate(render, position);
+        render = render * glm::toMat4(glm::normalize(rotation));
+        render[0] *= size.x;
+        render[1] *= size.y;
+        render[2] *= size.z;
+
         const float a11 = render[0][0];
         const float a21 = render[0][1];
         const float a12 = render[1][0];

@@ -95,6 +95,7 @@
     :tests.test-colorspacious
     :tests.test-graph-view
     :tests.test-graph-core
+    :tests.test-graph-edge-batch
     :tests.test-graph-view-registry
     :tests.test-graph-view-labels
     :tests.test-llm-graph

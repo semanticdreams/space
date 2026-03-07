@@ -74,6 +74,7 @@ void write_triangle_batch(VectorBuffer& buffer,
             std::memcpy(base + offset + 3, glm::value_ptr(color), sizeof(float) * 4);
             base[offset + 7] = depth;
         }
+        buffer.markDirty(handle.index, 24);
     }
 }
 

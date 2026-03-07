@@ -2,6 +2,12 @@
 (local ClipUtils {})
 (local no-clip-matrix (glm.mat4 0))
 
+(fn ClipUtils.matrix-key [matrix]
+  (assert (glm.is-mat4 matrix)
+          "ClipUtils.matrix-key requires glm.mat4")
+  (assert glm.mat4-key "ClipUtils.matrix-key requires glm.mat4-key binding")
+  (glm.mat4-key matrix))
+
 (fn clip-matrix-from-bounds [bounds]
   (if (not bounds)
       no-clip-matrix
