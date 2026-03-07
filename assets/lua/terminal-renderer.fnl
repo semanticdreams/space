@@ -13,6 +13,9 @@
                    :fg-r 255 :fg-g 255 :fg-b 255
                    :bg-r 0 :bg-g 0 :bg-b 0
                    :bold false :underline false :italic false :reverse false})
+(local zero-glyph-values [0.0 0.0 0.0 0.0
+                          0.0 0.0 0.0 0.0
+                          0.0 0.0 0.0 0.0])
 
 (fn to-color [r g b]
   (glm.vec4 (/ r 255.0) (/ g 255.0) (/ b 255.0) 1.0))
@@ -63,6 +66,9 @@
        (= a.y b.y)
        (= a.z b.z)))
 
+(fn rgb-key [r g b]
+  (+ (* r 65536) (* g 256) b))
+
 (fn resolve-font-state [fonts font-states cell]
   (local regular (. font-states fonts.regular))
   (local italic-state (and cell.italic (. font-states fonts.italic)))
@@ -103,6 +109,8 @@
 
   (var rows 0)
   (var cols 0)
+  (var column-lefts [])
+  (var row-bottoms [])
   (var term nil)
   (var layout-state nil)
   (var dirty? true)
@@ -126,6 +134,7 @@
   (local blink-period (or opts.blink-period default-blink-period))
   (var scroll-offset 0)
   (var alt-screen? false)
+  (var background-runs-by-row {})
 
   (local fonts {:regular style.font
                 :italic (or style.italic-font style.font)
@@ -160,6 +169,22 @@
           (local color (to-color r g b))
           (set (. palette key) color)
           color)))
+
+  (fn clear-background-runs []
+    (set background-runs-by-row {}))
+
+  (fn background-run-key [row start-col]
+    (.. row ":" start-col))
+
+  (fn rebuild-grid-metrics []
+    (set column-lefts [])
+    (set row-bottoms [])
+    (for [col 0 (- cols 1)]
+      (set (. column-lefts (+ col 1)) (* col cell-size.x)))
+    (local total-height (* rows cell-size.y))
+    (for [row 0 (- rows 1)]
+      (set (. row-bottoms (+ row 1))
+           (- total-height (* (+ row 1) cell-size.y)))))
 
   (fn with-model-batches [batches]
     (if (not batches)
@@ -246,24 +271,11 @@
 
   (fn write-empty-glyph [bucket index]
     (local base (* index glyph-stride))
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 0) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 1) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 2) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 3) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 4) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 5) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 6) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 7) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 8) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 9) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 10) 0.0)
-    (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 11) 0.0))
+    (bucket.glyph-vector:set-floats-diff bucket.glyph-handle base zero-glyph-values))
 
-  (fn cell-origin [row col]
-    (local total-height (* rows cell-size.y))
-    (glm.vec3 (* col cell-size.x)
-              (- total-height (* (+ row 1) cell-size.y))
-              0.0))
+  (fn rect-matrix [x y width height]
+    (* (glm.translate (glm.mat4 1) (glm.vec3 x y 0.0))
+       (glm.scale (glm.mat4 1) (glm.vec3 width height 1))))
 
   (fn write-glyph [state row col cell]
     (local bucket state.bucket)
@@ -294,13 +306,15 @@
           (do
             (local asc (or (ensure-ascender-height style state) cell-size.y))
             (local baseline-start (math.max 0.0 (- cell-size.y asc)))
-            (local offset (cell-origin row col))
+            (local cell-x (or (. column-lefts (+ col 1)) (* col cell-size.x)))
+            (local cell-y (or (. row-bottoms (+ row 1))
+                              (- (* rows cell-size.y) (* (+ row 1) cell-size.y))))
             (local left (* glyph.planeBounds.left style.scale))
             (local right (* glyph.planeBounds.right style.scale))
             (local bottom (* glyph.planeBounds.bottom style.scale))
             (local top (* glyph.planeBounds.top style.scale))
-            (local x0 (+ offset.x left))
-            (local y0 (+ offset.y baseline-start bottom))
+            (local x0 (+ cell-x left))
+            (local y0 (+ cell-y baseline-start bottom))
             (local width (- right left))
             (local height (- top bottom))
             (local (s0 t0 s1 t1) (glyph-uvs glyph))
@@ -310,18 +324,11 @@
             (when cell.reverse
               (set fg (resolve-color cell.bg-r cell.bg-g cell.bg-b)))
             (local base (* index glyph-stride))
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 0) x0)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 1) y0)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 2) width)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 3) height)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 4) s0)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 5) t0)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 6) s1)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 7) t1)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 8) fg.x)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 9) fg.y)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 10) fg.z)
-            (bucket.glyph-vector:set-float bucket.glyph-handle (+ base 11) fg.w)
+            (bucket.glyph-vector:set-floats-diff bucket.glyph-handle
+                                                 base
+                                                 [x0 y0 width height
+                                                  s0 t0 s1 t1
+                                                  fg.x fg.y fg.z fg.w])
             (set-cell-visible bucket index true)))))
 
   (fn clear-glyph-at [state row col]
@@ -332,21 +339,87 @@
       (set-cell-visible bucket index false)))
 
   (fn cell-matrix [row col y0 y1]
-    (local offset (cell-origin row col))
-    (local x0 offset.x)
-    (local bottom (+ offset.y (or y0 0.0)))
-    (local top (+ offset.y (or y1 cell-size.y)))
+    (local x0 (or (. column-lefts (+ col 1)) (* col cell-size.x)))
+    (local row-bottom (or (. row-bottoms (+ row 1))
+                          (- (* rows cell-size.y) (* (+ row 1) cell-size.y))))
+    (local bottom (+ row-bottom (or y0 0.0)))
+    (local top (+ row-bottom (or y1 cell-size.y)))
     (local height (math.max 0.0001 (- top bottom)))
-    (* (glm.translate (glm.mat4 1) (glm.vec3 x0 bottom offset.z))
-       (glm.scale (glm.mat4 1) (glm.vec3 cell-size.x height 1))))
+    (rect-matrix x0 bottom cell-size.x height))
 
-  (fn write-background [row col color depth]
-    (local index (cell-index row col cols))
-    (background-quad-batcher:upsert-quad index
-                                         {:matrix (cell-matrix row col 0 cell-size.y)
-                                          :color color
-                                          :depth-offset depth
-                                          :clip (and layout-state layout-state.clip)}))
+  (fn write-background-run [row start-col end-col color depth]
+    (when (<= start-col end-col)
+      (local x0 (or (. column-lefts (+ start-col 1)) (* start-col cell-size.x)))
+      (local y0 (or (. row-bottoms (+ row 1))
+                    (- (* rows cell-size.y) (* (+ row 1) cell-size.y))))
+      (local width (* (+ (- end-col start-col) 1) cell-size.x))
+      (local key (background-run-key row start-col))
+      (background-quad-batcher:upsert-quad key
+                                           {:matrix (rect-matrix x0 y0 width cell-size.y)
+                                            :color color
+                                            :depth-offset depth
+                                            :clip (and layout-state layout-state.clip)})))
+
+  (fn build-background-runs-for-row [row line source-row depth use-scrollback?]
+    (local runs [])
+    (var run-start nil)
+    (var run-color nil)
+    (var run-color-key nil)
+    (for [col 0 (- cols 1)]
+      (local cell
+        (if use-scrollback?
+            (or (and line (. line (+ col 1))) blank-cell)
+            (term:get-cell source-row col)))
+      (local bg-r (if cell.reverse cell.fg-r cell.bg-r))
+      (local bg-g (if cell.reverse cell.fg-g cell.bg-g))
+      (local bg-b (if cell.reverse cell.fg-b cell.bg-b))
+      (local color-key (rgb-key bg-r bg-g bg-b))
+      (local color (resolve-color bg-r bg-g bg-b))
+      (if (not run-start)
+          (do
+            (set run-start col)
+            (set run-color color)
+            (set run-color-key color-key))
+          (when (not (= run-color-key color-key))
+            (table.insert runs {:key (background-run-key row run-start)
+                                :start run-start
+                                :end (- col 1)
+                                :color run-color
+                                :color-key run-color-key
+                                :depth depth})
+            (set run-start col)
+            (set run-color color)
+            (set run-color-key color-key))))
+    (when run-start
+      (table.insert runs {:key (background-run-key row run-start)
+                          :start run-start
+                          :end (- cols 1)
+                          :color run-color
+                          :color-key run-color-key
+                          :depth depth}))
+    runs)
+
+  (fn sync-background-runs-for-row [row next-runs]
+    (local row-key (+ row 1))
+    (local prev-runs (or (. background-runs-by-row row-key) []))
+    (local prev-by-key {})
+    (each [_ run (ipairs prev-runs)]
+      (set (. prev-by-key run.key) run))
+    (each [_ run (ipairs next-runs)]
+      (local prev (. prev-by-key run.key))
+      (if (and prev
+               (= prev.end run.end)
+               (= prev.color-key run.color-key)
+               (= prev.depth run.depth))
+          (set (. prev-by-key run.key) nil)
+          (do
+            (write-background-run row run.start run.end run.color run.depth)
+            (set (. prev-by-key run.key) nil))))
+    (each [key _ (pairs prev-by-key)]
+      (background-quad-batcher:remove-quad key))
+    (if (> (# next-runs) 0)
+        (set (. background-runs-by-row row-key) next-runs)
+        (set (. background-runs-by-row row-key) nil)))
 
   (fn underline-geometry [state]
     (underline.underline-geometry state cell-size style line-height
@@ -361,8 +434,9 @@
                                          :depth-offset depth
                                          :clip (and layout-state layout-state.clip)}))
 
-  (fn write-empty-underline [row col depth]
-    (write-underline row col (glm.vec4 0 0 0 0) depth 0.0 0.0001))
+  (fn clear-underline-at [row col]
+    (local index (cell-index row col cols))
+    (underline-quad-batcher:remove-quad index))
 
   (set background-quad-source
        {:get-draw-list
@@ -472,7 +546,9 @@
       (set cell-size size)
       (background-quad-batcher:clear)
       (underline-quad-batcher:clear)
+      (clear-background-runs)
       (clear-font-buckets)
+      (rebuild-grid-metrics)
       (set full-redraw? true)
       (set layout-dirty? true))
     self)
@@ -484,7 +560,9 @@
       (set cols new-cols)
       (background-quad-batcher:clear)
       (underline-quad-batcher:clear)
+      (clear-background-runs)
       (clear-font-buckets)
+      (rebuild-grid-metrics)
       (set full-redraw? true)
       (set dirty? true))
     self)
@@ -599,6 +677,7 @@
       (local depth (or layout-state.depth 0))
       (when full-redraw?
         (background-quad-batcher:clear)
+        (clear-background-runs)
         (underline-quad-batcher:clear))
       (ensure-buckets depth)
       (when (and layout-dirty? tracking-dirty? (not full-redraw?))
@@ -643,32 +722,29 @@
             (local line (if use-scrollback?
                             (line-for-viewport row)
                             nil))
+            (sync-background-runs-for-row
+              row
+              (build-background-runs-for-row row line source-row depth use-scrollback?))
             (for [col region.left region.right]
               (local cell
                 (if use-scrollback?
                     (or (and line (. line (+ col 1))) blank-cell)
                     (term:get-cell source-row col)))
-              (var fg (resolve-color cell.fg-r cell.fg-g cell.fg-b))
-              (var bg (resolve-color cell.bg-r cell.bg-g cell.bg-b))
-              (when cell.reverse
-                (local tmp fg)
-                (set fg bg)
-                (set bg tmp))
-              (var underline-color (resolve-color cell.fg-r cell.fg-g cell.fg-b))
-              (when cell.bold
-                (set underline-color (apply-bold underline-color)))
-              (when cell.reverse
-                (set underline-color (resolve-color cell.bg-r cell.bg-g cell.bg-b)))
               (local target-state (resolve-font-state fonts font-states cell))
-              (local underline-geo (underline-geometry target-state))
-              (write-background row col bg depth)
               (if cell.underline
-                  (write-underline row col underline-color (+ depth 1.0) underline-geo.y0 underline-geo.y1)
-                  (write-empty-underline row col (+ depth 1.0)))
+                  (do
+                    (var underline-color (resolve-color cell.fg-r cell.fg-g cell.fg-b))
+                    (when cell.bold
+                      (set underline-color (apply-bold underline-color)))
+                    (when cell.reverse
+                      (set underline-color (resolve-color cell.bg-r cell.bg-g cell.bg-b)))
+                    (local underline-geo (underline-geometry target-state))
+                    (write-underline row col underline-color (+ depth 1.0) underline-geo.y0 underline-geo.y1))
+                  (clear-underline-at row col))
               (each [_ state (ipairs font-state-list)]
                 (if (= state target-state)
                     (write-glyph state row col cell)
-                    (clear-glyph-at state row col))))))
+                    (clear-glyph-at state row col)))))
         (term:clear-dirty-regions))
 
       (local cursor (term:get-cursor))
@@ -687,7 +763,7 @@
       (set dirty? false)
       (set layout-dirty? false)
       (set full-redraw? false)
-      (set tracking-dirty? false)))
+      (set tracking-dirty? false))))
 
   (fn update-blink [_self delta cursor]
     (when cursor
@@ -742,6 +818,15 @@
      :glyph-count active-count
      :cursor nil})
 
+  (fn get-stats [_self]
+    (var background-run-count 0)
+    (each [_ row-runs (pairs background-runs-by-row)]
+      (each [_ _ (ipairs row-runs)]
+        (set background-run-count (+ background-run-count 1))))
+    {:background-runs background-run-count
+     :background-batcher (background-quad-batcher:get-last-stats)
+     :underline-batcher (underline-quad-batcher:get-last-stats)})
+
   {:set-term set-term
    :set-cell-size set-cell-size
    :set-grid-size set-grid-size
@@ -750,6 +835,7 @@
    :mark-dirty mark-dirty
    :update update
    :drop drop
-   :get-handles get-handles})
+   :get-handles get-handles
+   :get-stats get-stats})
 
 TerminalRenderer

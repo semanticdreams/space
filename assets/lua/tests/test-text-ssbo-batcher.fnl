@@ -147,6 +147,45 @@
   (assert (= (entry-b.glyph-vector:length) first-length)
           "pooled handles should prevent vector growth for same capacity"))
 
+(fn text-ssbo-batcher-updates-dirty-subrange-for-content-edits []
+  (local font (make-font))
+  (local batcher (TextSsboBatcher {}))
+  (batcher:begin-frame)
+  (batcher:upsert-text :row-1 {:font font :text "AB"})
+  (batcher:end-frame)
+
+  (batcher:begin-frame)
+  (batcher:upsert-text :row-1 {:font font :text "AA"})
+  (batcher:end-frame)
+  (local edited (batcher:get-last-stats))
+  (assert (> edited.glyph-write-count 0))
+  (assert (< edited.glyph-write-count 24)
+          "single glyph edit should not rewrite full 2-glyph payload"))
+
+(fn text-ssbo-batcher-uses-multi-span-diffs-for-disjoint-edits []
+  (local font (make-font))
+  ;; Add a glyph variant with same advance as A so distant edits stay disjoint.
+  (set (. font.glyph-map (string.byte "C"))
+       {:planeBounds {:left 0 :right 0.6 :bottom -0.2 :top 0.8}
+        :atlasBounds {:left 180 :right 240 :bottom 0 :top 80}
+        :advance 0.65})
+
+  (local batcher (TextSsboBatcher {}))
+  (batcher:begin-frame)
+  (batcher:upsert-text :row-1 {:font font :text "ABBA"})
+  (batcher:end-frame)
+
+  (batcher:begin-frame)
+  (batcher:upsert-text :row-1 {:font font :text "CBBC"})
+  (batcher:end-frame)
+  (local edited (batcher:get-last-stats))
+  ;; Only UV fields change for first/last glyphs, so writes should stay very small.
+  (assert (> edited.glyph-write-count 0))
+  (assert (<= edited.glyph-write-count 8))
+  ;; Old one-span diff would upload from first changed float to last changed float:
+  ;; index 5 (glyph1 UV) .. index 43 (glyph4 UV) => 39 floats.
+  (assert (< edited.glyph-write-count 39)))
+
 (table.insert tests {:name "TextSsboBatcher builds shared buffers per font"
                      :fn text-ssbo-batcher-builds-shared-buffers-per-font})
 (table.insert tests {:name "TextSsboBatcher render delegates entries"
@@ -161,6 +200,10 @@
                      :fn text-ssbo-batcher-remove-text-hides-entry})
 (table.insert tests {:name "TextSsboBatcher reuses pooled handles after remove"
                      :fn text-ssbo-batcher-reuses-pooled-handles-after-remove})
+(table.insert tests {:name "TextSsboBatcher updates dirty subrange for content edits"
+                     :fn text-ssbo-batcher-updates-dirty-subrange-for-content-edits})
+(table.insert tests {:name "TextSsboBatcher uses multi-span diffs for disjoint edits"
+                     :fn text-ssbo-batcher-uses-multi-span-diffs-for-disjoint-edits})
 
 (local main
   (fn []

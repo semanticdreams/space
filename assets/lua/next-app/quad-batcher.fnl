@@ -70,14 +70,6 @@
           (set (. clip-group-handles index) handle)
           handle)))
 
-  (fn color-components [color]
-    (if color
-        [(or color.x (. color 1) 1)
-         (or color.y (. color 2) 1)
-         (or color.z (. color 3) 1)
-         (or color.w (. color 4) 1)]
-        [1 1 1 1]))
-
   (fn write-clip-matrix [clip-index matrix]
     (local handle (ensure-clip-handle (+ clip-index 1)))
     (if (glm-is-mat4 matrix)
@@ -106,6 +98,7 @@
                         :matrix {}
                         :color {}
                         :depth nil
+                        :clip-matrix nil
                         :clip-group nil
                         :visible false
                         :seen-frame -1})
@@ -121,13 +114,24 @@
     (local handle (ensure-handle slot))
     (local clip-group-handle (ensure-clip-group-handle slot))
     (local matrix (or opts.matrix (identity-matrix)))
-    (local color (color-components (or opts.color (glm.vec4 1 1 1 1))))
+    (local color (or opts.color (glm.vec4 1 1 1 1)))
+    (local color1 (or color.x (. color 1) 1))
+    (local color2 (or color.y (. color 2) 1))
+    (local color3 (or color.z (. color 3) 1))
+    (local color4 (or color.w (. color 4) 1))
     (local depth-offset (or opts.depth-offset 0))
     (local clip-matrix
       (if opts.clip-matrix
           opts.clip-matrix
           (ClipUtils.resolve-matrix opts.clip)))
-    (local clip-group (ensure-clip-group clip-matrix))
+    (local clip-group
+      (if opts.clip-matrix
+          (ensure-clip-group clip-matrix)
+          (if (= entry.clip-matrix clip-matrix)
+              entry.clip-group
+              (do
+                (set entry.clip-matrix clip-matrix)
+                (ensure-clip-group clip-matrix)))))
     (if (glm-is-mat4 matrix)
         (do
           (set write-count (+ write-count (vector:set-glm-mat4-diff handle 0 matrix))))
@@ -137,12 +141,22 @@
             (set (. entry.matrix i) next-value)
             (set write-count (+ write-count 1))
             (vector:set-float handle (- i 1) next-value))))
-    (for [i 1 4]
-      (local next-value (. color i))
-      (when (not (= (. entry.color i) next-value))
-        (set (. entry.color i) next-value)
-        (set write-count (+ write-count 1))
-        (vector:set-float handle (+ 15 i) next-value)))
+    (when (not (= (. entry.color 1) color1))
+      (set (. entry.color 1) color1)
+      (set write-count (+ write-count 1))
+      (vector:set-float handle 16 color1))
+    (when (not (= (. entry.color 2) color2))
+      (set (. entry.color 2) color2)
+      (set write-count (+ write-count 1))
+      (vector:set-float handle 17 color2))
+    (when (not (= (. entry.color 3) color3))
+      (set (. entry.color 3) color3)
+      (set write-count (+ write-count 1))
+      (vector:set-float handle 18 color3))
+    (when (not (= (. entry.color 4) color4))
+      (set (. entry.color 4) color4)
+      (set write-count (+ write-count 1))
+      (vector:set-float handle 19 color4))
     (when (not (= entry.depth depth-offset))
       (set entry.depth depth-offset)
       (set write-count (+ write-count 1))

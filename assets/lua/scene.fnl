@@ -792,14 +792,6 @@
 (fn get-line-strips [self]
   self.build-context.line-strips)
 
-(fn get-text-vectors [self]
-  self.build-context.text-vectors)
-
-(fn get-text-batches [self]
-  (and self.build-context
-       self.build-context.get-text-batches
-       (self.build-context:get-text-batches)))
-
 (fn get-image-batches [self]
   self.build-context.image-batches)
 
@@ -977,8 +969,6 @@
 (set self.get-line-vector get-line-vector)
 (set self.get-point-vector get-point-vector)
 (set self.get-line-strips get-line-strips)
-(set self.get-text-vectors get-text-vectors)
-(set self.get-text-batches get-text-batches)
 (set self.get-image-batches get-image-batches)
 (set self.get-quad-draw-list get-quad-draw-list)
 (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)

@@ -20,9 +20,6 @@
 (local clip-matrix-stride 16)
 (local group-depth-index-stride 1)
 
-(fn copy-matrix [matrix]
-  matrix)
-
 (fn zero-matrix []
   (glm.mat4 0))
 
@@ -31,7 +28,7 @@
 
 (fn matrix-from-opts [opts]
   (if (and opts opts.group-matrix)
-      (copy-matrix opts.group-matrix)
+      opts.group-matrix
       (translation-matrix (and opts opts.x) (and opts opts.y) (and opts opts.z))))
 
 (fn ensure-style [opts]
@@ -86,6 +83,29 @@
        (= a.z b.z)
        (= a.w b.w)))
 
+(fn copy-floats [float-list]
+  (local out [])
+  (each [i value (ipairs float-list)]
+    (set (. out i) value))
+  out)
+
+(fn collect-diff-ranges [previous next-values]
+  (local ranges [])
+  (local value-count (length next-values))
+  (var range-start nil)
+  (for [i 1 value-count]
+    (if (not (= (. previous i) (. next-values i)))
+        (when (not range-start)
+          (set range-start i))
+        (when range-start
+          (table.insert ranges {:start range-start
+                                :end (- i 1)})
+          (set range-start nil))))
+  (when range-start
+    (table.insert ranges {:start range-start
+                          :end value-count}))
+  ranges)
+
 (fn TextSsboBatcher [_opts]
   (local buckets {})
   (var entries-by-key {})
@@ -105,8 +125,8 @@
       (set entry.glyph-handle nil)
       (set entry.glyph-group-handle nil)
       (set entry.renderable-count 0)
-      (set entry.glyph-cache [])
-      (set entry.group-index-cache [])))
+      (set entry.glyph-values-cache nil)
+      (set entry.group-fill-count 0)))
 
   (fn recycle-entry-geometry [entry]
     (when entry.glyph-handle
@@ -242,8 +262,8 @@
                         :renderable-count 0
                         :visible false
                         :matrix-cache {}
-                        :glyph-cache []
-                        :group-index-cache []
+                        :glyph-values-cache nil
+                        :group-fill-count 0
                         :content-hash nil})
           (set (. entries-by-key key) entry)
           entry)))
@@ -390,19 +410,49 @@
           built)))
 
   (fn write-glyph-instances [entry layout]
-    (local changed
-      (entry.bucket.glyph-vector:set-floats-diff entry.glyph-handle
-                                                 0
-                                                 layout.values))
+    (local glyph-values layout.values)
+    (local previous entry.glyph-values-cache)
+    (local value-count (length glyph-values))
+    (var changed 0)
+    (if (and previous (= (length previous) value-count))
+        (do
+          (local ranges (collect-diff-ranges previous glyph-values))
+          (local range-count (length ranges))
+          (if (= range-count 0)
+              nil
+              (if (<= range-count 4)
+                  (each [_ range (ipairs ranges)]
+                    (local range-values [])
+                    (for [i range.start range.end]
+                      (table.insert range-values (. glyph-values i)))
+                    (set changed
+                         (+ changed
+                            (entry.bucket.glyph-vector:set-floats-diff
+                              entry.glyph-handle
+                              (- range.start 1)
+                              range-values))))
+                  (set changed
+                       (entry.bucket.glyph-vector:set-floats-diff entry.glyph-handle
+                                                                  0
+                                                                  glyph-values)))))
+        (set changed
+             (entry.bucket.glyph-vector:set-floats-diff entry.glyph-handle
+                                                        0
+                                                        glyph-values)))
     (set write-count (+ write-count changed))
     (set glyph-write-count (+ glyph-write-count changed))
+    (set entry.glyph-values-cache (copy-floats glyph-values))
     (local group-changed
-      (entry.bucket.glyph-group-vector:set-float-fill-diff entry.glyph-group-handle
-                                                            0
-                                                            layout.renderable-count
-                                                            entry.group-index))
+      (if (and (= entry.group-fill-count layout.renderable-count)
+               (not (= entry.group-index nil)))
+          0
+          (entry.bucket.glyph-group-vector:set-float-fill-diff entry.glyph-group-handle
+                                                                0
+                                                                layout.renderable-count
+                                                                entry.group-index)))
     (set write-count (+ write-count group-changed))
-    (set glyph-write-count (+ glyph-write-count group-changed)))
+    (set glyph-write-count (+ glyph-write-count group-changed))
+    (set entry.group-fill-count layout.renderable-count))
 
   (fn resolve-clip-matrix [options]
     (if options.clip-matrix

@@ -1,7 +1,6 @@
 (local TriangleRenderer (require :triangle-renderer))
 (local LineRenderer (require :line-renderer))
 (local PointRenderer (require :point-renderer))
-(local TextRenderer (require :text-renderer))
 (local ImageRenderer (require :image-renderer))
 (local MeshRenderer (require :mesh-renderer))
 (local QuadRenderer (require :quad-renderer))
@@ -23,7 +22,6 @@
   (local triangle-renderer (TriangleRenderer))
   (local line-renderer (LineRenderer))
   (local point-renderer (PointRenderer))
-  (local text-renderer (TextRenderer))
   (local image-renderer (ImageRenderer))
   (local mesh-renderer (MeshRenderer))
   (local quad-renderer (QuadRenderer))
@@ -100,10 +98,6 @@
         (when point-vector
           (point-renderer:render point-vector projection view)))
       (when draw-text
-        (local text-batches (and target.get-text-batches (target:get-text-batches)))
-        (each [font vector (pairs (target:get-text-vectors))]
-          (local batches (and text-batches (. text-batches font)))
-          (text-renderer:render vector font projection view batches))
         (local text-ssbo-draw-list
           (and target.get-text-ssbo-draw-list
                (target:get-text-ssbo-draw-list)))

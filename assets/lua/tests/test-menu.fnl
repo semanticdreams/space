@@ -107,6 +107,11 @@
               :clickables options.clickables
               :hoverables options.hoverables})
   (set ctx.get-text-vector (fn [_self _font] text-buffer))
+  (set ctx.get-text-ssbo-batcher
+       (fn [_self]
+         {:upsert-text (fn [_batcher _key _opts] nil)
+          :update-text-transform (fn [_batcher _key _opts] nil)
+          :remove-text (fn [_batcher _key] nil)}))
   (set ctx.icons (or options.icons default-icons))
   ctx)
 

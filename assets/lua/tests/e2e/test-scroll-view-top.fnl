@@ -27,6 +27,7 @@
   (StateBase.dispatch-mouse-wheel {:x pointer.x :y 1})
   (assert (< (math.abs (- view.state.scroll-offset max-offset)) 0.02)
           "scroll-view-top should clamp to top after wheel input")
+  (view:set-scroll-offset (math.max 0 (- max-offset 0.12)))
   (Harness.draw-targets ctx.width ctx.height [{:target target}])
   (Harness.capture-snapshot {:name "scroll-view-top"
                              :width ctx.width

@@ -301,7 +301,7 @@
       (renderer:mark-dirty {:full? true})
       (renderer:update 0)
       (local initial-draw-list (ctx:get-quad-draw-list))
-      (assert (= (# initial-draw-list) 3))
+      (assert (= (# initial-draw-list) 2))
       (set dirty.regions [])
       (renderer:update 0.7)
       (local later-draw-list (ctx:get-quad-draw-list))
@@ -335,7 +335,7 @@
       (renderer:set-scroll-state {:offset 1 :alt-screen? false})
       (renderer:update 0)
       (local quad-draw-list (ctx:get-quad-draw-list))
-      (assert (= (# quad-draw-list) 2))
+      (assert (= (# quad-draw-list) 1))
       (local QuadRenderer (reload "quad-renderer"))
       (local quad (QuadRenderer))
       (each [_ entry (ipairs quad-draw-list)]
@@ -346,7 +346,7 @@
                      entry.clip-vector
                      entry.clip-group-vector))
       (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
-      (assert (= (# draw-calls) 2)))))
+      (assert (= (# draw-calls) 1)))))
 
 (fn clears-glyphs-when-cell-becomes-blank []
   (with-mock
@@ -398,6 +398,40 @@
       (assert (. palette "10:20:30"))
       (assert (. palette "40:50:60")))))
 
+(fn background-runs-merge-and-split-on-partial-dirty []
+  (with-mock
+    (fn [_mock]
+      (local ctx (BuildContext {:theme (app.themes.get-active-theme)}))
+      (local style (make-style))
+      (local base-cell {:codepoint (string.byte "A")
+                        :fg-r 255 :fg-g 255 :fg-b 255
+                        :bg-r 20 :bg-g 30 :bg-b 40
+                        :bold false :underline false :italic false :reverse false})
+      (local changed-cell {:codepoint (string.byte "A")
+                           :fg-r 255 :fg-g 255 :fg-b 255
+                           :bg-r 120 :bg-g 90 :bg-b 10
+                           :bold false :underline false :italic false :reverse false})
+      (var cells [[base-cell base-cell base-cell base-cell]])
+      (local dirty {:regions [{:top 0 :left 0 :bottom 0 :right 3}]})
+      (local term-pair (make-term cells dirty {:row 0 :col 0 :visible false :blinking false}))
+      (local term (. term-pair 1))
+      (local renderer (TerminalRenderer {:ctx ctx :style style :cell-size (glm.vec2 1 1)}))
+      (local layout (make-layout))
+      (renderer:set-term term)
+      (renderer:set-grid-size 1 4)
+      (renderer:set-layout layout)
+      (renderer:mark-dirty {:full? true})
+      (renderer:update 0)
+      (local first-stats (renderer:get-stats))
+      (assert (= first-stats.background-runs 1))
+
+      (tset (. cells 1) 2 changed-cell)
+      (set dirty.regions [{:top 0 :left 1 :bottom 0 :right 1}])
+      (renderer:mark-dirty {})
+      (renderer:update 0)
+      (local second-stats (renderer:get-stats))
+      (assert (= second-stats.background-runs 3)))))
+
 (fn terminal-widget-renders-glyphs-into-text-ssbo-source []
   (with-mock
     (fn [_mock]
@@ -439,6 +473,8 @@
                      :fn clears-glyphs-when-cell-becomes-blank})
 (table.insert tests {:name "terminal renderer caches colors in provided palette map"
                      :fn renderer-populates-palette-map})
+(table.insert tests {:name "terminal renderer merges and splits background runs for partial dirt"
+                     :fn background-runs-merge-and-split-on-partial-dirty})
 (table.insert tests {:name "terminal widget renders glyphs into text ssbo draw source"
                      :fn terminal-widget-renders-glyphs-into-text-ssbo-source})
 
