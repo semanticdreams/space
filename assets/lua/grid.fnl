@@ -248,7 +248,10 @@
         (set layout.size (glm.vec3 child-width child-height (or (. layout.measure 3) 0)))
         (set layout.position (+ base-position (self.rotation:rotate position-offset)))
         (set layout.rotation self.rotation)
-        (set layout.depth-offset-index self.depth-offset-index)
+        (set layout.depth-offset-index
+             (if (= child.depth-offset-index nil)
+                 self.depth-offset-index
+                 (+ self.depth-offset-index child.depth-offset-index)))
         (set layout.clip-region self.clip-region)
         (when (or (> x-adjust 0) (> y-adjust 0))
           (set layout.position (+ layout.position (self.rotation:rotate (glm.vec3 x-adjust y-adjust 0)))))

@@ -28,6 +28,7 @@
 (fn FloatLayer [opts]
   (fn build [ctx]
     (local options (or opts {}))
+    (local depth-layer-step (or options.depth-layer-step 256))
     (local layer {:children []
                   :layout nil
                   :build-context ctx})
@@ -45,7 +46,7 @@
 
     (fn layouter [self]
       (let [(parent-position parent-rotation _parent-inverse) (resolve-parent-transform self)]
-        (each [_ metadata (ipairs layer.children)]
+        (each [idx metadata (ipairs layer.children)]
           (local element (and metadata metadata.element))
           (local layout (and element element.layout))
           (when layout
@@ -55,9 +56,9 @@
               (set metadata.rotation (compute-local-rotation self metadata.world-rotation)))
             (local rotation (or metadata.rotation (glm.quat 1 0 0 0)))
             (local depth-offset-index
-              (if (= metadata.depth-offset-index nil)
-                  self.depth-offset-index
-                  metadata.depth-offset-index))
+              (+ self.depth-offset-index
+                 (or metadata.depth-offset-index 0)
+                 (* (- idx 1) depth-layer-step)))
             (local new-pos
               (+ parent-position (parent-rotation:rotate (or metadata.position (glm.vec3 0 0 0)))))
             (set layout.size (or metadata.size layout.measure layout.size))
