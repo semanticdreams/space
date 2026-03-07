@@ -1,6 +1,5 @@
 (local glm (require :glm))
 (local glm-is-mat4 glm.is-mat4)
-(local glm-mat4-hash-key glm.mat4-hash-key)
 (local ClipUtils (require :clip-utils))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (local os os)
@@ -20,6 +19,7 @@
   (local clip-group-handles [])
   (var entries [])
   (var entry-by-key {})
+  (var free-slots [])
   (var clip-index-by-key {})
   (var clip-group-count 0)
   (var active-count 0)
@@ -31,14 +31,14 @@
   (fn clip-matrix-key [matrix]
     (if (or (= matrix nil) (= matrix false))
         "clip:nil"
-        (if (glm-is-mat4 matrix)
-            (glm-mat4-hash-key matrix)
-            (do
-              (var key "")
-              (for [i 1 16]
-                (local value (tonumber (. matrix i)))
-                (set key (.. key ":" (string.format "%.9g" (or value 0)))))
-              key))))
+        (do
+          ;; Use matrix values (not object identity/hash) because clip matrices are
+          ;; frequently mutated in place across frames.
+          (var key "")
+          (for [i 1 16]
+            (local value (tonumber (. matrix i)))
+            (set key (.. key ":" (string.format "%.17g" (or value 0)))))
+          key)))
 
   (fn zero-matrix []
     (glm.mat4 0))
@@ -90,19 +90,30 @@
     (if existing
         existing
         (do
-          (set active-count (+ active-count 1))
-          (ensure-handle active-count)
-          (ensure-clip-group-handle active-count)
-          (local entry {:slot active-count
+          (local slot
+            (if (> (length free-slots) 0)
+                (table.remove free-slots)
+                (do
+                  (set active-count (+ active-count 1))
+                  active-count)))
+          ;; Reused holes can sit above current active-count after tail trimming.
+          ;; Keep draw-count covering the highest occupied slot.
+          (if (> slot active-count)
+              (set active-count slot))
+          (ensure-handle slot)
+          (ensure-clip-group-handle slot)
+          (local entry {:slot slot
                         :key key
                         :matrix {}
                         :color {}
                         :depth nil
+                        :matrix-value nil
+                        :color-value nil
                         :clip-matrix nil
                         :clip-group nil
                         :visible false
                         :seen-frame -1})
-          (set (. entries active-count) entry)
+          (set (. entries slot) entry)
           (set (. entry-by-key key) entry)
           entry)))
 
@@ -124,14 +135,12 @@
       (if opts.clip-matrix
           opts.clip-matrix
           (ClipUtils.resolve-matrix opts.clip)))
-    (local clip-group
-      (if opts.clip-matrix
-          (ensure-clip-group clip-matrix)
-          (if (= entry.clip-matrix clip-matrix)
-              entry.clip-group
-              (do
-                (set entry.clip-matrix clip-matrix)
-                (ensure-clip-group clip-matrix)))))
+    (set entry.clip-matrix clip-matrix)
+    (set entry.matrix-value matrix)
+    (set entry.color-value color)
+    ;; Clip matrices can be updated in place, so identity checks are unsafe.
+    ;; Always resolve the clip group from current matrix values.
+    (local clip-group (ensure-clip-group clip-matrix))
     (if (glm-is-mat4 matrix)
         (do
           (set write-count (+ write-count (vector:set-glm-mat4-diff handle 0 matrix))))
@@ -170,11 +179,13 @@
 
   (fn hide-entry [entry]
     (when entry.visible
-      (local slot entry.slot)
-      (local handle (ensure-handle slot))
-      (vector:set-float handle 19 0)
-      (set write-count (+ write-count 1))
-      (set (. entry.color 4) 0)
+      (local handle (ensure-handle entry.slot))
+      ;; Keep geometry untouched; shader discards alpha==0 instances so
+      ;; hidden slots cannot write depth or leak stale visuals.
+      (when (not (= (. entry.color 4) 0))
+        (set (. entry.color 4) 0)
+        (set write-count (+ write-count 1))
+        (vector:set-float handle 19 0))
       (set entry.visible false)))
 
   (fn begin-frame [_self]
@@ -197,8 +208,13 @@
     (local entry (. entry-by-key key))
     (when entry
       (hide-entry entry)
+      (local slot entry.slot)
       (set (. entry-by-key key) nil)
-      (set (. entries entry.slot) nil)))
+      (set (. entries slot) nil)
+      (table.insert free-slots slot)
+      (while (and (> active-count 0) (= (. entries active-count) nil))
+        (set active-count (- active-count 1)))
+      (set entry.visible false)))
 
   (fn get-last-stats [_self]
     {:write-seconds write-seconds
@@ -225,6 +241,7 @@
     (set active-count 0)
     (set entries [])
     (set entry-by-key {})
+    (set free-slots [])
     (set frame-id 0)
     (init-clip-groups))
 

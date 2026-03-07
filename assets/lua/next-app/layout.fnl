@@ -420,21 +420,19 @@
           (node:transform-pass nil true))))
   processed)
 
-(fn begin-submit-collection [root]
-  (each [_ node (ipairs root._submit-nodes)]
-    (set node._submit-queued false))
-  (set root._submit-nodes []))
-
 (fn collect-submit-nodes [root]
   (local top (or root.root root))
   (ensure-root-state top)
-  top._submit-nodes)
+  (local nodes top._submit-nodes)
+  (each [_ node (ipairs nodes)]
+    (set node._submit-queued false))
+  (set top._submit-nodes [])
+  nodes)
 
 (fn run-frame-internal [root width height depth collect-stats?]
   (assert root "next-app layout run-frame requires root")
   (local top (or root.root root))
   (ensure-root-state top)
-  (begin-submit-collection top)
   (when (not top._initialized)
     (mark-measure-dirty-upward top)
     (mark-transform-dirty-root top)

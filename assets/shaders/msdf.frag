@@ -1,6 +1,7 @@
 #version 130
 
 #include "clipping.glsl"
+#include "depth-bias.glsl"
 
 in vec2 texCoord;
 in vec4 fgColor;
@@ -11,8 +12,6 @@ out vec4 color;
 
 uniform sampler2D msdf;
 uniform float pxRange;
-
-const float depthStep = 1e-3;
 
 float screenPxRange() {
     vec2 unitRange = vec2(pxRange)/vec2(textureSize(msdf, 0));
@@ -38,5 +37,5 @@ void main() {
     //color = vec4(fgColor.rgb, fgColor.a * opacity);
     //vec4 bgColor = vec4(0.0, 0.0, 1.0, 1.0);
     //color = mix(bgColor, fgColor, opacity);
-	gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * depth_offset_index * depthStep));
+	gl_FragDepth = applyDepthOffset(gl_FragCoord.z, depth_offset_index);
 }

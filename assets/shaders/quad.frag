@@ -1,15 +1,13 @@
 #version 430 core
 
+#include "depth-bias.glsl"
 #include "lighting.glsl"
 
 smooth in vec4 theColor;
 smooth in vec3 worldPos;
-smooth in vec3 worldNormal;
 flat in float depth_offset_index;
 flat in uint clipGroup;
 out vec4 fragColor;
-
-const float depthStep = 1e-3;
 
 uniform vec3 viewPos;
 uniform vec3 ambientLight;
@@ -26,13 +24,17 @@ layout(std430, binding = 0) readonly buffer QuadClipGroups {
 
 void main()
 {
-    vec4 clipPos = clipModel[clipGroup] * vec4(worldPos, 1.0);
-    if (clipPos.x < 0.0 || clipPos.x > 1.0 ||
-        clipPos.y < 0.0 || clipPos.y > 1.0) {
+    if (theColor.a <= 0.0) {
         discard;
     }
 
-    vec3 normal = normalize(worldNormal);
+    vec4 clipPos = clipModel[clipGroup] * vec4(worldPos, 1.0);
+    if (clipPos.x < -1.0 || clipPos.x > 1.0 ||
+        clipPos.y < -1.0 || clipPos.y > 1.0) {
+        discard;
+    }
+
+    vec3 normal = normalize(cross(dFdy(worldPos), dFdx(worldPos)));
     vec3 viewDir = normalize(viewPos - worldPos);
     vec3 lightingViewDir = viewDir;
     vec3 light = ambientLight;
@@ -41,5 +43,5 @@ void main()
     light += CalcSpotLights(spotLights, spotLightCount, normal, worldPos, lightingViewDir);
 
     fragColor = vec4(light, 1.0f) * theColor;
-    gl_FragDepth = max(0.0, gl_FragCoord.z - (gl_FragCoord.z * depth_offset_index * depthStep));
+    gl_FragDepth = applyDepthOffset(gl_FragCoord.z, depth_offset_index);
 }

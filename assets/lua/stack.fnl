@@ -4,7 +4,7 @@
 (local {: Layout} (require :layout))
 
 (fn Stack [opts]
-  (local depth-offset-step (or opts.depth-offset-step 0.001))
+  (local depth-offset-step (or opts.depth-offset-step 1))
   (fn build [ctx]
     (local children
       (icollect [_ x (ipairs opts.children)] (x ctx)))

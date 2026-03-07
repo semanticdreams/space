@@ -8,6 +8,13 @@
 
 (local tests [])
 
+(fn list-contains-node? [nodes target]
+  (var found false)
+  (each [_ node (ipairs nodes)]
+    (when (= node target)
+      (set found true)))
+  found)
+
 (fn make-root []
   (local title (TextWidget {:name "submit-perf-title"
                             :text "Submit Perf"
@@ -91,6 +98,26 @@
 
 (table.insert tests {:name "NextApp submit skips steady frames and rebuilds on transform"
                      :fn next-app-submit-skips-steady-frames-and-rebuilds-on-transform})
+
+(fn next-app-preserves-render-dirty-across-run-frame-boundary []
+  (local root (NextLayout.Node.new {:name "submit-boundary-root"}))
+  (local panel
+    (PanelWidget {:name "submit-boundary-panel"
+                  :padding [0 0]
+                  :color (glm.vec4 0.10 0.12 0.18 1)}))
+  (root:add-child panel)
+
+  (NextLayout.run-frame root 1 1 0)
+  (NextLayout.collect-submit-nodes root)
+
+  (panel:set-color (glm.vec4 0.20 0.14 0.10 1))
+  (NextLayout.run-frame root 1 1 0)
+  (local submitted (NextLayout.collect-submit-nodes root))
+  (assert (list-contains-node? submitted panel)
+          "render-dirty node queued before run-frame must be submitted"))
+
+(table.insert tests {:name "NextApp preserves render-dirty across run-frame boundary"
+                     :fn next-app-preserves-render-dirty-across-run-frame-boundary})
 
 (local main
   (fn []
