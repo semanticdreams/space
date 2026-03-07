@@ -382,6 +382,33 @@
       (assert (= (graph:edge-count) 1) "link integration should add edge after loading endpoints")
       (graph:drop))))
 
+(fn link-entity-integration-readds-edge-after-node-removal []
+  (with-temp-dir
+    (fn [dir]
+      (local StringEntityStore (require :entities/string))
+      (local LinkEntityStore (require :entities/link))
+      (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")}))
+      (local left (string-store:create-entity {:value "left"}))
+      (local right (string-store:create-entity {:value "right"}))
+      (local left-key (.. "string-entity:" left.id))
+      (local right-key (.. "string-entity:" right.id))
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false :link-store link-store}))
+      (local {:register-loader string-register} (require :graph/nodes/string-entity))
+      (string-register graph {:store string-store})
+      (link-store:create-entity {:source-key left-key :target-key right-key})
+      (local right-node (graph:lookup right-key))
+      (assert right-node "right node should exist after link-driven loading")
+      (assert (= (graph:edge-count) 1) "graph should have one edge before removal")
+      (graph:remove-nodes [right-node])
+      (assert (= (graph:edge-count) 0) "removing endpoint should remove link edge")
+      (local reloaded (graph:load-by-key right-key))
+      (assert reloaded "right node should reload after removal")
+      (assert (= (graph:edge-count) 1)
+              "link edge should be recreated after endpoint reload")
+      (graph:drop))))
+
 (fn list-entity-node-loads-items-via-load-by-key []
   (with-temp-dir
     (fn [dir]
@@ -634,6 +661,8 @@
                      :fn identity-loader-loads-existing-identity})
 (table.insert tests {:name "link entity integration loads endpoints via load-by-key"
                      :fn link-entity-integration-loads-endpoints-via-load-by-key})
+(table.insert tests {:name "link entity integration readds edge after node removal"
+                     :fn link-entity-integration-readds-edge-after-node-removal})
 (table.insert tests {:name "list entity node loads items via load-by-key"
                      :fn list-entity-node-loads-items-via-load-by-key})
 (table.insert tests {:name "graph key loaders registers and loads nodes"

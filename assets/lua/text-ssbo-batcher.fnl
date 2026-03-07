@@ -1,7 +1,6 @@
 (local ClipUtils (require :clip-utils))
 (local glm (require :glm))
 (local glm-is-mat4 glm.is-mat4)
-(local glm-mat4-bytes-key glm.mat4-bytes-key)
 
 (local DrawBatcher (require :draw-batcher))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
@@ -44,7 +43,7 @@
       (do
         (assert (glm-is-mat4 matrix)
                 "TextSsboBatcher.clip-matrix-key requires clip matrix to be glm.mat4")
-        (glm-mat4-bytes-key matrix))))
+        (ClipUtils.matrix-key matrix))))
 
 (fn hash-codepoints [codepoints scale line-height-value]
   (var hash 2166136261)

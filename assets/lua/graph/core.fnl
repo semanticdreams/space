@@ -28,6 +28,8 @@
     (local node-morphed (Signal))
     (local edge-added (Signal))
     (local edge-removed (Signal))
+    (local link-edge-map {}) ;; entity-id -> edge-key
+    (local link-edge-loading {}) ;; entity-id -> true
 
     (var check-link-edges-for-node nil) ;; Forward declaration
 
@@ -140,7 +142,11 @@
                 (each [_ edge (ipairs kept)]
                     (table.insert edges edge))
                 (each [_ edge (ipairs removed-edges)]
-                    (set (. edge-map (edge-key edge)) nil)
+                    (local removed-key (edge-key edge))
+                    (set (. edge-map removed-key) nil)
+                    (each [entity-id mapped-key (pairs link-edge-map)]
+                        (when (= mapped-key removed-key)
+                            (set (. link-edge-map entity-id) nil)))
                     (edge-removed:emit {:edge edge}))
                 (node-removed:emit {:nodes removed :removal-set removal-set})
                 (each [_ node (ipairs removed)]
@@ -312,9 +318,6 @@
     (set self.link-store link-store)
     (set self.identity-store identity-store)
     (set self.morphs morphs)
-    (local link-edge-map {}) ;; entity-id -> edge-key
-    (local link-edge-loading {}) ;; entity-id -> true
-
     (set self.create-identity
         (fn [_self target-key opts]
             (local create-opts (or opts {}))
