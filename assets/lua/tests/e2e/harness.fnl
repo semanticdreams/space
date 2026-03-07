@@ -7,6 +7,8 @@
 (local glm (require :glm))
 (local Snapshots (require :snapshots))
 (local gl (require :gl))
+; Missing from current bindings; OpenGL enum for glDisable/glEnable.
+(local GL_SCISSOR_TEST 0x0C11)
 (local BuildContext (require :build-context))
 (local {: Layout : LayoutRoot} (require :layout))
 (local Button (require :button))
@@ -361,6 +363,7 @@
   (gl.glBindFramebuffer gl.GL_READ_FRAMEBUFFER 0)
   (gl.glBindFramebuffer gl.GL_DRAW_FRAMEBUFFER 0)
   (gl.glDisable gl.GL_CULL_FACE)
+  (gl.glDisable GL_SCISSOR_TEST)
   (gl.glEnable gl.GL_DEPTH_TEST)
   (gl.glDepthFunc gl.GL_LESS)
   (gl.glClearColor 0.05 0.06 0.08 1.0)

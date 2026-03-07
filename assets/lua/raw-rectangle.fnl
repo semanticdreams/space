@@ -139,7 +139,8 @@
       (when (not (= desired self.visible?))
         (set self.visible? desired)
         (if desired
-            (update self)
+            (when cached.has-state?
+              (update self))
             (do
               (remove-quad)
               (set cached.has-state? false)))))

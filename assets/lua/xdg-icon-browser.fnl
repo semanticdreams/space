@@ -238,10 +238,11 @@
     (table.sort context-items)
 
     (local default-theme (resolve-default theme-items "Adwaita" "hicolor"))
+    (local requested-context (or options.initial-context options.initial_context))
     (local default-context
-        (resolve-default context-items
-                         (or options.initial-context options.initial_context)
-                         nil))
+        (if requested-context
+            (resolve-default context-items requested-context nil)
+            nil))
 
     (local state {:selected-context default-context
                   :last-context default-context
