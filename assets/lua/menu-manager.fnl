@@ -177,15 +177,12 @@
     (local open-opts (or opts {}))
     (local actions (wrap-actions open-opts.actions))
     (local position (or open-opts.position (glm.vec3 0 0 0)))
-    (local overlay-layout (and hud hud.overlay-root hud.overlay-root.layout))
-    (local base-depth (or (and overlay-layout overlay-layout.depth-offset-index) 0))
-    (local depth-offset-index (or open-opts.depth-offset-index (+ base-depth 100)))
     (close)
     (when (and hud hud.add-overlay-child)
       (local builder (Menu {:actions actions}))
       (set active-menu (hud:add-overlay-child {:builder builder
                                                :position position
-                                               :depth-offset-index depth-offset-index}))))
+                                               :depth-offset-index open-opts.depth-offset-index}))))
 
   (fn open-root [self event]
     (local screen (and event event.screen))

@@ -23,7 +23,6 @@
   (var clip-index-by-key {})
   (var clip-group-count 0)
   (var active-count 0)
-  (var frame-id 0)
   (var write-seconds 0.0)
   (var write-count 0)
   (var upsert-count 0)
@@ -107,12 +106,9 @@
                         :matrix {}
                         :color {}
                         :depth nil
-                        :matrix-value nil
-                        :color-value nil
                         :clip-matrix nil
                         :clip-group nil
-                        :visible false
-                        :seen-frame -1})
+                        :visible false})
           (set (. entries slot) entry)
           (set (. entry-by-key key) entry)
           entry)))
@@ -136,8 +132,6 @@
           opts.clip-matrix
           (ClipUtils.resolve-matrix opts.clip)))
     (set entry.clip-matrix clip-matrix)
-    (set entry.matrix-value matrix)
-    (set entry.color-value color)
     ;; Clip matrices can be updated in place, so identity checks are unsafe.
     ;; Always resolve the clip group from current matrix values.
     (local clip-group (ensure-clip-group clip-matrix))
@@ -189,7 +183,6 @@
       (set entry.visible false)))
 
   (fn begin-frame [_self]
-    (set frame-id (+ frame-id 1))
     (set write-seconds 0.0)
     (set write-count 0)
     (set upsert-count 0))
@@ -198,7 +191,6 @@
     (assert key "QuadBatcher.upsert-quad requires :key")
     (set upsert-count (+ upsert-count 1))
     (local entry (ensure-entry key))
-    (set entry.seen-frame frame-id)
     (write-entry entry (or opts {})))
 
   (fn end-frame [_self]
@@ -242,7 +234,6 @@
     (set entries [])
     (set entry-by-key {})
     (set free-slots [])
-    (set frame-id 0)
     (init-clip-groups))
 
   (fn add-quad [_self opts]

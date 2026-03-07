@@ -1,5 +1,5 @@
 const float kDepthOffsetStep = 1e-6;
-const float kDepthOffsetMaxBias = 1e-4;
+const float kDepthOffsetMaxBias = 1e-3;
 
 float applyDepthOffset(float depthValue, float depthOffsetIndex) {
     // Depth offsets are only for stable ordering of coplanar layers.
