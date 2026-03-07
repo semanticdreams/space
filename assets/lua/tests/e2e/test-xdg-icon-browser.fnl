@@ -15,7 +15,7 @@
                     {:title "Icon Browser"
                      :name "test-dialog"
                      :resizeable true
-                     :child (XdgIconBrowser.XdgIconBrowser {:initial-context "actions"})}))
+                     :child (XdgIconBrowser.XdgIconBrowser {})}))
             (dlg child-ctx)))
 
     (local sized

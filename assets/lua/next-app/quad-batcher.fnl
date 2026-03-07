@@ -166,15 +166,14 @@
     (set write-seconds (+ write-seconds (- (os.clock) write-start))))
 
   (fn hide-entry [entry]
-    (when entry.visible
-      (local handle (ensure-handle entry.slot))
-      ;; Keep geometry untouched; shader discards alpha==0 instances so
-      ;; hidden slots cannot write depth or leak stale visuals.
-      (when (not (= (. entry.color 4) 0))
-        (set (. entry.color 4) 0)
-        (set write-count (+ write-count 1))
-        (vector:set-float handle 19 0))
-      (set entry.visible false)))
+    (local handle (ensure-handle entry.slot))
+    ;; Keep geometry untouched; shader discards alpha==0 instances so
+    ;; hidden slots cannot write depth or leak stale visuals.
+    (when (not (= (. entry.color 4) 0))
+      (set (. entry.color 4) 0)
+      (set write-count (+ write-count 1))
+      (vector:set-float handle 19 0))
+    (set entry.visible false))
 
   (fn begin-frame [_self]
     (set write-seconds 0.0)
