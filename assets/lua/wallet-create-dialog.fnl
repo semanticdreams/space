@@ -30,7 +30,7 @@
     {:address created.address
      :record record})
 
-(fn build-wallet-create-dialog [options ctx]
+(fn build-wallet-create-dialog [options ctx runtime-opts]
     (local store (or options.store (WalletStore {})))
     (local state {:name ""
                   :mnemonic ""
@@ -167,12 +167,12 @@
                         :on-close options.on-close
                         :child (Padding {:edge-insets [0.6 0.6]
                                          :child content})}))
-    (dialog-builder ctx))
+    (dialog-builder ctx runtime-opts))
 
 (fn WalletCreateDialog [opts]
     (local options (or opts {}))
-    (fn [ctx]
-        (build-wallet-create-dialog options ctx)))
+    (fn [ctx runtime-opts]
+        (build-wallet-create-dialog options ctx runtime-opts)))
 
 (local exports {:WalletCreateDialog WalletCreateDialog})
 

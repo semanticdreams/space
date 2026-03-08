@@ -42,7 +42,7 @@
                                 :padding [0.5 0.5]
                                 :on-click options.on-send}))]}))
 
-(fn build-wallet-view [options ctx]
+(fn build-wallet-view [options ctx runtime-opts]
     (local store (or options.store
                      (and options.manager options.manager.store)
                      (WalletStore {})))
@@ -257,7 +257,8 @@
                           :on-close options.on-close
                           :child (Padding {:edge-insets [0.6 0.6]
                                            :child content})})
-          ctx))
+          ctx
+          runtime-opts))
     (when manager
         (manager:load-active)
         (update-current options.current-wallet))
@@ -274,8 +275,8 @@
 
 (fn WalletView [opts]
     (local options (or opts {}))
-    (fn [ctx]
-        (build-wallet-view options ctx)))
+    (fn [ctx runtime-opts]
+        (build-wallet-view options ctx runtime-opts)))
 
 (local exports {:WalletView WalletView})
 

@@ -294,7 +294,7 @@
                  game.lines-cleared
                  game.score))
 
-(fn build-tetris-dialog [ctx options]
+(fn build-tetris-dialog [ctx options runtime-opts]
   (local game (TetrisGame (or options.game {})))
   (var status-text-entity nil)
 
@@ -398,7 +398,7 @@
                  :body-padding [0 0]
                  :child body-builder
                  :on-close options.on-close}))
-  (local content (dialog-builder ctx))
+  (local content (dialog-builder ctx runtime-opts))
   (assert board "TetrisDialog build requires board entity")
 
   (set content.game game)
@@ -414,8 +414,8 @@
 
 (fn TetrisDialog [opts]
   (local options (or opts {}))
-  (fn build [ctx]
-    (build-tetris-dialog ctx options))
+  (fn build [ctx runtime-opts]
+    (build-tetris-dialog ctx options runtime-opts))
   build)
 
 (local exports {:TetrisDialog TetrisDialog
