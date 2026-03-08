@@ -383,6 +383,8 @@
           (button.rectangle:set-visible false)
           (assert (< (quad-batcher:get-instance-count) visible-count))
           (button.rectangle:set-visible true)
+          ;; Re-adding the quad happens on the next layout/update pass.
+          (button.layout:layouter)
           (assert (= (quad-batcher:get-instance-count) visible-count))
           (button:drop)
           (assert (= (quad-batcher:get-instance-count) baseline-count)))))))

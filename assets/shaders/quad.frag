@@ -1,5 +1,6 @@
 #version 430 core
 
+#include "clipping.glsl"
 #include "depth-bias.glsl"
 #include "lighting.glsl"
 
@@ -28,9 +29,7 @@ void main()
         discard;
     }
 
-    vec4 clipPos = clipModel[clipGroup] * vec4(worldPos, 1.0);
-    if (clipPos.x < -1.0 || clipPos.x > 1.0 ||
-        clipPos.y < -1.0 || clipPos.y > 1.0) {
+    if (isClipped(clipModel[clipGroup], worldPos)) {
         discard;
     }
 

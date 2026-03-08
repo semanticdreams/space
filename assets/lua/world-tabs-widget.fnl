@@ -10,17 +10,42 @@
   (local options (or opts {}))
   (local world-manager (assert options.world-manager "WorldTabsWidget requires :world-manager"))
   (local tab-spacing (or options.tab-spacing 0.1))
+  (local get-menu-manager
+    (or options.get-menu-manager
+        (fn []
+          (or options.menu-manager app.menu-manager))))
 
   (fn build [ctx]
     (var row nil)
     (var world-listener nil)
     (local self {:layout nil})
 
+    (fn resolve-tab-index-by-id [id]
+      (var resolved nil)
+      (each [_ candidate (ipairs (world-manager:list-tabs))]
+        (when (and (not resolved) (= candidate.id id))
+          (set resolved candidate.index)))
+      resolved)
+
+    (fn open-tab-menu [tab event]
+      (local menu-manager (get-menu-manager))
+      (assert menu-manager "WorldTabsWidget tab context menu requires menu manager")
+      (assert (and event event.point) "WorldTabsWidget tab context menu requires event.point")
+      (menu-manager:open {:position event.point
+                          :open-button (and event event.button)
+                          :actions [{:name "Delete world"
+                                     :on-click (fn [_button _click-event]
+                                                 (local idx (resolve-tab-index-by-id tab.id))
+                                                 (when idx
+                                                   (world-manager:close-world-index idx)))}]}))
+
     (fn create-tab-button [tab]
       (Button {:text tab.name
                :variant (if tab.active? :primary :ghost)
                :on-click (fn [_button _event]
-                           (world-manager:activate-index tab.index))}))
+                           (world-manager:activate-index tab.index))
+               :on-right-click (fn [_button event]
+                                 (open-tab-menu tab event))}))
 
     (fn create-add-button []
       (Button {:text "+"
