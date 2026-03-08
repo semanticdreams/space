@@ -18,6 +18,12 @@
                    "h" 4})
 
 (local ECC_FORMAT_BITS [1 0 3 2])
+;; QR mode indicators
+(local MODE_NUMERIC 1)
+(local MODE_ALPHANUMERIC 2)
+(local MODE_BYTE 4)
+
+(local ALPHANUMERIC_CHARSET "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:")
 
 (local ECC_CODEWORDS_PER_BLOCK
        [[7 10 13 17]
@@ -238,8 +244,153 @@
 
 (fn get-char-count-bits [version]
     (if (<= version 9)
-        8
-        16))
+        {:numeric 10 :alphanumeric 9 :byte 8}
+        (if (<= version 26)
+            {:numeric 12 :alphanumeric 11 :byte 16}
+            {:numeric 14 :alphanumeric 13 :byte 16})))
+
+(fn make-alphanumeric-map []
+    (local map {})
+    (for [i 1 (# ALPHANUMERIC_CHARSET)]
+        (set (. map (string.byte ALPHANUMERIC_CHARSET i)) (- i 1)))
+    map)
+
+(local ALPHANUMERIC_MAP (make-alphanumeric-map))
+
+(fn is-digit-byte [b]
+    (and (>= b 48) (<= b 57)))
+
+(fn is-alphanumeric-byte [b]
+    (not (= (. ALPHANUMERIC_MAP b) nil)))
+
+(fn mode-key [mode]
+    (if (= mode MODE_NUMERIC)
+        :numeric
+        (if (= mode MODE_ALPHANUMERIC)
+            :alphanumeric
+            :byte)))
+
+(fn data-bits-for-length [mode count]
+    (if (= mode MODE_NUMERIC)
+        (+ (* (math.floor (/ count 3)) 10)
+           (if (= (% count 3) 0) 0
+               (= (% count 3) 1) 4
+               7))
+        (if (= mode MODE_ALPHANUMERIC)
+            (+ (* (math.floor (/ count 2)) 11)
+               (if (= (% count 2) 0) 0 6))
+            (* count 8))))
+
+(fn optimize-segments [value version]
+    (local value-length (# value))
+    (local ccbits (get-char-count-bits version))
+    (local max-counts
+           {:numeric (- (^ 2 ccbits.numeric) 1)
+            :alphanumeric (- (^ 2 ccbits.alphanumeric) 1)
+            :byte (- (^ 2 ccbits.byte) 1)})
+    (local inf 1000000000)
+    (local dp [])
+    (local prev [])
+    (for [_ 1 (+ value-length 2)]
+        (table.insert dp inf)
+        (table.insert prev nil))
+    (set (. dp 1) 0)
+    (for [start 1 value-length]
+        (local base-bits (. dp start))
+        (when (< base-bits inf)
+            (each [_ mode (ipairs [MODE_NUMERIC MODE_ALPHANUMERIC MODE_BYTE])]
+                (local key (mode-key mode))
+                (local limit (. max-counts key))
+                (var run 0)
+                (for [idx start value-length]
+                    (local byte (string.byte value idx))
+                    (local valid?
+                           (if (= mode MODE_NUMERIC)
+                               (is-digit-byte byte)
+                               (if (= mode MODE_ALPHANUMERIC)
+                                   (is-alphanumeric-byte byte)
+                                   true)))
+                    (if (or (not valid?) (>= run limit))
+                        (lua "break")
+                        (do
+                            (set run (+ run 1))
+                            (local payload-bits (data-bits-for-length mode run))
+                            (local candidate (+ base-bits
+                                                4
+                                                (. ccbits key)
+                                                payload-bits))
+                            (local next-index (+ idx 1))
+                            (when (< candidate (. dp next-index))
+                                (set (. dp next-index) candidate)
+                                (set (. prev next-index)
+                                     {:start start
+                                      :mode mode
+                                      :len run}))))))))
+    (local end-index (+ value-length 1))
+    (assert (< (. dp end-index) inf) "QrCode failed to optimize segments")
+    (local segments [])
+    (var cursor end-index)
+    (while (> cursor 1)
+        (local step (. prev cursor))
+        (assert step "QrCode segment backtracking failed")
+        (table.insert segments 1 step)
+        (set cursor step.start))
+    {:segments segments
+     :bits (. dp end-index)})
+
+(fn append-mode-data [bits value segment]
+    (local start segment.start)
+    (local len segment.len)
+    (local mode segment.mode)
+    (if (= mode MODE_NUMERIC)
+        (do
+            (var idx start)
+            (while (<= idx (+ start len -1))
+                (local remain (+ start len (- idx)))
+                (if (>= remain 3)
+                    (do
+                        (local d1 (- (string.byte value idx) 48))
+                        (local d2 (- (string.byte value (+ idx 1)) 48))
+                        (local d3 (- (string.byte value (+ idx 2)) 48))
+                        (append-bits bits (+ (* d1 100) (* d2 10) d3) 10)
+                        (set idx (+ idx 3)))
+                    (if (= remain 2)
+                        (do
+                            (local d1 (- (string.byte value idx) 48))
+                            (local d2 (- (string.byte value (+ idx 1)) 48))
+                            (append-bits bits (+ (* d1 10) d2) 7)
+                            (set idx (+ idx 2)))
+                        (do
+                            (local d (- (string.byte value idx) 48))
+                            (append-bits bits d 4)
+                            (set idx (+ idx 1)))))))
+        (if (= mode MODE_ALPHANUMERIC)
+            (do
+                (var idx start)
+                (while (<= idx (+ start len -1))
+                    (local remain (+ start len (- idx)))
+                    (if (>= remain 2)
+                        (do
+                            (local a (. ALPHANUMERIC_MAP (string.byte value idx)))
+                            (local b (. ALPHANUMERIC_MAP (string.byte value (+ idx 1))))
+                            (append-bits bits (+ (* a 45) b) 11)
+                            (set idx (+ idx 2)))
+                        (do
+                            (local a (. ALPHANUMERIC_MAP (string.byte value idx)))
+                            (append-bits bits a 6)
+                            (set idx (+ idx 1))))))
+            (for [idx start (+ start len -1)]
+                (append-bits bits (string.byte value idx) 8)))))
+
+(fn encode-segments-bits [value segments version]
+    (local ccbits (get-char-count-bits version))
+    (local bits [])
+    (each [_ segment (ipairs segments)]
+        (append-bits bits segment.mode 4)
+        (local key (mode-key segment.mode))
+        (append-bits bits segment.len (. ccbits key))
+        (append-mode-data bits value segment))
+    bits)
 
 (fn make-blank-matrix [size]
     (local rows [])
@@ -520,13 +671,11 @@
         (set upward (not upward))
         (set x (- x 2))))
 
-(fn encode-codewords [data version ecc]
+(fn encode-codewords [payload-bits version ecc]
     (local data-capacity (get-data-capacity version ecc))
     (local data-bits [])
-    (append-bits data-bits 4 4)
-    (append-bits data-bits (# data) (get-char-count-bits version))
-    (each [_ byte (ipairs data)]
-        (append-bits data-bits byte 8))
+    (each [_ bit (ipairs payload-bits)]
+        (table.insert data-bits bit))
     (local total-bits (* data-capacity 8))
     (local terminator (math.min 4 (- total-bits (# data-bits))))
     (for [_ 1 terminator]
@@ -597,21 +746,24 @@
     (assert (= (type value) :string) "QrCode.encode requires a string")
     (local options (or opts {}))
     (local ecc (resolve-ecc options.ecc))
-    (local bytes [])
-    (for [i 1 (# value)]
-        (table.insert bytes (string.byte value i)))
     (var version nil)
+    (var best-segments nil)
     (for [candidate 1 40]
         (local capacity (* (get-data-capacity candidate ecc) 8))
-        (local required (+ 4 (get-char-count-bits candidate) (* (# bytes) 8)))
-        (when (and (>= capacity required) (not version))
-            (set version candidate)))
+        (local optimized (optimize-segments value candidate))
+        (when (and (not version) (>= capacity optimized.bits))
+            (set version candidate)
+            (set best-segments optimized.segments)))
     (assert version "QrCode input too long")
     (local size (+ (* version 4) 17))
     (local modules (make-blank-matrix size))
     (local is-function (make-blank-matrix size))
     (draw-function-patterns modules is-function version)
-    (local bits (encode-codewords bytes version ecc))
+    ;; Reserve format info modules before placing payload bits.
+    (draw-format-bits modules is-function ecc 0)
+    (assert best-segments "QrCode segment selection failed")
+    (local payload-bits (encode-segments-bits value best-segments version))
+    (local bits (encode-codewords payload-bits version ecc))
     (place-data-bits modules is-function bits)
     (var best-mask nil)
     (var best-penalty nil)

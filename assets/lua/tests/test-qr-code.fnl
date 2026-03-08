@@ -42,6 +42,17 @@
     (local qr (QrCode.encode (string.rep "A" 50)))
     (assert (> (. qr :size) 21) "QrCode should pick larger versions for longer input"))
 
+(fn qr-code-numeric-mode-optimization []
+    (local qr (QrCode.encode (string.rep "1" 30)))
+    (assert (= (. qr :size) 21)
+            "QrCode should use numeric mode packing to fit 30 digits in version 1"))
+
+(fn qr-code-url-mode-optimization []
+    (local value "https://example.com/path?a=1&b=2")
+    (local qr (QrCode.encode value))
+    (assert (<= (. qr :size) 29)
+            "QrCode should optimize URL-like payloads across modes"))
+
 (fn qr-code-widget-renders []
     (local ctx (make-test-ctx))
     (local baseline-triangle-count (ctx.triangle-vector:length))
@@ -60,13 +71,20 @@
     (set widget.layout.rotation (glm.quat 1 0 0 0))
     (widget.layout:layouter)
     (local rendered-triangle-count (ctx.triangle-vector:length))
-    (assert (> rendered-triangle-count baseline-triangle-count)
-            "QrCodeWidget should render triangle geometry for modules")
+    (assert (= rendered-triangle-count baseline-triangle-count)
+            "QrCodeWidget should not emit per-module triangle geometry")
+    (var image-floats 0)
+    (each [_ batch (pairs ctx.image-batches)]
+        (set image-floats (+ image-floats (batch.vector:length))))
+    (assert (> image-floats 0)
+            "QrCodeWidget should render via image batch texture")
     (assert (> dark-count 0))
     (widget:drop))
 
 (table.insert tests {:name "QrCode basic patterns" :fn qr-code-basic-patterns})
 (table.insert tests {:name "QrCode version upgrade" :fn qr-code-version-upgrade})
+(table.insert tests {:name "QrCode numeric mode optimization" :fn qr-code-numeric-mode-optimization})
+(table.insert tests {:name "QrCode URL mode optimization" :fn qr-code-url-mode-optimization})
 (table.insert tests {:name "QrCode widget renders" :fn qr-code-widget-renders})
 
 (local main

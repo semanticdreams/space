@@ -4,6 +4,7 @@
 (local Text (require :text))
 (local TextStyle (require :text-style))
 (local MathUtils (require :math-utils))
+(local {: resolve-qr-colors} (require :widget-theme-utils))
 
 (local tests [])
 
@@ -72,9 +73,18 @@
   (assert (= style.bold-italic-font theme.bold-italic-font))
   (set app.themes previous))
 
+(fn qr-colors-default-to-theme []
+  (local theme {:qr-code {:foreground (glm.vec4 0.1 0.2 0.3 1)
+                          :background (glm.vec4 0.95 0.96 0.97 1)}})
+  (local ctx (make-test-ctx {:theme theme}))
+  (local colors (resolve-qr-colors ctx {}))
+  (assert (color= colors.foreground theme.qr-code.foreground))
+  (assert (color= colors.background theme.qr-code.background)))
+
 (table.insert tests {:name "Card pulls colors from theme" :fn card-defaults-to-theme-colors})
 (table.insert tests {:name "Text defaults to theme foreground color" :fn text-defaults-to-theme-color})
 (table.insert tests {:name "TextStyle resolves bold/italic fonts from theme" :fn text-style-picks-theme-font-variants})
+(table.insert tests {:name "QR colors default to theme values" :fn qr-colors-default-to-theme})
 
 (local main
   (fn []

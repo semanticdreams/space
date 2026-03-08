@@ -118,10 +118,28 @@
    :focus-outline focus-outline
    :variant variant})
 
+(fn resolve-qr-colors [ctx options]
+  (local opts (or options {}))
+  (local theme (and ctx ctx.theme))
+  (local qr-theme (and theme theme.qr-code))
+  (local foreground
+    (or opts.foreground
+        opts.color
+        (and qr-theme qr-theme.foreground)
+        (glm.vec4 0 0 0 1)))
+  (local background
+    (or opts.background
+        opts.background-color
+        (and qr-theme qr-theme.background)
+        (glm.vec4 1 1 1 1)))
+  {:foreground foreground
+   :background background})
+
 {:clamp01 clamp01
  :adjust adjust
  :make-button-variant make-button-variant
  :resolve-input-colors resolve-input-colors
  :resolve-padding resolve-padding
  :get-button-theme-colors get-button-theme-colors
- :resolve-button-colors resolve-button-colors}
+ :resolve-button-colors resolve-button-colors
+ :resolve-qr-colors resolve-qr-colors}

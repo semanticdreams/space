@@ -2,6 +2,7 @@
 (local DefaultDialog (require :default-dialog))
 (local {: Flex : FlexChild} (require :flex))
 (local gl (require :gl))
+(local glm (require :glm))
 (local Padding (require :padding))
 (local {: QrCodeWidget} (require :qr-code-widget))
 (local Text (require :text))
@@ -226,8 +227,10 @@
         (local builder
             (QrCodeWidget {:name "wallet-receive-qr"
                            :allow-empty? true
-                           :module-size 0.4
-                           :quiet-zone 4}))
+                           :module-size 0.32
+                           :quiet-zone 4
+                           :foreground (glm.vec4 0 0 0 1)
+                           :background (glm.vec4 1 1 1 1)}))
         (local element (builder child-ctx))
         (set qr-widget element)
         (update-current options.current-wallet)
