@@ -73,11 +73,23 @@
        (fn [name _bytes]
          (stub name "<bytes>")))
   (set textures.load-texture-from-bytes-async textures.load-texture-from-bytes)
-  (when (not textures.get-texture)
-    (local loaded {})
-    (set textures.get-texture
-         (fn [_name]
-           (error "textures.get_texture not implemented in tests"))))
+  (set textures.load-texture-from-pixels
+       (fn [name width height _channels _bytes]
+         (local tex (stub name "<pixels>"))
+         (set tex.width width)
+         (set tex.height height)
+         tex))
+  (set textures.get-texture
+       (fn [name]
+         (or (. loaded name)
+             (stub name "<lazy>"))))
+  (set textures.drop-texture
+       (fn [name]
+         (if (. loaded name)
+             (do
+               (set (. loaded name) nil)
+               true)
+             false)))
   (when (not textures.load-cubemap)
     (local cube-stub (fn [_files] {:id 1 :ready true}))
     (set textures.load-cubemap cube-stub)
@@ -106,15 +118,29 @@
   (when textures
     (set textures.load-texture
          (fn [name path]
-           {:id (tonumber (tostring (string.byte name 1) 10))
-            :name name :path path}))
+           (stub name path)))
     (set textures.load-texture-async textures.load-texture)
     (set textures.load-texture-from-bytes
          (fn [name _bytes]
            (textures.load-texture name "<bytes>")))
     (set textures.load-texture-from-bytes-async textures.load-texture-from-bytes)
-    (when (not textures.get-texture)
-      (set textures.get-texture (fn [_name] (error "textures.get_texture not implemented in tests"))))
+    (set textures.load-texture-from-pixels
+         (fn [name width height _channels _bytes]
+           (local tex (stub name "<pixels>"))
+           (set tex.width width)
+           (set tex.height height)
+           tex))
+    (set textures.get-texture
+         (fn [name]
+           (or (. loaded name)
+               (stub name "<lazy>"))))
+    (set textures.drop-texture
+         (fn [name]
+           (if (. loaded name)
+               (do
+                 (set (. loaded name) nil)
+                 true)
+               false)))
     (when (not textures.load-cubemap)
       (set textures.load-cubemap (fn [_files] {:id 1}))
       (set textures.load-cubemap-async textures.load-cubemap)))

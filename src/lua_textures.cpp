@@ -111,6 +111,18 @@ Texture2D& lua_get_texture(const std::string& name) {
     return ResourceManager::getTexture(name);
 }
 
+bool lua_drop_texture(const std::string& name) {
+    auto it = ResourceManager::textures.find(name);
+    if (it == ResourceManager::textures.end()) {
+        return false;
+    }
+    if (it->second.id != 0) {
+        glDeleteTextures(1, &it->second.id);
+    }
+    ResourceManager::textures.erase(it);
+    return true;
+}
+
 TextureCubemap& lua_load_cubemap(sol::as_table_t<std::vector<std::string>> files) {
     static int counter = 0;
     std::string name = "__cubemap_sync_" + std::to_string(counter++);
@@ -189,6 +201,7 @@ sol::table create_textures_table(sol::state_view lua)
         &lua_load_texture_from_bytes_async_flipped_cb));
     textures_table.set_function("load-texture-from-pixels", &lua_load_texture_from_pixels);
     textures_table.set_function("get-texture", &lua_get_texture);
+    textures_table.set_function("drop-texture", &lua_drop_texture);
     textures_table.set_function("load-cubemap", &lua_load_cubemap);
     textures_table.set_function("load-cubemap-async", &lua_load_cubemap_async);
     return textures_table;

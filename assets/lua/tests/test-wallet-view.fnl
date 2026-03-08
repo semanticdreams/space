@@ -58,6 +58,7 @@
     (local hoverables (Hoverables {:intersectables intersector}))
     (local triangle (make-vector-buffer))
     (local text-buffer (make-vector-buffer))
+    (local image-batches {})
     (local icons (make-icons-stub))
     (local ctx {:triangle-vector triangle})
     (set ctx.get-text-vector (fn [_self _font] text-buffer))
@@ -69,6 +70,17 @@
     (set ctx.clickables clickables)
     (set ctx.hoverables hoverables)
     (set ctx.icons icons)
+    (set ctx.get-image-batch
+         (fn [_self texture]
+             (assert (and texture texture.id) "WalletView test image batch requires texture id")
+             (local id texture.id)
+             (when (not (. image-batches id))
+                 (set (. image-batches id)
+                      {:texture texture
+                       :vector (make-vector-buffer)
+                       :id id}))
+             (. image-batches id)))
+    (set ctx.image-batches image-batches)
     ctx)
 
 (fn resolve-dialog-element [dialog]
@@ -222,7 +234,14 @@
                    :name "Wallet"
                    :coin "arbitrumnova"
                    :address "0xabc"})
-    (gl.clipboard-set "placeholder")
+    (var clipboard "placeholder")
+    (local original-clipboard-set gl.clipboard-set)
+    (local original-clipboard-get gl.clipboard-get)
+    (set gl.clipboard-set (fn [value]
+                            (set clipboard value)
+                            true))
+    (set gl.clipboard-get (fn []
+                            clipboard))
     (local dialog
         ((WalletView {:target target
                       :manager manager
@@ -231,6 +250,8 @@
     (local address-row (find-address-row dialog))
     (address-row.button:on-click {:button 1})
     (assert (= (gl.clipboard-get) "0xabc") "WalletView should copy address")
+    (set gl.clipboard-set original-clipboard-set)
+    (set gl.clipboard-get original-clipboard-get)
     (dialog:drop))
 
 (table.insert tests {:name "WalletView copy address" :fn wallet-view-copy-address})

@@ -1,62 +1,96 @@
+(local gl (require :gl))
 (local glm (require :glm))
 (local QrCode (require :qr-code))
+(local RawImage (require :raw-image))
 (local Rectangle (require :rectangle))
 (local Stack (require :stack))
+(local textures (require :textures))
+(local {: resolve-qr-colors} (require :widget-theme-utils))
 (local {: Layout : resolve-mark-flag} (require :layout))
+
+(var qr-texture-counter 0)
+
+(fn next-texture-name []
+    (set qr-texture-counter (+ qr-texture-counter 1))
+    (.. "qr-code-widget/" qr-texture-counter))
+
+(fn clamp-byte [value]
+    (local scaled (math.floor (+ 0.5 (* 255 (or value 0)))))
+    (math.max 0 (math.min 255 scaled)))
+
+(fn build-qr-pixels [qr quiet-zone grid-size dark-color light-color]
+    (local dark-r (clamp-byte dark-color.x))
+    (local dark-g (clamp-byte dark-color.y))
+    (local dark-b (clamp-byte dark-color.z))
+    (local dark-a (clamp-byte dark-color.w))
+    (local light-r (clamp-byte light-color.x))
+    (local light-g (clamp-byte light-color.y))
+    (local light-b (clamp-byte light-color.z))
+    (local light-a (clamp-byte light-color.w))
+    (local dark (string.char dark-r dark-g dark-b dark-a))
+    (local light (string.char light-r light-g light-b light-a))
+    (local size (. qr :size))
+    (local rows [])
+    (for [grid-y 0 (- grid-size 1)]
+        (local row [])
+        (local qr-y (- grid-y quiet-zone))
+        (for [grid-x 0 (- grid-size 1)]
+            (local qr-x (- grid-x quiet-zone))
+            (if (and (>= qr-x 0)
+                     (< qr-x size)
+                     (>= qr-y 0)
+                     (< qr-y size)
+                     (qr:get qr-x qr-y))
+                (table.insert row dark)
+                (table.insert row light)))
+        (table.insert rows (table.concat row)))
+    (table.concat rows))
+
+(fn configure-texture [texture]
+    (assert texture "QrCodeModules failed to allocate texture")
+    (set texture.filterMin gl.GL_NEAREST)
+    (set texture.filterMax gl.GL_NEAREST)
+    (set texture.wrapS gl.GL_CLAMP_TO_EDGE)
+    (set texture.wrapT gl.GL_CLAMP_TO_EDGE))
 
 (fn build-qr-modules [options ctx]
     (assert ctx "QrCodeModules requires a build context")
-    (assert ctx.triangle-vector "QrCodeModules requires ctx.triangle-vector")
+    (assert ctx.get-image-batch "QrCodeModules requires image batch support")
+    (assert textures.load-texture-from-pixels "QrCodeModules requires textures.load-texture-from-pixels")
+    (assert textures.get-texture "QrCodeModules requires textures.get-texture")
+    (assert textures.drop-texture "QrCodeModules requires textures.drop-texture")
 
     (local module-size (or options.module-size 0.4))
     (local quiet-zone (or options.quiet-zone 4))
     (local color (or options.color (glm.vec4 0 0 0 1)))
+    (local background-color (or options.background-color (glm.vec4 1 1 1 1)))
     (local allow-empty? (= options.allow-empty? true))
 
+    (local texture-name (next-texture-name))
+    (local transparent-pixel (string.char 0 0 0 0))
+    (var texture (textures.get-texture texture-name))
+    (configure-texture texture)
+    (set texture (textures.load-texture-from-pixels texture-name 1 1 4 transparent-pixel true))
+    (local raw-image ((RawImage {:texture texture}) ctx))
+
     (var value nil)
-    (var qr nil)
-    (var module-positions [])
-    (var module-count 0)
     (var grid-size 0)
-    (var handle nil)
-    (var handle-size 0)
     (var visible? true)
-
-    (fn release-handle []
-        (when handle
-            (when (and ctx ctx.untrack-triangle-handle)
-                (ctx:untrack-triangle-handle handle))
-            (ctx.triangle-vector:delete handle)
-            (set handle nil)
-            (set handle-size 0)))
-
-    (fn ensure-handle []
-        (if (<= module-count 0)
-            (release-handle)
-            (do
-                (local desired (* module-count 6 8))
-                (when (or (not handle) (not (= handle-size desired)))
-                    (release-handle)
-                    (set handle-size desired)
-                    (set handle (ctx.triangle-vector:allocate desired))))))
 
     (fn rebuild []
         (if value
             (do
-                (set qr (QrCode.encode value {:ecc options.ecc}))
-                (local size (. qr :size))
-                (set grid-size (+ size (* quiet-zone 2)))
-                (set module-positions [])
-                (for [y 0 (- size 1)]
-                    (for [x 0 (- size 1)]
-                        (when (qr:get x y)
-                            (table.insert module-positions [x y]))))
-                (set module-count (# module-positions)))
-            (do
-                (set qr nil)
-                (set module-positions [])
-                (set module-count 0)
-                (set grid-size 0))))
+                (local qr (QrCode.encode value {:ecc options.ecc}))
+                (set grid-size (+ (. qr :size) (* quiet-zone 2)))
+                (local pixels (build-qr-pixels qr quiet-zone grid-size color background-color))
+                (configure-texture texture)
+                (set texture (textures.load-texture-from-pixels texture-name
+                                                                grid-size
+                                                                grid-size
+                                                                4
+                                                                pixels))
+                (set raw-image.texture texture))
+            (set grid-size 0)))
 
     (fn measurer [self]
         (if (> grid-size 0)
@@ -65,39 +99,17 @@
                 (set self.measure (glm.vec3 dimension dimension 0)))
             (set self.measure (glm.vec3 0 0 0))))
 
-    (fn write-vertex [offset position rotation x y depth-index]
-        (local point (rotation:rotate (glm.vec3 x y 0)))
-        (ctx.triangle-vector:set-glm-vec3 handle offset (+ position point))
-        (ctx.triangle-vector:set-glm-vec4 handle (+ offset 3) color)
-        (ctx.triangle-vector:set-float handle (+ offset 7) depth-index))
-
     (fn layouter [self]
-        (local should-render (and visible? (not (self:effective-culled?)) (> module-count 0)))
-        (if (not should-render)
-            (release-handle)
-            (do
-                (ensure-handle)
-                (local depth-index (or self.depth-offset-index 0))
-                (local rotation (or self.rotation (glm.quat 1 0 0 0)))
-                (local position (or self.position (glm.vec3 0 0 0)))
-                (var vertex-index 0)
-                (each [_ pos (ipairs module-positions)]
-                    (local x (. pos 1))
-                    (local y (. pos 2))
-                    (local x0 (* (+ quiet-zone x) module-size))
-                    (local y0 (* (+ quiet-zone (- (. qr :size) 1 y)) module-size))
-                    (local x1 (+ x0 module-size))
-                    (local y1 (+ y0 module-size))
-                    (local base-offset (* vertex-index 8))
-                    (write-vertex base-offset position rotation x0 y0 depth-index)
-                    (write-vertex (+ base-offset 8) position rotation x0 y1 depth-index)
-                    (write-vertex (+ base-offset 16) position rotation x1 y1 depth-index)
-                    (write-vertex (+ base-offset 24) position rotation x1 y1 depth-index)
-                    (write-vertex (+ base-offset 32) position rotation x1 y0 depth-index)
-                    (write-vertex (+ base-offset 40) position rotation x0 y0 depth-index)
-                    (set vertex-index (+ vertex-index 6)))
-                (when (and ctx ctx.track-triangle-handle)
-                    (ctx:track-triangle-handle handle self.clip-region)))))
+        (local should-render (and visible? (not (self:effective-culled?)) (> grid-size 0)))
+        (raw-image:set-visible should-render)
+        (when should-render
+            (local dimension (* grid-size module-size))
+            (set raw-image.size (glm.vec3 dimension dimension 0))
+            (set raw-image.position self.position)
+            (set raw-image.rotation self.rotation)
+            (set raw-image.depth-offset-index (or self.depth-offset-index 0))
+            (set raw-image.clip-region self.clip-region)
+            (raw-image:update)))
 
     (local layout
         (Layout {:name (or options.name "qr-code")
@@ -124,7 +136,8 @@
     {:layout layout
      :drop (fn [_self]
                 (layout:drop)
-                (release-handle))
+                (raw-image:drop)
+                (textures.drop-texture texture-name))
      :set-value set-value
      :get-value get-value
      :set-visible set-visible})
@@ -135,13 +148,15 @@
         (build-qr-modules options ctx)))
 
 (fn build-qr-widget [options ctx]
-    (local background-color (or options.background (glm.vec4 1 1 1 1)))
+    (local colors (resolve-qr-colors ctx options))
+    (local background-color colors.background)
     (local modules-builder
         (QrCodeModules {:value options.value
                         :allow-empty? options.allow-empty?
                         :module-size options.module-size
                         :quiet-zone options.quiet-zone
-                        :color (or options.foreground (glm.vec4 0 0 0 1))
+                        :color colors.foreground
+                        :background-color background-color
                         :ecc options.ecc
                         :name options.name}))
     (local stack-builder

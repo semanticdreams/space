@@ -67,6 +67,8 @@
                   :light (glm.vec4 0.94 0.95 0.97 1.0)}
    :card {:background (glm.vec4 0.96 0.97 0.98 1)
           :foreground text-color}
+   :qr-code {:foreground (glm.vec4 0.08 0.1 0.13 1)
+             :background (glm.vec4 1 1 1 1)}
    :input {:background input-base
            :hover-background (adjust input-base -0.03)
            :focused-background (adjust input-base -0.05)
