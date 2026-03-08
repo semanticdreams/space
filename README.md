@@ -243,7 +243,7 @@ Soak thresholds (optional):
 
 ## Contribute
 
-Create a [discussion here on GitHub](https://github.com/semanticdreams/space/discussions). Join the community on [Matrix](https://matrix.to/#/#semanticdreams42:matrix.org).
+Create a [discussion here on GitHub](https://github.com/semanticdreams/space/discussions). Join the community on [Matrix](https://matrix.to/#/#spaceui.org:matrix.org).
 
 ## Profiling the Fennel Runtime
 
