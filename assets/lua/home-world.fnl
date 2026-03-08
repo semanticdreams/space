@@ -59,6 +59,21 @@
    :scene {:panels []}
    :hud {:panels []}})
 
+(fn resolve-graph-core-state [state]
+  (local payload (or state {}))
+  (if (and (= (type payload.graph) :table))
+      payload.graph
+      {:nodes (or payload.nodes [])
+       :edges (or payload.edges [])}))
+
+(fn resolve-graph-views-state [state]
+  (local payload (or state {}))
+  (if (and (= (type payload.views) :table))
+      payload.views
+      (if (and (= (type payload.open-node-keys) :table))
+          {:open-node-keys payload.open-node-keys}
+          {})))
+
 (fn read-world-state [path]
   (if (not (fs.exists path))
       (default-state)
@@ -181,6 +196,14 @@
     (set physics-state.floor-y floor-y)
     (set world.state.physics physics-state))
 
+  (fn queue-runtime-restore-state [world]
+    (local runtime world.runtime)
+    (when runtime
+      (set runtime.pending-graph-views-state
+           (clone-table (resolve-graph-views-state (and world.state world.state.graph))))
+      (set runtime.pending-hud-state
+           (clone-table (and world.state world.state.hud)))))
+
   (fn create-runtime [world ctx]
     (local camera-state (or (and world.state world.state.camera) {}))
     (local floor-y (apply-runtime-floor! world))
@@ -230,21 +253,6 @@
                   :camera camera
                   :pointer-target scene
                   :data-dir world.dir}))
-    (fn resolve-graph-core-state [state]
-      (local payload (or state {}))
-      (if (and (= (type payload.graph) :table))
-          payload.graph
-          {:nodes (or payload.nodes [])
-           :edges (or payload.edges [])}))
-
-    (fn resolve-graph-views-state [state]
-      (local payload (or state {}))
-      (if (and (= (type payload.views) :table))
-          payload.views
-          (if (and (= (type payload.open-node-keys) :table))
-              {:open-node-keys payload.open-node-keys}
-              {})))
-
     (local graph-state (resolve-graph-core-state world.state.graph))
     (local graph-views-state (resolve-graph-views-state world.state.graph))
     (scene:build-default)
@@ -315,7 +323,9 @@
     (apply-runtime-floor! world)
     (set world.active? true))
 
-  (fn deactivate [world _ctx reason]
+  (fn deactivate [world ctx reason]
+    (capture-runtime-state world ctx)
+    (queue-runtime-restore-state world)
     (set world.active? false)
     (when reason
       (logging.info (string.format "[world] %s deactivated (%s)" world.id reason))))

@@ -253,6 +253,32 @@
               "World drop should capture runtime floor into persisted state")
       true)))
 
+(fn home-world-deactivate-queues-hud-and-graph-restore-state []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:camera {:position [0 0 0]
+                     :rotation [1 0 0 0]}
+            :graph-view {:capture-state (fn [_self]
+                                          {:graph {:nodes []
+                                                   :edges []}
+                                           :views {:open-node-keys ["node-a"]}})}})
+      (world:deactivate {:hud {:capture-state (fn [_self]
+                                                {:panels [{:kind "dialog/demo"}]})}}
+                        "switch")
+      (assert (= (length world.runtime.pending-graph-views-state.open-node-keys) 1)
+              "World deactivate should queue graph view state for restore")
+      (assert (= (. (. world.runtime.pending-hud-state.panels 1) :kind) "dialog/demo")
+              "World deactivate should queue hud panel state for restore")
+      true)))
+
 (table.insert tests {:name "WorldManager creates and activates default home world"
                      :fn manager-creates-and-activates-default-home})
 (table.insert tests {:name "WorldManager adds and switches home tabs"
@@ -275,6 +301,8 @@
                      :fn home-world-activate-reapplies-runtime-floor})
 (table.insert tests {:name "HomeWorld captures runtime floor on drop"
                      :fn home-world-captures-runtime-floor-on-drop})
+(table.insert tests {:name "HomeWorld deactivate queues hud and graph restore state"
+                     :fn home-world-deactivate-queues-hud-and-graph-restore-state})
 
 (local main
   (fn []
