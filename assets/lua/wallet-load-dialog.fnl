@@ -13,7 +13,7 @@
         (.. name " - " wallet.address)
         name))
 
-(fn build-wallet-load-dialog [options ctx]
+(fn build-wallet-load-dialog [options ctx runtime-opts]
     (local store (or options.store (WalletStore {})))
     (local wallets (store:list-wallets))
     (var dialog nil)
@@ -74,13 +74,13 @@
                         :on-close options.on-close
                         :child (Padding {:edge-insets [0.6 0.6]
                                          :child content})}))
-    (set dialog (dialog-builder ctx))
+    (set dialog (dialog-builder ctx runtime-opts))
     dialog)
 
 (fn WalletLoadDialog [opts]
     (local options (or opts {}))
-    (fn [ctx]
-        (build-wallet-load-dialog options ctx)))
+    (fn [ctx runtime-opts]
+        (build-wallet-load-dialog options ctx runtime-opts)))
 
 (local exports {:WalletLoadDialog WalletLoadDialog})
 
