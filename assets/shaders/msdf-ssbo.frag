@@ -1,5 +1,6 @@
 #version 430 core
 
+#include "clipping.glsl"
 #include "depth-bias.glsl"
 
 in vec2 texCoord;
@@ -38,9 +39,7 @@ float median(float r, float g, float b) {
 
 void main() {
     uint clipIndex = groupClipIndex[groupIndex];
-    vec4 clipPos = clipMatrix[clipIndex] * vec4(worldPos, 1.0);
-    if (clipPos.x < -1.0 || clipPos.x > 1.0 ||
-        clipPos.y < -1.0 || clipPos.y > 1.0) {
+    if (isClipped(clipMatrix[clipIndex], worldPos)) {
         discard;
     }
     vec3 msd = texture(msdf, texCoord).rgb;
