@@ -239,6 +239,32 @@
       (assert (>= (renderer:get-last-upload-seconds) 0)
               "quad renderer should expose upload timing"))))
 
+(fn quad-renderer-updates-dirty-instance-window []
+  (with-open-gl
+    (fn [mock]
+      (local QuadRenderer (reload "quad-renderer"))
+      (local renderer (QuadRenderer))
+      (local vector (VectorBuffer 0))
+      (local handle (vector:allocate (* 21 2)))
+      (vector:set-glm-mat4 handle 0 (glm.mat4 1))
+      (vector:set-glm-vec4 handle 16 (glm.vec4 1 1 1 1))
+      (vector:set-float handle 20 0)
+      (local clip-vector (fake-vector 16))
+      (local clip-group-vector (fake-vector 2))
+      (local batches [{:model nil :firsts [0] :counts [2]}])
+      (renderer:render vector {:projection true} {:view true} batches clip-vector clip-group-vector)
+
+      (mock:reset)
+      (vector:set-float handle 0 2.0)
+      (renderer:render vector {:projection true} {:view true} batches clip-vector clip-group-vector)
+
+      (local sub-updates
+        (collect-calls (mock:get-gl-calls "bufferSubDataFromVectorBuffer")
+                       "bufferSubDataFromVectorBuffer"
+                       (fn [args] (= args.target gl.GL_ARRAY_BUFFER))))
+      (assert (= (# sub-updates) 1)
+              "quad renderer should issue one dirty subdata update for instance data changes"))))
+
 (fn mesh-renderer-draws-textured-triangles []
   (with-open-gl
     (fn [mock]
@@ -360,6 +386,8 @@
 (table.insert tests {:name "Point renderer uses instanced quads" :fn point-renderer-uses-instanced-quads})
 (table.insert tests {:name "Quad renderer draws instanced batches with clipping and lighting"
                      :fn quad-renderer-draws-instanced-batches-with-clipping-and-lighting})
+(table.insert tests {:name "Quad renderer updates dirty instance window"
+                     :fn quad-renderer-updates-dirty-instance-window})
 (table.insert tests {:name "Mesh renderer draws textured triangles" :fn mesh-renderer-draws-textured-triangles})
 (table.insert tests {:name "Text renderer uploads font metadata and texture" :fn text-renderer-uploads-font-state})
 (table.insert tests {:name "Image renderer uses draw batcher and fallback draws" :fn image-renderer-respects-draw-batcher})

@@ -5,8 +5,8 @@
 (fn ClipUtils.matrix-key [matrix]
   (assert (glm.is-mat4 matrix)
           "ClipUtils.matrix-key requires glm.mat4")
-  (assert glm.mat4-key "ClipUtils.matrix-key requires glm.mat4-key binding")
-  (glm.mat4-key matrix))
+  (assert glm.mat4-hash-key "ClipUtils.matrix-key requires glm.mat4-hash-key binding")
+  (glm.mat4-hash-key matrix))
 
 (fn clip-matrix-from-bounds [bounds]
   (if (not bounds)
