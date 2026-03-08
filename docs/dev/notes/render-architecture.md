@@ -207,6 +207,23 @@ We avoided unconditional per-frame sorting of draw segments because:
 - Works well with “contiguous range coalescing”: we can convert many handles into a few ranges.
 - Pairs naturally with dirty-range uploads: buffer stays stable while draw segmentation changes.
 
+## Quad Stream Stability Note (post-instanced-quad migration)
+
+The UI quad path (`assets/lua/quad-renderer.fnl`) previously used a rotating stream-buffer ring.
+In practice, this introduced visual instability in live world switching scenarios:
+
+- rectangles could flicker between stale and fresh transforms/colors
+- hover backgrounds could appear to "stick" or oscillate
+
+Root cause: dirty-range updates and slot rotation can diverge when slots are not guaranteed to hold identical instance state at every frame boundary.
+
+Current policy:
+
+- use a **single authoritative stream slot** for quad instance uploads
+- keep uploads deterministic (full upload on vector/size changes, subdata on dirty ranges)
+
+This trades a small amount of theoretical overlap throughput for strict correctness and stable visuals. If ring streaming is reintroduced later, it must be accompanied by explicit per-slot coherency/versioning guarantees and regression coverage for world-switch/hover flicker.
+
 ## Future Optimizations (practical next steps)
 
 These are ordered roughly from “smallest change” to “bigger architectural shift”.
