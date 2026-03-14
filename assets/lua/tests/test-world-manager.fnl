@@ -1,5 +1,6 @@
 (local tests [])
 (local fs (require :fs))
+(local bt (require :bt))
 (local WorldManager (require :world-manager))
 (local HomeWorld (require :home-world))
 (local PhysicsFloor (require :physics-floor))
@@ -48,6 +49,47 @@
      :get-runtime (fn [_self] runtime)
      :get-hud-contrib (fn [_self] nil)}))
 
+(fn make-physics-count-world-factory []
+  (fn [opts]
+    (var body nil)
+    (fn remove-body []
+      (when (and body app.engine app.engine.physics)
+        (app.engine.physics:removeRigidBody body)
+        (set body nil)))
+    (fn create-body []
+      (when (and (not body) app.engine app.engine.physics bt)
+        (local shape (bt.StaticPlaneShape (bt.Vector3 0 1 0) 0))
+        (local transform (bt.Transform))
+        (transform:setIdentity)
+        (local motion-state (bt.DefaultMotionState transform))
+        (local zero (bt.Vector3 0 0 0))
+        (local info (bt.RigidBodyConstructionInfo 0 motion-state shape zero))
+        (set body (bt.RigidBody info))
+        (app.engine.physics:addRigidBody body)))
+    {:id opts.id
+     :name opts.name
+     :type opts.type
+     :dir opts.dir
+     :init (fn [_self _ctx] nil)
+     :activate (fn [_self _ctx] (create-body))
+     :deactivate (fn [_self _ctx _reason] nil)
+     :suspend (fn [_self _ctx] (remove-body))
+     :resume (fn [_self _ctx] (create-body))
+     :drop (fn [_self _ctx _reason] (remove-body))
+     :update (fn [_self _delta _opts] nil)
+     :get-runtime (fn [_self] {:camera {:id (.. "camera-" opts.id)}
+                               :scene {:id (.. "scene-" opts.id)}
+                               :graph {:id (.. "graph-" opts.id)}})
+     :get-hud-contrib (fn [_self] nil)}))
+
+(fn collision-object-count []
+  (assert (and app.engine app.engine.physics app.engine.physics.getWorld)
+          "Physics world is required for collision object counting")
+  (local world (app.engine.physics:getWorld))
+  (assert world "Physics.getWorld returned nil")
+  (local objects (world:getCollisionObjectArray))
+  (length objects))
+
 (fn manager-creates-and-activates-default-home []
   (with-temp-dir
     (fn [root]
@@ -85,6 +127,7 @@
       (assert (= second.name "home-2") "expected second home world to be named home-2")
       (assert (not (= first-id (manager:active-world-id))) "active world should switch to new world")
       (assert (= (. stats.deactivate first-id) 1) "first world should deactivate once")
+      (assert (= (. stats.suspend first-id) 1) "first world should suspend immediately on switch")
       (local tabs (manager:list-tabs))
       (assert (= (length tabs) 2) "expected two tabs after create-home-world")
       true)))
@@ -146,6 +189,43 @@
       (assert (string.find (tostring err) "failed to parse")
               "Expected parse failure for invalid world index")
       true)))
+
+(fn manager-switch-suspends-inactive-world-in-physics []
+  (with-temp-dir
+    (fn [root]
+      (assert bt "Physics integration test requires bt module")
+      (assert (and app.engine app.engine.physics) "Physics integration test requires engine physics")
+      (local baseline (collision-object-count))
+      (local manager
+        (WorldManager {:root-dir root
+                       :create-world (make-physics-count-world-factory)
+                       :context-fn (fn [] {})}))
+      (var ok false)
+      (var err-msg nil)
+      (local (ok-run err-or-nil)
+        (pcall
+          (fn []
+            (manager:activate-first)
+            (local after-first (collision-object-count))
+            (assert (= after-first (+ baseline 1))
+                    (string.format "Expected one active-world body (baseline=%d after-first=%d)"
+                                   baseline after-first))
+            (manager:create-home-world {:activate? true})
+            (local after-switch (collision-object-count))
+            (assert (= after-switch (+ baseline 1))
+                    (string.format "Expected switch to keep exactly one world body (baseline=%d after-switch=%d)"
+                                   baseline after-switch))
+            (set ok true))))
+      (when (not ok-run)
+        (set err-msg err-or-nil))
+      (manager:drop)
+      (local final-count (collision-object-count))
+      (assert (= final-count baseline)
+              (string.format "WorldManager.drop should restore physics object count (baseline=%d final=%d)"
+                             baseline final-count))
+      (when (not ok-run)
+        (error err-msg))
+      ok)))
 
 (fn home-world-errors-on-corrupt-state []
   (with-temp-dir
@@ -279,6 +359,59 @@
               "World deactivate should queue hud panel state for restore")
       true)))
 
+(fn home-world-new-state-seeds-default-terrain []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (assert (= (type terrains) :table) "Expected world scene terrains table")
+      (assert (= (length terrains) 1) "Expected exactly one default terrain for new world")
+      (assert (= (. (. terrains 1) :kind) "flat-terrain") "Default terrain should be flat-terrain")
+      true)))
+
+(fn home-world-preserves-explicit-empty-terrain-list []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (assert (= (type terrains) :table) "Expected terrain list to remain a table")
+      (assert (= (length terrains) 0) "Expected explicit empty terrain list to be preserved")
+      true)))
+
+(fn home-world-preserves-unknown-terrain-kind-state []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[{\"id\":\"t-1\",\"kind\":\"voxel-terrain\",\"options\":{\"chunk-size\":32}}]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (assert (= (type terrains) :table) "Expected terrain list table")
+      (assert (= (length terrains) 1) "Expected unknown terrain record to be preserved")
+      (local terrain (. terrains 1))
+      (assert (= terrain.kind "voxel-terrain") "Expected unknown terrain kind to remain unchanged")
+      (assert (= terrain.id "t-1") "Expected unknown terrain id to remain unchanged")
+      true)))
+
 (table.insert tests {:name "WorldManager creates and activates default home world"
                      :fn manager-creates-and-activates-default-home})
 (table.insert tests {:name "WorldManager adds and switches home tabs"
@@ -289,6 +422,8 @@
                      :fn manager-colon-activate-index-regression})
 (table.insert tests {:name "WorldManager errors on corrupt index"
                      :fn manager-errors-on-corrupt-index})
+(table.insert tests {:name "WorldManager switch suspends inactive world in physics"
+                     :fn manager-switch-suspends-inactive-world-in-physics})
 (table.insert tests {:name "HomeWorld errors on corrupt state"
                      :fn home-world-errors-on-corrupt-state})
 (table.insert tests {:name "HomeWorld sanitizes poisoned camera position"
@@ -303,6 +438,12 @@
                      :fn home-world-captures-runtime-floor-on-drop})
 (table.insert tests {:name "HomeWorld deactivate queues hud and graph restore state"
                      :fn home-world-deactivate-queues-hud-and-graph-restore-state})
+(table.insert tests {:name "HomeWorld new state seeds default terrain"
+                     :fn home-world-new-state-seeds-default-terrain})
+(table.insert tests {:name "HomeWorld preserves explicit empty terrain list"
+                     :fn home-world-preserves-explicit-empty-terrain-list})
+(table.insert tests {:name "HomeWorld preserves unknown terrain kind state"
+                     :fn home-world-preserves-unknown-terrain-kind-state})
 
 (local main
   (fn []
