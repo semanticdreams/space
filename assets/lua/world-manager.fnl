@@ -156,6 +156,12 @@
       (set entry.inactive-at (os.clock))
       (set entry.suspended? false)))
 
+  (fn suspend-entry-now [entry]
+    (when (and entry entry.world (not entry.suspended?))
+      (entry.world:suspend (runtime-context))
+      (set entry.suspended? true)
+      (set entry.inactive-at nil)))
+
   (fn activate-index [idx]
     (local total (length worlds))
     (when (or (< idx 1) (> idx total))
@@ -165,7 +171,8 @@
       (lua "return true"))
     (local previous (and active-index (. worlds active-index)))
     (when previous
-      (deactivate-entry previous "switch"))
+      (deactivate-entry previous "switch")
+      (suspend-entry-now previous))
     (local entry (. worlds idx))
     (ensure-world-instance entry)
     (if entry.suspended?

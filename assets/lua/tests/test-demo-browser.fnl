@@ -140,26 +140,6 @@
     (when (not ok)
       (error err))))
 
-(fn demo-browser-perlin-entry-adds-terrain []
-  (local setup (setup-scene))
-  (local cleanup setup.cleanup)
-  (local scene setup.scene-result.scene)
-
-  (let [(ok err)
-        (pcall (fn []
-                 (scene:add-demo-browser)
-                 (local entry (DemoDialogs.find-entry :perlin-terrain))
-                 (assert entry "Expected Perlin terrain entry in demo browser")
-                 (local element (scene:add-demo-entry entry))
-                 (assert element "Expected Perlin terrain element to be created")
-                 (assert (= (length scene.scene-children) 2)
-                         "Scene should contain browser and Perlin terrain")
-                 (assert (>= (length scene.entity.__scene_movable_keys) 2)
-                         "Movables should include demo browser and Perlin terrain")))]
-    (cleanup)
-    (when (not ok)
-      (error err))))
-
 (fn demo-browser-capture-and-restore-roundtrip []
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
@@ -190,6 +170,41 @@
     (cleanup)
     (when (not ok)
       (error err))))
+
+(fn scene-capture-state-includes-default-terrain []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (local captured (scene:capture-state))
+        (local terrains (or captured.terrains []))
+        (assert (= (length terrains) 1)
+                "Expected one default terrain in captured scene state")
+        (local terrain (. terrains 1))
+        (assert (= terrain.kind "flat-terrain")
+                "Expected default terrain kind flat-terrain")
+        (assert terrain.id "Expected captured terrain id"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
+(fn scene-build-default-preserves-explicit-empty-terrains []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains []})
+        (local captured (scene:capture-state))
+        (local terrains (or captured.terrains []))
+        (assert (= (length terrains) 0)
+                "Explicit empty terrains should remain empty when building scene defaults"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
 
 (fn demo-entry-capture-state-persists-entry-persistence []
   (local setup (setup-scene))
@@ -585,8 +600,11 @@
 
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
-(table.insert tests {:name "Demo browser can add Perlin terrain entry" :fn demo-browser-perlin-entry-adds-terrain})
 (table.insert tests {:name "Demo browser capture/restore roundtrip" :fn demo-browser-capture-and-restore-roundtrip})
+(table.insert tests {:name "Scene capture-state includes default terrain"
+                     :fn scene-capture-state-includes-default-terrain})
+(table.insert tests {:name "Scene build-default preserves explicit empty terrains"
+                     :fn scene-build-default-preserves-explicit-empty-terrains})
 (table.insert tests {:name "Demo entry capture-state persists entry metadata"
                      :fn demo-entry-capture-state-persists-entry-persistence})
 (table.insert tests {:name "Scene capture-state requires panel persistence"

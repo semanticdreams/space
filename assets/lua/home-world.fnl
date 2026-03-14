@@ -13,6 +13,7 @@
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
 (local PhysicsFloor (require :physics-floor))
+(local TerrainRecords (require :scene-terrain-records))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -56,7 +57,8 @@
    :graph {:graph {:nodes []
                    :edges []}
            :views {:open-node-keys []}}
-   :scene {:panels []}
+   :scene {:panels []
+           :terrains []}
    :hud {:panels []}})
 
 (fn resolve-graph-core-state [state]
@@ -76,7 +78,7 @@
 
 (fn read-world-state [path]
   (if (not (fs.exists path))
-      (default-state)
+      nil
       (do
         (local (ok-read content) (pcall fs.read-file path))
         (if (not ok-read)
@@ -115,6 +117,10 @@
   (fn load-state [world]
     (local persisted (read-world-state world.state-path))
     (set world.state (merge-state-defaults (default-state) persisted))
+    (when (not persisted)
+      (when (not world.state.scene)
+        (set world.state.scene {}))
+      (set world.state.scene.terrains (TerrainRecords.default-records)))
     (local camera-state (or (and world.state world.state.camera) {}))
     (local raw-position camera-state.position)
     (local (ok parsed-position) (pcall array->vec3 raw-position))
@@ -255,7 +261,7 @@
                   :data-dir world.dir}))
     (local graph-state (resolve-graph-core-state world.state.graph))
     (local graph-views-state (resolve-graph-views-state world.state.graph))
-    (scene:build-default)
+    (scene:build-default {:terrains (and world.state world.state.scene world.state.scene.terrains)})
     (when (and graph graph.restore-state graph-state)
       (graph:restore-state graph-state))
     (when (and scene scene.restore-state world.state.scene)

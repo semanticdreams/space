@@ -10,7 +10,7 @@
 (local WidgetCuboid (require :widget-cuboid))
 (local GraphNodeCube (require :graph-node-cube))
 (local Sized (require :sized))
-(local FlatTerrain (require :flat-terrain))
+(local SceneWorldState (require :scene-world-state))
 (local Ball (require :ball))
 (local GltfMesh (require :gltf-mesh))
 (local BuildContext (require :build-context))
@@ -170,22 +170,36 @@
     (table.insert entries entry))
   entries)
 
-(fn make-default-builder []
-  (local terrain (FlatTerrain {}))
+(fn make-default-builder [opts]
+  (local options (or opts {}))
+  (local terrain-records
+    (SceneWorldState.resolve-terrain-records options.terrains))
+  (local terrain-entries
+    (SceneWorldState.build-terrain-entries terrain-records))
   (local scene-children [])
+  (local terrain-children [])
 
   (fn build [ctx]
     (local container-children [])
-    (table.insert container-children
-                  (fn [child-ctx]
-                    (local element (terrain child-ctx))
-                    {:element element
-                     :position (glm.vec3 -500 -100 -500)}))
+    (each [_ entry (ipairs terrain-entries)]
+      (local terrain-builder entry.builder)
+      (local terrain-record entry.record)
+      (local terrain-position entry.position)
+      (local terrain-rotation entry.rotation)
+      (table.insert container-children
+                    (fn [child-ctx]
+                      (local element (terrain-builder child-ctx))
+                      (table.insert terrain-children {:element element
+                                                      :record terrain-record})
+                      {:element element
+                       :position terrain-position
+                       :rotation terrain-rotation})))
     (local builder
       (Container {:children
                   container-children}))
     (local entity (builder ctx))
     (set entity.scene-children scene-children)
+    (set entity.scene-terrains terrain-children)
     ;(local balls
     ;  (icollect [_ metadata (ipairs entity.children)]
     ;    (and metadata metadata.element metadata.element.is-physics-ball
@@ -228,6 +242,7 @@
                :panel-restorers {}
                :demo-browser nil
                :scene-children nil
+               :scene-terrains nil
                :physics-body-count 0
                :default-position (or options.position default-position)
                :default-rotation (or options.rotation default-rotation)
@@ -716,15 +731,19 @@
       (self.entity:drop))
     (set self.entity entity)
     (set self.scene-children nil)
+    (set self.scene-terrains nil)
     (set self.demo-browser nil)
     (set self.physics-body-count 0)
     (when entity
       (set entity.__scene_base_movables (copy-movables entity.movables))
       (when (not entity.scene-children)
         (set entity.scene-children []))
+      (when (not entity.scene-terrains)
+        (set entity.scene-terrains []))
       (when (not entity.children)
         (set entity.children []))
       (set self.scene-children entity.scene-children)
+      (set self.scene-terrains entity.scene-terrains)
       (entity.layout:set-root self.layout-root)
       (local position self.default-position)
       (local resolved-position (glm.vec3 position.x position.y position.z))
@@ -748,20 +767,21 @@
         (self:attach-entity (builder self.build-context)))
       (self:attach-entity nil)))
 
-(fn build-default [self]
-  (self:build (make-default-builder)))
+(fn build-default [self opts]
+  (self:build (make-default-builder opts)))
 
 (fn update [self]
   (self:sync-physics-bodies)
   (self:sync-physics-balls)
   (self.layout-root:update))
 
-(fn drop [self]
+  (fn drop [self]
   (when self.entity
     (self:unregister-entity self.entity)
     (self.entity:drop)
     (set self.entity nil)
-    (set self.scene-children nil))
+    (set self.scene-children nil)
+    (set self.scene-terrains nil))
   (set self.demo-browser nil)
   (when (and self.focus-manager self.focus-scope)
     (self.focus-manager:detach self.focus-scope)
@@ -851,6 +871,8 @@
 
   (fn capture-state [self]
     (local panels [])
+    (local terrains
+      (SceneWorldState.capture-terrains self.scene-terrains))
     (each [_ metadata (ipairs (or self.scene-children []))]
       (local persistence (and metadata metadata.persistence))
       (assert persistence
@@ -878,7 +900,8 @@
         (set record.rotation layout-state.rotation)
         (set record.size (or layout-state.size record.size))
         (table.insert panels record)))
-    {:panels panels})
+    {:panels panels
+     :terrains terrains})
 
   (fn resolve-panel-restorer [self panel]
     (local kind panel.kind)
