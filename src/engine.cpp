@@ -193,6 +193,13 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_engine.set_function("get-input-paused", [this]() {
         return input_paused_;
     });
+    lua_engine.set_function("set-ui-paused", [this](bool paused) {
+        ui_paused_ = paused;
+        lua_engine["ui-paused"] = ui_paused_;
+    });
+    lua_engine.set_function("get-ui-paused", [this]() {
+        return ui_paused_;
+    });
     request_frame_event_type = SDL_RegisterEvents(1);
     if (request_frame_event_type == static_cast<Uint32>(-1)) {
         LOG(Warning) << "Failed to allocate request-frame event type: " << SDL_GetError();
@@ -209,6 +216,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_engine["target-fps"] = timer.getTargetFps();
     lua_engine["physics-paused"] = physics_paused_;
     lua_engine["input-paused"] = input_paused_;
+    lua_engine["ui-paused"] = ui_paused_;
     lua_bind_callbacks(*lua_state, lua_engine);
     lua_engine["physics"] = &physics;
     lua_engine["audio"] = &audio;
@@ -772,6 +780,7 @@ void Engine::run() {
 
         SDL_Event first_event {};
         bool has_first_event = false;
+        bool has_force_ui_frame = false;
         if (zero_fps_mode) {
             has_first_event = SDL_WaitEventTimeout(&first_event, 100) == 1;
             if (!has_first_event) {
@@ -779,13 +788,11 @@ void Engine::run() {
                 previous_target_fps = target_fps;
                 continue;
             }
+            has_force_ui_frame = first_event.type == request_frame_event_type;
             dt = 0;
         } else {
             dt = timer.computeDeltaTime();
         }
-
-        window->updateFpsCounter(dt);
-        window->clear();
 
         memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_SCANCODE_COUNT);
         inputState.mouseState.begin_frame();
@@ -804,6 +811,9 @@ void Engine::run() {
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            if (event.type == request_frame_event_type) {
+                has_force_ui_frame = true;
+            }
             handle_event(event);
         }
 
@@ -857,16 +867,19 @@ void Engine::run() {
 
         lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
         dispatch_lua_work();
-        {
-            sol::table events = lua_engine["events"];
-            sol::table signal = events["updated"];
-            sol::function emit = signal["emit"];
-            fennel_call_fatal(emit, static_cast<uint32_t>(dt));
+        const bool render_enabled = !ui_paused_ || has_force_ui_frame;
+        if (render_enabled) {
+            window->updateFpsCounter(dt);
+            window->clear();
+            {
+                sol::table events = lua_engine["events"];
+                sol::table signal = events["updated"];
+                sol::function emit = signal["emit"];
+                fennel_call_fatal(emit, static_cast<uint32_t>(dt));
+            }
+            frame_id.fetch_add(1, std::memory_order_relaxed);
+            window->swapBuffer();
         }
-        frame_id.fetch_add(1, std::memory_order_relaxed);
-
-
-        window->swapBuffer();
 
         if (!zero_fps_mode) {
             timer.delayTime();

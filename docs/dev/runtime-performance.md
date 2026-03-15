@@ -35,6 +35,7 @@ Each mode has policy fields:
 - `fps_cap`
 - `pause_physics`
 - `pause_input`
+- `pause_ui`
 
 ## Settings Schema
 
@@ -50,21 +51,25 @@ restore_manual_on_clear = true      # if no override is active in auto mode
 fps_cap = 60
 pause_physics = false
 pause_input = false
+pause_ui = false
 
 [runtime_performance.modes.balanced]
 fps_cap = 30
 pause_physics = false
 pause_input = false
+pause_ui = false
 
 [runtime_performance.modes.unfocused]
 fps_cap = 12
 pause_physics = false
 pause_input = false
+pause_ui = false
 
 [runtime_performance.modes.minimized]
 fps_cap = 0
 pause_physics = true
 pause_input = true
+pause_ui = true
 
 [runtime_performance.auto]
 enabled = true                      # master switch for all automatic behavior
@@ -149,6 +154,7 @@ Implementation: `assets/lua/runtime-performance.fnl`.
    - `fps_cap`
    - `pause_physics`
    - `pause_input`
+   - `pause_ui`
 
 ## What Gets Applied
 
@@ -159,7 +165,14 @@ Effects:
 - `engine.set-target-fps(fps_cap)`
 - `engine.set-physics-paused(pause_physics)`
 - `engine.set-input-paused(pause_input)`
+- `engine.set-ui-paused(pause_ui)`
 - If transitioning from `fps_cap=0` to `>0`, call `engine.request-frame()` to wake render loop.
+- App update path skips UI sections (`scene`, `hud`, `renderers`, UI next-frame queue)
+  when `pause_ui=true`, while control-plane work continues.
+
+Queue semantics:
+
+- `app.next-frame(cb)` is a UI-lane callback.
 
 State is cached as `state.last` and also mirrored in `app.*` fields for diagnostics/logging.
 
@@ -306,6 +319,8 @@ Use gameplay boost for a custom game:
 - Rule edits are currently treated as non-live (except `control_mode` / `manual_mode`, which users commonly change live).
 - `minimized` default uses `fps_cap=0` and `pause_physics=true` for maximum background cooperation.
 - `pause_physics` is mode-configurable to allow niche workloads.
+- `pause_ui` lets minimized mode freeze UI/update/render work while still allowing
+  background control-plane activity (jobs/network/callback dispatch).
 - While unfocused on X11/Xfce, minimized-class behavior is intentionally sticky
   until focus returns, to avoid false visibility clears.
 - Idle downgrade is based strictly on no input events; background compute is not considered activity.
