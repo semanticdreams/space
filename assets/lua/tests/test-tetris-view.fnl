@@ -57,9 +57,46 @@
   (set dialog.board.sync original-sync)
   (dialog:drop))
 
+(fn tetris-dialog-manages-gameplay-performance-lease []
+  (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                            :hoverables (assert app.hoverables "test requires app.hoverables")
+                            :icons icons-stub
+                            :theme (app.themes.get-active-theme)}))
+  (local builder (TetrisView.TetrisDialog {}))
+  (local dialog (builder ctx))
+  (local original-activate app.activate-runtime-performance-gameplay-lease)
+  (local original-clear app.clear-runtime-performance-gameplay-lease)
+  (local (ok err)
+    (pcall
+      (fn []
+        (var activated nil)
+        (var cleared nil)
+
+        (set app.activate-runtime-performance-gameplay-lease
+             (fn [id]
+               (set activated id)
+               {:id id}))
+        (set app.clear-runtime-performance-gameplay-lease
+             (fn [id]
+               (set cleared id)
+               true))
+
+        (dialog.game:start)
+        (assert activated "starting tetris should activate gameplay lease")
+        (assert (= activated (.. "tetris:" (tostring dialog.game))))
+        (dialog.game:pause)
+        (assert (= cleared activated) "pausing tetris should clear gameplay lease")
+        (dialog:drop))))
+  (set app.activate-runtime-performance-gameplay-lease original-activate)
+  (set app.clear-runtime-performance-gameplay-lease original-clear)
+  (if (not ok)
+      (error err)))
+
 (table.insert tests {:name "Tetris view builds blocks" :fn tetris-view-builds-blocks})
 (table.insert tests {:name "Tetris view builds dialog" :fn tetris-view-builds-dialog})
 (table.insert tests {:name "Tetris dialog idle does not sync" :fn tetris-dialog-idle-does-not-sync})
+(table.insert tests {:name "Tetris dialog manages gameplay performance lease"
+                     :fn tetris-dialog-manages-gameplay-performance-lease})
 
 (local main
   (fn []

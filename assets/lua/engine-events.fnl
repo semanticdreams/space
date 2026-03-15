@@ -16,4 +16,12 @@
  :key-up (Signal)
  :key-down (Signal)
  :window-resized (Signal)
- :window-mode-changed (Signal)}
+ :window-mode-changed (Signal)
+ :window-focus-changed (Signal)
+ :window-minimized-changed (Signal)
+ :window-occluded-changed (Signal)
+ :window-hidden-changed (Signal)
+ :app-suspended-changed (Signal)
+ :screen-locked-changed (Signal)
+ :on-battery-changed (Signal)
+ :video-playback-active-changed (Signal)}

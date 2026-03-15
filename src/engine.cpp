@@ -45,6 +45,31 @@ const char* startup_mode_to_string(WindowStartupMode mode)
     return "fullscreen";
 }
 
+const char* power_state_to_string(SDL_PowerState state)
+{
+    switch (state) {
+        case SDL_POWERSTATE_ERROR:
+            return "error";
+        case SDL_POWERSTATE_UNKNOWN:
+            return "unknown";
+        case SDL_POWERSTATE_ON_BATTERY:
+            return "on_battery";
+        case SDL_POWERSTATE_NO_BATTERY:
+            return "no_battery";
+        case SDL_POWERSTATE_CHARGING:
+            return "charging";
+        case SDL_POWERSTATE_CHARGED:
+            return "charged";
+        default:
+            return "unknown";
+    }
+}
+
+bool is_on_battery(SDL_PowerState state)
+{
+    return state == SDL_POWERSTATE_ON_BATTERY;
+}
+
 } // namespace
 
 Engine::Engine() {
@@ -130,6 +155,60 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_engine.set_function("set-text-input-enabled", [this](bool enabled) {
         this->setTextInputEnabled(enabled);
     });
+    lua_engine.set_function("set-screen-locked", [this](bool locked) {
+        sol::table payload = lua_state->create_table();
+        payload["locked"] = locked;
+        payload["timestamp"] = SDL_GetTicks();
+        emit_engine_event("screen-locked-changed", payload);
+    });
+    lua_engine.set_function("is-on-battery", []() {
+        int seconds_left = -1;
+        int percent = -1;
+        SDL_PowerState state = SDL_GetPowerInfo(&seconds_left, &percent);
+        (void)seconds_left;
+        (void)percent;
+        return is_on_battery(state);
+    });
+    lua_engine.set_function("has-active-video-playback", [this]() {
+        return video_manager.has_active_playback();
+    });
+    lua_engine.set_function("set-target-fps", [this](int fps) {
+        timer.setTargetFps(fps);
+        lua_engine["target-fps"] = timer.getTargetFps();
+    });
+    lua_engine.set_function("get-target-fps", [this]() {
+        return timer.getTargetFps();
+    });
+    lua_engine.set_function("set-physics-paused", [this](bool paused) {
+        physics_paused_ = paused;
+        lua_engine["physics-paused"] = physics_paused_;
+    });
+    lua_engine.set_function("get-physics-paused", [this]() {
+        return physics_paused_;
+    });
+    lua_engine.set_function("set-input-paused", [this](bool paused) {
+        input_paused_ = paused;
+        lua_engine["input-paused"] = input_paused_;
+    });
+    lua_engine.set_function("get-input-paused", [this]() {
+        return input_paused_;
+    });
+    request_frame_event_type = SDL_RegisterEvents(1);
+    if (request_frame_event_type == static_cast<Uint32>(-1)) {
+        LOG(Warning) << "Failed to allocate request-frame event type: " << SDL_GetError();
+        SDL_ClearError();
+    }
+    lua_engine.set_function("request-frame", [this]() {
+        if (request_frame_event_type == static_cast<Uint32>(-1)) {
+            return false;
+        }
+        SDL_Event event {};
+        event.type = request_frame_event_type;
+        return SDL_PushEvent(&event) == 1;
+    });
+    lua_engine["target-fps"] = timer.getTargetFps();
+    lua_engine["physics-paused"] = physics_paused_;
+    lua_engine["input-paused"] = input_paused_;
     lua_bind_callbacks(*lua_state, lua_engine);
     lua_engine["physics"] = &physics;
     lua_engine["audio"] = &audio;
@@ -309,17 +388,409 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
 }
 
 void Engine::run() {
+    timer.reset();
+    int previous_target_fps = timer.getTargetFps();
+
+    auto dispatch_lua_work = [this]() {
+        if (jobs) {
+            lua_jobs_dispatch(*lua_state, *jobs);
+        }
+        lua_http_dispatch(*lua_state);
+        lua_process_dispatch(*lua_state);
+        lua_callbacks_dispatch(*lua_state);
+    };
+
+    auto is_window_management_event = [](Uint32 event_type) {
+        if (event_type >= SDL_EVENT_WINDOW_FIRST && event_type <= SDL_EVENT_WINDOW_LAST) {
+            return true;
+        }
+        return event_type == SDL_EVENT_QUIT ||
+               event_type == SDL_EVENT_WILL_ENTER_BACKGROUND ||
+               event_type == SDL_EVENT_DID_ENTER_FOREGROUND;
+    };
+
+    auto handle_event = [this, &is_window_management_event](const SDL_Event& event) {
+        if (event.type == request_frame_event_type) {
+            return;
+        }
+        if (input_paused_ && !is_window_management_event(event.type)) {
+            return;
+        }
+
+        switch (event.type) {
+            case SDL_EVENT_QUIT:
+                isRunning = false;
+                break;
+
+            case SDL_EVENT_WINDOW_RESIZED:
+                {
+                    Uint64 resize_started = SDL_GetPerformanceCounter();
+                    Uint64 perf_frequency = SDL_GetPerformanceFrequency();
+                    int width = event.window.data1;
+                    int height = event.window.data2;
+                    window->updateViewportFromWindowPixels();
+                    lua_engine["width"] = width;
+                    lua_engine["height"] = height;
+                    sol::table payload = lua_state->create_table();
+                    payload["width"] = width;
+                    payload["height"] = height;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-resized", payload);
+                    Uint64 resize_finished = SDL_GetPerformanceCounter();
+                    double resize_ms = 0.0;
+                    if (perf_frequency > 0) {
+                        resize_ms = (static_cast<double>(resize_finished - resize_started) * 1000.0)
+                                    / static_cast<double>(perf_frequency);
+                    }
+                    LOG(Info) << "window-resized handled in " << resize_ms << "ms"
+                              << " (" << width << "x" << height << ")";
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                lua_engine["pixel-width"] = event.window.data1;
+                lua_engine["pixel-height"] = event.window.data2;
+                window->updateViewportFromWindowPixels();
+                break;
+
+            case SDL_EVENT_WINDOW_MAXIMIZED:
+                {
+                    lua_engine["window-mode"] = "maximized";
+                    sol::table payload = lua_state->create_table();
+                    payload["mode"] = "maximized";
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-mode-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_RESTORED:
+                {
+                    lua_engine["window-mode"] = "windowed";
+                    sol::table payload = lua_state->create_table();
+                    payload["mode"] = "windowed";
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-mode-changed", payload);
+                    sol::table minimized_payload = lua_state->create_table();
+                    minimized_payload["minimized"] = false;
+                    minimized_payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-minimized-changed", minimized_payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_MINIMIZED:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["minimized"] = true;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-minimized-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_HIDDEN:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["hidden"] = true;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-hidden-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_SHOWN:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["hidden"] = false;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-hidden-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_OCCLUDED:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["occluded"] = true;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-occluded-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_EXPOSED:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["occluded"] = false;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-occluded-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["focused"] = true;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-focus-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["focused"] = false;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-focus-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WILL_ENTER_BACKGROUND:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["suspended"] = true;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("app-suspended-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_DID_ENTER_FOREGROUND:
+                {
+                    sol::table payload = lua_state->create_table();
+                    payload["suspended"] = false;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("app-suspended-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                {
+                    lua_engine["window-mode"] = "fullscreen";
+                    sol::table payload = lua_state->create_table();
+                    payload["mode"] = "fullscreen";
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-mode-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                {
+                    WindowStartupMode current_mode = WindowStartupMode::Windowed;
+                    if (window) {
+                        current_mode = window->currentStartupMode();
+                    }
+                    const char* mode = startup_mode_to_string(current_mode);
+                    lua_engine["window-mode"] = mode;
+                    sol::table payload = lua_state->create_table();
+                    payload["mode"] = mode;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-mode-changed", payload);
+                }
+                break;
+
+            case SDL_EVENT_KEY_DOWN: {
+                switch(event.key.key) {
+                    case SDLK_F11:
+                        window->toggleFullscreen();
+                        break;
+
+                }
+                sol::table payload = lua_state->create_table();
+                payload["key"] = static_cast<int>(event.key.key);
+                payload["scancode"] = static_cast<int>(event.key.scancode);
+                payload["mod"] = static_cast<int>(event.key.mod);
+                payload["repeat"] = event.key.repeat != 0;
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("key-down", payload);
+                break;
+            }
+
+            case SDL_EVENT_KEY_UP: {
+                sol::table payload = lua_state->create_table();
+                payload["key"] = static_cast<int>(event.key.key);
+                payload["scancode"] = static_cast<int>(event.key.scancode);
+                payload["mod"] = static_cast<int>(event.key.mod);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("key-up", payload);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_MOTION: {
+                inputState.mouseState.set_motion(
+                    event.motion.x,
+                    event.motion.y,
+                    event.motion.xrel,
+                    event.motion.yrel);
+                sol::table payload = lua_state->create_table();
+                payload["x"] = event.motion.x;
+                payload["y"] = event.motion.y;
+                payload["xrel"] = event.motion.xrel;
+                payload["yrel"] = event.motion.yrel;
+                payload["which"] = static_cast<int>(event.motion.which);
+                payload["mod"] = static_cast<int>(SDL_GetModState());
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("mouse-motion", payload);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+                inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
+                inputState.mouseState.set_button(event.button.button, true);
+                sol::table payload = lua_state->create_table();
+                payload["button"] = static_cast<int>(event.button.button);
+                payload["state"] = event.button.down;
+                payload["clicks"] = static_cast<int>(event.button.clicks);
+                payload["x"] = event.button.x;
+                payload["y"] = event.button.y;
+                payload["which"] = static_cast<int>(event.button.which);
+                payload["mod"] = static_cast<int>(SDL_GetModState());
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("mouse-button-down", payload);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_BUTTON_UP: {
+                inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
+                inputState.mouseState.set_button(event.button.button, false);
+                sol::table payload = lua_state->create_table();
+                payload["button"] = static_cast<int>(event.button.button);
+                payload["state"] = event.button.down;
+                payload["clicks"] = static_cast<int>(event.button.clicks);
+                payload["x"] = event.button.x;
+                payload["y"] = event.button.y;
+                payload["which"] = static_cast<int>(event.button.which);
+                payload["mod"] = static_cast<int>(SDL_GetModState());
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("mouse-button-up", payload);
+                break;
+            }
+
+            case SDL_EVENT_MOUSE_WHEEL: {
+                float wheel_x = event.wheel.x;
+                float wheel_y = event.wheel.y;
+                if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+                    wheel_x = -wheel_x;
+                    wheel_y = -wheel_y;
+                }
+                inputState.mouseState.add_wheel(wheel_x, wheel_y);
+                sol::table payload = lua_state->create_table();
+                payload["x"] = wheel_x;
+                payload["y"] = wheel_y;
+                payload["direction"] = static_cast<int>(event.wheel.direction);
+                payload["which"] = static_cast<int>(event.wheel.which);
+                payload["mod"] = static_cast<int>(SDL_GetModState());
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("mouse-wheel", payload);
+                break;
+            }
+
+            case SDL_EVENT_TEXT_INPUT: {
+                sol::table payload = lua_state->create_table();
+                payload["text"] = std::string(event.text.text);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("text-input", payload);
+                break;
+            }
+
+            case SDL_EVENT_TEXT_EDITING: {
+                sol::table payload = lua_state->create_table();
+                payload["text"] = std::string(event.edit.text);
+                payload["start"] = static_cast<int>(event.edit.start);
+                payload["length"] = static_cast<int>(event.edit.length);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("text-editing", payload);
+                break;
+            }
+
+            case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+                inputState.on_gamepad_button(event.gbutton.button, true, event.gbutton.which, ns_to_ms(event.common.timestamp));
+                sol::table payload = lua_state->create_table();
+                payload["which"] = static_cast<int>(event.gbutton.which);
+                payload["instance-id"] = static_cast<int>(event.gbutton.which);
+                payload["button"] = static_cast<int>(event.gbutton.button);
+                payload["state"] = event.gbutton.down;
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("gamepad-button-down", payload);
+                break;
+            }
+
+            case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+                inputState.on_gamepad_button(event.gbutton.button, false, event.gbutton.which, ns_to_ms(event.common.timestamp));
+                sol::table payload = lua_state->create_table();
+                payload["which"] = static_cast<int>(event.gbutton.which);
+                payload["instance-id"] = static_cast<int>(event.gbutton.which);
+                payload["button"] = static_cast<int>(event.gbutton.button);
+                payload["state"] = event.gbutton.down;
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("gamepad-button-up", payload);
+                break;
+            }
+
+            case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+                const float axis_value = static_cast<float>(event.gaxis.value) / 32768.0f;
+                inputState.on_gamepad_axis(event.gaxis.axis, axis_value, event.gaxis.which, ns_to_ms(event.common.timestamp));
+                sol::table payload = lua_state->create_table();
+                payload["which"] = static_cast<int>(event.gaxis.which);
+                payload["instance-id"] = static_cast<int>(event.gaxis.which);
+                payload["axis"] = static_cast<int>(event.gaxis.axis);
+                payload["value"] = axis_value;
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("gamepad-axis-motion", payload);
+                if (inputDialType) {
+                    inputDialType->process_gamepad(event.gaxis.which);
+                }
+                break;
+            }
+
+            case SDL_EVENT_GAMEPAD_ADDED: {
+                const SDL_JoystickID instance_id = openGamepad(event.gdevice.which, ns_to_ms(event.common.timestamp));
+                sol::table payload = lua_state->create_table();
+                payload["which"] = static_cast<int>(event.gdevice.which);
+                payload["instance-id"] = static_cast<int>(instance_id);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("gamepad-added", payload);
+                break;
+            }
+
+            case SDL_EVENT_GAMEPAD_REMOVED: {
+                closeGamepad(event.gdevice.which, ns_to_ms(event.common.timestamp));
+                sol::table payload = lua_state->create_table();
+                payload["which"] = static_cast<int>(event.gdevice.which);
+                payload["instance-id"] = static_cast<int>(event.gdevice.which);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("gamepad-removed", payload);
+                break;
+            }
+
+            default:
+                break;
+        }
+    };
+
     while (isRunning) {
         cef_runtime::do_message_loop_work();
-        dt = timer.computeDeltaTime();
-        window->updateFpsCounter(dt);
+        const int target_fps = timer.getTargetFps();
+        const bool zero_fps_mode = target_fps <= 0;
+        if (!zero_fps_mode && previous_target_fps <= 0) {
+            timer.reset();
+        }
 
+        SDL_Event first_event {};
+        bool has_first_event = false;
+        if (zero_fps_mode) {
+            has_first_event = SDL_WaitEventTimeout(&first_event, 100) == 1;
+            if (!has_first_event) {
+                dispatch_lua_work();
+                previous_target_fps = target_fps;
+                continue;
+            }
+            dt = 0;
+        } else {
+            dt = timer.computeDeltaTime();
+        }
+
+        window->updateFpsCounter(dt);
         window->clear();
 
         memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_SCANCODE_COUNT);
         inputState.mouseState.begin_frame();
         inputState.begin_frame();
-        {
+        if (!input_paused_) {
             float mouseX = static_cast<float>(inputState.mouseState.x);
             float mouseY = static_cast<float>(inputState.mouseState.y);
             SDL_MouseButtonFlags mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
@@ -327,270 +798,52 @@ void Engine::run() {
             inputState.mouseState.set_motion(mouseX, mouseY, 0.0F, 0.0F);
         }
 
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            switch (event.type) {
-                case SDL_EVENT_QUIT:
-                    isRunning = false;
-                    break;
-
-                case SDL_EVENT_WINDOW_RESIZED:
-                    {
-                        Uint64 resize_started = SDL_GetPerformanceCounter();
-                        Uint64 perf_frequency = SDL_GetPerformanceFrequency();
-                        int width = event.window.data1;
-                        int height = event.window.data2;
-                        window->updateViewportFromWindowPixels();
-                        lua_engine["width"] = width;
-                        lua_engine["height"] = height;
-                        sol::table payload = lua_state->create_table();
-                        payload["width"] = width;
-                        payload["height"] = height;
-                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                        emit_engine_event("window-resized", payload);
-                        Uint64 resize_finished = SDL_GetPerformanceCounter();
-                        double resize_ms = 0.0;
-                        if (perf_frequency > 0) {
-                            resize_ms = (static_cast<double>(resize_finished - resize_started) * 1000.0)
-                                        / static_cast<double>(perf_frequency);
-                        }
-                        LOG(Info) << "window-resized handled in " << resize_ms << "ms"
-                                  << " (" << width << "x" << height << ")";
-                    }
-                    break;
-
-                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                    lua_engine["pixel-width"] = event.window.data1;
-                    lua_engine["pixel-height"] = event.window.data2;
-                    window->updateViewportFromWindowPixels();
-                    break;
-
-                case SDL_EVENT_WINDOW_MAXIMIZED:
-                    {
-                        lua_engine["window-mode"] = "maximized";
-                        sol::table payload = lua_state->create_table();
-                        payload["mode"] = "maximized";
-                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                        emit_engine_event("window-mode-changed", payload);
-                    }
-                    break;
-
-                case SDL_EVENT_WINDOW_RESTORED:
-                    {
-                        lua_engine["window-mode"] = "windowed";
-                        sol::table payload = lua_state->create_table();
-                        payload["mode"] = "windowed";
-                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                        emit_engine_event("window-mode-changed", payload);
-                    }
-                    break;
-
-                case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
-                    {
-                        lua_engine["window-mode"] = "fullscreen";
-                        sol::table payload = lua_state->create_table();
-                        payload["mode"] = "fullscreen";
-                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                        emit_engine_event("window-mode-changed", payload);
-                    }
-                    break;
-
-                case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
-                    {
-                        WindowStartupMode current_mode = WindowStartupMode::Windowed;
-                        if (window) {
-                            current_mode = window->currentStartupMode();
-                        }
-                        const char* mode = startup_mode_to_string(current_mode);
-                        lua_engine["window-mode"] = mode;
-                        sol::table payload = lua_state->create_table();
-                        payload["mode"] = mode;
-                        payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                        emit_engine_event("window-mode-changed", payload);
-                    }
-                    break;
-
-                case SDL_EVENT_KEY_DOWN: {
-                    switch(event.key.key) {
-                        case SDLK_F11:
-                            window->toggleFullscreen();
-                            break;
-
-                    }
-                    sol::table payload = lua_state->create_table();
-                    payload["key"] = static_cast<int>(event.key.key);
-                    payload["scancode"] = static_cast<int>(event.key.scancode);
-                    payload["mod"] = static_cast<int>(event.key.mod);
-                    payload["repeat"] = event.key.repeat != 0;
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("key-down", payload);
-                    break;
-                }
-
-                case SDL_EVENT_KEY_UP: {
-                    sol::table payload = lua_state->create_table();
-                    payload["key"] = static_cast<int>(event.key.key);
-                    payload["scancode"] = static_cast<int>(event.key.scancode);
-                    payload["mod"] = static_cast<int>(event.key.mod);
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("key-up", payload);
-                    break;
-                }
-
-                case SDL_EVENT_MOUSE_MOTION: {
-                    inputState.mouseState.set_motion(
-                        event.motion.x,
-                        event.motion.y,
-                        event.motion.xrel,
-                        event.motion.yrel);
-                    sol::table payload = lua_state->create_table();
-                    payload["x"] = event.motion.x;
-                    payload["y"] = event.motion.y;
-                    payload["xrel"] = event.motion.xrel;
-                    payload["yrel"] = event.motion.yrel;
-                    payload["which"] = static_cast<int>(event.motion.which);
-                    payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("mouse-motion", payload);
-                    break;
-                }
-
-                case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
-                    inputState.mouseState.set_button(event.button.button, true);
-                    sol::table payload = lua_state->create_table();
-                    payload["button"] = static_cast<int>(event.button.button);
-                    payload["state"] = event.button.down;
-                    payload["clicks"] = static_cast<int>(event.button.clicks);
-                    payload["x"] = event.button.x;
-                    payload["y"] = event.button.y;
-                    payload["which"] = static_cast<int>(event.button.which);
-                    payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("mouse-button-down", payload);
-                    break;
-                }
-
-                case SDL_EVENT_MOUSE_BUTTON_UP: {
-                    inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
-                    inputState.mouseState.set_button(event.button.button, false);
-                    sol::table payload = lua_state->create_table();
-                    payload["button"] = static_cast<int>(event.button.button);
-                    payload["state"] = event.button.down;
-                    payload["clicks"] = static_cast<int>(event.button.clicks);
-                    payload["x"] = event.button.x;
-                    payload["y"] = event.button.y;
-                    payload["which"] = static_cast<int>(event.button.which);
-                    payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("mouse-button-up", payload);
-                    break;
-                }
-
-                case SDL_EVENT_MOUSE_WHEEL: {
-                    float wheel_x = event.wheel.x;
-                    float wheel_y = event.wheel.y;
-                    if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
-                        wheel_x = -wheel_x;
-                        wheel_y = -wheel_y;
-                    }
-                    inputState.mouseState.add_wheel(wheel_x, wheel_y);
-                    sol::table payload = lua_state->create_table();
-                    payload["x"] = wheel_x;
-                    payload["y"] = wheel_y;
-                    payload["direction"] = static_cast<int>(event.wheel.direction);
-                    payload["which"] = static_cast<int>(event.wheel.which);
-                    payload["mod"] = static_cast<int>(SDL_GetModState());
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("mouse-wheel", payload);
-                    break;
-                }
-
-                case SDL_EVENT_TEXT_INPUT: {
-                    sol::table payload = lua_state->create_table();
-                    payload["text"] = std::string(event.text.text);
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("text-input", payload);
-                    break;
-                }
-
-                case SDL_EVENT_TEXT_EDITING: {
-                    sol::table payload = lua_state->create_table();
-                    payload["text"] = std::string(event.edit.text);
-                    payload["start"] = static_cast<int>(event.edit.start);
-                    payload["length"] = static_cast<int>(event.edit.length);
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("text-editing", payload);
-                    break;
-                }
-
-                case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
-                    inputState.on_gamepad_button(event.gbutton.button, true, event.gbutton.which, ns_to_ms(event.common.timestamp));
-                    sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.gbutton.which);
-                    payload["instance-id"] = static_cast<int>(event.gbutton.which);
-                    payload["button"] = static_cast<int>(event.gbutton.button);
-                    payload["state"] = event.gbutton.down;
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("gamepad-button-down", payload);
-                    break;
-                }
-
-                case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-                    inputState.on_gamepad_button(event.gbutton.button, false, event.gbutton.which, ns_to_ms(event.common.timestamp));
-                    sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.gbutton.which);
-                    payload["instance-id"] = static_cast<int>(event.gbutton.which);
-                    payload["button"] = static_cast<int>(event.gbutton.button);
-                    payload["state"] = event.gbutton.down;
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("gamepad-button-up", payload);
-                    break;
-                }
-
-                case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
-                    const float axis_value = static_cast<float>(event.gaxis.value) / 32768.0f;
-                    inputState.on_gamepad_axis(event.gaxis.axis, axis_value, event.gaxis.which, ns_to_ms(event.common.timestamp));
-                    sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.gaxis.which);
-                    payload["instance-id"] = static_cast<int>(event.gaxis.which);
-                    payload["axis"] = static_cast<int>(event.gaxis.axis);
-                    payload["value"] = axis_value;
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("gamepad-axis-motion", payload);
-                    if (inputDialType) {
-                        inputDialType->process_gamepad(event.gaxis.which);
-                    }
-                    break;
-                }
-
-                case SDL_EVENT_GAMEPAD_ADDED: {
-                    const SDL_JoystickID instance_id = openGamepad(event.gdevice.which, ns_to_ms(event.common.timestamp));
-                    sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.gdevice.which);
-                    payload["instance-id"] = static_cast<int>(instance_id);
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("gamepad-added", payload);
-                    break;
-                }
-
-                case SDL_EVENT_GAMEPAD_REMOVED: {
-                    closeGamepad(event.gdevice.which, ns_to_ms(event.common.timestamp));
-                    sol::table payload = lua_state->create_table();
-                    payload["which"] = static_cast<int>(event.gdevice.which);
-                    payload["instance-id"] = static_cast<int>(event.gdevice.which);
-                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
-                    emit_engine_event("gamepad-removed", payload);
-                    break;
-                }
-
-                default:
-                    break;
-            }
-
+        if (has_first_event) {
+            handle_event(first_event);
         }
 
-        physics.update(static_cast<uint32_t>(dt));
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            handle_event(event);
+        }
+
+        if (!isRunning) {
+            previous_target_fps = target_fps;
+            continue;
+        }
+
+        Uint64 now_ticks = SDL_GetTicks();
+        if (!on_battery_known_ || now_ticks >= next_power_poll_ticks_) {
+            int seconds_left = -1;
+            int percent = -1;
+            SDL_PowerState power_state = SDL_GetPowerInfo(&seconds_left, &percent);
+            const bool on_battery = is_on_battery(power_state);
+            if (!on_battery_known_ || on_battery != on_battery_state_) {
+                on_battery_state_ = on_battery;
+                on_battery_known_ = true;
+                sol::table payload = lua_state->create_table();
+                payload["on_battery"] = on_battery;
+                payload["state"] = power_state_to_string(power_state);
+                payload["seconds_left"] = seconds_left;
+                payload["percent"] = percent;
+                payload["timestamp"] = now_ticks;
+                emit_engine_event("on-battery-changed", payload);
+            }
+            next_power_poll_ticks_ = now_ticks + 1000;
+        }
+
+        bool has_active_video = video_manager.has_active_playback();
+        if (has_active_video != video_playback_active_) {
+            video_playback_active_ = has_active_video;
+            sol::table payload = lua_state->create_table();
+            payload["active"] = has_active_video;
+            payload["timestamp"] = now_ticks;
+            emit_engine_event("video-playback-active-changed", payload);
+        }
+
+        if (!physics_paused_) {
+            physics.update(static_cast<uint32_t>(dt));
+        }
 
         audio.update(static_cast<uint32_t>(dt));
         video_manager.update_all(static_cast<uint32_t>(dt));
@@ -603,12 +856,7 @@ void Engine::run() {
         browser_system.tick(frame_id.load(std::memory_order_relaxed));
 
         lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
-        if (jobs) {
-            lua_jobs_dispatch(*lua_state, *jobs);
-        }
-        lua_http_dispatch(*lua_state);
-        lua_process_dispatch(*lua_state);
-        lua_callbacks_dispatch(*lua_state);
+        dispatch_lua_work();
         {
             sol::table events = lua_engine["events"];
             sol::table signal = events["updated"];
@@ -620,7 +868,10 @@ void Engine::run() {
 
         window->swapBuffer();
 
-        timer.delayTime();
+        if (!zero_fps_mode) {
+            timer.delayTime();
+        }
+        previous_target_fps = target_fps;
     }
 }
 
