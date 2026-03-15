@@ -249,6 +249,7 @@
         (local prev-fps app.runtime-performance-fps-cap)
         (local prev-physics app.runtime-performance-physics-paused)
         (local prev-input app.runtime-performance-input-paused)
+        (local prev-ui app.runtime-performance-ui-paused)
         (local prev-source app.runtime-performance-source)
         (local prev-override app.runtime-performance-active-override)
         (local result (RuntimePerformance.apply-settings app.settings state app.engine))
@@ -258,6 +259,7 @@
           (set app.runtime-performance-fps-cap result.fps_cap)
           (set app.runtime-performance-physics-paused result.pause_physics)
           (set app.runtime-performance-input-paused result.pause_input)
+          (set app.runtime-performance-ui-paused result.pause_ui)
           (set app.runtime-performance-source result.source)
           (set app.runtime-performance-active-override result.active_override)
           (when (or (not (= prev-control result.control_mode))
@@ -265,16 +267,18 @@
                     (not (= prev-fps result.fps_cap))
                     (not (= prev-physics result.pause_physics))
                     (not (= prev-input result.pause_input))
+                    (not (= prev-ui result.pause_ui))
                     (not (= prev-source result.source))
                     (not (= prev-override result.active_override)))
             (logging.info
               (string.format
-                "[space] runtime-performance control=%s mode=%s fps=%s physics-paused=%s input-paused=%s source=%s override=%s (prev control=%s mode=%s fps=%s physics-paused=%s input-paused=%s source=%s override=%s)"
+                "[space] runtime-performance control=%s mode=%s fps=%s physics-paused=%s input-paused=%s ui-paused=%s source=%s override=%s (prev control=%s mode=%s fps=%s physics-paused=%s input-paused=%s ui-paused=%s source=%s override=%s)"
                 (tostring result.control_mode)
                 (tostring result.effective_mode)
                 (tostring result.fps_cap)
                 (tostring result.pause_physics)
                 (tostring result.pause_input)
+                (tostring result.pause_ui)
                 (tostring result.source)
                 (tostring result.active_override)
                 (tostring prev-control)
@@ -282,6 +286,7 @@
                 (tostring prev-fps)
                 (tostring prev-physics)
                 (tostring prev-input)
+                (tostring prev-ui)
                 (tostring prev-source)
                 (tostring prev-override))))))))
 
@@ -587,6 +592,7 @@
 (set app.runtime-performance-fps-cap nil)
 (set app.runtime-performance-physics-paused nil)
 (set app.runtime-performance-input-paused nil)
+(set app.runtime-performance-ui-paused nil)
 (set app.runtime-performance-source nil)
 (set app.runtime-performance-active-override nil)
 (set app.world-manager nil)
@@ -598,7 +604,7 @@
   (assert cb "app.next-frame requires callback")
   (table.insert app.next-frame-queue cb))
 
-(fn run-next-frame []
+(fn run-next-ui-frame []
   (local pending app.next-frame-pending)
   (set app.next-frame-pending [])
   (each [_ cb (ipairs pending)]
@@ -988,8 +994,11 @@
     (if profiler
         (profiler.measure label cb)
         (cb)))
-  (local pending app.next-frame-queue)
+  (local pending app.next-frame-pending)
+  (local queued app.next-frame-queue)
   (set app.next-frame-queue [])
+  (each [_ cb (ipairs queued)]
+    (table.insert pending cb))
   (set app.next-frame-pending pending)
   (when profiler
     (profiler.begin-frame delta))
@@ -999,23 +1008,25 @@
   (when app.remote-control
     (app.remote-control:tick))
   (flush-window-settings-save)
-  (when (and app.world-manager app.world-manager.update)
-    (app.world-manager:update delta))
   (when (and app.kernels app.kernels.tick)
     (app.kernels:tick))
-  (when (and app.engine.audio app.camera)
-    (local cam app.camera)
-    (local forward (cam:get-forward))
-    (local up (cam:get-up))
-    (app.engine.audio:setListenerPosition cam.position)
-    (app.engine.audio:setListenerOrientation forward up))
-  (when app.scene
-    (run-section "scene" (fn [] (app.scene:update))))
-  (when app.hud
-    (run-section "hud" (fn [] (app.hud:update))))
-  (when app.renderers
-    (run-section "renderers" (fn [] (app.renderers:update))))
-  (run-next-frame)
+  (local ui-paused (= app.runtime-performance-ui-paused true))
+  (when (not ui-paused)
+    (when (and app.world-manager app.world-manager.update)
+      (app.world-manager:update delta))
+    (when (and app.engine.audio app.camera)
+      (local cam app.camera)
+      (local forward (cam:get-forward))
+      (local up (cam:get-up))
+      (app.engine.audio:setListenerPosition cam.position)
+      (app.engine.audio:setListenerOrientation forward up))
+    (when app.scene
+      (run-section "scene" (fn [] (app.scene:update))))
+    (when app.hud
+      (run-section "hud" (fn [] (app.hud:update))))
+    (when app.renderers
+      (run-section "renderers" (fn [] (app.renderers:update))))
+    (run-next-ui-frame))
   (when app.tray-manager
     (app.tray-manager.loop))
   (when profiler
@@ -1142,6 +1153,7 @@
   (set app.runtime-performance-fps-cap nil)
   (set app.runtime-performance-physics-paused nil)
   (set app.runtime-performance-input-paused nil)
+  (set app.runtime-performance-ui-paused nil)
   (set app.runtime-performance-source nil)
   (set app.runtime-performance-active-override nil)
   )

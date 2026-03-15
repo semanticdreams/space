@@ -111,6 +111,7 @@ private:
     bool video_playback_active_ { false };
     bool physics_paused_ { false };
     bool input_paused_ { false };
+    bool ui_paused_ { false };
 
     // python
     //std::unique_ptr<py::scoped_interpreter> python;

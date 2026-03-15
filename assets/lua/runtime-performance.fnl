@@ -4,16 +4,20 @@
                          :restore_manual_on_clear true
                          :modes {:max {:fps_cap 60
                                        :pause_physics false
-                                       :pause_input false}
+                                       :pause_input false
+                                       :pause_ui false}
                                  :balanced {:fps_cap 30
                                             :pause_physics false
-                                            :pause_input false}
+                                            :pause_input false
+                                            :pause_ui false}
                                  :unfocused {:fps_cap 12
                                              :pause_physics false
-                                             :pause_input false}
+                                             :pause_input false
+                                             :pause_ui false}
                                  :minimized {:fps_cap 0
                                              :pause_physics true
-                                             :pause_input true}}
+                                             :pause_input true
+                                             :pause_ui true}}
                          :auto {:enabled true
                                 :system {:unfocused {:enabled true
                                                      :priority 700
@@ -150,6 +154,17 @@
   (sanitize-bool
     (get-setting settings
                  (.. "runtime_performance.modes." mode ".pause_input")
+                 default-value)
+    default-value))
+
+(fn resolve-pause-ui [settings mode]
+  (local default-value
+    (if (= mode "minimized")
+        true
+        false))
+  (sanitize-bool
+    (get-setting settings
+                 (.. "runtime_performance.modes." mode ".pause_ui")
                  default-value)
     default-value))
 
@@ -535,12 +550,15 @@
   (local fps-cap (resolve-fps-cap settings resolution.effective_mode))
   (local pause-physics (resolve-pause-physics settings resolution.effective_mode))
   (local pause-input (resolve-pause-input settings resolution.effective_mode))
+  (local pause-ui (resolve-pause-ui settings resolution.effective_mode))
   (when (and engine engine.set-target-fps)
     (engine.set-target-fps fps-cap))
   (when (and engine engine.set-physics-paused)
     (engine.set-physics-paused pause-physics))
   (when (and engine engine.set-input-paused)
     (engine.set-input-paused pause-input))
+  (when (and engine engine.set-ui-paused)
+    (engine.set-ui-paused pause-ui))
   (when (and engine engine.request-frame state.last (= state.last.fps_cap 0) (> fps-cap 0))
     (engine.request-frame))
   (set state.last {:manual_mode resolution.manual_mode
@@ -551,7 +569,8 @@
                    :priority resolution.priority
                    :fps_cap fps-cap
                    :pause_physics pause-physics
-                   :pause_input pause-input})
+                   :pause_input pause-input
+                   :pause_ui pause-ui})
   state.last)
 
 {:defaults default-settings
@@ -562,6 +581,7 @@
  :resolve-fps-cap resolve-fps-cap
  :resolve-pause-physics resolve-pause-physics
  :resolve-pause-input resolve-pause-input
+ :resolve-pause-ui resolve-pause-ui
  :create-state create-state
  :set-focused set-focused
  :set-minimized set-minimized
