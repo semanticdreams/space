@@ -25,6 +25,7 @@ build/
 release/
 .vscode/ipch
 cmake-build-*
+ffi/matrix/target/
 
 #IDE
 .idea
