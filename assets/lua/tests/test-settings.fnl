@@ -115,10 +115,33 @@
     (assert (= (reload.get-value "window.height" nil) 768))
     true)))
 
+(fn settings-ensure-defaults-only-missing []
+  (with-temp-dir (fn [root]
+    (local settings (Settings {:config-dir root :filename "settings.toml"}))
+    (settings.set-value "runtime_performance.manual_mode" "balanced" {:save? false})
+    (local changed
+      (settings.ensure-defaults
+        {:runtime_performance {:manual_mode "max"
+                               :modes {:max {:fps_cap 60}
+                                       :balanced {:fps_cap 30}
+                                       :unfocused {:fps_cap 12}
+                                       :minimized {:fps_cap 0}}}}
+        {:save? false}))
+    (assert changed "ensure-defaults should populate missing values")
+    (assert (= (settings.get-value "runtime_performance.manual_mode" nil) "balanced")
+            "ensure-defaults should keep existing values")
+    (assert (= (settings.get-value "runtime_performance.modes.max.fps_cap" nil) 60))
+    (assert (= (settings.get-value "runtime_performance.modes.balanced.fps_cap" nil) 30))
+    (assert (= (settings.get-value "runtime_performance.modes.unfocused.fps_cap" nil) 12))
+    (assert (= (settings.get-value "runtime_performance.modes.minimized.fps_cap" nil) 0))
+    true)))
+
 (table.insert tests {:name "Settings merge system then user" :fn settings-merge-order})
 (table.insert tests {:name "Settings write only user config" :fn settings-write-user-only})
 (table.insert tests {:name "Settings camera roundtrip" :fn settings-camera-roundtrip})
 (table.insert tests {:name "Settings window roundtrip" :fn settings-window-roundtrip})
+(table.insert tests {:name "Settings ensure-defaults fills only missing values"
+                     :fn settings-ensure-defaults-only-missing})
 
 (local main
   (fn []

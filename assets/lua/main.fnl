@@ -48,6 +48,7 @@
 (local audio (require :audio))
 (local _input-state-binding (require :input-state))
 (local Settings (require :settings))
+(local RuntimePerformance (require :runtime-performance))
 (local VolumeControl (require :volume-control))
 (local MenuManager (require :menu-manager))
 (local WalletManager (require :wallet-manager))
@@ -234,10 +235,170 @@
                (app.settings.set-value "audio.muted" muted? {:save? false})
                (app.settings.save)))))))
 
+(fn ensure-runtime-performance-state []
+  (if (not app.runtime-performance-state)
+      (set app.runtime-performance-state (RuntimePerformance.create-state)))
+  app.runtime-performance-state)
+
+(fn apply-runtime-performance-settings []
+  (if (and app.settings app.engine)
+      (do
+        (local state (ensure-runtime-performance-state))
+        (local prev-control app.runtime-performance-control-mode)
+        (local prev-mode app.runtime-performance-active-mode)
+        (local prev-fps app.runtime-performance-fps-cap)
+        (local prev-physics app.runtime-performance-physics-paused)
+        (local prev-input app.runtime-performance-input-paused)
+        (local prev-source app.runtime-performance-source)
+        (local prev-override app.runtime-performance-active-override)
+        (local result (RuntimePerformance.apply-settings app.settings state app.engine))
+        (when result
+          (set app.runtime-performance-control-mode result.control_mode)
+          (set app.runtime-performance-active-mode result.effective_mode)
+          (set app.runtime-performance-fps-cap result.fps_cap)
+          (set app.runtime-performance-physics-paused result.pause_physics)
+          (set app.runtime-performance-input-paused result.pause_input)
+          (set app.runtime-performance-source result.source)
+          (set app.runtime-performance-active-override result.active_override)
+          (when (or (not (= prev-control result.control_mode))
+                    (not (= prev-mode result.effective_mode))
+                    (not (= prev-fps result.fps_cap))
+                    (not (= prev-physics result.pause_physics))
+                    (not (= prev-input result.pause_input))
+                    (not (= prev-source result.source))
+                    (not (= prev-override result.active_override)))
+            (logging.info
+              (string.format
+                "[space] runtime-performance control=%s mode=%s fps=%s physics-paused=%s input-paused=%s source=%s override=%s (prev control=%s mode=%s fps=%s physics-paused=%s input-paused=%s source=%s override=%s)"
+                (tostring result.control_mode)
+                (tostring result.effective_mode)
+                (tostring result.fps_cap)
+                (tostring result.pause_physics)
+                (tostring result.pause_input)
+                (tostring result.source)
+                (tostring result.active_override)
+                (tostring prev-control)
+                (tostring prev-mode)
+                (tostring prev-fps)
+                (tostring prev-physics)
+                (tostring prev-input)
+                (tostring prev-source)
+                (tostring prev-override))))))))
+
+(fn app.set-runtime-performance-control-mode [control-mode]
+  (assert (and app.settings app.settings.set-value) "settings must be initialized")
+  (local normalized (RuntimePerformance.normalize-control-mode control-mode))
+  (app.settings.set-value "runtime_performance.control_mode" normalized {:save? true})
+  (apply-runtime-performance-settings)
+  normalized)
+
+(fn app.set-runtime-performance-manual-mode [mode]
+  (assert (and app.settings app.settings.set-value) "settings must be initialized")
+  (local normalized (RuntimePerformance.normalize-mode mode))
+  (app.settings.set-value "runtime_performance.manual_mode" normalized {:save? true})
+  (apply-runtime-performance-settings)
+  normalized)
+
+(fn app.activate-runtime-performance-lease [opts]
+  (local state (ensure-runtime-performance-state))
+  (local lease (RuntimePerformance.activate-lease state opts))
+  (apply-runtime-performance-settings)
+  lease)
+
+(fn app.clear-runtime-performance-lease [id]
+  (local state (ensure-runtime-performance-state))
+  (RuntimePerformance.clear-lease state id)
+  (apply-runtime-performance-settings)
+  true)
+
+(fn app.activate-runtime-performance-gameplay-lease [id]
+  (assert (and (= (type id) :string) (> (# id) 0))
+          "activate-runtime-performance-gameplay-lease requires non-empty string id")
+  (if (not app.settings)
+      nil
+      (do
+  (local state (ensure-runtime-performance-state))
+  (local lease (RuntimePerformance.activate-gameplay-lease app.settings state id))
+  (apply-runtime-performance-settings)
+  lease)))
+
+(fn app.clear-runtime-performance-gameplay-lease [id]
+  (assert (and (= (type id) :string) (> (# id) 0))
+          "clear-runtime-performance-gameplay-lease requires non-empty string id")
+  (local state (ensure-runtime-performance-state))
+  (RuntimePerformance.clear-gameplay-lease state id)
+  (apply-runtime-performance-settings)
+  true)
+
+(fn mark-runtime-performance-input-activity []
+  (local state (ensure-runtime-performance-state))
+  (local was-idle (RuntimePerformance.note-input state (os.clock)))
+  (when was-idle
+    (apply-runtime-performance-settings)))
+
+(local runtime-performance-input-signal-names
+  ["key-down"
+   "key-up"
+   "mouse-motion"
+   "mouse-button-down"
+   "mouse-button-up"
+   "mouse-wheel"
+   "text-input"
+   "text-editing"
+   "gamepad-axis-motion"
+   "gamepad-button-down"
+   "gamepad-button-up"])
+
+(fn disconnect-runtime-performance-input-handlers []
+  (when (and app.runtime-performance-input-handlers app.engine.events)
+    (each [_ name (ipairs runtime-performance-input-signal-names)]
+      (local handler (. app.runtime-performance-input-handlers name))
+      (local signal (. app.engine.events name))
+      (when (and signal handler)
+        (signal:disconnect handler true))))
+  (set app.runtime-performance-input-handlers {}))
+
+(fn connect-runtime-performance-input-handlers []
+  (set app.runtime-performance-input-handlers {})
+  (if (not (and app.engine app.engine.events))
+      nil
+      (do
+        (each [_ name (ipairs runtime-performance-input-signal-names)]
+          (local signal (. app.engine.events name))
+          (when signal
+            (tset app.runtime-performance-input-handlers name
+                 (signal:connect
+                   (fn [_event]
+                     (mark-runtime-performance-input-activity)))))))))
+
 (fn init-settings []
   (when (and app.settings app.settings.drop)
     (app.settings.drop))
   (set app.settings (Settings {:app-name "space"}))
+  (if app.runtime-performance-state
+      (do
+        (RuntimePerformance.set-focused app.runtime-performance-state true)
+        (RuntimePerformance.set-minimized app.runtime-performance-state false)
+        (RuntimePerformance.set-occluded app.runtime-performance-state false)
+        (RuntimePerformance.set-hidden app.runtime-performance-state false)
+        (RuntimePerformance.set-suspended app.runtime-performance-state false)
+        (RuntimePerformance.set-screen-locked app.runtime-performance-state false)
+        (RuntimePerformance.set-on-battery app.runtime-performance-state false)
+        (RuntimePerformance.set-video-playback app.runtime-performance-state false))
+      (ensure-runtime-performance-state))
+  (when app.engine
+    (when app.engine.is-on-battery
+      (RuntimePerformance.set-on-battery app.runtime-performance-state (not (= (app.engine.is-on-battery) false))))
+    (when app.engine.has-active-video-playback
+      (RuntimePerformance.set-video-playback
+        app.runtime-performance-state
+        (not (= (app.engine.has-active-video-playback) false)))))
+  (local changed (RuntimePerformance.ensure-settings-defaults app.settings))
+  (if (and changed app.settings app.settings.save)
+      (do
+        (app.settings.save)))
+  (RuntimePerformance.note-input app.runtime-performance-state (os.clock))
+  (apply-runtime-performance-settings)
   (local stored-volume (app.settings.get-value "audio.volume" nil))
   (local stored-muted (app.settings.get-value "audio.muted" nil))
   (when (or (not (= stored-volume nil)) (not (= stored-muted nil)))
@@ -404,6 +565,13 @@
 (set app.volume-settings-handler nil)
 (set app.window-resized-handler nil)
 (set app.window-mode-handler nil)
+(set app.window-focus-handler nil)
+(set app.window-minimized-handler nil)
+(set app.window-occluded-handler nil)
+(set app.window-hidden-handler nil)
+(set app.app-suspended-handler nil)
+(set app.screen-locked-handler nil)
+(set app.runtime-performance-input-handlers {})
 (set app.update-handler nil)
 (set app.global-shortcuts-handler nil)
 (set app.remote-control nil)
@@ -413,6 +581,14 @@
 (set app.next-frame-pending [])
 (set app.window-settings-dirty false)
 (set app.window-settings-save-deadline 0)
+(set app.runtime-performance-state nil)
+(set app.runtime-performance-control-mode nil)
+(set app.runtime-performance-active-mode nil)
+(set app.runtime-performance-fps-cap nil)
+(set app.runtime-performance-physics-paused nil)
+(set app.runtime-performance-input-paused nil)
+(set app.runtime-performance-source nil)
+(set app.runtime-performance-active-override nil)
 (set app.world-manager nil)
 (set app.world-tabs-builder nil)
 (set app.active-world-hud-contrib nil)
@@ -585,6 +761,31 @@
   (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
     (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
     (set app.window-mode-handler nil))
+  (when (and app.window-focus-handler app.engine.events app.engine.events.window-focus-changed)
+    (app.engine.events.window-focus-changed:disconnect app.window-focus-handler true)
+    (set app.window-focus-handler nil))
+  (when (and app.window-minimized-handler app.engine.events app.engine.events.window-minimized-changed)
+    (app.engine.events.window-minimized-changed:disconnect app.window-minimized-handler true)
+    (set app.window-minimized-handler nil))
+  (when (and app.window-occluded-handler app.engine.events app.engine.events.window-occluded-changed)
+    (app.engine.events.window-occluded-changed:disconnect app.window-occluded-handler true)
+    (set app.window-occluded-handler nil))
+  (when (and app.window-hidden-handler app.engine.events app.engine.events.window-hidden-changed)
+    (app.engine.events.window-hidden-changed:disconnect app.window-hidden-handler true)
+    (set app.window-hidden-handler nil))
+  (when (and app.app-suspended-handler app.engine.events app.engine.events.app-suspended-changed)
+    (app.engine.events.app-suspended-changed:disconnect app.app-suspended-handler true)
+    (set app.app-suspended-handler nil))
+  (when (and app.screen-locked-handler app.engine.events app.engine.events.screen-locked-changed)
+    (app.engine.events.screen-locked-changed:disconnect app.screen-locked-handler true)
+    (set app.screen-locked-handler nil))
+  (when (and app.on-battery-handler app.engine.events app.engine.events.on-battery-changed)
+    (app.engine.events.on-battery-changed:disconnect app.on-battery-handler true)
+    (set app.on-battery-handler nil))
+  (when (and app.video-playback-active-handler app.engine.events app.engine.events.video-playback-active-changed)
+    (app.engine.events.video-playback-active-changed:disconnect app.video-playback-active-handler true)
+    (set app.video-playback-active-handler nil))
+  (disconnect-runtime-performance-input-handlers)
   (when (and app.engine.events app.engine.events.window-resized)
     (set app.window-resized-handler
          (app.engine.events.window-resized:connect
@@ -600,6 +801,63 @@
              (when app.engine
                (set (. app.engine "window-mode") (normalize-window-mode e.mode)))
              (persist-window-mode e.mode)))))
+  (when (and app.engine.events app.engine.events.window-focus-changed)
+    (set app.window-focus-handler
+         (app.engine.events.window-focus-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-focused state (not (= e.focused false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.window-minimized-changed)
+    (set app.window-minimized-handler
+         (app.engine.events.window-minimized-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-minimized state (not (= e.minimized false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.window-occluded-changed)
+    (set app.window-occluded-handler
+         (app.engine.events.window-occluded-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-occluded state (not (= e.occluded false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.window-hidden-changed)
+    (set app.window-hidden-handler
+         (app.engine.events.window-hidden-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-hidden state (not (= e.hidden false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.app-suspended-changed)
+    (set app.app-suspended-handler
+         (app.engine.events.app-suspended-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-suspended state (not (= e.suspended false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.screen-locked-changed)
+    (set app.screen-locked-handler
+         (app.engine.events.screen-locked-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-screen-locked state (not (= e.locked false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.on-battery-changed)
+    (set app.on-battery-handler
+         (app.engine.events.on-battery-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-on-battery state (not (= e.on_battery false)))
+             (apply-runtime-performance-settings)))))
+  (when (and app.engine.events app.engine.events.video-playback-active-changed)
+    (set app.video-playback-active-handler
+         (app.engine.events.video-playback-active-changed:connect
+           (fn [e]
+             (local state (ensure-runtime-performance-state))
+             (RuntimePerformance.set-video-playback state (not (= e.active false)))
+             (apply-runtime-performance-settings)))))
+  (connect-runtime-performance-input-handlers)
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)
     (set app.update-handler nil))
@@ -735,6 +993,9 @@
   (set app.next-frame-pending pending)
   (when profiler
     (profiler.begin-frame delta))
+  (when (and app.settings app.runtime-performance-state)
+    (if (RuntimePerformance.update-idle-state app.settings app.runtime-performance-state (os.clock))
+        (apply-runtime-performance-settings)))
   (when app.remote-control
     (app.remote-control:tick))
   (flush-window-settings-save)
@@ -772,6 +1033,31 @@
   (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
     (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
     (set app.window-mode-handler nil))
+  (when (and app.window-focus-handler app.engine.events app.engine.events.window-focus-changed)
+    (app.engine.events.window-focus-changed:disconnect app.window-focus-handler true)
+    (set app.window-focus-handler nil))
+  (when (and app.window-minimized-handler app.engine.events app.engine.events.window-minimized-changed)
+    (app.engine.events.window-minimized-changed:disconnect app.window-minimized-handler true)
+    (set app.window-minimized-handler nil))
+  (when (and app.window-occluded-handler app.engine.events app.engine.events.window-occluded-changed)
+    (app.engine.events.window-occluded-changed:disconnect app.window-occluded-handler true)
+    (set app.window-occluded-handler nil))
+  (when (and app.window-hidden-handler app.engine.events app.engine.events.window-hidden-changed)
+    (app.engine.events.window-hidden-changed:disconnect app.window-hidden-handler true)
+    (set app.window-hidden-handler nil))
+  (when (and app.app-suspended-handler app.engine.events app.engine.events.app-suspended-changed)
+    (app.engine.events.app-suspended-changed:disconnect app.app-suspended-handler true)
+    (set app.app-suspended-handler nil))
+  (when (and app.screen-locked-handler app.engine.events app.engine.events.screen-locked-changed)
+    (app.engine.events.screen-locked-changed:disconnect app.screen-locked-handler true)
+    (set app.screen-locked-handler nil))
+  (when (and app.on-battery-handler app.engine.events app.engine.events.on-battery-changed)
+    (app.engine.events.on-battery-changed:disconnect app.on-battery-handler true)
+    (set app.on-battery-handler nil))
+  (when (and app.video-playback-active-handler app.engine.events app.engine.events.video-playback-active-changed)
+    (app.engine.events.video-playback-active-changed:disconnect app.video-playback-active-handler true)
+    (set app.video-playback-active-handler nil))
+  (disconnect-runtime-performance-input-handlers)
   (when (and app.global-shortcuts-handler app.engine.events app.engine.events.key-down)
     (app.engine.events.key-down:disconnect app.global-shortcuts-handler true)
     (set app.global-shortcuts-handler nil))
@@ -850,6 +1136,14 @@
   (when (and app.settings app.settings.drop)
     (app.settings.drop)
     (set app.settings nil))
+  (set app.runtime-performance-state nil)
+  (set app.runtime-performance-control-mode nil)
+  (set app.runtime-performance-active-mode nil)
+  (set app.runtime-performance-fps-cap nil)
+  (set app.runtime-performance-physics-paused nil)
+  (set app.runtime-performance-input-paused nil)
+  (set app.runtime-performance-source nil)
+  (set app.runtime-performance-active-override nil)
   )
 
 (when (and app.engine AppConfig.run-main)

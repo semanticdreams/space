@@ -119,6 +119,7 @@
     :tests.test-glm
     :tests.test-volume
     :tests.test-settings
+    :tests.test-runtime-performance
     :tests.test-world-manager
     :tests.test-world-tabs-widget
     :tests.test-skybox-settings

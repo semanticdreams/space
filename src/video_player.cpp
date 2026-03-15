@@ -1090,6 +1090,24 @@ void VideoManager::unregister_player(VideoPlayer* player) {
     players_.erase(player);
 }
 
+bool VideoManager::has_active_playback() const {
+    std::vector<VideoPlayer*> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(players_mutex_);
+        snapshot.reserve(players_.size());
+        for (VideoPlayer* player : players_) {
+            snapshot.push_back(player);
+        }
+    }
+
+    for (VideoPlayer* player : snapshot) {
+        if (player && player->playing()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void VideoManager::drop_all() {
     std::vector<VideoPlayer*> snapshot;
     {

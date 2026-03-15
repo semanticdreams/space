@@ -14,9 +14,14 @@ public:
     // Wait if the game run faster than the decided FPS
     void delayTime();
 
+    void reset();
+    void setTargetFps(int fps);
+    [[nodiscard]] int getTargetFps() const;
+
 private:
-    const static int FPS = 60;
-    const static int frameDelay = 1000 / FPS;
+    static constexpr int kDefaultFps = 60;
+    static constexpr int kMinFps = 0;
+    static constexpr int kMaxFps = 240;
 
     // Time in milliseconds when frame starts
     Uint64 frameStart { 0 };
@@ -26,6 +31,7 @@ private:
 
     // Time it tooks to run the loop. Used to cap framerate.
     Uint64 frameTime { 0 };
+    int targetFps { kDefaultFps };
 };
 
 #endif

@@ -84,6 +84,16 @@
         (tset result k (clone-value v))))
   result)
 
+(fn walk-default-leaves [node prefix on-leaf]
+  (each [k v (pairs node)]
+    (assert (= (type k) :string) "settings defaults keys must be strings")
+    (local key (if (= prefix "")
+                   k
+                   (.. prefix "." k)))
+    (if (and (= (type v) :table) (not (table-is-array? v)))
+        (walk-default-leaves v key on-leaf)
+        (on-leaf key v))))
+
 (fn Settings [opts]
   (assert (and app.engine fs.join-path) "settings requires fs.join-path")
   (local options (or opts {}))
@@ -155,6 +165,18 @@
     (set user-data {})
     (set data {}))
 
+  (fn ensure-defaults [defaults opts]
+    (assert (= (type defaults) :table) "settings ensure-defaults requires table defaults")
+    (var changed false)
+    (walk-default-leaves defaults ""
+                         (fn [key value]
+                           (when (not (has-value? key))
+                             (set-value key (clone-value value) {:save? false})
+                             (set changed true))))
+    (when (and changed (resolve-save? opts))
+      (save))
+    changed)
+
   (load)
 
   {:load load
@@ -162,6 +184,7 @@
    :get-value get-value
    :set-value set-value
    :has-value? has-value?
+   :ensure-defaults ensure-defaults
    :drop drop
    :path config-path
    :system-path site-config-path})

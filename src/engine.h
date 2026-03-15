@@ -104,6 +104,13 @@ private:
     std::unordered_map<std::string, SDL_Cursor*> systemCursors;
     std::unordered_map<SDL_JoystickID, SDL_Gamepad*> gamepads;
     SDL_Cursor* activeCursor { nullptr };
+    Uint32 request_frame_event_type { static_cast<Uint32>(-1) };
+    bool on_battery_state_ { false };
+    bool on_battery_known_ { false };
+    Uint64 next_power_poll_ticks_ { 0 };
+    bool video_playback_active_ { false };
+    bool physics_paused_ { false };
+    bool input_paused_ { false };
 
     // python
     //std::unique_ptr<py::scoped_interpreter> python;

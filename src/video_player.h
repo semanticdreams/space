@@ -190,6 +190,7 @@ public:
     bool has_audio() const;
     void register_player(VideoPlayer* player);
     void unregister_player(VideoPlayer* player);
+    bool has_active_playback() const;
     void update_all(uint32_t dt_ms);
     void drop_all();
     void on_audio_reset(Audio* previous_audio);

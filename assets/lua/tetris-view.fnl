@@ -297,6 +297,20 @@
 (fn build-tetris-dialog [ctx options runtime-opts]
   (local game (TetrisGame (or options.game {})))
   (var status-text-entity nil)
+  (local gameplay-lease-id (.. "tetris:" (tostring game)))
+  (var performance-lease-active false)
+
+  (fn activate-performance-lease []
+    (when (and (not performance-lease-active)
+               app
+               app.activate-runtime-performance-gameplay-lease)
+      (if (app.activate-runtime-performance-gameplay-lease gameplay-lease-id)
+          (set performance-lease-active true))))
+
+  (fn clear-performance-lease []
+    (when (and performance-lease-active app app.clear-runtime-performance-gameplay-lease)
+      (app.clear-runtime-performance-gameplay-lease gameplay-lease-id)
+      (set performance-lease-active false)))
 
   (fn update-status []
     (when status-text-entity
@@ -316,6 +330,7 @@
   (var update-handler nil)
 
   (fn disconnect-updates []
+    (clear-performance-lease)
     (when (and update-handler app.engine app.engine.events app.engine.events.updated)
       (app.engine.events.updated:disconnect update-handler true)
       (set update-handler nil)))
@@ -329,7 +344,8 @@
 
   (fn connect-updates []
     (when (and (not update-handler) app.engine app.engine.events app.engine.events.updated)
-      (set update-handler (app.engine.events.updated:connect on-update))))
+      (set update-handler (app.engine.events.updated:connect on-update))
+      (activate-performance-lease)))
 
   ;; Tetris dialog owns the update loop subscription: connect only while running.
   (local base-start game.start)
@@ -408,6 +424,7 @@
   (local base-drop content.drop)
   (set content.drop
        (fn [self]
+         (clear-performance-lease)
          (disconnect-updates)
          (base-drop self)))
   content)
