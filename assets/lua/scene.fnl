@@ -53,8 +53,14 @@
   (local yaw (- (math.atan target.x (- target.z))))
   (local yaw-rotation (glm.quat yaw (glm.vec3 0 1 0)))
   (local facing-rotation (* yaw-rotation (glm.quat math.pi (glm.vec3 0 1 0))))
-  {:position (+ origin (* forward (glm.vec3 default-camera-distance)))
+  {:center (+ origin (* forward (glm.vec3 default-camera-distance)))
    :rotation facing-rotation})
+
+(fn layout-origin-from-center [center rotation size]
+  (local resolved-center (or center (glm.vec3 0 0 0)))
+  (local resolved-rotation (or rotation (glm.quat 1 0 0 0)))
+  (local resolved-size (or size (glm.vec3 0 0 0)))
+  (- resolved-center (resolved-rotation:rotate (* 0.5 resolved-size))))
 
 (fn resolve-active-theme []
   (and app.engine app.themes app.themes.get-active-theme
@@ -528,20 +534,19 @@
           (self:remove-panel-child (or element dialog))))
       (set builder-options.on-close handle-close)
       (local placement (resolve-camera-placement self))
-      (when (and opts opts.position)
-        (set placement.position opts.position))
       (when (and opts opts.rotation)
         (set placement.rotation opts.rotation))
+      ;; Scene APIs now treat opts.position as layout-origin coordinates.
+      (local requested-layout-position (and opts opts.position))
       (local parent-layout entity.layout)
       (local parent-position (or (and parent-layout parent-layout.position) (glm.vec3 0 0 0)))
       (local parent-rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0)))
       (local parent-inverse (parent-rotation:inverse))
-      (local offset (parent-inverse:rotate (- placement.position parent-position)))
       (local local-rotation (* parent-inverse placement.rotation))
       (set element (builder self.build-context builder-options))
       (local metadata {:flex (or opts.flex 0)
                        :element element
-                       :position offset
+                       :position (glm.vec3 0 0 0)
                        :rotation local-rotation
                        :persistence (and opts.persistence
                                          (clone-table opts.persistence))})
@@ -560,12 +565,13 @@
         (set element.layout.rotation placement.rotation)
         (local measure (or element.layout.measure (glm.vec3 0 0 0)))
         (set element.layout.size measure)
-        (local half-measure (* 0.5 measure))
-        (local centered-position
-          (- placement.position (placement.rotation:rotate half-measure)))
-        (set element.layout.position centered-position)
+        (local layout-position
+          (if requested-layout-position
+              requested-layout-position
+              (layout-origin-from-center placement.center placement.rotation measure)))
+        (set element.layout.position layout-position)
         (set metadata.position
-             (parent-inverse:rotate (- centered-position parent-position)))
+             (parent-inverse:rotate (- layout-position parent-position)))
         (element.layout:layouter))
       (when (and self.entity
                  element
@@ -627,17 +633,20 @@
     (local size (or options.size (glm.vec3 4 4 4)))
     (local placement (resolve-camera-placement self))
     (local stack-index self.physics-body-count)
-    (local stacked-position
-      (+ placement.position
+    (local stacked-center
+      (+ placement.center
          (glm.vec3 0 (+ 6 (* stack-index 4)) 0)))
     (set self.physics-body-count (+ stack-index 1))
     (local builder (Sized {:size size
                            :child (DemoPhysicsBodies.new-cuboid)}))
-    (local spawn-position (or options.position stacked-position))
+    (local spawn-rotation (or options.rotation placement.rotation))
+    (local spawn-layout-position
+      (or options.position
+          (layout-origin-from-center stacked-center spawn-rotation size)))
     (local element (add-panel-child self {:builder builder
                                           :skip-cuboid true
                                           :skip-physics false
-                                          :position spawn-position
+                                          :position spawn-layout-position
                                           :rotation options.rotation
                                           :persistence {:kind "physics-cuboid"
                                                         :size (vec3->array size)}}))
@@ -659,8 +668,8 @@
     (local size (or options.size (glm.vec3 4 4 4)))
     (local placement (resolve-camera-placement self))
     (local stack-index self.physics-body-count)
-    (local stacked-position
-      (+ placement.position
+    (local stacked-center
+      (+ placement.center
          (glm.vec3 0 (+ 6 (* stack-index 4)) 0)))
     (set self.physics-body-count (+ stack-index 1))
     (fn on-graph-action [_cube _button _event payload]
@@ -684,12 +693,15 @@
                                      :node-key key
                                      :label label
                                      :on-graph on-graph-action})}))
-    (local spawn-position (or options.position stacked-position))
+    (local spawn-rotation (or options.rotation placement.rotation))
+    (local spawn-layout-position
+      (or options.position
+          (layout-origin-from-center stacked-center spawn-rotation size)))
     (local element
       (add-panel-child self {:builder cube-builder
                              :skip-cuboid true
                              :skip-physics false
-                             :position spawn-position
+                             :position spawn-layout-position
                              :rotation options.rotation
                              :persistence {:kind "graph-node-cube"
                                            :node-key key
