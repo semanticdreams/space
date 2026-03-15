@@ -22,31 +22,14 @@ runs:
           mingw-w64-x86_64-ccache
           git
 
-    - name: Ensure MinGW posix compiler aliases
+    - name: Validate MinGW toolchain binaries
       shell: msys2 {0}
       run: |
-        gcc_src="$(command -v x86_64-w64-mingw32-gcc.exe || command -v x86_64-w64-mingw32-gcc)"
-        gxx_src="$(command -v x86_64-w64-mingw32-g++.exe || command -v x86_64-w64-mingw32-g++)"
-        windres_src="$(
-          command -v x86_64-w64-mingw32-windres.exe \
-          || command -v x86_64-w64-mingw32-windres \
-          || command -v windres.exe \
-          || command -v windres \
-          || true
-        )"
-        if [ ! -f /mingw64/bin/x86_64-w64-mingw32-gcc-posix.exe ]; then
-          cp -f "${gcc_src}" /mingw64/bin/x86_64-w64-mingw32-gcc-posix.exe
-        fi
-        if [ ! -f /mingw64/bin/x86_64-w64-mingw32-g++-posix.exe ]; then
-          cp -f "${gxx_src}" /mingw64/bin/x86_64-w64-mingw32-g++-posix.exe
-        fi
-        if [ -z "${windres_src}" ]; then
-          echo "error: could not locate windres in MSYS2 MINGW64 environment" >&2
-          exit 1
-        fi
-        if [ ! -f /mingw64/bin/x86_64-w64-mingw32-windres.exe ]; then
-          cp -f "${windres_src}" /mingw64/bin/x86_64-w64-mingw32-windres.exe
-        fi
+        command -v x86_64-w64-mingw32-gcc.exe >/dev/null
+        command -v x86_64-w64-mingw32-g++.exe >/dev/null
+        command -v x86_64-w64-mingw32-windres.exe >/dev/null
+        mingw_bin_win="$(cygpath -w /mingw64/bin)"
+        echo "${mingw_bin_win}" >> "${GITHUB_PATH}"
 
     - name: Install vcpkg
       shell: msys2 {0}
