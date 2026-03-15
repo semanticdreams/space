@@ -1,0 +1,28 @@
+diff --git a/src/libFLAC/CMakeLists.txt b/src/libFLAC/CMakeLists.txt
+index 6e26abf..2fbd8e7 100644
+--- a/src/libFLAC/CMakeLists.txt
++++ b/src/libFLAC/CMakeLists.txt
+@@ -63,7 +63,7 @@ add_library(FLAC
+     stream_encoder_intrin_sse2.c
+     stream_encoder_intrin_ssse3.c
+     stream_encoder_intrin_avx2.c
+-    stream_encoder_framing.c
+-    version.rc
++    stream_encoder_framing.c
++    $<$<BOOL:${MSVC}>:version.rc>
+     window.c
+     $<$<BOOL:${WIN32}>:../../include/share/win_utf8_io.h>
+     $<$<BOOL:${WIN32}>:../share/win_utf8_io/win_utf8_io.c>
+diff --git a/src/libFLAC++/CMakeLists.txt b/src/libFLAC++/CMakeLists.txt
+index 4c57c2a..4c39dc4 100644
+--- a/src/libFLAC++/CMakeLists.txt
++++ b/src/libFLAC++/CMakeLists.txt
+@@ -2,7 +2,7 @@ add_library(FLAC++
+     metadata.cpp
+     stream_decoder.cpp
+     stream_encoder.cpp
+-	version.rc)
++	$<$<BOOL:${MSVC}>:version.rc>)
+ set_property(TARGET FLAC++ PROPERTY PROJECT_LABEL "libFLAC++")
+ target_compile_definitions(FLAC++
+     PRIVATE $<$<BOOL:${BUILD_SHARED_LIBS}>:FLACPP_API_EXPORTS>
