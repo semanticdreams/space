@@ -25,11 +25,13 @@ runs:
     - name: Ensure MinGW posix compiler aliases
       shell: msys2 {0}
       run: |
-        if ! command -v x86_64-w64-mingw32-gcc-posix >/dev/null 2>&1; then
-          ln -sf "$(command -v x86_64-w64-mingw32-gcc)" /mingw64/bin/x86_64-w64-mingw32-gcc-posix
+        gcc_src="$(command -v x86_64-w64-mingw32-gcc.exe || command -v x86_64-w64-mingw32-gcc)"
+        gxx_src="$(command -v x86_64-w64-mingw32-g++.exe || command -v x86_64-w64-mingw32-g++)"
+        if [ ! -f /mingw64/bin/x86_64-w64-mingw32-gcc-posix.exe ]; then
+          cp -f "${gcc_src}" /mingw64/bin/x86_64-w64-mingw32-gcc-posix.exe
         fi
-        if ! command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1; then
-          ln -sf "$(command -v x86_64-w64-mingw32-g++)" /mingw64/bin/x86_64-w64-mingw32-g++-posix
+        if [ ! -f /mingw64/bin/x86_64-w64-mingw32-g++-posix.exe ]; then
+          cp -f "${gxx_src}" /mingw64/bin/x86_64-w64-mingw32-g++-posix.exe
         fi
 
     - name: Install vcpkg
