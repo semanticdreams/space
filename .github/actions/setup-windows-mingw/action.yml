@@ -22,15 +22,6 @@ runs:
           mingw-w64-x86_64-ccache
           git
 
-    - name: Validate MinGW toolchain binaries
-      shell: msys2 {0}
-      run: |
-        command -v x86_64-w64-mingw32-gcc >/dev/null || command -v x86_64-w64-mingw32-gcc.exe >/dev/null
-        command -v x86_64-w64-mingw32-g++ >/dev/null || command -v x86_64-w64-mingw32-g++.exe >/dev/null
-        command -v x86_64-w64-mingw32-windres >/dev/null || command -v x86_64-w64-mingw32-windres.exe >/dev/null
-        mingw_bin_win="$(cygpath -w /mingw64/bin)"
-        echo "${mingw_bin_win}" >> "${GITHUB_PATH}"
-
     - name: Install vcpkg
       shell: msys2 {0}
       run: |
