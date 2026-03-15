@@ -256,7 +256,13 @@ find_package(pybind11 CONFIG)
 
 find_package(OpenMP REQUIRED)
 find_package(CURL REQUIRED)
-find_package(Aubio CONFIG REQUIRED)
+find_package(Aubio CONFIG QUIET)
+if(TARGET Aubio::aubio)
+    set(SPACE_AUBIO_TARGET Aubio::aubio)
+else()
+    pkg_check_modules(AUBIO REQUIRED IMPORTED_TARGET aubio)
+    set(SPACE_AUBIO_TARGET PkgConfig::AUBIO)
+endif()
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "Disable spdlog shared build" FORCE)
 set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "Disable spdlog tests" FORCE)
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Disable spdlog examples" FORCE)
@@ -363,7 +369,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     lsqlite3
     PkgConfig::ZMQ
     PkgConfig::PORTAUDIO
-    Aubio::aubio
+    ${SPACE_AUBIO_TARGET}
     PkgConfig::XAPIAN
     tree_sitter_core
     tree_sitter_cpp
