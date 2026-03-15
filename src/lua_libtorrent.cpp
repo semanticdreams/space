@@ -367,9 +367,9 @@ lt::settings_pack make_settings(sol::table opts)
     pack.set_bool(lt::settings_pack::enable_dht, true);
     pack.set_bool(lt::settings_pack::announce_to_all_tiers, true);
     pack.set_bool(lt::settings_pack::announce_to_all_trackers, true);
+    auto alert_mask = lt::alert_category::error | lt::alert_category::status | lt::alert_category::dht;
     pack.set_int(lt::settings_pack::alert_mask,
-                 static_cast<int>(lt::alert_category::error | lt::alert_category::status
-                                  | lt::alert_category::dht));
+                 static_cast<int>(static_cast<lt::alert_category_t::underlying_type>(alert_mask)));
     return pack;
 }
 
@@ -435,9 +435,15 @@ sol::table settings_pack_to_table(sol::state_view lua, const lt::settings_pack& 
     return result;
 }
 
-sol::table session_status_to_table(sol::state_view lua, const lt::session_status& status)
+sol::table session_status_to_table(sol::state_view lua
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
+                                   ,
+                                   const lt::session_status& status
+#endif
+)
 {
     sol::table result = lua.create_table();
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
     result["download-rate"] = status.download_rate;
     result["upload-rate"] = status.upload_rate;
     result["num-peers"] = status.num_peers;
@@ -446,6 +452,16 @@ sol::table session_status_to_table(sol::state_view lua, const lt::session_status
     result["dht-torrents"] = status.dht_torrents;
     result["total-download"] = status.total_download;
     result["total-upload"] = status.total_upload;
+#else
+    result["download-rate"] = 0;
+    result["upload-rate"] = 0;
+    result["num-peers"] = 0;
+    result["has-incoming-connections"] = false;
+    result["dht-nodes"] = 0;
+    result["dht-torrents"] = 0;
+    result["total-download"] = 0;
+    result["total-upload"] = 0;
+#endif
     return result;
 }
 
@@ -1335,13 +1351,25 @@ struct LibtorrentSession
     void start_dht()
     {
         ensure_open("start-dht");
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
         session->start_dht();
+#else
+        lt::settings_pack pack = session->get_settings();
+        pack.set_bool(lt::settings_pack::enable_dht, true);
+        session->apply_settings(std::move(pack));
+#endif
     }
 
     void stop_dht()
     {
         ensure_open("stop-dht");
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
         session->stop_dht();
+#else
+        lt::settings_pack pack = session->get_settings();
+        pack.set_bool(lt::settings_pack::enable_dht, false);
+        session->apply_settings(std::move(pack));
+#endif
     }
 
     bool is_dht_running() const
@@ -1565,7 +1593,13 @@ struct LibtorrentSession
     void set_alert_mask(std::uint32_t mask)
     {
         ensure_open("set-alert-mask");
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
         session->set_alert_mask(lt::alert_category_t(mask));
+#else
+        lt::settings_pack pack = session->get_settings();
+        pack.set_int(lt::settings_pack::alert_mask, static_cast<int>(mask));
+        session->apply_settings(std::move(pack));
+#endif
     }
 
     int set_alert_queue_size_limit(int limit)
@@ -1574,7 +1608,14 @@ struct LibtorrentSession
         if (limit < 1) {
             limit = 1;
         }
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
         return session->set_alert_queue_size_limit(limit);
+#else
+        lt::settings_pack pack = session->get_settings();
+        pack.set_int(lt::settings_pack::alert_queue_size, limit);
+        session->apply_settings(std::move(pack));
+        return limit;
+#endif
     }
 
     sol::table get_settings(sol::this_state ts) const
@@ -1589,8 +1630,12 @@ struct LibtorrentSession
     {
         ensure_open("session-status");
         sol::state_view lua(ts);
+#if TORRENT_ABI_VERSION == 1 && !defined(TORRENT_NO_DEPRECATE)
         lt::session_status status = session->status();
         return session_status_to_table(lua, status);
+#else
+        return session_status_to_table(lua);
+#endif
     }
 
     std::shared_ptr<SessionParamsHandle> session_state(sol::optional<std::uint32_t> flags_opt) const

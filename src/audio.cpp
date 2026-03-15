@@ -17,9 +17,9 @@ void ensure_openal_drivers() {
         return;
     }
 #if defined(_WIN32)
-    _putenv_s("ALSOFT_DRIVERS", "pulse,alsa");
+    _putenv_s("ALSOFT_DRIVERS", "dsound,wave");
 #else
-    setenv("ALSOFT_DRIVERS", "pulse,alsa", 0);
+    setenv("ALSOFT_DRIVERS", "pipewire,pulse,alsa", 0);
 #endif
 }
 
@@ -58,7 +58,11 @@ std::string pick_preferred_device() {
     }
 
     const std::vector<std::string> devices = list_al_devices();
-    const char* preferred[] = {"pulse", "pipewire", "alsa"};
+#if defined(_WIN32)
+    const char* preferred[] = {"dsound", "wave"};
+#else
+    const char* preferred[] = {"pipewire", "pulse", "alsa"};
+#endif
     for (const char* token : preferred) {
         for (const auto& device : devices) {
             if (contains_case_insensitive(device, token)) {

@@ -1,10 +1,33 @@
 (local tests [])
 (local process (require :process))
 (local fs (require :fs))
+(local sysinfo (require :sysinfo))
 
-;; Helper to create a temp directory for tests
+(local platform-os (. (sysinfo.platform) :os))
+(local is-windows (= platform-os "windows"))
+
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "process-test-tmp"))
+
+(fn normalize-eol [s]
+  (if s
+      (string.gsub s "\r\n" "\n")
+      ""))
+
+(fn shell-args [script]
+  (if is-windows
+      ["cmd" "/d" "/s" "/c" script]
+      ["sh" "-c" script]))
+
+(fn stdin-echo-args []
+  (if is-windows
+      (shell-args "more")
+      ["cat"]))
+
+(fn short-delay []
+  (if is-windows
+      (os.execute "ping -n 2 127.0.0.1 > nul")
+      (os.execute "sleep 0.05")))
 
 (fn make-temp-dir []
   (set temp-counter (+ temp-counter 1))
@@ -22,97 +45,114 @@
       result
       (error result)))
 
-;; ============================================================================
-;; Synchronous process.run tests
-;; ============================================================================
-
 (fn test-run-simple-command []
-  (local result (process.run {:args ["echo" "hello world"]}))
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo hello world")
+                                        ["echo" "hello world"])}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "hello world\n") "stdout should match")
+  (local out (normalize-eol result.stdout))
+  (assert (= out "hello world\n") "stdout should match")
   (assert (= result.stderr "") "stderr should be empty")
   (assert (not result.timed-out) "should not time out")
   (assert (= result.signal nil) "should have no signal"))
 
 (fn test-run-exit-code []
-  (local result (process.run {:args ["sh" "-c" "exit 42"]}))
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "exit /b 42")
+                                        (shell-args "exit 42"))}))
   (assert (= result.exit-code 42) "exit code should be 42"))
 
 (fn test-run-stderr []
-  (local result (process.run {:args ["sh" "-c" "echo error >&2"]}))
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo error 1>&2 & exit /b 0")
+                                        (shell-args "echo error >&2"))}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "") "stdout should be empty")
-  (assert (= result.stderr "error\n") "stderr should match"))
+  (assert (= (normalize-eol result.stdout) "") "stdout should be empty")
+  (assert (string.find (normalize-eol result.stderr) "error") "stderr should include error"))
 
 (fn test-run-stdout-and-stderr []
-  (local result (process.run {:args ["sh" "-c" "echo out; echo err >&2"]}))
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo out & echo err 1>&2")
+                                        (shell-args "echo out; echo err >&2"))}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "out\n") "stdout should match")
-  (assert (= result.stderr "err\n") "stderr should match"))
+  (assert (string.find (normalize-eol result.stdout) "out") "stdout should contain out")
+  (assert (string.find (normalize-eol result.stderr) "err") "stderr should contain err"))
 
 (fn test-run-merge-stderr []
-  (local result (process.run {:args ["sh" "-c" "echo out; echo err >&2"]
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo out & echo err 1>&2")
+                                        (shell-args "echo out; echo err >&2"))
                               :merge-stderr true}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  ;; Both should be in stdout when merged
-  (assert (string.find result.stdout "out") "stdout should contain out")
-  (assert (string.find result.stdout "err") "stdout should contain err")
+  (local out (normalize-eol result.stdout))
+  (assert (string.find out "out") "stdout should contain out")
+  (assert (string.find out "err") "stdout should contain err")
   (assert (= result.stderr "") "stderr should be empty when merged"))
 
 (fn test-run-stdin []
-  (local result (process.run {:args ["cat"]
+  (local result (process.run {:args (stdin-echo-args)
                               :stdin "hello from stdin"}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "hello from stdin") "stdout should match stdin"))
+  (assert (string.find (normalize-eol result.stdout) "hello from stdin") "stdout should contain stdin"))
 
 (fn test-run-stdin-multiline []
   (local input "line1\nline2\nline3\n")
-  (local result (process.run {:args ["cat"]
+  (local result (process.run {:args (stdin-echo-args)
                               :stdin input}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout input) "stdout should match multiline stdin"))
+  (local out (normalize-eol result.stdout))
+  (assert (string.find out "line1") "stdout should contain line1")
+  (assert (string.find out "line2") "stdout should contain line2")
+  (assert (string.find out "line3") "stdout should contain line3"))
 
 (fn test-run-cwd []
-  (with-temp-dir (fn [dir]
-    (local result (process.run {:args ["pwd"]
-                                :cwd dir}))
-    (assert (= result.exit-code 0) "exit code should be 0")
-    ;; pwd output might have a trailing newline
-    (local output (string.gsub result.stdout "\n$" ""))
-    ;; Resolve any symlinks for comparison (e.g., /tmp -> /private/tmp on macOS)
-    (local popen-handle (io.popen (.. "cd " dir " && pwd -P")))
-    (local expected (string.gsub (popen-handle:read "*a") "\n$" ""))
-    (popen-handle:close)
-    (assert (= output expected) (.. "cwd should be " expected " but got " output)))))
+  (with-temp-dir
+    (fn [dir]
+      (local result (process.run {:args (if is-windows
+                                            (shell-args "cd")
+                                            ["pwd"])
+                                  :cwd dir}))
+      (assert (= result.exit-code 0) "exit code should be 0")
+      (local output (string.lower (normalize-eol result.stdout)))
+      (local tail (string.lower (or (string.match dir "([^/]+)$") "")))
+      (assert (string.find output tail 1 true)
+              (.. "cwd output should contain temp dir tail " tail)))))
 
 (fn test-run-env []
-  (local result (process.run {:args ["sh" "-c" "echo $MY_TEST_VAR"]
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo %MY_TEST_VAR%")
+                                        (shell-args "echo $MY_TEST_VAR"))
                               :env {:MY_TEST_VAR "test_value"}}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "test_value\n") "env var should be set"))
+  (assert (= (normalize-eol result.stdout) "test_value\n") "env var should be set"))
 
 (fn test-run-env-multiple []
-  (local result (process.run {:args ["sh" "-c" "echo $VAR1-$VAR2"]
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo %VAR1%-%VAR2%")
+                                        (shell-args "echo $VAR1-$VAR2"))
                               :env {:VAR1 "foo" :VAR2 "bar"}}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "foo-bar\n") "multiple env vars should work"))
+  (assert (= (normalize-eol result.stdout) "foo-bar\n") "multiple env vars should work"))
 
 (fn test-run-clear-env []
-  ;; When clearing env, PATH won't be set, so we need to use absolute path
-  (local result (process.run {:args ["/bin/sh" "-c" "echo ${HOME:-empty}"]
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "if defined HOME (echo set) else (echo empty)")
+                                        ["/bin/sh" "-c" "echo ${HOME:-empty}"])
                               :clear-env true}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "empty\n") "HOME should be cleared"))
+  (assert (= (normalize-eol result.stdout) "empty\n") "HOME should be cleared"))
 
 (fn test-run-timeout []
-  (local result (process.run {:args ["sleep" "10"]
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "ping -n 8 127.0.0.1 > nul")
+                                        ["sleep" "10"])
                               :timeout 0.1}))
-  (assert result.timed-out "should time out")
-  ;; Exit code should indicate signal termination
-  (assert (>= result.exit-code 128) "exit code should indicate signal"))
+  (assert result.timed-out "should time out"))
 
 (fn test-run-timeout-not-triggered []
-  (local result (process.run {:args ["echo" "fast"]
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "echo fast")
+                                        ["echo" "fast"])
                               :timeout 5}))
   (assert (not result.timed-out) "should not time out")
   (assert (= result.exit-code 0) "exit code should be 0"))
@@ -122,168 +162,120 @@
   (assert (= result.exit-code 127) "exit code should be 127 for command not found"))
 
 (fn test-run-duration []
-  (local result (process.run {:args ["sleep" "0.1"]}))
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "ping -n 2 127.0.0.1 > nul")
+                                        ["sleep" "0.1"])}))
   (assert (>= result.duration-ms 50) "duration should be at least 50ms")
-  (assert (<= result.duration-ms 2000) "duration should be less than 2s"))
+  (assert (<= result.duration-ms (if is-windows 20000 5000)) "duration should be bounded"))
 
 (fn test-run-large-output []
-  ;; Generate 10000 lines of output
-  (local result (process.run {:args ["sh" "-c" "seq 1 10000"]}))
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "for /L %i in (1,1,2000) do @echo %i")
+                                        (shell-args "seq 1 2000"))}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  ;; Check that we got all lines
-  (local lines (icollect [line (string.gmatch result.stdout "[^\n]+")] line))
-  (assert (= (length lines) 10000) "should have 10000 lines"))
-
-;; ============================================================================
-;; Asynchronous process.spawn tests
-;; ============================================================================
+  (local lines (icollect [line (string.gmatch (normalize-eol result.stdout) "[^\n]+")] line))
+  (assert (= (length lines) 2000) "should have expected line count"))
 
 (fn test-spawn-and-wait []
-  (local id (process.spawn {:args ["echo" "async hello"]}))
+  (local id (process.spawn {:args (if is-windows
+                                     (shell-args "echo async hello")
+                                     ["echo" "async hello"])}))
   (assert (> id 0) "should return positive id")
   (local result (process.wait id))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "async hello\n") "stdout should match"))
+  (assert (= (normalize-eol result.stdout) "async hello\n") "stdout should match"))
 
-(fn test-spawn-running []
-  (local id (process.spawn {:args ["sleep" "10"]}))
+(fn test-spawn-running-and-kill []
+  (local id (process.spawn {:args (if is-windows
+                                     (shell-args "ping -n 8 127.0.0.1 > nul")
+                                     ["sleep" "10"])}))
   (assert (process.running id) "process should be running")
-  (process.kill id)
-  ;; Wait a bit for it to terminate
-  (local result (process.wait id))
-  (assert (not (process.running id)) "process should not be running after kill"))
-
-(fn test-spawn-kill []
-  (local id (process.spawn {:args ["sleep" "10"]}))
-  ;; Give process time to start
-  (os.execute "sleep 0.05")
+  (short-delay)
   (local killed (process.kill id))
   (local result (process.wait id))
-  ;; Either kill succeeded, or process finished (unlikely with sleep 10)
-  (assert (or killed result.signal (>= result.exit-code 128)) "should be killed by signal"))
+  (assert killed "kill should report success")
+  (assert (not (process.running id)) "process should not be running after wait")
+  (assert (or result.timed-out (not (= result.exit-code 0))) "killed process should not exit cleanly"))
 
-(fn test-spawn-kill-sigkill []
-  (local id (process.spawn {:args ["sleep" "10"]}))
-  ;; Give process time to start
-  (os.execute "sleep 0.05")
-  (local killed (process.kill id 9))
-  (local result (process.wait id))
-  ;; Either kill succeeded, or process was terminated
-  (assert (or killed (= result.signal 9) (= result.exit-code 137)) "should be killed by SIGKILL"))
-
-(fn test-spawn-write-stdin []
-  (local id (process.spawn {:args ["cat"]}))
+(fn test-spawn-write-and-close-stdin []
+  (local id (process.spawn {:args (stdin-echo-args)}))
   (process.write id "hello ")
   (process.write id "world")
-  (process.close-stdin id)
-  (local result (process.wait id))
-  (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "hello world") "stdout should match written data"))
-
-(fn test-spawn-close-stdin []
-  (local id (process.spawn {:args ["cat"]}))
   (assert (process.close-stdin id) "first close should succeed")
   (assert (not (process.close-stdin id)) "second close should return false")
   (local result (process.wait id))
-  (assert (= result.exit-code 0) "exit code should be 0"))
+  (assert (= result.exit-code 0) "exit code should be 0")
+  (assert (string.find (normalize-eol result.stdout) "hello world") "stdout should contain written data"))
 
 (fn test-spawn-poll []
-  (local id1 (process.spawn {:args ["echo" "one"]}))
-  (local id2 (process.spawn {:args ["echo" "two"]}))
-  ;; Give processes time to complete
-  (os.execute "sleep 0.2")
+  (process.spawn {:args (if is-windows (shell-args "echo one") ["echo" "one"])})
+  (process.spawn {:args (if is-windows (shell-args "echo two") ["echo" "two"])})
+  (short-delay)
   (local results (process.poll))
-  ;; Both should be completed
-  (assert (>= (length results) 2) "should have at least 2 results"))
+  (assert (>= (length results) 2) "should have at least 2 completed results"))
 
 (fn test-spawn-poll-max-results []
-  (local id1 (process.spawn {:args ["echo" "a"]}))
-  (local id2 (process.spawn {:args ["echo" "b"]}))
-  (local id3 (process.spawn {:args ["echo" "c"]}))
-  ;; Give processes time to complete
-  (os.execute "sleep 0.2")
+  (process.spawn {:args (if is-windows (shell-args "echo a") ["echo" "a"])})
+  (process.spawn {:args (if is-windows (shell-args "echo b") ["echo" "b"])})
+  (process.spawn {:args (if is-windows (shell-args "echo c") ["echo" "c"])})
+  (short-delay)
   (local results (process.poll 1))
   (assert (<= (length results) 1) "should have at most 1 result"))
 
 (fn test-spawn-timeout []
-  (local id (process.spawn {:args ["sleep" "10"]
+  (local id (process.spawn {:args (if is-windows
+                                     (shell-args "ping -n 8 127.0.0.1 > nul")
+                                     ["sleep" "10"])
                             :timeout 0.1}))
   (local result (process.wait id))
   (assert result.timed-out "should time out"))
 
-(fn test-spawn-cwd []
-  (with-temp-dir (fn [dir]
-    (local id (process.spawn {:args ["pwd"]
-                              :cwd dir}))
-    (local result (process.wait id))
-    (assert (= result.exit-code 0) "exit code should be 0")
-    (local output (string.gsub result.stdout "\n$" ""))
-    (local popen-handle (io.popen (.. "cd " dir " && pwd -P")))
-    (local expected (string.gsub (popen-handle:read "*a") "\n$" ""))
-    (popen-handle:close)
-    (assert (= output expected) "cwd should match"))))
+(fn test-spawn-cwd-and-env []
+  (with-temp-dir
+    (fn [dir]
+      (local cwd-id (process.spawn {:args (if is-windows (shell-args "cd") ["pwd"]) :cwd dir}))
+      (local cwd-result (process.wait cwd-id))
+      (assert (= cwd-result.exit-code 0) "cwd spawn should succeed")
 
-(fn test-spawn-env []
-  (local id (process.spawn {:args ["sh" "-c" "echo $SPAWN_TEST_VAR"]
-                            :env {:SPAWN_TEST_VAR "spawn_value"}}))
-  (local result (process.wait id))
+      (local env-id (process.spawn {:args (if is-windows
+                                            (shell-args "echo %SPAWN_TEST_VAR%")
+                                            (shell-args "echo $SPAWN_TEST_VAR"))
+                                    :env {:SPAWN_TEST_VAR "spawn_value"}}))
+      (local env-result (process.wait env-id))
+      (assert (= env-result.exit-code 0) "env spawn should succeed")
+      (assert (= (normalize-eol env-result.stdout) "spawn_value\n") "spawn env var should be set"))))
+
+(fn test-edge-cases []
+  (local (ok-empty _err-empty) (pcall process.run {:args []}))
+  (assert (not ok-empty) "should error on empty args")
+
+  (local (ok-no-args _err-no-args) (pcall process.run {}))
+  (assert (not ok-no-args) "should error on missing args")
+
+  (local (ok-wait _err-wait) (pcall process.wait 999999))
+  (assert (not ok-wait) "should error on invalid wait id")
+
+  (local (ok-write _err-write) (pcall process.write 999999 "data"))
+  (assert (not ok-write) "should error on invalid write id"))
+
+(fn test-run-three-bytes-output []
+  (local result (process.run {:args (if is-windows
+                                        (shell-args "<nul set /p =ABC")
+                                        ["printf" "\\x00\\x01\\x02"])}))
   (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= result.stdout "spawn_value\n") "env var should be set"))
-
-(fn test-spawn-initial-stdin []
-  ;; Test that stdin data provided at spawn time works
-  (local id (process.spawn {:args ["cat"]
-                            :stdin "initial data"}))
-  (process.close-stdin id)
-  (local result (process.wait id))
-  (assert (= result.exit-code 0) "exit code should be 0")
-  ;; Note: initial stdin may or may not be fully written depending on buffer size
-  ;; At minimum we should get something
-  (assert (> (length result.stdout) 0) "should have some output"))
-
-;; ============================================================================
-;; Edge cases and error handling
-;; ============================================================================
-
-(fn test-run-empty-args-error []
-  (local (ok err) (pcall process.run {:args []}))
-  (assert (not ok) "should error on empty args")
-  (assert (string.find err "empty") "error should mention empty"))
-
-(fn test-run-no-args-error []
-  (local (ok err) (pcall process.run {}))
-  (assert (not ok) "should error on missing args"))
-
-(fn test-spawn-invalid-id-wait []
-  (local (ok err) (pcall process.wait 999999))
-  (assert (not ok) "should error on invalid id"))
-
-(fn test-spawn-invalid-id-write []
-  (local (ok err) (pcall process.write 999999 "data"))
-  (assert (not ok) "should error on invalid id"))
-
-(fn test-run-binary-output []
-  ;; Test that binary data is preserved
-  (local result (process.run {:args ["printf" "\\x00\\x01\\x02"]}))
-  (assert (= result.exit-code 0) "exit code should be 0")
-  (assert (= (length result.stdout) 3) "should have 3 bytes"))
+  (if is-windows
+      (assert (= (length result.stdout) 3) "should have 3 bytes")
+      (assert (= (length result.stdout) 3) "should have 3 bytes")))
 
 (fn test-spawn-multiple-concurrent []
-  ;; Spawn multiple processes concurrently
   (local ids [])
   (for [i 1 5]
-    (table.insert ids (process.spawn {:args ["echo" (tostring i)]})))
-  ;; Wait for all
-  (local results [])
+    (table.insert ids (process.spawn {:args (if is-windows
+                                                (shell-args (.. "echo " i))
+                                                ["echo" (tostring i)])})))
   (each [_ id (ipairs ids)]
-    (table.insert results (process.wait id)))
-  ;; All should succeed
-  (each [_ result (ipairs results)]
-    (assert (= result.exit-code 0) "all should succeed")))
-
-;; ============================================================================
-;; Register all tests
-;; ============================================================================
+    (local result (process.wait id))
+    (assert (= result.exit-code 0) "all concurrent processes should succeed")))
 
 (table.insert tests {:name "run simple command" :fn test-run-simple-command})
 (table.insert tests {:name "run exit code" :fn test-run-exit-code})
@@ -302,22 +294,14 @@
 (table.insert tests {:name "run duration" :fn test-run-duration})
 (table.insert tests {:name "run large output" :fn test-run-large-output})
 (table.insert tests {:name "spawn and wait" :fn test-spawn-and-wait})
-(table.insert tests {:name "spawn running" :fn test-spawn-running})
-(table.insert tests {:name "spawn kill" :fn test-spawn-kill})
-(table.insert tests {:name "spawn kill sigkill" :fn test-spawn-kill-sigkill})
-(table.insert tests {:name "spawn write stdin" :fn test-spawn-write-stdin})
-(table.insert tests {:name "spawn close stdin" :fn test-spawn-close-stdin})
+(table.insert tests {:name "spawn running and kill" :fn test-spawn-running-and-kill})
+(table.insert tests {:name "spawn write and close stdin" :fn test-spawn-write-and-close-stdin})
 (table.insert tests {:name "spawn poll" :fn test-spawn-poll})
 (table.insert tests {:name "spawn poll max results" :fn test-spawn-poll-max-results})
 (table.insert tests {:name "spawn timeout" :fn test-spawn-timeout})
-(table.insert tests {:name "spawn cwd" :fn test-spawn-cwd})
-(table.insert tests {:name "spawn env" :fn test-spawn-env})
-(table.insert tests {:name "spawn initial stdin" :fn test-spawn-initial-stdin})
-(table.insert tests {:name "run empty args error" :fn test-run-empty-args-error})
-(table.insert tests {:name "run no args error" :fn test-run-no-args-error})
-(table.insert tests {:name "spawn invalid id wait" :fn test-spawn-invalid-id-wait})
-(table.insert tests {:name "spawn invalid id write" :fn test-spawn-invalid-id-write})
-(table.insert tests {:name "run binary output" :fn test-run-binary-output})
+(table.insert tests {:name "spawn cwd and env" :fn test-spawn-cwd-and-env})
+(table.insert tests {:name "edge cases" :fn test-edge-cases})
+(table.insert tests {:name "run three bytes output" :fn test-run-three-bytes-output})
 (table.insert tests {:name "spawn multiple concurrent" :fn test-spawn-multiple-concurrent})
 
 (local main

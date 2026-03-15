@@ -2,8 +2,11 @@
 (local _ (require :main))
 (local FsView (require :fs-view))
 (local fs (require :fs))
+(local PathUtils (require :tests.path-utils))
 
 (local tests [])
+
+(local paths-eq PathUtils.paths-eq)
 
 (fn make-vector-buffer []
   (local buffer {})
@@ -134,7 +137,7 @@
       (fn [view]
         (local first (. view.items 1))
         (assert first.is-up? "first entry should be parent link")
-        (assert (= first.path root)))))))
+        (assert (paths-eq first.path root)))))))
 
 (fn fs-view-sorts-directories-before-files []
   (with-temp-dir (fn [root]
@@ -159,11 +162,11 @@
       (fn [view]
         (var target-entry nil)
         (each [_ entry (ipairs view.items)]
-          (when (= entry.path target-dir)
+          (when (paths-eq entry.path target-dir)
             (set target-entry entry)))
         (assert target-entry "expected directory entry")
         (view:handle-entry-click target-entry)
-        (assert (= view.current-path target-dir)))))))
+        (assert (paths-eq view.current-path target-dir)))))))
 
 (fn fs-view-parent-entry-goes-up []
   (with-temp-dir (fn [root]
@@ -174,7 +177,7 @@
         (local parent-entry (. view.items 1))
         (assert parent-entry.is-up?)
         (view:handle-entry-click parent-entry)
-        (assert (= view.current-path root)))))))
+        (assert (paths-eq view.current-path root)))))))
 
 (fn fs-view-entry-builder-adds-icons []
   (with-temp-dir (fn [root]

@@ -40,10 +40,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ runner.os }}-${{ matrix.profile }}-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
+          key: ccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ matrix.profile }}-${{ github.ref }}-
-            ccache-${{ runner.os }}-${{ matrix.profile }}-
+            ccache-${{ runner.os }}-linux-${{ github.ref }}-
+            ccache-${{ runner.os }}-linux-
             ccache-${{ runner.os }}-
 
       - name: Install dependencies
@@ -106,48 +106,59 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    if: ${{ false }} # Temporarily disabled; keep job definition for future re-enable.
     runs-on: windows-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
+      CCACHE_MAXSIZE: 1G
+      CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
+      - name: Restore ccache
+        uses: actions/cache@v4
         with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-toolchain
-            mingw-w64-x86_64-cmake
-            mingw-w64-x86_64-ninja
-            mingw-w64-x86_64-curl
-            git
+          path: .ccache-windows
+          key: ccache-${{ runner.os }}-windows-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/prepare-windows-runtime.sh', '.github/workflows/build.yml') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-windows-${{ github.ref }}-
+            ccache-${{ runner.os }}-windows-
+            ccache-${{ runner.os }}-
 
-      - name: Install vcpkg
-        shell: msys2 {0}
-        run: |
-          git clone https://github.com/microsoft/vcpkg
-          ./vcpkg/bootstrap-vcpkg.sh
+      - name: Setup Windows MinGW toolchain
+        uses: ./.github/actions/setup-windows-mingw
+        with:
+          vcpkg-root: ${{ github.workspace }}/vcpkg
 
       - name: Configure and Build
         shell: msys2 {0}
         env:
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-          VCPKG_TARGET_TRIPLET: x64-mingw
+          VCPKG_TARGET_TRIPLET: x64-mingw-dynamic-posix
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: scripts/build-windows.sh
 
-      - name: Bundle runtime DLLs
+      - name: Prepare runtime and bundle artifacts
         shell: msys2 {0}
         run: |
+          scripts/prepare-windows-runtime.sh build/windows/space.exe
           mkdir -p dist
           cp build/windows/space.exe dist/
           cp -r assets dist/assets
-          cp vcpkg/installed/x64-mingw/bin/*.dll dist/
-          cp /mingw64/bin/libgcc_s_seh-1.dll dist/
-          cp /mingw64/bin/libstdc++-6.dll dist/
-          cp /mingw64/bin/libwinpthread-1.dll dist/
+          cp build/windows/*.dll dist/
+
+      - name: Smoke test Windows binary
+        shell: msys2 {0}
+        run: |
+          test -f dist/space.exe
+          dist/space.exe --help >/dev/null
 
       - name: Create ZIP
         run: powershell Compress-Archive -Path dist\* -DestinationPath space-windows.zip
+
+      - name: ccache stats
+        shell: msys2 {0}
+        run: ccache -s
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2

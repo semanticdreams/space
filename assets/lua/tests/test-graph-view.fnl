@@ -22,6 +22,7 @@
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local fs (require :fs))
+(local PathUtils (require :tests.path-utils))
 
 (local tests [])
 (local appdirs (require :appdirs))
@@ -35,6 +36,18 @@
     (for [i 1 (# expected)]
         (assert (= (. actual i) (. expected i))
                 (or message "codepoints mismatch"))))
+
+(local paths-eq PathUtils.paths-eq)
+
+(fn find-fs-node-by-path [graph target-path]
+    (var matched nil)
+    (each [_ node (pairs (or graph.nodes {}))]
+        (when (and (not matched)
+                   node
+                   node.path
+                   (paths-eq node.path target-path))
+            (set matched node)))
+    matched)
 
 (fn make-icons-stub []
     (local glyph {:advance 1})
@@ -235,13 +248,13 @@
                     (var txt-entry nil)
                     (each [_ pair (ipairs view.search.items)]
                         (local entry (. pair 1))
-                        (when (= entry.path subdir)
+                        (when (paths-eq entry.path subdir)
                             (set dir-entry entry))
-                        (when (= entry.path fnl-file)
+                        (when (paths-eq entry.path fnl-file)
                             (set fnl-entry entry))
-                        (when (= entry.path cpp-file)
+                        (when (paths-eq entry.path cpp-file)
                             (set cpp-entry entry))
-                        (when (= entry.path txt-file)
+                        (when (paths-eq entry.path txt-file)
                             (set txt-entry entry)))
                     (assert dir-entry "CodeDir should include subdirectories")
                     (assert fnl-entry "CodeDir should include .fnl files")
@@ -366,7 +379,7 @@
                     (var cpp-entry nil)
                     (each [_ pair (ipairs code-dir-view.search.items)]
                         (local entry (. pair 1))
-                        (when (= entry.path main-file)
+                        (when (paths-eq entry.path main-file)
                             (set cpp-entry entry)))
                     (assert cpp-entry "CodeDir should include cpp module entries")
                     (code-dir-view:open-entry cpp-entry)
@@ -488,9 +501,9 @@
                     (var file-entry nil)
                     (each [_ item (ipairs view.search.items)]
                         (local entry (. item 1))
-                        (when (= entry.path child-dir)
+                        (when (paths-eq entry.path child-dir)
                             (set dir-entry entry))
-                        (when (= entry.path file)
+                        (when (paths-eq entry.path file)
                             (set file-entry entry)))
                     (assert dir-entry "Fs node view should list directories")
                     (assert file-entry "Fs node view should list files")
@@ -499,11 +512,9 @@
                             (string.format "Fs node should create one edge after opening dir (got %s)"
                                            (graph:edge-count)))
                     (view:open-entry file-entry)
-                    (local resolved-dir (node:resolve-path child-dir))
-                    (local resolved-file (node:resolve-path file))
-                    (assert (graph:lookup (.. "fs:" resolved-dir))
+                    (assert (find-fs-node-by-path graph child-dir)
                             "Dir node should be added to graph")
-                    (assert (graph:lookup (.. "fs:" resolved-file))
+                    (assert (find-fs-node-by-path graph file)
                             "File node should be added to graph")
                     (local edge-count (graph:edge-count))
                     (assert (= edge-count 2)

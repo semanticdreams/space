@@ -1,0 +1,41 @@
+name: Setup Windows MinGW Environment
+description: Setup MSYS2 MinGW toolchain, ensure posix aliases, and bootstrap vcpkg.
+
+inputs:
+  vcpkg-root:
+    description: Path where vcpkg should be installed.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-ninja
+          mingw-w64-x86_64-curl
+          mingw-w64-x86_64-pkgconf
+          mingw-w64-x86_64-ccache
+          git
+
+    - name: Ensure MinGW posix compiler aliases
+      shell: msys2 {0}
+      run: |
+        if ! command -v x86_64-w64-mingw32-gcc-posix >/dev/null 2>&1; then
+          ln -sf "$(command -v x86_64-w64-mingw32-gcc)" /mingw64/bin/x86_64-w64-mingw32-gcc-posix
+        fi
+        if ! command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1; then
+          ln -sf "$(command -v x86_64-w64-mingw32-g++)" /mingw64/bin/x86_64-w64-mingw32-g++-posix
+        fi
+
+    - name: Install vcpkg
+      shell: msys2 {0}
+      run: |
+        if [ ! -d "${{ inputs.vcpkg-root }}" ]; then
+          git clone https://github.com/microsoft/vcpkg "${{ inputs.vcpkg-root }}"
+        fi
+        "${{ inputs.vcpkg-root }}/bootstrap-vcpkg.sh"
