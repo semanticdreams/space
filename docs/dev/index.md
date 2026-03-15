@@ -12,6 +12,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [C IR Notes](/dev/notes/c-ir)
 - [GCCJIT Notes](/dev/notes/gccjit)
 - [Native Build Notes](/dev/notes/native-build)
+- [Windows + Wine Build Notes](/dev/notes/windows-wine-build-and-test)
 - [Graph Identity Notes](/dev/notes/graph-identity)
 - [Morphs Notes](/dev/notes/morphs)
 - [Libtorrent Notes](/dev/notes/libtorrent)

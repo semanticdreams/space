@@ -10,6 +10,8 @@ add_library(tree_sitter_core STATIC
 
 target_include_directories(tree_sitter_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/tree_sitter
 )
 
 # Tree-sitter C++ grammar

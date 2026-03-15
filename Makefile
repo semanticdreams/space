@@ -1,4 +1,4 @@
-.PHONY: build cmake debug run pack appimage install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs
+.PHONY: build cmake debug run pack appimage install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs test-windows-wine
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
@@ -46,6 +46,9 @@ test-e2e:
 	FENNEL_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
 	FENNEL_MACRO_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
 	SDL_VIDEODRIVER=x11 xvfb-run -a -s "-screen 0 1280x720x24" ./build/space -m tests.e2e:main
+
+test-windows-wine:
+	./scripts/test-windows-under-wine.sh
 
 prof:
 	@if [ -z "$(target)" ]; then \

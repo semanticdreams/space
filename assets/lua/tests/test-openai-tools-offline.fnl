@@ -2,7 +2,13 @@
 (local fixtures (require :tests/http-fixtures))
 (local json (require :json))
 
-(local fixture-path (.. (os.getenv "PWD") "/assets/lua/tests/data/openai-tools-fixture.json"))
+(local fixture-base
+  (or (and (os.getenv "SPACE_ASSETS_PATH")
+           (.. (os.getenv "SPACE_ASSETS_PATH") "/lua/tests/data"))
+      (and (os.getenv "PWD")
+           (.. (os.getenv "PWD") "/assets/lua/tests/data"))))
+(assert fixture-base "SPACE_ASSETS_PATH or PWD must be set for openai-tools-offline fixture")
+(local fixture-path (.. fixture-base "/openai-tools-fixture.json"))
 (local fixture (fixtures.read-json fixture-path))
 
 (fn wait-until [pred poll-fn timeout-secs]

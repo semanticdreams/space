@@ -20,6 +20,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 #elif defined(_WIN32)
+#ifndef WINVER
+#define WINVER 0x0600
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #define NOMINMAX
 #include <windows.h>
 #include <process.h>
@@ -528,9 +534,9 @@ bool query_process_name(int64_t pid, std::optional<std::string>& out_name)
     }
 
     char buffer[MAX_PATH] = { 0 };
-    DWORD size = MAX_PATH;
     bool ok = false;
-    if (QueryFullProcessImageNameA(handle, 0, buffer, &size) != 0) {
+    DWORD size = GetProcessImageFileNameA(handle, buffer, MAX_PATH);
+    if (size > 0) {
         out_name = basename_from_path(std::string(buffer, size));
         ok = true;
     }
@@ -563,8 +569,8 @@ bool capture_process_times(int64_t pid, ProcessTimes& times, std::optional<std::
     if (out_name != nullptr) {
         std::optional<std::string> name;
         char buffer[MAX_PATH] = { 0 };
-        DWORD size = MAX_PATH;
-        if (QueryFullProcessImageNameA(handle, 0, buffer, &size) != 0) {
+        DWORD size = GetProcessImageFileNameA(handle, buffer, MAX_PATH);
+        if (size > 0) {
             name = basename_from_path(std::string(buffer, size));
         }
         *out_name = name;

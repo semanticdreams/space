@@ -31,6 +31,15 @@ extern "C" { int NvOptimusEnablement = 1; }
 extern "C" { int AmdPowerXpressRequestHighPerformance = 1; }
 #endif
 
+bool set_env_var(const char* key, const char* value)
+{
+#if defined(_WIN32)
+    return _putenv_s(key, value) == 0;
+#else
+    return setenv(key, value, 1) == 0;
+#endif
+}
+
 void configure_audio_env(const std::string& entryScript)
 {
     const char* explicitDriver = std::getenv("SPACE_AUDIO_DRIVER");
@@ -39,7 +48,7 @@ void configure_audio_env(const std::string& entryScript)
     const char* ci = std::getenv("CI");
 
     if (explicitDriver) {
-        setenv("ALSOFT_DRIVERS", explicitDriver, 1);
+        set_env_var("ALSOFT_DRIVERS", explicitDriver);
         return;
     }
 
@@ -47,7 +56,7 @@ void configure_audio_env(const std::string& entryScript)
                          || (!entryScript.empty() && entryScript == "test")
                          || (ci && std::string(ci) == "true");
     if (shouldDisable && !alsoftDrivers) {
-        setenv("ALSOFT_DRIVERS", "null", 1);
+        set_env_var("ALSOFT_DRIVERS", "null");
     }
 }
 

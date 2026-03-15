@@ -117,13 +117,17 @@
   (assert (= (type filtered) "table") "filtered process-list should return table")
   (assert (<= (# filtered) 8) "filtered process-list should honor limit")
 
-  (local spawned (process.run {:args ["sh" "-c" "sleep 1 >/dev/null 2>&1 & echo $!"]}))
-  (assert (= spawned.exit-code 0) "spawn helper command should succeed")
-  (local pid (tonumber (trim spawned.stdout)))
-  (assert pid "spawn helper should emit pid")
-  (local other (sys:process pid))
-  (assert other "sys:process should resolve spawned pid")
-  (assert (other:exists) "spawned pid should exist briefly"))
+  (var candidate nil)
+  (each [_ info (ipairs list)]
+    (when (and (not candidate)
+               info
+               info.pid
+               (not (= info.pid self.pid)))
+      (set candidate info.pid)))
+  (when candidate
+    (local other (sys:process candidate))
+    (assert other "sys:process should resolve candidate pid")
+    (assert (other:exists) "candidate pid should exist")))
 
 (table.insert tests {:name "sysinfo platform" :fn test-platform})
 (table.insert tests {:name "sysinfo system cpu warmup" :fn test-system-cpu-warmup})

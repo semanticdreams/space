@@ -81,18 +81,21 @@ void LuaRuntime::init()
 
 void LuaRuntime::install_fennel(bool correlate)
 {
-    std::string correlate_flag = correlate ? "true" : "false";
-    std::string script =
+    lua["__SPACE_FENNEL_PATH"] = fennel_path_value;
+    lua["__SPACE_FENNEL_CORRELATE"] = correlate;
+    lua.script(
         "app = app or {}\n"
         "local fennel = require(\"fennel\")\n"
-        "fennel.path = \"" + fennel_path_value + "\" .. \";\" .. fennel.path\n"
-        "fennel.install({ correlate = " + correlate_flag + " })\n";
-    lua.script(script);
+        "fennel.path = __SPACE_FENNEL_PATH .. \";\" .. fennel.path\n"
+        "fennel.install({ correlate = __SPACE_FENNEL_CORRELATE })\n"
+        "__SPACE_FENNEL_PATH = nil\n"
+        "__SPACE_FENNEL_CORRELATE = nil\n");
 }
 
 void LuaRuntime::require_module(const std::string& name)
 {
-    lua.script("require(\"" + name + "\")");
+    sol::function require = lua["require"];
+    require(name);
 }
 
 void LuaRuntime::install_fatal_traceback()

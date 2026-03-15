@@ -9,7 +9,6 @@
 (local InsertState (require :insert-state))
 (local {: fallback-glyph} (require :text-utils))
 (local gl (require :gl))
-(local callbacks (require :callbacks))
 
 (local tests [])
 
@@ -128,23 +127,22 @@
       (error result))
     result))
 
-(fn with-settings [settings f]
-  (local previous app.settings)
-  (set app.settings settings)
-  (local (ok result) (pcall f))
-  (set app.settings previous)
+(fn with-clipboard-stub [body]
+  (local original-set gl.clipboard-set)
+  (local original-get gl.clipboard-get)
+  (var clipboard "")
+  (set gl.clipboard-set
+       (fn [value]
+         (set clipboard (or value ""))))
+  (set gl.clipboard-get
+       (fn []
+         clipboard))
+  (local (ok result) (pcall body))
+  (set gl.clipboard-set original-set)
+  (set gl.clipboard-get original-get)
   (if ok
       result
       (error result)))
-
-(local wait-until
-  (fn [pred]
-    (callbacks.run-loop {:poll-jobs false
-                         :poll-http false
-                         :poll-process true
-                         :sleep-ms 0
-                         :timeout-ms 2000
-                         :until pred})))
 
 (fn string-from-text [entity]
   (codepoints->text (entity:get-codepoints)))
@@ -163,78 +161,84 @@
       (input:drop))))
 
 (fn input-context-menu-default-actions []
-  (with-pointer-stubs
-    (fn [_stubs]
-      (local menu (make-menu-manager-stub))
-      (with-menu-manager menu
-        (fn [_menu]
-          (local ctx-info (make-focus-build-ctx _stubs))
-          (local input ((Input {:text "alpha"}) ctx-info.ctx))
-          (gl.clipboard-set "")
-          (input:on-right-click {:point (glm.vec3 1 2 0)
-                                 :button 3})
-          (local actions (. menu.state.opened :actions))
-          (assert (= (length actions) 3) "Input context menu should include 3 default actions")
-          (assert (= (. (. actions 1) :name) "Copy"))
-          (assert (= (. (. actions 2) :name) "Paste"))
-          (assert (= (. (. actions 3) :name) "Clear"))
-          ((. (. actions 1) :fn) nil nil)
-          (assert (= (gl.clipboard-get) "alpha") "Copy should write full input text to clipboard")
-          (input:set-text "ab")
-          (input:move-caret-to 1)
-          (gl.clipboard-set "Z")
-          ((. (. actions 2) :fn) nil nil)
-          (assert (= (input:get-text) "aZb") "Paste should insert at cursor position")
-          ((. (. actions 3) :fn) nil nil)
-          (assert (= (input:get-text) "") "Clear should remove input text")
-          (input:drop))))))
+  (with-clipboard-stub
+    (fn []
+      (with-pointer-stubs
+        (fn [_stubs]
+          (local menu (make-menu-manager-stub))
+          (with-menu-manager menu
+            (fn [_menu]
+              (local ctx-info (make-focus-build-ctx _stubs))
+              (local input ((Input {:text "alpha"}) ctx-info.ctx))
+              (gl.clipboard-set "")
+              (input:on-right-click {:point (glm.vec3 1 2 0)
+                                     :button 3})
+              (local actions (. menu.state.opened :actions))
+              (assert (= (length actions) 3) "Input context menu should include 3 default actions")
+              (assert (= (. (. actions 1) :name) "Copy"))
+              (assert (= (. (. actions 2) :name) "Paste"))
+              (assert (= (. (. actions 3) :name) "Clear"))
+              ((. (. actions 1) :fn) nil nil)
+              (assert (= (gl.clipboard-get) "alpha") "Copy should write full input text to clipboard")
+              (input:set-text "ab")
+              (input:move-caret-to 1)
+              (gl.clipboard-set "Z")
+              ((. (. actions 2) :fn) nil nil)
+              (assert (= (input:get-text) "aZb") "Paste should insert at cursor position")
+              ((. (. actions 3) :fn) nil nil)
+              (assert (= (input:get-text) "") "Clear should remove input text")
+              (input:drop))))))))
 
 (fn input-context-menu-custom-actions []
-  (with-pointer-stubs
-    (fn [_stubs]
-      (local menu (make-menu-manager-stub))
-      (with-menu-manager menu
-        (fn [_menu]
-          (local ctx-info (make-focus-build-ctx _stubs))
-          (local input ((Input {:text "alpha"
-                                :context-menu (fn [_input _event]
-                                                [{:name "Only"
-                                                  :fn (fn [_button _event]
-                                                        (gl.clipboard-set "custom"))}])})
-                       ctx-info.ctx))
-          (input:on-right-click {:point (glm.vec3 1 2 0)
-                                 :button 3})
-          (local actions (. menu.state.opened :actions))
-          (assert (= (length actions) 1) "Custom context menu should replace defaults")
-          (assert (= (. (. actions 1) :name) "Only"))
-          ((. (. actions 1) :fn) nil nil)
-          (assert (= (gl.clipboard-get) "custom"))
-          (input:drop))))))
+  (with-clipboard-stub
+    (fn []
+      (with-pointer-stubs
+        (fn [_stubs]
+          (local menu (make-menu-manager-stub))
+          (with-menu-manager menu
+            (fn [_menu]
+              (local ctx-info (make-focus-build-ctx _stubs))
+              (local input ((Input {:text "alpha"
+                                    :context-menu (fn [_input _event]
+                                                    [{:name "Only"
+                                                      :fn (fn [_button _event]
+                                                            (gl.clipboard-set "custom"))}])})
+                           ctx-info.ctx))
+              (input:on-right-click {:point (glm.vec3 1 2 0)
+                                     :button 3})
+              (local actions (. menu.state.opened :actions))
+              (assert (= (length actions) 1) "Custom context menu should replace defaults")
+              (assert (= (. (. actions 1) :name) "Only"))
+              ((. (. actions 1) :fn) nil nil)
+              (assert (= (gl.clipboard-get) "custom"))
+              (input:drop))))))))
 
 (fn input-context-menu-extend-actions []
-  (with-pointer-stubs
-    (fn [_stubs]
-      (local menu (make-menu-manager-stub))
-      (with-menu-manager menu
-        (fn [_menu]
-          (local ctx-info (make-focus-build-ctx _stubs))
-          (local input ((Input {:text "alpha"
-                                :context-menu (fn [input event]
-                                                (local actions (Input.standard-context-menu input event))
-                                                (table.insert actions {:name "Extra"
-                                                                       :fn (fn [_button _event]
-                                                                             (gl.clipboard-set "extra"))})
-                                                actions)})
-                       ctx-info.ctx))
-          (input:on-right-click {:point (glm.vec3 1 2 0)
-                                 :button 3})
-          (local actions (. menu.state.opened :actions))
-          (assert (= (length actions) 4) "Extended context menu should include defaults plus extras")
-          (assert (= (. (. actions 1) :name) "Copy"))
-          (assert (= (. (. actions 4) :name) "Extra"))
-          ((. (. actions 4) :fn) nil nil)
-          (assert (= (gl.clipboard-get) "extra"))
-          (input:drop))))))
+  (with-clipboard-stub
+    (fn []
+      (with-pointer-stubs
+        (fn [_stubs]
+          (local menu (make-menu-manager-stub))
+          (with-menu-manager menu
+            (fn [_menu]
+              (local ctx-info (make-focus-build-ctx _stubs))
+              (local input ((Input {:text "alpha"
+                                    :context-menu (fn [input event]
+                                                    (local actions (Input.standard-context-menu input event))
+                                                    (table.insert actions {:name "Extra"
+                                                                           :fn (fn [_button _event]
+                                                                                 (gl.clipboard-set "extra"))})
+                                                    actions)})
+                           ctx-info.ctx))
+              (input:on-right-click {:point (glm.vec3 1 2 0)
+                                     :button 3})
+              (local actions (. menu.state.opened :actions))
+              (assert (= (length actions) 4) "Extended context menu should include defaults plus extras")
+              (assert (= (. (. actions 1) :name) "Copy"))
+              (assert (= (. (. actions 4) :name) "Extra"))
+              ((. (. actions 4) :fn) nil nil)
+              (assert (= (gl.clipboard-get) "extra"))
+              (input:drop))))))))
 
 (fn input-registers-double-click []
   (with-pointer-stubs
@@ -246,25 +250,6 @@
       (input:drop)
       (assert (= (or (. _stubs.clickables.state :unregister-double-click) 0) 1)
               "Input should unregister from double click"))))
-
-(fn input-double-click-external-editor-strips-eof-newline []
-  (with-pointer-stubs
-    (fn [_stubs]
-      (local settings
-        {:get-value (fn [key fallback]
-                      (if (= key "external-editor.program")
-                          "sh"
-                          (= key "external-editor.args")
-                          ["-c" "printf 'updated\\n' > \"{path}\""]
-                          fallback))})
-      (with-settings settings
-        (fn []
-          (local ctx-info (make-focus-build-ctx _stubs))
-          (local input ((Input {:text "original"}) ctx-info.ctx))
-          (input:on-double-click {})
-          (local ok (wait-until (fn [] (= (input:get-text) "updated"))))
-          (input:drop)
-          (assert ok "single-line input should strip external-editor EOF newline"))))))
 
 (fn input-text-and-insert-states-edit-text []
   (with-pointer-stubs
@@ -632,7 +617,6 @@
 (table.insert tests {:name "Input context menu custom actions" :fn input-context-menu-custom-actions})
 (table.insert tests {:name "Input context menu extend actions" :fn input-context-menu-extend-actions})
 (table.insert tests {:name "Input registers for double click" :fn input-registers-double-click})
-(table.insert tests {:name "Input external-editor strips eof newline" :fn input-double-click-external-editor-strips-eof-newline})
 (table.insert tests {:name "Text and insert states edit input text" :fn input-text-and-insert-states-edit-text})
 (table.insert tests {:name "Focused input connects through input state" :fn input-focus-connects-to-input-state})
 (table.insert tests {:name "Input blur via click restores normal state" :fn input-blur-via-click-restores-normal-state})

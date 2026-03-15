@@ -14,8 +14,47 @@
     (table.insert out item))
   out)
 
+(local windows-default-skip-modules
+  {:tests.test-terminal true
+   :tests.test-terminal-widget true
+   :tests.test-terminal-renderer true
+   :tests.test-terminal-scrollback true
+   :tests.test-external-editor true
+   :tests.test-ripgrep true
+   :tests.test-ripgrep-view true
+   :tests.test-flamegraph true
+   :tests.test-llm-tools true})
+
 (fn apply-module-overrides [modules]
   (var result (copy-array modules))
+  (var platform-os nil)
+  (local (sys-ok sysinfo-or-err) (pcall (fn []
+                                          (require :sysinfo))))
+  (when sys-ok
+    (local platform (sysinfo-or-err.platform))
+    (when (and platform platform.os)
+      (set platform-os platform.os)))
+
+  (when (= platform-os "windows")
+    ;; Keep Windows/Wine test filtering explicit and centralized.
+    ;; `lua "return true"` per-test skips remain valid for feature-level gates.
+    (local excluded {})
+    (each [module-name enabled? (pairs windows-default-skip-modules)]
+      (when enabled?
+        (set (. excluded module-name) true)))
+    (local (terminal-ok _terminal) (pcall (fn []
+                                            (require :terminal))))
+    (when terminal-ok
+      (set (. excluded :tests.test-terminal) nil)
+      (set (. excluded :tests.test-terminal-widget) nil)
+      (set (. excluded :tests.test-terminal-renderer) nil)
+      (set (. excluded :tests.test-terminal-scrollback) nil))
+    (local filtered [])
+    (each [_ module-name (ipairs result)]
+      (when (not (. excluded module-name))
+        (table.insert filtered module-name)))
+    (set result filtered))
+
   (when (os.getenv "SPACE_MATRIX_TEST")
     (table.insert result :tests.test-matrix))
   (when (os.getenv "SKIP_KEYRING_TESTS")

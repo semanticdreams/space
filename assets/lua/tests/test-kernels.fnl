@@ -1,6 +1,9 @@
 (local fs (require :fs))
 
 (local tests [])
+(local sysinfo (require :sysinfo))
+(local platform-os (. (sysinfo.platform) :os))
+(local is-windows (= platform-os "windows"))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "kernels"))
@@ -142,6 +145,9 @@
               "delete error should explain active instances"))))
 
 (fn kernels-subprocess-launcher-integration []
+  (when is-windows
+    (print "Skipping kernels subprocess launcher integration on Windows: Python runtime unavailable in Wine")
+    (lua "return true"))
   (with-kernels
     (fn [kernels _root]
       (assert (and app app.engine app.engine.get-asset-path)

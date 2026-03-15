@@ -5,8 +5,13 @@
 
 #if defined(_WIN32)
 #define NOMINMAX
+#if defined(__MINGW32__)
+#include <windows.h>
+#include <wincred.h>
+#else
 #include <Windows.h>
 #include <Wincred.h>
+#endif
 #elif defined(__APPLE__)
 #include <Security/Security.h>
 #elif defined(__linux__)

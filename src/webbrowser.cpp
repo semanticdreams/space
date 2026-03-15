@@ -12,8 +12,8 @@
 #if defined(_WIN32)
 
 #define NOMINMAX
-#include <shellapi.h>
 #include <windows.h>
+#include <shellapi.h>
 
 #elif defined(__APPLE__)
 
