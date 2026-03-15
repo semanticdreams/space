@@ -324,6 +324,11 @@ if(WIN32)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_process_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_shell_windows.cpp
     )
+else()
+    list(REMOVE_ITEM SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_process_windows.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_shell_windows.cpp
+    )
 endif()
 add_library(${PROJECT_NAME}_lib ${SOURCES})
 target_compile_definitions(${PROJECT_NAME}_lib PUBLIC GLM_ENABLE_EXPERIMENTAL=1)
