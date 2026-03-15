@@ -444,6 +444,87 @@
     (when (not ok)
       (error err))))
 
+(fn scene-restore-physics-cuboids-world-switch-drift-check []
+  (assert bt "World-switch drift check requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+
+  (fn sim [scene steps]
+    (for [i 1 steps]
+      (app.engine.physics:update 0)
+      (scene:update)))
+
+  (fn physics-layout-ys [scene]
+    (local ys [])
+    (each [_ entry (ipairs (or (and scene.entity scene.entity.physics-bodies) []))]
+      (local y (and entry entry.positioned entry.positioned.layout entry.positioned.layout.position.y))
+      (when y
+        (table.insert ys y)))
+    ys)
+
+  (fn max-abs-drift [start-ys end-ys]
+    (var drift 0.0)
+    (var idx 1)
+    (while (<= idx (math.min (length start-ys) (length end-ys)))
+      (local delta (math.abs (- (. end-ys idx) (. start-ys idx))))
+      (when (> delta drift)
+        (set drift delta))
+      (set idx (+ idx 1)))
+    drift)
+
+  (local setup0 (setup-scene))
+  (local cleanup0 setup0.cleanup)
+  (local scene0 setup0.scene-result.scene)
+  (local (ok0 payload0)
+    (pcall
+      (fn []
+        (scene0:add-physics-body {:position (glm.vec3 -6 0 0)
+                                  :size (glm.vec3 4 4 4)})
+        (scene0:add-physics-body {:position (glm.vec3 6 0 0)
+                                  :size (glm.vec3 4 4 4)})
+        (sim scene0 720)
+        (scene0:capture-state))))
+  (cleanup0)
+  (when (not ok0)
+    (error payload0))
+  (local captured payload0)
+  (var current-captured captured)
+
+  (var worst-drift 0.0)
+  (for [cycle 1 3]
+    (local setup (setup-scene))
+    (local cleanup setup.cleanup)
+    (local scene setup.scene-result.scene)
+    (local (ok payload)
+      (pcall
+        (fn []
+          (scene:build-default {:terrains current-captured.terrains})
+          (scene:restore-state current-captured)
+          (local start-ys (physics-layout-ys scene))
+          (assert (= (length start-ys) 2)
+                  (string.format "Expected 2 restored physics cuboids, got %d" (length start-ys)))
+          (sim scene 120)
+          (local end-ys (physics-layout-ys scene))
+          (local drift (max-abs-drift start-ys end-ys))
+          (when (> drift worst-drift)
+            (set worst-drift drift))
+          (assert (< drift 0.05)
+                  (string.format
+                   "Expected restored physics cuboids to keep stable Y before/after ticks (cycle=%d drift=%.6f start=(%.6f,%.6f) end=(%.6f,%.6f))"
+                   cycle
+                   drift
+                   (. start-ys 1)
+                   (. start-ys 2)
+                   (. end-ys 1)
+                   (. end-ys 2)))
+          (scene:capture-state))))
+    (cleanup)
+    (when (not ok)
+      (error payload))
+    (set current-captured payload))
+  (assert (< worst-drift 0.05)
+          (string.format "Expected worst restore drift < 0.05, got %.6f" worst-drift))
+  true)
+
 (fn scene-add-graph-node-cube-adds-physics-and-readds-node []
   (assert bt "Graph node cube test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -617,6 +698,8 @@
                      :fn scene-physics-body-collides-with-flat-terrain})
 (table.insert tests {:name "Scene runtime body falls after drag release"
                      :fn scene-runtime-body-falls-after-drag-release})
+(table.insert tests {:name "Scene restore physics cuboids world-switch drift check"
+                     :fn scene-restore-physics-cuboids-world-switch-drift-check})
 (table.insert tests {:name "Scene graph node cube adds physics and graph action"
                      :fn scene-add-graph-node-cube-adds-physics-and-readds-node})
 (table.insert tests {:name "Scene restore graph node cube uses scene graph before app binding"
