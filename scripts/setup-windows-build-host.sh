@@ -20,6 +20,11 @@ sudo apt-get install -y \
     nasm \
     curl
 
+if command -v ninja >/dev/null 2>&1 && [ ! -x /usr/local/bin/ninja ]; then
+    sudo mkdir -p /usr/local/bin
+    sudo ln -sf "$(command -v ninja)" /usr/local/bin/ninja
+fi
+
 if ! command -v x86_64-w64-mingw32-gcc-posix >/dev/null 2>&1 \
     || ! command -v x86_64-w64-mingw32-g++-posix >/dev/null 2>&1; then
     echo "Missing posix MinGW compiler variants after install." >&2
