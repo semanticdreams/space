@@ -9,6 +9,7 @@ vcpkg_extract_source_archive(
     ARCHIVE "${ARCHIVE}"
     PATCHES
         configure.diff
+        mingw-stat64.diff
         msvc-no-debug.diff
 )
 
