@@ -1,0 +1,71 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 03462271..3e692b68 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1219,7 +1219,11 @@ foreach(source ${cxx-sources})
+   list(APPEND sources ${CMAKE_CURRENT_SOURCE_DIR}/src/${source})
+ endforeach()
+ 
+-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.rc.in ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++set(ZMQ_VERSION_RC_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++if(MINGW)
++  set(ZMQ_VERSION_RC_SOURCE)
++endif()
+ 
+ # Delete any src/platform.hpp left by configure
+ file(REMOVE ${CMAKE_CURRENT_SOURCE_DIR}/src/platform.hpp)
+@@ -1340,7 +1344,7 @@ if(MSVC)
+     endif()
+ 
+     add_library(libzmq SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs}
+-                              ${CMAKE_CURRENT_BINARY_DIR}/NSIS.template.in ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                              ${CMAKE_CURRENT_BINARY_DIR}/NSIS.template.in ${ZMQ_VERSION_RC_SOURCE})
+     if(ENABLE_ANALYSIS)
+       enable_vs_guideline_checker(libzmq)
+     endif()
+@@ -1361,7 +1365,7 @@ if(MSVC)
+   endif()
+ 
+   if(BUILD_STATIC)
+-    add_library(libzmq-static STATIC ${sources} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++    add_library(libzmq-static STATIC ${sources} ${ZMQ_VERSION_RC_SOURCE})
+     set_target_properties(
+       libzmq-static
+       PROPERTIES PUBLIC_HEADER "${public_headers}"
+@@ -1388,14 +1392,14 @@ else()
+   if(BUILD_SHARED)
+     if(MINGW)
+       add_library(libzmq SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs} ${zmq-pkgconfig}
+-                                ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                                ${ZMQ_VERSION_RC_SOURCE})
+     else()
+         if (CMAKE_GENERATOR STREQUAL "Xcode")
+            add_library(libzmq SHARED ${sources} ${public_headers} ${html-docs} ${readme-docs}
+-                                     ${zmq-pkgconfig} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                                     ${zmq-pkgconfig} ${ZMQ_VERSION_RC_SOURCE})
+         else()
+            add_library(libzmq SHARED $<TARGET_OBJECTS:objects> ${public_headers} ${html-docs} ${readme-docs}
+-                                     ${zmq-pkgconfig} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                                     ${zmq-pkgconfig} ${ZMQ_VERSION_RC_SOURCE})
+         endif()
+ 
+     endif()
+@@ -1419,14 +1423,14 @@ else()
+   if(BUILD_STATIC)
+     if(MINGW)
+       add_library(libzmq-static STATIC ${sources} ${public_headers} ${html-docs} ${readme-docs} ${zmq-pkgconfig}
+-                                       ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                                       ${ZMQ_VERSION_RC_SOURCE})
+     else()
+       if (CMAKE_GENERATOR STREQUAL "Xcode")
+         add_library(libzmq-static STATIC ${sources} ${public_headers} ${html-docs} ${readme-docs}
+-                                         ${zmq-pkgconfig} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                                         ${zmq-pkgconfig} ${ZMQ_VERSION_RC_SOURCE})
+       else()
+         add_library(libzmq-static STATIC $<TARGET_OBJECTS:objects> ${public_headers} ${html-docs} ${readme-docs}
+-                                         ${zmq-pkgconfig} ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
++                                         ${zmq-pkgconfig} ${ZMQ_VERSION_RC_SOURCE})
+       endif()
+     endif()
+     if(CMAKE_SYSTEM_NAME MATCHES "QNX")
