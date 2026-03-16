@@ -26,7 +26,22 @@ runs:
       shell: pwsh
       run: |
         $binDir = Join-Path $env:RUNNER_TEMP 'msys64\mingw64\bin'
-        $toolNames = @('ar', 'dlltool', 'nm', 'ranlib', 'strip', 'windres')
+        $toolNames = @(
+          'addr2line',
+          'ar',
+          'as',
+          'dlltool',
+          'ld',
+          'nm',
+          'objcopy',
+          'objdump',
+          'ranlib',
+          'readelf',
+          'size',
+          'strings',
+          'strip',
+          'windres'
+        )
         foreach ($toolName in $toolNames) {
           $prefixedPath = Join-Path $binDir "x86_64-w64-mingw32-$toolName.exe"
           if (Test-Path $prefixedPath) {
