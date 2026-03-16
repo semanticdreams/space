@@ -9,7 +9,6 @@ vcpkg_extract_source_archive(
     ARCHIVE "${ARCHIVE}"
     PATCHES
         configure.diff
-        mingw-stat64.diff
         msvc-no-debug.diff
 )
 
@@ -25,7 +24,6 @@ if(VCPKG_TARGET_IS_MINGW)
     # __*_chk symbols unavailable with this mingw runtime combination.
     list(APPEND OPTIONS
         CPPFLAGS=-D_FORTIFY_SOURCE=0
-        CXXFLAGS=-std=gnu++14
     )
 endif()
 
