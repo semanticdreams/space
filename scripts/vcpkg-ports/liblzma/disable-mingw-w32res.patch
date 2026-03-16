@@ -1,0 +1,40 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8d8d9a53..4b54f47c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1458,7 +1458,7 @@ endif()
+ if(WIN32 OR CYGWIN)
+     if(BUILD_SHARED_LIBS)
+         # Add the Windows resource file for liblzma.dll.
+-        target_sources(liblzma PRIVATE src/liblzma/liblzma_w32res.rc)
++        target_sources(liblzma PRIVATE $<$<BOOL:${MSVC}>:src/liblzma/liblzma_w32res.rc>)
+ 
+         set_source_files_properties(src/liblzma/liblzma_w32res.rc PROPERTIES
+             OBJECT_DEPENDS "${W32RES_DEPENDENCIES}"
+@@ -1993,7 +1993,7 @@ if(HAVE_DECODERS)
+ 
+         if(WIN32 OR CYGWIN)
+             # Add the Windows resource file for xzdec.exe or lzmadec.exe.
+-            target_sources("${XZDEC}" PRIVATE "src/xzdec/${XZDEC}_w32res.rc")
++            target_sources("${XZDEC}" PRIVATE "$<$<BOOL:${MSVC}>:src/xzdec/${XZDEC}_w32res.rc>")
+             set_source_files_properties(
+                 "src/xzdec/${XZDEC}_w32res.rc" PROPERTIES
+                 OBJECT_DEPENDS "${W32RES_DEPENDENCIES}"
+@@ -2069,7 +2069,7 @@ if(XZ_TOOL_LZMAINFO AND HAVE_DECODERS)
+ 
+     if(WIN32 OR CYGWIN)
+         # Add the Windows resource file for lzmainfo.exe.
+-        target_sources(lzmainfo PRIVATE src/lzmainfo/lzmainfo_w32res.rc)
++        target_sources(lzmainfo PRIVATE $<$<BOOL:${MSVC}>:src/lzmainfo/lzmainfo_w32res.rc>)
+         set_source_files_properties(src/lzmainfo/lzmainfo_w32res.rc PROPERTIES
+             OBJECT_DEPENDS "${W32RES_DEPENDENCIES}"
+         )
+@@ -2188,7 +2188,7 @@ this many MiB of RAM if xz cannot determine the amount at runtime")
+ 
+     if(WIN32 OR CYGWIN)
+         # Add the Windows resource file for xz.exe.
+-        target_sources(xz PRIVATE src/xz/xz_w32res.rc)
++        target_sources(xz PRIVATE $<$<BOOL:${MSVC}>:src/xz/xz_w32res.rc>)
+         set_source_files_properties(src/xz/xz_w32res.rc PROPERTIES
+             OBJECT_DEPENDS "${W32RES_DEPENDENCIES}"
+         )
