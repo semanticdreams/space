@@ -1,0 +1,13 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b501f088..76f2de0d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -448,7 +448,7 @@ if (BUILD_SHARED_LIBS)
+ 		set (PACKAGE_VERSION ${CPACK_PACKAGE_VERSION})
+ 
+ 		configure_file (src/version-metadata.rc.in src/version-metadata.rc @ONLY)
+-		target_sources (sndfile PRIVATE ${PROJECT_BINARY_DIR}/src/version-metadata.rc)
++		target_sources (sndfile PRIVATE $<$<BOOL:${MSVC}>:${PROJECT_BINARY_DIR}/src/version-metadata.rc>)
+ 	endif ()
+ 
+ 
