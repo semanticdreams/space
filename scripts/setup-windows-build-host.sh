@@ -15,6 +15,7 @@ sudo apt-get install -y \
     winbind \
     cmake \
     ninja-build \
+    ccache \
     git \
     pkg-config \
     nasm \
@@ -23,6 +24,11 @@ sudo apt-get install -y \
 if command -v ninja >/dev/null 2>&1 && [ ! -x /usr/local/bin/ninja ]; then
     sudo mkdir -p /usr/local/bin
     sudo ln -sf "$(command -v ninja)" /usr/local/bin/ninja
+fi
+
+if ! command -v ccache >/dev/null 2>&1; then
+    echo "Missing ccache after setup." >&2
+    exit 1
 fi
 
 if ! command -v x86_64-w64-mingw32-gcc-posix >/dev/null 2>&1 \
