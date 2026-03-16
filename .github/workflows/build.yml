@@ -106,11 +106,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    runs-on: windows-latest
+    runs-on: ubuntu-22.04
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
       - uses: actions/checkout@v4
 
@@ -118,46 +119,47 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache-windows
-          key: ccache-${{ runner.os }}-windows-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/prepare-windows-runtime.sh', '.github/workflows/build.yml') }}
+          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh') }}
           restore-keys: |
-            ccache-${{ runner.os }}-windows-${{ github.ref }}-
-            ccache-${{ runner.os }}-windows-
-            ccache-${{ runner.os }}-
+            ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
+            ccache-${{ runner.os }}-windows-cross-
 
-      - name: Setup Windows MinGW toolchain
-        uses: ./.github/actions/setup-windows-mingw
-        with:
-          vcpkg-root: ${{ github.workspace }}/vcpkg
+      - name: Setup Windows cross-build host
+        run: scripts/setup-windows-build-host.sh
 
       - name: Configure and Build
-        shell: msys2 {0}
         env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-          VCPKG_TARGET_TRIPLET: x64-mingw-dynamic-posix
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: scripts/build-windows.sh
+        run: scripts/build-windows-from-linux.sh
 
       - name: Prepare runtime and bundle artifacts
-        shell: msys2 {0}
         run: |
           scripts/prepare-windows-runtime.sh build/windows/space.exe
-          mkdir -p dist
-          cp build/windows/space.exe dist/
-          cp -r assets dist/assets
-          cp build/windows/*.dll dist/
+          mkdir -p dist/windows
+          cp build/windows/space.exe dist/windows/
+          cp -r assets dist/windows/assets
+          cp build/windows/*.dll dist/windows/
 
       - name: Smoke test Windows binary
-        shell: msys2 {0}
         run: |
-          test -f dist/space.exe
-          dist/space.exe --help >/dev/null
+          scripts/prepare-windows-wine-runtime.sh build/windows/space.exe
+          test -f dist/windows/space.exe
+          timeout 60s wine64 build/windows/space.exe --help >/dev/null
 
       - name: Create ZIP
-        run: powershell Compress-Archive -Path dist\* -DestinationPath space-windows.zip
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import zipfile
+
+          root = pathlib.Path("dist/windows")
+          with zipfile.ZipFile("space-windows.zip", "w", zipfile.ZIP_DEFLATED) as archive:
+              for path in root.rglob("*"):
+                  archive.write(path, path.relative_to(root))
+          PY
 
       - name: ccache stats
-        shell: msys2 {0}
         run: ccache -s
 
       - name: Upload to GitHub Release

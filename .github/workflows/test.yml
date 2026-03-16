@@ -52,15 +52,13 @@ jobs:
       - name: Run e2e test suite
         run: make test-e2e
 
-  test-windows:
-    runs-on: windows-latest
+  build-windows:
+    runs-on: ubuntu-22.04
     env:
-      SKIP_KEYRING_TESTS: 1
-      SPACE_DISABLE_AUDIO: 1
-      SPACE_MATRIX_TEST: 1
       CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,39 +67,59 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache-windows
-          key: ccache-${{ runner.os }}-windows-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/prepare-windows-runtime.sh', '.github/workflows/test.yml') }}
+          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh') }}
           restore-keys: |
-            ccache-${{ runner.os }}-windows-${{ github.ref }}-
-            ccache-${{ runner.os }}-windows-
-            ccache-${{ runner.os }}-
+            ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
+            ccache-${{ runner.os }}-windows-cross-
 
-      - name: Setup Windows MinGW toolchain
-        uses: ./.github/actions/setup-windows-mingw
-        with:
-          vcpkg-root: ${{ github.workspace }}/vcpkg
+      - name: Setup Windows cross-build host
+        run: scripts/setup-windows-build-host.sh
 
       - name: Build Windows target
-        shell: msys2 {0}
         env:
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-          VCPKG_TARGET_TRIPLET: x64-mingw-dynamic-posix
           CMAKE_C_COMPILER_LAUNCHER: ccache
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
-        run: scripts/build-windows.sh
+        run: scripts/build-windows-from-linux.sh
 
-      - name: Prepare runtime
-        shell: msys2 {0}
-        run: scripts/prepare-windows-runtime.sh build/windows/space.exe
-
-      - name: Run Windows fast suite
-        shell: msys2 {0}
-        env:
-          SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
-          FENNEL_PATH: ${{ github.workspace }}/assets/lua/?.fnl;${{ github.workspace }}/assets/lua/?/init.fnl
-          FENNEL_MACRO_PATH: ${{ github.workspace }}/assets/lua/?.fnl;${{ github.workspace }}/assets/lua/?/init.fnl
-          XDG_DATA_HOME: ${{ github.workspace }}/.tmp/xdg-data
-        run: build/windows/space.exe -m tests.fast:main
+      - name: Prepare runtime bundle
+        run: |
+          scripts/prepare-windows-runtime.sh build/windows/space.exe
+          mkdir -p dist/windows
+          cp build/windows/space.exe dist/windows/
+          cp -r assets dist/windows/assets
+          cp build/windows/*.dll dist/windows/
 
       - name: ccache stats
-        shell: msys2 {0}
         run: ccache -s
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: space-windows-runtime
+          path: dist/windows
+          if-no-files-found: error
+
+  test-windows:
+    needs: build-windows
+    runs-on: windows-latest
+    env:
+      SKIP_KEYRING_TESTS: 1
+      SPACE_DISABLE_AUDIO: 1
+      SPACE_MATRIX_TEST: 1
+    steps:
+      - name: Download Windows runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: space-windows-runtime
+          path: dist/windows
+
+      - name: Smoke test Windows binary
+        run: .\dist\windows\space.exe --help | Out-Null
+
+      - name: Run Windows fast suite
+        env:
+          SPACE_ASSETS_PATH: ${{ github.workspace }}\\dist\\windows\\assets
+          FENNEL_PATH: ${{ github.workspace }}\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\dist\\windows\\assets\\lua\\?\\init.fnl
+          FENNEL_MACRO_PATH: ${{ github.workspace }}\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\dist\\windows\\assets\\lua\\?\\init.fnl
+          XDG_DATA_HOME: ${{ github.workspace }}\\.tmp\\xdg-data
+        run: .\dist\windows\space.exe -m tests.fast:main
