@@ -260,8 +260,7 @@
 
 (fn test-run-three-bytes-output []
   (local result (process.run {:args (if is-windows
-                                        ["powershell" "-NoProfile" "-Command"
-                                         "[Console]::OpenStandardOutput().Write([byte[]](65,66,67),0,3)"]
+                                        ["cmd" "/d" "/c" "set /p =ABC<nul"]
                                         ["printf" "\\x00\\x01\\x02"])}))
   (assert (= result.exit-code 0) "exit code should be 0")
   (if is-windows
