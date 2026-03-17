@@ -37,7 +37,8 @@ sol::table create_terminal_table(sol::state_view lua)
         "row", &Terminal::Cursor::row,
         "col", &Terminal::Cursor::col,
         "visible", &Terminal::Cursor::visible,
-        "blinking", &Terminal::Cursor::blinking);
+        "blinking", &Terminal::Cursor::blinking,
+        "shape", &Terminal::Cursor::shape);
 
     sol::usertype<Terminal> terminal_type = terminal_table.new_usertype<Terminal>("Terminal",
         sol::no_constructor);

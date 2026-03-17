@@ -8,6 +8,20 @@
 (local terminal (require :terminal))
 (local Modifiers (require :input-modifiers))
 
+(fn negate-vec3 [value]
+  (glm.vec3 (- value.x)
+            (- value.y)
+            (- value.z)))
+
+(fn resolve-frame-padding [options cell-size]
+  (local value (or options.frame-padding
+                   (glm.vec2 (* cell-size.x 0.25)
+                             (* cell-size.y 0.25))))
+  (if (= (type value) "number")
+      (glm.vec2 value value)
+      (glm.vec2 (or (. value 1) value.x value.width 0)
+                (or (. value 2) value.y value.height 0))))
+
 (fn resolve-cell-size [ctx opts style]
   (local options (or opts {}))
   (if options.cell-size
@@ -32,6 +46,7 @@
   (fn build [ctx]
     (local style (resolve-style ctx options))
     (local cell-size (resolve-cell-size ctx options style))
+    (local desired-frame-padding (resolve-frame-padding options cell-size))
     (var rows (or options.rows 72))
     (var cols (or options.cols 240))
     (local scrollback-lines (or (. options "scrollback-lines") 8000))
@@ -86,16 +101,35 @@
 
     (local layouter
       (fn [self]
-        (local size (or self.size self.measure))
-        (local next-cols (math.max 1 (math.floor (/ size.x (math.max cell-size.x 0.0001)))))
-        (local next-rows (math.max 1 (math.floor (/ size.y (math.max cell-size.y 0.0001)))))
+        (local allocated-size (or self.size self.measure))
+        (local allocated-position self.position)
+        (local max-frame-padding-x (math.max 0 (/ (- allocated-size.x cell-size.x) 2)))
+        (local max-frame-padding-y (math.max 0 (/ (- allocated-size.y cell-size.y) 2)))
+        (local frame-padding (glm.vec2 (math.min desired-frame-padding.x max-frame-padding-x)
+                                       (math.min desired-frame-padding.y max-frame-padding-y)))
+        (local usable-size (glm.vec3 (math.max cell-size.x (- allocated-size.x (* 2 frame-padding.x)))
+                                     (math.max cell-size.y (- allocated-size.y (* 2 frame-padding.y)))
+                                     0))
+        (local next-cols (math.max 1 (math.floor (/ usable-size.x (math.max cell-size.x 0.0001)))))
+        (local next-rows (math.max 1 (math.floor (/ usable-size.y (math.max cell-size.y 0.0001)))))
+        (local snapped-size (glm.vec3 (* next-cols cell-size.x)
+                                      (* next-rows cell-size.y)
+                                      0))
+        (local extra-x (math.max 0 (- usable-size.x snapped-size.x)))
+        (local extra-y (math.max 0 (- usable-size.y snapped-size.y)))
+        (local position-offset (glm.vec3 (+ frame-padding.x (/ extra-x 2))
+                                         (+ frame-padding.y (/ extra-y 2))
+                                         0))
         (when (or (not (= next-cols cols))
                   (not (= next-rows rows)))
           (set cols next-cols)
           (set rows next-rows)
           (term:resize rows cols)
           (renderer:set-grid-size rows cols))
-        (set self.size size)
+        (renderer:set-frame {:size allocated-size
+                             :offset (negate-vec3 position-offset)})
+        (set self.position (+ allocated-position (self.rotation:rotate position-offset)))
+        (set self.size snapped-size)
         (renderer:set-layout self)))
 
     (local layout (Layout {:name "terminal"

@@ -43,6 +43,7 @@ public:
         int col = 0;
         bool visible = true;
         bool blinking = false;
+        int shape = 1;
     };
 
     struct Rect {
