@@ -205,6 +205,9 @@ std::vector<wchar_t> build_environment_block(const ProcessArgs& args)
         block.insert(block.end(), entry.begin(), entry.end());
         block.push_back(L'\0');
     }
+    if (block.empty()) {
+        block.push_back(L'\0');
+    }
     block.push_back(L'\0');
     return block;
 }
