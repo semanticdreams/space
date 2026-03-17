@@ -55,9 +55,11 @@
                         (set term.set_alt_screen (fn [_ value]
                                                    (set alt-screen value)))
                         term))
-  (let [result (body calls)]
-    (set terminal.Terminal original-Terminal)
-    result))
+  (local (ok result) (pcall body calls))
+  (set terminal.Terminal original-Terminal)
+  (if ok
+      result
+      (error result)))
 
 (fn setup-state []
   (reset-engine-events)
@@ -85,7 +87,7 @@
   (assert (= widget.layout.measure.y 12)))
 
 (fn terminal-layouter-resizes-terminal []
-  (local widget (make-widget {:rows 2 :cols 2 :cell-size {:x 1 :y 1}}))
+  (local widget (make-widget {:rows 2 :cols 2 :cell-size {:x 1 :y 1} :frame-padding 0}))
   (widget.layout:measurer)
   (set widget.layout.size (glm.vec3 7 4 0))
   (widget.layout:layouter)
@@ -106,7 +108,10 @@
                                     :focus-scope scope
                                     :theme (app.themes.get-active-theme)
                                     :clickables (assert app.clickables "test requires app.clickables")}))
-      (local widget ((TerminalWidget {:rows 2 :cols 3 :cell-size {:x 1 :y 1}}) ctx))
+      (local widget ((TerminalWidget {:rows 2
+                                      :cols 3
+                                      :cell-size {:x 1 :y 1}
+                                      :frame-padding 0}) ctx))
       (widget.layout:measurer)
       (set widget.layout.size (glm.vec3 3 2 0))
       (widget.layout:layouter)
@@ -162,7 +167,10 @@
 (fn terminal-shows-placeholder-when-pty-missing []
   (with-terminal-stub
     (fn [calls]
-      (local widget (make-widget {:rows 2 :cols 2 :cell-size {:x 1 :y 1}}))
+      (local widget (make-widget {:rows 2
+                                  :cols 2
+                                  :cell-size {:x 1 :y 1}
+                                  :frame-padding 0}))
       (assert (= (# calls.injected) 1))
       (assert (string.find (. calls.injected 1) "PTY unavailable"))
       (assert (not (widget:set_scroll_offset 4)))
@@ -243,7 +251,10 @@
   (with-terminal-stub
     (fn [calls]
       (reset-engine-events)
-      (local widget (make-widget {:rows 2 :cols 2 :cell-size {:x 1 :y 1}}))
+      (local widget (make-widget {:rows 2
+                                  :cols 2
+                                  :cell-size {:x 1 :y 1}
+                                  :frame-padding 0}))
       (widget.term:set_alt_screen true)
       (widget.layout:measurer)
       (set widget.layout.size (glm.vec3 2 2 0))
