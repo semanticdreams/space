@@ -101,6 +101,7 @@ struct Terminal::Impl {
         cursor.col = 0;
         cursor.visible = true;
         cursor.blinking = false;
+        cursor.shape = VTERM_PROP_CURSORSHAPE_BLOCK;
 
         vt = vterm_new(rows, cols);
         if (!vt) {
@@ -545,6 +546,12 @@ struct Terminal::Impl {
             int rows = std::max(impl->size.rows, 1);
             int cols = std::max(impl->size.cols, 1);
             impl->markDamage(Rect{0, 0, rows - 1, cols - 1});
+        } else if (prop == VTERM_PROP_CURSORVISIBLE) {
+            impl->cursor.visible = val->boolean != 0;
+        } else if (prop == VTERM_PROP_CURSORBLINK) {
+            impl->cursor.blinking = val->boolean != 0;
+        } else if (prop == VTERM_PROP_CURSORSHAPE) {
+            impl->cursor.shape = val->number;
         }
         return 1;
     }

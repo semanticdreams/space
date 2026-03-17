@@ -280,7 +280,7 @@
       (assert (= get-cell-count first-read-count))
       (renderer:drop))))
 
-(fn cursor-blink-removes-cursor-handle-when-off []
+(fn blinking-cursor-remains-visible []
   (with-mock
     (fn [_mock]
       (local ctx (BuildContext {:theme (app.themes.get-active-theme)}))
@@ -305,7 +305,10 @@
       (set dirty.regions [])
       (renderer:update 0.7)
       (local later-draw-list (ctx:get-quad-draw-list))
-      (assert (= (# later-draw-list) 2)))))
+      (assert (= (# later-draw-list) 2))
+      (local cursor-entry (. later-draw-list 2))
+      (assert cursor-entry "cursor draw entry should remain present even when blinking is requested")
+      (assert (> (cursor-entry.vector:length) 0) "cursor geometry should remain uploaded"))))
 
 (fn renders-scrollback-when-offset []
   (with-mock
@@ -465,8 +468,8 @@
                      :fn underline-uses-font-metrics})
 (table.insert tests {:name "terminal renderer movement updates transform without repainting cells"
                      :fn layout-movement-does-not-repaint-cells})
-(table.insert tests {:name "terminal cursor blink toggles overlay draw"
-                     :fn cursor-blink-removes-cursor-handle-when-off})
+(table.insert tests {:name "terminal renderer keeps blinking cursor visible"
+                     :fn blinking-cursor-remains-visible})
 (table.insert tests {:name "terminal renderer draws scrollback when offset is set"
                      :fn renders-scrollback-when-offset})
 (table.insert tests {:name "terminal renderer clears glyphs for blank cells"

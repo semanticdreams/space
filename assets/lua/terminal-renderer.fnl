@@ -6,13 +6,23 @@
 (local QuadBatcher (require :next-app/quad-batcher))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 
-(local default-blink-period 0.6)
 (local glyph-stride 12)
 (local zero-clip-matrix (glm.mat4 0))
+(local base-background-key "__terminal_base_background")
+(local base-background-depth-offset 1.0)
+(local background-run-depth-offset 2.0)
+(local underline-depth-offset 3.0)
+(local text-depth-offset 4.0)
+(local cursor-depth-offset 5.0)
+(local cursor-underline-height-factor 0.3)
+(local cursor-bar-width-factor 0.3)
 (local blank-cell {:codepoint 32
                    :fg-r 255 :fg-g 255 :fg-b 255
                    :bg-r 0 :bg-g 0 :bg-b 0
                    :bold false :underline false :italic false :reverse false})
+(local cursor-shape-block 1)
+(local cursor-shape-underline 2)
+(local cursor-shape-bar-left 3)
 (local zero-glyph-values [0.0 0.0 0.0 0.0
                           0.0 0.0 0.0 0.0
                           0.0 0.0 0.0 0.0])
@@ -128,13 +138,11 @@
   (var cursor-quad-source nil)
   (var text-ssbo-source nil)
 
-  (var blink-on? true)
-  (var last-update-time nil)
-  (var blink-accumulator 0.0)
-  (local blink-period (or opts.blink-period default-blink-period))
   (var scroll-offset 0)
   (var alt-screen? false)
   (var background-runs-by-row {})
+  (var frame-size (glm.vec3 0 0 0))
+  (var frame-offset (glm.vec3 0 0 0))
 
   (local fonts {:regular style.font
                 :italic (or style.italic-font style.font)
@@ -172,6 +180,21 @@
 
   (fn clear-background-runs []
     (set background-runs-by-row {}))
+
+  (fn write-base-background [depth]
+    (local bg (resolve-color blank-cell.bg-r blank-cell.bg-g blank-cell.bg-b))
+    (background-quad-batcher:upsert-quad base-background-key
+                                         {:matrix (* (glm.translate (glm.mat4 1)
+                                                                    (glm.vec3 frame-offset.x
+                                                                              frame-offset.y
+                                                                              0.0))
+                                                     (glm.scale (glm.mat4 1)
+                                                                (glm.vec3 frame-size.x
+                                                                          frame-size.y
+                                                                          1)))
+                                          :color bg
+                                          :depth-offset (+ depth base-background-depth-offset)
+                                          :clip (and layout-state layout-state.clip)}))
 
   (fn background-run-key [row start-col]
     (.. row ":" start-col))
@@ -338,14 +361,17 @@
       (write-empty-glyph bucket index)
       (set-cell-visible bucket index false)))
 
-  (fn cell-matrix [row col y0 y1]
-    (local x0 (or (. column-lefts (+ col 1)) (* col cell-size.x)))
+  (fn cell-matrix [row col y0 y1 x-start x-end]
+    (local cell-left (or (. column-lefts (+ col 1)) (* col cell-size.x)))
     (local row-bottom (or (. row-bottoms (+ row 1))
                           (- (* rows cell-size.y) (* (+ row 1) cell-size.y))))
+    (local left (+ cell-left (or x-start 0.0)))
+    (local right (+ cell-left (or x-end cell-size.x)))
     (local bottom (+ row-bottom (or y0 0.0)))
     (local top (+ row-bottom (or y1 cell-size.y)))
+    (local width (math.max 0.0001 (- right left)))
     (local height (math.max 0.0001 (- top bottom)))
-    (rect-matrix x0 bottom cell-size.x height))
+    (rect-matrix left bottom width height))
 
   (fn write-background-run [row start-col end-col color depth]
     (when (<= start-col end-col)
@@ -357,7 +383,7 @@
       (background-quad-batcher:upsert-quad key
                                            {:matrix (rect-matrix x0 y0 width cell-size.y)
                                             :color color
-                                            :depth-offset depth
+                                            :depth-offset (+ depth background-run-depth-offset)
                                             :clip (and layout-state layout-state.clip)})))
 
   (fn build-background-runs-for-row [row line source-row depth use-scrollback?]
@@ -579,6 +605,18 @@
       (set cursor-dirty? true))
     self)
 
+  (fn set-frame [self frame]
+    (local next-size (or (and frame frame.size) (glm.vec3 0 0 0)))
+    (local next-offset (or (and frame frame.offset) (glm.vec3 0 0 0)))
+    (when (or (not (vec3-equal? frame-size next-size))
+              (not (vec3-equal? frame-offset next-offset)))
+      (set frame-size next-size)
+      (set frame-offset next-offset)
+      (set full-redraw? true)
+      (set dirty? true)
+      (set cursor-dirty? true))
+    self)
+
   (fn set-layout [self layout]
     (when layout
       (local next-state {:position layout.position
@@ -646,24 +684,27 @@
     (local cell-count (* rows cols))
     (each [_ state (ipairs font-state-list)]
       (when (ensure-font-bucket state cell-count)
-        (write-bucket-transform state (+ depth 2.0)))))
+        (write-bucket-transform state (+ depth text-depth-offset)))))
 
   (fn update-bucket-transforms [depth]
     (each [_ state (ipairs font-state-list)]
       (when state.bucket
-        (write-bucket-transform state (+ depth 2.0)))))
+        (write-bucket-transform state (+ depth text-depth-offset)))))
 
   (fn write-cursor [cursor]
     (if (and cursor cursor.visible layout-state (not layout-state.culled?))
         (do
           (local color (glm.vec4 1 1 1 0.8))
-          (local depth (+ (or layout-state.depth 0) 3.0))
-          (when (and cursor.blinking (not blink-on?))
-            (cursor-quad-batcher:clear)
-            (set cursor-dirty? false)
-            (lua "return"))
+          (local depth (+ (or layout-state.depth 0) cursor-depth-offset))
+          (local shape (or cursor.shape cursor-shape-block))
           (cursor-quad-batcher:upsert-quad 0
-                                           {:matrix (cell-matrix cursor.row cursor.col 0 cell-size.y)
+                                           {:matrix (if (= shape cursor-shape-underline)
+                                                        (cell-matrix cursor.row cursor.col 0
+                                                                     (* cell-size.y cursor-underline-height-factor))
+                                                        (if (= shape cursor-shape-bar-left)
+                                                            (cell-matrix cursor.row cursor.col 0 cell-size.y
+                                                                         0 (* cell-size.x cursor-bar-width-factor))
+                                                            (cell-matrix cursor.row cursor.col 0 cell-size.y)))
                                             :color color
                                             :depth-offset depth
                                             :clip layout-state.clip})
@@ -679,6 +720,7 @@
         (background-quad-batcher:clear)
         (clear-background-runs)
         (underline-quad-batcher:clear))
+      (write-base-background depth)
       (ensure-buckets depth)
       (when (and layout-dirty? tracking-dirty? (not full-redraw?))
         (update-bucket-transforms depth))
@@ -739,7 +781,8 @@
                     (when cell.reverse
                       (set underline-color (resolve-color cell.bg-r cell.bg-g cell.bg-b)))
                     (local underline-geo (underline-geometry target-state))
-                    (write-underline row col underline-color (+ depth 1.0) underline-geo.y0 underline-geo.y1))
+                    (write-underline row col underline-color (+ depth underline-depth-offset)
+                                     underline-geo.y0 underline-geo.y1))
                   (clear-underline-at row col))
               (each [_ state (ipairs font-state-list)]
                 (if (= state target-state)
@@ -765,28 +808,14 @@
       (set full-redraw? false)
       (set tracking-dirty? false))))
 
-  (fn update-blink [_self delta cursor]
-    (when cursor
-      (if cursor.blinking
-          (do
-            (set blink-accumulator (+ blink-accumulator delta))
-            (when (>= blink-accumulator blink-period)
-              (set blink-accumulator (- blink-accumulator blink-period))
-              (set blink-on? (not blink-on?))
-              (set cursor-dirty? true)))
-          (do
-            (when (not blink-on?)
-              (set blink-on? true)
-              (set cursor-dirty? true))
-            (set blink-accumulator 0)))))
-
   (fn cursor-state-changed? [a b]
     (or (not a)
         (not b)
         (not (= a.row b.row))
         (not (= a.col b.col))
         (not (= a.visible b.visible))
-        (not (= a.blinking b.blinking))))
+        (not (= a.blinking b.blinking))
+        (not (= a.shape b.shape))))
 
   (var last-cursor nil)
 
@@ -794,18 +823,15 @@
     (and cursor {:row cursor.row
                  :col cursor.col
                  :visible cursor.visible
-                 :blinking cursor.blinking}))
+                 :blinking cursor.blinking
+                 :shape cursor.shape}))
 
   (fn update [self delta]
     (when term
-      (local now (os.clock))
-      (local elapsed (or delta (and last-update-time (- now last-update-time)) 0))
-      (set last-update-time now)
       (local cursor (term:get-cursor))
       (when (cursor-state-changed? cursor last-cursor)
         (set cursor-dirty? true))
       (set last-cursor (copy-cursor cursor))
-      (update-blink self elapsed cursor)
       (when (or dirty? layout-dirty? full-redraw? cursor-dirty?)
         (paint self))))
 
@@ -830,6 +856,7 @@
   {:set-term set-term
    :set-cell-size set-cell-size
    :set-grid-size set-grid-size
+   :set-frame set-frame
    :set-scroll-state set-scroll-state
    :set-layout set-layout
    :mark-dirty mark-dirty

@@ -6,20 +6,18 @@
 (fn make-terminal-dialog [opts]
   (local options (or opts {}))
   (local DefaultDialog (require :default-dialog))
-  (local Padding (require :padding))
   (local Sized (require :sized))
   (local TerminalWidget (require :terminal-widget))
   (DefaultDialog
     {:title "Terminal"
      :name "hud-terminal-dialog"
+     :body-padding false
      :on-close options.on-close
      :child
-     (Padding {:edge-insets [0.6 0.5]
-               :child
-               (Sized {:size default-terminal-size
-                       :child (TerminalWidget {:name "hud-terminal"
-                                               :focus-name "hud-terminal"
-                                               :follow-tail? true})})})}))
+     (Sized {:size default-terminal-size
+             :child (TerminalWidget {:name "hud-terminal"
+                                     :focus-name "hud-terminal"
+                                     :follow-tail? true})})}))
 
 (fn make-icon-browser-dialog [opts]
   (local options (or opts {}))
