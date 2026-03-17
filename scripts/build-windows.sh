@@ -99,6 +99,7 @@ fi
 
 if [ -n "${VCPKG_PACKAGES}" ]; then
     "${vcpkg_bin}" install \
+        --recurse \
         --triplet "${VCPKG_TRIPLET}" \
         --overlay-triplets "${VCPKG_OVERLAY_TRIPLETS}" \
         --overlay-ports "${VCPKG_OVERLAY_PORTS}" \

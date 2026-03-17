@@ -40,6 +40,23 @@ require_tool() {
     command -v "$tool" >/dev/null 2>&1 || die "required tool not found: $tool"
 }
 
+normalize_sha() {
+    local sha="$1"
+    if [ -z "$sha" ]; then
+        printf '\n'
+        return 0
+    fi
+    if command -v git >/dev/null 2>&1; then
+        local resolved=""
+        resolved="$(git rev-parse --verify "${sha}^{commit}" 2>/dev/null || true)"
+        if [ -n "$resolved" ]; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+    fi
+    printf '%s\n' "$sha"
+}
+
 shell_escape_json() {
     local value="$1"
     printf '%s' "$value" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -97,6 +114,7 @@ latest_run_id_cmd() {
 
     require_arg "$workflow" "--workflow"
     require_arg "$branch" "--branch"
+    sha="$(normalize_sha "$sha")"
 
     local args=(
         run list
@@ -178,6 +196,7 @@ wait_run_cmd() {
 
     require_arg "$workflow" "--workflow"
     require_arg "$branch" "--branch"
+    sha="$(normalize_sha "$sha")"
 
     latest_args=(--workflow "$workflow" --branch "$branch")
     if [ -n "$sha" ]; then

@@ -82,12 +82,7 @@ jobs:
         run: scripts/build-windows-from-linux.sh
 
       - name: Prepare runtime bundle
-        run: |
-          scripts/prepare-windows-runtime.sh build/windows/space.exe
-          mkdir -p dist/windows
-          cp build/windows/space.exe dist/windows/
-          cp -r assets dist/windows/assets
-          cp build/windows/*.dll dist/windows/
+        run: scripts/package-windows-runtime.sh
 
       - name: ccache stats
         run: ccache -s
