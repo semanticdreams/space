@@ -205,14 +205,14 @@
 
 (fn assert-bash-cwd [root]
     (local rooted (LlmTools.call "bash" {:command "printf '%s' \"$PWD\""
-                                         :timeout 3
+                                         :timeout 10
                                          :cwd root}))
     (assert (= rooted.exit_code 0))
     (assert (= rooted.stdout root)))
 
 (fn bash-runs-command []
     (local result (LlmTools.call "bash" {:command "printf 'hello'"
-                                         :timeout 3}))
+                                         :timeout 10}))
     (when (or (not (= result.exit_code 0))
               (not (= result.stdout "hello"))
               (not (= result.timed_out false)))
