@@ -14,6 +14,9 @@
     (table.insert out item))
   out)
 
+(fn env-enabled? [name]
+  (= (os.getenv name) "1"))
+
 (local windows-default-skip-modules
   {:tests.test-terminal true
    :tests.test-terminal-widget true
@@ -55,9 +58,9 @@
         (table.insert filtered module-name)))
     (set result filtered))
 
-  (when (os.getenv "SPACE_MATRIX_TEST")
+  (when (env-enabled? "SPACE_MATRIX_TEST")
     (table.insert result :tests.test-matrix))
-  (when (os.getenv "SKIP_KEYRING_TESTS")
+  (when (env-enabled? "SKIP_KEYRING_TESTS")
     (local filtered [])
     (each [_ module-name (ipairs result)]
       (when (not (= module-name :tests.test-keyring))
