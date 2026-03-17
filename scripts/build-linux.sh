@@ -66,7 +66,13 @@ else
     STABLE_RPM_NAME="space-linux-x86_64.rpm"
 fi
 
-tar -czf "${BUILD_DIR}/dist/${BIN_TAR_NAME}" -C "${BUILD_DIR}/dist" space assets
+RELEASE_MANIFEST="${BUILD_DIR}/release-artifacts-${PROFILE}.txt"
+RELEASE_DEB_PATH="${BUILD_DIR}/${STABLE_DEB_NAME}"
+RELEASE_RPM_PATH="${BUILD_DIR}/${STABLE_RPM_NAME}"
+RELEASE_APPIMAGE_PATH="${BUILD_DIR}/${STABLE_APPIMAGE_NAME}"
+RELEASE_TAR_PATH="${BUILD_DIR}/dist/${BIN_TAR_NAME}"
+
+tar -czf "${RELEASE_TAR_PATH}" -C "${BUILD_DIR}/dist" space assets
 
 SPACE_BUILD_DIR="${BUILD_DIR}" SPACE_APPIMAGE_BASENAME="${APPIMAGE_BASE}" scripts/build-appimage.sh
 
@@ -92,6 +98,25 @@ if [[ -z "${APPIMAGE_SRC}" ]]; then
     exit 1
 fi
 
-cp "${APPIMAGE_SRC}" "${BUILD_DIR}/${STABLE_APPIMAGE_NAME}"
-cp "${DEB_SRC}" "${BUILD_DIR}/${STABLE_DEB_NAME}"
-cp "${RPM_SRC}" "${BUILD_DIR}/${STABLE_RPM_NAME}"
+cp "${APPIMAGE_SRC}" "${RELEASE_APPIMAGE_PATH}"
+cp "${DEB_SRC}" "${RELEASE_DEB_PATH}"
+cp "${RPM_SRC}" "${RELEASE_RPM_PATH}"
+
+for artifact in \
+    "${RELEASE_DEB_PATH}" \
+    "${RELEASE_RPM_PATH}" \
+    "${RELEASE_APPIMAGE_PATH}" \
+    "${RELEASE_TAR_PATH}"
+do
+    if [[ ! -f "${artifact}" ]]; then
+        echo "error: expected release artifact missing: ${artifact}" >&2
+        exit 1
+    fi
+done
+
+cat > "${RELEASE_MANIFEST}" <<EOF
+${RELEASE_DEB_PATH}
+${RELEASE_RPM_PATH}
+${RELEASE_APPIMAGE_PATH}
+${RELEASE_TAR_PATH}
+EOF
