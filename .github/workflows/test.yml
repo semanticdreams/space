@@ -105,7 +105,10 @@ jobs:
     env:
       SKIP_KEYRING_TESTS: 1
       SPACE_DISABLE_AUDIO: 1
-      SPACE_MATRIX_TEST: 1
+      SPACE_MATRIX_TEST: ${{ secrets.MATRIX_USERNAME != '' && secrets.MATRIX_PASSWORD != '' && '1' || '' }}
+      MATRIX_USERNAME: ${{ secrets.MATRIX_USERNAME }}
+      MATRIX_PASSWORD: ${{ secrets.MATRIX_PASSWORD }}
+      MATRIX_HOMESERVER: ${{ secrets.MATRIX_HOMESERVER }}
     steps:
       - name: Download Windows runtime
         uses: actions/download-artifact@v4
