@@ -11,6 +11,8 @@ Goals covered:
 - validate Windows artifacts under Wine
 - keep Windows coverage as high as possible in `tests.fast`, with explicit and minimal skips
 - keep optional modules (notably libtorrent and ffmpeg) enabled by default for Windows
+- align local Windows-from-Linux builds and CI as closely as practical
+- replace the unstable Windows-host MinGW CI path with the Linux cross-build path
 
 ## What Changed
 
@@ -33,6 +35,33 @@ Result:
 - one-time host setup is isolated
 - build and test steps are repeatable across machines
 - Wine runtime prep resolves/copies dependent DLLs automatically and stages `matrix.dll` when present
+- local and CI Windows builds now share the same core build entrypoint (`scripts/build-windows.sh`)
+- `scripts/build-windows.sh` uses `vcpkg install --recurse` so local cross-builds also work on non-pristine machines
+
+### 1.1) Final CI architecture
+
+The original attempt used a native Windows-host MinGW build in GitHub Actions. That path turned out to be the least stable part of the system:
+
+- repeated upstream vcpkg/MinGW resource compilation failures
+- Windows-host tool naming/path mismatches
+- long failure cycles with poor feedback
+
+Final CI shape:
+
+- `test.yml`
+  - Linux job builds the Windows artifact with `scripts/setup-windows-build-host.sh` + `scripts/build-windows-from-linux.sh`
+  - Linux job prepares a runtime bundle with `scripts/package-windows-runtime.sh`
+  - Windows job downloads that runtime bundle and runs the native Windows fast suite
+- `build.yml`
+  - Linux job builds the Windows artifact the same way
+  - Linux job smoke-tests the Windows binary under Wine
+  - Linux job packages the Windows release payload
+
+Why this architecture was chosen:
+
+- it matches the already-working local Windows-from-Linux build path
+- it removes the least reliable environment (Windows-host MinGW dependency builds) from CI
+- it still keeps native Windows runtime validation in CI, which matters for production confidence
 
 ### 2) Windows feature/dependency defaults
 
@@ -91,6 +120,11 @@ Stability tweak:
 
 - input context-menu clipboard assertions now use a local clipboard stub in test code to avoid Wine clipboard flakiness while still validating behavior.
 
+Additional cleanup:
+
+- terminal widget tests now restore their terminal stub correctly even if a test body throws
+- terminal widget tests that assert raw grid or pointer behavior explicitly set `:frame-padding 0` instead of depending on old implicit layout assumptions
+
 ### 5) Kernel subprocess expectations under Wine
 
 - `tests.test-kernels` subprocess integration remains skipped on Windows/Wine due Python runtime availability in Wine environments used for CI-style validation.
@@ -117,6 +151,12 @@ Stability tweak:
 
 - decision: script host setup/build/runtime prep instead of manual commands
 - trade-off: more scripts to maintain, but repeatable onboarding and CI/dev parity
+
+4.1. Prefer the stable build environment over the nominally native one
+
+- decision: build Windows artifacts on Linux in CI instead of building them on a Windows host
+- trade-off: native Windows no longer compiles the dependency graph in CI, but native Windows still validates the produced artifact
+- rationale: production confidence comes from reproducible builds plus native runtime validation, not from forcing the least stable host/toolchain combination through every dependency build
 
 5. Wine-specific compatibility shim (`bcryptprimitives.dll`)
 
@@ -146,16 +186,61 @@ Stability tweak:
 - symptom: shell-dependent behavior caused platform-specific instability in `test-input`
 - resolution: moved that case into `test-external-editor`, keep module skip on Windows
 
+5. Windows-host MinGW CI instability
+
+- symptom: repeated failures in upstream MinGW/vcpkg dependency builds on Windows-host CI
+- root causes included:
+  - resource compiler (`.rc`) failures in several upstream ports
+  - tool-discovery and prefixed-bin naming mismatches
+  - slow iteration loop with poor signal
+- resolution: pivot CI to Linux cross-build for Windows artifacts, keep native Windows only for runtime validation
+
+6. Terminal fast-suite regressions after unrelated CI iteration
+
+- symptom: Linux `space_fnl_tests` started failing in terminal widget/scrollback tests
+- root cause:
+  - one terminal widget test had an outdated layout expectation after default frame padding changes
+  - test helper `with-terminal-stub` leaked the stubbed terminal binding when a test failed, contaminating later terminal tests
+- resolution:
+  - make the helper restore the original binding even on failure
+  - make raw grid/pointer tests opt into `:frame-padding 0`
+
+7. `llm-tools bash runs command` Linux CI timeout
+
+- symptom: bash integration test timed out in CI (`exit_code=143`, `timed_out=true`)
+- root cause: test timeout margin was too tight for loaded CI runners
+- resolution: widen the test timeout from `3` to `10` seconds for the bash tool integration checks
+
 ## Current Known Limitations
 
 - CEF is still Linux-only in current engine integration path.
 - `test-external-editor` remains skipped on Windows due shell-command assumptions (`sh`-driven behavior).
 - kernel subprocess integration test is skipped on Windows/Wine test environments lacking Python runtime.
 - Wine is validation support, not a complete substitute for native Windows verification.
+- current CI uses `ccache`, but the main remaining Windows build time bottleneck is likely outside cacheable compilation; `vcpkg` binary caching is the next meaningful optimization, not more `ccache` tuning alone.
 
 ## Validation Snapshot
 
-Validated in this cycle (Windows binary under Wine):
+Validated in this cycle:
+
+Linux / CI:
+
+- `test.yml` green with:
+  - Linux `test`
+  - Linux `build-windows`
+  - native Windows `test-windows`
+
+Local:
+
+- local Windows cross-build from Linux succeeded
+- focused Linux `tests.test-llm-tools:main` succeeded after timeout fix
+- focused terminal runner path covering:
+  - `tests.test-terminal-widget`
+  - `tests.test-terminal-renderer`
+  - `tests.test-terminal-scrollback`
+  - all passed after test helper/layout fixes
+
+Windows binary under Wine:
 
 - `tests.test-process:main` passing
 - `tests.test-input:main` passing after refactor
@@ -166,8 +251,8 @@ Validated in this cycle (Windows binary under Wine):
 
 1. Native Windows verification pass
 
-- run full fast suite on a real Windows host (not Wine-only)
-- specifically validate audio backend/device matrix under native drivers
+- keep running the native Windows fast suite in CI
+- later, validate release/workflow parity in `build.yml` on manual dispatch or tagged release
 
 2. Reduce skip surface further
 
@@ -178,6 +263,12 @@ Validated in this cycle (Windows binary under Wine):
 
 - implement Windows platform handler in CEF setup/runtime path
 - add Windows packaging/runtime asset flow for CEF payload
+
+4. Windows build performance
+
+- add `ccache -z` before CI builds so per-run cache stats are meaningful
+- add `vcpkg` binary caching for the Linux Windows cross-build path
+- keep `ccache`, but do not expect it alone to materially change total Windows build time
 
 ## Reproducible Workflow (Current)
 
@@ -196,7 +287,7 @@ scripts/build-windows-from-linux.sh
 Prepare native Windows runtime payload (for packaging):
 
 ```bash
-scripts/prepare-windows-runtime.sh build/windows/space.exe
+scripts/package-windows-runtime.sh
 ```
 
 Run Windows fast suite under Wine:
