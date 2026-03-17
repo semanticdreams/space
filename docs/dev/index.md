@@ -7,6 +7,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [Video Playback (FFmpeg)](/dev/video-playback)
 - [SQL Builder (SQLite)](/dev/sql-builder)
 - [Devlog](/dev/devlog)
+- [Milestones](/dev/milestones)
 - [Notes](/dev/notes/aubio)
 - [C Builder Notes](/dev/notes/c-builder)
 - [C IR Notes](/dev/notes/c-ir)
