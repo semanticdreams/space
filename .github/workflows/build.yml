@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
@@ -32,12 +35,12 @@ jobs:
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
@@ -113,10 +116,10 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache-windows
           key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh') }}
