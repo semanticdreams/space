@@ -1230,6 +1230,9 @@ public:
             }
 
             ProcessHandle handle(pid);
+            if (!handle.refresh()) {
+                continue;
+            }
             out[static_cast<int>(count + 1)] = handle;
             count += 1;
             if (limit.has_value() && count >= limit.value()) {
