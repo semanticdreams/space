@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-22.04
@@ -17,10 +20,10 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-linux.sh', 'scripts/build-appimage.sh', 'Makefile') }}
@@ -61,10 +64,10 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache-windows
           key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh') }}
@@ -88,7 +91,7 @@ jobs:
         run: ccache -s
 
       - name: Upload Windows runtime
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: space-windows-runtime
           path: dist/windows
@@ -106,7 +109,7 @@ jobs:
       MATRIX_HOMESERVER: ${{ secrets.MATRIX_HOMESERVER }}
     steps:
       - name: Download Windows runtime
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: space-windows-runtime
           path: dist/windows
