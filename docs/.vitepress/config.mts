@@ -41,7 +41,8 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/dev/' },
             { text: 'Concepts', link: '/dev/concepts' },
-            { text: 'Devlog', link: '/dev/devlog' }
+            { text: 'Devlog', link: '/dev/devlog' },
+            { text: 'Milestones', link: '/dev/milestones' }
           ]
         },
         {
