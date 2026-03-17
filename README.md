@@ -8,12 +8,13 @@ Check out the <a href="https://spaceui.org/" target="_blank">docs</a> for more i
 
 ## Setup
 
-### Install from latest GitHub release (Linux)
+### Install from latest GitHub release
 
 Use prebuilt packages from the latest release:
 [Latest release page](https://github.com/semanticdreams/space/releases/latest)
 
 Direct downloads:
+- Windows (.zip): [space-windows.zip](https://github.com/semanticdreams/space/releases/latest/download/space-windows.zip)
 - AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage)
 - Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb)
 - Fedora/RHEL/openSUSE (.rpm): [space-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm)
@@ -22,6 +23,7 @@ Direct downloads:
 - Minimal Fedora/RHEL/openSUSE (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm)
 
 Install guidance:
+- Windows: extract `space-windows.zip` and run `space.exe`.
 - AppImage: mark executable and run it (`chmod +x <file>.AppImage`, then `./<file>.AppImage`).
 - Debian/Ubuntu: install the downloaded `.deb` with your standard package workflow (`apt`/`dpkg`).
 - Fedora/RHEL/openSUSE: install the downloaded `.rpm` with your standard package workflow (`dnf`/`yum`/`zypper`/`rpm`).
@@ -71,6 +73,9 @@ scripts/build-linux.sh --profile minimal
 Stable outputs are written as:
 - Full: `build/space-linux-x86_64.AppImage`, `build/space-linux-amd64.deb`, `build/space-linux-x86_64.rpm`
 - Minimal: `build/space-minimal-linux-x86_64.AppImage`, `build/space-minimal-linux-amd64.deb`, `build/space-minimal-linux-x86_64.rpm`
+
+Windows release builds currently publish:
+- `space-windows.zip`
 
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).

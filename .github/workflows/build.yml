@@ -18,18 +18,8 @@ jobs:
         include:
           - profile: full
             stable_appimage: space-linux-x86_64.AppImage
-            release_files: |
-              build/*.deb
-              build/*.rpm
-              build/*.AppImage
-              build/dist/space-linux-x86_64-bin.tar.gz
           - profile: minimal
             stable_appimage: space-minimal-linux-x86_64.AppImage
-            release_files: |
-              build/space-minimal-linux-amd64.deb
-              build/space-minimal-linux-x86_64.rpm
-              build/space-minimal-linux-x86_64.AppImage
-              build/dist/space-minimal-linux-x86_64-bin.tar.gz
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
@@ -100,11 +90,31 @@ jobs:
       - name: ccache stats
         run: ccache -s
 
+      - name: Resolve release artifacts
+        id: linux-release-artifacts
+        run: |
+          manifest="build/release-artifacts-${{ matrix.profile }}.txt"
+          test -f "${manifest}"
+          {
+            echo 'files<<EOF'
+            cat "${manifest}"
+            echo 'EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Verify release artifacts
+        run: |
+          manifest="build/release-artifacts-${{ matrix.profile }}.txt"
+          test -f "${manifest}"
+          while IFS= read -r artifact; do
+            test -n "${artifact}"
+            test -f "${artifact}"
+          done < "${manifest}"
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         if: github.ref_type == 'tag'
         with:
-          files: ${{ matrix.release_files }}
+          files: ${{ steps.linux-release-artifacts.outputs.files }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
