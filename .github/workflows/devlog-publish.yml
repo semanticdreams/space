@@ -1,0 +1,151 @@
+name: Publish devlog updates
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compute UTC publish window
+        id: publish-window
+        run: |
+          echo "today=$(date -u +%F)" >> "${GITHUB_OUTPUT}"
+          echo "yesterday=$(date -u -d 'yesterday' +%F)" >> "${GITHUB_OUTPUT}"
+
+      - name: Compute latest docs-affecting commit
+        id: docs-head
+        run: |
+          sha="$(git log -1 --format=%H -- docs assets/pics/space.png .github/workflows/docs-pages.yml)"
+          if [ -z "${sha}" ]; then
+            echo "Unable to determine latest docs-affecting commit" >&2
+            exit 1
+          fi
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify latest docs-affecting commit is deployed to Pages
+        id: docs-deploy-check
+        uses: actions/github-script@v7
+        env:
+          DOCS_WORKFLOW_FILE: docs-pages.yml
+          DOCS_HEAD_SHA: ${{ steps.docs-head.outputs.sha }}
+        with:
+          script: |
+            const workflowFile = process.env.DOCS_WORKFLOW_FILE
+            const docsHeadSha = process.env.DOCS_HEAD_SHA
+
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflowFile,
+              branch: 'main',
+              status: 'completed',
+              per_page: 100
+            })
+
+            const latestSuccess = runs.find((run) => run.conclusion === 'success')
+
+            if (!latestSuccess) {
+              core.warning('No successful docs Pages deploy found for main; skipping devlog publish')
+              core.setOutput('ready', 'false')
+              return
+            }
+
+            core.info(`Latest successful docs deploy head SHA: ${latestSuccess.head_sha}`)
+            core.info(`Latest docs-affecting head SHA: ${docsHeadSha}`)
+
+            if (latestSuccess.head_sha !== docsHeadSha) {
+              core.warning('Latest successful docs deploy is not for the latest docs-affecting commit; skipping devlog publish')
+              core.setOutput('ready', 'false')
+              return
+            }
+
+            core.setOutput('ready', 'true')
+
+      - name: Restore latest devlog publish state artifact
+        if: steps.docs-deploy-check.outputs.ready == 'true'
+        id: state-artifact
+        uses: actions/github-script@v7
+        env:
+          STATE_ARTIFACT_NAME: devlog-publish-state
+          STATE_ARCHIVE_PATH: ${{ runner.temp }}/devlog-publish-state.zip
+        with:
+          script: |
+            const fs = require('fs')
+            const artifactName = process.env.STATE_ARTIFACT_NAME
+            const archivePath = process.env.STATE_ARCHIVE_PATH
+
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100
+            })
+
+            const latest = artifacts
+              .filter((artifact) => artifact.name === artifactName && !artifact.expired)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]
+
+            if (!latest) {
+              core.info('No existing devlog publish state artifact found')
+              core.setOutput('found', 'false')
+              return
+            }
+
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: latest.id,
+              archive_format: 'zip'
+            })
+
+            fs.writeFileSync(archivePath, Buffer.from(download.data))
+            core.info(`Downloaded state artifact ${latest.id}`)
+            core.setOutput('found', 'true')
+
+      - name: Prepare devlog state directory
+        if: steps.docs-deploy-check.outputs.ready == 'true'
+        run: mkdir -p "${RUNNER_TEMP}/devlog-publish-state"
+
+      - name: Unpack devlog publish state artifact
+        if: steps.docs-deploy-check.outputs.ready == 'true' && steps.state-artifact.outputs.found == 'true'
+        run: unzip -o "${RUNNER_TEMP}/devlog-publish-state.zip" -d "${RUNNER_TEMP}/devlog-publish-state"
+
+      - name: Publish scheduled devlog updates
+        if: steps.docs-deploy-check.outputs.ready == 'true'
+        env:
+          DEVLOG_BASE_URL: https://spaceui.org
+          DEVLOG_MAX_ENTRY_ID_EXCLUSIVE: ${{ steps.publish-window.outputs.today }}
+          DEVLOG_SEED_ON_EMPTY_STATE: '1'
+          DEVLOG_SEED_BEFORE_ENTRY_ID_EXCLUSIVE: ${{ steps.publish-window.outputs.yesterday }}
+          DEVLOG_STATE_PATH: ${{ runner.temp }}/devlog-publish-state/state.json
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          MATRIX_ACCESS_TOKEN: ${{ secrets.MATRIX_ACCESS_TOKEN }}
+          MATRIX_HOMESERVER: ${{ secrets.MATRIX_HOMESERVER }}
+          MATRIX_ROOM_ID: ${{ secrets.MATRIX_ROOM_ID }}
+        run: node docs/scripts/publish-devlog.mjs
+
+      - name: Upload devlog publish state artifact
+        if: always() && steps.docs-deploy-check.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: devlog-publish-state
+          path: ${{ runner.temp }}/devlog-publish-state/state.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90

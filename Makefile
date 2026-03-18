@@ -1,4 +1,4 @@
-.PHONY: build cmake debug run pack appimage install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs test-windows-wine
+.PHONY: build cmake debug run pack appimage install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs devlog test-windows-wine
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
@@ -16,6 +16,9 @@ run:
 
 docs:
 	cd docs && npm run docs:dev
+
+devlog:
+	cd docs && node scripts/open-devlog-entry.mjs
 
 commit:
 	codex exec "run `git add -A` and commit with a fitting message"
