@@ -14,6 +14,7 @@ Use prebuilt packages from the latest release:
 [Latest release page](https://github.com/semanticdreams/space/releases/latest)
 
 Direct downloads:
+- Windows installer (.exe): [space-windows-setup.exe](https://github.com/semanticdreams/space/releases/latest/download/space-windows-setup.exe)
 - Windows (.zip): [space-windows.zip](https://github.com/semanticdreams/space/releases/latest/download/space-windows.zip)
 - AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage)
 - Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb)
@@ -23,6 +24,7 @@ Direct downloads:
 - Minimal Fedora/RHEL/openSUSE (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm)
 
 Install guidance:
+- Windows installer: run `space-windows-setup.exe` and follow the installer.
 - Windows: extract `space-windows.zip` and run `space.exe`.
 - AppImage: mark executable and run it (`chmod +x <file>.AppImage`, then `./<file>.AppImage`).
 - Debian/Ubuntu: install the downloaded `.deb` with your standard package workflow (`apt`/`dpkg`).
@@ -34,7 +36,7 @@ Install guidance:
 
 <!-- CI_DEPS_START -->
 ```
-sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-zmq cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev
+sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pil python3-zmq cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev
 make build
 make run
 ```
@@ -75,6 +77,7 @@ Stable outputs are written as:
 - Minimal: `build/space-minimal-linux-x86_64.AppImage`, `build/space-minimal-linux-amd64.deb`, `build/space-minimal-linux-x86_64.rpm`
 
 Windows release builds currently publish:
+- `space-windows-setup.exe`
 - `space-windows.zip`
 
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure

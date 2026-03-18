@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .ccache-windows
-          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh') }}
+          key: ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', 'apps/space/windows_app.rc.in', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh', 'scripts/prepare-windows-runtime.sh', 'scripts/prepare-windows-wine-runtime.sh', 'scripts/generate_windows_icon.py', 'scripts/build-windows-installer.py', 'scripts/windows-installer.iss') }}
           restore-keys: |
             ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
             ccache-${{ runner.os }}-windows-cross-
@@ -94,7 +94,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: space-windows-runtime
-          path: dist/windows
+          path: build/dist/windows
           if-no-files-found: error
 
   test-windows:
@@ -112,15 +112,15 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: space-windows-runtime
-          path: dist/windows
+          path: build/dist/windows
 
       - name: Smoke test Windows binary
-        run: .\dist\windows\space.exe --help | Out-Null
+        run: .\build\dist\windows\space.exe --help | Out-Null
 
       - name: Run Windows fast suite
         env:
-          SPACE_ASSETS_PATH: ${{ github.workspace }}\\dist\\windows\\assets
-          FENNEL_PATH: ${{ github.workspace }}\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\dist\\windows\\assets\\lua\\?\\init.fnl
-          FENNEL_MACRO_PATH: ${{ github.workspace }}\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\dist\\windows\\assets\\lua\\?\\init.fnl
+          SPACE_ASSETS_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets
+          FENNEL_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
+          FENNEL_MACRO_PATH: ${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?.fnl;${{ github.workspace }}\\build\\dist\\windows\\assets\\lua\\?\\init.fnl
           XDG_DATA_HOME: ${{ github.workspace }}\\.tmp\\xdg-data
-        run: .\dist\windows\space.exe -m tests.fast:main
+        run: .\build\dist\windows\space.exe -m tests.fast:main

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build/windows}"
-DIST_DIR="${1:-${ROOT_DIR}/dist/windows}"
+DIST_DIR="${1:-${ROOT_DIR}/build/dist/windows}"
 TARGET_EXE="${BUILD_DIR}/space.exe"
 
 if [ ! -d "${BUILD_DIR}" ]; then
