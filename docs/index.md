@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "space"
-  text: "A 3D Computing Interface"
-  tagline: Build apps, tools, and worlds in a shared runtime where UI, code, and data stay connected.
+  text: "A New Kind of Computing Interface"
+  tagline: space is an experiment in building a programmable, shared, user-owned computing environment for code, knowledge, games, art, and collaboration.
   image:
     src: /space.png
     alt: space logo
@@ -21,35 +21,19 @@ hero:
       link: /dev/
 
 features:
-  - title: 3D-First Interface
-    details: Go beyond flat windows with spatial UI, in-world media, and workflows that benefit from depth and context.
-  - title: Fennel + C++ Runtime
-    details: Script quickly with Fennel on top of a performant C++ engine, with strong control over behavior and layout.
-  - title: Entity-Based Model
-    details: Represent code, notes, tasks, and app state as linked entities for richer organization and navigation.
-  - title: Space Graph
-    details: Use graph relationships as a common interaction model across app features, tools, and views.
-  - title: Collaboration by Design
-    details: Build toward realtime shared spaces with synchronized entities and collaborative editing workflows.
-  - title: Decentralized Pods
-    details: Run user-owned service bundles for sync, communication, and distribution without central lock-in.
+  - title: Spatial Computing
+    details: 3D environments with in-world media, embedded surfaces, spatial widgets, and interactive visualization.
+  - title: Live Programming
+    details: Running code that can be inspected, modified, and reloaded in place within shared 3D environments.
+  - title: Shared Worlds
+    details: Persistent multi-user environments for collaboration, communication, and social interaction.
+  - title: User-Owned Infrastructure
+    details: Federated and self-hosted services for sync, communication, identity, and software distribution.
+  - title: Games, Art, and Simulation
+    details: Games, visual art, simulation, and artificial life in shared interactive worlds.
+  - title: Connected Workflows
+    details: Code, data, notes, tools, media, and world state linked directly to each other for knowledge management and creative work.
 ---
-
-## What You Can Build
-
-- Workflow-oriented apps that combine code, data, and UI in one place.
-- Collaborative spaces for coding, planning, and knowledge management.
-- Visual and spatial tools for exploring complex systems.
-
-## Start Here
-
-From the repository root:
-
-```bash
-make build
-make run
-make test
-```
 
 ## Key Docs
 
@@ -57,3 +41,5 @@ make test
 - User documentation: [/user/](/user/)
 - Developer documentation: [/dev/](/dev/)
 - Concepts: [/dev/concepts](/dev/concepts)
+- Milestones: [/dev/milestones](/dev/milestones)
+- Devlog: [/dev/devlog](/dev/devlog)

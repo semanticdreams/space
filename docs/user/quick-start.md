@@ -1,14 +1,14 @@
 # Quick Start
 
-Run these commands from the repository root:
+Setup, build, and test instructions live in the project README.
 
-```bash
-make build
-make run
-```
+Start there:
 
-Run tests with the standard environment:
+- [README](https://github.com/semanticdreams/space)
 
-```bash
-make test
-```
+Then continue here:
+
+- [User Docs](/user/)
+- [Developer Docs](/dev/)
+- [Concepts](/dev/concepts)
+- [Milestones](/dev/milestones)
