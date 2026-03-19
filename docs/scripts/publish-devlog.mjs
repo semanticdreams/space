@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
+import { format_social_message } from './devlog-social-renderer.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const docsDir = resolve(__dirname, '..')
@@ -102,7 +103,7 @@ function is_sent(state, entryId, channel)
 
 function format_plaintext_message(entry, baseUrl)
 {
-    return `Devlog ${entry.id}\n${entry.body}\n\n${baseUrl}${entry.urlPath}`
+    return format_social_message(entry, baseUrl)
 }
 
 async function post_discord(entry, baseUrl)
