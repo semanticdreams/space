@@ -96,7 +96,8 @@ function ensure_entry_state(state, entryId)
 
 function is_sent(state, entryId, channel)
 {
-    return state.entries[entryId]?.[channel]?.status === 'sent'
+    const channelState = state.entries[entryId]?.[channel]
+    return channelState?.status === 'sent' && channelState.seeded !== true
 }
 
 function format_plaintext_message(entry, baseUrl)

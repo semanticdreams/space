@@ -131,8 +131,6 @@ jobs:
         env:
           DEVLOG_BASE_URL: https://spaceui.org
           DEVLOG_MAX_ENTRY_ID_EXCLUSIVE: ${{ steps.publish-window.outputs.today }}
-          DEVLOG_SEED_ON_EMPTY_STATE: '1'
-          DEVLOG_SEED_BEFORE_ENTRY_ID_EXCLUSIVE: ${{ steps.publish-window.outputs.yesterday }}
           DEVLOG_STATE_PATH: ${{ runner.temp }}/devlog-publish-state/state.json
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           MATRIX_ACCESS_TOKEN: ${{ secrets.MATRIX_ACCESS_TOKEN }}
