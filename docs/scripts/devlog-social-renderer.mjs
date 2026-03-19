@@ -25,6 +25,11 @@ function normalize_base_url(url)
     return url.replace(/\/+$/, '')
 }
 
+function entry_heading_anchor(entry)
+{
+    return `_${entry.id}`
+}
+
 function resolve_entry_target_url(entry, target, baseUrl)
 {
     const normalizedBaseUrl = normalize_base_url(baseUrl)
@@ -146,15 +151,14 @@ function parse_link_or_image(source, startIndex, entry, baseUrl)
         return null
     }
 
-    const url = resolve_entry_target_url(entry, destination.content.trim(), baseUrl)
     if (isImage) {
-        const alt = render_inline_text(label.content, entry, baseUrl).trim()
         return {
-            text: alt ? `${alt}\n${url}` : url,
+            text: '',
             nextIndex: destination.nextIndex
         }
     }
 
+    const url = resolve_entry_target_url(entry, destination.content.trim(), baseUrl)
     const renderedLabel = render_inline_text(label.content, entry, baseUrl).trim()
     return {
         text: renderedLabel ? `${renderedLabel}: ${url}` : url,
@@ -207,6 +211,7 @@ function render_paragraph(lines, entry, baseUrl)
 {
     return lines
         .map((line) => render_inline_text(line, entry, baseUrl).trimEnd())
+        .filter((line) => line.length > 0)
         .join('\n')
 }
 
@@ -222,7 +227,10 @@ function render_list(lines, entry, baseUrl)
             return
         }
 
-        rendered.push(`${currentMarker} ${render_paragraph(currentItem, entry, baseUrl)}`)
+        const paragraph = render_paragraph(currentItem, entry, baseUrl)
+        if (paragraph.length > 0) {
+            rendered.push(`${currentMarker} ${paragraph}`)
+        }
         currentItem = []
     }
 
@@ -248,6 +256,7 @@ function render_blockquote(lines, entry, baseUrl)
             const quoted = line.replace(/^\s*>\s?/, '')
             return render_inline_text(quoted, entry, baseUrl)
                 .split('\n')
+                .filter((quotedLine) => quotedLine.length > 0)
                 .map((quotedLine) => `> ${quotedLine}`)
         })
         .join('\n')
@@ -329,12 +338,13 @@ export function format_social_body(entry, baseUrl)
 export function format_social_message(entry, baseUrl)
 {
     const normalizedBaseUrl = normalize_base_url(baseUrl)
-    return `Devlog ${entry.id}\n${format_social_body(entry, normalizedBaseUrl)}\n\n${normalizedBaseUrl}${entry.urlPath}`
+    return `Devlog ${entry.id}\n${format_social_body(entry, normalizedBaseUrl)}\n\n${normalizedBaseUrl}/dev/devlog#${entry_heading_anchor(entry)}`
 }
 
 export function social_renderer_test_exports()
 {
     return {
+        entry_heading_anchor,
         resolve_entry_target_url,
         render_inline_text
     }

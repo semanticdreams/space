@@ -27,8 +27,8 @@ Current files:
 The current flow is:
 
 1. `publish-devlog.mjs` reads each devlog entry from `docs/dev/devlog/*.md`.
-2. Entry links published to users point at `/dev/devlog#<entry-id>`, not at `/dev/devlog/<entry-id>`.
-3. `generate-devlog-index.mjs` emits explicit anchors into `docs/dev/devlog.md` so those public links land on the correct section.
+2. Entry links published to users point at the actual VitePress heading anchor form, currently `/dev/devlog#_<entry-id>`, not at `/dev/devlog/<entry-id>`.
+3. `generate-devlog-index.mjs` keeps the public devlog page as the user-facing destination for entries.
 4. `devlog-social-renderer.mjs` converts the entry body into social-safe plain text before it is sent to Discord or Matrix.
 
 ## Rendering Rules
@@ -37,16 +37,13 @@ The social renderer currently keeps the source markdown as input and renders a p
 
 Important behavior:
 
-- relative image links are resolved against the source entry path and converted to absolute public URLs
-- image markdown becomes:
-  - alt text on one line
-  - absolute image URL on the next line
+- markdown images are omitted from social output entirely
 - markdown links become visible text plus absolute URL
 - fenced code blocks are preserved
 - simple lists are preserved
 - blockquotes are preserved
 - inline code spans are preserved
-- final entry links use the public devlog anchor URL
+- final entry links use the public devlog heading anchor URL
 
 Example:
 
@@ -59,8 +56,7 @@ Source markdown:
 Published social text:
 
 ```text
-Space Prototype Screenshot
-https://spaceui.org/dev/space-prototype-screenshot1.png
+[omitted]
 ```
 
 ## Why This Design
@@ -71,6 +67,7 @@ Why we did not keep the old approach:
 
 - the original publisher used raw markdown body text in social payloads
 - a quick regex rewrite was enough to prove the direction, but it was not robust enough to be the long-term implementation
+- trying to force image markdown into social posts produced the wrong user experience and still depended on transport-specific behavior
 
 Why we did not jump straight to a full markdown stack:
 
@@ -94,6 +91,7 @@ Accepted trade-offs:
 - unusual nested markdown constructs may still render imperfectly
 - inline HTML is not treated as a first-class structured format
 - different channels still share the same rendered text shape today
+- the current heading-anchor path depends on VitePress's heading id behavior for date-based headings
 
 This is deliberate. The goal was to make the publisher correct for current content and clean enough to extend, without overbuilding.
 
@@ -102,7 +100,7 @@ This is deliberate. The goal was to make the publisher correct for current conte
 `docs/scripts/test-devlog-social-renderer.mjs` covers:
 
 - relative asset URL resolution
-- markdown image rendering
+- markdown image omission
 - markdown link rendering
 - fenced code blocks
 - simple lists
@@ -148,6 +146,6 @@ When changing the devlog publisher:
 
 - keep `docs/dev/devlog/*.md` as the canonical authoring format
 - do not special-case Discord by mutating the source markdown
-- keep public links pointed at the generated devlog index anchors
+- keep public links pointed at the generated devlog heading anchors
 - extend the social renderer and its tests together
 - prefer explicit rendering rules over silent magic

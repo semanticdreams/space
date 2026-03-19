@@ -79,7 +79,7 @@ async function read_entries()
             id,
             title: lines[0].slice(2).trim(),
             body,
-            urlPath: `/dev/devlog#${id}`
+            urlPath: `/dev/devlog#_${id}`
         })
     }
 

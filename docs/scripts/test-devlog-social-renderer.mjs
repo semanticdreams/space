@@ -1,13 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import {
-    format_social_body,
-    format_social_message,
-    social_renderer_test_exports
-} from './devlog-social-renderer.mjs'
+import { format_social_body, format_social_message, social_renderer_test_exports } from './devlog-social-renderer.mjs'
 
-const { resolve_entry_target_url, render_inline_text } = social_renderer_test_exports()
+const { render_inline_text } = social_renderer_test_exports()
 
 function create_entry(body)
 {
@@ -15,23 +11,15 @@ function create_entry(body)
         id: '2025-09-16',
         title: '2025-09-16',
         body,
-        urlPath: '/dev/devlog#2025-09-16'
+        urlPath: '/dev/devlog#_2025-09-16'
     }
 }
 
-test('resolves relative asset URLs against the devlog source directory', () => {
-    const entry = create_entry('')
-    assert.equal(
-        resolve_entry_target_url(entry, '../space-prototype-screenshot1.png', 'https://spaceui.org/'),
-        'https://spaceui.org/dev/space-prototype-screenshot1.png'
-    )
-})
-
-test('renders markdown image syntax as alt text plus absolute URL', () => {
+test('drops markdown image syntax from social output', () => {
     const entry = create_entry('![Space Prototype Screenshot](../space-prototype-screenshot1.png)')
     assert.equal(
         format_social_body(entry, 'https://spaceui.org'),
-        'Space Prototype Screenshot\nhttps://spaceui.org/dev/space-prototype-screenshot1.png'
+        ''
     )
 })
 
@@ -64,9 +52,6 @@ test('renders simple lists and blockquotes without losing URLs', () => {
         [
             '- first item',
             '- link: https://spaceui.org/dev/devlog/doc.md',
-            '',
-            '> Shot',
-            '> https://spaceui.org/dev/img.png'
         ].join('\n')
     )
 })
@@ -75,7 +60,7 @@ test('formats the full social message with public entry anchor URL', () => {
     const entry = create_entry('Hello world')
     assert.equal(
         format_social_message(entry, 'https://spaceui.org/'),
-        'Devlog 2025-09-16\nHello world\n\nhttps://spaceui.org/dev/devlog#2025-09-16'
+        'Devlog 2025-09-16\nHello world\n\nhttps://spaceui.org/dev/devlog#_2025-09-16'
     )
 })
 

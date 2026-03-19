@@ -1,22 +1,14 @@
 # Devlog
 
-<a id="2026-02-16"></a>
-
 ## 2026-02-16
 Restructured docs: combined public docs with dev docs in a new VitePress project, deployed via GitHub Pages to spaceui.org.
 A recent attempt at creating a new instanced quad based rectangle and text rendering system stalled, see code in next-app. Live development is needed to understand the system and harmonize layout and rendering designs.
 
-<a id="2026-02-09"></a>
-
 ## 2026-02-09
 Added Xapian bindings for in-app search. Fixed input text alignment for inputs with extra space. Main challenge is how to structure the graph system to support specific features such as agentic coding, live state exploration, visual programming, knowledge management, etc. while remaining generic and convenient. A possible next step is to add notebooks with notebook pages (or nested notebooks) inspired by gtoolkit in order to provide a structure for the implementation of new features and to keep track of the alignment of development efforts with project goals.
 
-<a id="2026-02-08"></a>
-
 ## 2026-02-08
 Status: Most features from the Python prototype have been recreated in the new Fennel/C++ implementation over the last few months.
-
-<a id="2025-09-24"></a>
 
 ## 2025-09-24
 Changed to load classes in Python prototype directly from z folder rather than through DB-based entities
@@ -26,14 +18,10 @@ Prototype is reaching its end of life so this is ok.
 
 Fixed fbo update issue by updating Lua's fbo handle on viewport change.
 
-<a id="2025-09-17"></a>
-
 ## 2025-09-17
 Fennel implementation has basic triangle renderering and initial UI code (rectangles, layout, widget).
 Output is rendered to a framebuffer displayed on a texture within the scene created by the prototype.
 Entities will be file-based.
-
-<a id="2025-09-16"></a>
 
 ## 2025-09-16
 In the process of replacing Python prototype with C++/Fennel implementation.
