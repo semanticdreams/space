@@ -41,7 +41,7 @@ for (const entryName of entryNames) {
         continue
     }
 
-    sections.push(`## ${title}\n${body}`)
+    sections.push(`<a id="${entryName.replace(/\.md$/, '')}"></a>\n\n## ${title}\n${body}`)
 }
 
 const output = `# Devlog
