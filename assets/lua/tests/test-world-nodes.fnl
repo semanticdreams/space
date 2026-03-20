@@ -22,6 +22,41 @@
   (fs.remove-all dir)
   (if ok result (error result)))
 
+(fn make-world-entry [opts]
+  (local options (or opts {}))
+  (local runtime (or options.runtime nil))
+  (local state (or options.state {:scene {:panels [] :terrains []}
+                                  :hud {:panels []}}))
+  {:id (or options.id "test-world")
+   :name (or options.name "Test World")
+   :active? (or options.active? false)
+   :world {:state state
+           :get-runtime (fn [_self] runtime)
+           :save-state (fn [_self]
+                         (when options.on-save
+                           (options.on-save state))
+                         true)}})
+
+(fn make-world-manager [opts]
+  (local options (or opts {}))
+  (local changed (or options.changed (Signal)))
+  (local entry (or options.entry (make-world-entry options)))
+  (local tabs (or options.tabs [{:index 1
+                                 :id entry.id
+                                 :name entry.name
+                                 :active? (or options.active? false)}]))
+  {:changed changed
+   :list-tabs (fn [_self] tabs)
+   :get-world-entry (fn [_self world-id]
+                      (if (= world-id entry.id)
+                          entry
+                          nil))
+   :active-world (fn [_self]
+                   (if (or options.active? entry.active?) entry nil))
+   :activate-index (or options.activate-index (fn [_self _idx] true))
+   :close-world-index (or options.close-world-index (fn [_self _idx] true))
+   :create-home-world (or options.create-home-world (fn [_self _opts] {:id "created-world"}))})
+
 (fn test-worlds-node-module-exports []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
   (assert WorldsNode "worlds module should export WorldsNode")
@@ -104,7 +139,7 @@
 
 (fn test-worlds-node-has-correct-key []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
-  (local mock-manager {:changed (Signal) :list-tabs (fn [] [])})
+  (local mock-manager {:changed (Signal) :list-tabs (fn [] []) :get-world-entry (fn [_self _id] nil)})
   (local node (WorldsNode {:world-manager mock-manager}))
   (assert (= node.key "worlds") "WorldsNode key should be 'worlds'")
   (assert (= node.label "worlds") "WorldsNode label should be 'worlds'")
@@ -112,53 +147,63 @@
 
 (fn test-world-node-has-correct-key []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
-  (local mock-manager {:changed (Signal) :list-tabs (fn [] []) :active-world (fn [] nil)})
+  (local mock-manager (make-world-manager {:id "test-world-123"}))
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (assert (= node.key "world:test-world-123") "WorldNode key should include world-id")
   (node:drop))
 
 (fn test-scene-panels-node-has-correct-key []
   (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
-  (local node (ScenePanelsNode {:world-id "test-world-123"}))
+  (local node (ScenePanelsNode {:world-id "test-world-123"
+                                :world-manager (make-world-manager {:id "test-world-123"})}))
   (assert (= node.key "scene-panels:test-world-123") "ScenePanelsNode key should include world-id")
   (assert (= node.label "scene panels") "ScenePanelsNode label should be 'scene panels'")
   (node:drop))
 
 (fn test-hud-panels-node-has-correct-key []
   (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
-  (local node (HudPanelsNode {:world-id "test-world-123"}))
+  (local node (HudPanelsNode {:world-id "test-world-123"
+                              :world-manager (make-world-manager {:id "test-world-123"})}))
   (assert (= node.key "hud-panels:test-world-123") "HudPanelsNode key should include world-id")
   (assert (= node.label "hud panels") "HudPanelsNode label should be 'hud panels'")
   (node:drop))
 
 (fn test-terrains-node-has-correct-key []
   (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
-  (local node (TerrainsNode {:world-id "test-world-123"}))
+  (local node (TerrainsNode {:world-id "test-world-123"
+                             :world-manager (make-world-manager {:id "test-world-123"})}))
   (assert (= node.key "terrains:test-world-123") "TerrainsNode key should include world-id")
   (assert (= node.label "terrains") "TerrainsNode label should be 'terrains'")
   (node:drop))
 
 (fn test-scene-panel-node-has-correct-key []
   (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
-  (local node (ScenePanelNode {:world-id "test-world-123" :panel-index 5}))
+  (local node (ScenePanelNode {:world-id "test-world-123"
+                               :world-manager (make-world-manager {:id "test-world-123"})
+                               :panel-index 5}))
   (assert (= node.key "scene-panel:test-world-123:5") "ScenePanelNode key should include world-id and index")
   (node:drop))
 
 (fn test-hud-panel-node-has-correct-key []
   (local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
-  (local node (HudPanelNode {:world-id "test-world-123" :layer "float" :panel-index 3}))
+  (local node (HudPanelNode {:world-id "test-world-123"
+                             :world-manager (make-world-manager {:id "test-world-123"})
+                             :layer "float"
+                             :panel-index 3}))
   (assert (= node.key "hud-panel:test-world-123:float:3") "HudPanelNode key should include world-id, layer, and index")
   (node:drop))
 
 (fn test-terrain-node-has-correct-key []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
-  (local node (TerrainNode {:world-id "test-world-123" :terrain-id "terrain-abc"}))
+  (local node (TerrainNode {:world-id "test-world-123"
+                            :world-manager (make-world-manager {:id "test-world-123"})
+                            :terrain-id "terrain-abc"}))
   (assert (= node.key "terrain:test-world-123:terrain-abc") "TerrainNode key should include world-id and terrain-id")
   (node:drop))
 
 (fn test-world-node-has-emit-categories []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
-  (local mock-manager {:changed (Signal) :list-tabs (fn [] []) :active-world (fn [] nil)})
+  (local mock-manager (make-world-manager {:id "test-world-123"}))
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (assert node.emit-categories "WorldNode should have emit-categories method")
   (local categories (node:emit-categories))
@@ -174,7 +219,7 @@
 (fn test-world-node-add-category-node []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
   (local graph (Graph {:with-start false}))
-  (local mock-manager {:changed (Signal) :list-tabs (fn [] []) :active-world (fn [] nil)})
+  (local mock-manager (make-world-manager {:id "test-world-123"}))
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (graph:add-node node {})
   (local categories (node:emit-categories))
@@ -185,7 +230,9 @@
 
 (fn test-worlds-node-has-emit-items []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
-  (local mock-manager {:changed (Signal) :list-tabs (fn [] [{:index 1 :id "w1" :name "home" :active? true}])})
+  (local mock-manager {:changed (Signal)
+                       :list-tabs (fn [] [{:index 1 :id "w1" :name "home" :active? true}])
+                       :get-world-entry (fn [_self _id] nil)})
   (local node (WorldsNode {:world-manager mock-manager}))
   (assert node.emit-items "WorldsNode should have emit-items method")
   (local items (node:emit-items))
@@ -198,7 +245,8 @@
 
 (fn test-scene-panels-node-has-emit-items []
   (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
-  (local node (ScenePanelsNode {:world-id "test-world"}))
+  (local node (ScenePanelsNode {:world-id "test-world"
+                                :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "ScenePanelsNode should have emit-items method")
   (local items (node:emit-items))
   (assert (= (type items) :table) "emit-items should return a table")
@@ -206,7 +254,8 @@
 
 (fn test-hud-panels-node-has-emit-items []
   (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
-  (local node (HudPanelsNode {:world-id "test-world"}))
+  (local node (HudPanelsNode {:world-id "test-world"
+                              :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "HudPanelsNode should have emit-items method")
   (local items (node:emit-items))
   (assert (= (type items) :table) "emit-items should return a table")
@@ -214,7 +263,8 @@
 
 (fn test-terrains-node-has-emit-items []
   (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
-  (local node (TerrainsNode {:world-id "test-world"}))
+  (local node (TerrainsNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"})}))
   (assert node.emit-items "TerrainsNode should have emit-items method")
   (local items (node:emit-items))
   (assert (= (type items) :table) "emit-items should return a table")
@@ -222,7 +272,7 @@
 
 (fn test-world-node-has-actions []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
-  (local mock-manager {:changed (Signal) :list-tabs (fn [] []) :active-world (fn [] nil)})
+  (local mock-manager (make-world-manager {:id "test-world-123"}))
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (assert node.actions "WorldNode should have actions")
   (assert (= (type node.actions) :table) "actions should be a table")
@@ -235,7 +285,9 @@
 
 (fn test-scene-panel-node-has-remove-action []
   (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
-  (local node (ScenePanelNode {:world-id "test-world" :panel-index 1}))
+  (local node (ScenePanelNode {:world-id "test-world"
+                               :world-manager (make-world-manager {:id "test-world"})
+                               :panel-index 1}))
   (assert node.actions "ScenePanelNode should have actions")
   (assert (= (length node.actions) 1) "ScenePanelNode should have one action")
   (local action (. node.actions 1))
@@ -244,7 +296,10 @@
 
 (fn test-hud-panel-node-has-remove-action []
   (local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
-  (local node (HudPanelNode {:world-id "test-world" :layer "float" :panel-index 1}))
+  (local node (HudPanelNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"})
+                             :layer "float"
+                             :panel-index 1}))
   (assert node.actions "HudPanelNode should have actions")
   (assert (= (length node.actions) 1) "HudPanelNode should have one action")
   (local action (. node.actions 1))
@@ -253,7 +308,9 @@
 
 (fn test-terrain-node-has-no-actions []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
-  (local node (TerrainNode {:world-id "test-world" :terrain-id "t1"}))
+  (local node (TerrainNode {:world-id "test-world"
+                            :world-manager (make-world-manager {:id "test-world"})
+                            :terrain-id "t1"}))
   (assert node.actions "TerrainNode should have actions")
   (assert (= (length node.actions) 0) "TerrainNode should have no actions (read-only)")
   (node:drop))
@@ -263,6 +320,7 @@
   (var created nil)
   (local mock-manager {:changed (Signal)
                        :list-tabs (fn [] [])
+                       :get-world-entry (fn [_self _id] nil)
                        :create-home-world (fn [self opts]
                                             (set created opts)
                                             {:id "new-world"})})
@@ -276,12 +334,11 @@
 (fn test-world-node-activate-finds-index []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
   (var activated-idx nil)
-  (local mock-manager {:changed (Signal)
-                       :list-tabs (fn []
-                                    [{:index 1 :id "other-world" :name "other" :active? false}
-                                     {:index 2 :id "target-world" :name "target" :active? false}])
-                       :activate-index (fn [self idx] (set activated-idx idx))
-                       :active-world (fn [self] nil)})
+  (local mock-manager (make-world-manager {:id "target-world"
+                                           :name "target"
+                                           :tabs [{:index 1 :id "other-world" :name "other" :active? false}
+                                                  {:index 2 :id "target-world" :name "target" :active? false}]
+                                           :activate-index (fn [self idx] (set activated-idx idx))}))
   (local node (WorldNode {:world-id "target-world" :world-manager mock-manager}))
   (node:activate)
   (assert (= activated-idx 2) "activate should find correct index")
@@ -290,22 +347,183 @@
 (fn test-world-node-close-finds-index []
   (local {:WorldNode WorldNode} (require :graph/nodes/world))
   (var closed-idx nil)
-  (local mock-manager {:changed (Signal)
-                       :list-tabs (fn []
-                                    [{:index 1 :id "other-world" :name "other" :active? false}
-                                     {:index 2 :id "target-world" :name "target" :active? false}])
-                       :close-world-index (fn [self idx] (set closed-idx idx))
-                       :active-world (fn [self] nil)})
+  (local mock-manager (make-world-manager {:id "target-world"
+                                           :name "target"
+                                           :tabs [{:index 1 :id "other-world" :name "other" :active? false}
+                                                  {:index 2 :id "target-world" :name "target" :active? false}]
+                                           :close-world-index (fn [self idx] (set closed-idx idx))}))
   (local node (WorldNode {:world-id "target-world" :world-manager mock-manager}))
   (node:close)
   (assert (= closed-idx 2) "close should find correct index")
   (node:drop))
 
+(fn with-app [app-value f]
+  (local previous-app app)
+  (set app app-value)
+  (local (ok result) (pcall f))
+  (set app previous-app)
+  (if ok result (error result)))
+
+(fn test-world-node-uses-target-world-entry []
+  (local {:WorldNode WorldNode} (require :graph/nodes/world))
+  (local target-entry (make-world-entry {:id "target-world" :name "Target World"}))
+  (local mock-manager (make-world-manager {:id "target-world"
+                                           :name "Target World"
+                                           :entry target-entry}))
+  (local node (WorldNode {:world-id "target-world" :world-manager mock-manager}))
+  (assert (= node.label "Target World") "WorldNode should use the requested world entry")
+  (node:drop))
+
+(fn test-scene-panels-node-uses-world-state-when-inactive []
+  (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels [{:kind "alpha"}
+                                                           {:kind "beta"}]
+                                                  :terrains []}
+                                          :hud {:panels []}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (ScenePanelsNode {:world-id "test-world" :world-manager manager}))
+  (local items (node:emit-items))
+  (assert (= (length items) 2) "ScenePanelsNode should read inactive world scene state")
+  (assert (= (. (. items 1) 2) "alpha [1]") "first scene panel label should come from world state")
+  (node:drop))
+
+(fn test-hud-panels-node-uses-world-state-when-inactive []
+  (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels [] :terrains []}
+                                          :hud {:panels [{:layer "tiles" :kind "control"}
+                                                         {:layer "float" :kind "chat"}
+                                                         {:layer "tiles" :kind "status"}]}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (with-app {:active-world-entry {:id "other-world"}
+             :hud {:tiles {:children [{:persistence {:kind "wrong"}}]}
+                   :float {:children []}}}
+    (fn []
+      (local node (HudPanelsNode {:world-id "test-world" :world-manager manager}))
+      (local items (node:emit-items))
+      (assert (= (length items) 3) "HudPanelsNode should read inactive world hud state")
+      (assert (= (. (. items 1) 2) "control [tiles:1]") "tiles index should be layer-relative")
+      (assert (= (. (. items 3) 2) "status [tiles:2]") "second tiles panel should keep layer-relative index")
+      (node:drop))))
+
+(fn test-scene-panel-remove-updates-world-state []
+  (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
+  (local state {:scene {:panels [{:kind "alpha"}
+                                 {:kind "beta"}]
+                        :terrains []}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (ScenePanelNode {:world-id "test-world"
+                               :world-manager manager
+                               :panel-index 1}))
+  (assert (node:remove-panel) "scene panel removal should succeed")
+  (assert (= (length state.scene.panels) 1) "scene panel removal should mutate world state")
+  (assert (= (. (. state.scene.panels 1) :kind) "beta") "scene panel removal should target the requested world")
+  (node:drop))
+
+(fn test-scene-panel-removal-drops-shifted-siblings []
+  (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
+  (local graph (Graph {:with-start false}))
+  (local changed (Signal))
+  (local state {:scene {:panels [{:kind "alpha"}
+                                 {:kind "beta"}]
+                        :terrains []}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager {:changed changed
+                  :list-tabs (fn [_self]
+                               [{:index 1 :id "test-world" :name "Test World" :active? false}])
+                  :get-world-entry (fn [_self world-id]
+                                     (if (= world-id "test-world")
+                                         entry
+                                         nil))})
+  (local node-a (ScenePanelNode {:world-id "test-world"
+                                 :world-manager manager
+                                 :panel-index 1}))
+  (local node-b (ScenePanelNode {:world-id "test-world"
+                                 :world-manager manager
+                                 :panel-index 2}))
+  (graph:add-node node-a {})
+  (graph:add-node node-b {})
+  (assert (node-a:remove-panel) "scene panel removal should succeed")
+  (assert (= (graph:lookup "scene-panel:test-world:2") nil)
+          "shifted sibling nodes should be removed after panel deletion")
+  (graph:drop))
+
+(fn test-hud-panel-remove-uses-layer-relative-state-index []
+  (local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels [{:layer "tiles" :kind "control"}
+                               {:layer "float" :kind "chat"}
+                               {:layer "tiles" :kind "status"}]}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (HudPanelNode {:world-id "test-world"
+                             :world-manager manager
+                             :layer "tiles"
+                             :panel-index 2}))
+  (assert (node:remove-panel) "hud panel removal should succeed")
+  (assert (= (length state.hud.panels) 2) "hud panel removal should mutate world state")
+  (assert (= (. (. state.hud.panels 1) :kind) "control") "first tiles panel should remain")
+  (assert (= (. (. state.hud.panels 2) :kind) "chat") "layer-relative removal should not remove float panels")
+  (node:drop))
+
+(fn test-world-node-removes-itself-when-world-disappears []
+  (local {:WorldNode WorldNode} (require :graph/nodes/world))
+  (local graph (Graph {:with-start false}))
+  (local changed (Signal))
+  (var entry (make-world-entry {:id "test-world"}))
+  (local manager {:changed changed
+                  :list-tabs (fn [_self]
+                               (if entry
+                                   [{:index 1 :id entry.id :name entry.name :active? false}]
+                                   []))
+                  :get-world-entry (fn [_self world-id]
+                                     (if (and entry (= world-id entry.id))
+                                         entry
+                                         nil))
+                  :activate-index (fn [_self _idx] true)
+                  :close-world-index (fn [_self _idx] true)})
+  (local node (WorldNode {:world-id "test-world" :world-manager manager}))
+  (graph:add-node node {})
+  (set entry nil)
+  (changed:emit {})
+  (assert (= (graph:lookup "world:test-world") nil) "WorldNode should remove itself when the world disappears")
+  (graph:drop))
+
+(fn test-scene-panel-node-removes-itself-when-world-disappears []
+  (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
+  (local graph (Graph {:with-start false}))
+  (local changed (Signal))
+  (var entry (make-world-entry {:id "test-world"
+                                :state {:scene {:panels [{:kind "alpha"}] :terrains []}
+                                        :hud {:panels []}}}))
+  (local manager {:changed changed
+                  :list-tabs (fn [_self]
+                               (if entry
+                                   [{:index 1 :id entry.id :name entry.name :active? false}]
+                                   []))
+                  :get-world-entry (fn [_self world-id]
+                                     (if (and entry (= world-id entry.id))
+                                         entry
+                                         nil))})
+  (local node (ScenePanelNode {:world-id "test-world"
+                               :world-manager manager
+                               :panel-index 1}))
+  (graph:add-node node {})
+  (set entry nil)
+  (changed:emit {})
+  (assert (= (graph:lookup "scene-panel:test-world:1") nil)
+          "ScenePanelNode should remove itself when its world disappears")
+  (graph:drop))
+
 (fn test-graph-key-loaders-loads-scene-panels-node []
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
       (local result (graph:load-by-key "scene-panels:test-world"))
       (assert result "scene-panels loader should create node")
       (assert (= result.key "scene-panels:test-world") "scene-panels key should match")
@@ -316,7 +534,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
       (local result (graph:load-by-key "hud-panels:test-world"))
       (assert result "hud-panels loader should create node")
       (assert (= result.key "hud-panels:test-world") "hud-panels key should match")
@@ -327,7 +545,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
       (local result (graph:load-by-key "terrains:test-world"))
       (assert result "terrains loader should create node")
       (assert (= result.key "terrains:test-world") "terrains key should match")
@@ -338,7 +556,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
       (local result (graph:load-by-key "scene-panel:test-world:5"))
       (assert result "scene-panel loader should create node")
       (assert (= result.key "scene-panel:test-world:5") "scene-panel key should match")
@@ -350,7 +568,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
       (local result (graph:load-by-key "hud-panel:test-world:float:3"))
       (assert result "hud-panel loader should create node")
       (assert (= result.key "hud-panel:test-world:float:3") "hud-panel key should match")
@@ -363,7 +581,7 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {})
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
       (local result (graph:load-by-key "terrain:test-world:terrain-abc"))
       (assert result "terrain loader should create node")
       (assert (= result.key "terrain:test-world:terrain-abc") "terrain key should match")
@@ -408,6 +626,14 @@
 (table.insert tests {:name "worlds node has create world" :fn test-worlds-node-has-create-world})
 (table.insert tests {:name "world node activate finds index" :fn test-world-node-activate-finds-index})
 (table.insert tests {:name "world node close finds index" :fn test-world-node-close-finds-index})
+(table.insert tests {:name "world node uses target world entry" :fn test-world-node-uses-target-world-entry})
+(table.insert tests {:name "scene panels node uses world state when inactive" :fn test-scene-panels-node-uses-world-state-when-inactive})
+(table.insert tests {:name "hud panels node uses world state when inactive" :fn test-hud-panels-node-uses-world-state-when-inactive})
+(table.insert tests {:name "scene panel remove updates world state" :fn test-scene-panel-remove-updates-world-state})
+(table.insert tests {:name "scene panel removal drops shifted siblings" :fn test-scene-panel-removal-drops-shifted-siblings})
+(table.insert tests {:name "hud panel remove uses layer relative state index" :fn test-hud-panel-remove-uses-layer-relative-state-index})
+(table.insert tests {:name "world node removes itself when world disappears" :fn test-world-node-removes-itself-when-world-disappears})
+(table.insert tests {:name "scene panel node removes itself when world disappears" :fn test-scene-panel-node-removes-itself-when-world-disappears})
 (table.insert tests {:name "graph key loaders loads scene panels node" :fn test-graph-key-loaders-loads-scene-panels-node})
 (table.insert tests {:name "graph key loaders loads hud panels node" :fn test-graph-key-loaders-loads-hud-panels-node})
 (table.insert tests {:name "graph key loaders loads terrains node" :fn test-graph-key-loaders-loads-terrains-node})

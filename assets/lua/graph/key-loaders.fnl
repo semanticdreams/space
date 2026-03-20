@@ -51,6 +51,12 @@
 
 (local M {})
 
+(fn split-key-parts [text]
+  (local parts [])
+  (each [part (string.gmatch (or text "") "[^:]+")]
+    (table.insert parts part))
+  parts)
+
 (fn starts-with? [text prefix]
   (and text prefix
        (= (type text) "string")
@@ -100,6 +106,7 @@
   (local notebook-store (or options.notebook-store options.notebook_store (NotebookStore.get-default)))
   (local llm-store (or options.llm-store options.llm_store (LlmStore.get-default)))
   (local kernels (or options.kernels (Kernels.get-default)))
+  (local world-manager (or options.world-manager (and app app.world-manager)))
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
 
   (register-string-entity-loader graph {:store string-store})
@@ -259,58 +266,65 @@
   (graph:register-key-loader "worlds"
     (exact-key-loader "worlds"
       (fn []
-        (when (and app app.world-manager)
-          (WorldsNode {:world-manager app.world-manager})))))
+        (when world-manager
+          (WorldsNode {:world-manager world-manager})))))
 
   (graph:register-key-loader "world"
     (prefix-loader "world:"
       (fn [world-id key]
-        (when (and app app.world-manager)
+        (when world-manager
           (WorldNode {:world-id world-id
-                      :world-manager app.world-manager
+                      :world-manager world-manager
                       :key key})))))
 
   (graph:register-key-loader "scene-panels"
     (prefix-loader "scene-panels:"
       (fn [world-id key]
-        (ScenePanelsNode {:world-id world-id :key key}))))
+        (when world-manager
+          (ScenePanelsNode {:world-id world-id
+                            :world-manager world-manager
+                            :key key})))))
 
   (graph:register-key-loader "hud-panels"
     (prefix-loader "hud-panels:"
       (fn [world-id key]
-        (HudPanelsNode {:world-id world-id :key key}))))
+        (when world-manager
+          (HudPanelsNode {:world-id world-id
+                          :world-manager world-manager
+                          :key key})))))
 
   (graph:register-key-loader "terrains"
     (prefix-loader "terrains:"
       (fn [world-id key]
-        (TerrainsNode {:world-id world-id :key key}))))
+        (when world-manager
+          (TerrainsNode {:world-id world-id
+                         :world-manager world-manager
+                         :key key})))))
 
   (graph:register-key-loader "scene-panel"
     (prefix-loader "scene-panel:"
       (fn [rest key]
-        (local parts [])
-        (each [part (string.gmatch rest "[^:]+")]
-          (table.insert parts part))
+        (local parts (split-key-parts rest))
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local panel-index (tonumber (. parts 2)))
-          (when panel-index
+          (when (and world-manager panel-index)
             (ScenePanelNode {:world-id world-id
+                             :world-manager world-manager
                              :panel-index panel-index
                              :key key}))))))
 
   (graph:register-key-loader "hud-panel"
     (prefix-loader "hud-panel:"
       (fn [rest key]
-        (local parts [])
-        (each [part (string.gmatch rest "[^:]+")]
-          (table.insert parts part))
+        (local parts (split-key-parts rest))
         (when (>= (length parts) 3)
           (local world-id (. parts 1))
           (local layer (. parts 2))
           (local panel-index (tonumber (. parts 3)))
-          (when panel-index
+          (when (and world-manager panel-index)
             (HudPanelNode {:world-id world-id
+                           :world-manager world-manager
                            :layer layer
                            :panel-index panel-index
                            :key key}))))))
@@ -318,15 +332,15 @@
   (graph:register-key-loader "terrain"
     (prefix-loader "terrain:"
       (fn [rest key]
-        (local parts [])
-        (each [part (string.gmatch rest "[^:]+")]
-          (table.insert parts part))
+        (local parts (split-key-parts rest))
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local terrain-id (. parts 2))
-          (TerrainNode {:world-id world-id
-                        :terrain-id terrain-id
-                        :key key})))))
+          (when world-manager
+            (TerrainNode {:world-id world-id
+                          :world-manager world-manager
+                          :terrain-id terrain-id
+                          :key key}))))))
   true)
 
 M

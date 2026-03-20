@@ -368,6 +368,7 @@
   (set self.update update)
   (set self.get-runtime get-runtime)
   (set self.get-hud-contrib get-hud-contrib)
+  (set self.save-state save-state)
   self)
 
 HomeWorld

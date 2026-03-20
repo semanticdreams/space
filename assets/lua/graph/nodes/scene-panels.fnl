@@ -4,12 +4,14 @@
 (local Signal (require :signal))
 (local ScenePanelsNodeView (require :graph/view/views/scene-panels))
 (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
+(local WorldData (require :graph/world-data))
 
 (local M {})
 
 (fn M.ScenePanelsNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "ScenePanelsNode requires :world-id"))
+  (local world-manager (assert options.world-manager "ScenePanelsNode requires :world-manager"))
   (local key (or options.key (.. "scene-panels:" world-id)))
   (local node (GraphNode {:key key
                            :label "scene panels"
@@ -18,20 +20,10 @@
                            :size 8.0
                            :view ScenePanelsNodeView}))
   (set node.world-id world-id)
+  (set node.world-manager world-manager)
   (set node.items-changed (Signal))
   (fn collect-items [self]
-    (local scene (and app.scene))
-    (local children (and scene scene.scene-children))
-    (local produced [])
-    (each [idx metadata (ipairs (or children []))]
-      (local persistence (and metadata metadata.persistence))
-      (local kind (or (and persistence persistence.kind) "unknown"))
-      (local label (.. kind " [" idx "]"))
-      (table.insert produced [{:index idx
-                               :kind kind
-                               :metadata metadata}
-                              label]))
-    produced)
+    (WorldData.list-scene-panels self.world-manager self.world-id))
   (fn emit-items [self]
     (local items (collect-items self))
     (self.items-changed:emit items)
@@ -43,8 +35,11 @@
          (local graph self.graph)
          (when (and graph entry entry.index)
            (local panel-node (ScenePanelNode {:world-id self.world-id
+                                              :world-manager self.world-manager
                                               :panel-index entry.index
-                                              :panel entry.metadata}))
+                                              :panel entry.metadata
+                                              :panel-record entry.panel
+                                              :label entry.kind}))
            (graph:add-edge (GraphEdge {:source self
                                        :target panel-node})))))
   (set node.actions
@@ -52,8 +47,19 @@
          :icon "refresh"
          :fn (fn [_button _event]
                (node:emit-items))}])
+  (var changed-handler nil)
+  (set changed-handler
+       (world-manager.changed:connect
+         (fn [_payload]
+           (if (WorldData.resolve-world-entry world-manager world-id)
+               (node:emit-items)
+               (when (and node.graph node.graph.remove-nodes)
+                 (node.graph:remove-nodes [node]))))))
   (set node.drop
        (fn [self]
+         (when changed-handler
+           (world-manager.changed:disconnect changed-handler true)
+           (set changed-handler nil))
          (when self.items-changed
            (self.items-changed:clear))))
   node)

@@ -4,6 +4,7 @@
 (local Signal (require :signal))
 (local WorldsNodeView (require :graph/view/views/worlds))
 (local {:WorldNode WorldNode} (require :graph/nodes/world))
+(local WorldData (require :graph/world-data))
 
 (local M {})
 
@@ -38,7 +39,8 @@
          (when (and graph tab tab.id)
            (local world-node (WorldNode {:world-id tab.id
                                          :world-manager self.world-manager
-                                         :world-entry tab}))
+                                         :world-entry (or (WorldData.resolve-world-entry self.world-manager tab.id)
+                                                          tab)}))
            (graph:add-edge (GraphEdge {:source self
                                        :target world-node})))))
   (set node.create-world

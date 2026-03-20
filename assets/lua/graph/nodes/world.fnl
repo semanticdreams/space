@@ -6,6 +6,7 @@
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
 (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+(local WorldData (require :graph/world-data))
 
 (local M {})
 
@@ -14,8 +15,8 @@
   (local world-id (assert options.world-id "WorldNode requires :world-id"))
   (local world-manager (assert options.world-manager "WorldNode requires :world-manager"))
   (local world-entry (or options.world-entry
-                          (and world-manager.active-world
-                               (world-manager:active-world))))
+                          (WorldData.resolve-world-entry world-manager world-id)))
+  (assert world-entry (.. "WorldNode could not resolve world: " world-id))
   (local key (or options.key (.. "world:" world-id)))
   (local name (or (and world-entry world-entry.name) world-id))
   (local node (GraphNode {:key key
@@ -42,7 +43,8 @@
        (fn [self category]
          (local graph self.graph)
          (when (and graph category category.kind)
-           (local category-node (category.kind {:world-id self.world-id}))
+           (local category-node (category.kind {:world-id self.world-id
+                                               :world-manager self.world-manager}))
            (graph:add-edge (GraphEdge {:source self :target category-node})))))
   (set node.activate
        (fn [self]
@@ -71,8 +73,20 @@
          :icon "close"
          :fn (fn [_button _event]
                (node:close))}])
+  (var changed-handler nil)
+  (set changed-handler
+       (world-manager.changed:connect
+         (fn [_payload]
+           (local entry (WorldData.resolve-world-entry world-manager world-id))
+           (if entry
+               (set node.world-entry entry)
+               (when (and node.graph node.graph.remove-nodes)
+                 (node.graph:remove-nodes [node]))))))
   (set node.drop
        (fn [self]
+         (when changed-handler
+           (world-manager.changed:disconnect changed-handler true)
+           (set changed-handler nil))
          (when self.changed
            (self.changed:clear))
          (when self.categories-changed

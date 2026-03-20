@@ -299,6 +299,15 @@
        :name entry.name
        :active? (= idx active-index)}))
 
+  (fn get-world-entry [world-id]
+    (var resolved nil)
+    (each [_ entry (ipairs worlds)]
+      (when (and (not resolved) (= entry.id world-id))
+        (set resolved entry)))
+    (when resolved
+      (ensure-world-instance resolved))
+    resolved)
+
   (fn count []
     (length worlds))
 
@@ -322,6 +331,7 @@
    :update (fn [_self delta] (update delta))
    :drop (fn [_self] (drop))
    :list-tabs (fn [_self] (list-tabs))
+    :get-world-entry (fn [_self world-id] (get-world-entry world-id))
    :count (fn [_self] (count))
    :active-world (fn [_self] (active-world))
    :active-world-id (fn [_self] (active-world-id))
