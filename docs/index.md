@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "space"
-  text: "A New Kind of Computing Interface"
-  tagline: space is an experiment in building a programmable, shared, user-owned computing environment for code, knowledge, games, art, and collaboration.
+  text: "Free Your System"
+  tagline: space is a programmable, shared, user-owned computing environment for code, knowledge, games, art, and collaboration.
   image:
     src: /space.png
     alt: space logo
