@@ -31,6 +31,14 @@
 (local StartNode (require :graph/nodes/start))
 (local {:register-loader register-string-entity-loader} (require :graph/nodes/string-entity))
 (local StringEntityListNode (require :graph/nodes/string-entity-list))
+(local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
+(local {:WorldNode WorldNode} (require :graph/nodes/world))
+(local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
+(local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
+(local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+(local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
+(local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
+(local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
 
 (local LinkEntityStore (require :entities/link))
 (local CodeEntityStore (require :entities/code))
@@ -247,6 +255,78 @@
         (when instance
           (KernelInstanceNode {:instance-id instance.id
                                :kernels kernels})))))
+
+  (graph:register-key-loader "worlds"
+    (exact-key-loader "worlds"
+      (fn []
+        (when (and app app.world-manager)
+          (WorldsNode {:world-manager app.world-manager})))))
+
+  (graph:register-key-loader "world"
+    (prefix-loader "world:"
+      (fn [world-id key]
+        (when (and app app.world-manager)
+          (WorldNode {:world-id world-id
+                      :world-manager app.world-manager
+                      :key key})))))
+
+  (graph:register-key-loader "scene-panels"
+    (prefix-loader "scene-panels:"
+      (fn [world-id key]
+        (ScenePanelsNode {:world-id world-id :key key}))))
+
+  (graph:register-key-loader "hud-panels"
+    (prefix-loader "hud-panels:"
+      (fn [world-id key]
+        (HudPanelsNode {:world-id world-id :key key}))))
+
+  (graph:register-key-loader "terrains"
+    (prefix-loader "terrains:"
+      (fn [world-id key]
+        (TerrainsNode {:world-id world-id :key key}))))
+
+  (graph:register-key-loader "scene-panel"
+    (prefix-loader "scene-panel:"
+      (fn [rest key]
+        (local parts [])
+        (each [part (string.gmatch rest "[^:]+")]
+          (table.insert parts part))
+        (when (>= (length parts) 2)
+          (local world-id (. parts 1))
+          (local panel-index (tonumber (. parts 2)))
+          (when panel-index
+            (ScenePanelNode {:world-id world-id
+                             :panel-index panel-index
+                             :key key}))))))
+
+  (graph:register-key-loader "hud-panel"
+    (prefix-loader "hud-panel:"
+      (fn [rest key]
+        (local parts [])
+        (each [part (string.gmatch rest "[^:]+")]
+          (table.insert parts part))
+        (when (>= (length parts) 3)
+          (local world-id (. parts 1))
+          (local layer (. parts 2))
+          (local panel-index (tonumber (. parts 3)))
+          (when panel-index
+            (HudPanelNode {:world-id world-id
+                           :layer layer
+                           :panel-index panel-index
+                           :key key}))))))
+
+  (graph:register-key-loader "terrain"
+    (prefix-loader "terrain:"
+      (fn [rest key]
+        (local parts [])
+        (each [part (string.gmatch rest "[^:]+")]
+          (table.insert parts part))
+        (when (>= (length parts) 2)
+          (local world-id (. parts 1))
+          (local terrain-id (. parts 2))
+          (TerrainNode {:world-id world-id
+                        :terrain-id terrain-id
+                        :key key})))))
   true)
 
 M

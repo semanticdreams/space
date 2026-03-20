@@ -10,6 +10,7 @@
 (local EntitiesNode (require :graph/nodes/entities))
 (local NotebooksNode (require :graph/nodes/notebooks))
 (local KernelsNode (require :graph/nodes/kernels))
+(local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
 (local Signal (require :signal))
 (local fs (require :fs))
 
@@ -51,6 +52,9 @@
              (table.insert produced [notebooks-node (or notebooks-node.label notebooks-node.key)])
              (local kernels-node (KernelsNode {}))
              (table.insert produced [kernels-node (or kernels-node.label kernels-node.key)])
+             (when (and app app.world-manager)
+               (local worlds-node (WorldsNode {:world-manager app.world-manager}))
+               (table.insert produced [worlds-node (or worlds-node.label worlds-node.key)]))
              produced))
 
     (set node.emit-targets

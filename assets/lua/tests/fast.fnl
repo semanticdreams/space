@@ -163,8 +163,9 @@
     :tests.test-list-entities
     :tests.test-notebooks
     :tests.test-morphs
-    :tests.test-link-entity-crash
-    :tests.test-graph-loaders]})
+   :tests.test-link-entity-crash
+   :tests.test-graph-loaders
+   :tests.test-world-nodes]})
 
 (local main
   (fn []
