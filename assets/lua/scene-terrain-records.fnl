@@ -117,23 +117,17 @@
   (local position (resolve-vec3 options.position (glm.vec3 0 0 0)))
   (local rotation (resolve-quat options.rotation (glm.quat 1 0 0 0)))
   (if (= normalized.kind "flat-terrain")
-      (do
-        (local dark-color (resolve-vec4 (and options.colors options.colors.dark) nil))
-        (local light-color (resolve-vec4 (and options.colors options.colors.light) nil))
-        (local colors {:dark dark-color
-                       :light light-color})
-        {:record normalized
-         :position position
-         :rotation rotation
-         :builder
-         (FlatTerrain {:width options.width
-                       :length options.length
-                       :scale (resolve-vec3 options.scale (glm.vec3 20 1 20))
-                       :position position
-                       :rotation rotation
-                       :opacity options.opacity
-                       :physics-thickness options.physics-thickness
-                       :colors colors})})
+      {:record normalized
+       :position position
+       :rotation rotation
+       :builder
+       (FlatTerrain {:width options.width
+                     :length options.length
+                     :scale (resolve-vec3 options.scale (glm.vec3 20 1 20))
+                     :position position
+                     :rotation rotation
+                     :opacity options.opacity
+                     :physics-thickness options.physics-thickness})}
       (error (.. "Unsupported terrain kind for build: " normalized.kind))))
 
 (fn capture-record [record layout]

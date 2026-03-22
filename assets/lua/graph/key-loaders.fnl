@@ -39,6 +39,7 @@
 (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
 (local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
 (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+(local TerrainEditors (require :graph/terrain-editors))
 
 (local LinkEntityStore (require :entities/link))
 (local CodeEntityStore (require :entities/code))
@@ -341,6 +342,19 @@
                           :world-manager world-manager
                           :terrain-id terrain-id
                           :key key}))))))
+
+  (graph:register-key-loader "terrain-editor"
+    (prefix-loader "terrain-editor:"
+      (fn [rest key]
+        (local parts (split-key-parts rest))
+        (when (>= (length parts) 2)
+          (local world-id (. parts 1))
+          (local terrain-id (. parts 2))
+          (when world-manager
+            (TerrainEditors.create-editor-node {:world-id world-id
+                                                :world-manager world-manager
+                                                :terrain-id terrain-id
+                                                :key key}))))))
   true)
 
 M

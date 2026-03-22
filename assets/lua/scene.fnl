@@ -132,6 +132,53 @@
         (set found metadata))))
   found)
 
+(fn find-metadata-index-by-element [children element]
+  (var found nil)
+  (when (and children element)
+    (each [idx metadata (ipairs children)]
+      (when (and (not found)
+                 (= (and metadata metadata.element) element))
+        (set found idx))))
+  found)
+
+(fn insert-layout-child [parent-layout idx child-layout]
+  (assert parent-layout "Scene.insert-layout-child requires parent layout")
+  (assert child-layout "Scene.insert-layout-child requires child layout")
+  (local insert-index (or idx (+ (length parent-layout.children) 1)))
+  (set child-layout.parent parent-layout)
+  (child-layout:set-root parent-layout.root)
+  (set child-layout.depth-offset-index parent-layout.depth-offset-index)
+  (set child-layout.clip-region parent-layout.clip-region)
+  (child-layout:set-parent-culled (parent-layout:effective-culled?))
+  (table.insert parent-layout.children insert-index child-layout))
+
+(fn find-terrain-entry [scene-terrains terrain-id]
+  (var resolved nil)
+  (when scene-terrains
+    (each [idx metadata (ipairs scene-terrains)]
+      (local record (and metadata metadata.record))
+      (when (and (not resolved)
+                 (= (and record record.id) terrain-id))
+        (set resolved {:index idx
+                       :metadata metadata}))))
+  resolved)
+
+(fn require-terrain-runtime-entry [scene terrain-id]
+  (local entity scene.entity)
+  (local terrain-entry (find-terrain-entry scene.scene-terrains terrain-id))
+  (assert entity (.. "Scene terrain runtime missing entity for terrain " terrain-id))
+  (assert terrain-entry (.. "Scene terrain runtime missing terrain entry for " terrain-id))
+  (local current-metadata terrain-entry.metadata)
+  (local current-element (and current-metadata current-metadata.element))
+  (local child-index (find-metadata-index-by-element entity.children current-element))
+  (assert current-element (.. "Scene terrain runtime missing element for terrain " terrain-id))
+  (assert child-index (.. "Scene terrain runtime missing child index for terrain " terrain-id))
+  {:entity entity
+   :terrain-entry terrain-entry
+   :current-metadata current-metadata
+   :current-element current-element
+   :child-index child-index})
+
 (fn collect-positioned-resizables [children]
   (var entries [])
   (each [_ metadata (ipairs (or children []))]
@@ -737,6 +784,53 @@
   (fn sync-physics-balls [self]
     (Ball.sync-all self.entity))
 
+  (fn replace-terrain-record [self terrain-id record]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local entity runtime-entry.entity)
+    (local terrain-entry runtime-entry.terrain-entry)
+    (local current-element runtime-entry.current-element)
+    (local child-index runtime-entry.child-index)
+    (local built-entry (SceneWorldState.build-terrain-entries [record]))
+    (local terrain-spec (. built-entry 1))
+    (assert terrain-spec (.. "Scene.replace-terrain-record could not build terrain " terrain-id))
+    (local terrain-builder terrain-spec.builder)
+    (local new-element (terrain-builder self.build-context))
+    (assert (and new-element new-element.layout)
+            (.. "Scene.replace-terrain-record built invalid terrain " terrain-id))
+    (local new-terrain-metadata {:element new-element
+                                 :record terrain-spec.record})
+    (local new-child-metadata {:element new-element
+                               :position terrain-spec.position
+                               :rotation terrain-spec.rotation
+                               :transform-applied? false})
+    (set (. self.scene-terrains terrain-entry.index) new-terrain-metadata)
+    (entity.layout:remove-child child-index)
+    (table.remove entity.children child-index)
+    (table.insert entity.children child-index new-child-metadata)
+    (insert-layout-child entity.layout child-index new-element.layout)
+    (current-element:drop)
+    (when entity.layout
+      (entity.layout:mark-measure-dirty)
+      (entity.layout:mark-layout-dirty))
+    (self:sync-physics-bodies)
+    true)
+
+  (fn remove-terrain [self terrain-id]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local entity runtime-entry.entity)
+    (local terrain-entry runtime-entry.terrain-entry)
+    (local current-element runtime-entry.current-element)
+    (local child-index runtime-entry.child-index)
+    (table.remove self.scene-terrains terrain-entry.index)
+    (entity.layout:remove-child child-index)
+    (table.remove entity.children child-index)
+    (current-element:drop)
+    (when entity.layout
+      (entity.layout:mark-measure-dirty)
+      (entity.layout:mark-layout-dirty))
+    (self:sync-physics-bodies)
+    true)
+
   (fn attach-entity [self entity]
     (when self.entity
       (self:unregister-entity self.entity)
@@ -997,6 +1091,8 @@
 (set self.drop drop)
 (set self.sync-physics-bodies sync-physics-bodies)
 (set self.sync-physics-balls sync-physics-balls)
+(set self.replace-terrain-record replace-terrain-record)
+(set self.remove-terrain remove-terrain)
 (set self.reset-projection reset-projection)
 (set self.get-view-matrix get-view-matrix)
 (set self.get-triangle-vector get-triangle-vector)

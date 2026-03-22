@@ -1,4 +1,15 @@
+(local TerrainRecords (require :scene-terrain-records))
+
 (local M {})
+
+(fn clone-table [value]
+  (if (= (type value) :table)
+      (do
+        (local out {})
+        (each [k v (pairs value)]
+          (set (. out k) (clone-table v)))
+        out)
+      value))
 
 (fn find-tab [world-manager world-id]
   (var resolved nil)
@@ -49,6 +60,54 @@
 (fn terrain-state-records [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (or (and world world.state world.state.scene world.state.scene.terrains) []))
+
+(fn ensure-scene-state [world]
+  (when (not world.state)
+    (set world.state {}))
+  (when (not world.state.scene)
+    (set world.state.scene {}))
+  (when (not world.state.scene.panels)
+    (set world.state.scene.panels []))
+  (when (not world.state.scene.terrains)
+    (set world.state.scene.terrains []))
+  world.state.scene)
+
+(fn emit-world-change [world-manager world-id reason]
+  (when (and world-manager world-manager.changed world-manager.changed.emit)
+    (world-manager.changed:emit {:world-id world-id
+                                 :reason reason})))
+
+(fn persist-world [world-manager world-id]
+  (local world (resolve-world world-manager world-id))
+  (when (and world world.save-state)
+    (world:save-state))
+  world)
+
+(fn require-active-scene-method [scene terrain-id method-name]
+  (assert (. scene method-name)
+          (.. "Active scene is missing " method-name " for terrain " terrain-id)))
+
+(fn sync-active-terrain-record [world-manager world-id terrain-id record]
+  (local scene (resolve-scene world-manager world-id))
+  (when scene
+    (require-active-scene-method scene terrain-id :replace-terrain-record)
+    (assert (scene:replace-terrain-record terrain-id record)
+            (.. "Active scene failed to replace terrain " terrain-id))))
+
+(fn sync-active-terrain-removal [world-manager world-id terrain-id]
+  (local scene (resolve-scene world-manager world-id))
+  (when scene
+    (require-active-scene-method scene terrain-id :remove-terrain)
+    (assert (scene:remove-terrain terrain-id)
+            (.. "Active scene failed to remove terrain " terrain-id))))
+
+(fn find-terrain-state-index [world-manager world-id terrain-id]
+  (local terrains (terrain-state-records world-manager world-id))
+  (var resolved nil)
+  (each [idx record (ipairs terrains)]
+    (when (and (not resolved) (= (and record record.id) terrain-id))
+      (set resolved idx)))
+  resolved)
 
 (fn list-scene-panels [world-manager world-id]
   (local scene (resolve-scene world-manager world-id))
@@ -138,6 +197,7 @@
         (local label (.. kind " [" terrain-id "]"))
         (table.insert produced [{:terrain-id terrain-id
                                  :kind kind
+                                 :record record
                                  :entry entry
                                  :label label
                                  :source "runtime"}
@@ -243,6 +303,41 @@
               true)
             false))))
 
+(fn update-terrain-record [world-manager world-id terrain-id updater]
+  (local world (resolve-world world-manager world-id))
+  (when world
+    (local scene-state (ensure-scene-state world))
+    (local terrains scene-state.terrains)
+    (local idx (find-terrain-state-index world-manager world-id terrain-id))
+    (local resolved (find-terrain world-manager world-id terrain-id))
+    (local current (or (and idx (. terrains idx))
+                       (and resolved resolved.record)))
+    (when current
+      (local next-record (clone-table current))
+      (updater next-record)
+      (local normalized (TerrainRecords.normalize-record next-record))
+      (set normalized.id terrain-id)
+      (if idx
+          (set (. terrains idx) normalized)
+          (table.insert terrains normalized))
+      (sync-active-terrain-record world-manager world-id terrain-id normalized)
+      (persist-world world-manager world-id)
+      (emit-world-change world-manager world-id "terrain-updated")
+      normalized)))
+
+(fn remove-terrain [world-manager world-id terrain-id]
+  (local world (resolve-world world-manager world-id))
+  (when world
+    (local scene-state (ensure-scene-state world))
+    (local terrains scene-state.terrains)
+    (local idx (find-terrain-state-index world-manager world-id terrain-id))
+    (when idx
+      (table.remove terrains idx)
+      (sync-active-terrain-removal world-manager world-id terrain-id)
+      (persist-world world-manager world-id)
+      (emit-world-change world-manager world-id "terrain-removed")
+      true)))
+
 {:find-tab find-tab
  :resolve-world-entry resolve-world-entry
  :resolve-world resolve-world
@@ -256,5 +351,7 @@
  :find-scene-panel find-scene-panel
  :find-hud-panel find-hud-panel
  :find-terrain find-terrain
+ :update-terrain-record update-terrain-record
+ :remove-terrain remove-terrain
  :remove-scene-panel remove-scene-panel
  :remove-hud-panel remove-hud-panel}

@@ -32,10 +32,45 @@
    :active? (or options.active? false)
    :world {:state state
            :get-runtime (fn [_self] runtime)
-           :save-state (fn [_self]
-                         (when options.on-save
-                           (options.on-save state))
-                         true)}})
+            :save-state (fn [_self]
+                          (when options.on-save
+                            (options.on-save state))
+                          true)}})
+
+(fn make-flat-terrain-record [opts]
+  (local options (or opts {}))
+  {:id (or options.id "flat-1")
+   :kind "flat-terrain"
+   :options {:width (or options.width 50)
+             :length (or options.length 50)
+             :scale (or options.scale [20 1 20])
+             :position (or options.position [-500 -100 -500])
+             :rotation (or options.rotation [1 0 0 0])
+             :opacity (or options.opacity 1.0)
+             :physics-thickness (or options.physics-thickness 2.0)}})
+
+(fn make-scene-runtime [opts]
+  (local options (or opts {}))
+  (local scene {:capture-state (fn [_self]
+                                 {:panels (or options.panels [])
+                                  :terrains (or options.terrains [])})
+                :build-default (fn [_self payload]
+                                 (when options.on-build-default
+                                   (options.on-build-default payload))
+                                 true)
+                 :restore-state (fn [_self payload]
+                                  (when options.on-restore-state
+                                    (options.on-restore-state payload))
+                                  true)
+                :replace-terrain-record (fn [_self terrain-id record]
+                                          (when options.on-replace-terrain-record
+                                            (options.on-replace-terrain-record terrain-id record))
+                                          true)
+                :remove-terrain (fn [_self terrain-id]
+                                  (when options.on-remove-terrain
+                                    (options.on-remove-terrain terrain-id))
+                                  true)})
+  {:scene scene})
 
 (fn make-world-manager [opts]
   (local options (or opts {}))
@@ -97,6 +132,11 @@
   (assert TerrainNode "terrain module should export TerrainNode")
   (assert (= (type TerrainNode) "function") "TerrainNode should be a function"))
 
+(fn test-flat-terrain-node-module-exports []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (assert FlatTerrainNode "flat-terrain module should export FlatTerrainNode")
+  (assert (= (type FlatTerrainNode) "function") "FlatTerrainNode should be a function"))
+
 (fn test-worlds-node-requires-world-manager []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
   (local (ok err) (pcall (fn [] (WorldsNode {}))))
@@ -136,6 +176,11 @@
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local (ok err) (pcall (fn [] (TerrainNode {}))))
   (assert (not ok) "TerrainNode should require world-id"))
+
+(fn test-flat-terrain-node-requires-world-id []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local (ok err) (pcall (fn [] (FlatTerrainNode {}))))
+  (assert (not ok) "FlatTerrainNode should require world-id"))
 
 (fn test-worlds-node-has-correct-key []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
@@ -199,6 +244,18 @@
                             :world-manager (make-world-manager {:id "test-world-123"})
                             :terrain-id "terrain-abc"}))
   (assert (= node.key "terrain:test-world-123:terrain-abc") "TerrainNode key should include world-id and terrain-id")
+  (node:drop))
+
+(fn test-flat-terrain-node-has-correct-key []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local entry (make-world-entry {:id "test-world-123"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-flat-terrain-record {:id "terrain-abc"})]}
+                                          :hud {:panels []}}}))
+  (local node (FlatTerrainNode {:world-id "test-world-123"
+                                :world-manager (make-world-manager {:id "test-world-123" :entry entry})
+                                :terrain-id "terrain-abc"}))
+  (assert (= node.key "terrain-editor:test-world-123:terrain-abc") "FlatTerrainNode key should include world-id and terrain-id")
   (node:drop))
 
 (fn test-world-node-has-emit-categories []
@@ -306,13 +363,200 @@
   (assert (= action.name "Remove") "action should be Remove")
   (node:drop))
 
-(fn test-terrain-node-has-no-actions []
+(fn test-terrain-node-has-actions []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-flat-terrain-record {:id "t1"})]}
+                                          :hud {:panels []}}}))
   (local node (TerrainNode {:world-id "test-world"
-                            :world-manager (make-world-manager {:id "test-world"})
+                            :world-manager (make-world-manager {:id "test-world" :entry entry})
                             :terrain-id "t1"}))
+  (assert (= node.label "terrain") "generic terrain node label should stay generic")
   (assert node.actions "TerrainNode should have actions")
-  (assert (= (length node.actions) 0) "TerrainNode should have no actions (read-only)")
+  (assert (= (length node.actions) 2) "TerrainNode should have editor and remove actions")
+  (assert (= (. (. node.actions 1) :name) "Open Editor") "first terrain action should open editor")
+  (assert (= (. (. node.actions 2) :name) "Remove") "second terrain action should remove terrain")
+  (node:drop))
+
+(fn test-flat-terrain-node-updates-world-state []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local terrain-record (make-flat-terrain-record {:id "terrain-a" :width 50}))
+  (local state {:scene {:panels []
+                        :terrains [terrain-record]}
+                :hud {:panels []}})
+  (var save-count 0)
+  (local entry (make-world-entry {:id "test-world"
+                                  :state state
+                                  :on-save (fn [_state]
+                                             (set save-count (+ save-count 1)))}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (FlatTerrainNode {:world-id "test-world"
+                                :world-manager manager
+                                :terrain-id "terrain-a"}))
+  (node:apply-values {:width 64
+                      :length 50
+                      :scale [20 1 20]
+                      :position [-500 -100 -500]
+                      :rotation [1 0 0 0]
+                      :opacity 1.0
+                      :physics-thickness 2.0})
+  (assert (= (. (. (. state.scene.terrains 1) :options) :width) 64)
+          "FlatTerrainNode should update the persisted terrain width")
+  (assert (> save-count 0) "FlatTerrainNode should persist terrain edits")
+  (node:drop))
+
+(fn test-flat-terrain-node-updates-active-scene-in-place []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local terrain-record (make-flat-terrain-record {:id "terrain-a" :width 50}))
+  (local state {:scene {:panels [{:kind "graph-node-cube" :node-key "start" :position [0 0 0] :rotation [1 0 0 0] :size [4 4 4]}]
+                        :terrains [terrain-record]}
+                :hud {:panels []}})
+  (var built-count 0)
+  (var restored-count 0)
+  (var replaced nil)
+  (local runtime (make-scene-runtime {:panels state.scene.panels
+                                      :terrains state.scene.terrains
+                                      :on-build-default (fn [_payload] (set built-count (+ built-count 1)))
+                                      :on-restore-state (fn [_payload] (set restored-count (+ restored-count 1)))
+                                      :on-replace-terrain-record (fn [terrain-id record]
+                                                                  (set replaced {:terrain-id terrain-id
+                                                                                 :record record}))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (FlatTerrainNode {:world-id "test-world"
+                                :world-manager manager
+                                :terrain-id "terrain-a"}))
+  (node:apply-values {:width 72
+                      :length 50
+                      :scale [20 1 20]
+                      :position [-500 -100 -500]
+                      :rotation [1 0 0 0]
+                      :opacity 1.0
+                      :physics-thickness 2.0})
+  (assert replaced "editing an active terrain should replace only that terrain runtime")
+  (assert (= replaced.terrain-id "terrain-a") "active terrain update should target the same terrain id")
+  (assert (= (. (. replaced.record :options) :width) 72)
+          "replaced runtime terrain should include the edited width")
+  (assert (= built-count 0) "editing an active terrain should not rebuild scene defaults")
+  (assert (= restored-count 0) "editing an active terrain should not restore scene panels")
+  (node:drop))
+
+(fn test-flat-terrain-node-errors-when-active-runtime-update-fails []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local terrain-record (make-flat-terrain-record {:id "terrain-a" :width 50}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (FlatTerrainNode {:world-id "test-world"
+                                :world-manager manager
+                                :terrain-id "terrain-a"}))
+  (local (ok err)
+    (pcall (fn []
+             (node:apply-values {:width 72
+                                 :length 50
+                                 :scale [20 1 20]
+                                 :position [-500 -100 -500]
+                                 :rotation [1 0 0 0]
+                                 :opacity 1.0
+                                 :physics-thickness 2.0}))))
+  (assert (not ok) "active terrain update should fail loudly when runtime sync fails")
+  (assert (string.find err "failed to replace terrain") "runtime sync failure should mention replace terrain")
+  (node:drop))
+
+(fn test-terrain-node-open-editor-adds-edge []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local graph (Graph {:with-start false}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-flat-terrain-record {:id "terrain-a"})]}
+                                          :hud {:panels []}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (TerrainNode {:world-id "test-world"
+                            :world-manager manager
+                            :terrain-id "terrain-a"}))
+  (graph:add-node node {})
+  (local editor (node:open-editor))
+  (assert editor "TerrainNode should create a type-specific editor")
+  (assert (= editor.key "terrain-editor:test-world:terrain-a") "editor key should be stable")
+  (assert (= (graph:edge-count) 1) "opening terrain editor should add one edge")
+  (graph:drop))
+
+(fn test-flat-terrain-node-remove-updates-world-state []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local state {:scene {:panels []
+                        :terrains [(make-flat-terrain-record {:id "terrain-a"})
+                                   (make-flat-terrain-record {:id "terrain-b"})]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (FlatTerrainNode {:world-id "test-world"
+                                :world-manager manager
+                                :terrain-id "terrain-a"}))
+  (assert (node:remove-terrain) "flat terrain removal should succeed")
+  (assert (= (length state.scene.terrains) 1) "flat terrain removal should mutate world state")
+  (assert (= (. (. state.scene.terrains 1) :id) "terrain-b") "flat terrain removal should target the correct record")
+  (node:drop))
+
+(fn test-flat-terrain-node-removes-active-scene-in-place []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local state {:scene {:panels []
+                        :terrains [(make-flat-terrain-record {:id "terrain-a"})
+                                   (make-flat-terrain-record {:id "terrain-b"})]}
+                :hud {:panels []}})
+  (var removed-terrain-id nil)
+  (var built-count 0)
+  (local runtime (make-scene-runtime {:panels state.scene.panels
+                                      :terrains state.scene.terrains
+                                      :on-build-default (fn [_payload] (set built-count (+ built-count 1)))
+                                      :on-remove-terrain (fn [terrain-id]
+                                                           (set removed-terrain-id terrain-id))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (FlatTerrainNode {:world-id "test-world"
+                                :world-manager manager
+                                :terrain-id "terrain-a"}))
+  (assert (node:remove-terrain) "active flat terrain removal should succeed")
+  (assert (= removed-terrain-id "terrain-a") "active terrain removal should target only that terrain")
+  (assert (= built-count 0) "active terrain removal should not rebuild scene defaults")
+  (node:drop))
+
+(fn test-flat-terrain-node-errors-when-active-runtime-remove-fails []
+  (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+  (local state {:scene {:panels []
+                        :terrains [(make-flat-terrain-record {:id "terrain-a"})]}
+                :hud {:panels []}})
+  (local runtime {:scene {:remove-terrain (fn [_self _terrain-id] false)}})
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (FlatTerrainNode {:world-id "test-world"
+                                :world-manager manager
+                                :terrain-id "terrain-a"}))
+  (local (ok err) (pcall (fn [] (node:remove-terrain))))
+  (assert (not ok) "active terrain removal should fail loudly when runtime sync fails")
+  (assert (string.find err "failed to remove terrain") "runtime removal failure should mention remove terrain")
   (node:drop))
 
 (fn test-worlds-node-has-create-world []
@@ -581,11 +825,31 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels []
+                                                      :terrains [(make-flat-terrain-record {:id "terrain-abc"})]}
+                                              :hud {:panels []}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
       (local result (graph:load-by-key "terrain:test-world:terrain-abc"))
       (assert result "terrain loader should create node")
       (assert (= result.key "terrain:test-world:terrain-abc") "terrain key should match")
       (assert (= result.terrain-id "terrain-abc") "terrain-id should be parsed")
+      (result:drop)
+      (graph:drop))))
+
+(fn test-graph-key-loaders-loads-terrain-editor-node []
+  (with-temp-dir
+    (fn [dir]
+      (local graph (Graph {:with-start false}))
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels []
+                                                      :terrains [(make-flat-terrain-record {:id "terrain-abc"})]}
+                                              :hud {:panels []}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (local result (graph:load-by-key "terrain-editor:test-world:terrain-abc"))
+      (assert result "terrain editor loader should create node")
+      (assert (= result.key "terrain-editor:test-world:terrain-abc") "terrain editor key should match")
+      (assert (= result.terrain-id "terrain-abc") "terrain editor terrain-id should be parsed")
       (result:drop)
       (graph:drop))))
 
@@ -597,6 +861,7 @@
 (table.insert tests {:name "scene panel node module exports" :fn test-scene-panel-node-module-exports})
 (table.insert tests {:name "hud panel node module exports" :fn test-hud-panel-node-module-exports})
 (table.insert tests {:name "terrain node module exports" :fn test-terrain-node-module-exports})
+(table.insert tests {:name "flat terrain node module exports" :fn test-flat-terrain-node-module-exports})
 (table.insert tests {:name "worlds node requires world-manager" :fn test-worlds-node-requires-world-manager})
 (table.insert tests {:name "world node requires world-id" :fn test-world-node-requires-world-id})
 (table.insert tests {:name "scene panels node requires world-id" :fn test-scene-panels-node-requires-world-id})
@@ -605,6 +870,7 @@
 (table.insert tests {:name "scene panel node requires world-id" :fn test-scene-panel-node-requires-world-id})
 (table.insert tests {:name "hud panel node requires world-id" :fn test-hud-panel-node-requires-world-id})
 (table.insert tests {:name "terrain node requires world-id" :fn test-terrain-node-requires-world-id})
+(table.insert tests {:name "flat terrain node requires world-id" :fn test-flat-terrain-node-requires-world-id})
 (table.insert tests {:name "worlds node has correct key" :fn test-worlds-node-has-correct-key})
 (table.insert tests {:name "world node has correct key" :fn test-world-node-has-correct-key})
 (table.insert tests {:name "scene panels node has correct key" :fn test-scene-panels-node-has-correct-key})
@@ -613,6 +879,7 @@
 (table.insert tests {:name "scene panel node has correct key" :fn test-scene-panel-node-has-correct-key})
 (table.insert tests {:name "hud panel node has correct key" :fn test-hud-panel-node-has-correct-key})
 (table.insert tests {:name "terrain node has correct key" :fn test-terrain-node-has-correct-key})
+(table.insert tests {:name "flat terrain node has correct key" :fn test-flat-terrain-node-has-correct-key})
 (table.insert tests {:name "world node has emit categories" :fn test-world-node-has-emit-categories})
 (table.insert tests {:name "world node add category node" :fn test-world-node-add-category-node})
 (table.insert tests {:name "worlds node has emit items" :fn test-worlds-node-has-emit-items})
@@ -622,7 +889,14 @@
 (table.insert tests {:name "world node has actions" :fn test-world-node-has-actions})
 (table.insert tests {:name "scene panel node has remove action" :fn test-scene-panel-node-has-remove-action})
 (table.insert tests {:name "hud panel node has remove action" :fn test-hud-panel-node-has-remove-action})
-(table.insert tests {:name "terrain node has no actions" :fn test-terrain-node-has-no-actions})
+(table.insert tests {:name "terrain node has actions" :fn test-terrain-node-has-actions})
+(table.insert tests {:name "flat terrain node updates world state" :fn test-flat-terrain-node-updates-world-state})
+(table.insert tests {:name "flat terrain node updates active scene in place" :fn test-flat-terrain-node-updates-active-scene-in-place})
+(table.insert tests {:name "flat terrain node errors when active runtime update fails" :fn test-flat-terrain-node-errors-when-active-runtime-update-fails})
+(table.insert tests {:name "terrain node open editor adds edge" :fn test-terrain-node-open-editor-adds-edge})
+(table.insert tests {:name "flat terrain node remove updates world state" :fn test-flat-terrain-node-remove-updates-world-state})
+(table.insert tests {:name "flat terrain node removes active scene in place" :fn test-flat-terrain-node-removes-active-scene-in-place})
+(table.insert tests {:name "flat terrain node errors when active runtime remove fails" :fn test-flat-terrain-node-errors-when-active-runtime-remove-fails})
 (table.insert tests {:name "worlds node has create world" :fn test-worlds-node-has-create-world})
 (table.insert tests {:name "world node activate finds index" :fn test-world-node-activate-finds-index})
 (table.insert tests {:name "world node close finds index" :fn test-world-node-close-finds-index})
@@ -640,6 +914,7 @@
 (table.insert tests {:name "graph key loaders loads scene panel node" :fn test-graph-key-loaders-loads-scene-panel-node})
 (table.insert tests {:name "graph key loaders loads hud panel node" :fn test-graph-key-loaders-loads-hud-panel-node})
 (table.insert tests {:name "graph key loaders loads terrain node" :fn test-graph-key-loaders-loads-terrain-node})
+(table.insert tests {:name "graph key loaders loads terrain editor node" :fn test-graph-key-loaders-loads-terrain-editor-node})
 
 (fn make-icons-stub []
   (local glyph {:advance 1})
@@ -669,6 +944,14 @@
                             :hoverables app.hoverables}))
   (set ctx.icons (make-icons-stub))
   ctx)
+
+(fn codepoints->text [codepoints]
+  (table.concat
+    (icollect [_ codepoint (ipairs (or codepoints []))]
+      (utf8.char codepoint))))
+
+(fn text-entity-value [entity]
+  (codepoints->text (entity:get-codepoints)))
 
 (fn test-world-node-view-builds []
   (local WorldNodeView (require :graph/view/views/world))
@@ -729,10 +1012,112 @@
   (assert added-category "add-category-node should be called on search submit")
   (view:drop))
 
+(fn test-flat-terrain-node-view-builds []
+  (local Validation (require :graph/terrain-editor-validation))
+  (local FlatTerrainNodeView (require :graph/view/views/flat-terrain))
+  (local ctx (make-build-ctx))
+  (local mock-node {:terrain-id "terrain-a"
+                    :changed (Signal)
+                    :get-record (fn [] (make-flat-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values] true)})
+  (local builder (FlatTerrainNodeView mock-node))
+  (local view (builder ctx))
+  (assert view "FlatTerrainNodeView should build a view")
+  (assert view.layout "FlatTerrainNodeView should have layout")
+  (assert view.fields "FlatTerrainNodeView should expose fields")
+  (assert view.error-labels "FlatTerrainNodeView should expose field error labels")
+  (assert view.status-label "FlatTerrainNodeView should expose status label")
+  (assert view.apply-button "FlatTerrainNodeView should expose apply button")
+  (assert (= (length Validation.field-specs) 7) "validation should expose flat terrain field specs")
+  (assert (not view.apply-button.enabled?) "Apply should start disabled when nothing changed")
+  (view:drop))
+
+(fn test-terrain-node-view-builds-scrollable-summary []
+  (local TerrainNodeView (require :graph/view/views/terrain))
+  (local ctx (make-build-ctx))
+  (local mock-node {:terrain-id "terrain-a"
+                    :terrain-kind "flat-terrain"
+                    :has-editor? true
+                    :open-editor (fn [_self] nil)
+                    :remove-terrain (fn [_self] nil)
+                    :terrain-record (make-flat-terrain-record {:id "terrain-a"})
+                    :changed (Signal)})
+  (local builder (TerrainNodeView mock-node))
+  (local view (builder ctx))
+  (assert view.layout "TerrainNodeView should have layout")
+  (assert view.scroll-view "TerrainNodeView should use a scroll view for long summaries")
+  (view:drop))
+
+(fn test-flat-terrain-node-view-defers-updates-until-apply []
+  (local FlatTerrainNodeView (require :graph/view/views/flat-terrain))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local record (make-flat-terrain-record {:id "terrain-a" :width 50}))
+  (local changed (Signal))
+  (local mock-node {:terrain-id "terrain-a"
+                    :changed changed
+                    :get-record (fn [] record)
+                    :apply-values (fn [_self validated]
+                                      (set updates (+ updates 1))
+                                      (local options (. record :options))
+                                      (set options.width validated.width)
+                                      (changed:emit record)
+                                      record)})
+  (local builder (FlatTerrainNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.width:set-text "72")
+  (assert (= updates 0) "editing input text should not update terrain immediately")
+  (assert view.apply-button.enabled? "Apply should enable when the draft is dirty")
+  (view.apply-button:on-click {})
+  (assert (= updates 1) "Apply should trigger a single terrain update")
+  (assert (= (. (. record :options) :width) 72) "Apply should write edited width")
+  (assert (not view.apply-button.enabled?) "Apply should disable again after commit")
+  (assert (= (text-entity-value view.status-label) "Applied") "successful apply should show applied status")
+  (view:drop))
+
+(fn test-flat-terrain-node-view-shows-validation-errors []
+  (local FlatTerrainNodeView (require :graph/view/views/flat-terrain))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local mock-node {:terrain-id "terrain-a"
+                    :changed (Signal)
+                    :get-record (fn [] (make-flat-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values]
+                                    (set updates (+ updates 1))
+                                    true)})
+  (local builder (FlatTerrainNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.opacity:set-text "2")
+  (view.apply-button:on-click {})
+  (assert (= updates 0) "invalid apply should not update terrain")
+  (assert (= (text-entity-value (. (. view :error-labels) :opacity)) "Opacity must be between 0 and 1")
+          "invalid opacity should show an inline error")
+  (assert (= (text-entity-value view.status-label) "Fix 1 invalid field before applying")
+          "invalid apply should show summary feedback")
+  (view.fields.opacity:set-text "0.5")
+  (assert (= (text-entity-value (. (. view :error-labels) :opacity)) "")
+          "fixing a field should clear its inline error")
+  (assert (= (text-entity-value view.status-label) "Unsaved changes")
+          "fixing the field should return to unsaved status")
+  (view:drop))
+
+(fn test-terrain-editor-validation-validates-draft []
+  (local Validation (require :graph/terrain-editor-validation))
+  (local draft (Validation.draft-from-record (make-flat-terrain-record {:id "terrain-a"})))
+  (set (. draft :width) "4.5")
+  (local result (Validation.validate-draft draft))
+  (assert (not result.ok?) "validation should reject invalid draft values")
+  (assert (= (. (. result :errors) :width) "Width must be an integer") "width validation should require integers"))
+
 (table.insert tests {:name "world node view builds" :fn test-world-node-view-builds})
 (table.insert tests {:name "world node view set categories" :fn test-world-node-view-set-categories})
 (table.insert tests {:name "world node view refresh categories" :fn test-world-node-view-refresh-categories})
 (table.insert tests {:name "world node view search submitted" :fn test-world-node-view-search-submitted})
+(table.insert tests {:name "terrain node view builds scrollable summary" :fn test-terrain-node-view-builds-scrollable-summary})
+(table.insert tests {:name "flat terrain node view builds" :fn test-flat-terrain-node-view-builds})
+(table.insert tests {:name "flat terrain node view defers updates until apply" :fn test-flat-terrain-node-view-defers-updates-until-apply})
+(table.insert tests {:name "flat terrain node view shows validation errors" :fn test-flat-terrain-node-view-shows-validation-errors})
+(table.insert tests {:name "terrain editor validation validates draft" :fn test-terrain-editor-validation-validates-draft})
 
 (local main
   (fn []

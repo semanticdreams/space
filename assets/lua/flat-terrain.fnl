@@ -192,12 +192,10 @@
 
   (local theme (and app.themes app.themes.get-active-theme (app.themes.get-active-theme)))
   (local theme-colors (and theme theme.flat-terrain))
-  (local colors {:dark (resolve-glm-vec4 (and options.colors options.colors.dark)
-                                        (resolve-glm-vec4 (and theme-colors theme-colors.dark)
-                                                          (glm.vec4 0.3 0.3 0.3 1.0)))
-                 :light (resolve-glm-vec4 (and options.colors options.colors.light)
-                                         (resolve-glm-vec4 (and theme-colors theme-colors.light)
-                                                           (glm.vec4 0.7 0.7 0.7 1.0)))})
+  (local colors {:dark (resolve-glm-vec4 (and theme-colors theme-colors.dark)
+                                        (glm.vec4 0.3 0.3 0.3 1.0))
+                 :light (resolve-glm-vec4 (and theme-colors theme-colors.light)
+                                         (glm.vec4 0.7 0.7 0.7 1.0))})
 
   (local mesh (MeshBuilder.generate {:width terrain-width
                                      :length terrain-length
