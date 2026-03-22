@@ -49,6 +49,27 @@
              :opacity (or options.opacity 1.0)
              :physics-thickness (or options.physics-thickness 2.0)}})
 
+(fn make-perlin-terrain-record [opts]
+  (local options (or opts {}))
+  {:id (or options.id "perlin-1")
+   :kind "perlin-terrain"
+   :options {:width (or options.width 50)
+             :length (or options.length 50)
+             :seed (or options.seed 1337)
+             :scale (or options.scale [20 1 20])
+             :position (or options.position [500 -100 -500])
+             :rotation (or options.rotation [1 0 0 0])
+             :opacity (or options.opacity 1.0)
+             :physics true
+             :n1div (or options.n1div 30)
+             :n2div (or options.n2div 4)
+             :n3div (or options.n3div 1)
+             :n1scale (or options.n1scale 20)
+             :n2scale (or options.n2scale 2)
+             :n3scale (or options.n3scale 1)
+             :zroot (or options.zroot 2)
+             :zpower (or options.zpower 2.5)}})
+
 (fn make-scene-runtime [opts]
   (local options (or opts {}))
   (local scene {:capture-state (fn [_self]
@@ -66,6 +87,10 @@
                                           (when options.on-replace-terrain-record
                                             (options.on-replace-terrain-record terrain-id record))
                                           true)
+                :add-terrain-record (fn [_self record]
+                                      (when options.on-add-terrain-record
+                                        (options.on-add-terrain-record record))
+                                      true)
                 :remove-terrain (fn [_self terrain-id]
                                   (when options.on-remove-terrain
                                     (options.on-remove-terrain terrain-id))
@@ -137,6 +162,11 @@
   (assert FlatTerrainNode "flat-terrain module should export FlatTerrainNode")
   (assert (= (type FlatTerrainNode) "function") "FlatTerrainNode should be a function"))
 
+(fn test-perlin-terrain-node-module-exports []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (assert PerlinTerrainNode "perlin-terrain module should export PerlinTerrainNode")
+  (assert (= (type PerlinTerrainNode) "function") "PerlinTerrainNode should be a function"))
+
 (fn test-worlds-node-requires-world-manager []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
   (local (ok err) (pcall (fn [] (WorldsNode {}))))
@@ -181,6 +211,11 @@
   (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
   (local (ok err) (pcall (fn [] (FlatTerrainNode {}))))
   (assert (not ok) "FlatTerrainNode should require world-id"))
+
+(fn test-perlin-terrain-node-requires-world-id []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local (ok err) (pcall (fn [] (PerlinTerrainNode {}))))
+  (assert (not ok) "PerlinTerrainNode should require world-id"))
 
 (fn test-worlds-node-has-correct-key []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
@@ -246,6 +281,21 @@
   (assert (= node.key "terrain:test-world-123:terrain-abc") "TerrainNode key should include world-id and terrain-id")
   (node:drop))
 
+(fn test-terrain-node-default-label-uses-terrain-kind []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local entry (make-world-entry {:id "test-world-123"
+                                  :state {:scene {:panels []
+                                                  :terrains [{:id "terrain-abc"
+                                                              :kind "perlin-terrain"
+                                                              :options {}}]}
+                                          :hud {:panels []}}}))
+  (local node (TerrainNode {:world-id "test-world-123"
+                            :world-manager (make-world-manager {:id "test-world-123"
+                                                                :entry entry})
+                            :terrain-id "terrain-abc"}))
+  (assert (= node.label "Perlin Terrain") "TerrainNode should derive its label from the terrain kind registry")
+  (node:drop))
+
 (fn test-flat-terrain-node-has-correct-key []
   (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
   (local entry (make-world-entry {:id "test-world-123"
@@ -256,6 +306,18 @@
                                 :world-manager (make-world-manager {:id "test-world-123" :entry entry})
                                 :terrain-id "terrain-abc"}))
   (assert (= node.key "terrain-editor:test-world-123:terrain-abc") "FlatTerrainNode key should include world-id and terrain-id")
+  (node:drop))
+
+(fn test-perlin-terrain-node-has-correct-key []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local entry (make-world-entry {:id "test-world-123"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-perlin-terrain-record {:id "terrain-abc"})]}
+                                          :hud {:panels []}}}))
+  (local node (PerlinTerrainNode {:world-id "test-world-123"
+                                  :world-manager (make-world-manager {:id "test-world-123" :entry entry})
+                                  :terrain-id "terrain-abc"}))
+  (assert (= node.key "terrain-editor:test-world-123:terrain-abc") "PerlinTerrainNode key should include world-id and terrain-id")
   (node:drop))
 
 (fn test-world-node-has-emit-categories []
@@ -372,7 +434,7 @@
   (local node (TerrainNode {:world-id "test-world"
                             :world-manager (make-world-manager {:id "test-world" :entry entry})
                             :terrain-id "t1"}))
-  (assert (= node.label "terrain") "generic terrain node label should stay generic")
+  (assert (= node.label "Flat Terrain") "terrain node label should derive from the terrain kind registry")
   (assert node.actions "TerrainNode should have actions")
   (assert (= (length node.actions) 2) "TerrainNode should have editor and remove actions")
   (assert (= (. (. node.actions 1) :name) "Open Editor") "first terrain action should open editor")
@@ -476,6 +538,117 @@
   (assert (string.find err "failed to replace terrain") "runtime sync failure should mention replace terrain")
   (node:drop))
 
+(fn test-perlin-terrain-node-updates-world-state []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local terrain-record (make-perlin-terrain-record {:id "terrain-a" :seed 7}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :world-manager manager
+                                  :terrain-id "terrain-a"}))
+  (node:apply-values {:width 72
+                      :length 60
+                      :seed 99
+                      :scale [30 2 30]
+                      :position [10 -90 12]
+                      :rotation [1 0 0 0]
+                      :opacity 0.8
+                      :n1div 31
+                      :n2div 5
+                      :n3div 2
+                      :n1scale 18
+                      :n2scale 3
+                      :n3scale 1.5
+                      :zroot 2.2
+                      :zpower 3.1})
+  (assert (= (. (. (. state.scene.terrains 1) :options) :seed) 99)
+          "PerlinTerrainNode should update the persisted terrain seed")
+  (assert (= (. (. (. state.scene.terrains 1) :options) :n3div) 2)
+          "PerlinTerrainNode should update perlin-specific noise parameters")
+  (assert (= (. (. (. state.scene.terrains 1) :options) :physics) true)
+          "PerlinTerrainNode should keep physics enabled")
+  (node:drop))
+
+(fn test-perlin-terrain-node-updates-active-scene-in-place []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local terrain-record (make-perlin-terrain-record {:id "terrain-a" :seed 7}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (var replaced nil)
+  (local runtime (make-scene-runtime {:terrains state.scene.terrains
+                                      :on-replace-terrain-record (fn [terrain-id record]
+                                                                  (set replaced {:terrain-id terrain-id
+                                                                                 :record record}))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :world-manager manager
+                                  :terrain-id "terrain-a"}))
+  (node:apply-values {:width 72
+                      :length 60
+                      :seed 99
+                      :scale [30 2 30]
+                      :position [10 -90 12]
+                      :rotation [1 0 0 0]
+                      :opacity 0.8
+                      :n1div 31
+                      :n2div 5
+                      :n3div 2
+                      :n1scale 18
+                      :n2scale 3
+                      :n3scale 1.5
+                      :zroot 2.2
+                      :zpower 3.1})
+  (assert replaced "editing an active perlin terrain should replace only that terrain runtime")
+  (assert (= replaced.terrain-id "terrain-a") "active perlin terrain update should target the same terrain id")
+  (assert (= (. (. replaced.record :options) :seed) 99)
+          "replaced runtime perlin terrain should include the edited seed")
+  (node:drop))
+
+(fn test-perlin-terrain-node-errors-when-active-runtime-update-fails []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local terrain-record (make-perlin-terrain-record {:id "terrain-a" :seed 7}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :world-manager manager
+                                  :terrain-id "terrain-a"}))
+  (local (ok err)
+    (pcall (fn []
+             (node:apply-values {:width 72
+                                 :length 60
+                                 :seed 99
+                                 :scale [30 2 30]
+                                 :position [10 -90 12]
+                                 :rotation [1 0 0 0]
+                                 :opacity 0.8
+                                 :n1div 31
+                                 :n2div 5
+                                 :n3div 2
+                                 :n1scale 18
+                                 :n2scale 3
+                                 :n3scale 1.5
+                                 :zroot 2.2
+                                 :zpower 3.1}))))
+  (assert (not ok) "active perlin terrain update should fail loudly when runtime sync fails")
+  (assert (string.find err "failed to replace terrain") "runtime sync failure should mention replace terrain")
+  (node:drop))
+
 (fn test-terrain-node-open-editor-adds-edge []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local graph (Graph {:with-start false}))
@@ -492,6 +665,109 @@
   (assert editor "TerrainNode should create a type-specific editor")
   (assert (= editor.key "terrain-editor:test-world:terrain-a") "editor key should be stable")
   (assert (= (graph:edge-count) 1) "opening terrain editor should add one edge")
+  (graph:drop))
+
+(fn test-terrain-node-open-editor-returns-nil-for-noneditable-kind []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local graph (Graph {:with-start false}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels []
+                                                  :terrains [{:id "terrain-a"
+                                                              :kind "voxel-terrain"
+                                                              :options {}}]}
+                                          :hud {:panels []}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (TerrainNode {:world-id "test-world"
+                            :world-manager manager
+                            :terrain-id "terrain-a"}))
+  (graph:add-node node {})
+  (local editor (node:open-editor))
+  (assert (= editor nil) "TerrainNode should return nil when the terrain kind has no editor")
+  (assert (= (graph:edge-count) 0) "noneditable terrain kinds should not add editor edges")
+  (graph:drop))
+
+(fn test-terrains-node-add-terrain-updates-world-state []
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}})
+  (local node (TerrainsNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"
+                                                                 :state state})}))
+  (local added (node:add-terrain "flat-terrain"))
+  (assert added "adding a flat terrain should return the created record")
+  (assert (= (length state.scene.terrains) 1) "adding a terrain should append to world state")
+  (assert (= (. (. state.scene.terrains 1) :kind) "flat-terrain") "added terrain should preserve kind")
+  (assert (. added :id) "added terrain should have an id")
+  (node:drop))
+
+(fn test-terrains-node-add-terrain-supports-perlin-kind []
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}})
+  (local node (TerrainsNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"
+                                                                 :state state})}))
+  (local added (node:add-terrain "perlin-terrain"))
+  (assert added "adding a perlin terrain should return the created record")
+  (assert (= (. added :kind) "perlin-terrain") "perlin add should preserve terrain kind")
+  (assert (= (. (. added :options) :seed) 1337) "perlin add should seed default options")
+  (assert (= (length state.scene.terrains) 1) "perlin add should append to world state")
+  (node:drop))
+
+(fn test-terrains-node-adds-active-scene-terrain-in-place []
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}})
+  (var added-record nil)
+  (var saved-count 0)
+  (local runtime (make-scene-runtime {:terrains state.scene.terrains
+                                      :on-add-terrain-record (fn [record]
+                                                               (set added-record record))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state state
+                                  :runtime runtime
+                                  :on-save (fn [_state]
+                                             (set saved-count (+ saved-count 1)))}))
+  (local node (TerrainsNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"
+                                                                 :entry entry})}))
+  (local added (node:add-terrain "flat-terrain"))
+  (assert added "active terrain add should return the created record")
+  (assert added-record "active terrain add should sync into the live scene")
+  (assert (= added-record.id added.id) "active scene add should use the same terrain record")
+  (assert (= saved-count 1) "adding a terrain should persist world state once")
+  (node:drop))
+
+(fn test-terrains-node-add-terrain-errors-on-unsupported-kind []
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}})
+  (local node (TerrainsNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"
+                                                                 :state state})}))
+  (local (ok err) (pcall (fn []
+                           (node:add-terrain "voxel-terrain"))))
+  (assert (not ok) "unsupported terrain kinds should fail loudly")
+  (assert (string.find err "Unsupported terrain kind")
+          "unsupported terrain kind failure should mention the kind registry")
+  (assert (= (length state.scene.terrains) 0) "unsupported terrain add should not mutate world state")
+  (node:drop))
+
+(fn test-terrains-node-adds-new-terrain-node-to-graph-when-present []
+  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+  (local graph (Graph {:with-start false}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}})
+  (local node (TerrainsNode {:world-id "test-world"
+                             :world-manager (make-world-manager {:id "test-world"
+                                                                 :state state})}))
+  (graph:add-node node {})
+  (local added (node:add-terrain "flat-terrain"))
+  (assert added "graph terrain add should return the created record")
+  (local terrain-key (.. "terrain:test-world:" added.id))
+  (local terrain-node (graph:lookup terrain-key))
+  (assert terrain-node "new terrain should appear in the graph when parent node is mounted")
+  (assert (= (graph:edge-count) 1) "new terrain graph attachment should add one edge from terrains node")
   (graph:drop))
 
 (fn test-flat-terrain-node-remove-updates-world-state []
@@ -556,6 +832,67 @@
                                 :terrain-id "terrain-a"}))
   (local (ok err) (pcall (fn [] (node:remove-terrain))))
   (assert (not ok) "active terrain removal should fail loudly when runtime sync fails")
+  (assert (string.find err "failed to remove terrain") "runtime removal failure should mention remove terrain")
+  (node:drop))
+
+(fn test-perlin-terrain-node-remove-updates-world-state []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local state {:scene {:panels []
+                        :terrains [(make-perlin-terrain-record {:id "terrain-a"})
+                                   (make-perlin-terrain-record {:id "terrain-b"})]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :world-manager manager
+                                  :terrain-id "terrain-a"}))
+  (assert (node:remove-terrain) "perlin terrain removal should succeed")
+  (assert (= (length state.scene.terrains) 1) "perlin terrain removal should mutate world state")
+  (assert (= (. (. state.scene.terrains 1) :id) "terrain-b") "perlin terrain removal should target the correct record")
+  (node:drop))
+
+(fn test-perlin-terrain-node-removes-active-scene-in-place []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local state {:scene {:panels []
+                        :terrains [(make-perlin-terrain-record {:id "terrain-a"})
+                                   (make-perlin-terrain-record {:id "terrain-b"})]}
+                :hud {:panels []}})
+  (var removed-terrain-id nil)
+  (local runtime (make-scene-runtime {:terrains state.scene.terrains
+                                      :on-remove-terrain (fn [terrain-id]
+                                                           (set removed-terrain-id terrain-id))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :world-manager manager
+                                  :terrain-id "terrain-a"}))
+  (assert (node:remove-terrain) "active perlin terrain removal should succeed")
+  (assert (= removed-terrain-id "terrain-a") "active perlin terrain removal should target only that terrain")
+  (node:drop))
+
+(fn test-perlin-terrain-node-errors-when-active-runtime-remove-fails []
+  (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
+  (local state {:scene {:panels []
+                        :terrains [(make-perlin-terrain-record {:id "terrain-a"})]}
+                :hud {:panels []}})
+  (local runtime {:scene {:remove-terrain (fn [_self _terrain-id] false)}})
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (PerlinTerrainNode {:world-id "test-world"
+                                  :world-manager manager
+                                  :terrain-id "terrain-a"}))
+  (local (ok err) (pcall (fn [] (node:remove-terrain))))
+  (assert (not ok) "active perlin terrain removal should fail loudly when runtime sync fails")
   (assert (string.find err "failed to remove terrain") "runtime removal failure should mention remove terrain")
   (node:drop))
 
@@ -853,6 +1190,23 @@
       (result:drop)
       (graph:drop))))
 
+(fn test-graph-key-loaders-loads-perlin-terrain-editor-node []
+  (with-temp-dir
+    (fn [dir]
+      (local graph (Graph {:with-start false}))
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels []
+                                                      :terrains [(make-perlin-terrain-record {:id "terrain-abc"})]}
+                                              :hud {:panels []}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (local result (graph:load-by-key "terrain-editor:test-world:terrain-abc"))
+      (assert result "perlin terrain editor loader should create node")
+      (assert (= result.key "terrain-editor:test-world:terrain-abc") "perlin terrain editor key should match")
+      (assert (= result.terrain-id "terrain-abc") "perlin terrain editor terrain-id should be parsed")
+      (assert (= result.terrain-kind "perlin-terrain") "perlin terrain editor should preserve terrain kind")
+      (result:drop)
+      (graph:drop))))
+
 (table.insert tests {:name "worlds node module exports" :fn test-worlds-node-module-exports})
 (table.insert tests {:name "world node module exports" :fn test-world-node-module-exports})
 (table.insert tests {:name "scene panels node module exports" :fn test-scene-panels-node-module-exports})
@@ -862,6 +1216,7 @@
 (table.insert tests {:name "hud panel node module exports" :fn test-hud-panel-node-module-exports})
 (table.insert tests {:name "terrain node module exports" :fn test-terrain-node-module-exports})
 (table.insert tests {:name "flat terrain node module exports" :fn test-flat-terrain-node-module-exports})
+(table.insert tests {:name "perlin terrain node module exports" :fn test-perlin-terrain-node-module-exports})
 (table.insert tests {:name "worlds node requires world-manager" :fn test-worlds-node-requires-world-manager})
 (table.insert tests {:name "world node requires world-id" :fn test-world-node-requires-world-id})
 (table.insert tests {:name "scene panels node requires world-id" :fn test-scene-panels-node-requires-world-id})
@@ -871,6 +1226,7 @@
 (table.insert tests {:name "hud panel node requires world-id" :fn test-hud-panel-node-requires-world-id})
 (table.insert tests {:name "terrain node requires world-id" :fn test-terrain-node-requires-world-id})
 (table.insert tests {:name "flat terrain node requires world-id" :fn test-flat-terrain-node-requires-world-id})
+(table.insert tests {:name "perlin terrain node requires world-id" :fn test-perlin-terrain-node-requires-world-id})
 (table.insert tests {:name "worlds node has correct key" :fn test-worlds-node-has-correct-key})
 (table.insert tests {:name "world node has correct key" :fn test-world-node-has-correct-key})
 (table.insert tests {:name "scene panels node has correct key" :fn test-scene-panels-node-has-correct-key})
@@ -879,7 +1235,9 @@
 (table.insert tests {:name "scene panel node has correct key" :fn test-scene-panel-node-has-correct-key})
 (table.insert tests {:name "hud panel node has correct key" :fn test-hud-panel-node-has-correct-key})
 (table.insert tests {:name "terrain node has correct key" :fn test-terrain-node-has-correct-key})
+(table.insert tests {:name "terrain node default label uses terrain kind" :fn test-terrain-node-default-label-uses-terrain-kind})
 (table.insert tests {:name "flat terrain node has correct key" :fn test-flat-terrain-node-has-correct-key})
+(table.insert tests {:name "perlin terrain node has correct key" :fn test-perlin-terrain-node-has-correct-key})
 (table.insert tests {:name "world node has emit categories" :fn test-world-node-has-emit-categories})
 (table.insert tests {:name "world node add category node" :fn test-world-node-add-category-node})
 (table.insert tests {:name "worlds node has emit items" :fn test-worlds-node-has-emit-items})
@@ -893,10 +1251,22 @@
 (table.insert tests {:name "flat terrain node updates world state" :fn test-flat-terrain-node-updates-world-state})
 (table.insert tests {:name "flat terrain node updates active scene in place" :fn test-flat-terrain-node-updates-active-scene-in-place})
 (table.insert tests {:name "flat terrain node errors when active runtime update fails" :fn test-flat-terrain-node-errors-when-active-runtime-update-fails})
+(table.insert tests {:name "perlin terrain node updates world state" :fn test-perlin-terrain-node-updates-world-state})
+(table.insert tests {:name "perlin terrain node updates active scene in place" :fn test-perlin-terrain-node-updates-active-scene-in-place})
+(table.insert tests {:name "perlin terrain node errors when active runtime update fails" :fn test-perlin-terrain-node-errors-when-active-runtime-update-fails})
 (table.insert tests {:name "terrain node open editor adds edge" :fn test-terrain-node-open-editor-adds-edge})
+(table.insert tests {:name "terrain node open editor returns nil for noneditable kind" :fn test-terrain-node-open-editor-returns-nil-for-noneditable-kind})
+(table.insert tests {:name "terrains node add terrain updates world state" :fn test-terrains-node-add-terrain-updates-world-state})
+(table.insert tests {:name "terrains node add terrain supports perlin kind" :fn test-terrains-node-add-terrain-supports-perlin-kind})
+(table.insert tests {:name "terrains node adds active scene terrain in place" :fn test-terrains-node-adds-active-scene-terrain-in-place})
+(table.insert tests {:name "terrains node add terrain errors on unsupported kind" :fn test-terrains-node-add-terrain-errors-on-unsupported-kind})
+(table.insert tests {:name "terrains node adds new terrain node to graph when present" :fn test-terrains-node-adds-new-terrain-node-to-graph-when-present})
 (table.insert tests {:name "flat terrain node remove updates world state" :fn test-flat-terrain-node-remove-updates-world-state})
 (table.insert tests {:name "flat terrain node removes active scene in place" :fn test-flat-terrain-node-removes-active-scene-in-place})
 (table.insert tests {:name "flat terrain node errors when active runtime remove fails" :fn test-flat-terrain-node-errors-when-active-runtime-remove-fails})
+(table.insert tests {:name "perlin terrain node remove updates world state" :fn test-perlin-terrain-node-remove-updates-world-state})
+(table.insert tests {:name "perlin terrain node removes active scene in place" :fn test-perlin-terrain-node-removes-active-scene-in-place})
+(table.insert tests {:name "perlin terrain node errors when active runtime remove fails" :fn test-perlin-terrain-node-errors-when-active-runtime-remove-fails})
 (table.insert tests {:name "worlds node has create world" :fn test-worlds-node-has-create-world})
 (table.insert tests {:name "world node activate finds index" :fn test-world-node-activate-finds-index})
 (table.insert tests {:name "world node close finds index" :fn test-world-node-close-finds-index})
@@ -915,6 +1285,7 @@
 (table.insert tests {:name "graph key loaders loads hud panel node" :fn test-graph-key-loaders-loads-hud-panel-node})
 (table.insert tests {:name "graph key loaders loads terrain node" :fn test-graph-key-loaders-loads-terrain-node})
 (table.insert tests {:name "graph key loaders loads terrain editor node" :fn test-graph-key-loaders-loads-terrain-editor-node})
+(table.insert tests {:name "graph key loaders loads perlin terrain editor node" :fn test-graph-key-loaders-loads-perlin-terrain-editor-node})
 
 (fn make-icons-stub []
   (local glyph {:advance 1})
@@ -924,7 +1295,8 @@
                            4242 glyph}})
   (local stub {:font font
                :codepoints {:close 4242
-                            :play_arrow 4242}})
+                            :play_arrow 4242
+                            :arrow_drop_down 4242}})
   (set stub.get
        (fn [self name]
          (local value (. self.codepoints name))
@@ -1010,6 +1382,41 @@
   (view:refresh-categories)
   (view.search.submitted:emit (. view.search.items 1))
   (assert added-category "add-category-node should be called on search submit")
+  (view:drop))
+
+(fn test-terrains-node-view-builds-add-controls []
+  (local TerrainsNodeView (require :graph/view/views/terrains))
+  (local ctx (make-build-ctx))
+  (local mock-node {:supported-terrain-kinds ["flat-terrain" "perlin-terrain"]
+                    :emit-items (fn [] [])
+                    :items-changed (Signal)
+                    :open-terrain-node (fn [_self _entry] nil)
+                    :add-terrain (fn [_self _kind] nil)})
+  (local builder (TerrainsNodeView mock-node))
+  (local view (builder ctx))
+  (assert view.layout "TerrainsNodeView should have layout")
+  (assert view.kind-picker "TerrainsNodeView should expose a terrain kind picker")
+  (assert view.add-button "TerrainsNodeView should expose an add button")
+  (assert (= (view.kind-picker:get-value) "flat-terrain")
+          "TerrainsNodeView should default to the first supported terrain kind")
+  (view:drop))
+
+(fn test-terrains-node-view-add-button-uses-selected-kind []
+  (local TerrainsNodeView (require :graph/view/views/terrains))
+  (local ctx (make-build-ctx))
+  (var added-kind nil)
+  (local mock-node {:supported-terrain-kinds ["flat-terrain" "perlin-terrain"]
+                    :emit-items (fn [] [])
+                    :items-changed (Signal)
+                    :open-terrain-node (fn [_self _entry] nil)
+                    :add-terrain (fn [_self kind]
+                                   (set added-kind kind))})
+  (local builder (TerrainsNodeView mock-node))
+  (local view (builder ctx))
+  (view.kind-picker:set-value "perlin-terrain")
+  (view.add-button:on-click nil)
+  (assert (= added-kind "perlin-terrain")
+          "TerrainsNodeView add button should use the selected terrain kind")
   (view:drop))
 
 (fn test-flat-terrain-node-view-builds []
@@ -1109,15 +1516,103 @@
   (assert (not result.ok?) "validation should reject invalid draft values")
   (assert (= (. (. result :errors) :width) "Width must be an integer") "width validation should require integers"))
 
+(fn test-perlin-terrain-node-view-builds []
+  (local Validation (require :graph/perlin-terrain-editor-validation))
+  (local PerlinTerrainNodeView (require :graph/view/views/perlin-terrain))
+  (local ctx (make-build-ctx))
+  (local mock-node {:terrain-id "terrain-a"
+                    :changed (Signal)
+                    :get-record (fn [] (make-perlin-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values] true)})
+  (local builder (PerlinTerrainNodeView mock-node))
+  (local view (builder ctx))
+  (assert view "PerlinTerrainNodeView should build a view")
+  (assert view.layout "PerlinTerrainNodeView should have layout")
+  (assert view.fields "PerlinTerrainNodeView should expose fields")
+  (assert view.error-labels "PerlinTerrainNodeView should expose field error labels")
+  (assert view.status-label "PerlinTerrainNodeView should expose status label")
+  (assert view.apply-button "PerlinTerrainNodeView should expose apply button")
+  (assert (= (length Validation.field-specs) 15) "validation should expose perlin terrain field specs")
+  (assert (not view.apply-button.enabled?) "Apply should start disabled when nothing changed")
+  (view:drop))
+
+(fn test-perlin-terrain-node-view-defers-updates-until-apply []
+  (local PerlinTerrainNodeView (require :graph/view/views/perlin-terrain))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local record (make-perlin-terrain-record {:id "terrain-a" :seed 7}))
+  (local changed (Signal))
+  (local mock-node {:terrain-id "terrain-a"
+                    :changed changed
+                    :get-record (fn [] record)
+                    :apply-values (fn [_self validated]
+                                      (set updates (+ updates 1))
+                                      (local options (. record :options))
+                                      (set options.seed validated.seed)
+                                      (changed:emit record)
+                                      record)})
+  (local builder (PerlinTerrainNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.seed:set-text "99")
+  (assert (= updates 0) "editing input text should not update perlin terrain immediately")
+  (assert view.apply-button.enabled? "Apply should enable when the perlin draft is dirty")
+  (view.apply-button:on-click {})
+  (assert (= updates 1) "Apply should trigger a single perlin terrain update")
+  (assert (= (. (. record :options) :seed) 99) "Apply should write edited perlin seed")
+  (assert (not view.apply-button.enabled?) "Apply should disable again after perlin commit")
+  (assert (= (text-entity-value view.status-label) "Applied") "successful perlin apply should show applied status")
+  (view:drop))
+
+(fn test-perlin-terrain-node-view-shows-validation-errors []
+  (local PerlinTerrainNodeView (require :graph/view/views/perlin-terrain))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local mock-node {:terrain-id "terrain-a"
+                    :changed (Signal)
+                    :get-record (fn [] (make-perlin-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values]
+                                    (set updates (+ updates 1))
+                                    true)})
+  (local builder (PerlinTerrainNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.seed:set-text "-1")
+  (view.apply-button:on-click {})
+  (assert (= updates 0) "invalid perlin apply should not update terrain")
+  (assert (= (text-entity-value (. (. view :error-labels) :seed)) "Seed must be between 0 and 4294967295")
+          "invalid perlin seed should show an inline error")
+  (assert (= (text-entity-value view.status-label) "Fix 1 invalid field before applying")
+          "invalid perlin apply should show summary feedback")
+  (view.fields.seed:set-text "99")
+  (assert (= (text-entity-value (. (. view :error-labels) :seed)) "")
+          "fixing a perlin field should clear its inline error")
+  (assert (= (text-entity-value view.status-label) "Unsaved changes")
+          "fixing the perlin field should return to unsaved status")
+  (view:drop))
+
+(fn test-perlin-terrain-editor-validation-validates-draft []
+  (local Validation (require :graph/perlin-terrain-editor-validation))
+  (local draft (Validation.draft-from-record (make-perlin-terrain-record {:id "terrain-a"})))
+  (set (. draft :seed) "-1")
+  (local result (Validation.validate-draft draft))
+  (assert (not result.ok?) "perlin validation should reject invalid draft values")
+  (assert (= (. (. result :errors) :seed) "Seed must be between 0 and 4294967295")
+          "perlin seed validation should require the native uint32 range"))
+
 (table.insert tests {:name "world node view builds" :fn test-world-node-view-builds})
 (table.insert tests {:name "world node view set categories" :fn test-world-node-view-set-categories})
 (table.insert tests {:name "world node view refresh categories" :fn test-world-node-view-refresh-categories})
 (table.insert tests {:name "world node view search submitted" :fn test-world-node-view-search-submitted})
+(table.insert tests {:name "terrains node view builds add controls" :fn test-terrains-node-view-builds-add-controls})
+(table.insert tests {:name "terrains node view add button uses selected kind" :fn test-terrains-node-view-add-button-uses-selected-kind})
 (table.insert tests {:name "terrain node view builds scrollable summary" :fn test-terrain-node-view-builds-scrollable-summary})
 (table.insert tests {:name "flat terrain node view builds" :fn test-flat-terrain-node-view-builds})
 (table.insert tests {:name "flat terrain node view defers updates until apply" :fn test-flat-terrain-node-view-defers-updates-until-apply})
 (table.insert tests {:name "flat terrain node view shows validation errors" :fn test-flat-terrain-node-view-shows-validation-errors})
 (table.insert tests {:name "terrain editor validation validates draft" :fn test-terrain-editor-validation-validates-draft})
+(table.insert tests {:name "perlin terrain node view builds" :fn test-perlin-terrain-node-view-builds})
+(table.insert tests {:name "perlin terrain node view defers updates until apply" :fn test-perlin-terrain-node-view-defers-updates-until-apply})
+(table.insert tests {:name "perlin terrain node view shows validation errors" :fn test-perlin-terrain-node-view-shows-validation-errors})
+(table.insert tests {:name "perlin terrain editor validation validates draft" :fn test-perlin-terrain-editor-validation-validates-draft})
 
 (local main
   (fn []

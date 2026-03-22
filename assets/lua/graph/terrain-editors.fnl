@@ -1,13 +1,26 @@
 (local WorldData (require :graph/world-data))
+(local TerrainRecords (require :scene-terrain-records))
 (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+(local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
 
 (local M {})
+
+(local editor-specs
+  {"flat-terrain" {:node-kind FlatTerrainNode}
+   "perlin-terrain" {:node-kind PerlinTerrainNode}})
 
 (fn editor-key [world-id terrain-id]
   (.. "terrain-editor:" world-id ":" terrain-id))
 
+(fn editor-spec [terrain-kind]
+  (. editor-specs terrain-kind))
+
+(fn terrain-label [terrain-kind]
+  (local spec (TerrainRecords.terrain-kind-spec terrain-kind))
+  (or (and spec spec.label) terrain-kind "terrain"))
+
 (fn has-editor? [terrain-kind]
-  (= terrain-kind "flat-terrain"))
+  (not (= (editor-spec terrain-kind) nil)))
 
 (fn create-editor-node [opts]
   (local options (or opts {}))
@@ -18,14 +31,17 @@
                       (WorldData.find-terrain world-manager world-id terrain-id)))
   (local terrain-kind (or options.terrain-kind
                           (and resolved resolved.kind)))
-  (if (= terrain-kind "flat-terrain")
-      (FlatTerrainNode {:world-id world-id
-                        :terrain-id terrain-id
-                        :world-manager world-manager
-                        :terrain-entry resolved
-                        :key (or options.key (editor-key world-id terrain-id))})
+  (local spec (editor-spec terrain-kind))
+  (if spec
+      (spec.node-kind {:world-id world-id
+                       :terrain-id terrain-id
+                       :world-manager world-manager
+                       :terrain-entry resolved
+                       :key (or options.key (editor-key world-id terrain-id))})
       nil))
 
 {:editor-key editor-key
+ :editor-spec editor-spec
+ :terrain-label terrain-label
  :has-editor? has-editor?
  :create-editor-node create-editor-node}

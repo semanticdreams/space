@@ -5,6 +5,7 @@
 (local TerrainsNodeView (require :graph/view/views/terrains))
 (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
 (local WorldData (require :graph/world-data))
+(local TerrainRecords (require :scene-terrain-records))
 
 (local M {})
 
@@ -22,26 +23,49 @@
   (set node.world-id world-id)
   (set node.world-manager world-manager)
   (set node.items-changed (Signal))
+  (set node.supported-terrain-kinds (TerrainRecords.supported-kinds))
+  (set node.known-terrain-ids {})
   (fn collect-items [self]
     (WorldData.list-terrains self.world-manager self.world-id))
+  (fn update-known-terrain-ids [self items]
+    (local known {})
+    (each [_ item (ipairs (or items []))]
+      (local entry (. item 1))
+      (local terrain-id (and entry entry.terrain-id))
+      (when terrain-id
+        (set (. known terrain-id) true)))
+    (set self.known-terrain-ids known)
+    known)
+  (fn attach-terrain-node [self entry]
+    (local graph self.graph)
+    (when (and graph entry entry.terrain-id)
+      (local terrain-key (.. "terrain:" self.world-id ":" entry.terrain-id))
+      (local terrain-node
+        (or (graph:lookup terrain-key)
+            (TerrainNode {:world-id self.world-id
+                          :world-manager self.world-manager
+                          :terrain-id entry.terrain-id
+                          :terrain entry.entry
+                          :terrain-record entry.record
+                          :label entry.kind})))
+      (graph:add-edge (GraphEdge {:source self
+                                  :target terrain-node}))))
   (fn emit-items [self]
     (local items (collect-items self))
+    (update-known-terrain-ids self items)
     (self.items-changed:emit items)
     items)
   (set node.collect-items collect-items)
   (set node.emit-items emit-items)
-  (set node.add-terrain-node
+  (set node.update-known-terrain-ids update-known-terrain-ids)
+  (set node.attach-terrain-node attach-terrain-node)
+  (set node.open-terrain-node
        (fn [self entry]
-         (local graph self.graph)
-         (when (and graph entry entry.terrain-id)
-           (local terrain-node (TerrainNode {:world-id self.world-id
-                                             :world-manager self.world-manager
-                                             :terrain-id entry.terrain-id
-                                             :terrain entry.entry
-                                             :terrain-record entry.record
-                                             :label entry.kind}))
-           (graph:add-edge (GraphEdge {:source self
-                                       :target terrain-node})))))
+         (attach-terrain-node self entry)))
+  (set node.add-terrain
+       (fn [self terrain-kind]
+         (WorldData.add-terrain self.world-manager self.world-id terrain-kind)))
+  (update-known-terrain-ids node (collect-items node))
   (set node.actions
        [{:name "Refresh"
          :icon "refresh"
@@ -50,9 +74,22 @@
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
-         (fn [_payload]
+         (fn [payload]
            (if (WorldData.resolve-world-entry world-manager world-id)
-               (node:emit-items)
+               (do
+                 (local items (collect-items node))
+                 (when (and node.graph
+                            payload
+                            (= payload.world-id world-id)
+                            (= payload.reason "terrain-added"))
+                   (each [_ item (ipairs items)]
+                     (local entry (. item 1))
+                     (local terrain-id (and entry entry.terrain-id))
+                     (when (and terrain-id
+                                (not (. node.known-terrain-ids terrain-id)))
+                       (attach-terrain-node node entry))))
+                 (update-known-terrain-ids node items)
+                 (node.items-changed:emit items))
                (when (and node.graph node.graph.remove-nodes)
                  (node.graph:remove-nodes [node]))))))
   (set node.drop

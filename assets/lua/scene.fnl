@@ -815,6 +815,40 @@
     (self:sync-physics-bodies)
     true)
 
+  (fn add-terrain-record [self record]
+    (local entity self.entity)
+    (assert entity "Scene.add-terrain-record requires an attached entity")
+    (local built-entry (SceneWorldState.build-terrain-entries [record]))
+    (local terrain-spec (. built-entry 1))
+    (assert terrain-spec
+            (.. "Scene.add-terrain-record could not build terrain "
+                (or (and record record.id) "?")))
+    (local terrain-builder terrain-spec.builder)
+    (local new-element (terrain-builder self.build-context))
+    (assert (and new-element new-element.layout)
+            (.. "Scene.add-terrain-record built invalid terrain "
+                (or (and record record.id) "?")))
+    (local new-terrain-metadata {:element new-element
+                                 :record terrain-spec.record})
+    (local new-child-metadata {:element new-element
+                               :position terrain-spec.position
+                               :rotation terrain-spec.rotation
+                               :transform-applied? false})
+    (when (not entity.scene-terrains)
+      (set entity.scene-terrains []))
+    (when (not self.scene-terrains)
+      (set self.scene-terrains entity.scene-terrains))
+    (when (not entity.children)
+      (set entity.children []))
+    (table.insert self.scene-terrains new-terrain-metadata)
+    (table.insert entity.children new-child-metadata)
+    (insert-layout-child entity.layout (length entity.children) new-element.layout)
+    (when entity.layout
+      (entity.layout:mark-measure-dirty)
+      (entity.layout:mark-layout-dirty))
+    (self:sync-physics-bodies)
+    true)
+
   (fn remove-terrain [self terrain-id]
     (local runtime-entry (require-terrain-runtime-entry self terrain-id))
     (local entity runtime-entry.entity)
@@ -1092,6 +1126,7 @@
 (set self.sync-physics-bodies sync-physics-bodies)
 (set self.sync-physics-balls sync-physics-balls)
 (set self.replace-terrain-record replace-terrain-record)
+(set self.add-terrain-record add-terrain-record)
 (set self.remove-terrain remove-terrain)
 (set self.reset-projection reset-projection)
 (set self.get-view-matrix get-view-matrix)

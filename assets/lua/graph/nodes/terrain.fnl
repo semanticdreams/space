@@ -8,6 +8,11 @@
 
 (local M {})
 
+(fn terrain-node-label [terrain-kind fallback]
+  (or (TerrainEditors.terrain-label terrain-kind)
+      fallback
+      "terrain"))
+
 (fn M.TerrainNode [opts]
   (local options (or opts {}))
   (local world-id (assert options.world-id "TerrainNode requires :world-id"))
@@ -20,7 +25,7 @@
   (local terrain-record (or options.terrain-record resolved.record {}))
   (local terrain-kind (or terrain.kind terrain-record.kind resolved.kind "unknown"))
   (local key (or options.key (.. "terrain:" world-id ":" terrain-id)))
-  (local label (or options.label "terrain"))
+  (local label (terrain-node-label terrain-kind options.label))
   (local node (GraphNode {:key key
                            :label label
                            :color (glm.vec4 0.4 0.6 0.4 1)
@@ -64,10 +69,10 @@
          (fn [_payload]
            (local current (WorldData.find-terrain world-manager world-id terrain-id))
            (if current
-                (do
+               (do
                   (set node.terrain-kind (or current.kind "unknown"))
                   (set node.has-editor? (TerrainEditors.has-editor? node.terrain-kind))
-                  (set node.label label)
+                  (set node.label (terrain-node-label node.terrain-kind options.label))
                   (set node.terrain (or current.entry current.record {}))
                   (set node.terrain-record (or current.record {}))
                   (node.changed:emit current))

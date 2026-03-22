@@ -101,6 +101,13 @@
     (assert (scene:remove-terrain terrain-id)
             (.. "Active scene failed to remove terrain " terrain-id))))
 
+(fn sync-active-terrain-addition [world-manager world-id record]
+  (local scene (resolve-scene world-manager world-id))
+  (when scene
+    (require-active-scene-method scene record.id :add-terrain-record)
+    (assert (scene:add-terrain-record record)
+            (.. "Active scene failed to add terrain " record.id))))
+
 (fn find-terrain-state-index [world-manager world-id terrain-id]
   (local terrains (terrain-state-records world-manager world-id))
   (var resolved nil)
@@ -325,6 +332,18 @@
       (emit-world-change world-manager world-id "terrain-updated")
       normalized)))
 
+(fn add-terrain [world-manager world-id terrain-kind]
+  (local world (resolve-world world-manager world-id))
+  (when world
+    (local scene-state (ensure-scene-state world))
+    (local terrains scene-state.terrains)
+    (local record (TerrainRecords.default-record-for-kind terrain-kind))
+    (table.insert terrains record)
+    (sync-active-terrain-addition world-manager world-id record)
+    (persist-world world-manager world-id)
+    (emit-world-change world-manager world-id "terrain-added")
+    record))
+
 (fn remove-terrain [world-manager world-id terrain-id]
   (local world (resolve-world world-manager world-id))
   (when world
@@ -351,6 +370,7 @@
  :find-scene-panel find-scene-panel
  :find-hud-panel find-hud-panel
  :find-terrain find-terrain
+ :add-terrain add-terrain
  :update-terrain-record update-terrain-record
  :remove-terrain remove-terrain
  :remove-scene-panel remove-scene-panel
