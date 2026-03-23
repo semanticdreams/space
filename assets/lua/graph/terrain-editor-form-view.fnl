@@ -39,13 +39,34 @@
   (local validation (assert options.validation "TerrainEditorFormView requires :validation"))
   (local info-text (assert options.info-text "TerrainEditorFormView requires :info-text"))
   (local name (or options.name "terrain-editor-form-view"))
+  (local wrap-scroll? (if (= options.wrap-scroll? nil) true (not (not options.wrap-scroll?))))
+  (local refresh-on-change? (if (= options.refresh-on-change? nil) true (not (not options.refresh-on-change?))))
+
+  (fn clone-table [value]
+    (if (= (type value) :table)
+        (do
+          (local out {})
+          (each [k v (pairs value)]
+            (set (. out k) (clone-table v)))
+          out)
+        value))
+
+  (fn baseline-draft []
+    (if options.read-baseline-draft
+        (clone-table (options.read-baseline-draft))
+        (validation.draft-from-record (and target target.get-record (target:get-record)))))
+
+  (fn store-baseline-draft! [draft]
+    (when options.write-baseline-draft
+      (options.write-baseline-draft (clone-table draft))))
+
   (fn build [ctx]
     (local build-ctx (or ctx options.ctx (and target target.graph target.graph.ctx)))
     (assert build-ctx "TerrainEditorFormView requires a build context")
     (local view {})
     (local fields {})
     (local error-labels {})
-    (var draft (validation.draft-from-record (and target target.get-record (target:get-record))))
+    (var draft (baseline-draft))
     (local errors {})
     (var syncing? false)
     (var applied? false)
@@ -61,7 +82,7 @@
         (label:set-text (or message "") {:mark-measure-dirty? false})))
 
     (fn update-status-and-actions []
-      (local current-draft (validation.draft-from-record (and target target.get-record (target:get-record))))
+      (local current-draft (baseline-draft))
       (local dirty? (not (validation.draft-equals? draft current-draft)))
       (local error-count (count-errors validation errors))
       (view.apply-button:set-enabled dirty?)
@@ -80,7 +101,7 @@
     (fn refresh-from-target [refresh-opts]
       (local refresh-options (or refresh-opts {}))
       (set syncing? true)
-      (set draft (validation.draft-from-record (and target target.get-record (target:get-record))))
+      (set draft (baseline-draft))
       (each [_ spec (ipairs validation.field-specs)]
         (set-field-text (. fields spec.key) (. draft spec.key))
         (set (. errors spec.key) nil)
@@ -113,6 +134,8 @@
                                                (handle-field-change spec.key text))}))
       (set (. error-labels spec.key) (make-error-label build-ctx)))
 
+    (local changed-signal (and target target.changed))
+
     (local apply-button
       ((Button {:text "Apply"
                 :enabled? false
@@ -131,10 +154,16 @@
                                     (if (and target target.apply-values)
                                         (target:apply-values result.values)
                                         nil))
-                                  (when (not updated)
-                                    (set pending-apply? false)
-                                    (set apply-failed? true)
-                                    (update-status-and-actions)))
+                                  (if updated
+                                      (when (or (not changed-signal)
+                                                (not refresh-on-change?))
+                                        (set pending-apply? false)
+                                        (store-baseline-draft! draft)
+                                        (refresh-from-target {:applied? true}))
+                                      (do
+                                        (set pending-apply? false)
+                                        (set apply-failed? true)
+                                        (update-status-and-actions))))
                                 (update-status-and-actions)))})
        build-ctx))
     (set view.apply-button apply-button)
@@ -187,34 +216,40 @@
                          (FlexChild (fn [_] grid) 1)
                          (FlexChild (fn [_] action-row) 0)]})
        build-ctx))
-    (local scroll-view
-      ((ScrollView {:child (fn [_] content)
-                    :padding false
-                    :scrollbar-policy :as-needed
-                    :name name})
-       build-ctx))
-
-    (local changed-signal (and target target.changed))
     (local changed-handler
       (and changed-signal
+           refresh-on-change?
            (fn [_payload]
              (local applied-change? pending-apply?)
              (set pending-apply? false)
              (refresh-from-target {:applied? applied-change?}))))
-    (when changed-signal
+    (when changed-handler
       (changed-signal:connect changed-handler))
 
     (refresh-from-target {:applied? false})
 
-    (set view.layout scroll-view.layout)
+    (local root-entity
+      (if wrap-scroll?
+          ((ScrollView {:child (fn [_] content)
+                        :padding false
+                        :scrollbar-policy :as-needed
+                        :name name})
+           build-ctx)
+          {:layout content.layout
+           :drop (fn [_self]
+                   (content:drop))}))
+
+    (set view.layout root-entity.layout)
     (set view.fields fields)
     (set view.error-labels error-labels)
     (set view.status-label status-label)
+    (when wrap-scroll?
+      (set view.scroll-view root-entity))
     (set view.drop
          (fn [_self]
            (when changed-signal
              (changed-signal:disconnect changed-handler true))
-           (scroll-view:drop)))
+           (root-entity:drop)))
     view))
 
 TerrainEditorFormView

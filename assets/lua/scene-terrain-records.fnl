@@ -2,6 +2,7 @@
 (local Uuid (require :uuid))
 (local MathUtils (require :math-utils))
 (local FlatTerrain (require :flat-terrain))
+(local HeightfieldTerrain (require :heightfield-terrain))
 (local PerlinTerrain (require :perlin-terrain))
 
 (local vec3->array (. MathUtils :vec3->array))
@@ -23,6 +24,15 @@
        (= value value)
        (not (= value math.huge))
        (not (= value (- math.huge)))))
+
+(fn positive-integer? [value]
+  (and (finite-number? value)
+       (= value (math.floor value))
+       (> value 0)))
+
+(fn integer? [value]
+  (and (finite-number? value)
+       (= value (math.floor value))))
 
 (fn resolve-vec3 [value fallback]
   (if
@@ -96,10 +106,97 @@
    :zroot 2
    :zpower 2.5})
 
+(local default-heightfield-options
+  {:position [0 -100 0]
+   :rotation [1 0 0 0]
+   :opacity 1.0
+   :physics true
+   :sample-spacing [20 20]
+   :chunk-samples [17 17]
+   :default-height 0.0})
+
+(fn normalize-chunk-samples [value]
+  (local source (or value [17 17]))
+  (local width (or (. source 1) source.x 17))
+  (local depth (or (. source 2) source.y source.z 17))
+  (assert (positive-integer? width) "Heightfield chunk sample width must be a positive integer")
+  (assert (positive-integer? depth) "Heightfield chunk sample length must be a positive integer")
+  (assert (>= width 2) "Heightfield chunk sample width must be at least 2")
+  (assert (>= depth 2) "Heightfield chunk sample length must be at least 2")
+  [(math.floor width) (math.floor depth)])
+
+(fn normalize-sample-spacing [value]
+  (local source (or value [20 20]))
+  (local width (or (. source 1) source.x 20))
+  (local depth (or (. source 2) source.y source.z 20))
+  (assert (and (finite-number? width) (> width 0)) "Heightfield sample spacing X must be a positive number")
+  (assert (and (finite-number? depth) (> depth 0)) "Heightfield sample spacing Z must be a positive number")
+  [width depth])
+
+(fn default-heightfield-heights [size default-height]
+  (local width (. size 1))
+  (local depth (. size 2))
+  (local heights [])
+  (for [_ 1 (* width depth)]
+    (table.insert heights default-height))
+  heights)
+
+(fn normalize-heightfield-chunks [chunks options]
+  (local chunk-samples (normalize-chunk-samples options.chunk-samples))
+  (local default-height
+    (if (finite-number? options.default-height)
+        options.default-height
+        0.0))
+  (if (or (= chunks nil) (= (length chunks) 0))
+      [{:coord [0 0]
+        :size chunk-samples
+        :heights (default-heightfield-heights chunk-samples default-height)}]
+      (do
+        (local out [])
+        (local seen {})
+        (each [_ chunk (ipairs chunks)]
+          (local raw (or chunk {}))
+          (local raw-coord (or raw.coord [0 0]))
+          (local chunk-x (or (. raw-coord 1) raw-coord.x 0))
+          (local chunk-z (or (. raw-coord 2) raw-coord.y raw-coord.z 0))
+          (assert (integer? chunk-x)
+                  "Heightfield chunk X coordinate must be an integer")
+          (assert (integer? chunk-z)
+                  "Heightfield chunk Z coordinate must be an integer")
+          (local size
+            (if raw.size
+                (normalize-chunk-samples raw.size)
+                chunk-samples))
+          (assert (= (. size 1) (. chunk-samples 1))
+                  "Heightfield chunk size must match terrain chunk-samples width")
+          (assert (= (. size 2) (. chunk-samples 2))
+                  "Heightfield chunk size must match terrain chunk-samples length")
+          (local coord-key (.. chunk-x ":" chunk-z))
+          (assert (not (. seen coord-key))
+                  (.. "Duplicate heightfield chunk coordinate " coord-key))
+          (set (. seen coord-key) true)
+          (var heights [])
+          (local expected-count (* (. size 1) (. size 2)))
+          (if (= raw.heights nil)
+              (set heights (default-heightfield-heights size default-height))
+              (do
+                (assert (= (length raw.heights) expected-count)
+                        "Heightfield chunk heights length must match chunk sample count")
+                (each [_ value (ipairs raw.heights)]
+                  (assert (finite-number? value) "Heightfield chunk heights must be finite numbers")
+                  (table.insert heights value))))
+          (table.insert out {:coord [chunk-x chunk-z]
+                             :size size
+                             :heights heights}))
+        out)))
+
 (local terrain-kind-spec-list
   [{:kind "flat-terrain"
     :label "Flat Terrain"
     :default-options default-flat-options}
+   {:kind "heightfield-terrain"
+    :label "Heightfield Terrain"
+    :default-options default-heightfield-options}
    {:kind "perlin-terrain"
     :label "Perlin Terrain"
     :default-options default-perlin-options}])
@@ -134,9 +231,17 @@
   (local options (clone-table defaults))
   (each [k v (pairs (or raw.options {}))]
     (set (. options k) (clone-table v)))
-  {:id id
-   :kind kind
-   :options options})
+  (when (= kind "heightfield-terrain")
+    (set options.chunk-samples (normalize-chunk-samples options.chunk-samples))
+    (set options.sample-spacing (normalize-sample-spacing options.sample-spacing))
+    (when (not (finite-number? options.default-height))
+      (set options.default-height 0.0)))
+  (local normalized {:id id
+                     :kind kind
+                     :options options})
+  (when (= kind "heightfield-terrain")
+    (set normalized.chunks (normalize-heightfield-chunks raw.chunks options)))
+  normalized)
 
 (fn normalize-records [records]
   (var out [])
@@ -175,6 +280,17 @@
                      :rotation rotation
                      :opacity options.opacity
                      :physics-thickness options.physics-thickness})}
+      (= normalized.kind "heightfield-terrain")
+      {:record normalized
+       :position position
+       :rotation rotation
+       :builder
+       (HeightfieldTerrain {:position position
+                            :rotation rotation
+                            :opacity options.opacity
+                            :physics options.physics
+                            :sample-spacing options.sample-spacing
+                            :chunks normalized.chunks})}
       (= normalized.kind "perlin-terrain")
       {:record normalized
        :position position

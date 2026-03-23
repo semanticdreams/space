@@ -60,6 +60,12 @@
           (M.invalid (.. label " must be at least " (tostring minimum)))
           (M.valid value))))
 
+(fn M.validate-number [text label]
+  (local value (M.parse-number text))
+  (if value
+      (M.valid value)
+      (M.invalid (.. label " must be a number"))))
+
 (fn M.validate-number-range [text label min-value max-value]
   (local value (M.parse-number text))
   (if (not value)

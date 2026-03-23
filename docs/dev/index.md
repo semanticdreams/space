@@ -18,3 +18,4 @@ This section contains internal architecture, implementation notes, and integrati
 - [Morphs Notes](/dev/notes/morphs)
 - [Libtorrent Notes](/dev/notes/libtorrent)
 - [Terrain Architecture](/dev/notes/terrain-architecture)
+- [Heightfield Terrain Implementation Plan](/dev/notes/heightfield-terrain-implementation)

@@ -1,12 +1,14 @@
 (local WorldData (require :graph/world-data))
 (local TerrainRecords (require :scene-terrain-records))
 (local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
+(local {:HeightfieldTerrainNode HeightfieldTerrainNode} (require :graph/nodes/heightfield-terrain))
 (local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
 
 (local M {})
 
 (local editor-specs
   {"flat-terrain" {:node-kind FlatTerrainNode}
+   "heightfield-terrain" {:node-kind HeightfieldTerrainNode}
    "perlin-terrain" {:node-kind PerlinTerrainNode}})
 
 (fn editor-key [world-id terrain-id]

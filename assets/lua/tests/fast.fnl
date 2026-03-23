@@ -124,6 +124,7 @@
     :tests.test-world-tabs-widget
     :tests.test-skybox-settings
     :tests.test-flat-terrain-theme
+    :tests.test-heightfield-terrain
     :tests.test-perlin-terrain
     :tests.test-selection
     :tests.test-terminal
