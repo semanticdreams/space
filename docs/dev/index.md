@@ -19,4 +19,5 @@ This section contains internal architecture, implementation notes, and integrati
 - [Libtorrent Notes](/dev/notes/libtorrent)
 - [Terrain Architecture](/dev/notes/terrain-architecture)
 - [Terrain Selection Notes](/dev/notes/terrain-selection)
+- [Composable Input States](/dev/notes/composable-states)
 - [Heightfield Terrain Implementation Plan](/dev/notes/heightfield-terrain-implementation)
