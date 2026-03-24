@@ -275,20 +275,15 @@
   (local target (entity:get-selection-target))
   (assert (= target.x0 1))
   (assert (= target.z1 3))
-  (entity:set-preview-target {:mode :rect
-                              :x0 0
-                              :z0 0
-                              :x1 1
-                              :z1 1})
+  (entity:set-selection-target {:mode :rect
+                                :x0 0
+                                :z0 0
+                                :x1 1
+                                :z1 1})
   (root:update)
-  (local committed-while-previewing (entity:get-selection-target))
-  (assert (= committed-while-previewing.x0 1)
-          "preview should not overwrite the committed terrain selection")
-  (entity:clear-preview-target)
-  (root:update)
-  (local committed-after-preview (entity:get-selection-target))
-  (assert (= committed-after-preview.x0 1)
-          "clearing preview should restore the committed terrain selection")
+  (local updated-target (entity:get-selection-target))
+  (assert (= updated-target.x0 0)
+          "setting terrain selection again should replace the stored target")
   (entity:clear-selection-target)
   (assert (= (entity:get-selection-target) nil)
           "terrain selection should clear the stored target")

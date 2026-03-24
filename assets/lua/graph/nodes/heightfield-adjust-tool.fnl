@@ -40,12 +40,6 @@
   (set node.clear-selection-target
        (fn [self]
          (WorldData.clear-terrain-selection-target self.world-manager self.world-id self.terrain-id)))
-  (set node.set-preview-target
-       (fn [self target]
-         (WorldData.set-terrain-preview-target self.world-manager self.world-id self.terrain-id target)))
-  (set node.clear-preview-target
-       (fn [self]
-         (WorldData.clear-terrain-preview-target self.world-manager self.world-id self.terrain-id)))
   (set node.apply-values
        (fn [self validated]
          (local updated

@@ -255,18 +255,14 @@
   (local fill-buffer (make-triangle-buffer ctx))
   (local border-buffer (make-triangle-buffer ctx))
   (var selection-target nil)
-  (var preview-target nil)
   (var fill-mesh {:positions [] :colors []})
   (var border-mesh {:positions [] :colors []})
   (var last-theme-ref nil)
   (var last-fill-color nil)
   (var last-border-color nil)
 
-  (fn effective-target []
-    (or preview-target selection-target))
-
   (fn rebuild-meshes []
-    (local active-target (effective-target))
+    (local active-target selection-target)
     (if active-target
         (do
           (set last-theme-ref (resolve-active-theme))
@@ -290,34 +286,19 @@
 
   {:get-selection-target (fn [_self]
                            (clone-target selection-target))
-   :get-preview-target (fn [_self]
-                         (clone-target preview-target))
    :has-active-target? (fn [_self]
-                         (not (= (effective-target) nil)))
+                         (not (= selection-target nil)))
    :set-selection-target (fn [_self target]
                            (set selection-target
                                 (if target
                                     (HeightfieldTerrainData.normalize-target record target)
                                     nil))
-                           (set preview-target nil)
                            (rebuild-meshes)
                            selection-target)
    :clear-selection-target (fn [self]
                              (self:set-selection-target nil))
-   :set-preview-target (fn [_self target]
-                         (set preview-target
-                              (if target
-                                  (HeightfieldTerrainData.normalize-target record target)
-                                  nil))
-                         (rebuild-meshes)
-                         preview-target)
-   :clear-preview-target (fn [_self]
-                           (when preview-target
-                             (set preview-target nil)
-                             (rebuild-meshes))
-                           true)
    :refresh-theme! (fn [_self]
-                     (if (and (effective-target)
+                     (if (and selection-target
                               (not (= (resolve-active-theme) last-theme-ref)))
                          (do
                            (rebuild-meshes)

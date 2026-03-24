@@ -353,18 +353,6 @@
                                true)
      :get-selection-target (fn [_self]
                              (selection-overlay:get-selection-target))
-     :set-preview-target (fn [self target]
-                           (selection-overlay:set-preview-target target)
-                           (when self.layout
-                             (self.layout:mark-layout-dirty))
-                           true)
-     :clear-preview-target (fn [self]
-                             (selection-overlay:clear-preview-target)
-                             (when self.layout
-                               (self.layout:mark-layout-dirty))
-                             true)
-     :get-preview-target (fn [_self]
-                           (selection-overlay:get-preview-target))
      :physics physics}))
 
 HeightfieldTerrain

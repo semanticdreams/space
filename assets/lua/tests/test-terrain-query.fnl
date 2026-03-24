@@ -137,6 +137,24 @@
   (assert (= hit.sample.x 2) "translated hit should still resolve the correct local sample x")
   (assert (= hit.sample.z 2) "translated hit should still resolve the correct local sample z"))
 
+(fn heightfield-raycast-detects-second-triangle-hit []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [1 1]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local hit
+    (HeightfieldTerrainQuery.raycast-record record {:origin (glm.vec3 0.75 10 0.75)
+                                                    :direction (glm.vec3 0 -1 0)}))
+  (assert hit "raycast should hit points that land only on the cell's second triangle")
+  (assert (< (math.abs (- hit.world-point.x 0.75)) 1e-4) "second-triangle hit should preserve x")
+  (assert (< (math.abs (- hit.world-point.z 0.75)) 1e-4) "second-triangle hit should preserve z")
+  (assert (< (math.abs hit.world-point.y) 1e-4) "second-triangle hit should land on the flat terrain"))
+
 (fn heightfield-rect-target-between-local-points-builds-rect []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
@@ -284,6 +302,8 @@
                      :fn heightfield-raycast-hits-flat-terrain})
 (table.insert tests {:name "heightfield terrain query raycast respects transform"
                      :fn heightfield-raycast-respects-transform})
+(table.insert tests {:name "heightfield terrain query raycast detects second triangle hit"
+                     :fn heightfield-raycast-detects-second-triangle-hit})
 (table.insert tests {:name "heightfield terrain query rect-target-between-local-points builds rect"
                      :fn heightfield-rect-target-between-local-points-builds-rect})
 (table.insert tests {:name "heightfield terrain query domain-hit handles non-flat multi-chunk terrain"

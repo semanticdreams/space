@@ -6,8 +6,10 @@
                             "HeightfieldTargetCapture requires :terrain-id"))
   (local ray-opts options.ray-opts)
   (local on-target (or options.on-target (fn [_target _result] nil)))
-  (local on-preview-target (or options.on-preview-target (fn [_target _result] nil)))
+  (local on-target-updated (or options.on-target-updated (fn [_target _result] nil)))
   (local on-invalid-target (or options.on-invalid-target (fn [] nil)))
+  (local on-drag-began (or options.on-drag-began (fn [] nil)))
+  (local on-canceled (or options.on-canceled (fn [] nil)))
   (local on-active-changed (or options.on-active-changed (fn [_active?] nil)))
   (var active? false)
   (var start-pos nil)
@@ -24,12 +26,12 @@
          end-pos
          (scene:screen-rect-terrain-target terrain-id start-pos end-pos ray-opts)))
 
-  (fn emit-preview-target! []
+  (fn emit-target-updated! []
     (when (and start-pos last-pos)
       (local result (target-result last-pos))
       (if result
-          (on-preview-target result.target result)
-          (on-preview-target nil nil))))
+          (on-target-updated result.target result)
+          (on-target-updated nil nil))))
 
   (fn resolve-target! []
     (local result (target-result last-pos))
@@ -47,6 +49,7 @@
       (on-active-changed false)))
 
   (fn begin-drag [pos]
+    (on-drag-began)
     (set start-pos pos)
     (set last-pos pos)
     (set drag-active? true)
@@ -55,7 +58,7 @@
   (fn update-drag [pos]
     (when drag-active?
       (set last-pos pos)
-      (emit-preview-target!))
+      (emit-target-updated!))
     drag-active?)
 
   (fn end-drag [pos]
@@ -79,6 +82,7 @@
              (finish))
    :cancel-selection (fn [_self]
                        (reset-drag-state)
+                       (on-canceled)
                        (finish))
    :begin-drag (fn [_self pos]
                  (begin-drag pos))

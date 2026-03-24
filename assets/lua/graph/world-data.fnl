@@ -365,16 +365,6 @@
       (scene:get-terrain-selection-target terrain-id)
       nil))
 
-(fn set-terrain-preview-target [world-manager world-id terrain-id target]
-  (local scene (resolve-scene world-manager world-id))
-  (when (and scene scene.set-terrain-preview-target)
-    (scene:set-terrain-preview-target terrain-id target)))
-
-(fn clear-terrain-preview-target [world-manager world-id terrain-id]
-  (local scene (resolve-scene world-manager world-id))
-  (when (and scene scene.clear-terrain-preview-target)
-    (scene:clear-terrain-preview-target terrain-id)))
-
 (fn add-terrain [world-manager world-id terrain-kind]
   (local world (resolve-world world-manager world-id))
   (when world
@@ -419,8 +409,6 @@
  :set-terrain-selection-target set-terrain-selection-target
  :clear-terrain-selection-target clear-terrain-selection-target
  :get-terrain-selection-target get-terrain-selection-target
- :set-terrain-preview-target set-terrain-preview-target
- :clear-terrain-preview-target clear-terrain-preview-target
  :remove-terrain remove-terrain
  :remove-scene-panel remove-scene-panel
  :remove-hud-panel remove-hud-panel}

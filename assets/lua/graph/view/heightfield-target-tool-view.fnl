@@ -64,10 +64,12 @@
                                       (fn [_draft validation-result]
                                         (when target
                                           (if (and validation-result validation-result.ok?)
-                                              (when target.set-preview-target
-                                                (target:set-preview-target validation-result.values.target))
-                                              (when target.clear-preview-target
-                                                (target:clear-preview-target)))))
+                                              (do
+                                                (when target.set-selection-target
+                                                  (target:set-selection-target validation-result.values.target)))
+                                              (do
+                                                (when target.clear-selection-target
+                                                  (target:clear-selection-target))))))
                                       :info-text info-text})
        build-ctx))
     (local selection-label
@@ -104,31 +106,31 @@
       (HeightfieldTargetCapture {:scene scene
                                  :ctx build-ctx
                                  :terrain-id (and target target.terrain-id)
-                                 :on-preview-target (fn [preview-target _result]
-                                                      (if preview-target
-                                                          (when (and target target.set-preview-target)
-                                                            (target:set-preview-target preview-target))
-                                                          (when (and target target.clear-preview-target)
-                                                            (target:clear-preview-target))))
+                                 :on-drag-began (fn []
+                                                  (when (and target target.clear-selection-target)
+                                                    (target:clear-selection-target)))
+                                 :on-target-updated (fn [selection-target _result]
+                                                      (if selection-target
+                                                          (when (and target target.set-selection-target)
+                                                            (target:set-selection-target selection-target))
+                                                          (when (and target target.clear-selection-target)
+                                                            (target:clear-selection-target))))
                                  :on-target (fn [resolved-target _result]
                                               (form:set-draft-values (target->draft-values resolved-target))
                                               (set-selection-label resolved-target)
-                                              (when (and target target.clear-preview-target)
-                                                (target:clear-preview-target))
                                               (when (and target target.set-selection-target)
                                                 (target:set-selection-target resolved-target))
                                               (set-pick-status
                                                 (.. "Picked " (format-target resolved-target))))
                                  :on-invalid-target (fn []
-                                                      (when (and target target.clear-preview-target)
-                                                        (target:clear-preview-target))
+                                                      (when (and target target.clear-selection-target)
+                                                        (target:clear-selection-target))
                                                       (set-pick-status
                                                         "Drag over this terrain to choose samples."))
+                                 :on-canceled (fn []
+                                                (when (and target target.clear-selection-target)
+                                                  (target:clear-selection-target)))
                                  :on-active-changed (fn [active?]
-                                                     (when (and (not active?)
-                                                                target
-                                                                target.clear-preview-target)
-                                                       (target:clear-preview-target))
                                                      (update-pick-ui active?))}))
 
     (fn refresh-live-pick []

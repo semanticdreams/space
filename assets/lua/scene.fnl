@@ -967,22 +967,6 @@
     (require-terrain-selection-method element terrain-id :get-selection-target)
     (element:get-selection-target))
 
-  (fn set-terrain-preview-target [self terrain-id target]
-    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
-    (local element runtime-entry.current-element)
-    (require-terrain-selection-method element terrain-id :set-preview-target)
-    (assert (element:set-preview-target target)
-            (.. "Scene failed to set terrain preview for " terrain-id))
-    true)
-
-  (fn clear-terrain-preview-target [self terrain-id]
-    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
-    (local element runtime-entry.current-element)
-    (require-terrain-selection-method element terrain-id :clear-preview-target)
-    (assert (element:clear-preview-target)
-            (.. "Scene failed to clear terrain preview for " terrain-id))
-    true)
-
   (fn add-terrain-record [self record]
     (local entity self.entity)
     (assert entity "Scene.add-terrain-record requires an attached entity")
@@ -1399,8 +1383,6 @@
 (set self.set-terrain-selection-target set-terrain-selection-target)
 (set self.clear-terrain-selection-target clear-terrain-selection-target)
 (set self.get-terrain-selection-target get-terrain-selection-target)
-(set self.set-terrain-preview-target set-terrain-preview-target)
-(set self.clear-terrain-preview-target clear-terrain-preview-target)
 (set self.reset-projection reset-projection)
 (set self.get-view-matrix get-view-matrix)
 (set self.get-triangle-vector get-triangle-vector)

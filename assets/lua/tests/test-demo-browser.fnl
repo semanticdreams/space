@@ -16,7 +16,6 @@
 (local {: Layout} (require :layout))
 (local bt (require :bt))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
-(local HeightfieldTerrainQuery (require :heightfield-terrain-query))
 
 (local tests [])
 
@@ -167,52 +166,6 @@
   (local pitch (- (math.atan direction.y horizontal)))
   (Camera {:position position
            :rotation (glm.quat (glm.vec3 pitch yaw 0))}))
-
-(fn translated-query-record [metadata]
-  (local record metadata.record)
-  (local layout metadata.element.layout)
-  (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local spacing (or (and record.options record.options.sample-spacing) [20 20]))
-  (local spacing-x (or (. spacing 1) spacing.x 20))
-  (local spacing-z (or (. spacing 2) spacing.y spacing.z 20))
-  (local canonical-origin-offset
-    (glm.vec3 (* bounds.min-sample-x spacing-x)
-              0
-              (* bounds.min-sample-z spacing-z)))
-  (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
-  (local canonical-position
-    (- layout.position (rotation:rotate canonical-origin-offset)))
-  {:id record.id
-   :kind record.kind
-   :options {:position [canonical-position.x canonical-position.y canonical-position.z]
-             :rotation [rotation.w rotation.x rotation.y rotation.z]
-             :sample-spacing record.options.sample-spacing
-             :chunk-samples record.options.chunk-samples
-             :default-height record.options.default-height}
-   :chunks record.chunks})
-
-(fn scene-hit-approx=? [left right]
-  (if (or (not left) (not right))
-      (= left right)
-      (and (= left.terrain-id right.terrain-id)
-           (approx left.distance right.distance {:epsilon 1e-3})
-           (= left.sample.x right.sample.x)
-           (= left.sample.z right.sample.z)
-           (= left.target.x0 right.target.x0)
-           (= left.target.z0 right.target.z0)
-           (= left.target.x1 right.target.x1)
-           (= left.target.z1 right.target.z1))))
-
-(fn terrain-hit-approx=? [left right]
-  (if (or (not left) (not right))
-      (= left right)
-      (and (approx left.distance right.distance {:epsilon 1e-3})
-           (= left.sample.x right.sample.x)
-           (= left.sample.z right.sample.z)
-           (= left.target.x0 right.target.x0)
-           (= left.target.z0 right.target.z0)
-           (= left.target.x1 right.target.x1)
-           (= left.target.z1 right.target.z1))))
 
 (fn demo-browser-adds-dialogs-to-scene []
   (local setup (setup-scene))
@@ -826,7 +779,7 @@
   (when (not ok)
     (error err)))
 
-(fn heightfield-target-capture-clears-preview-when-drag-leaves-terrain []
+(fn heightfield-target-capture-clears-selection-when-drag-leaves-terrain []
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -856,7 +809,7 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
-        (var preview-target false)
+        (var selection-target false)
         (local capture
           (HeightfieldTargetCapture {:scene scene
                                      :ctx scene.build-context
@@ -864,16 +817,16 @@
                                      :ray-opts {:view view
                                                 :projection projection
                                                 :viewport viewport}
-                                     :on-preview-target (fn [target _result]
-                                                          (set preview-target target))}))
+                                     :on-target-updated (fn [target _result]
+                                                          (set selection-target target))}))
         (capture:begin)
         (capture:begin-drag {:x 40 :y 50})
         (capture:update-drag {:x 60 :y 50})
-        (assert preview-target
-                "target capture should emit a preview while the drag still resolves on terrain")
+        (assert selection-target
+                "target capture should emit a selection target while the drag still resolves on terrain")
         (capture:update-drag {:x 95 :y 5})
-        (assert (= preview-target nil)
-                "target capture should clear the preview as soon as the drag leaves the terrain")
+        (assert (= selection-target nil)
+                "target capture should clear the selection target as soon as the drag leaves the terrain")
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -1952,8 +1905,8 @@
                      :fn heightfield-target-capture-requires-both-drag-endpoints-on-terrain})
 (table.insert tests {:name "Heightfield target capture uses last drag position on release"
                      :fn heightfield-target-capture-uses-last-drag-position-on-release})
-(table.insert tests {:name "Heightfield target capture clears preview when drag leaves terrain"
-                     :fn heightfield-target-capture-clears-preview-when-drag-leaves-terrain})
+(table.insert tests {:name "Heightfield target capture clears selection when drag leaves terrain"
+                     :fn heightfield-target-capture-clears-selection-when-drag-leaves-terrain})
 (table.insert tests {:name "Heightfield target capture resolves live scene drag with default ray opts"
                      :fn heightfield-target-capture-resolves-live-scene-drag-with-default-ray-opts})
 (table.insert tests {:name "Heightfield paint capture stamps live scene samples"

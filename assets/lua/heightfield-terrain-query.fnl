@@ -10,6 +10,8 @@
 
 (local M {})
 
+(local ray-axis-epsilon 1e-6)
+
 (fn resolve-position [record]
   (array->vec3 (or (and record record.options record.options.position) [0 0 0])))
 
@@ -157,13 +159,15 @@
                           spacing-z
                           bounds.min-sample-z
                           bounds.max-sample-z))
-  (if (and x-range z-range)
-      (HeightfieldTerrainData.rectangular-sample-target record
-        {:x0 x-range.min
-         :z0 z-range.min
-         :x1 x-range.max
-         :z1 z-range.max})
-      nil))
+  (local target
+    (if (and x-range z-range)
+        (HeightfieldTerrainData.rectangular-sample-target record
+          {:x0 x-range.min
+           :z0 z-range.min
+           :x1 x-range.max
+           :z1 z-range.max})
+        nil))
+  target)
 
 (fn screen-rect-target [record start-pos end-pos opts]
   (local options (or opts {}))
@@ -221,9 +225,15 @@
       (let [p00 (glm.vec3 (+ 0.0 (* cell-x spacing-x)) (+ 0.0 h00) (+ 0.0 (* cell-z spacing-z)))
             p01 (glm.vec3 (+ 0.0 (* cell-x spacing-x)) (+ 0.0 h01) (+ 0.0 (* (+ cell-z 1) spacing-z)))
             p10 (glm.vec3 (+ 0.0 (* (+ cell-x 1) spacing-x)) (+ 0.0 h10) (+ 0.0 (* cell-z spacing-z)))
-            p11 (glm.vec3 (+ 0.0 (* (+ cell-x 1) spacing-x)) (+ 0.0 h11) (+ 0.0 (* (+ cell-z 1) spacing-z)))]
-        [(intersect-triangle ray p00 p01 p10)
-         (intersect-triangle ray p10 p01 p11)])))
+            p11 (glm.vec3 (+ 0.0 (* (+ cell-x 1) spacing-x)) (+ 0.0 h11) (+ 0.0 (* (+ cell-z 1) spacing-z)))
+            tri0 (intersect-triangle ray p00 p01 p10)
+            tri1 (intersect-triangle ray p10 p01 p11)
+            hits []]
+        (when tri0
+          (table.insert hits tri0))
+        (when tri1
+          (table.insert hits tri1))
+        hits)))
 
 (fn local-ray [record ray]
   (local rotation (resolve-rotation record))
@@ -248,7 +258,7 @@
   (var t-max math.huge)
 
   (fn update-axis [origin direction axis-min axis-max]
-    (if (< (math.abs direction) 1e-6)
+    (if (< (math.abs direction) ray-axis-epsilon)
         (and (>= origin axis-min) (<= origin axis-max))
         (let [inv (/ 1.0 direction)
               t0 (* (- axis-min origin) inv)
@@ -268,120 +278,158 @@
        :t1 t-max}
       nil))
 
+(fn make-traversal-state [record local-ray-value interval]
+  (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (local sample-spacing (spacing record))
+  (local spacing-x (. sample-spacing 1))
+  (local spacing-z (. sample-spacing 2))
+  (local start-point (+ local-ray-value.origin (* local-ray-value.direction (+ interval.t0 1e-6))))
+  (local clamp-cell-x
+    (fn [value]
+      (math.max bounds.min-sample-x
+                (math.min (- bounds.max-sample-x 1) value))))
+  (local clamp-cell-z
+    (fn [value]
+      (math.max bounds.min-sample-z
+                (math.min (- bounds.max-sample-z 1) value))))
+  (local cell-x (clamp-cell-x (math.floor (/ start-point.x spacing-x))))
+  (local cell-z (clamp-cell-z (math.floor (/ start-point.z spacing-z))))
+  (local direction-x
+    (if (< (math.abs local-ray-value.direction.x) ray-axis-epsilon)
+        0.0
+        local-ray-value.direction.x))
+  (local direction-z
+    (if (< (math.abs local-ray-value.direction.z) ray-axis-epsilon)
+        0.0
+        local-ray-value.direction.z))
+  (local step-x
+    (if (> direction-x 0) 1
+        (if (< direction-x 0) -1 0)))
+  (local step-z
+    (if (> direction-z 0) 1
+        (if (< direction-z 0) -1 0)))
+  (local next-boundary-x
+    (if (= step-x 0)
+        nil
+        (* (+ cell-x (if (> step-x 0) 1 0)) spacing-x)))
+  (local next-boundary-z
+    (if (= step-z 0)
+        nil
+        (* (+ cell-z (if (> step-z 0) 1 0)) spacing-z)))
+  {:bounds bounds
+   :chunk-map (build-chunk-map record)
+   :cell-x cell-x
+   :cell-z cell-z
+   :spacing-x spacing-x
+   :spacing-z spacing-z
+   :start-point start-point
+   :step-x step-x
+   :step-z step-z
+   :t-max-x (if next-boundary-x
+                (/ (- next-boundary-x local-ray-value.origin.x) direction-x)
+                math.huge)
+   :t-max-z (if next-boundary-z
+                (/ (- next-boundary-z local-ray-value.origin.z) direction-z)
+                math.huge)
+   :t-delta-x (if (= step-x 0)
+                  math.huge
+                  (/ spacing-x (math.abs direction-x)))
+   :t-delta-z (if (= step-z 0)
+                  math.huge
+                  (/ spacing-z (math.abs direction-z)))})
+
+(fn maybe-remember-best-hit [record interval best-ref hit]
+  (when (and hit
+             (>= hit.distance interval.t0)
+             (<= hit.distance interval.t1))
+    (local best (. best-ref.best))
+    (if (or (not best) (< hit.distance best.distance))
+        (set best-ref.best {:distance hit.distance
+                            :world-point (local->world record hit.point)
+                            :local-point hit.point
+                            :sample (nearest-sample-coord record hit.point)
+                            :target (sample-target record hit.point)}))))
+
+(fn scan-cell-hits! [record interval best-ref chunk-map cell-x cell-z local-ray-value]
+  (each [_ hit (ipairs (local-triangle-hits-for-cell record chunk-map cell-x cell-z local-ray-value))]
+    (maybe-remember-best-hit record interval best-ref hit)))
+
+(fn raycast-zero-step [record interval traversal local-ray-value]
+  (local bounds traversal.bounds)
+  (local cell-x traversal.cell-x)
+  (local cell-z traversal.cell-z)
+  (local chunk-map traversal.chunk-map)
+  (local start-point traversal.start-point)
+  (local spacing-x traversal.spacing-x)
+  (local spacing-z traversal.spacing-z)
+  (local best-ref {:best nil})
+
+  (fn near-boundary? [value spacing]
+    (< (math.abs (- value (* (math.floor (/ value spacing)) spacing))) 1e-6))
+
+  (local candidate-cells-x [cell-x])
+  (local candidate-cells-z [cell-z])
+  (when (and (near-boundary? start-point.x spacing-x)
+             (> cell-x bounds.min-sample-x))
+    (table.insert candidate-cells-x (- cell-x 1)))
+  (when (and (near-boundary? start-point.z spacing-z)
+             (> cell-z bounds.min-sample-z))
+    (table.insert candidate-cells-z (- cell-z 1)))
+  (each [_ candidate-x (ipairs candidate-cells-x)]
+    (each [_ candidate-z (ipairs candidate-cells-z)]
+      (when (and (>= candidate-x bounds.min-sample-x)
+                 (< candidate-x bounds.max-sample-x)
+                 (>= candidate-z bounds.min-sample-z)
+                 (< candidate-z bounds.max-sample-z))
+        (scan-cell-hits! record interval best-ref chunk-map candidate-x candidate-z local-ray-value))))
+  best-ref.best)
+
+(fn raycast-grid-walk [record interval traversal local-ray-value]
+  (local bounds traversal.bounds)
+  (local chunk-map traversal.chunk-map)
+  (local step-epsilon 1e-6)
+  (local best-ref {:best nil})
+  (var cell-x traversal.cell-x)
+  (var cell-z traversal.cell-z)
+  (var t-max-x traversal.t-max-x)
+  (var t-max-z traversal.t-max-z)
+
+  (while (and (>= cell-x bounds.min-sample-x)
+              (< cell-x bounds.max-sample-x)
+              (>= cell-z bounds.min-sample-z)
+              (< cell-z bounds.max-sample-z))
+    (scan-cell-hits! record interval best-ref chunk-map cell-x cell-z local-ray-value)
+    (if (<= (math.abs (- t-max-x t-max-z)) step-epsilon)
+        (do
+          (when (> t-max-x interval.t1)
+            (lua "break"))
+          (set cell-x (+ cell-x traversal.step-x))
+          (set cell-z (+ cell-z traversal.step-z))
+          (set t-max-x (+ t-max-x traversal.t-delta-x))
+          (set t-max-z (+ t-max-z traversal.t-delta-z)))
+        (if (< t-max-x t-max-z)
+            (do
+              (when (> t-max-x interval.t1)
+                (lua "break"))
+              (set cell-x (+ cell-x traversal.step-x))
+              (set t-max-x (+ t-max-x traversal.t-delta-x)))
+            (do
+              (when (> t-max-z interval.t1)
+                (lua "break"))
+              (set cell-z (+ cell-z traversal.step-z))
+              (set t-max-z (+ t-max-z traversal.t-delta-z))))))
+  best-ref.best)
+
 (fn raycast-record-fast [record ray]
   (local local-ray-value (local-ray record ray))
   (local interval (xz-ray-interval record local-ray-value))
   (if (not interval)
       nil
-      (let [sample-counts (chunk-samples record)
-            stride-x (- (. sample-counts 1) 1)
-            stride-z (- (. sample-counts 2) 1)
-            bounds (HeightfieldTerrainData.sample-bounds record)
-            sample-spacing (spacing record)
-            spacing-x (. sample-spacing 1)
-            spacing-z (. sample-spacing 2)
-            chunk-map (build-chunk-map record)
-            start-point (+ local-ray-value.origin (* local-ray-value.direction (+ interval.t0 1e-6)))
-            clamp-cell-x (fn [value]
-                           (math.max bounds.min-sample-x
-                                     (math.min (- bounds.max-sample-x 1) value)))
-            clamp-cell-z (fn [value]
-                           (math.max bounds.min-sample-z
-                                     (math.min (- bounds.max-sample-z 1) value)))]
-        (var cell-x (clamp-cell-x (math.floor (/ start-point.x spacing-x))))
-        (var cell-z (clamp-cell-z (math.floor (/ start-point.z spacing-z))))
-        (local step-x (if (> local-ray-value.direction.x 0) 1
-                          (if (< local-ray-value.direction.x 0) -1 0)))
-        (local step-z (if (> local-ray-value.direction.z 0) 1
-                          (if (< local-ray-value.direction.z 0) -1 0)))
-        (local next-boundary-x
-          (if (= step-x 0)
-              nil
-              (* (+ cell-x (if (> step-x 0) 1 0)) spacing-x)))
-        (local next-boundary-z
-          (if (= step-z 0)
-              nil
-              (* (+ cell-z (if (> step-z 0) 1 0)) spacing-z)))
-        (var t-max-x
-          (if next-boundary-x
-              (/ (- next-boundary-x local-ray-value.origin.x) local-ray-value.direction.x)
-              math.huge))
-        (var t-max-z
-          (if next-boundary-z
-              (/ (- next-boundary-z local-ray-value.origin.z) local-ray-value.direction.z)
-              math.huge))
-        (local t-delta-x
-          (if (= step-x 0)
-              math.huge
-              (/ spacing-x (math.abs local-ray-value.direction.x))))
-        (local t-delta-z
-          (if (= step-z 0)
-              math.huge
-              (/ spacing-z (math.abs local-ray-value.direction.z))))
-        (var best nil)
-        (fn maybe-remember-hit [hit]
-          (when (and hit
-                     (>= hit.distance interval.t0)
-                     (<= hit.distance interval.t1))
-            (let [world-point (local->world record hit.point)
-                  local-point hit.point]
-              (if (or (not best) (< hit.distance best.distance))
-                  (set best {:distance hit.distance
-                             :world-point world-point
-                             :local-point local-point
-                             :sample (nearest-sample-coord record local-point)
-                             :target (sample-target record local-point)})))))
-        (if (and (= step-x 0) (= step-z 0))
-            (do
-              (local near-boundary?
-                (fn [value spacing]
-                  (< (math.abs (- value (* (math.floor (/ value spacing)) spacing))) 1e-6)))
-              (local candidate-cells-x [cell-x])
-              (local candidate-cells-z [cell-z])
-              (when (and (near-boundary? start-point.x spacing-x)
-                         (> cell-x bounds.min-sample-x))
-                (table.insert candidate-cells-x (- cell-x 1)))
-              (when (and (near-boundary? start-point.z spacing-z)
-                         (> cell-z bounds.min-sample-z))
-                (table.insert candidate-cells-z (- cell-z 1)))
-              (each [_ candidate-x (ipairs candidate-cells-x)]
-                (each [_ candidate-z (ipairs candidate-cells-z)]
-                  (when (and (>= candidate-x bounds.min-sample-x)
-                             (< candidate-x bounds.max-sample-x)
-                             (>= candidate-z bounds.min-sample-z)
-                             (< candidate-z bounds.max-sample-z))
-                    (each [_ hit (ipairs (local-triangle-hits-for-cell
-                                           record chunk-map candidate-x candidate-z local-ray-value))]
-                      (maybe-remember-hit hit)))))
-              best)
-            (do
-              (local step-epsilon 1e-6)
-              (while (and (>= cell-x bounds.min-sample-x)
-                          (< cell-x bounds.max-sample-x)
-                          (>= cell-z bounds.min-sample-z)
-                          (< cell-z bounds.max-sample-z))
-                (each [_ hit (ipairs (local-triangle-hits-for-cell record chunk-map cell-x cell-z local-ray-value))]
-                  (maybe-remember-hit hit))
-                (if (<= (math.abs (- t-max-x t-max-z)) step-epsilon)
-                    (do
-                      (when (> t-max-x interval.t1)
-                        (lua "break"))
-                      (set cell-x (+ cell-x step-x))
-                      (set cell-z (+ cell-z step-z))
-                      (set t-max-x (+ t-max-x t-delta-x))
-                      (set t-max-z (+ t-max-z t-delta-z)))
-                    (if (< t-max-x t-max-z)
-                        (do
-                          (when (> t-max-x interval.t1)
-                            (lua "break"))
-                          (set cell-x (+ cell-x step-x))
-                          (set t-max-x (+ t-max-x t-delta-x)))
-                        (do
-                          (when (> t-max-z interval.t1)
-                            (lua "break"))
-                          (set cell-z (+ cell-z step-z))
-                          (set t-max-z (+ t-max-z t-delta-z))))))
-              best)))))
+      (do
+        (local traversal (make-traversal-state record local-ray-value interval))
+        (if (and (= traversal.step-x 0) (= traversal.step-z 0))
+            (raycast-zero-step record interval traversal local-ray-value)
+            (raycast-grid-walk record interval traversal local-ray-value)))))
 
 (fn M.raycast-record [record ray]
   (raycast-record-fast record ray))
