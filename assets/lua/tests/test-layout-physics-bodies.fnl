@@ -3,6 +3,7 @@
 (local Camera (require :camera))
 (local {: FirstPersonControls} (require :first-person-controls))
 (local MathUtils (require :math-utils))
+(local PhysicsFloor (require :physics-floor))
 (local {: Layout} (require :layout))
 (local PerlinTerrain (require :perlin-terrain))
 (local bt (require :bt))
@@ -42,6 +43,13 @@
          (table.insert self.unregistered key)))
   movables)
 
+(fn configure-test-physics-world [opts]
+  (local options (or opts {}))
+  (local floor-y (or options.floor-y app.physics-floor-y))
+  (when (and app.engine app.engine.physics)
+    (app.engine.physics:setGravity 0 -25 0)
+    (PhysicsFloor.ensure-installed {:floor-y floor-y})))
+
 (fn setup-scene []
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
@@ -63,6 +71,7 @@
                  (set app.scene scene)
                  (set app.layout-root scene.layout-root)
                  (set app.movables movables)
+                 (configure-test-physics-world)
                  (scene:build-default)
                  {:scene scene :movables movables}))]
     (if ok
@@ -255,6 +264,7 @@
   (local scene setup.scene-result.scene)
   (local original-floor app.physics-floor-y)
   (set app.physics-floor-y -1500)
+  (configure-test-physics-world {:floor-y app.physics-floor-y})
   (local panel-size {:value (glm.vec3 5 3 5)})
   (local panel-builder (make-probe-panel-builder panel-size))
 

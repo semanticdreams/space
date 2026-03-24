@@ -49,14 +49,14 @@
   (local root (Layout {:name "ball-root"}))
 
   (ball:ensure-body root)
-  (local start-offset-y ball.offset.y)
+  (local start-layout-y (or (and ball.layout ball.layout.position ball.layout.position.y) 0))
 
   (for [i 1 45]
     (app.engine.physics:update 0))
   (ball:sync root)
 
-  (assert (< ball.offset.y start-offset-y)
-          "Ball offset did not move downward after physics update")
+  (assert (< ball.layout.position.y start-layout-y)
+          "Ball layout position did not move downward after physics update")
 
   (ball:drop))
 

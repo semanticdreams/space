@@ -4,6 +4,7 @@
 (local Graph (require :graph/init))
 (local DemoDialogs (require :demo-dialogs))
 (local MathUtils (require :math-utils))
+(local PhysicsFloor (require :physics-floor))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
 
@@ -56,6 +57,11 @@
          (table.insert self.unregistered key)))
   movables)
 
+(fn configure-test-physics-world []
+  (when (and app.engine app.engine.physics)
+    (app.engine.physics:setGravity 0 -25 0)
+    (PhysicsFloor.ensure-installed {})))
+
 (fn setup-scene [opts]
   (local options (or opts {}))
   (local original-scene app.scene)
@@ -84,6 +90,7 @@
                  (set app.movables movables)
                  (when options.camera
                    (set app.camera options.camera))
+                 (configure-test-physics-world)
                  (scene:build-default)
                  {:scene scene :movables movables :icons icons}))]
     (if ok
@@ -426,8 +433,38 @@
             (assert (= (length (or scene.entity.balls [])) 1)
                     "Scene restore should recreate persisted ball")))]
     (cleanup)
-    (when (not ok)
-      (error err))))
+  (when (not ok)
+    (error err))))
+
+(fn scene-ball-settles-on-global-floor []
+  (assert bt "Scene ball floor test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local element (scene:add-ball {:size (glm.vec3 18 18 18)
+                                        :position (glm.vec3 0 40 0)}))
+        (assert element "Expected add-ball to return an element")
+        (for [_ 1 1500]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local center (+ element.layout.position
+                         (element.layout.rotation:rotate (* 0.5 element.layout.size))))
+        (assert (> center.y -100)
+                (string.format
+                  "Ball should not fall through global floor at y=-100 (center_y=%.3f)"
+                  center.y))
+        (assert (< center.y -70)
+                (string.format
+                  "Ball should settle near global floor, not remain high (center_y=%.3f)"
+                  center.y)))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
 
 (fn scene-physics-body-collides-with-flat-terrain []
   (assert bt "Physics body terrain test requires Bullet bindings")
@@ -757,6 +794,8 @@
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
 (table.insert tests {:name "Scene ball appears in front of camera and restores"
                      :fn scene-add-ball-appears-in-front-of-camera-and-restores})
+(table.insert tests {:name "Scene ball settles on global floor"
+                     :fn scene-ball-settles-on-global-floor})
 (table.insert tests {:name "Scene physics body collides with flat terrain"
                      :fn scene-physics-body-collides-with-flat-terrain})
 (table.insert tests {:name "Scene runtime body falls after drag release"

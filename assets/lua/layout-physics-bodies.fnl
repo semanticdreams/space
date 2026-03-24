@@ -2,7 +2,6 @@
 (local bt (require :bt))
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
-(local PhysicsFloor (require :physics-floor))
 
 (local safe-vec3? CoordinateGuard.safe-vec3?)
 
@@ -36,11 +35,6 @@
   (if layout
       (clamp-size (or layout.size layout.measure fallback (glm.vec3 1 1 1)))
       (clamp-size (or fallback (glm.vec3 1 1 1)))))
-
-(fn ensure-physics-configured []
-  (when (physics-available?)
-    (app.engine.physics:setGravity 0 -25 0)
-    (PhysicsFloor.ensure-installed {})))
 
 (fn get-entries [entity]
   (or (and entity entity.physics-bodies) []))
@@ -257,7 +251,6 @@
   (local count (length entries))
   (when entity
     (when (> count 0)
-      (ensure-physics-configured)
       (local child-count (length entity.children))
       (local start-index (+ 1 (- child-count count)))
       (local base-position (or entity.layout.position (glm.vec3 0 0 0)))
@@ -336,7 +329,6 @@
   (set entry.offset.x entry.spawn.x)
   (set entry.offset.y entry.spawn.y)
   (set entry.offset.z entry.spawn.z)
-  (ensure-physics-configured)
   (ensure-body-matches-layout-size entry)
   (local entries (get-entries entity))
   (table.insert entries entry)

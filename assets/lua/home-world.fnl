@@ -243,6 +243,8 @@
   (fn apply-runtime-floor! [world]
     (local floor-y (resolve-runtime-floor-y world))
     (set app.physics-floor-y floor-y)
+    (when (and app.engine app.engine.physics)
+      (app.engine.physics:setGravity 0 -25 0))
     (PhysicsFloor.ensure-installed {:floor-y floor-y})
     (when world.state
       (when (not world.state.physics)
