@@ -1550,6 +1550,68 @@
   (when (not ok)
     (error err)))
 
+(fn scene-terrain-selection-persists-across-runtime-replace []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-themes app.themes)
+  (set app.themes
+       {:get-active-theme (fn []
+                            {:terrain-selection {:fill (glm.vec4 0.2 0.5 0.9 0.2)
+                                                 :border (glm.vec4 0.2 0.5 0.9 0.95)}})})
+  (local (ok err)
+    (pcall
+      (fn []
+        (local terrain-record
+          {:id "terrain-a"
+           :kind "heightfield-terrain"
+           :options {:position [0 0 0]
+                     :rotation [1 0 0 0]
+                     :sample-spacing [2 2]
+                     :chunk-samples [5 5]
+                     :default-height 0.0}
+           :chunks [{:coord [0 0]
+                     :size [5 5]
+                     :heights [0 0 0 0 0
+                               0 0 0 0 0
+                               0 0 0 0 0
+                               0 0 0 0 0
+                               0 0 0 0 0]}]})
+        (local updated-record
+          {:id "terrain-a"
+           :kind "heightfield-terrain"
+           :options {:position [0 0 0]
+                     :rotation [1 0 0 0]
+                     :sample-spacing [2 2]
+                     :chunk-samples [5 5]
+                     :default-height 1.0}
+           :chunks [{:coord [0 0]
+                     :size [5 5]
+                     :heights [1 1 1 1 1
+                               1 1 1 1 1
+                               1 1 1 1 1
+                               1 1 1 1 1
+                               1 1 1 1 1]}]})
+        (scene:build-default {:terrains [terrain-record]})
+        (scene:set-terrain-selection-target "terrain-a" {:mode :rect
+                                                         :x0 1
+                                                         :z0 1
+                                                         :x1 3
+                                                         :z1 3})
+        (local before (scene:get-terrain-selection-target "terrain-a"))
+        (assert before "scene should expose terrain selection after it is set")
+        (scene:replace-terrain-record "terrain-a" updated-record)
+        (local after (scene:get-terrain-selection-target "terrain-a"))
+        (assert after "terrain selection should persist after runtime terrain replacement")
+        (assert (= after.x0 1))
+        (assert (= after.z0 1))
+        (assert (= after.x1 3))
+        (assert (= after.z1 3)))))
+  (set app.themes original-themes)
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn demo-entry-capture-state-persists-entry-persistence []
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
@@ -2066,6 +2128,8 @@
                      :fn heightfield-paint-capture-does-not-raycast-before-stroke})
 (table.insert tests {:name "Terrain rect pick state routes engine events"
                      :fn terrain-rect-pick-state-routes-engine-events})
+(table.insert tests {:name "Scene terrain selection persists across runtime replace"
+                     :fn scene-terrain-selection-persists-across-runtime-replace})
 (table.insert tests {:name "Demo entry capture-state persists entry metadata"
                      :fn demo-entry-capture-state-persists-entry-persistence})
 (table.insert tests {:name "Scene capture-state requires panel persistence"

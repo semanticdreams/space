@@ -59,6 +59,7 @@
   (local wrap-scroll? (if (= options.wrap-scroll? nil) true (not (not options.wrap-scroll?))))
   (local refresh-on-change? (if (= options.refresh-on-change? nil) true (not (not options.refresh-on-change?))))
   (local apply-when-valid? (if (= options.apply-when-valid? nil) false (not (not options.apply-when-valid?))))
+  (local on-draft-changed (or options.on-draft-changed (fn [_draft _validation-result] nil)))
 
   (fn clone-table [value]
     (if (= (type value) :table)
@@ -147,8 +148,10 @@
     (fn handle-field-change [field-key text]
       (when (not syncing?)
         (set (. draft field-key) text)
+        (var draft-validation-result nil)
         (if apply-when-valid?
-            (sync-errors! validation draft errors error-labels set-error-label)
+            (set draft-validation-result
+                 (sync-errors! validation draft errors error-labels set-error-label))
             (when (. errors field-key)
               (local field-result (validation.validate-field field-key text))
               (if field-result.ok?
@@ -160,7 +163,10 @@
                     (set-error-label field-key field-result.error)))))
         (set applied? false)
         (set apply-failed? false)
-        (update-status-and-actions)))
+        (update-status-and-actions)
+        (on-draft-changed (clone-table draft)
+                          (or draft-validation-result
+                              (validation.validate-draft draft)))))
 
     (fn sync-visible-fields [field-keys]
       (each [_ key (ipairs field-keys)]
@@ -316,7 +322,9 @@
            (sync-validation-state)
            (set applied? false)
            (set apply-failed? false)
-           (update-status-and-actions)))
+           (update-status-and-actions)
+           (on-draft-changed (clone-table draft)
+                             (validation.validate-draft draft))))
     (when wrap-scroll?
       (set view.scroll-view root-entity))
     (set view.drop
@@ -324,6 +332,8 @@
            (when changed-signal
              (changed-signal:disconnect changed-handler true))
            (root-entity:drop)))
-    view))
+    view)
+
+  build)
 
 TerrainEditorFormView

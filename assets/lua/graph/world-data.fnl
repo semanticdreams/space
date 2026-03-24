@@ -349,6 +349,32 @@
       (emit-world-change world-manager world-id "terrain-updated")
       normalized)))
 
+(fn set-terrain-selection-target [world-manager world-id terrain-id target]
+  (local scene (resolve-scene world-manager world-id))
+  (when (and scene scene.set-terrain-selection-target)
+    (scene:set-terrain-selection-target terrain-id target)))
+
+(fn clear-terrain-selection-target [world-manager world-id terrain-id]
+  (local scene (resolve-scene world-manager world-id))
+  (when (and scene scene.clear-terrain-selection-target)
+    (scene:clear-terrain-selection-target terrain-id)))
+
+(fn get-terrain-selection-target [world-manager world-id terrain-id]
+  (local scene (resolve-scene world-manager world-id))
+  (if (and scene scene.get-terrain-selection-target)
+      (scene:get-terrain-selection-target terrain-id)
+      nil))
+
+(fn set-terrain-preview-target [world-manager world-id terrain-id target]
+  (local scene (resolve-scene world-manager world-id))
+  (when (and scene scene.set-terrain-preview-target)
+    (scene:set-terrain-preview-target terrain-id target)))
+
+(fn clear-terrain-preview-target [world-manager world-id terrain-id]
+  (local scene (resolve-scene world-manager world-id))
+  (when (and scene scene.clear-terrain-preview-target)
+    (scene:clear-terrain-preview-target terrain-id)))
+
 (fn add-terrain [world-manager world-id terrain-kind]
   (local world (resolve-world world-manager world-id))
   (when world
@@ -390,6 +416,11 @@
  :find-terrain find-terrain
  :add-terrain add-terrain
  :update-terrain-record update-terrain-record
+ :set-terrain-selection-target set-terrain-selection-target
+ :clear-terrain-selection-target clear-terrain-selection-target
+ :get-terrain-selection-target get-terrain-selection-target
+ :set-terrain-preview-target set-terrain-preview-target
+ :clear-terrain-preview-target clear-terrain-preview-target
  :remove-terrain remove-terrain
  :remove-scene-panel remove-scene-panel
  :remove-hud-panel remove-hud-panel}

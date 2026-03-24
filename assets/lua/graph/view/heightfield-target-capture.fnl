@@ -9,6 +9,7 @@
                             "HeightfieldTargetCapture requires :terrain-id"))
   (local ray-opts options.ray-opts)
   (local on-target (or options.on-target (fn [_target _result] nil)))
+  (local on-preview-target (or options.on-preview-target (fn [_target _result] nil)))
   (local on-invalid-target (or options.on-invalid-target (fn [] nil)))
   (local on-active-changed (or options.on-active-changed (fn [_active?] nil)))
   (var active? false)
@@ -28,6 +29,20 @@
     (when hit
       (set last-valid-hit hit))
     hit)
+
+  (fn emit-preview-target! []
+    (when (and start-hit last-valid-hit)
+      (local record start-hit.terrain-record)
+      (local target
+        (and record
+             (TerrainQuery.target-between-hits record start-hit last-valid-hit)))
+      (when target
+        (on-preview-target target {:terrain-record record
+                                   :terrain-id start-hit.terrain-id
+                                   :terrain-kind start-hit.terrain-kind
+                                   :start-hit start-hit
+                                   :end-hit last-valid-hit
+                                   :target target}))))
 
   (fn resolve-target! [end-pos]
     (local resolved-start-hit (or start-hit (terrain-hit end-pos)))
@@ -78,6 +93,8 @@
     (set last-valid-hit hit)
     (set drag-active? (not (not hit)))
     (set pending-start? (not drag-active?))
+    (when drag-active?
+      (emit-preview-target!))
     drag-active?)
 
   (fn update-drag [pos]
@@ -88,9 +105,11 @@
             (set start-hit hit)
             (set last-valid-hit hit)
             (set drag-active? true)
-            (set pending-start? false)))
+            (set pending-start? false)
+            (emit-preview-target!)))
         (when drag-active?
-          (update-last-valid-hit! pos)))
+          (update-last-valid-hit! pos)
+          (emit-preview-target!)))
     drag-active?)
 
   (fn end-drag [pos]

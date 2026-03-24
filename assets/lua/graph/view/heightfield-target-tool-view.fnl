@@ -20,6 +20,17 @@
       "] to ["
       (tostring target.x1) ", " (tostring target.z1) "]"))
 
+(fn merge-draft-with-target [draft target]
+  (if target
+      (do
+        (local merged {})
+        (each [key value (pairs (or draft {}))]
+          (set (. merged key) value))
+        (each [key value (pairs (target->draft-values target))]
+          (set (. merged key) value))
+        merged)
+      draft))
+
 (fn HeightfieldTargetToolView [node opts]
   (local options (or opts {}))
   (local target (or node options.node))
@@ -32,7 +43,10 @@
   (fn build [ctx]
     (local build-ctx (or ctx options.ctx (and target target.graph target.graph.ctx)))
     (assert build-ctx "HeightfieldTargetToolView requires a build context")
-    (var draft (draft-from-record (and target target.get-record (target:get-record))))
+    (var draft
+      (merge-draft-with-target
+        (draft-from-record (and target target.get-record (target:get-record)))
+        (and target target.get-selection-target (target:get-selection-target))))
     (local form
       ((TerrainEditorFormView target {:validation validation
                                       :name name
@@ -43,6 +57,14 @@
                                                              draft)
                                       :write-baseline-draft (fn [next-draft]
                                                               (set draft next-draft))
+                                      :on-draft-changed
+                                      (fn [_draft validation-result]
+                                        (when target
+                                          (if (and validation-result validation-result.ok?)
+                                              (when target.set-preview-target
+                                                (target:set-preview-target validation-result.values.target))
+                                              (when target.clear-preview-target
+                                                (target:clear-preview-target)))))
                                       :info-text info-text})
        build-ctx))
     (local pick-status
@@ -73,14 +95,28 @@
       (HeightfieldTargetCapture {:scene scene
                                  :ctx build-ctx
                                  :terrain-id (and target target.terrain-id)
+                                 :on-preview-target (fn [preview-target _result]
+                                                      (when (and target target.set-preview-target)
+                                                        (target:set-preview-target preview-target)))
                                  :on-target (fn [resolved-target _result]
                                               (form:set-draft-values (target->draft-values resolved-target))
+                                              (when (and target target.clear-preview-target)
+                                                (target:clear-preview-target))
+                                              (when (and target target.set-selection-target)
+                                                (target:set-selection-target resolved-target))
                                               (set-pick-status
                                                 (.. "Picked rectangle " (format-target resolved-target))))
                                  :on-invalid-target (fn []
+                                                      (when (and target target.clear-preview-target)
+                                                        (target:clear-preview-target))
                                                       (set-pick-status
                                                         "Drag over this terrain to choose a rectangle."))
-                                 :on-active-changed update-pick-ui}))
+                                 :on-active-changed (fn [active?]
+                                                     (when (and (not active?)
+                                                                target
+                                                                target.clear-preview-target)
+                                                       (target:clear-preview-target))
+                                                     (update-pick-ui active?))}))
 
     (fn refresh-live-pick []
       (local next-live-scene (and target target.get-live-scene (target:get-live-scene)))

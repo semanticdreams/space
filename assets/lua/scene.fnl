@@ -210,6 +210,13 @@
    :current-element current-element
    :child-index child-index})
 
+(fn require-terrain-selection-method [element terrain-id method-name]
+  (assert (. element method-name)
+          (.. "Scene terrain runtime missing "
+              method-name
+              " for terrain "
+              terrain-id)))
+
 (fn collect-positioned-resizables [children]
   (var entries [])
   (each [_ metadata (ipairs (or children []))]
@@ -828,6 +835,10 @@
     (local new-element (terrain-builder self.build-context))
     (assert (and new-element new-element.layout)
             (.. "Scene.replace-terrain-record built invalid terrain " terrain-id))
+    (local current-selection-target
+      (if current-element.get-selection-target
+          (current-element:get-selection-target)
+          nil))
     (local new-terrain-metadata {:element new-element
                                  :record terrain-spec.record})
     (local new-child-metadata {:element new-element
@@ -840,10 +851,50 @@
     (table.insert entity.children child-index new-child-metadata)
     (insert-layout-child entity.layout child-index new-element.layout)
     (current-element:drop)
+    (when (and current-selection-target new-element.set-selection-target)
+      (new-element:set-selection-target current-selection-target))
     (when entity.layout
       (entity.layout:mark-measure-dirty)
       (entity.layout:mark-layout-dirty))
     (self:sync-physics-bodies)
+    true)
+
+  (fn set-terrain-selection-target [self terrain-id target]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local element runtime-entry.current-element)
+    (require-terrain-selection-method element terrain-id :set-selection-target)
+    (assert (element:set-selection-target target)
+            (.. "Scene failed to set terrain selection for " terrain-id))
+    true)
+
+  (fn clear-terrain-selection-target [self terrain-id]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local element runtime-entry.current-element)
+    (require-terrain-selection-method element terrain-id :clear-selection-target)
+    (assert (element:clear-selection-target)
+            (.. "Scene failed to clear terrain selection for " terrain-id))
+    true)
+
+  (fn get-terrain-selection-target [self terrain-id]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local element runtime-entry.current-element)
+    (require-terrain-selection-method element terrain-id :get-selection-target)
+    (element:get-selection-target))
+
+  (fn set-terrain-preview-target [self terrain-id target]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local element runtime-entry.current-element)
+    (require-terrain-selection-method element terrain-id :set-preview-target)
+    (assert (element:set-preview-target target)
+            (.. "Scene failed to set terrain preview for " terrain-id))
+    true)
+
+  (fn clear-terrain-preview-target [self terrain-id]
+    (local runtime-entry (require-terrain-runtime-entry self terrain-id))
+    (local element runtime-entry.current-element)
+    (require-terrain-selection-method element terrain-id :clear-preview-target)
+    (assert (element:clear-preview-target)
+            (.. "Scene failed to clear terrain preview for " terrain-id))
     true)
 
   (fn add-terrain-record [self record]
@@ -1218,6 +1269,11 @@
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)
 (set self.remove-terrain remove-terrain)
+(set self.set-terrain-selection-target set-terrain-selection-target)
+(set self.clear-terrain-selection-target clear-terrain-selection-target)
+(set self.get-terrain-selection-target get-terrain-selection-target)
+(set self.set-terrain-preview-target set-terrain-preview-target)
+(set self.clear-terrain-preview-target clear-terrain-preview-target)
 (set self.reset-projection reset-projection)
 (set self.get-view-matrix get-view-matrix)
 (set self.get-triangle-vector get-triangle-vector)

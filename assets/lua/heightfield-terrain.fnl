@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
+(local HeightfieldTerrainSelectionOverlay (require :heightfield-terrain-selection-overlay))
 
 (fn finite-number? [value]
   (and (= (type value) :number)
@@ -265,6 +266,13 @@
   (local rotation (resolve-glm-quat options.rotation (glm.quat 1 0 0 0)))
   (local opacity (or options.opacity 1.0))
   (local enable-physics (if (= options.physics nil) true (not (not options.physics))))
+  (local overlay-record {:kind "heightfield-terrain"
+                         :options {:sample-spacing (or options.sample-spacing [20 20])
+                                   :chunk-samples (or options.chunk-samples
+                                                      (and (. (or options.chunks []) 1)
+                                                           (. (. (or options.chunks []) 1) :size))
+                                                      [17 17])}
+                         :chunks (or options.chunks [])})
   (local mesh (build-mesh {:chunks options.chunks
                            :sample-spacing options.sample-spacing}))
   (local origin-offset (or mesh.origin-offset (glm.vec3 0 0 0)))
@@ -276,6 +284,10 @@
 
   (fn build [ctx]
     (local renderable (RenderBuffer ctx mesh {:opacity opacity}))
+    (local selection-overlay
+      (HeightfieldTerrainSelectionOverlay ctx {:record overlay-record
+                                               :origin-offset origin-offset}))
+    (var updated-handler nil)
     (local physics
       (if enable-physics
           (PhysicsBridge.create-static-mesh mesh {:position layout-position :rotation rotation})
@@ -292,7 +304,11 @@
                             :rotation self.rotation
                             :clip-region self.clip-region
                             :depth-index self.depth-offset-index
-                            :opacity opacity})))
+                            :opacity opacity}))
+      (selection-overlay:update {:position self.position
+                                 :rotation self.rotation
+                                 :clip-region self.clip-region
+                                 :depth-index (+ self.depth-offset-index 1)}))
 
     (local layout (Layout {:name "heightfield-terrain"
                            :measurer measurer
@@ -300,15 +316,55 @@
     (layout:set-position layout-position)
     (layout:set-rotation rotation)
 
+    (set updated-handler
+         (and app.engine
+              app.engine.events
+              app.engine.events.updated
+              (app.engine.events.updated:connect
+                (fn [_delta]
+                  (when (selection-overlay:refresh-theme!)
+                    (layout:mark-layout-dirty))))))
+
     (fn drop [_self]
+      (when (and app.engine
+                 app.engine.events
+                 app.engine.events.updated
+                 updated-handler)
+        (app.engine.events.updated:disconnect updated-handler true)
+        (set updated-handler nil))
       (layout:drop)
       (renderable:drop)
+      (selection-overlay:drop)
       (when physics
         (physics:drop)))
 
     {:layout layout
      :drop drop
      :mesh mesh
+     :set-selection-target (fn [self target]
+                             (selection-overlay:set-selection-target target)
+                             (when self.layout
+                               (self.layout:mark-layout-dirty))
+                             true)
+     :clear-selection-target (fn [self]
+                               (selection-overlay:clear-selection-target)
+                               (when self.layout
+                                 (self.layout:mark-layout-dirty))
+                               true)
+     :get-selection-target (fn [_self]
+                             (selection-overlay:get-selection-target))
+     :set-preview-target (fn [self target]
+                           (selection-overlay:set-preview-target target)
+                           (when self.layout
+                             (self.layout:mark-layout-dirty))
+                           true)
+     :clear-preview-target (fn [self]
+                             (selection-overlay:clear-preview-target)
+                             (when self.layout
+                               (self.layout:mark-layout-dirty))
+                             true)
+     :get-preview-target (fn [_self]
+                           (selection-overlay:get-preview-target))
      :physics physics}))
 
 HeightfieldTerrain

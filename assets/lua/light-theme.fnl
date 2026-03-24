@@ -35,6 +35,8 @@
            :edge-thickness 4.0
            :label-color (glm.vec4 0.3 0.34 0.42 0.95)
            :selection-border-color (glm.vec4 0.18 0.5 0.9 0.9)}
+   :terrain-selection {:fill (glm.vec4 0.18 0.5 0.9 0.18)
+                       :border (glm.vec4 0.16 0.47 0.88 0.95)}
    :lights {:ambient (glm.vec3 0 0 0)
             :directional [{:direction light-direction
                            :ambient (glm.vec3 0.6 0.6 0.6)

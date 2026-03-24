@@ -2426,6 +2426,79 @@
   (set app.clickables original-clickables)
   (view:drop))
 
+(fn test-heightfield-perlin-tool-initializes-from-existing-selection-target []
+  (local HeightfieldPerlinToolNodeView (require :graph/view/views/heightfield-perlin-tool))
+  (local ctx (make-build-ctx))
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-selection-target (fn [_self]
+                                            {:mode :rect
+                                             :x0 2
+                                             :z0 3
+                                             :x1 5
+                                             :z1 7})
+                    :apply-values (fn [_self _values] true)})
+  (local builder (HeightfieldPerlinToolNodeView mock-node))
+  (local view (builder ctx))
+  (assert (= (view.fields.target-mode:get-value) "rect"))
+  (assert (= (view.fields.rect-min-x:get-text) "2"))
+  (assert (= (view.fields.rect-min-z:get-text) "3"))
+  (assert (= (view.fields.rect-max-x:get-text) "5"))
+  (assert (= (view.fields.rect-max-z:get-text) "7"))
+  (view:drop))
+
+(fn test-heightfield-perlin-tool-typed-rect-syncs-live-selection []
+  (local HeightfieldPerlinToolNodeView (require :graph/view/views/heightfield-perlin-tool))
+  (local ctx (make-build-ctx))
+  (var last-selection-target nil)
+  (var last-preview-target nil)
+  (var clear-preview-count 0)
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-selection-target (fn [_self]
+                                            {:mode :rect
+                                             :x0 7
+                                             :z0 8
+                                             :x1 9
+                                             :z1 10})
+                    :set-selection-target (fn [_self target]
+                                            (set last-selection-target target)
+                                            true)
+                    :set-preview-target (fn [_self target]
+                                          (set last-preview-target target)
+                                          true)
+                    :clear-preview-target (fn [_self]
+                                            (set clear-preview-count (+ clear-preview-count 1))
+                                            (set last-preview-target nil)
+                                              true)
+                    :apply-values (fn [_self _values] true)})
+  (local builder (HeightfieldPerlinToolNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.target-mode:set-value "rect")
+  (view.fields.rect-min-x:set-text "1")
+  (view.fields.rect-min-z:set-text "2")
+  (view.fields.rect-max-x:set-text "4")
+  (view.fields.rect-max-z:set-text "6")
+  (assert last-preview-target "valid typed rect should sync live terrain preview")
+  (assert (= last-preview-target.mode :rect))
+  (assert (= last-preview-target.x0 1))
+  (assert (= last-preview-target.z0 2))
+  (assert (= last-preview-target.x1 4))
+  (assert (= last-preview-target.z1 6))
+  (view.fields.rect-max-x:set-text "")
+  (assert (= last-preview-target nil)
+          "invalid typed rect should clear live terrain preview")
+  (assert (> clear-preview-count 0)
+          "invalid typed rect should route through clear-preview-target")
+  (assert (= last-selection-target nil)
+          "invalid typed rect should not overwrite the committed terrain selection")
+  (view.fields.rect-max-x:set-text "4")
+  (assert last-preview-target
+          "restoring a valid typed rect should restore the live terrain preview")
+  (assert (> clear-preview-count 0)
+          "live preview sync should clear invalid targets at least once")
+  (view:drop))
+
 (fn test-heightfield-resize-tool-node-view-builds []
   (local Validation (require :graph/heightfield-resize-tool-validation))
   (local HeightfieldResizeToolNodeView (require :graph/view/views/heightfield-resize-tool))
@@ -2584,6 +2657,10 @@
 (table.insert tests {:name "heightfield perlin tool stays applicable after apply" :fn test-heightfield-perlin-tool-stays-applicable-after-apply})
 (table.insert tests {:name "heightfield perlin tool pick rectangle updates fields"
                      :fn test-heightfield-perlin-tool-pick-rectangle-updates-fields})
+(table.insert tests {:name "heightfield perlin tool initializes from existing selection target"
+                     :fn test-heightfield-perlin-tool-initializes-from-existing-selection-target})
+(table.insert tests {:name "heightfield perlin tool typed rect syncs live selection"
+                     :fn test-heightfield-perlin-tool-typed-rect-syncs-live-selection})
 (table.insert tests {:name "heightfield resize tool node view builds" :fn test-heightfield-resize-tool-node-view-builds})
 (table.insert tests {:name "heightfield resize tool stays applicable after apply" :fn test-heightfield-resize-tool-stays-applicable-after-apply})
 (table.insert tests {:name "heightfield adjust tool node view builds" :fn test-heightfield-adjust-tool-node-view-builds})

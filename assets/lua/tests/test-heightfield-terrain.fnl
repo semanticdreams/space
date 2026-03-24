@@ -2,6 +2,7 @@
 (local bt (require :bt))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (local {: LayoutRoot} (require :layout))
+(local Signal (require :signal))
 (local HeightfieldTerrain (require :heightfield-terrain))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local TerrainRecords (require :scene-terrain-records))
@@ -242,6 +243,115 @@
           "heightfield runtime should rotate the origin offset into world z")
   (entity:drop))
 
+(fn terrain-selection-overlay-follows-selection-target []
+  (local original-themes app.themes)
+  (set app.themes
+       {:get-active-theme (fn []
+                            {:terrain-selection {:fill (glm.vec4 0.2 0.5 0.9 0.2)
+                                                 :border (glm.vec4 0.2 0.5 0.9 0.95)}})})
+  (local vector (VectorBuffer 0))
+  (local ctx {:triangle-vector vector})
+  (local builder
+    (HeightfieldTerrain {:physics false
+                         :sample-spacing [2 2]
+                         :chunk-samples [5 5]
+                         :chunks [{:coord [0 0]
+                                   :size [5 5]
+                                   :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local entity (builder ctx))
+  (local root (LayoutRoot {:log-dirt? false}))
+  (entity.layout:set-root root)
+  (root:update)
+  (local base-length (vector:length))
+  (entity:set-selection-target {:mode :rect
+                                :x0 1
+                                :z0 1
+                                :x1 3
+                                :z1 3})
+  (root:update)
+  (local selected-length (vector:length))
+  (assert (> selected-length base-length)
+          "terrain selection should add overlay triangles above the terrain mesh")
+  (local target (entity:get-selection-target))
+  (assert (= target.x0 1))
+  (assert (= target.z1 3))
+  (entity:set-preview-target {:mode :rect
+                              :x0 0
+                              :z0 0
+                              :x1 1
+                              :z1 1})
+  (root:update)
+  (local committed-while-previewing (entity:get-selection-target))
+  (assert (= committed-while-previewing.x0 1)
+          "preview should not overwrite the committed terrain selection")
+  (entity:clear-preview-target)
+  (root:update)
+  (local committed-after-preview (entity:get-selection-target))
+  (assert (= committed-after-preview.x0 1)
+          "clearing preview should restore the committed terrain selection")
+  (entity:clear-selection-target)
+  (assert (= (entity:get-selection-target) nil)
+          "terrain selection should clear the stored target")
+  (entity:drop)
+  (set app.themes original-themes))
+
+(fn terrain-selection-overlay-reacts-to-theme-changes []
+  (local original-themes app.themes)
+  (local original-engine app.engine)
+  (var current-fill (glm.vec4 0.2 0.5 0.9 0.2))
+  (var current-border (glm.vec4 0.2 0.5 0.9 0.95))
+  (set app.themes
+       {:get-active-theme (fn []
+                            {:terrain-selection {:fill current-fill
+                                                 :border current-border}})})
+  (set app.engine {:events {:updated (Signal)}})
+  (local handle-state {:next-handle 1
+                       :writes {}})
+  (local vector
+    {:allocate (fn [self size]
+                 (local handle {:id handle-state.next-handle :size size})
+                 (set handle-state.next-handle (+ handle-state.next-handle 1))
+                 handle)
+     :reallocate (fn [_self handle size]
+                   (set handle.size size))
+     :delete (fn [_self _handle] nil)
+     :set-glm-vec3 (fn [_self _handle _offset _value] nil)
+     :set-float (fn [_self _handle _offset _value] nil)
+     :set-glm-vec4 (fn [_self handle offset value]
+                     (local key (.. handle.id ":" offset))
+                     (set (. handle-state.writes key)
+                          [value.x value.y value.z value.w]))})
+  (local ctx {:triangle-vector vector})
+  (local builder
+    (HeightfieldTerrain {:physics false
+                         :sample-spacing [2 2]
+                         :chunk-samples [5 5]
+                         :chunks [{:coord [0 0]
+                                   :size [5 5]
+                                   :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local entity (builder ctx))
+  (local root (LayoutRoot {:log-dirt? false}))
+  (entity.layout:set-root root)
+  (entity:set-selection-target {:mode :rect
+                                :x0 1
+                                :z0 1
+                                :x1 2
+                                :z1 2})
+  (root:update)
+  (local first-color (. handle-state.writes "2:3"))
+  (assert first-color "selection overlay should write fill colors for its fill handle")
+  (set current-fill (glm.vec4 0.85 0.25 0.18 0.33))
+  (set current-border (glm.vec4 0.9 0.3 0.2 0.98))
+  (app.engine.events.updated:emit 0.016)
+  (root:update)
+  (local changed-color (. handle-state.writes "2:3"))
+  (assert changed-color "selection overlay should still write fill colors after theme change")
+  (assert (not (= (. first-color 1) (. changed-color 1)))
+          "selection overlay fill should update when the active theme changes")
+  (entity:drop)
+  (set app.engine original-engine)
+  (set app.themes original-themes))
+
 (fn heightfield-physics-catches-falling-body []
   (assert bt "Heightfield terrain physics test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -315,6 +425,10 @@
                      :fn terrain-checker-pattern-alternates-across-chunk-seams})
 (table.insert tests {:name "Heightfield terrain respects array rotation from record data"
                      :fn terrain-respects-array-rotation-from-record-data})
+(table.insert tests {:name "Heightfield terrain selection overlay follows selection target"
+                     :fn terrain-selection-overlay-follows-selection-target})
+(table.insert tests {:name "Heightfield terrain selection overlay reacts to theme changes"
+                     :fn terrain-selection-overlay-reacts-to-theme-changes})
 (table.insert tests {:name "Heightfield terrain integrates with Bullet physics"
                      :fn heightfield-physics-catches-falling-body})
 
