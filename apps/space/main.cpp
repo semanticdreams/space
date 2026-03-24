@@ -106,6 +106,38 @@ std::string sibling_path(const std::string& file_path, const std::string& siblin
     return std::filesystem::absolute(parent / sibling_name).string();
 }
 
+sol::object require_checked(sol::state& lua, const std::string& module_name)
+{
+    sol::function require = lua["require"];
+    sol::protected_function protected_require = require;
+    sol::protected_function_result result = protected_require(module_name);
+    if (!result.valid()) {
+        sol::error err = result;
+        throw sol::error(err.what());
+    }
+    return result.get<sol::object>();
+}
+
+void call_checked(const sol::function& function)
+{
+    sol::protected_function protected_function = function;
+    sol::protected_function_result result = protected_function();
+    if (!result.valid()) {
+        sol::error err = result;
+        throw sol::error(err.what());
+    }
+}
+
+void call_checked(const sol::function& function, const std::string& argument)
+{
+    sol::protected_function protected_function = function;
+    sol::protected_function_result result = protected_function(argument);
+    if (!result.valid()) {
+        sol::error err = result;
+        throw sol::error(err.what());
+    }
+}
+
 int main(int argc, char *argv[])
 {
     LOG_CONFIG.reporting_level = Debug;
@@ -308,11 +340,10 @@ int main(int argc, char *argv[])
 
     if (entry_mode == EntryMode::Command || entry_mode == EntryMode::Stdin) {
         try {
-            sol::function require = lua["require"];
-            sol::table fennel = require("fennel");
+            sol::table fennel = require_checked(lua, "fennel");
             sol::function eval = fennel["eval"];
             std::string source = (entry_mode == EntryMode::Stdin) ? read_stdin() : entry_target;
-            eval(source);
+            call_checked(eval, source);
         }
         catch (const sol::error &e) {
             std::cerr << "Lua error: " << e.what() << "\n";
@@ -323,10 +354,9 @@ int main(int argc, char *argv[])
             if (ends_with(entry_target, ".lua")) {
                 lua.script_file(entry_target);
             } else {
-                sol::function require = lua["require"];
-                sol::table fennel = require("fennel");
+                sol::table fennel = require_checked(lua, "fennel");
                 sol::function dofile = fennel["dofile"];
-                dofile(entry_target);
+                call_checked(dofile, entry_target);
             }
         }
         catch (const sol::error &e) {
@@ -335,11 +365,16 @@ int main(int argc, char *argv[])
         }
     } else {
         if (module_function.empty()) {
-            runtime.require_module(module_name_target);
+            try {
+                runtime.require_module(module_name_target);
+            }
+            catch (const sol::error &e) {
+                std::cerr << "Lua error: " << e.what() << "\n";
+                return 1;
+            }
         } else {
             try {
-                sol::function require = lua["require"];
-                sol::object module_obj = require(module_name_target);
+                sol::object module_obj = require_checked(lua, module_name_target);
                 if (!module_obj.is<sol::table>()) {
                     std::cerr << "Lua error: module " << module_name_target
                               << " did not return a table for :" << module_function << "\n";
@@ -353,7 +388,7 @@ int main(int argc, char *argv[])
                     return 1;
                 }
                 sol::function fn = function_obj.as<sol::function>();
-                fn();
+                call_checked(fn);
             }
             catch (const sol::error &e) {
                 std::cerr << "Lua error: " << e.what() << "\n";

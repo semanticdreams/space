@@ -691,6 +691,14 @@ set_tests_properties(test_lua_gccjit_binding PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_lua_module_error_integration
+    tests/test_lua_module_error_integration.cpp
+)
+add_test(NAME test_lua_module_error_integration COMMAND test_lua_module_error_integration)
+set_tests_properties(test_lua_module_error_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 target_compile_options(${PROJECT_NAME} PRIVATE -O2 -g)
 target_link_options(${PROJECT_NAME} PRIVATE -O2 -g)
 

@@ -95,7 +95,12 @@ void LuaRuntime::install_fennel(bool correlate)
 void LuaRuntime::require_module(const std::string& name)
 {
     sol::function require = lua["require"];
-    require(name);
+    sol::protected_function protected_require = require;
+    sol::protected_function_result result = protected_require(name);
+    if (!result.valid()) {
+        sol::error err = result;
+        throw sol::error(err.what());
+    }
 }
 
 void LuaRuntime::install_fatal_traceback()
