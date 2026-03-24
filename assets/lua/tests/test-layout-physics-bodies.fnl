@@ -235,11 +235,11 @@
             (for [_ 1 1200]
               (app.engine.physics:update 0)
               (scene:update))
-            (assert (> panel.layout.position.y -1005)
+            (assert (> panel.layout.position.y -105)
                     (string.format
-                      "Panel should not fall through global floor at y=-1000 (y=%.3f)"
+                      "Panel should not fall through global floor at y=-100 (y=%.3f)"
                       panel.layout.position.y))
-            (assert (< panel.layout.position.y -900)
+            (assert (< panel.layout.position.y -10)
                     (string.format
                       "Panel should settle near floor, not remain high (y=%.3f)"
                       panel.layout.position.y))))]
