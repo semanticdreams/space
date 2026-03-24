@@ -1,5 +1,7 @@
 (local zmq (require :zmq))
 
+(local default-timeout-ms 2000)
+
 (fn read-file [path]
   (local file (io.open path "rb"))
   (if file
@@ -13,6 +15,7 @@
   (var endpoint nil)
   (var code nil)
   (var file nil)
+  (var timeout-ms default-timeout-ms)
   (var i 1)
   (while (<= i (# args))
     (local arg (. args i))
@@ -28,11 +31,17 @@
                 (do
                   (set i (+ i 1))
                   (set file (. args i)))
+                (if (= arg "--timeout-ms")
+                    (do
+                      (set i (+ i 1))
+                      (set timeout-ms (tonumber (. args i))))
+                    nil)
                 nil)))
     (set i (+ i 1)))
   {:endpoint endpoint
    :code code
-   :file file})
+   :file file
+   :timeout-ms timeout-ms})
 
 (fn read-source [opts]
   (if opts.code
@@ -40,6 +49,21 @@
       (if opts.file
           (read-file opts.file)
           (io.read "*a"))))
+
+(fn request-reply [socket poll-events source timeout-ms endpoint]
+  (socket:send source)
+  (local ready (zmq.poll [{:socket socket :events poll-events.IN}] timeout-ms))
+  (local entry (. ready 1))
+  (local revents (and entry entry.revents))
+  (if (and revents (> revents 0))
+      (do
+        (local reply (socket:recv))
+        (when reply
+          (print (reply:to-string))))
+      (error (.. "remote-control-client timed out after "
+                 (tostring timeout-ms)
+                 "ms waiting for reply from "
+                 endpoint))))
 
 (fn main []
   (local args (parse-args _G.arg))
@@ -49,14 +73,21 @@
   (assert (and source (> (length source) 0))
           "remote-control-client requires code via -c, -f, or stdin")
   (local socket-types (. zmq :socket-types))
+  (local poll-events (. zmq :poll-events))
   (local ctx (zmq.Context 1))
   (local socket (ctx:socket socket-types.REQ))
+  (socket:set-option-int "linger" 0)
+  (socket:set-option-int "rcvtimeo" args.timeout-ms)
+  (socket:set-option-int "sndtimeo" args.timeout-ms)
   (socket:connect args.endpoint)
-  (socket:send source)
-  (local reply (socket:recv))
-  (when reply
-    (print (reply:to-string)))
+  (local (ok err)
+    (pcall
+      (fn []
+        (request-reply socket poll-events source args.timeout-ms args.endpoint))))
   (socket:close)
-  (ctx:close))
+  (ctx:close)
+  (when (not ok)
+    (io.stderr:write (tostring err) "\n")
+    (os.exit 1)))
 
 {:main main}

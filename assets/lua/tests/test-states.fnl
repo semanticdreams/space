@@ -9,6 +9,10 @@
 (local CameraState (require :camera-state))
 (local Camera (require :camera))
 (local FpcState (require :fpc-state))
+(local TerrainRectPickState (require :terrain-rect-pick-state))
+(local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
+(local TerrainPaintState (require :terrain-paint-state))
+(local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 (local InputState (require :input-state-router))
 (local StateBase (require :state-base))
 (local InputModel (require :input-model))
@@ -123,6 +127,24 @@
       (set found true)))
   found)
 
+(fn reset-engine-events []
+  (local events (and app.engine app.engine.events))
+  (when events
+    (each [_ signal (ipairs [events.text-input
+                             events.text-editing
+                             events.key-down
+                             events.key-up
+                             events.mouse-button-down
+                             events.mouse-button-up
+                             events.mouse-motion
+                             events.mouse-wheel
+                             events.gamepad-button-down
+                             events.gamepad-axis-motion
+                             events.gamepad-removed
+                             events.updated])]
+      (when (and signal signal.clear)
+        (signal:clear)))))
+
 (fn normal-state-forwards-events []
   (reset-engine-events)
   (local controls (create-controls-stub))
@@ -196,6 +218,297 @@
   (state.on-leave)
   (InputState.disconnect-input input)
   (set app.first-person-controls nil))
+
+(fn terrain-rect-pick-state-routes-and-restores []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set app.states states)
+  (set app.hud {:build-context {}
+                :world-units-per-pixel 1})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-drag (fn [_self payload]
+                   (table.insert forwarded [:button true payload.x payload.y])
+                   true)
+     :drag-active? (fn [_self] active?)
+     :update-drag (fn [_self payload]
+                    (table.insert forwarded [:motion payload.x payload.y])
+                    true)
+     :end-drag (fn [_self payload]
+                 (table.insert forwarded [:button false payload.x payload.y])
+                 (set active? false)
+                 true)
+     :on-key-down (fn [_self payload]
+                    (table.insert forwarded [:key payload.key])
+                    (when (= payload.key KEY_ESCAPE)
+                      (set active? false)))})
+  (TerrainRectPickManager.begin session)
+  (assert (= (states.active-name) :terrain-rect-pick))
+  (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+  (app.engine.events.mouse-motion.emit {:x 30 :y 40})
+  (assert (= (# forwarded) 1))
+  (assert (= (. (. forwarded 1) 1) :button))
+  (app.engine.events.updated.emit 0.016)
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 30 :y 40})
+  (assert (= (# forwarded) 3))
+  (assert (= (. (. forwarded 1) 1) :button))
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 3) 1) :button))
+  (assert (= (states.active-name) :normal)
+          "terrain rect pick state should restore the previous state when the session completes")
+  (set app.hud original-hud)
+  (set app.states original-states))
+
+(fn terrain-rect-pick-state-coalesces-motion-until-update []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set app.states states)
+  (set app.hud {:build-context {}
+                :world-units-per-pixel 1})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-drag (fn [_self payload]
+                   (table.insert forwarded [:button true payload.x payload.y])
+                   true)
+     :drag-active? (fn [_self] active?)
+     :update-drag (fn [_self payload]
+                    (table.insert forwarded [:motion payload.x payload.y])
+                    true)
+     :end-drag (fn [_self payload]
+                 (table.insert forwarded [:button false payload.x payload.y])
+                 (set active? false)
+                 true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainRectPickManager.begin session)
+  (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+  (app.engine.events.mouse-motion.emit {:x 30 :y 40})
+  (app.engine.events.mouse-motion.emit {:x 50 :y 60})
+  (assert (= (# forwarded) 1)
+          "motion should be deferred until the next update tick")
+  (app.engine.events.updated.emit 0.016)
+  (assert (= (# forwarded) 2))
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 2) 2) 50))
+  (assert (= (. (. forwarded 2) 3) 60))
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
+  (set app.hud original-hud)
+  (set app.states original-states))
+
+(fn terrain-rect-pick-state-flushes-pending-motion-on-mouse-up []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set app.states states)
+  (set app.hud {:build-context {}
+                :world-units-per-pixel 1})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-drag (fn [_self payload]
+                   (table.insert forwarded [:button true payload.x payload.y])
+                   true)
+     :drag-active? (fn [_self] active?)
+     :update-drag (fn [_self payload]
+                    (table.insert forwarded [:motion payload.x payload.y])
+                    true)
+     :end-drag (fn [_self payload]
+                 (table.insert forwarded [:button false payload.x payload.y])
+                 (set active? false)
+                 true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainRectPickManager.begin session)
+  (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+  (app.engine.events.mouse-motion.emit {:x 30 :y 40})
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 30 :y 40})
+  (assert (= (# forwarded) 3)
+          "mouse up should flush pending drag motion before ending the drag")
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 2) 2) 30))
+  (assert (= (. (. forwarded 2) 3) 40))
+  (assert (= (. (. forwarded 3) 1) :button))
+  (set app.hud original-hud)
+  (set app.states original-states))
+
+(fn terrain-rect-pick-state-forwards-pending-start-motion-before-drag-active []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set app.states states)
+  (set app.hud {:build-context {}
+                :world-units-per-pixel 1})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (var drag-active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false) (set drag-active? false))
+     :begin-drag (fn [_self payload]
+                   (table.insert forwarded [:button true payload.x payload.y])
+                   false)
+     :drag-active? (fn [_self] drag-active?)
+     :update-drag (fn [_self payload]
+                    (table.insert forwarded [:motion payload.x payload.y])
+                    (set drag-active? true)
+                    true)
+     :end-drag (fn [_self payload]
+                 (table.insert forwarded [:button false payload.x payload.y])
+                 (set active? false)
+                 (set drag-active? false)
+                 true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainRectPickManager.begin session)
+  (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+  (app.engine.events.mouse-motion.emit {:x 30 :y 40})
+  (assert (= (# forwarded) 1)
+          "motion should still be deferred until the next update tick")
+  (app.engine.events.updated.emit 0.016)
+  (assert (= (# forwarded) 2)
+          "pending-start motion should be forwarded even before drag-active becomes true")
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 2) 2) 30))
+  (assert (= (. (. forwarded 2) 3) 40))
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 30 :y 40})
+  (assert (= (. (. forwarded 3) 1) :button))
+  (set app.hud original-hud)
+  (set app.states original-states))
+
+(fn terrain-paint-state-routes-and-restores []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-paint (TerrainPaintState))
+  (set app.states states)
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-stroke (fn [_self payload]
+                     (table.insert forwarded [:button true payload.x payload.y])
+                     true)
+     :update-stroke (fn [_self payload]
+                      (table.insert forwarded [:motion payload.x payload.y])
+                      true)
+     :end-stroke (fn [_self payload]
+                   (table.insert forwarded [:button false payload.x payload.y])
+                   (set active? false)
+                   true)
+     :on-key-down (fn [_self payload]
+                    (table.insert forwarded [:key payload.key])
+                    (when (= payload.key KEY_ESCAPE)
+                      (set active? false)))})
+  (TerrainPaintManager.begin session)
+  (assert (= (states.active-name) :terrain-paint))
+  (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+  (app.engine.events.mouse-motion.emit {:x 30 :y 40})
+  (assert (= (# forwarded) 1))
+  (app.engine.events.updated.emit 0.016)
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 30 :y 40})
+  (assert (= (# forwarded) 3))
+  (assert (= (. (. forwarded 1) 1) :button))
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 3) 1) :button))
+  (assert (= (states.active-name) :normal)
+          "terrain paint state should restore the previous state when the session completes")
+  (set app.states original-states))
+
+(fn terrain-paint-state-coalesces-motion-until-update []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-paint (TerrainPaintState))
+  (set app.states states)
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-stroke (fn [_self payload]
+                     (table.insert forwarded [:button true payload.x payload.y])
+                     true)
+     :update-stroke (fn [_self payload]
+                      (table.insert forwarded [:motion payload.x payload.y])
+                      true)
+     :end-stroke (fn [_self payload]
+                   (table.insert forwarded [:button false payload.x payload.y])
+                   (set active? false)
+                   true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainPaintManager.begin session)
+  (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+  (app.engine.events.mouse-motion.emit {:x 30 :y 40})
+  (app.engine.events.mouse-motion.emit {:x 50 :y 60})
+  (assert (= (# forwarded) 1))
+  (app.engine.events.updated.emit 0.016)
+  (assert (= (# forwarded) 2))
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 2) 2) 50))
+  (assert (= (. (. forwarded 2) 3) 60))
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
+  (set app.states original-states))
+
+(fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local states (States))
+  (var next-state-mouse-up 0)
+  (states.add-state
+    :normal
+    (StateBase.make-state
+      {:name :normal
+       :on-mouse-button-up (fn [_payload]
+                             (states.set-state :next)
+                             true)}))
+  (states.add-state
+    :next
+    (StateBase.make-state
+      {:name :next
+       :on-mouse-button-up (fn [_payload]
+                             (set next-state-mouse-up (+ next-state-mouse-up 1))
+                             true)}))
+  (set app.states states)
+  (states.set-state :normal)
+  (app.engine.events.mouse-button-up.emit {:button 1 :x 10 :y 20})
+  (assert (= next-state-mouse-up 0)
+          "switching states during mouse-up should not deliver the same mouse-up to the newly entered state")
+  (assert (= (states.active-name) :next))
+  (set app.states original-states))
 
 (fn normal-state-delete-removes-graph-selection []
   (reset-engine-events)
@@ -320,6 +633,17 @@
 (table.insert tests {:name "Normal state forwards events to controls" :fn normal-state-forwards-events})
 (table.insert tests {:name "Normal state Tab cycles focus" :fn normal-state-tab-cycles-focus})
 (table.insert tests {:name "Normal state swallows keys when input is active" :fn normal-state-swallows-keys-when-input-active})
+(table.insert tests {:name "Terrain rect pick state routes and restores" :fn terrain-rect-pick-state-routes-and-restores})
+(table.insert tests {:name "Terrain rect pick state coalesces motion until update"
+                     :fn terrain-rect-pick-state-coalesces-motion-until-update})
+(table.insert tests {:name "Terrain rect pick state flushes pending motion on mouse up"
+                     :fn terrain-rect-pick-state-flushes-pending-motion-on-mouse-up})
+(table.insert tests {:name "Terrain paint state routes and restores"
+                     :fn terrain-paint-state-routes-and-restores})
+(table.insert tests {:name "Terrain paint state coalesces motion until update"
+                     :fn terrain-paint-state-coalesces-motion-until-update})
+(table.insert tests {:name "State switch during mouse up does not deliver same event to new state"
+                     :fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state})
 (table.insert tests {:name "Normal state directional focus triggers" :fn normal-state-directional-focus-triggers})
 (table.insert tests {:name "Normal state directional focus skips while input active"
                      :fn normal-state-directional-focus-skips-with-input})

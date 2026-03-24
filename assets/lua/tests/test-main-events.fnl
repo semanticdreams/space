@@ -2,6 +2,12 @@
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
+(local AppViewport (require :app-viewport))
+(local AppProjection (require :app-projection))
+(local reset-engine-events
+  (fn []
+    (when _G.reset-engine-events
+      (_G.reset-engine-events))))
 
 (local tests [])
 
@@ -18,21 +24,42 @@
     (when (and app.window-resized-handler app.engine.events app.engine.events.window-resized)
       (app.engine.events.window-resized:disconnect app.window-resized-handler true)
       (set app.window-resized-handler nil))
+    (when (and app.window-pixel-size-handler app.engine.events app.engine.events.window-pixel-size-changed)
+      (app.engine.events.window-pixel-size-changed:disconnect app.window-pixel-size-handler true)
+      (set app.window-pixel-size-handler nil))
     (when (and app.engine.events app.engine.events.window-resized)
       (set app.window-resized-handler
            (app.engine.events.window-resized:connect
              (fn [e]
-               (app.set-viewport {:width e.width :height e.height})
+               (local width (or (and app.engine (. app.engine "pixel-width")) e.width))
+               (local height (or (and app.engine (. app.engine "pixel-height")) e.height))
+               (app.set-viewport {:width width :height height})
                (app.reset-projection)))))
+    (when (and app.engine.events app.engine.events.window-pixel-size-changed)
+      (set app.window-pixel-size-handler
+           (app.engine.events.window-pixel-size-changed:connect
+             (fn [_e]
+               (local width (or (and app.engine (. app.engine "pixel-width")) 0))
+               (local height (or (and app.engine (. app.engine "pixel-height")) 0))
+               (app.set-viewport {:width width :height height})
+               (app.reset-projection)))))
+    (when (not app.set-viewport)
+      (set app.set-viewport AppViewport.set-viewport))
+    (when (not app.create-default-projection)
+      (set app.create-default-projection AppProjection.create-default-projection))
+    (when (not app.reset-projection)
+      (set app.reset-projection (fn [] (set app.projection (app.create-default-projection)))))
     (app.set-viewport {:width 0 :height 0})
     (set app.layout-root nil)))
 
 (fn window-resize-updates-viewport-and-layout-root []
   (reset-state)
   (ensure-renderers)
+  (set (. app.engine "pixel-width") 960)
+  (set (. app.engine "pixel-height") 540)
   (app.engine.events.window-resized.emit {:width 640 :height 360})
-  (assert (= app.viewport.width 640))
-  (assert (= app.viewport.height 360)))
+  (assert (= app.viewport.width 960))
+  (assert (= app.viewport.height 540)))
 
 (fn drop-keeps-engine-events-and-clears-layout-root []
   (reset-state)
@@ -62,7 +89,17 @@
   (assert (= app.viewport.width 111))
   (assert (= app.viewport.height 222)))
 
+(fn window-pixel-size-change-updates-viewport []
+  (reset-state)
+  (ensure-renderers)
+  (set (. app.engine "pixel-width") 2560)
+  (set (. app.engine "pixel-height") 1440)
+  (app.engine.events.window-pixel-size-changed.emit {:width 2560 :height 1440})
+  (assert (= app.viewport.width 2560))
+  (assert (= app.viewport.height 1440)))
+
 (table.insert tests {:name "Window resize updates viewport and layout root" :fn window-resize-updates-viewport-and-layout-root})
+(table.insert tests {:name "Window pixel size change updates viewport" :fn window-pixel-size-change-updates-viewport})
 (table.insert tests {:name "app.drop keeps engine events and clears layout root" :fn drop-keeps-engine-events-and-clears-layout-root})
 (table.insert tests {:name "Non-resize events leave viewport unchanged" :fn other-events-leave-viewport-untouched})
 

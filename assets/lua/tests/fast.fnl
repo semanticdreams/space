@@ -59,6 +59,7 @@
     :tests.test-states
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
+    :tests.test-terrain-query
     :tests.test-movables
     :tests.test-resizables
     :tests.test-scene-drag

@@ -372,7 +372,7 @@
       (local terrains (and world.state world.state.scene world.state.scene.terrains))
       (assert (= (type terrains) :table) "Expected world scene terrains table")
       (assert (= (length terrains) 1) "Expected exactly one default terrain for new world")
-      (assert (= (. (. terrains 1) :kind) "flat-terrain") "Default terrain should be flat-terrain")
+      (assert (= (. (. terrains 1) :kind) "heightfield-terrain") "Default terrain should be heightfield-terrain")
       true)))
 
 (fn home-world-preserves-explicit-empty-terrain-list []

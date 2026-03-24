@@ -80,8 +80,9 @@
   (for [_ 1 (* chunk-width chunk-length)]
     (table.insert heights default-height))
   {:id (or options.id "heightfield-1")
+   :name options.name
    :kind "heightfield-terrain"
-   :options {:position (or options.position [0 -100 0])
+   :options {:position (or options.position [-160 -100 -160])
              :rotation (or options.rotation [1 0 0 0])
              :opacity (or options.opacity 1.0)
              :physics (if (= options.physics nil) true options.physics)
@@ -127,6 +128,10 @@
                                  :id entry.id
                                  :name entry.name
                                  :active? (or options.active? false)}]))
+  (local active-world-id
+    (or options.active-world-id
+        (and (or options.active? entry.active?) entry.id)
+        nil))
   {:changed changed
    :list-tabs (fn [_self] tabs)
    :get-world-entry (fn [_self world-id]
@@ -134,7 +139,8 @@
                           entry
                           nil))
    :active-world (fn [_self]
-                   (if (or options.active? entry.active?) entry nil))
+                   (if (= active-world-id entry.id) entry nil))
+   :active-world-id (fn [_self] active-world-id)
    :activate-index (or options.activate-index (fn [_self _idx] true))
    :close-world-index (or options.close-world-index (fn [_self _idx] true))
    :create-home-world (or options.create-home-world (fn [_self _opts] {:id "created-world"}))})
@@ -193,6 +199,19 @@
   (local {:HeightfieldTerrainNode HeightfieldTerrainNode} (require :graph/nodes/heightfield-terrain))
   (assert HeightfieldTerrainNode "heightfield-terrain module should export HeightfieldTerrainNode")
   (assert (= (type HeightfieldTerrainNode) "function") "HeightfieldTerrainNode should be a function"))
+
+(fn test-world-data-resolve-active-scene-uses-active-world-id []
+  (local WorldData (require :graph/world-data))
+  (local runtime (make-scene-runtime {:terrains []}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :runtime runtime
+                                  :active? false}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry entry
+                                      :active-world-id "test-world"}))
+  (local scene (WorldData.resolve-active-scene manager "test-world"))
+  (assert (= scene runtime.scene)
+          "resolve-active-scene should use the manager active-world-id, not stub-only entry.active?"))
 
 (fn test-worlds-node-requires-world-manager []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
@@ -313,19 +332,33 @@
   (assert (= node.key "terrain:test-world-123:terrain-abc") "TerrainNode key should include world-id and terrain-id")
   (node:drop))
 
-(fn test-terrain-node-default-label-uses-terrain-kind []
+(fn test-terrain-node-default-label-is-generic []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local entry (make-world-entry {:id "test-world-123"
                                   :state {:scene {:panels []
                                                   :terrains [{:id "terrain-abc"
-                                                              :kind "perlin-terrain"
+                                                              :kind "heightfield-terrain"
                                                               :options {}}]}
                                           :hud {:panels []}}}))
   (local node (TerrainNode {:world-id "test-world-123"
                             :world-manager (make-world-manager {:id "test-world-123"
                                                                 :entry entry})
                             :terrain-id "terrain-abc"}))
-  (assert (= node.label "Perlin Terrain") "TerrainNode should derive its label from the terrain kind registry")
+  (assert (= node.label "terrain") "TerrainNode should stay generic by default")
+  (node:drop))
+
+(fn test-terrain-node-uses-name-as-label []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local entry (make-world-entry {:id "test-world-123"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-heightfield-terrain-record {:id "terrain-abc"
+                                                                                               :name "mesa"})]}
+                                          :hud {:panels []}}}))
+  (local node (TerrainNode {:world-id "test-world-123"
+                            :world-manager (make-world-manager {:id "test-world-123"
+                                                                :entry entry})
+                            :terrain-id "terrain-abc"}))
+  (assert (= node.label "mesa") "TerrainNode should prefer terrain name for its label")
   (node:drop))
 
 (fn test-flat-terrain-node-has-correct-key []
@@ -473,15 +506,15 @@
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local entry (make-world-entry {:id "test-world"
                                   :state {:scene {:panels []
-                                                  :terrains [(make-flat-terrain-record {:id "t1"})]}
+                                                  :terrains [(make-heightfield-terrain-record {:id "t1"})]}
                                           :hud {:panels []}}}))
   (local node (TerrainNode {:world-id "test-world"
                             :world-manager (make-world-manager {:id "test-world" :entry entry})
                             :terrain-id "t1"}))
-  (assert (= node.label "Flat Terrain") "terrain node label should derive from the terrain kind registry")
+  (assert (= node.label "terrain") "terrain node should stay generic")
   (assert node.actions "TerrainNode should have actions")
   (assert (= (length node.actions) 2) "TerrainNode should have editor and remove actions")
-  (assert (= (. (. node.actions 1) :name) "Open Editor") "first terrain action should open editor")
+  (assert (= (. (. node.actions 1) :name) "Open Editor") "first terrain action should open properties")
   (assert (= (. (. node.actions 2) :name) "Remove") "second terrain action should remove terrain")
   (node:drop))
 
@@ -707,11 +740,18 @@
   (local node (HeightfieldTerrainNode {:world-id "test-world"
                                        :world-manager manager
                                        :terrain-id "terrain-a"}))
-  (node:apply-values {:height 4.25})
-  (assert (= (. (. (. state.scene.terrains 1) :options) :default-height) 4.25)
-          "HeightfieldTerrainNode should update the persisted default height")
-  (assert (= (. (. (. (. state.scene.terrains 1) :chunks 1) :heights) 1) 4.25)
-          "HeightfieldTerrainNode should update persisted height samples")
+  (node:apply-values {:name "mesa"
+                      :position [10 -50 12]
+                      :rotation [1 0 0 0]
+                      :opacity 0.8
+                      :physics false
+                      :sample-spacing [8 8]})
+  (assert (= (. (. state.scene.terrains 1) :name) "mesa")
+          "HeightfieldTerrainNode should update the persisted terrain name")
+  (assert (= (. (. (. state.scene.terrains 1) :options) :opacity) 0.8)
+          "HeightfieldTerrainNode should update persisted terrain properties")
+  (assert (= (. (. (. state.scene.terrains 1) :options) :physics) false)
+          "HeightfieldTerrainNode should update persisted terrain physics")
   (assert (> save-count 0) "HeightfieldTerrainNode should persist terrain edits")
   (node:drop))
 
@@ -735,13 +775,19 @@
   (local node (HeightfieldTerrainNode {:world-id "test-world"
                                        :world-manager manager
                                        :terrain-id "terrain-a"}))
-  (node:apply-values {:height 3.5})
+  (node:apply-values {:name "mesa"
+                      :position [5 -75 0]
+                      :rotation [1 0 0 0]
+                      :opacity 0.9
+                      :physics false
+                      :sample-spacing [12 12]})
   (assert replaced "editing an active heightfield terrain should replace only that terrain runtime")
   (assert (= replaced.terrain-id "terrain-a") "active heightfield terrain update should target the same terrain id")
-  (assert (= (. (. replaced.record :options) :default-height) 3.5)
-          "replaced runtime terrain should include the edited default height")
-  (assert (= (. (. (. replaced.record :chunks 1) :heights) 1) 3.5)
-          "replaced runtime terrain should include updated chunk data")
+  (assert (= replaced.record.name "mesa") "replaced runtime terrain should include the edited terrain name")
+  (assert (= (. (. replaced.record :options) :opacity) 0.9)
+          "replaced runtime terrain should include updated terrain properties")
+  (assert (= (. (. replaced.record :options) :physics) false)
+          "replaced runtime terrain should include updated terrain physics")
   (node:drop))
 
 (fn test-heightfield-terrain-node-errors-when-active-runtime-update-fails []
@@ -762,37 +808,158 @@
                                        :terrain-id "terrain-a"}))
   (local (ok err)
     (pcall (fn []
-             (node:apply-values {:height 2.0}))))
+             (node:apply-values {:name "mesa"
+                                 :position [0 -100 0]
+                                 :rotation [1 0 0 0]
+                                 :opacity 1.0
+                                 :physics true
+                                 :sample-spacing [20 20]}))))
   (assert (not ok) "active heightfield terrain update should fail loudly when runtime sync fails")
   (assert (string.find err "failed to replace terrain") "runtime sync failure should mention replace terrain")
   (node:drop))
 
-(fn test-heightfield-terrain-node-applies-perlin-to-world-state []
-  (local {:HeightfieldTerrainNode HeightfieldTerrainNode} (require :graph/nodes/heightfield-terrain))
+(fn test-heightfield-perlin-tool-node-applies-to-world-state []
+  (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode} (require :graph/nodes/heightfield-perlin-tool))
   (local terrain-record (make-heightfield-terrain-record {:id "terrain-a" :default-height 0.0}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
   (local entry (make-world-entry {:id "test-world" :state state}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local node (HeightfieldTerrainNode {:world-id "test-world"
-                                       :world-manager manager
-                                       :terrain-id "terrain-a"}))
-  (node:apply-perlin-values {:seed 99
-                             :n1div 30
-                             :n2div 4
-                             :n3div 1
-                             :n1scale 20
-                             :n2scale 2
-                             :n3scale 1
-                             :zroot 2
-                             :zpower 2.5})
+  (local node (HeightfieldPerlinToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:seed 99
+                      :target {:mode :whole}
+                      :n1div 30
+                      :n2div 4
+                      :n3div 1
+                      :n1scale 20
+                      :n2scale 2
+                      :n3scale 1
+                      :zroot 2
+                      :zpower 2.5})
   (local heights (. (. (. state.scene.terrains 1) :chunks 1) :heights))
   (assert (not (= (. heights 1) (. heights 2)))
           "Heightfield perlin apply should change canonical height samples")
   (node:drop))
 
-(fn test-heightfield-terrain-node-applies-perlin-to-active-scene-in-place []
-  (local {:HeightfieldTerrainNode HeightfieldTerrainNode} (require :graph/nodes/heightfield-terrain))
+(fn test-heightfield-flat-tool-node-applies-rectangle-to-world-state []
+  (local {:HeightfieldFlatToolNode HeightfieldFlatToolNode} (require :graph/nodes/heightfield-flat-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 0.0
+                                      :chunk-samples [5 5]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (HeightfieldFlatToolNode {:world-id "test-world"
+                                        :world-manager manager
+                                        :terrain-id "terrain-a"}))
+  (node:apply-values {:target {:mode :rect
+                               :x0 1
+                               :z0 1
+                               :x1 2
+                               :z1 2}
+                      :height 6.0})
+  (local heights (. (. (. state.scene.terrains 1) :chunks 1) :heights))
+  (assert (= (. heights 1) 0.0) "flat rect apply should leave outside samples unchanged")
+  (assert (= (. heights 7) 6.0) "flat rect apply should change targeted samples")
+  (assert (= (. (. (. state.scene.terrains 1) :options) :default-height) 0.0)
+          "flat rect apply should not rewrite default-height")
+  (node:drop))
+
+(fn test-heightfield-adjust-tool-node-applies-rectangle-to-world-state []
+  (local {:HeightfieldAdjustToolNode HeightfieldAdjustToolNode} (require :graph/nodes/heightfield-adjust-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 1.0
+                                      :chunk-samples [5 5]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (HeightfieldAdjustToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:target {:mode :rect
+                               :x0 1
+                               :z0 1
+                               :x1 2
+                               :z1 2}
+                      :delta 2.0})
+  (local heights (. (. (. state.scene.terrains 1) :chunks 1) :heights))
+  (assert (= (. heights 1) 1.0) "adjust rect apply should leave outside samples unchanged")
+  (assert (= (. heights 7) 3.0) "adjust rect apply should change targeted samples")
+  (assert (= (. (. (. state.scene.terrains 1) :options) :default-height) 1.0)
+          "adjust rect apply should not rewrite default-height")
+  (node:drop))
+
+(fn test-heightfield-perlin-tool-node-applies-rectangle-to-world-state []
+  (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode} (require :graph/nodes/heightfield-perlin-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 0.0
+                                      :chunk-samples [5 5]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (HeightfieldPerlinToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:target {:mode :rect
+                               :x0 1
+                               :z0 1
+                               :x1 3
+                               :z1 3}
+                      :seed 99
+                      :n1div 30
+                      :n2div 4
+                      :n3div 1
+                      :n1scale 20
+                      :n2scale 2
+                      :n3scale 1
+                      :zroot 2
+                      :zpower 2.5})
+  (local heights (. (. (. state.scene.terrains 1) :chunks 1) :heights))
+  (var changed-count 0)
+  (each [_ value (ipairs heights)]
+    (when (not (= value 0.0))
+      (set changed-count (+ changed-count 1))))
+  (assert (= (. heights 1) 0.0) "perlin rect apply should leave outside samples unchanged")
+  (assert (> changed-count 0) "perlin rect apply should change targeted samples")
+  (node:drop))
+
+(fn test-heightfield-resize-tool-node-updates-world-state []
+  (local {:HeightfieldResizeToolNode HeightfieldResizeToolNode} (require :graph/nodes/heightfield-resize-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 0.0
+                                      :chunk-samples [5 5]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (HeightfieldResizeToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:min-chunk-x -1
+                      :min-chunk-z 0
+                      :max-chunk-x 1
+                      :max-chunk-z 0
+                      :fill-height 2.5})
+  (local chunks (. (. state.scene.terrains 1) :chunks))
+  (assert (= (length chunks) 3) "resize tool should update persisted chunk coverage")
+  (assert (= (. (. chunks 1) :coord 1) -1) "resize tool should extend chunk coverage left")
+  (assert (= (. (. chunks 2) :coord 1) 0) "resize tool should preserve overlapping center chunk")
+  (assert (= (. (. chunks 3) :coord 1) 1) "resize tool should extend chunk coverage right")
+  (assert (= (. (. (. chunks 2) :heights) 1) 0.0) "resize tool should preserve overlapping chunk sample data")
+  (assert (= (. (. (. chunks 1) :heights) 1) 2.5) "resize tool should fill new chunks with fill height")
+  (node:drop))
+
+(fn test-heightfield-perlin-tool-node-applies-to-active-scene-in-place []
+  (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode} (require :graph/nodes/heightfield-perlin-tool))
   (local terrain-record (make-heightfield-terrain-record {:id "terrain-a" :default-height 0.0}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
@@ -808,18 +975,19 @@
   (local manager (make-world-manager {:id "test-world"
                                       :active? true
                                       :entry entry}))
-  (local node (HeightfieldTerrainNode {:world-id "test-world"
-                                       :world-manager manager
-                                       :terrain-id "terrain-a"}))
-  (node:apply-perlin-values {:seed 99
-                             :n1div 30
-                             :n2div 4
-                             :n3div 1
-                             :n1scale 20
-                             :n2scale 2
-                             :n3scale 1
-                             :zroot 2
-                             :zpower 2.5})
+  (local node (HeightfieldPerlinToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:seed 99
+                      :target {:mode :whole}
+                      :n1div 30
+                      :n2div 4
+                      :n3div 1
+                      :n1scale 20
+                      :n2scale 2
+                      :n3scale 1
+                      :zroot 2
+                      :zpower 2.5})
   (assert replaced "active perlin tool apply should replace only that terrain runtime")
   (assert (= replaced.terrain-id "terrain-a") "active perlin tool apply should target the same terrain id")
   (assert (not (= (. (. (. replaced.record :chunks 1) :heights) 1)
@@ -827,12 +995,113 @@
           "active perlin tool apply should update runtime chunk data")
   (node:drop))
 
+(fn test-heightfield-resize-tool-node-updates-active-scene-in-place []
+  (local {:HeightfieldResizeToolNode HeightfieldResizeToolNode} (require :graph/nodes/heightfield-resize-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 0.0
+                                      :chunk-samples [5 5]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (var replaced nil)
+  (local runtime (make-scene-runtime {:terrains state.scene.terrains
+                                      :on-replace-terrain-record (fn [terrain-id record]
+                                                                  (set replaced {:terrain-id terrain-id
+                                                                                 :record record}))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (HeightfieldResizeToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:min-chunk-x 0
+                      :min-chunk-z 0
+                      :max-chunk-x 0
+                      :max-chunk-z 1
+                      :fill-height 4.0})
+  (assert replaced "active resize tool apply should replace only that terrain runtime")
+  (assert (= replaced.terrain-id "terrain-a") "active resize tool apply should target the same terrain id")
+  (assert (= (length replaced.record.chunks) 2) "active resize tool apply should update runtime chunk coverage")
+  (assert (= (. (. (. replaced.record.chunks 2) :coord) 2) 1) "active resize tool apply should include the new chunk")
+  (assert (= (. (. (. replaced.record.chunks 2) :heights) 1) 4.0) "active resize tool apply should fill new runtime chunks")
+  (node:drop))
+
+(fn test-heightfield-adjust-tool-node-applies-to-active-scene-in-place []
+  (local {:HeightfieldAdjustToolNode HeightfieldAdjustToolNode} (require :graph/nodes/heightfield-adjust-tool))
+  (local terrain-record (make-heightfield-terrain-record {:id "terrain-a" :default-height 1.0}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (var replaced nil)
+  (local runtime (make-scene-runtime {:terrains state.scene.terrains
+                                      :on-replace-terrain-record (fn [terrain-id record]
+                                                                  (set replaced {:terrain-id terrain-id
+                                                                                 :record record}))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (HeightfieldAdjustToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-values {:target {:mode :whole}
+                      :delta -0.5})
+  (assert replaced "active adjust tool apply should replace only that terrain runtime")
+  (assert (= replaced.terrain-id "terrain-a") "active adjust tool apply should target the same terrain id")
+  (assert (= (. (. (. replaced.record :chunks 1) :heights) 1) 0.5) "active adjust tool apply should update runtime chunk data")
+  (assert (= (. (. replaced.record :options) :default-height) 0.5) "active adjust tool apply should update default height")
+  (node:drop))
+
+(fn test-heightfield-adjust-tool-node-applies-stroke-batch-in-one-update []
+  (local {:HeightfieldAdjustToolNode HeightfieldAdjustToolNode} (require :graph/nodes/heightfield-adjust-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 0.0
+                                      :chunk-samples [5 5]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (var replace-count 0)
+  (var replaced nil)
+  (local runtime
+    (make-scene-runtime {:terrains state.scene.terrains
+                         :on-replace-terrain-record (fn [terrain-id record]
+                                                     (set replace-count (+ replace-count 1))
+                                                     (set replaced {:terrain-id terrain-id
+                                                                    :record record}))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :runtime runtime
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (HeightfieldAdjustToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (node:apply-stroke-values {:targets [{:mode :rect :x0 1 :z0 1 :x1 1 :z1 1}
+                                       {:mode :rect :x0 2 :z0 1 :x1 2 :z1 1}
+                                       {:mode :rect :x0 3 :z0 1 :x1 3 :z1 1}]
+                             :delta 0.5})
+  (assert (= replace-count 1) "stroke batch should replace the active terrain runtime once")
+  (assert replaced "stroke batch should replace the active terrain runtime")
+  (local heights (. (. replaced.record :chunks 1) :heights))
+  (assert (= (. heights 7) 0.5) "stroke batch should update the first stamped sample")
+  (assert (= (. heights 8) 0.5) "stroke batch should update intermediate stamped samples")
+  (assert (= (. heights 9) 0.5) "stroke batch should update the last stamped sample")
+  (node:drop))
+
 (fn test-terrain-node-open-editor-adds-edge []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local graph (Graph {:with-start false}))
   (local entry (make-world-entry {:id "test-world"
                                   :state {:scene {:panels []
-                                                  :terrains [(make-flat-terrain-record {:id "terrain-a"})]}
+                                                  :terrains [(make-heightfield-terrain-record {:id "terrain-a"})]}
                                           :hud {:panels []}}}))
   (local manager (make-world-manager {:id "test-world" :entry entry}))
   (local node (TerrainNode {:world-id "test-world"
@@ -871,25 +1140,11 @@
   (local node (TerrainsNode {:world-id "test-world"
                              :world-manager (make-world-manager {:id "test-world"
                                                                  :state state})}))
-  (local added (node:add-terrain "flat-terrain"))
-  (assert added "adding a flat terrain should return the created record")
+  (local added (node:add-terrain "heightfield-terrain"))
+  (assert added "adding a heightfield terrain should return the created record")
   (assert (= (length state.scene.terrains) 1) "adding a terrain should append to world state")
-  (assert (= (. (. state.scene.terrains 1) :kind) "flat-terrain") "added terrain should preserve kind")
+  (assert (= (. (. state.scene.terrains 1) :kind) "heightfield-terrain") "added terrain should preserve kind")
   (assert (. added :id) "added terrain should have an id")
-  (node:drop))
-
-(fn test-terrains-node-add-terrain-supports-perlin-kind []
-  (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
-  (local state {:scene {:panels [] :terrains []}
-                :hud {:panels []}})
-  (local node (TerrainsNode {:world-id "test-world"
-                             :world-manager (make-world-manager {:id "test-world"
-                                                                 :state state})}))
-  (local added (node:add-terrain "perlin-terrain"))
-  (assert added "adding a perlin terrain should return the created record")
-  (assert (= (. added :kind) "perlin-terrain") "perlin add should preserve terrain kind")
-  (assert (= (. (. added :options) :seed) 1337) "perlin add should seed default options")
-  (assert (= (length state.scene.terrains) 1) "perlin add should append to world state")
   (node:drop))
 
 (fn test-terrains-node-add-terrain-supports-heightfield-kind []
@@ -920,11 +1175,65 @@
                             :world-manager manager
                             :terrain-id "terrain-a"}))
   (graph:add-node node {})
-  (assert (= node.label "Heightfield Terrain") "heightfield terrains should use the kind label")
+  (assert (= node.label "terrain") "heightfield terrain node should stay generic without a name")
   (assert (= node.has-editor? true) "heightfield terrain should advertise its editor")
   (local editor (node:open-editor))
   (assert editor "heightfield terrain should open a type-specific editor")
   (assert (= editor.key "terrain-editor:test-world:terrain-a") "heightfield terrain editor key should be stable")
+  (graph:drop))
+
+(fn test-terrain-node-open-tool-adds-edge []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local graph (Graph {:with-start false}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-heightfield-terrain-record {:id "terrain-a"})]}
+                                          :hud {:panels []}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (TerrainNode {:world-id "test-world"
+                            :world-manager manager
+                            :terrain-id "terrain-a"}))
+  (graph:add-node node {})
+  (local tool-node (node:open-tool "apply-perlin"))
+  (assert tool-node "TerrainNode should create a dedicated terrain tool node")
+  (assert (= tool-node.key "terrain-tool:test-world:terrain-a:apply-perlin") "terrain tool key should be stable")
+  (assert (= (graph:edge-count) 1) "opening a terrain tool should add one edge")
+  (graph:drop))
+
+(fn test-terrain-node-open-resize-tool-adds-edge []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local graph (Graph {:with-start false}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-heightfield-terrain-record {:id "terrain-a"})]}
+                                          :hud {:panels []}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (TerrainNode {:world-id "test-world"
+                            :world-manager manager
+                            :terrain-id "terrain-a"}))
+  (graph:add-node node {})
+  (local tool-node (node:open-tool "resize-terrain"))
+  (assert tool-node "TerrainNode should create a resize terrain tool node")
+  (assert (= tool-node.key "terrain-tool:test-world:terrain-a:resize-terrain") "resize terrain tool key should be stable")
+  (assert (= (graph:edge-count) 1) "opening the resize terrain tool should add one edge")
+  (graph:drop))
+
+(fn test-terrain-node-open-adjust-tool-adds-edge []
+  (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
+  (local graph (Graph {:with-start false}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state {:scene {:panels []
+                                                  :terrains [(make-heightfield-terrain-record {:id "terrain-a"})]}
+                                          :hud {:panels []}}}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (TerrainNode {:world-id "test-world"
+                            :world-manager manager
+                            :terrain-id "terrain-a"}))
+  (graph:add-node node {})
+  (local tool-node (node:open-tool "adjust-height"))
+  (assert tool-node "TerrainNode should create an adjust-height tool node")
+  (assert (= tool-node.key "terrain-tool:test-world:terrain-a:adjust-height") "adjust-height tool key should be stable")
+  (assert (= (graph:edge-count) 1) "opening the adjust-height tool should add one edge")
   (graph:drop))
 
 (fn test-terrains-node-adds-active-scene-terrain-in-place []
@@ -944,7 +1253,7 @@
   (local node (TerrainsNode {:world-id "test-world"
                              :world-manager (make-world-manager {:id "test-world"
                                                                  :entry entry})}))
-  (local added (node:add-terrain "flat-terrain"))
+  (local added (node:add-terrain "heightfield-terrain"))
   (assert added "active terrain add should return the created record")
   (assert added-record "active terrain add should sync into the live scene")
   (assert (= added-record.id added.id) "active scene add should use the same terrain record")
@@ -975,7 +1284,7 @@
                              :world-manager (make-world-manager {:id "test-world"
                                                                  :state state})}))
   (graph:add-node node {})
-  (local added (node:add-terrain "flat-terrain"))
+  (local added (node:add-terrain "heightfield-terrain"))
   (assert added "graph terrain add should return the created record")
   (local terrain-key (.. "terrain:test-world:" added.id))
   (local terrain-node (graph:lookup terrain-key))
@@ -1377,7 +1686,7 @@
       (local graph (Graph {:with-start false}))
       (local entry (make-world-entry {:id "test-world"
                                       :state {:scene {:panels []
-                                                      :terrains [(make-flat-terrain-record {:id "terrain-abc"})]}
+                                                      :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
       (local result (graph:load-by-key "terrain:test-world:terrain-abc"))
@@ -1393,30 +1702,14 @@
       (local graph (Graph {:with-start false}))
       (local entry (make-world-entry {:id "test-world"
                                       :state {:scene {:panels []
-                                                      :terrains [(make-flat-terrain-record {:id "terrain-abc"})]}
+                                                      :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
                                               :hud {:panels []}}}))
       (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
       (local result (graph:load-by-key "terrain-editor:test-world:terrain-abc"))
       (assert result "terrain editor loader should create node")
       (assert (= result.key "terrain-editor:test-world:terrain-abc") "terrain editor key should match")
       (assert (= result.terrain-id "terrain-abc") "terrain editor terrain-id should be parsed")
-      (result:drop)
-      (graph:drop))))
-
-(fn test-graph-key-loaders-loads-perlin-terrain-editor-node []
-  (with-temp-dir
-    (fn [dir]
-      (local graph (Graph {:with-start false}))
-      (local entry (make-world-entry {:id "test-world"
-                                      :state {:scene {:panels []
-                                                      :terrains [(make-perlin-terrain-record {:id "terrain-abc"})]}
-                                              :hud {:panels []}}}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
-      (local result (graph:load-by-key "terrain-editor:test-world:terrain-abc"))
-      (assert result "perlin terrain editor loader should create node")
-      (assert (= result.key "terrain-editor:test-world:terrain-abc") "perlin terrain editor key should match")
-      (assert (= result.terrain-id "terrain-abc") "perlin terrain editor terrain-id should be parsed")
-      (assert (= result.terrain-kind "perlin-terrain") "perlin terrain editor should preserve terrain kind")
+      (assert (= result.terrain-kind "heightfield-terrain") "terrain editor should preserve terrain kind")
       (result:drop)
       (graph:drop))))
 
@@ -1437,6 +1730,22 @@
       (result:drop)
       (graph:drop))))
 
+(fn test-graph-key-loaders-loads-heightfield-terrain-tool-node []
+  (with-temp-dir
+    (fn [dir]
+      (local graph (Graph {:with-start false}))
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels []
+                                                      :terrains [(make-heightfield-terrain-record {:id "terrain-abc"})]}
+                                              :hud {:panels []}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (local result (graph:load-by-key "terrain-tool:test-world:terrain-abc:apply-perlin"))
+      (assert result "terrain tool loader should create node")
+      (assert (= result.key "terrain-tool:test-world:terrain-abc:apply-perlin") "terrain tool key should match")
+      (assert (= result.terrain-id "terrain-abc") "terrain tool terrain-id should be parsed")
+      (result:drop)
+      (graph:drop))))
+
 (table.insert tests {:name "worlds node module exports" :fn test-worlds-node-module-exports})
 (table.insert tests {:name "world node module exports" :fn test-world-node-module-exports})
 (table.insert tests {:name "scene panels node module exports" :fn test-scene-panels-node-module-exports})
@@ -1448,6 +1757,8 @@
 (table.insert tests {:name "flat terrain node module exports" :fn test-flat-terrain-node-module-exports})
 (table.insert tests {:name "perlin terrain node module exports" :fn test-perlin-terrain-node-module-exports})
 (table.insert tests {:name "heightfield terrain node module exports" :fn test-heightfield-terrain-node-module-exports})
+(table.insert tests {:name "world data resolve-active-scene uses active-world-id"
+                     :fn test-world-data-resolve-active-scene-uses-active-world-id})
 (table.insert tests {:name "worlds node requires world-manager" :fn test-worlds-node-requires-world-manager})
 (table.insert tests {:name "world node requires world-id" :fn test-world-node-requires-world-id})
 (table.insert tests {:name "scene panels node requires world-id" :fn test-scene-panels-node-requires-world-id})
@@ -1467,7 +1778,8 @@
 (table.insert tests {:name "scene panel node has correct key" :fn test-scene-panel-node-has-correct-key})
 (table.insert tests {:name "hud panel node has correct key" :fn test-hud-panel-node-has-correct-key})
 (table.insert tests {:name "terrain node has correct key" :fn test-terrain-node-has-correct-key})
-(table.insert tests {:name "terrain node default label uses terrain kind" :fn test-terrain-node-default-label-uses-terrain-kind})
+(table.insert tests {:name "terrain node default label is generic" :fn test-terrain-node-default-label-is-generic})
+(table.insert tests {:name "terrain node uses name as label" :fn test-terrain-node-uses-name-as-label})
 (table.insert tests {:name "flat terrain node has correct key" :fn test-flat-terrain-node-has-correct-key})
 (table.insert tests {:name "perlin terrain node has correct key" :fn test-perlin-terrain-node-has-correct-key})
 (table.insert tests {:name "heightfield terrain node has correct key" :fn test-heightfield-terrain-node-has-correct-key})
@@ -1490,13 +1802,29 @@
 (table.insert tests {:name "heightfield terrain node updates world state" :fn test-heightfield-terrain-node-updates-world-state})
 (table.insert tests {:name "heightfield terrain node updates active scene in place" :fn test-heightfield-terrain-node-updates-active-scene-in-place})
 (table.insert tests {:name "heightfield terrain node errors when active runtime update fails" :fn test-heightfield-terrain-node-errors-when-active-runtime-update-fails})
-(table.insert tests {:name "heightfield terrain node applies perlin to world state" :fn test-heightfield-terrain-node-applies-perlin-to-world-state})
-(table.insert tests {:name "heightfield terrain node applies perlin to active scene in place" :fn test-heightfield-terrain-node-applies-perlin-to-active-scene-in-place})
+(table.insert tests {:name "heightfield flat tool node applies rectangle to world state"
+                     :fn test-heightfield-flat-tool-node-applies-rectangle-to-world-state})
+(table.insert tests {:name "heightfield adjust tool node applies rectangle to world state"
+                     :fn test-heightfield-adjust-tool-node-applies-rectangle-to-world-state})
+(table.insert tests {:name "heightfield resize tool node updates world state"
+                     :fn test-heightfield-resize-tool-node-updates-world-state})
+(table.insert tests {:name "heightfield perlin tool node applies rectangle to world state"
+                     :fn test-heightfield-perlin-tool-node-applies-rectangle-to-world-state})
+(table.insert tests {:name "heightfield perlin tool node applies to world state" :fn test-heightfield-perlin-tool-node-applies-to-world-state})
+(table.insert tests {:name "heightfield resize tool node updates active scene in place"
+                     :fn test-heightfield-resize-tool-node-updates-active-scene-in-place})
+(table.insert tests {:name "heightfield adjust tool node applies to active scene in place"
+                     :fn test-heightfield-adjust-tool-node-applies-to-active-scene-in-place})
+(table.insert tests {:name "heightfield adjust tool node applies stroke batch in one update"
+                     :fn test-heightfield-adjust-tool-node-applies-stroke-batch-in-one-update})
+(table.insert tests {:name "heightfield perlin tool node applies to active scene in place" :fn test-heightfield-perlin-tool-node-applies-to-active-scene-in-place})
 (table.insert tests {:name "terrain node open editor adds edge" :fn test-terrain-node-open-editor-adds-edge})
 (table.insert tests {:name "terrain node open editor returns nil for noneditable kind" :fn test-terrain-node-open-editor-returns-nil-for-noneditable-kind})
 (table.insert tests {:name "terrain node heightfield kind opens editor" :fn test-terrain-node-heightfield-kind-opens-editor})
+(table.insert tests {:name "terrain node open tool adds edge" :fn test-terrain-node-open-tool-adds-edge})
+(table.insert tests {:name "terrain node open resize tool adds edge" :fn test-terrain-node-open-resize-tool-adds-edge})
+(table.insert tests {:name "terrain node open adjust tool adds edge" :fn test-terrain-node-open-adjust-tool-adds-edge})
 (table.insert tests {:name "terrains node add terrain updates world state" :fn test-terrains-node-add-terrain-updates-world-state})
-(table.insert tests {:name "terrains node add terrain supports perlin kind" :fn test-terrains-node-add-terrain-supports-perlin-kind})
 (table.insert tests {:name "terrains node add terrain supports heightfield kind" :fn test-terrains-node-add-terrain-supports-heightfield-kind})
 (table.insert tests {:name "terrains node adds active scene terrain in place" :fn test-terrains-node-adds-active-scene-terrain-in-place})
 (table.insert tests {:name "terrains node add terrain errors on unsupported kind" :fn test-terrains-node-add-terrain-errors-on-unsupported-kind})
@@ -1525,8 +1853,8 @@
 (table.insert tests {:name "graph key loaders loads hud panel node" :fn test-graph-key-loaders-loads-hud-panel-node})
 (table.insert tests {:name "graph key loaders loads terrain node" :fn test-graph-key-loaders-loads-terrain-node})
 (table.insert tests {:name "graph key loaders loads terrain editor node" :fn test-graph-key-loaders-loads-terrain-editor-node})
-(table.insert tests {:name "graph key loaders loads perlin terrain editor node" :fn test-graph-key-loaders-loads-perlin-terrain-editor-node})
 (table.insert tests {:name "graph key loaders loads heightfield terrain editor node" :fn test-graph-key-loaders-loads-heightfield-terrain-editor-node})
+(table.insert tests {:name "graph key loaders loads heightfield terrain tool node" :fn test-graph-key-loaders-loads-heightfield-terrain-tool-node})
 
 (fn make-icons-stub []
   (local glyph {:advance 1})
@@ -1628,7 +1956,7 @@
 (fn test-terrains-node-view-builds-add-controls []
   (local TerrainsNodeView (require :graph/view/views/terrains))
   (local ctx (make-build-ctx))
-  (local mock-node {:supported-terrain-kinds ["flat-terrain" "perlin-terrain"]
+  (local mock-node {:supported-terrain-kinds ["heightfield-terrain"]
                     :emit-items (fn [] [])
                     :items-changed (Signal)
                     :open-terrain-node (fn [_self _entry] nil)
@@ -1638,7 +1966,7 @@
   (assert view.layout "TerrainsNodeView should have layout")
   (assert view.kind-picker "TerrainsNodeView should expose a terrain kind picker")
   (assert view.add-button "TerrainsNodeView should expose an add button")
-  (assert (= (view.kind-picker:get-value) "flat-terrain")
+  (assert (= (view.kind-picker:get-value) "heightfield-terrain")
           "TerrainsNodeView should default to the first supported terrain kind")
   (view:drop))
 
@@ -1646,7 +1974,7 @@
   (local TerrainsNodeView (require :graph/view/views/terrains))
   (local ctx (make-build-ctx))
   (var added-kind nil)
-  (local mock-node {:supported-terrain-kinds ["flat-terrain" "perlin-terrain"]
+  (local mock-node {:supported-terrain-kinds ["heightfield-terrain"]
                     :emit-items (fn [] [])
                     :items-changed (Signal)
                     :open-terrain-node (fn [_self _entry] nil)
@@ -1654,9 +1982,9 @@
                                    (set added-kind kind))})
   (local builder (TerrainsNodeView mock-node))
   (local view (builder ctx))
-  (view.kind-picker:set-value "perlin-terrain")
+  (view.kind-picker:set-value "heightfield-terrain")
   (view.add-button:on-click nil)
-  (assert (= added-kind "perlin-terrain")
+  (assert (= added-kind "heightfield-terrain")
           "TerrainsNodeView add button should use the selected terrain kind")
   (view:drop))
 
@@ -1684,16 +2012,23 @@
   (local TerrainNodeView (require :graph/view/views/terrain))
   (local ctx (make-build-ctx))
   (local mock-node {:terrain-id "terrain-a"
-                    :terrain-kind "flat-terrain"
+                    :terrain-kind "heightfield-terrain"
                     :has-editor? true
                     :open-editor (fn [_self] nil)
+                    :open-tool (fn [_self _tool-id] nil)
                     :remove-terrain (fn [_self] nil)
-                    :terrain-record (make-flat-terrain-record {:id "terrain-a"})
+                    :terrain-record (make-heightfield-terrain-record {:id "terrain-a" :name "mesa"})
+                    :available-tools [{:id "resize-terrain" :label "Resize Terrain"}
+                                      {:id "initialize-flat" :label "Initialize Flat"}
+                                      {:id "adjust-height" :label "Raise/Lower"}
+                                      {:id "apply-perlin" :label "Apply Perlin"}]
                     :changed (Signal)})
   (local builder (TerrainNodeView mock-node))
   (local view (builder ctx))
   (assert view.layout "TerrainNodeView should have layout")
   (assert view.scroll-view "TerrainNodeView should use a scroll view for long summaries")
+  (assert view.tools-search "TerrainNodeView should expose a tools search list")
+  (assert (= (length (or view.tools-search.items [])) 4) "TerrainNodeView should list terrain tools")
   (view:drop))
 
 (fn test-flat-terrain-node-view-defers-updates-until-apply []
@@ -1841,26 +2176,19 @@
 
 (fn test-heightfield-terrain-node-view-builds []
   (local Validation (require :graph/heightfield-terrain-editor-validation))
-  (local PerlinValidation (require :graph/heightfield-perlin-tool-validation))
   (local HeightfieldTerrainNodeView (require :graph/view/views/heightfield-terrain))
   (local ctx (make-build-ctx))
   (local mock-node {:terrain-id "terrain-a"
                     :changed (Signal)
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
-                    :apply-values (fn [_self _values] true)
-                    :apply-perlin-values (fn [_self _values] true)})
+                    :apply-values (fn [_self _values] true)})
   (local builder (HeightfieldTerrainNodeView mock-node))
   (local view (builder ctx))
   (assert view "HeightfieldTerrainNodeView should build a view")
   (assert view.layout "HeightfieldTerrainNodeView should have layout")
-  (assert view.flat-view "HeightfieldTerrainNodeView should expose the flat tool subview")
-  (assert view.perlin-view "HeightfieldTerrainNodeView should expose the perlin tool subview")
-  (assert view.flat-view.fields "flat tool should expose fields")
-  (assert view.perlin-view.fields "perlin tool should expose fields")
-  (assert (= (length Validation.field-specs) 1) "validation should expose heightfield terrain field specs")
-  (assert (= (length PerlinValidation.field-specs) 9) "validation should expose heightfield perlin field specs")
-  (assert (not view.flat-view.apply-button.enabled?) "flat apply should start disabled when nothing changed")
-  (assert (not view.perlin-view.apply-button.enabled?) "perlin apply should start disabled when nothing changed")
+  (assert view.fields "HeightfieldTerrainNodeView should expose property fields")
+  (assert (= (length Validation.field-specs) 6) "validation should expose heightfield terrain property field specs")
+  (assert (not view.apply-button.enabled?) "property apply should start disabled when nothing changed")
   (view:drop))
 
 (fn test-heightfield-terrain-node-view-defers-updates-until-apply []
@@ -1874,23 +2202,25 @@
                     :get-record (fn [] record)
                     :apply-values (fn [_self validated]
                                     (set updates (+ updates 1))
+                                    (set record.name validated.name)
                                     (local options (. record :options))
-                                    (local chunk (. record :chunks 1))
-                                    (set options.default-height validated.height)
-                                    (set (. chunk.heights 1) validated.height)
+                                    (set options.position validated.position)
+                                    (set options.opacity validated.opacity)
+                                    (set options.physics validated.physics)
                                     (changed:emit record)
-                                    record)
-                    :apply-perlin-values (fn [_self _validated] nil)})
+                                    record)})
   (local builder (HeightfieldTerrainNodeView mock-node))
   (local view (builder ctx))
-  (view.flat-view.fields.height:set-text "2.75")
+  (view.fields.name:set-text "mesa")
+  (view.fields.physics:set-value "disabled")
   (assert (= updates 0) "editing input text should not update heightfield terrain immediately")
-  (assert view.flat-view.apply-button.enabled? "Apply should enable when the heightfield draft is dirty")
-  (view.flat-view.apply-button:on-click {})
+  (assert view.apply-button.enabled? "Apply should enable when the heightfield draft is dirty")
+  (view.apply-button:on-click {})
   (assert (= updates 1) "Apply should trigger a single heightfield terrain update")
-  (assert (= (. (. record :options) :default-height) 2.75) "Apply should write edited flat height")
-  (assert (not view.flat-view.apply-button.enabled?) "Apply should disable again after heightfield commit")
-  (assert (= (text-entity-value view.flat-view.status-label) "Applied") "successful heightfield apply should show applied status")
+  (assert (= record.name "mesa") "Apply should write edited terrain name")
+  (assert (= (. (. record :options) :physics) false) "Apply should write edited physics state")
+  (assert (not view.apply-button.enabled?) "Apply should disable again after heightfield commit")
+  (assert (= (text-entity-value view.status-label) "Applied") "successful heightfield apply should show applied status")
   (view:drop))
 
 (fn test-heightfield-terrain-node-view-shows-validation-errors []
@@ -1902,77 +2232,333 @@
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
                     :apply-values (fn [_self _values]
                                     (set updates (+ updates 1))
-                                    true)
-                    :apply-perlin-values (fn [_self _values] nil)})
+                                    true)})
   (local builder (HeightfieldTerrainNodeView mock-node))
   (local view (builder ctx))
-  (view.flat-view.fields.height:set-text "oops")
-  (view.flat-view.apply-button:on-click {})
+  (view.fields.opacity:set-text "2")
+  (view.apply-button:on-click {})
   (assert (= updates 0) "invalid heightfield apply should not update terrain")
-  (assert (= (text-entity-value (. (. view.flat-view :error-labels) :height)) "Flat height must be a number")
+  (assert (= (text-entity-value (. (. view :error-labels) :opacity)) "Opacity must be between 0 and 1")
           "invalid heightfield value should show an inline error")
-  (assert (= (text-entity-value view.flat-view.status-label) "Fix 1 invalid field before applying")
+  (assert (= (text-entity-value view.status-label) "Fix 1 invalid field before applying")
           "invalid heightfield apply should show summary feedback")
-  (view.flat-view.fields.height:set-text "1.5")
-  (assert (= (text-entity-value (. (. view.flat-view :error-labels) :height)) "")
+  (view.fields.opacity:set-text "0.5")
+  (assert (= (text-entity-value (. (. view :error-labels) :opacity)) "")
           "fixing the heightfield field should clear its inline error")
-  (assert (= (text-entity-value view.flat-view.status-label) "Unsaved changes")
+  (assert (= (text-entity-value view.status-label) "Unsaved changes")
           "fixing the heightfield field should return to unsaved status")
   (view:drop))
 
-(fn test-heightfield-terrain-node-view-perlin-defers-updates-until-apply []
-  (local HeightfieldTerrainNodeView (require :graph/view/views/heightfield-terrain))
+(fn test-heightfield-flat-tool-node-view-builds []
+  (local Validation (require :graph/heightfield-flat-tool-validation))
+  (local HeightfieldFlatToolNodeView (require :graph/view/views/heightfield-flat-tool))
   (local ctx (make-build-ctx))
-  (var updates 0)
-  (local changed (Signal))
+  (local world-changed (Signal))
   (local mock-node {:terrain-id "terrain-a"
-                    :changed changed
+                    :world-id "world-a"
+                    :world-manager {:changed world-changed}
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
-                    :apply-values (fn [_self _validated] nil)
-                    :apply-perlin-values (fn [_self validated]
-                                           (set updates (+ updates 1))
-                                           (changed:emit validated)
-                                           validated)})
-  (local builder (HeightfieldTerrainNodeView mock-node))
+                    :get-live-scene (fn [] nil)
+                    :apply-values (fn [_self _validated] true)})
+  (local builder (HeightfieldFlatToolNodeView mock-node))
   (local view (builder ctx))
-  (view.perlin-view.fields.seed:set-text "99")
-  (assert (= updates 0) "editing perlin inputs should not update heightfield terrain immediately")
-  (assert view.perlin-view.apply-button.enabled? "perlin apply should enable when the draft is dirty")
-  (view.perlin-view.apply-button:on-click {})
-  (assert (= updates 1) "perlin apply should trigger a single heightfield terrain update")
-  (assert (= (view.perlin-view.fields.seed:get-text) "99")
-          "successful perlin apply should preserve the last used tool params")
-  (assert (not view.perlin-view.apply-button.enabled?) "perlin apply should disable again after commit")
-  (assert (= (text-entity-value view.perlin-view.status-label) "Applied")
-          "successful perlin apply should show applied status")
+  (assert view.layout "HeightfieldFlatToolNodeView should have layout")
+  (assert view.scroll-view "HeightfieldFlatToolNodeView should wrap controls in a scroll view")
+  (assert view.fields "HeightfieldFlatToolNodeView should expose fields")
+  (assert view.pick-button "HeightfieldFlatToolNodeView should expose the live pick button")
+  (assert (not view.pick-button.enabled?) "flat tool live pick should be disabled without an active scene")
+  (assert (= (length Validation.field-specs) 6) "flat tool validation should expose target and height fields")
   (view:drop))
 
-(fn test-heightfield-terrain-node-view-perlin-shows-validation-errors []
-  (local HeightfieldTerrainNodeView (require :graph/view/views/heightfield-terrain))
+(fn test-heightfield-flat-tool-node-view-reacts-to-world-activation []
+  (local HeightfieldFlatToolNodeView (require :graph/view/views/heightfield-flat-tool))
+  (local ctx (make-build-ctx))
+  (local world-changed (Signal))
+  (var live-scene nil)
+  (local mock-node {:terrain-id "terrain-a"
+                    :world-id "world-a"
+                    :world-manager {:changed world-changed}
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-live-scene (fn [] live-scene)
+                    :apply-values (fn [_self _validated] true)})
+  (local builder (HeightfieldFlatToolNodeView mock-node))
+  (local view (builder ctx))
+  (assert (not view.pick-button.enabled?) "flat tool live pick should start disabled without an active scene")
+  (set live-scene {:id "scene-a"})
+  (world-changed:emit {:active-index 1})
+  (assert view.pick-button.enabled? "flat tool live pick should enable when its world becomes active")
+  (set live-scene nil)
+  (world-changed:emit {:active-index nil})
+  (assert (not view.pick-button.enabled?) "flat tool live pick should disable when its world becomes inactive")
+  (view:drop))
+
+(fn test-heightfield-flat-tool-stays-applicable-after-apply []
+  (local HeightfieldFlatToolNodeView (require :graph/view/views/heightfield-flat-tool))
   (local ctx (make-build-ctx))
   (var updates 0)
   (local mock-node {:terrain-id "terrain-a"
-                    :changed (Signal)
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
-                    :apply-values (fn [_self _values] nil)
-                    :apply-perlin-values (fn [_self _values]
+                    :apply-values (fn [_self _values]
                                            (set updates (+ updates 1))
                                            true)})
-  (local builder (HeightfieldTerrainNodeView mock-node))
+  (local builder (HeightfieldFlatToolNodeView mock-node))
   (local view (builder ctx))
-  (view.perlin-view.fields.seed:set-text "-1")
-  (view.perlin-view.apply-button:on-click {})
-  (assert (= updates 0) "invalid heightfield perlin apply should not update terrain")
-  (assert (= (text-entity-value (. (. view.perlin-view :error-labels) :seed)) "Seed must be between 0 and 4294967295")
-          "invalid heightfield perlin seed should show an inline error")
-  (assert (= (text-entity-value view.perlin-view.status-label) "Fix 1 invalid field before applying")
-          "invalid perlin apply should show summary feedback")
-  (view.perlin-view.fields.seed:set-text "99")
-  (assert (= (text-entity-value (. (. view.perlin-view :error-labels) :seed)) "")
-          "fixing a perlin field should clear its inline error")
-  (assert (= (text-entity-value view.perlin-view.status-label) "Unsaved changes")
-          "fixing the perlin field should return to unsaved status")
+  (view.fields.target-mode:set-value "rect")
+  (view.fields.rect-min-x:set-text "1")
+  (view.fields.rect-min-z:set-text "1")
+  (view.fields.rect-max-x:set-text "2")
+  (view.fields.rect-max-z:set-text "2")
+  (view.fields.height:set-text "2")
+  (assert view.apply-button.enabled? "flat tool should enable apply when valid")
+  (view.apply-button:on-click {})
+  (assert (= updates 1) "flat tool should apply once")
+  (assert view.apply-button.enabled? "flat tool apply should remain enabled after apply")
+  (assert (= (view.fields.target-mode:get-value) "rect") "flat tool should keep last used target mode")
+  (assert (= (text-entity-value view.status-label) "Applied") "flat tool should show applied status")
   (view:drop))
+
+(fn test-heightfield-perlin-tool-stays-applicable-after-apply []
+  (local HeightfieldPerlinToolNodeView (require :graph/view/views/heightfield-perlin-tool))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values]
+                                    (set updates (+ updates 1))
+                                    true)})
+  (local builder (HeightfieldPerlinToolNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.target-mode:set-value "rect")
+  (view.fields.rect-min-x:set-text "1")
+  (view.fields.rect-min-z:set-text "1")
+  (view.fields.rect-max-x:set-text "3")
+  (view.fields.rect-max-z:set-text "3")
+  (view.fields.seed:set-text "99")
+  (assert view.apply-button.enabled? "perlin tool should enable apply when valid")
+  (view.apply-button:on-click {})
+  (assert (= updates 1) "perlin tool should apply once")
+  (assert view.apply-button.enabled? "perlin tool apply should remain enabled after apply")
+  (assert (= (view.fields.target-mode:get-value) "rect") "perlin tool should keep last used target mode")
+  (assert (= (view.fields.seed:get-text) "99") "perlin tool should keep last used params")
+  (assert (= (text-entity-value view.status-label) "Applied") "perlin tool should show applied status")
+  (view:drop))
+
+(fn test-heightfield-perlin-tool-pick-rectangle-updates-fields []
+  (local HeightfieldPerlinToolNodeView (require :graph/view/views/heightfield-perlin-tool))
+  (local States (require :states))
+  (local TerrainRectPickState (require :terrain-rect-pick-state))
+  (local ctx (make-build-ctx))
+  (local world-changed (Signal))
+  (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local original-clickables app.clickables)
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :position [0 0 0]
+                                      :rotation [1 0 0 0]
+                                      :sample-spacing [1 1]
+                                      :chunk-samples [5 5]
+                                      :default-height 0.0
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights [0 0 0 0 0
+                                                          0 0 0 0 0
+                                                          0 0 0 0 0
+                                                          0 0 0 0 0
+                                                          0 0 0 0 0]}]}))
+  (local scene
+    {:screen-pos-terrain-domain-hit (fn [_self pos _opts]
+                                      (if (< pos.x 20)
+                                          {:terrain-id "terrain-a"
+                                           :terrain-kind "heightfield-terrain"
+                                           :terrain-record terrain-record
+                                           :local-point (glm.vec3 1 0 2)}
+                                          {:terrain-id "terrain-a"
+                                           :terrain-kind "heightfield-terrain"
+                                           :terrain-record terrain-record
+                                           :local-point (glm.vec3 3 0 4)}))})
+  (local mock-node
+    {:terrain-id "terrain-a"
+     :world-id "world-a"
+     :world-manager {:changed world-changed}
+     :get-record (fn [] terrain-record)
+     :get-live-scene (fn [] scene)
+     :apply-values (fn [_self _values] true)})
+  (local states (States))
+  (set app.hud {:build-context ctx
+                :world-units-per-pixel 1})
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states.set-state :normal)
+  (set app.states states)
+  (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
+                       :on-mouse-button-up (fn [_self _payload] nil)
+                       :active? true})
+  (local builder (HeightfieldPerlinToolNodeView mock-node))
+  (local view (builder ctx))
+  (assert view.pick-button.enabled? "perlin tool live pick should enable when the terrain world is active")
+  (for [_ 1 2]
+    (view.pick-button:on-click {})
+    (assert (= (app.states.active-name) :terrain-rect-pick)
+            "clicking pick rectangle should enter the explicit terrain rectangle pick state")
+    (assert app.terrain-rect-pick-session
+            "clicking pick rectangle should register the active terrain rectangle pick session")
+    (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+    (app.engine.events.mouse-motion.emit {:x 40 :y 60})
+    (app.engine.events.updated.emit 0.016)
+    (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
+    (assert (= (app.states.active-name) :normal)
+            "successful rectangle picking should restore the previous state"))
+  (assert (= (view.fields.target-mode:get-value) "rect")
+          "successful pick should switch the perlin tool target mode to rect")
+  (assert (= (view.fields.rect-min-x:get-text) "1")
+          "successful pick should write rect min x back into the form")
+  (assert (= (view.fields.rect-min-z:get-text) "2")
+          "successful pick should write rect min z back into the form")
+  (assert (= (view.fields.rect-max-x:get-text) "3")
+          "successful pick should write rect max x back into the form")
+  (assert (= (view.fields.rect-max-z:get-text) "4")
+          "successful pick should write rect max z back into the form")
+  (set app.terrain-rect-pick-session original-terrain-rect-pick-session)
+  (set app.states original-states)
+  (set app.hud original-hud)
+  (set app.clickables original-clickables)
+  (view:drop))
+
+(fn test-heightfield-resize-tool-node-view-builds []
+  (local Validation (require :graph/heightfield-resize-tool-validation))
+  (local HeightfieldResizeToolNodeView (require :graph/view/views/heightfield-resize-tool))
+  (local ctx (make-build-ctx))
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _validated] true)})
+  (local builder (HeightfieldResizeToolNodeView mock-node))
+  (local view (builder ctx))
+  (assert view.layout "HeightfieldResizeToolNodeView should have layout")
+  (assert view.fields "HeightfieldResizeToolNodeView should expose fields")
+  (assert (= (length Validation.field-specs) 5) "resize tool validation should expose chunk bounds and fill height")
+  (view:drop))
+
+(fn test-heightfield-resize-tool-stays-applicable-after-apply []
+  (local HeightfieldResizeToolNodeView (require :graph/view/views/heightfield-resize-tool))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values]
+                                    (set updates (+ updates 1))
+                                    true)})
+  (local builder (HeightfieldResizeToolNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.min-chunk-x:set-text "-1")
+  (view.fields.max-chunk-x:set-text "1")
+  (view.fields.fill-height:set-text "3")
+  (assert view.apply-button.enabled? "resize tool should enable apply when valid")
+  (view.apply-button:on-click {})
+  (assert (= updates 1) "resize tool should apply once")
+  (assert view.apply-button.enabled? "resize tool apply should remain enabled after apply")
+  (assert (= (view.fields.min-chunk-x:get-text) "-1") "resize tool should keep last used params")
+  (assert (= (text-entity-value view.status-label) "Applied") "resize tool should show applied status")
+  (view:drop))
+
+(fn test-heightfield-adjust-tool-node-view-builds []
+  (local Validation (require :graph/heightfield-adjust-tool-validation))
+  (local HeightfieldAdjustToolNodeView (require :graph/view/views/heightfield-adjust-tool))
+  (local ctx (make-build-ctx))
+  (local world-changed (Signal))
+  (local mock-node {:terrain-id "terrain-a"
+                    :world-id "world-a"
+                    :world-manager {:changed world-changed}
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-live-scene (fn [] nil)
+                    :apply-values (fn [_self _validated] true)})
+  (local builder (HeightfieldAdjustToolNodeView mock-node))
+  (local view (builder ctx))
+  (assert view.layout "HeightfieldAdjustToolNodeView should have layout")
+  (assert view.scroll-view "HeightfieldAdjustToolNodeView should wrap controls in a scroll view")
+  (assert view.fields "HeightfieldAdjustToolNodeView should expose fields")
+  (assert view.pick-button "HeightfieldAdjustToolNodeView should expose the live pick button")
+  (assert view.paint-button "HeightfieldAdjustToolNodeView should expose the live paint button")
+  (assert (not view.pick-button.enabled?) "adjust tool live pick should be disabled without an active scene")
+  (assert (not view.paint-button.enabled?) "adjust tool live paint should be disabled without an active scene")
+  (assert (= (length Validation.field-specs) 6) "adjust tool validation should expose target and delta fields")
+  (view:drop))
+
+(fn test-heightfield-adjust-tool-node-view-reacts-to-world-activation []
+  (local HeightfieldAdjustToolNodeView (require :graph/view/views/heightfield-adjust-tool))
+  (local ctx (make-build-ctx))
+  (local world-changed (Signal))
+  (var live-scene nil)
+  (local mock-node {:terrain-id "terrain-a"
+                    :world-id "world-a"
+                    :world-manager {:changed world-changed}
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-live-scene (fn [] live-scene)
+                    :apply-values (fn [_self _validated] true)})
+  (local builder (HeightfieldAdjustToolNodeView mock-node))
+  (local view (builder ctx))
+  (assert (not view.pick-button.enabled?) "adjust tool live pick should start disabled without an active scene")
+  (assert (not view.paint-button.enabled?) "adjust tool live paint should start disabled without an active scene")
+  (set live-scene {:id "scene-a"})
+  (world-changed:emit {:active-index 1})
+  (assert view.pick-button.enabled? "adjust tool live pick should enable when its world becomes active")
+  (assert view.paint-button.enabled? "adjust tool live paint should enable when its world becomes active")
+  (set live-scene nil)
+  (world-changed:emit {:active-index nil})
+  (assert (not view.pick-button.enabled?) "adjust tool live pick should disable when its world becomes inactive")
+  (assert (not view.paint-button.enabled?) "adjust tool live paint should disable when its world becomes inactive")
+  (view:drop))
+
+(fn test-heightfield-adjust-tool-stays-applicable-after-apply []
+  (local HeightfieldAdjustToolNodeView (require :graph/view/views/heightfield-adjust-tool))
+  (local ctx (make-build-ctx))
+  (var updates 0)
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _values]
+                                    (set updates (+ updates 1))
+                                    true)})
+  (local builder (HeightfieldAdjustToolNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.target-mode:set-value "rect")
+  (view.fields.rect-min-x:set-text "1")
+  (view.fields.rect-min-z:set-text "1")
+  (view.fields.rect-max-x:set-text "2")
+  (view.fields.rect-max-z:set-text "2")
+  (view.fields.delta:set-text "-0.5")
+  (assert view.apply-button.enabled? "adjust tool should enable apply when valid")
+  (view.apply-button:on-click {})
+  (assert (= updates 1) "adjust tool should apply once")
+  (assert view.apply-button.enabled? "adjust tool apply should remain enabled after apply")
+  (assert (= (view.fields.delta:get-text) "-0.5") "adjust tool should keep last used params")
+  (assert (= (text-entity-value view.status-label) "Applied") "adjust tool should show applied status")
+  (view:drop))
+
+(fn test-heightfield-adjust-tool-node-emits-lightweight-stroke-change []
+  (local {:HeightfieldAdjustToolNode HeightfieldAdjustToolNode} (require :graph/nodes/heightfield-adjust-tool))
+  (local entry
+    (make-world-entry {:id "world-a"
+                       :state {:scene {:panels []
+                                       :terrains [(make-heightfield-terrain-record {:id "terrain-a"})]}
+                               :hud {:panels []}}}))
+  (local world-manager (make-world-manager {:id "world-a" :entry entry}))
+  (local node (HeightfieldAdjustToolNode {:world-id "world-a"
+                                          :world-manager world-manager
+                                          :terrain-id "terrain-a"}))
+  (var payload nil)
+  (node.changed:connect (fn [next-payload]
+                          (set payload next-payload)))
+  (node:apply-stroke-values {:targets [{:mode :rect :x0 1 :z0 1 :x1 1 :z1 1}
+                                       {:mode :rect :x0 2 :z0 1 :x1 2 :z1 1}]
+                             :delta 0.25})
+  (assert (= payload.reason :live-stroke-applied)
+          "live stroke updates should emit a lightweight reason payload")
+  (assert (= payload.terrain-id "terrain-a")
+          "live stroke updates should identify the edited terrain")
+  (assert (= payload.target-count 2)
+          "live stroke updates should report the batch target count")
+  (node:drop))
 
 (table.insert tests {:name "world node view builds" :fn test-world-node-view-builds})
 (table.insert tests {:name "world node view set categories" :fn test-world-node-view-set-categories})
@@ -1992,8 +2578,18 @@
 (table.insert tests {:name "heightfield terrain node view builds" :fn test-heightfield-terrain-node-view-builds})
 (table.insert tests {:name "heightfield terrain node view defers updates until apply" :fn test-heightfield-terrain-node-view-defers-updates-until-apply})
 (table.insert tests {:name "heightfield terrain node view shows validation errors" :fn test-heightfield-terrain-node-view-shows-validation-errors})
-(table.insert tests {:name "heightfield terrain node view perlin defers updates until apply" :fn test-heightfield-terrain-node-view-perlin-defers-updates-until-apply})
-(table.insert tests {:name "heightfield terrain node view perlin shows validation errors" :fn test-heightfield-terrain-node-view-perlin-shows-validation-errors})
+(table.insert tests {:name "heightfield flat tool node view builds" :fn test-heightfield-flat-tool-node-view-builds})
+(table.insert tests {:name "heightfield flat tool node view reacts to world activation" :fn test-heightfield-flat-tool-node-view-reacts-to-world-activation})
+(table.insert tests {:name "heightfield flat tool stays applicable after apply" :fn test-heightfield-flat-tool-stays-applicable-after-apply})
+(table.insert tests {:name "heightfield perlin tool stays applicable after apply" :fn test-heightfield-perlin-tool-stays-applicable-after-apply})
+(table.insert tests {:name "heightfield perlin tool pick rectangle updates fields"
+                     :fn test-heightfield-perlin-tool-pick-rectangle-updates-fields})
+(table.insert tests {:name "heightfield resize tool node view builds" :fn test-heightfield-resize-tool-node-view-builds})
+(table.insert tests {:name "heightfield resize tool stays applicable after apply" :fn test-heightfield-resize-tool-stays-applicable-after-apply})
+(table.insert tests {:name "heightfield adjust tool node view builds" :fn test-heightfield-adjust-tool-node-view-builds})
+(table.insert tests {:name "heightfield adjust tool node view reacts to world activation" :fn test-heightfield-adjust-tool-node-view-reacts-to-world-activation})
+(table.insert tests {:name "heightfield adjust tool stays applicable after apply" :fn test-heightfield-adjust-tool-stays-applicable-after-apply})
+(table.insert tests {:name "heightfield adjust tool node emits lightweight stroke change" :fn test-heightfield-adjust-tool-node-emits-lightweight-stroke-change})
 
 (local main
   (fn []

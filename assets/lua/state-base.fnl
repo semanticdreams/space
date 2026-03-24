@@ -17,13 +17,15 @@
   (and app.movables
        (if app.movables.drag-engaged?
            (app.movables:drag-engaged?)
-           (app.movables:drag-active?))))
+           (and app.movables.drag-active?
+                (app.movables:drag-active?)))))
 
 (fn resizables-active? []
   (and app.resizables
        (if app.resizables.drag-engaged?
            (app.resizables:drag-engaged?)
-           (app.resizables:drag-active?))))
+           (and app.resizables.drag-active?
+                (app.resizables:drag-active?)))))
 
 (fn clickables-active? []
   (assert app.clickables "state-base requires app.clickables")
@@ -165,13 +167,17 @@
       true
       (do
         (assert app.clickables "state-base requires app.clickables")
-        (when (and app.resizables (= payload.button SDL_BUTTON_RIGHT))
-          (app.resizables:on-mouse-button-up payload))
+        (local resizables-mouse-up
+          (and app.resizables app.resizables.on-mouse-button-up))
+        (when (and resizables-mouse-up (= payload.button SDL_BUTTON_RIGHT))
+          (resizables-mouse-up app.resizables payload))
         (local resize-engaged? (resizables-active?))
         (when (not resize-engaged?)
           (app.clickables:on-mouse-button-up payload))
-        (when app.movables
-          (app.movables:on-mouse-button-up payload))
+        (local movables-mouse-up
+          (and app.movables app.movables.on-mouse-button-up))
+        (when movables-mouse-up
+          (movables-mouse-up app.movables payload))
         (local selector (selection-handler))
         (local controls app.first-person-controls)
         (local click-active? (clickables-active?))
@@ -196,12 +202,16 @@
       (do
         (assert app.clickables "state-base requires app.clickables")
         (var resize-engaged? false)
-        (when (and app.resizables (= payload.button SDL_BUTTON_RIGHT) (alt-held? payload))
-          (set resize-engaged? (app.resizables:on-mouse-button-down payload)))
+        (local resizables-mouse-down
+          (and app.resizables app.resizables.on-mouse-button-down))
+        (when (and resizables-mouse-down (= payload.button SDL_BUTTON_RIGHT) (alt-held? payload))
+          (set resize-engaged? (resizables-mouse-down app.resizables payload)))
         (when (not resize-engaged?)
           (app.clickables:on-mouse-button-down payload))
-        (when (and app.movables (= payload.button SDL_BUTTON_LEFT) (alt-held? payload))
-          (app.movables:on-mouse-button-down payload))
+        (local movables-mouse-down
+          (and app.movables app.movables.on-mouse-button-down))
+        (when (and movables-mouse-down (= payload.button SDL_BUTTON_LEFT) (alt-held? payload))
+          (movables-mouse-down app.movables payload))
         (local selector (selection-handler))
         (local controls app.first-person-controls)
         (local click-active? (clickables-active?))
@@ -223,10 +233,14 @@
   (if handled
       true
       (do
-        (when app.movables
-          (app.movables:on-mouse-motion payload))
-        (when app.resizables
-          (app.resizables:on-mouse-motion payload))
+        (local movables-mouse-motion
+          (and app.movables app.movables.on-mouse-motion))
+        (when movables-mouse-motion
+          (movables-mouse-motion app.movables payload))
+        (local resizables-mouse-motion
+          (and app.resizables app.resizables.on-mouse-motion))
+        (when resizables-mouse-motion
+          (resizables-mouse-motion app.resizables payload))
         (local selector (selection-handler))
         (local controls app.first-person-controls)
         (local click-active? (clickables-active?))

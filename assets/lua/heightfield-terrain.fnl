@@ -25,6 +25,13 @@
   (if
     (= value nil) fallback
     (= (type value) :userdata) value
+    (= (type value) :table)
+      (do
+        (local w (or (. value 1) value.w 1))
+        (local x (or (. value 2) value.x 0))
+        (local y (or (. value 3) value.y 0))
+        (local z (or (. value 4) value.z 0))
+        (glm.quat w x y z))
     fallback))
 
 (fn chunk-xy [chunk]
@@ -119,7 +126,9 @@
                              (chunk-height chunk (+ sample-x 1) (+ sample-z 1))
                              (+ world-z spacing-z)))
         (local avg-height (/ (+ p00.y p01.y p10.y p11.y) 4.0))
-        (local color (checker-color (+ sample-x (. coord 1)) (+ sample-z (. coord 2)) avg-height))
+        (local global-cell-x (+ (* (. coord 1) (- chunk-width 1)) sample-x))
+        (local global-cell-z (+ (* (. coord 2) (- chunk-length 1)) sample-z))
+        (local color (checker-color global-cell-x global-cell-z avg-height))
         (push-vertex p00 color)
         (push-vertex p01 color)
 	        (push-vertex p10 color)

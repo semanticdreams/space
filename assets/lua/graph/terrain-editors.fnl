@@ -1,25 +1,16 @@
 (local WorldData (require :graph/world-data))
-(local TerrainRecords (require :scene-terrain-records))
-(local {:FlatTerrainNode FlatTerrainNode} (require :graph/nodes/flat-terrain))
 (local {:HeightfieldTerrainNode HeightfieldTerrainNode} (require :graph/nodes/heightfield-terrain))
-(local {:PerlinTerrainNode PerlinTerrainNode} (require :graph/nodes/perlin-terrain))
 
 (local M {})
 
 (local editor-specs
-  {"flat-terrain" {:node-kind FlatTerrainNode}
-   "heightfield-terrain" {:node-kind HeightfieldTerrainNode}
-   "perlin-terrain" {:node-kind PerlinTerrainNode}})
+  {"heightfield-terrain" {:node-kind HeightfieldTerrainNode}})
 
 (fn editor-key [world-id terrain-id]
   (.. "terrain-editor:" world-id ":" terrain-id))
 
 (fn editor-spec [terrain-kind]
   (. editor-specs terrain-kind))
-
-(fn terrain-label [terrain-kind]
-  (local spec (TerrainRecords.terrain-kind-spec terrain-kind))
-  (or (and spec spec.label) terrain-kind "terrain"))
 
 (fn has-editor? [terrain-kind]
   (not (= (editor-spec terrain-kind) nil)))
@@ -44,6 +35,5 @@
 
 {:editor-key editor-key
  :editor-spec editor-spec
- :terrain-label terrain-label
  :has-editor? has-editor?
  :create-editor-node create-editor-node}

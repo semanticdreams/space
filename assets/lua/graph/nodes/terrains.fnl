@@ -40,14 +40,13 @@
     (local graph self.graph)
     (when (and graph entry entry.terrain-id)
       (local terrain-key (.. "terrain:" self.world-id ":" entry.terrain-id))
-      (local terrain-node
-        (or (graph:lookup terrain-key)
-            (TerrainNode {:world-id self.world-id
-                          :world-manager self.world-manager
-                          :terrain-id entry.terrain-id
-                          :terrain entry.entry
-                          :terrain-record entry.record
-                          :label entry.kind})))
+	      (local terrain-node
+	        (or (graph:lookup terrain-key)
+	            (TerrainNode {:world-id self.world-id
+	                          :world-manager self.world-manager
+	                          :terrain-id entry.terrain-id
+	                          :terrain entry.entry
+	                          :terrain-record entry.record})))
       (graph:add-edge (GraphEdge {:source self
                                   :target terrain-node}))))
   (fn emit-items [self]

@@ -237,6 +237,7 @@ void lua_bind_logging(sol::state& lua)
         logging_table.set_function("init", [](sol::object options) {
             log_init(parse_config(options));
         });
+        logging_table.set_function("get-output-path", &log_get_output_path);
         logging_table.set_function("shutdown", &log_shutdown);
         logging_table.set_function("flush", &log_flush);
 

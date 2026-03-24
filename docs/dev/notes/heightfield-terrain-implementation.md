@@ -1,343 +1,357 @@
 # Heightfield Terrain Implementation Plan
 
-This note turns the terrain architecture direction into a concrete first implementation plan.
+This note turns the terrain architecture into a concrete implementation order.
 
-It is intentionally narrower than [Terrain Architecture](/dev/notes/terrain-architecture). The goal here is to define the smallest useful `heightfield-terrain` that:
+The goal is to move to the clean model:
 
-- fits the direct canonical-data model
-- works with the current graph/world runtime architecture
-- supports non-interactive terrain tools first
-- leaves a clean path to interactive in-world tools later
+- one real terrain object path for new work: `heightfield-terrain`
+- one generic terrain object in the graph
+- one terrain-properties editor for `heightfield-terrain`
+- separate terrain tools
+- form-based region targeting first
+- interactive selection and brushes later
 
-## Current Constraints
+## Immediate Corrections
 
-The current system is built around whole-terrain records:
+Before building more tools, the graph model should be corrected.
 
-- world data can add, update, and remove terrain records
-- scene runtime can add, replace, and remove terrain records in place
-- `flat-terrain` and `perlin-terrain` are record-driven terrain kinds with dedicated graph editors
+Required corrections:
 
-That is enough to bootstrap `heightfield-terrain`, but not enough yet for localized live editing. The first implementation should therefore split into:
+1. The generic terrain node must stop using terrain kind as its label.
+2. The `heightfield-terrain` editor must become a terrain-properties editor only.
+3. `Initialize Flat` and `Apply Perlin` must move out of the terrain-properties editor and become terrain tools.
+4. Old `flat-terrain` and `perlin-terrain` terrain-object integration should be removed from the new path.
 
-1. `heightfield-terrain` data/runtime support
-2. non-interactive form-driven tools that mutate the terrain
-3. interactive world-space tools later
+Those are structural fixes, not optional cleanup.
 
-## First Persisted Schema
+## Target Runtime and Data Model
 
-The first persisted schema should be explicit, JSON-friendly, and chunk-based from the start.
+The canonical terrain record should remain final chunked heightfield data.
 
-Suggested record shape:
+Suggested persistent shape:
 
 ```fennel
 {:id "<uuid>"
+ :name "terrain"
  :kind "heightfield-terrain"
- :options
+ :transform
  {:position [0 0 0]
-  :rotation [1 0 0 0]
-  :opacity 1.0
-  :physics true
-  :sample-spacing [1 1]
-  :chunk-samples [33 33]
-  :default-height 0
+  :rotation [1 0 0 0]}
+ :appearance
+ {:opacity 1.0
   :material nil}
+ :physics
+ {:enabled true}
+ :domain
+ {:sample-spacing [1 1]
+  :chunk-samples [33 33]
+  :default-height 0}
  :chunks
  [{:coord [0 0]
-   :size [33 33]
-   :heights [0 0 0 ...]}
-  {:coord [1 0]
-   :size [33 33]
    :heights [0 0 0 ...]}]}
 ```
 
 Notes:
 
-- `sample-spacing` means local X/Z spacing between height samples.
-- `chunk-samples` means sample resolution per chunk, including border samples.
-- `coord` is chunk-space integer coordinates, not world coordinates.
-- `heights` is a row-major flat array.
-- `default-height` is the value for missing chunks.
-- `material` can stay minimal in the first pass; it only needs to reserve the field.
+- `name` belongs on the terrain object, not inferred from kind.
+- `transform`, `appearance`, `physics`, and `domain` should become explicit sections instead of a catch-all options blob.
+- `coord` should allow negative terrain-local chunk coordinates.
+- the canonical model stays chunk-based and final-data-based
 
-For the first pass, all chunks should use the same `chunk-samples` size. Do not add per-chunk variation yet.
+The current code does not need to reach this exact schema in one jump, but all new work should move toward it.
 
-## Deliberate Omissions
+## Graph Structure
 
-Avoid these in the first schema:
+The graph should be terrain-centered and simple.
 
-- stored tool history
-- generator recipes
-- per-chunk materials
-- streaming metadata
-- LOD data
-- multiple physics representations
-- sparse compression formats
+Recommended shape:
 
-The first schema should optimize for clarity, not storage efficiency.
+- `Terrains`
+- `Terrain`
+- `Terrain Properties`
+- `Terrain Tool`
 
-## Runtime Representation
+Meaning:
 
-The runtime should derive from the record and expose chunk-local mutation.
+- `Terrain` is the generic object node
+- `Terrain Properties` is the kind-specific object editor
+- `Terrain Tool` is an invoked tool UI for one terrain
 
-Recommended runtime concepts:
+The `Terrain` node view should show:
 
-- terrain metadata
-- canonical chunk store
-- render chunk cache
-- collision chunk cache
-- dirty chunk set
+- name
+- kind
+- summary of transform/domain/appearance/physics
+- searchable list of tools available for the terrain kind
 
-The runtime should not require rebuilding the whole terrain after every change.
+The `Terrain` node should not directly embed tool forms.
 
-## Minimum Runtime API
+## Heightfield Terrain Properties Editor
 
-The first runtime/world API should be designed around localized edits.
+`heightfield-terrain` needs a dedicated properties editor node/view.
 
-Recommended operations:
+It should own only object properties:
 
-- `create-heightfield-terrain(record)`
-- `get-heightfield-terrain(world-id terrain-id)`
-- `sample-height-local(terrain local-x local-z)`
-- `sample-height-world(terrain world-x world-z)`
-- `mutate-heightfield-chunks(world-id terrain-id mutation-fn)`
-- `set-height-region(world-id terrain-id region value-fn)`
-- `apply-flat-region(world-id terrain-id region opts)`
-- `apply-perlin-region(world-id terrain-id region opts)`
-- `apply-height-delta-brush(world-id terrain-id brush opts)`
-- `smooth-region(world-id terrain-id region opts)`
-- `rebuild-dirty-heightfield-chunks(world-id terrain-id)`
+- name
+- position
+- rotation
+- sample spacing
+- chunk sample size
+- appearance settings
+- physics settings
 
-The most important one is `mutate-heightfield-chunks(...)`: one API that:
+Not tool actions.
 
-- loads or creates touched chunks
-- applies the mutation
-- marks touched chunks dirty
-- syncs render/physics only for those chunks
+This editor should behave like a normal record editor:
 
-That should become the core write path. Higher-level tools should be implemented in terms of it.
+- validate
+- enable `Apply` only when dirty
+- update active scene terrain in place
 
-## Region Model
+## Tool Registry
 
-The system needs a simple region model before interactive brushes exist.
+Add a dedicated tool registry for terrain kinds.
 
-Recommended first region shapes:
+For `heightfield-terrain`, initial tool list:
 
-- whole terrain
-- axis-aligned local-space rectangle
-- circular brush area
+- `Initialize Flat`
+- `Apply Perlin`
 
-Do not add arbitrary polygon regions yet.
+Later:
 
-Suggested region representation:
+- `Flatten Region`
+- `Raise`
+- `Lower`
+- `Smooth`
+
+The terrain view should use this registry to populate a searchable list of tools.
+
+Clicking one tool should open that tool’s dedicated node/view.
+
+## Tool Nodes and Views
+
+Each tool should own:
+
+- its params
+- its target mode
+- its validation
+- its apply behavior
+
+The tool node is not a terrain object. It is a UI/action node scoped to one terrain.
+
+First tool nodes:
+
+- `heightfield-flat-tool`
+- `heightfield-perlin-tool`
+
+Each node should reference:
+
+- world id
+- terrain id
+- tool name
+
+## Tool Button Semantics
+
+Tool UIs should not behave like record editors.
+
+For tool nodes:
+
+- `Apply` is enabled whenever the tool is valid
+- it remains enabled after apply
+- it may keep the last-used params in local view state
+
+That gives the correct behavior for tools like perlin, where repeated apply with the same params is useful.
+
+## Target Region Model
+
+All terrain tools should take a target.
+
+First supported target modes:
+
+- `whole`
+- `rect`
+
+Suggested representation:
 
 ```fennel
-{:kind "rect"
- :center [x z]
- :size [sx sz]}
+{:mode :whole}
 ```
 
 and
 
 ```fennel
-{:kind "circle"
- :center [x z]
- :radius r}
+{:mode :rect
+ :x0 0
+ :z0 0
+ :x1 128
+ :z1 128}
 ```
 
-Those are enough for:
+Interpretation:
 
-- form-driven perlin/flat application
-- initial brush tools
+- local terrain-space coordinates
+- axis-aligned rectangle
+- normalized by the tool validation layer before apply
 
-## First Tools
+This region model should be shared across heightfield tools.
 
-The first tool set should be intentionally small.
+## First Tool Forms
 
-### Non-interactive first
-
-These should work through the terrain node view with forms/buttons:
-
-- initialize terrain to flat height
-- apply perlin to whole terrain
-- apply perlin to a rectangular region
-- flatten a rectangular region to a chosen height
-
-Why these first:
-
-- they prove the direct-data model
-- they exercise chunk mutation
-- they do not require new world interaction systems
-- they are still useful to users
-
-### Interactive second
-
-After the non-interactive tools are working:
-
-- raise/lower brush
-- smooth brush
-- flatten brush
-
-These require additional UI/runtime support and should come later.
-
-## Required New UI Primitives
-
-Interactive tools will need UI features the current graph forms do not provide.
-
-Likely required primitives:
-
-- tool activation state on the active world or terrain
-- terrain/world ray hit query from cursor position
-- world-space brush preview
-- drag/hold input capture for active tools
-- temporary overlay rendering for brush radius and target area
-- throttled live updates while dragging
-
-These should not be invented in the abstract. They should be built only as needed by the first real brush tool.
-
-## Recommended Delivery Slices
-
-The clean implementation order is:
-
-### Slice 1: Data + runtime
-
-- add `heightfield-terrain` record support
-- add record normalization/defaults
-- add runtime build path
-- add chunk storage and dirty tracking
-- add whole-terrain or rectangular region mutation API
-
-No new interactive UI yet.
-
-### Slice 2: Form-driven tools
-
-- add `heightfield-terrain` graph node/editor
-- add create flow in `terrains`
-- add form controls for:
-  - dimensions / sample spacing
-  - flat initialize
-  - perlin region apply
-  - flatten region apply
-
-This gives users useful terrain creation and adjustment without requiring new interaction systems.
-
-### Slice 3: Query primitives
-
-- world-space ray to terrain hit query
-- local-space coordinate resolution
-- terrain sample inspection helpers
-
-This is the minimum needed before brush editing.
-
-### Slice 4: First interactive brush
-
-- active tool state
-- world-space preview
-- mouse drag application
-- localized chunk mutation while dragging
-
-Start with `raise/lower` or `flatten`, not a more complex tool.
-
-### Slice 5: Additional brushes
-
-- smooth
-- perlin brush or stamp
-- other region-local tools
-
-Only add these after Slice 4 feels clean.
-
-## Graph and UI Shape
-
-The graph should stay terrain-centered.
-
-Recommended first `heightfield-terrain` node view:
-
-- terrain id
-- terrain kind
-- sample spacing
-- chunk sample size
-- chunk count summary
-- material controls
-- physics controls
-- tool action panels
-
-The tool action panels should be simple:
-
-- `Initialize Flat`
-- `Apply Perlin`
-- `Flatten Region`
-
-Those can all be form-driven first.
-
-The graph does not need:
-
-- separate tool nodes
-- procedural history display
-- separate chunk nodes
-
-## Integration with Existing Terrain Kinds
-
-There is no need to migrate `flat-terrain` and `perlin-terrain` immediately.
-
-They can remain as existing simple terrain kinds while new work goes into `heightfield-terrain`.
-
-Important rule:
-
-- do not extend old terrain kinds with new live-edit features
-
-That keeps the transition clean.
-
-## Bullet Strategy
-
-The first implementation should keep the Bullet decision narrow.
-
-Required behavior:
-
-- terrain collision updates only for dirty chunks
-- terrain data stays independent of Bullet shape choice
-
-Acceptable first options:
-
-- one collision representation per chunk
-- chunked triangle mesh if that is simpler to wire now
-- Bullet heightfield shape only if it fits cleanly
-
-Do not optimize for the perfect long-term Bullet representation before the editing path exists.
-
-## Testing Plan
-
-The first implementation needs tests at three levels.
-
-### Record/schema tests
-
-- normalize default `heightfield-terrain`
-- reject invalid chunk sizes and malformed height arrays
-- verify missing chunks read as `default-height`
-
-### Runtime mutation tests
-
-- mutating one region only dirties touched chunks
-- perlin tool changes only targeted chunks
-- flatten tool sets expected heights
-- scene runtime rebuild stays localized
-
-### Graph/world tests
-
-- create `heightfield-terrain` from the terrains node
-- apply flat/perlin tool actions from the terrain node
-- verify world state changes and active scene stays in sync
-
-Interactive brush tests can come later.
-
-## Immediate Next Step
-
-The next concrete step should be to define the exact `heightfield-terrain` record schema and default record/builder support in code.
+For now, region selection should be form-driven.
 
 That means:
 
-1. add `heightfield-terrain` to terrain record normalization/defaults
-2. define chunk storage helpers
-3. build a minimal scene/runtime builder for heightfield chunks
-4. expose one mutation API
-5. then add the first form-driven terrain tool
+- whole-terrain toggle or selector
+- rectangle coordinate inputs
 
-That sequence keeps the implementation grounded and avoids building interactive UI before the terrain runtime can support it.
+Example perlin tool form:
+
+- target mode
+- rectangle bounds if `:rect`
+- seed
+- `n1div`
+- `n2div`
+- `n3div`
+- `n1scale`
+- `n2scale`
+- `n3scale`
+- `zroot`
+- `zpower`
+- `Apply`
+
+Example flat tool form:
+
+- target mode
+- rectangle bounds if `:rect`
+- target height
+- `Apply`
+
+This is enough to prove the target model and the data mutation path before building friendlier selection UI.
+
+## Shared Data Mutation API
+
+Terrain data helpers should move to explicit target-aware APIs.
+
+Recommended first write surface:
+
+- `apply-flat!(record target params)`
+- `apply-perlin!(record target params)`
+
+Lower-level support:
+
+- iterate samples in target region
+- ensure touched chunks exist
+- mutate touched samples
+- return touched chunk coordinates
+
+Scene/runtime sync should then rebuild only affected chunks.
+
+Even if chunk-local rebuild is not fully implemented yet, the API should already report touched chunks so the runtime can evolve cleanly.
+
+## Interactive Selection Later
+
+After form-based rectangle tools exist and feel stable, add selection primitives:
+
+- terrain hit query from cursor
+- rectangular drag preview in world space
+- brush cursor preview
+- drag lifecycle
+
+Those primitives should feed the same target model:
+
+- drag rectangle produces `{:mode :rect ...}`
+- brush stroke later produces `{:mode :brush ...}`
+
+Do not build a separate parallel targeting system.
+
+## Delivery Order
+
+Recommended order from here:
+
+### Slice 1: Graph cleanup
+
+- generic terrain node label becomes generic again
+- generic terrain node view shows tool list, not embedded tool forms
+- add dedicated `heightfield-terrain` properties editor
+- remove old `flat-terrain` / `perlin-terrain` terrain-object integration from the active terrain path
+
+### Slice 2: Tool registry and tool nodes
+
+- add terrain tool registry
+- add searchable tools list for `heightfield-terrain`
+- add dedicated flat tool node/view
+- add dedicated perlin tool node/view
+- keep tool apply re-clickable
+
+### Slice 3: Region-aware data APIs
+
+- target model
+- flat whole/rect apply
+- perlin whole/rect apply
+- validation and tests
+
+### Slice 4: Heightfield properties coverage
+
+- name
+- transform
+- domain settings
+- appearance
+- physics
+
+### Slice 5: Interactive selection primitives
+
+- world hit query
+- rectangle selection preview
+- brush preview
+
+### Slice 6: First interactive edit tool
+
+- `Raise/Lower` or `Flatten`
+
+## Tests Needed
+
+New tests should cover:
+
+### Graph semantics
+
+- generic terrain node label stays generic
+- terrain view lists tools
+- tool click opens dedicated tool node
+
+### Tool semantics
+
+- tool apply stays enabled when valid after apply
+- tool keeps last-used params locally
+- tool validate/apply paths work for both `:whole` and `:rect`
+
+### Data semantics
+
+- rectangular target only changes intended samples
+- untouched chunks remain unchanged
+- negative chunk coordinates still work
+
+### Properties editor semantics
+
+- terrain properties are editable independently of tools
+- active scene terrain updates in place
+
+## What Not To Do
+
+Do not continue with:
+
+- tool forms inside the heightfield terrain editor
+- treating old `flat-terrain` / `perlin-terrain` object kinds as part of the new path
+- whole-terrain-only tool APIs as the long-term surface
+- building brush UI before target-aware form tools exist
+
+## Next Concrete Step
+
+The next implementation step should be:
+
+1. fix the generic terrain node label and semantics
+2. split the current `heightfield-terrain` editor into:
+   - terrain-properties editor
+   - dedicated flat/perlin tool nodes
+3. add the shared whole/rect target form model
+
+That is the smallest clean step that aligns the code with the intended terrain design.

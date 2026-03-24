@@ -474,7 +474,9 @@
         (lua "return false")))
     true))
 
-(local {:to-table viewport->table :to-glm-vec4 viewport->glm-vec4} (require :viewport-utils))
+(local {:to-table viewport->table
+        :to-glm-vec4 viewport->glm-vec4
+        :input-pos->viewport-pos viewport->input-pos} (require :viewport-utils))
 (local Hud (require :hud))
 (local AppViewport (require :app-viewport))
 (local AppProjection (require :app-projection))
@@ -495,6 +497,15 @@
 
 (set app.set-viewport AppViewport.set-viewport)
 (set app.create-default-projection AppProjection.create-default-projection)
+
+(fn current-pixel-viewport-size []
+  (local pixel-width (or (and app.engine (. app.engine "pixel-width")) 0))
+  (local pixel-height (or (and app.engine (. app.engine "pixel-height")) 0))
+  (if (and (> pixel-width 0) (> pixel-height 0))
+      {:width pixel-width :height pixel-height}
+      (let [width (or (and app.engine app.engine.width) 0)
+            height (or (and app.engine app.engine.height) 0)]
+        {:width width :height height})))
 
 (fn app.reset-projection []
   (if app.scene
@@ -534,7 +545,7 @@
             projection (or options.projection app.projection)]
         (assert view "app.screen-pos-ray requires a view matrix")
         (assert projection "app.screen-pos-ray requires a projection matrix")
-        (local sample-pos (or pos
+        (local sample-pos (or (viewport->input-pos pos viewport app.engine)
                               {:x (+ viewport.x (/ viewport.width 2))
                                :y (+ viewport.y (/ viewport.height 2))}))
         (local px (number-or sample-pos.x viewport.x))
@@ -569,6 +580,7 @@
 (set app.settings nil)
 (set app.volume-settings-handler nil)
 (set app.window-resized-handler nil)
+(set app.window-pixel-size-handler nil)
 (set app.window-mode-handler nil)
 (set app.window-focus-handler nil)
 (set app.window-minimized-handler nil)
@@ -694,6 +706,10 @@
   (set app.scene-focus-scope (and runtime runtime.scene-scope))
   (set app.scene (and runtime runtime.scene))
   (set app.object-selector (and runtime runtime.object-selector))
+  (set app.terrain-rect-pick-session nil)
+  (set app.terrain-rect-pick-previous-state nil)
+  (set app.terrain-paint-session nil)
+  (set app.terrain-paint-previous-state nil)
   (set app.graph (and runtime runtime.graph))
   (set app.graph-view (and runtime runtime.graph-view))
   (set app.layout-root (and app.scene app.scene.layout-root))
@@ -764,6 +780,9 @@
   (when (and app.window-resized-handler app.engine.events app.engine.events.window-resized)
     (app.engine.events.window-resized:disconnect app.window-resized-handler true)
     (set app.window-resized-handler nil))
+  (when (and app.window-pixel-size-handler app.engine.events app.engine.events.window-pixel-size-changed)
+    (app.engine.events.window-pixel-size-changed:disconnect app.window-pixel-size-handler true)
+    (set app.window-pixel-size-handler nil))
   (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
     (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
     (set app.window-mode-handler nil))
@@ -796,10 +815,16 @@
     (set app.window-resized-handler
          (app.engine.events.window-resized:connect
            (fn [e]
-             (app.set-viewport {:width e.width :height e.height})
+             (app.set-viewport (current-pixel-viewport-size))
              (app.reset-projection)
              (if (= (normalize-window-mode (and app.engine (. app.engine "window-mode"))) "windowed")
                  (persist-window-size e.width e.height))))))
+  (when (and app.engine.events app.engine.events.window-pixel-size-changed)
+    (set app.window-pixel-size-handler
+         (app.engine.events.window-pixel-size-changed:connect
+           (fn [_e]
+             (app.set-viewport (current-pixel-viewport-size))
+             (app.reset-projection)))))
   (when (and app.engine.events app.engine.events.window-mode-changed)
     (set app.window-mode-handler
          (app.engine.events.window-mode-changed:connect
@@ -892,8 +917,8 @@
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
   (AppBootstrap.init-input-systems)
-  (local initial-width (or (and app.engine app.engine.width) 0))
-  (local initial-height (or (and app.engine app.engine.height) 0))
+  (local initial-width (or (and app.engine (. app.engine "pixel-width")) (and app.engine app.engine.width) 0))
+  (local initial-height (or (and app.engine (. app.engine "pixel-height")) (and app.engine app.engine.height) 0))
   (when (and (> initial-width 0) (> initial-height 0))
     (app.set-viewport {:width initial-width :height initial-height}))
   (AppBootstrap.init-renderers {:viewport app.viewport})
@@ -935,6 +960,10 @@
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.object-selector nil)
+  (set app.terrain-rect-pick-session nil)
+  (set app.terrain-rect-pick-previous-state nil)
+  (set app.terrain-paint-session nil)
+  (set app.terrain-paint-previous-state nil)
   (set app.layout-root nil)
 
   (set app.hud (Hud {:scene nil
@@ -1041,6 +1070,9 @@
   (when (and app.window-resized-handler app.engine.events app.engine.events.window-resized)
     (app.engine.events.window-resized:disconnect app.window-resized-handler true)
     (set app.window-resized-handler nil))
+  (when (and app.window-pixel-size-handler app.engine.events app.engine.events.window-pixel-size-changed)
+    (app.engine.events.window-pixel-size-changed:disconnect app.window-pixel-size-handler true)
+    (set app.window-pixel-size-handler nil))
   (when (and app.window-mode-handler app.engine.events app.engine.events.window-mode-changed)
     (app.engine.events.window-mode-changed:disconnect app.window-mode-handler true)
     (set app.window-mode-handler nil))
@@ -1081,6 +1113,10 @@
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.object-selector nil)
+  (set app.terrain-rect-pick-session nil)
+  (set app.terrain-rect-pick-previous-state nil)
+  (set app.terrain-paint-session nil)
+  (set app.terrain-paint-previous-state nil)
   (set app.scene nil)
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)

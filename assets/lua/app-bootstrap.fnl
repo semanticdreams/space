@@ -76,6 +76,8 @@
   (app.states.add-state :insert ((require :insert-state)))
   (app.states.add-state :camera ((require :camera-state)))
   (app.states.add-state :fpc ((require :fpc-state)))
+  (app.states.add-state :terrain-rect-pick ((require :terrain-rect-pick-state)))
+  (app.states.add-state :terrain-paint ((require :terrain-paint-state)))
   (app.states.add-state :car ((require :car-state)))
   (app.states.add-state :tetris ((require :tetris-state)))
   (app.states.set-state :normal)

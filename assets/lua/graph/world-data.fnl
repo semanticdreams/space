@@ -38,6 +38,21 @@
   (local runtime (resolve-runtime world-manager world-id))
   (and runtime runtime.scene))
 
+(fn resolve-active-scene [world-manager world-id]
+  (local active-id
+    (or (and world-manager world-manager.active-world-id
+             (world-manager:active-world-id))
+        (and world-manager world-manager.active-world
+             (let [entry (world-manager:active-world)]
+               (and entry entry.id)))
+        (and app app.active-world-entry app.active-world-entry.id)))
+  (if (= active-id world-id)
+      (resolve-scene world-manager world-id)
+      (let [entry (resolve-world-entry world-manager world-id)]
+        (if (and entry entry.active?)
+            (resolve-scene world-manager world-id)
+            nil))))
+
 (fn resolve-hud [world-id]
   (when (and app
              app.active-world-entry
@@ -201,7 +216,8 @@
         (local record (and entry entry.record))
         (local terrain-id (or (and record record.id) "unknown"))
         (local kind (or (and record record.kind) "unknown"))
-        (local label (.. kind " [" terrain-id "]"))
+        (local name (and record record.name))
+        (local label (or name (.. "terrain [" terrain-id "]")))
         (table.insert produced [{:terrain-id terrain-id
                                  :kind kind
                                  :record record
@@ -212,7 +228,8 @@
       (each [_ record (ipairs (terrain-state-records world-manager world-id))]
         (local terrain-id (or record.id "unknown"))
         (local kind (or record.kind "unknown"))
-        (local label (.. kind " [" terrain-id "]"))
+        (local name (and record record.name))
+        (local label (or name (.. "terrain [" terrain-id "]")))
         (table.insert produced [{:terrain-id terrain-id
                                  :kind kind
                                  :record record
@@ -362,6 +379,7 @@
  :resolve-world resolve-world
  :resolve-runtime resolve-runtime
  :resolve-scene resolve-scene
+ :resolve-active-scene resolve-active-scene
  :resolve-hud resolve-hud
  :world-name world-name
  :list-scene-panels list-scene-panels

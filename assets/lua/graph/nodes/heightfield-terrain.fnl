@@ -1,7 +1,6 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local Signal (require :signal))
-(local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainNodeView (require :graph/view/views/heightfield-terrain))
 (local WorldData (require :graph/world-data))
 
@@ -29,7 +28,7 @@
           "HeightfieldTerrainNode requires a heightfield-terrain record")
   (local key (or options.key (.. "terrain-editor:" world-id ":" terrain-id)))
   (local node (GraphNode {:key key
-                          :label "heightfield terrain"
+                          :label "heightfield terrain properties"
                           :color (glm.vec4 0.34 0.58 0.4 1)
                           :sub-color (glm.vec4 0.22 0.42 0.28 1)
                           :size 8.0
@@ -55,12 +54,14 @@
        (fn [self validated]
          (self:update-record
            (fn [record]
-             (HeightfieldTerrainData.fill-record! record validated.height)))))
-  (set node.apply-perlin-values
-       (fn [self validated]
-         (self:update-record
-           (fn [record]
-             (HeightfieldTerrainData.apply-perlin-record! record validated)))))
+             (set record.name validated.name)
+             (when (not record.options)
+               (set record.options {}))
+             (set record.options.position validated.position)
+             (set record.options.rotation validated.rotation)
+             (set record.options.opacity validated.opacity)
+             (set record.options.physics validated.physics)
+             (set record.options.sample-spacing validated.sample-spacing)))))
   (set node.remove-terrain
        (fn [self]
          (WorldData.remove-terrain self.world-manager self.world-id self.terrain-id)))

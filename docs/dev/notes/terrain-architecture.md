@@ -1,341 +1,312 @@
 # Terrain Architecture
 
-This note proposes the long-term terrain structure for `space`.
+This note defines the clean terrain model for `space`.
 
-The immediate goal is to move beyond top-level `flat-terrain` and `perlin-terrain` objects without throwing away the useful ideas behind them. The design should support:
-
-- multiple terrain objects per world
-- live in-context terrain editing during gameplay
-- procedural generation and local sculpting
-- clean Bullet integration
-- future terrain backends such as heightfields, voxels, and SDFs
-- eventual chunking and streaming for very large or effectively infinite worlds
-
-The intended users for terrain editing are end users in the live world, not only developers or designers. They should be able to generate terrain, adjust it while playing, and keep going without switching into a separate authoring workflow.
+The intended user is an end user editing terrain live while using the world, not only a designer in a separate authoring mode.
 
 ## Design Decision
 
-The first real top-level terrain object should be `heightfield-terrain`.
+The terrain system should have:
 
-`flat-terrain` and `perlin-terrain` should not be the long-term canonical terrain objects. They are better understood as terrain tools or terrain actions that write into a `heightfield-terrain`.
+- terrain objects as the persistent things in the world
+- terrain tools as actions that mutate those objects
+- terrain runtimes as derived render/physics state
 
-This gives a simpler separation:
+The first real terrain object kind should be `heightfield-terrain`.
 
-- terrain kind answers "what kind of terrain is this?"
-- terrain tools answer "how does the user change the terrain right now?"
-- runtime adapters answer "how is it rendered and simulated?"
+`flat-terrain` and `perlin-terrain` should not remain as terrain object kinds in the long-term design. They are terrain tools for `heightfield-terrain`, not peer terrain objects.
 
-This is the right model for live end-user editing because the world only needs to keep the final terrain state. It does not need to remember how that state was produced.
-
-## Top-Level Model
+## Core Model
 
 Worlds contain multiple terrain objects.
 
-Each terrain object is single-kind forever. A world can mix multiple terrain kinds, but one terrain object should never internally switch between heightfield and voxel or hold multiple domain kinds at once.
+Each terrain object is single-kind forever.
 
-Recommended top-level kinds:
+Examples of future terrain kinds:
 
 - `heightfield-terrain`
 - later `voxel-terrain`
 - later `sdf-terrain`
 - later `mesh-terrain`
 
-## Core Parts
+Each terrain object has three responsibilities:
 
-Each terrain object should have three distinct parts of responsibility.
+### 1. Terrain Object
 
-### 1. Terrain
+Persistent world data.
 
-Persistent authored object stored in world data.
+Responsibilities:
 
-Suggested responsibilities:
-
-- terrain id, name, kind
-- transform / placement
-- terrain-specific configuration such as chunk size and resolution
-- material assignments
-- physics options
+- id
+- name
+- kind
+- transform
+- appearance settings
+- physics settings
+- terrain-domain configuration
 - canonical terrain data
-- persistence metadata
-
-This is the authoritative representation, not the render mesh and not the Bullet shape.
 
 ### 2. Canonical Terrain Data
 
-The editable geometry data stored inside a terrain.
+Editable source of truth.
 
 Examples:
 
-- heightfield: sampled height grid in local XZ
-- voxel: sparse voxel field
-- SDF: signed-distance volume
-- mesh: explicit patch or triangle domain
+- heightfield sample grid
+- voxel field
+- signed-distance field
+- mesh patch data
 
-For the first implementation, the canonical data is chunked heightfield data.
+For the first implementation, canonical data is chunked heightfield data in terrain-local space.
 
 ### 3. Terrain Runtime
 
-Derived runtime representation used by rendering, selection, raycasts, and physics.
+Derived runtime state.
 
-Examples:
+Responsibilities:
 
 - render mesh chunks
-- normals/tangents
-- Bullet collision chunks
-- dirty-region rebuild tracking
+- collision chunks
+- picking / raycast helpers
+- dirty-chunk tracking
 
-The runtime is disposable and rebuildable. It should never be the canonical source of truth.
+Runtime is disposable. It is never authoritative.
 
-## Heightfield First
+## Canonical State
 
-Heightfield is the right first canonical terrain kind.
-
-Why:
-
-- it directly supports flat/perlin-style generation
-- it directly supports raise/lower/smooth sculpting
-- it has simple spatial semantics
-- it has straightforward chunking
-- it is practical for Bullet
-- it does not block future voxel or SDF terrain kinds
-
-The canonical heightfield representation should be chunked sample data in terrain-local coordinates.
-
-Suggested structure:
-
-- `heightfield-terrain`
-- chunk grid or sparse chunk map
-- per-chunk sample arrays
-
-## Canonical Data Model
-
-The canonical editable source of truth should be final heightfield chunk data, not an operator list and not brush replay history.
+The terrain system should persist final terrain data, not tool history.
 
 That means:
 
-- tools such as `flat`, `perlin`, `raise`, `lower`, `smooth`, and `flatten` act directly on the terrain data
-- the world persists only the resulting terrain state
-- changing a generator later means running that generator tool again on some region
+- `flat`, `perlin`, `raise`, `smooth`, and future tools modify terrain data directly
+- the world persists only the resulting terrain
+- if the user wants different perlin parameters later, they run the perlin tool again on the target region
 
-This is simpler than persisting a history or a procedural recipe, and it matches the intended user experience much better.
+This matches the live in-context editing model and avoids unnecessary complexity around recipes, operator stacks, baking, or history replay.
 
-Example:
+## Terrain Objects vs Tools
 
-- a user generates a perlin area
-- a user smooths part of it
-- a user later wants a different perlin shape in one section
-- the user applies the perlin tool again to that section
+Terrain objects answer:
 
-There is no need to preserve the original perlin parameters unless a future feature explicitly wants history or recipes.
+- what terrain exists in the world?
+- where is it?
+- what kind is it?
+- what are its physical/render properties?
 
-## Tools, Not Operators
+Tools answer:
 
-The terrain system should distinguish between canonical data and the tools that modify it.
+- how does the user change this terrain right now?
 
-Examples of terrain tools:
+Examples of `heightfield-terrain` tools:
 
-- `flat`
-- `perlin`
-- `raise`
-- `lower`
-- `smooth`
-- `flatten`
-- later `heightmap-stamp`
-- later `erosion`
+- `Initialize Flat`
+- `Apply Perlin`
+- later `Raise`
+- later `Lower`
+- later `Smooth`
+- later `Flatten`
+- later `Stamp Heightmap`
 
-These should be treated as editing actions, not as persistent model objects.
+Tools are not persistent model objects. They are UI/actions that mutate canonical terrain data.
 
-Some tools are broad generators:
+## Graph Model
 
-- `flat`
-- `perlin`
-- `heightmap-stamp`
+The graph should present terrain objects, not terrain history.
 
-Some tools are local interactive brushes:
-
-- `raise`
-- `lower`
-- `smooth`
-- `flatten`
-
-That distinction matters for the UI, but not for persistence. Persistence only needs the resulting terrain data.
-
-## Why Not Persist Tool History?
-
-Persisting tools or tool history would add complexity without enough value for the current goal.
-
-Costs of persisting tools/history:
-
-- more complex persistence format
-- more complex runtime evaluation model
-- more complicated graph UI
-- harder reasoning about how local edits interact with old generators
-- pressure to expose reorder, bake, or recipe concepts to users
-
-Benefits of persisting tools/history:
-
-- procedural re-editability
-- recipe-style terrain reuse
-- richer undo/inspection possibilities
-
-Those are real benefits, but they are not required for the first terrain system and they make live end-user editing less simple. If they become important later, they can be added as optional non-canonical metadata or separate recipe assets.
-
-## Live Editing Constraint
-
-Terrain editing should be designed as an in-game activity, not only an offline authoring workflow.
-
-That implies:
-
-- edits must apply immediately in the active world
-- rendering and physics updates must be localized
-- gameplay systems should not need to rebuild unrelated scene state
-- users should not be forced to understand bake, recipes, or asset-pipeline concepts
-- the same terrain object should support generation, inspection, and direct adjustment
-
-This strongly favors direct canonical data editing over an operator-history model.
-
-## Bullet Integration
-
-Bullet should be integrated through terrain-kind-specific runtime adapters, not through the authored model directly.
-
-Recommended boundaries:
-
-- terrain is authoritative
-- terrain runtime derives collision representation
-- Bullet data is rebuilt only for dirty chunks
-
-For heightfields, there are two viable runtime options:
-
-- Bullet heightfield shape if the bindings and behavior are suitable
-- chunked static triangle mesh collision otherwise
-
-The architectural rule should be:
-
-- terrain data must not depend on a specific Bullet shape type
-
-That keeps the terrain model clean and leaves room for a different collision strategy per backend.
-
-## Graph Structure
-
-The graph should present terrain objects, not terrain construction history.
-
-Recommended high-level graph shape:
+Recommended shape:
 
 - `Terrains`
 - `Terrain`
-- `Materials`
-- `Physics`
 
-The graph does not need to expose tools as separate nodes in the first pass.
+That is enough for the first clean implementation.
 
-For `heightfield-terrain`, the terrain node view can show:
+The generic `Terrain` node should be generic.
 
-- terrain kind
-- terrain dimensions / resolution
-- material settings
+Its label should be:
+
+- terrain name if present
+- otherwise `terrain`
+
+It should not use terrain kind as the node label.
+
+The generic terrain node view should show:
+
+- name
+- kind
+- transform summary
+- terrain-domain summary
+- appearance summary
+- physics summary
+- available tools list
+
+`kind` is metadata in the view, not the node label.
+
+## Terrain Editors
+
+Terrain properties and terrain tools are different concepts and should have different UIs.
+
+### Terrain Properties Editor
+
+Each terrain kind can have one kind-specific terrain-properties editor.
+
+For `heightfield-terrain`, this editor should own:
+
+- name
+- position
+- rotation
+- sample spacing
+- chunk/sample configuration
+- appearance settings
 - physics settings
-- controls for applying terrain tools
 
-If the user invokes a tool such as perlin or smooth, that action mutates the terrain data directly.
+This editor changes terrain object properties.
 
-## Clean First Implementation
+It should not embed terrain tools like perlin or flatten.
 
-The clean first implementation is:
+### Terrain Tools List
 
-1. Introduce a new top-level `heightfield-terrain` kind.
-2. Define its persisted schema clearly.
-3. Store final canonical heightfield chunk data.
-4. Implement terrain tools that mutate that data directly.
-5. Add chunk-based runtime invalidation and rebuild boundaries.
-6. Keep Bullet integration behind a heightfield runtime adapter.
+The generic terrain node view should show a searchable list of tools applicable to the terrain kind.
 
-There is no need to design migration or persistent operator/history machinery right now.
+For `heightfield-terrain`, the first list should include:
 
-## Runtime and Invalidation
+- `Initialize Flat`
+- `Apply Perlin`
 
-The terrain runtime should be chunk-based from the start, even if initial worlds are small.
+Later:
 
-Required concepts:
+- `Raise`
+- `Lower`
+- `Smooth`
+- `Flatten`
 
-- chunk identity in terrain-local space
-- dirty chunk tracking
-- render rebuild by chunk
-- collision rebuild by chunk
-- local-space sampling and ray queries
+Clicking a tool should open that tool's own dedicated view or node.
 
-When a tool changes terrain:
+That keeps the terrain-properties editor clean and allows many tools without turning one view into a dumping ground.
 
-- identify touched chunks
-- mutate canonical terrain data for those chunks
-- rebuild only the changed render/physics chunks
+## Tool UI Semantics
 
-This structure is what will scale later to bigger worlds.
+Terrain property editing and tool application should not share exactly the same button behavior.
 
-## Forward Compatibility
+### Property Editors
 
-The design should be explicitly ready for larger worlds and other terrain domains, but those should remain future work.
+For terrain properties:
 
-### Large or Infinite Worlds
+- `Apply` should require valid input
+- `Apply` should be enabled only when the form is dirty
 
-Not needed immediately, but the architecture should already assume:
+### Tools
 
-- chunk-local authored data
-- sparse chunk storage
-- chunk identity separate from loaded runtime state
-- runtime streaming is possible later
+For terrain tools:
 
-Do not design around one monolithic terrain mesh.
+- `Apply` should require valid input
+- `Apply` should stay enabled even if the params are unchanged
+- repeated apply with unchanged params is valid
 
-### Future Terrain Kinds
+This matters especially for tools like perlin, where a user may want to re-run the tool repeatedly without changing the form.
 
-The backend contract should be designed so new terrain kinds plug in at the terrain-kind boundary, not by modifying the heightfield model.
+## Tool Target Model
 
-Each terrain kind should provide:
+All terrain tools should operate on an explicit target.
 
-- terrain schema
-- canonical geometry data
-- editing tools
-- runtime mesh builder
-- physics adapter
-- spatial query helpers
+The first clean target modes are:
 
-That is the main protection against future refactors when voxel or SDF terrain arrives.
+- whole terrain
+- rectangle
 
-### Optional Future History or Recipes
+Later:
 
-If terrain history or reusable procedural recipes become valuable later, they should be added as optional secondary data, not as the canonical terrain format.
+- brush
 
-Examples:
+Suggested target representation:
 
-- a non-canonical "recipe" attached to a terrain
-- reusable generator presets
-- undo/redo history
+```fennel
+{:mode :whole}
+```
 
-The terrain should still be fully represented by its final canonical data even if those features exist.
+and
 
-## Non-Goals for the First Pass
+```fennel
+{:mode :rect
+ :x0 local-x0
+ :z0 local-z0
+ :x1 local-x1
+ :z1 local-z1}
+```
 
-Avoid these in the first implementation:
+This is enough for:
 
+- whole-terrain initialization
+- whole-terrain perlin generation
+- rectangular perlin application
+- rectangular flatten
+
+For the first pass, rectangle selection can be form-driven by numeric inputs. A friendlier interactive selection mechanism can come later.
+
+## Interactive Editing Primitives
+
+Manual live editing still needs shared infrastructure.
+
+Required primitives:
+
+- world ray hit to terrain-local coordinates
+- region preview overlay
+- brush cursor preview
+- pointer drag lifecycle
+- localized dirty-chunk update path
+
+These primitives should be built only after rectangular form-based tools exist and the terrain mutation path is stable.
+
+## Heightfield First
+
+`heightfield-terrain` is the right first terrain kind because it supports:
+
+- procedural generation like flat/perlin
+- direct local edits
+- simple chunking
+- practical Bullet integration
+
+Canonical heightfield data should be:
+
+- chunk-based
+- sparse-capable
+- terrain-local
+- independent of Bullet representation
+
+## Bullet Integration
+
+Bullet should sit behind the terrain runtime, not inside the terrain object model.
+
+Rules:
+
+- terrain data is authoritative
+- render/physics are derived
+- only dirty chunks rebuild
+
+For `heightfield-terrain`, collision can use whichever runtime representation is simplest, as long as:
+
+- it is chunk-local
+- it does not force terrain data to mirror Bullet data structures
+
+## Non-Goals
+
+Avoid these in the clean design:
+
+- old `flat-terrain` / `perlin-terrain` object kinds as part of the new path
 - persistent operator lists
-- brush stroke history as canonical state
-- arbitrary operator graph reordering
-- multi-kind terrain objects
-- full terrain streaming
-- solving voxel/SDF runtime details now
-- exposing bake as a required user workflow
-- exposing tools as separate graph nodes in the first pass
+- persisted tool history
+- bake-first authoring workflows
+- terrain kind in the generic terrain node label
+- embedding many tool forms into the terrain-properties editor
+- special fallback compatibility structures in the new model
 
-## Summary
+## Clean Direction
 
-The clean design is:
+The clean direction from here is:
 
-- worlds contain multiple terrain objects
-- each terrain object has one canonical terrain kind
-- `heightfield-terrain` is the first real terrain object
-- canonical state is final heightfield chunk data
-- `flat`, `perlin`, and sculpting actions are tools that mutate that data directly
-- runtime render and Bullet data are derived chunked representations
-- the architecture leaves room for voxel/SDF terrain kinds later without changing the top-level graph model
-
-This gives a practical path forward now while staying simple and avoiding unnecessary history machinery.
+1. `heightfield-terrain` becomes the only active terrain path for new work.
+2. The generic terrain node stays generic.
+3. A dedicated heightfield properties editor handles terrain object settings.
+4. Terrain tools are listed separately and opened separately.
+5. Tools operate on explicit targets.
+6. Form-driven rectangular targeting comes before interactive selection.
+7. Interactive brush primitives come after the rectangular tool path is clean.

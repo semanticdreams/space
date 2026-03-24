@@ -139,6 +139,48 @@
             (with-data-dir root
                 (fn [] (f root))))))
 
+(fn make-heightfield-terrain-record [opts]
+    (local options (or opts {}))
+    (local chunk-samples (or options.chunk-samples [5 5]))
+    {:id (or options.id "terrain-a")
+     :kind "heightfield-terrain"
+     :options {:position (or options.position [0 0 0])
+               :rotation (or options.rotation [1 0 0 0])
+               :opacity 1.0
+               :physics true
+               :sample-spacing (or options.sample-spacing [1 1])
+               :chunk-samples chunk-samples
+               :default-height (or options.default-height 0.0)}
+     :chunks (or options.chunks
+                 [{:coord [0 0]
+                   :size chunk-samples
+                   :heights [0 0 0 0 0
+                             0 0 0 0 0
+                             0 0 0 0 0
+                             0 0 0 0 0
+                             0 0 0 0 0]}])})
+
+(fn make-world-entry [opts]
+    (local options (or opts {}))
+    {:id (or options.id "world-a")
+     :name (or options.name "World A")
+     :world {:state (or options.state {:scene {:panels [] :terrains []}
+                                       :hud {:panels []}})
+             :get-runtime (fn [_self] options.runtime)
+             :save-state (fn [_self] true)}})
+
+(fn make-world-manager [opts]
+    (local options (or opts {}))
+    (local entry (assert options.entry "make-world-manager requires :entry"))
+    {:changed (or options.changed (Signal))
+     :get-world-entry (fn [_self world-id]
+                        (if (= world-id entry.id) entry nil))
+     :active-world-id (fn [_self] (or options.active-world-id entry.id))
+     :active-world (fn [_self] entry)})
+
+(fn unwrap-element [item]
+    (or (and item item.element) item))
+
 (fn edge-produces-triangles []
     (with-temp-data-dir
         (fn [_root]
@@ -996,6 +1038,388 @@
             (graph:drop)
             (selector:drop))))
 
+(fn graph-view-node-views-hosts-heightfield-perlin-tool-dialog []
+    (with-temp-data-dir
+        (fn [_root]
+            (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode}
+                   (require :graph/nodes/heightfield-perlin-tool))
+            (local States (require :states))
+            (local TerrainRectPickState (require :terrain-rect-pick-state))
+            (local Clickables (require :clickables))
+            (local Hoverables (require :hoverables))
+            (local original-hud app.hud)
+            (local original-scene app.scene)
+            (local original-clickables app.clickables)
+            (local original-hoverables app.hoverables)
+            (local original-intersectables app.intersectables)
+            (local original-screen-pos-ray app.screen-pos-ray)
+            (local original-movables app.movables)
+            (local original-resizables app.resizables)
+            (local original-fpc app.first-person-controls)
+            (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
+            (local original-states app.states)
+            (local terrain-record (make-heightfield-terrain-record))
+            (local scene {:screen-pos-terrain-domain-hit
+                          (fn [_self pos _opts]
+                              (if (< pos.x 20)
+                                  {:terrain-id "terrain-a"
+                                   :terrain-kind "heightfield-terrain"
+                                   :terrain-record terrain-record
+                                   :local-point (glm.vec3 1 0 2)}
+                                  {:terrain-id "terrain-a"
+                                   :terrain-kind "heightfield-terrain"
+                                   :terrain-record terrain-record
+                                   :local-point (glm.vec3 3 0 4)}))})
+            (local runtime {:scene scene})
+            (local entry (make-world-entry {:id "world-a"
+                                            :runtime runtime
+                                            :state {:scene {:panels []
+                                                            :terrains [terrain-record]}
+                                                    :hud {:panels []}}}))
+            (local manager (make-world-manager {:entry entry}))
+            (set app.intersectables (Intersectables))
+            (set app.clickables (Clickables {:intersectables app.intersectables}))
+            (set app.hoverables (Hoverables {:intersectables app.intersectables}))
+            (set app.screen-pos-ray
+                 (fn [pointer]
+                     {:origin (glm.vec3 (or pointer.x 0) (or pointer.y 0) 10)
+                      :direction (glm.vec3 0 0 -1)}))
+            (set app.movables {:on-mouse-button-down (fn [_self _payload] nil)
+                               :on-mouse-button-up (fn [_self _payload] nil)
+                               :on-mouse-motion (fn [_self _payload] nil)
+                               :drag-active? (fn [_self] false)})
+            (set app.resizables {:on-mouse-button-down (fn [_self _payload] false)
+                                 :on-mouse-button-up (fn [_self _payload] nil)
+                                 :on-mouse-motion (fn [_self _payload] nil)
+                                 :drag-active? (fn [_self] false)})
+            (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
+                                            :on-mouse-button-up (fn [_self _payload] nil)
+                                            :on-mouse-motion (fn [_self _payload] nil)
+                                            :drag-active? (fn [_self] false)})
+            (local ctx (make-ctx))
+            (local target {:build-context ctx
+                           :world-units-per-pixel 1
+                           :children []
+                           :add-panel-child (fn [self opts]
+                                              (local builder (and opts opts.builder))
+                                              (assert builder "builder required")
+                                              (local dialog (builder self.build-context {}))
+                                              (table.insert self.children dialog)
+                                              dialog)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))})
+            (set app.hud target)
+            (set app.scene scene)
+            (local states (States))
+            (states.add-state :normal {})
+            (states.add-state :terrain-rect-pick (TerrainRectPickState))
+            (states.set-state :normal)
+            (set app.states states)
+            (local graph (Graph {:with-start false}))
+            (local node (HeightfieldPerlinToolNode {:world-id "world-a"
+                                                    :world-manager manager
+                                                    :terrain-id "terrain-a"}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local views (GraphViewNodeViews {:graph graph
+                                              :ctx ctx
+                                              :view-target target}))
+            (views:open node)
+            (assert (= (length target.children) 1)
+                    "GraphViewNodeViews should host the terrain tool in a dialog")
+            (local dialog (. target.children 1))
+            (local body-card (unwrap-element (. dialog.children 2)))
+            (local body-content (unwrap-element (. body-card.children 2)))
+            (local tool-view (or (and body-content body-content.child) body-content))
+            (assert tool-view "Expected terrain tool view inside hosted dialog")
+            (assert tool-view.pick-button "Hosted terrain tool should expose pick button")
+            (tool-view.pick-button:on-click {})
+            (assert (= (app.states.active-name) :terrain-rect-pick)
+                    "Hosted terrain tool pick should enter the terrain rectangle pick state")
+            (assert app.terrain-rect-pick-session
+                    "Hosted terrain tool pick should register the active terrain rectangle pick session")
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+            (app.engine.events.mouse-motion.emit {:x 40 :y 60})
+            (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
+            (assert (= (tool-view.fields.target-mode:get-value) "rect"))
+            (assert (= (tool-view.fields.rect-min-x:get-text) "1"))
+            (assert (= (tool-view.fields.rect-min-z:get-text) "2"))
+            (assert (= (tool-view.fields.rect-max-x:get-text) "3"))
+            (assert (= (tool-view.fields.rect-max-z:get-text) "4"))
+            (assert (= (app.states.active-name) :normal)
+                    "Hosted terrain tool pick should restore the previous state after completion")
+            (views:drop-all)
+            (graph:drop)
+            (set app.hud original-hud)
+            (set app.scene original-scene)
+            (set app.clickables original-clickables)
+            (set app.hoverables original-hoverables)
+            (set app.intersectables original-intersectables)
+            (set app.screen-pos-ray original-screen-pos-ray)
+            (set app.movables original-movables)
+            (set app.resizables original-resizables)
+            (set app.first-person-controls original-fpc)
+            (set app.states original-states)
+            (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
+
+
+(fn graph-view-node-views-clickables-drive-heightfield-perlin-tool-pick []
+    (with-temp-data-dir
+        (fn [_root]
+            (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode}
+                   (require :graph/nodes/heightfield-perlin-tool))
+            (local States (require :states))
+            (local TerrainRectPickState (require :terrain-rect-pick-state))
+            (local Clickables (require :clickables))
+            (local Hoverables (require :hoverables))
+            (local original-hud app.hud)
+            (local original-scene app.scene)
+            (local original-clickables app.clickables)
+            (local original-hoverables app.hoverables)
+            (local original-intersectables app.intersectables)
+            (local original-screen-pos-ray app.screen-pos-ray)
+            (local original-movables app.movables)
+            (local original-resizables app.resizables)
+            (local original-fpc app.first-person-controls)
+            (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
+            (local original-states app.states)
+            (local terrain-record (make-heightfield-terrain-record))
+            (local scene {:screen-pos-terrain-domain-hit
+                          (fn [_self pos _opts]
+                              (if (< pos.x 20)
+                                  {:terrain-id "terrain-a"
+                                   :terrain-kind "heightfield-terrain"
+                                   :terrain-record terrain-record
+                                   :local-point (glm.vec3 1 0 2)}
+                                  {:terrain-id "terrain-a"
+                                   :terrain-kind "heightfield-terrain"
+                                   :terrain-record terrain-record
+                                   :local-point (glm.vec3 3 0 4)}))})
+            (local runtime {:scene scene})
+            (local entry (make-world-entry {:id "world-a"
+                                            :runtime runtime
+                                            :state {:scene {:panels []
+                                                            :terrains [terrain-record]}
+                                                    :hud {:panels []}}}))
+            (local manager (make-world-manager {:entry entry}))
+            (set app.intersectables (Intersectables))
+            (set app.clickables (Clickables {:intersectables app.intersectables}))
+            (set app.hoverables (Hoverables {:intersectables app.intersectables}))
+            (set app.screen-pos-ray
+                 (fn [pointer]
+                     {:origin (glm.vec3 (or pointer.x 0) (or pointer.y 0) 10)
+                      :direction (glm.vec3 0 0 -1)}))
+            (set app.movables {:on-mouse-button-down (fn [_self _payload] nil)
+                               :on-mouse-button-up (fn [_self _payload] nil)
+                               :on-mouse-motion (fn [_self _payload] nil)
+                               :drag-active? (fn [_self] false)})
+            (set app.resizables {:on-mouse-button-down (fn [_self _payload] false)
+                                 :on-mouse-button-up (fn [_self _payload] nil)
+                                 :on-mouse-motion (fn [_self _payload] nil)
+                                 :drag-active? (fn [_self] false)})
+            (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
+                                            :on-mouse-button-up (fn [_self _payload] nil)
+                                            :on-mouse-motion (fn [_self _payload] nil)
+                                            :drag-active? (fn [_self] false)})
+            (local ctx (make-ctx))
+            (local target {:build-context ctx
+                           :world-units-per-pixel 1
+                           :children []
+                           :add-panel-child (fn [self opts]
+                                              (local builder (and opts opts.builder))
+                                              (assert builder "builder required")
+                                              (local dialog (builder self.build-context {}))
+                                              (table.insert self.children dialog)
+                                              dialog)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))})
+            (set app.hud target)
+            (set app.scene scene)
+            (local states (States))
+            (states.add-state :normal {})
+            (states.add-state :terrain-rect-pick (TerrainRectPickState))
+            (states.set-state :normal)
+            (set app.states states)
+            (local graph (Graph {:with-start false}))
+            (local node (HeightfieldPerlinToolNode {:world-id "world-a"
+                                                    :world-manager manager
+                                                    :terrain-id "terrain-a"}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local views (GraphViewNodeViews {:graph graph
+                                              :ctx ctx
+                                              :view-target target}))
+            (views:open node)
+            (local dialog (. target.children 1))
+            (local body-card (unwrap-element (. dialog.children 2)))
+            (local body-content (unwrap-element (. body-card.children 2)))
+            (local tool-view (or (and body-content body-content.child) body-content))
+            (local button tool-view.pick-button)
+            (assert button "Expected terrain tool pick button")
+            (local original-intersect button.intersect)
+            (set button.intersect
+                 (fn [_self _ray]
+                     (values true (glm.vec3 0 0 0) 0.0)))
+            (app.clickables:on-mouse-button-down {:button 1 :x 5 :y 5 :timestamp 10})
+            (app.clickables:on-mouse-button-up {:button 1 :x 5 :y 5 :timestamp 10})
+            (assert (= (app.states.active-name) :terrain-rect-pick)
+                    "clickables-driven pick button should enter the terrain rectangle pick state")
+            (assert app.terrain-rect-pick-session
+                    "clickables-driven pick button should register the active terrain rectangle pick session")
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+            (app.engine.events.mouse-motion.emit {:x 40 :y 60})
+            (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
+            (assert (= (tool-view.fields.target-mode:get-value) "rect"))
+            (assert (= (tool-view.fields.rect-min-x:get-text) "1"))
+            (assert (= (tool-view.fields.rect-min-z:get-text) "2"))
+            (assert (= (tool-view.fields.rect-max-x:get-text) "3"))
+            (assert (= (tool-view.fields.rect-max-z:get-text) "4"))
+            (set button.intersect original-intersect)
+            (views:drop-all)
+            (graph:drop)
+            (set app.hud original-hud)
+            (set app.scene original-scene)
+            (set app.clickables original-clickables)
+            (set app.hoverables original-hoverables)
+            (set app.intersectables original-intersectables)
+            (set app.screen-pos-ray original-screen-pos-ray)
+            (set app.movables original-movables)
+            (set app.resizables original-resizables)
+            (set app.first-person-controls original-fpc)
+            (set app.states original-states)
+            (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
+
+
+(fn graph-view-node-views-engine-events-drive-heightfield-perlin-tool-pick []
+    (with-temp-data-dir
+        (fn [_root]
+            (local {:HeightfieldPerlinToolNode HeightfieldPerlinToolNode}
+                   (require :graph/nodes/heightfield-perlin-tool))
+            (local States (require :states))
+            (local TerrainRectPickState (require :terrain-rect-pick-state))
+            (local NormalState (require :normal-state))
+            (local Clickables (require :clickables))
+            (local Hoverables (require :hoverables))
+            (local original-hud app.hud)
+            (local original-scene app.scene)
+            (local original-clickables app.clickables)
+            (local original-hoverables app.hoverables)
+            (local original-intersectables app.intersectables)
+            (local original-screen-pos-ray app.screen-pos-ray)
+            (local original-movables app.movables)
+            (local original-resizables app.resizables)
+            (local original-fpc app.first-person-controls)
+            (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
+            (local original-states app.states)
+            (local terrain-record (make-heightfield-terrain-record))
+            (local scene {:screen-pos-terrain-domain-hit
+                          (fn [_self pos _opts]
+                              (if (< pos.x 20)
+                                  {:terrain-id "terrain-a"
+                                   :terrain-kind "heightfield-terrain"
+                                   :terrain-record terrain-record
+                                   :local-point (glm.vec3 1 0 2)}
+                                  {:terrain-id "terrain-a"
+                                   :terrain-kind "heightfield-terrain"
+                                   :terrain-record terrain-record
+                                   :local-point (glm.vec3 3 0 4)}))})
+            (local runtime {:scene scene})
+            (local entry (make-world-entry {:id "world-a"
+                                            :runtime runtime
+                                            :state {:scene {:panels []
+                                                            :terrains [terrain-record]}
+                                                    :hud {:panels []}}}))
+            (local manager (make-world-manager {:entry entry}))
+            (set app.intersectables (Intersectables))
+            (set app.clickables (Clickables {:intersectables app.intersectables}))
+            (set app.hoverables (Hoverables {:intersectables app.intersectables}))
+            (set app.screen-pos-ray
+                 (fn [pointer]
+                     {:origin (glm.vec3 (or pointer.x 0) (or pointer.y 0) 10)
+                      :direction (glm.vec3 0 0 -1)}))
+            (set app.movables {:on-mouse-button-down (fn [_self _payload] nil)
+                               :on-mouse-button-up (fn [_self _payload] nil)
+                               :on-mouse-motion (fn [_self _payload] nil)
+                               :drag-active? (fn [_self] false)})
+            (set app.resizables {:on-mouse-button-down (fn [_self _payload] false)
+                                 :on-mouse-button-up (fn [_self _payload] nil)
+                                 :on-mouse-motion (fn [_self _payload] nil)
+                                 :drag-active? (fn [_self] false)})
+            (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
+                                            :on-mouse-button-up (fn [_self _payload] nil)
+                                            :on-mouse-motion (fn [_self _payload] nil)
+                                            :drag-active? (fn [_self] false)})
+            (local ctx (make-ctx))
+            (local target {:build-context ctx
+                           :world-units-per-pixel 1
+                           :children []
+                           :add-panel-child (fn [self opts]
+                                              (local builder (and opts opts.builder))
+                                              (assert builder "builder required")
+                                              (local dialog (builder self.build-context {}))
+                                              (table.insert self.children dialog)
+                                              dialog)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))})
+            (set app.hud target)
+            (set app.scene scene)
+            (local states (States))
+            (states.add-state :normal (NormalState))
+            (states.add-state :terrain-rect-pick (TerrainRectPickState))
+            (states.set-state :normal)
+            (set app.states states)
+            (local graph (Graph {:with-start false}))
+            (local node (HeightfieldPerlinToolNode {:world-id "world-a"
+                                                    :world-manager manager
+                                                    :terrain-id "terrain-a"}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local views (GraphViewNodeViews {:graph graph
+                                              :ctx ctx
+                                              :view-target target}))
+            (views:open node)
+            (local dialog (. target.children 1))
+            (local body-card (unwrap-element (. dialog.children 2)))
+            (local body-content (unwrap-element (. body-card.children 2)))
+            (local tool-view (or (and body-content body-content.child) body-content))
+            (local button tool-view.pick-button)
+            (assert button "Expected terrain tool pick button")
+            (local original-intersect button.intersect)
+            (set button.intersect
+                 (fn [_self _ray]
+                     (values true (glm.vec3 0 0 0) 0.0)))
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 5 :y 5 :timestamp 10})
+            (app.engine.events.mouse-button-up.emit {:button 1 :x 5 :y 5 :timestamp 10})
+            (assert (= (app.states.active-name) :terrain-rect-pick)
+                    "engine-event click should enter terrain rect pick state")
+            (assert app.terrain-rect-pick-session
+                    "engine-event click should register active terrain pick session")
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
+            (app.engine.events.mouse-motion.emit {:x 40 :y 60})
+            (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
+            (assert (= (tool-view.fields.target-mode:get-value) "rect"))
+            (assert (= (tool-view.fields.rect-min-x:get-text) "1"))
+            (assert (= (tool-view.fields.rect-min-z:get-text) "2"))
+            (assert (= (tool-view.fields.rect-max-x:get-text) "3"))
+            (assert (= (tool-view.fields.rect-max-z:get-text) "4"))
+            (set button.intersect original-intersect)
+            (views:drop-all)
+            (graph:drop)
+            (set app.hud original-hud)
+            (set app.scene original-scene)
+            (set app.clickables original-clickables)
+            (set app.hoverables original-hoverables)
+            (set app.intersectables original-intersectables)
+            (set app.screen-pos-ray original-screen-pos-ray)
+            (set app.movables original-movables)
+            (set app.resizables original-resizables)
+            (set app.first-person-controls original-fpc)
+            (set app.states original-states)
+            (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
+
 (fn graph-layout-module-updates-lines-and-labels []
     (with-temp-data-dir
         (fn [_root]
@@ -1398,6 +1822,12 @@
 (table.insert tests {:name "GraphView updates selection and focus borders" :fn graph-view-updates-selection-and-focus-borders})
 (table.insert tests {:name "GraphView auto-focus updates focus ring" :fn graph-view-autofocus-updates-focus-ring})
 (table.insert tests {:name "Graph view rebuilds views from double click" :fn graph-view-rebuilds-from-double-click})
+(table.insert tests {:name "GraphView node views host heightfield perlin tool dialog"
+                     :fn graph-view-node-views-hosts-heightfield-perlin-tool-dialog})
+(table.insert tests {:name "GraphView node views clickables drive heightfield perlin tool pick"
+                     :fn graph-view-node-views-clickables-drive-heightfield-perlin-tool-pick})
+(table.insert tests {:name "GraphView node views engine events drive heightfield perlin tool pick"
+                     :fn graph-view-node-views-engine-events-drive-heightfield-perlin-tool-pick})
 (table.insert tests {:name "GraphViewLayout updates lines and labels" :fn graph-layout-module-updates-lines-and-labels})
 (table.insert tests {:name "Graph movables register and clean up drag targets" :fn graph-movables-module-registers-and-cleans-up})
 (table.insert tests {:name "Graph nodes register with movables for dragging" :fn graph-nodes-are-movable})

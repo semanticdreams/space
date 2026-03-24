@@ -107,7 +107,7 @@
    :zpower 2.5})
 
 (local default-heightfield-options
-  {:position [0 -100 0]
+  {:position [-160 -100 -160]
    :rotation [1 0 0 0]
    :opacity 1.0
    :physics true
@@ -191,15 +191,9 @@
         out)))
 
 (local terrain-kind-spec-list
-  [{:kind "flat-terrain"
-    :label "Flat Terrain"
-    :default-options default-flat-options}
-   {:kind "heightfield-terrain"
+  [{:kind "heightfield-terrain"
     :label "Heightfield Terrain"
-    :default-options default-heightfield-options}
-   {:kind "perlin-terrain"
-    :label "Perlin Terrain"
-    :default-options default-perlin-options}])
+    :default-options default-heightfield-options}])
 
 (local terrain-kind-specs {})
 
@@ -237,6 +231,9 @@
     (when (not (finite-number? options.default-height))
       (set options.default-height 0.0)))
   (local normalized {:id id
+                     :name (if (and raw.name (= (type raw.name) :string) (> (string.len raw.name) 0))
+                               raw.name
+                               nil)
                      :kind kind
                      :options options})
   (when (= kind "heightfield-terrain")
@@ -249,19 +246,13 @@
     (table.insert out (normalize-record record)))
   out)
 
-(fn default-flat-record []
-  (normalize-record {:kind "flat-terrain"}))
-
-(fn default-perlin-record []
-  (normalize-record {:kind "perlin-terrain"}))
-
 (fn default-record-for-kind [kind]
   (assert (terrain-kind-spec kind)
           (.. "Unsupported terrain kind for record defaults: " (tostring kind)))
   (normalize-record {:kind kind}))
 
 (fn default-records []
-  [(default-flat-record)])
+  [(default-record-for-kind "heightfield-terrain")])
 
 (fn builder-for-record [record]
   (local normalized (normalize-record record))
@@ -330,8 +321,6 @@
  :normalize-records normalize-records
  :supported-kinds supported-kinds
  :terrain-kind-spec terrain-kind-spec
- :default-flat-record default-flat-record
- :default-perlin-record default-perlin-record
  :default-record-for-kind default-record-for-kind
  :default-records default-records
  :builder-for-record builder-for-record

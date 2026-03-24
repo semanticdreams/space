@@ -6,12 +6,19 @@
 (local Input (require :input))
 (local Text (require :text))
 (local TextStyle (require :text-style))
+(local FormComboBox (require :graph/view/widgets/form-combo-box))
 
 (fn make-field [ctx opts]
-  ((Input {:text (or opts.text "")
-           :placeholder (or opts.placeholder "")
-           :on-change (or opts.on-change (fn [_input _text] nil))})
-   ctx))
+  (if opts.items
+      (FormComboBox ctx {:name opts.name
+                         :items opts.items
+                         :value opts.text
+                         :placeholder (or opts.placeholder "")
+                         :on-change (or opts.on-change (fn [_input _text] nil))})
+      ((Input {:text (or opts.text "")
+               :placeholder (or opts.placeholder "")
+               :on-change (or opts.on-change (fn [_input _text] nil))})
+       ctx)))
 
 (fn make-error-label [ctx]
   ((Text {:text ""
@@ -24,7 +31,17 @@
    ctx))
 
 (fn set-field-text [field value]
-  (field:set-text (or value "") {:mark-measure-dirty? false}))
+  (if field.set-value
+      (field:set-value value)
+      (field:set-text (or value "") {:mark-measure-dirty? false})))
+
+(fn sync-errors! [validation draft errors error-labels set-error-label]
+  (local validation-result (validation.validate-draft draft))
+  (each [_ spec (ipairs validation.field-specs)]
+    (local message (. validation-result.errors spec.key))
+    (set (. errors spec.key) message)
+    (set-error-label spec.key message))
+  validation-result)
 
 (fn count-errors [validation errors]
   (var total 0)
@@ -41,6 +58,7 @@
   (local name (or options.name "terrain-editor-form-view"))
   (local wrap-scroll? (if (= options.wrap-scroll? nil) true (not (not options.wrap-scroll?))))
   (local refresh-on-change? (if (= options.refresh-on-change? nil) true (not (not options.refresh-on-change?))))
+  (local apply-when-valid? (if (= options.apply-when-valid? nil) false (not (not options.apply-when-valid?))))
 
   (fn clone-table [value]
     (if (= (type value) :table)
@@ -84,19 +102,34 @@
     (fn update-status-and-actions []
       (local current-draft (baseline-draft))
       (local dirty? (not (validation.draft-equals? draft current-draft)))
-      (local error-count (count-errors validation errors))
-      (view.apply-button:set-enabled dirty?)
+      (local validation-result
+        (if apply-when-valid?
+            (validation.validate-draft draft)
+            nil))
+      (local error-count
+        (if validation-result
+            validation-result.error-count
+            (count-errors validation errors)))
+      (local can-apply?
+        (if apply-when-valid?
+            validation-result.ok?
+            dirty?))
+      (view.apply-button:set-enabled can-apply?)
       (if apply-failed?
           (status-label:set-text "Apply failed" {:mark-measure-dirty? false})
           (if (> error-count 0)
               (status-label:set-text
                 (.. "Fix " (tostring error-count) " invalid field" (if (= error-count 1) "" "s") " before applying")
                 {:mark-measure-dirty? false})
-              (if dirty?
+              (if apply-when-valid?
+                  (if applied?
+                      (status-label:set-text "Applied" {:mark-measure-dirty? false})
+                      (status-label:set-text "Ready to apply" {:mark-measure-dirty? false}))
+                  (if dirty?
                   (status-label:set-text "Unsaved changes" {:mark-measure-dirty? false})
                   (if applied?
                       (status-label:set-text "Applied" {:mark-measure-dirty? false})
-                      (status-label:set-text "No pending changes" {:mark-measure-dirty? false}))))))
+                      (status-label:set-text "No pending changes" {:mark-measure-dirty? false})))))))
 
     (fn refresh-from-target [refresh-opts]
       (local refresh-options (or refresh-opts {}))
@@ -114,22 +147,44 @@
     (fn handle-field-change [field-key text]
       (when (not syncing?)
         (set (. draft field-key) text)
-        (when (. errors field-key)
-          (local field-result (validation.validate-field field-key text))
-          (if field-result.ok?
-              (do
-                (set (. errors field-key) nil)
-                (set-error-label field-key nil))
-              (do
-                (set (. errors field-key) field-result.error)
-                (set-error-label field-key field-result.error))))
+        (if apply-when-valid?
+            (sync-errors! validation draft errors error-labels set-error-label)
+            (when (. errors field-key)
+              (local field-result (validation.validate-field field-key text))
+              (if field-result.ok?
+                  (do
+                    (set (. errors field-key) nil)
+                    (set-error-label field-key nil))
+                  (do
+                    (set (. errors field-key) field-result.error)
+                    (set-error-label field-key field-result.error)))))
         (set applied? false)
         (set apply-failed? false)
         (update-status-and-actions)))
 
+    (fn sync-visible-fields [field-keys]
+      (each [_ key (ipairs field-keys)]
+        (set-field-text (. fields key) (. draft key))))
+
+    (fn sync-validation-state []
+      (if apply-when-valid?
+          (sync-errors! validation draft errors error-labels set-error-label)
+          (each [_ spec (ipairs validation.field-specs)]
+            (local key spec.key)
+            (local result (validation.validate-field key (. draft key)))
+            (if result.ok?
+                (do
+                  (set (. errors key) nil)
+                  (set-error-label key nil))
+                (do
+                  (set (. errors key) result.error)
+                  (set-error-label key result.error))))))
+
     (each [_ spec (ipairs validation.field-specs)]
       (set (. fields spec.key)
-           (make-field build-ctx {:placeholder spec.placeholder
+           (make-field build-ctx {:name (.. name "-" (tostring spec.key))
+                                  :items spec.items
+                                  :placeholder spec.placeholder
                                   :on-change (fn [_input text]
                                                (handle-field-change spec.key text))}))
       (set (. error-labels spec.key) (make-error-label build-ctx)))
@@ -170,20 +225,23 @@
 
     (local field-widgets {})
     (each [_ spec (ipairs validation.field-specs)]
-      (set (. field-widgets spec.key)
+      (local field-key spec.key)
+      (set (. field-widgets field-key)
            ((Flex {:axis 2
                    :xalign :stretch
                    :yspacing 0.15
-                   :children [(FlexChild (fn [_] (. fields spec.key)) 0)
-                              (FlexChild (fn [_] (. error-labels spec.key)) 0)]})
+                   :children [(FlexChild (fn [_] (. fields field-key)) 0)
+                              (FlexChild (fn [_] (. error-labels field-key)) 0)]})
             build-ctx)))
 
     (local grid-children [])
     (each [_ spec (ipairs validation.field-specs)]
-      (table.insert grid-children {:widget (fn [child-ctx] ((Text {:text spec.label}) child-ctx))
+      (local field-label spec.label)
+      (table.insert grid-children {:widget (fn [child-ctx] ((Text {:text field-label}) child-ctx))
                                    :align-y :end}))
     (each [_ spec (ipairs validation.field-specs)]
-      (table.insert grid-children {:widget (fn [_] (. field-widgets spec.key))
+      (local field-key spec.key)
+      (table.insert grid-children {:widget (fn [_] (. field-widgets field-key))
                                    :align-x :stretch}))
 
     (local grid
@@ -243,6 +301,22 @@
     (set view.fields fields)
     (set view.error-labels error-labels)
     (set view.status-label status-label)
+    (set view.get-draft
+         (fn [_self]
+           (clone-table draft)))
+    (set view.set-draft-values
+         (fn [_self next-values]
+           (local keys [])
+           (each [key value (pairs (or next-values {}))]
+             (set (. draft key) value)
+             (table.insert keys key))
+           (set syncing? true)
+           (sync-visible-fields keys)
+           (set syncing? false)
+           (sync-validation-state)
+           (set applied? false)
+           (set apply-failed? false)
+           (update-status-and-actions)))
     (when wrap-scroll?
       (set view.scroll-view root-entity))
     (set view.drop

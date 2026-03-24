@@ -18,6 +18,8 @@
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
+(local TerrainQuery (require :terrain-query))
+(local HeightfieldTerrainData (require :heightfield-terrain-data))
 
 (local default-position (glm.vec3 -5 0 0))
 (local default-rotation (glm.quat (math.rad 30) (glm.vec3 0 1 0)))
@@ -38,6 +40,35 @@
   (if (and value (> (glm.length value) 1e-6))
       (glm.normalize value)
       fallback))
+
+(fn terrain-query-record [metadata]
+  (local record (and metadata metadata.record))
+  (local layout (and metadata metadata.element metadata.element.layout))
+  (if (or (not record)
+          (not layout)
+          (not (= record.kind "heightfield-terrain")))
+      record
+      (do
+        (local bounds (HeightfieldTerrainData.sample-bounds record))
+        (local spacing (or (and record.options record.options.sample-spacing) [20 20]))
+        (local spacing-x (or (. spacing 1) spacing.x 20))
+        (local spacing-z (or (. spacing 2) spacing.y spacing.z 20))
+        (local canonical-origin-offset
+          (glm.vec3 (* bounds.min-sample-x spacing-x)
+                    0
+                    (* bounds.min-sample-z spacing-z)))
+        (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
+        (local canonical-position
+          (- layout.position (rotation:rotate canonical-origin-offset)))
+        (local options {})
+        (each [key value (pairs (or record.options {}))]
+          (set (. options key) value))
+        (set options.position [canonical-position.x canonical-position.y canonical-position.z])
+        (set options.rotation [rotation.w rotation.x rotation.y rotation.z])
+        {:id record.id
+         :kind record.kind
+         :options options
+         :chunks record.chunks})))
 
 (fn resolve-camera-placement [self]
   (local camera app.camera)
@@ -991,9 +1022,10 @@
       (error (.. "Scene.screen-pos-ray produced non-finite " label))))
   (assert view "Scene.screen-pos-ray requires a view matrix")
   (assert projection "Scene.screen-pos-ray requires a projection matrix")
-  (local sample-pos (or pos
-                        {:x (+ viewport.x (/ viewport.width 2))
-                         :y (+ viewport.y (/ viewport.height 2))}))
+  (local sample-pos
+    (or (viewport-utils.input-pos->viewport-pos pos viewport app.engine)
+        {:x (+ viewport.x (/ viewport.width 2))
+         :y (+ viewport.y (/ viewport.height 2))}))
   (local px (or sample-pos.x viewport.x))
   (local py (or sample-pos.y viewport.y))
   (local inverted-y (- (+ viewport.height viewport.y) py))
@@ -1008,6 +1040,64 @@
 
 (fn on-viewport-changed [_self _viewport]
   nil)
+
+(fn raycast-terrain [self ray]
+  (var best nil)
+  (each [_ metadata (ipairs (or self.scene-terrains []))]
+    (local record (and metadata metadata.record))
+    (local query-record (terrain-query-record metadata))
+    (local hit (and query-record (TerrainQuery.raycast-record query-record ray)))
+    (when (and hit (or (not best) (< hit.distance best.distance)))
+      (set best {:terrain-record record
+                 :terrain-id (and record record.id)
+                 :terrain-kind (and record record.kind)
+                 :distance hit.distance
+                 :world-point hit.world-point
+                 :local-point hit.local-point
+                 :sample hit.sample
+                 :target hit.target})))
+  best)
+
+(fn screen-pos-terrain-hit [self pos opts]
+  (self:raycast-terrain (self:screen-pos-ray pos opts)))
+
+(fn screen-pos-terrain-domain-hit [self pos opts]
+  (local ray (self:screen-pos-ray pos opts))
+  (var best nil)
+  (each [_ metadata (ipairs (or self.scene-terrains []))]
+    (local record (and metadata metadata.record))
+    (local query-record (terrain-query-record metadata))
+    (local hit (and query-record (TerrainQuery.domain-hit-record query-record ray)))
+    (when (and hit (or (not best) (< hit.distance best.distance)))
+      (set best {:terrain-record record
+                 :terrain-id (and record record.id)
+                 :terrain-kind (and record record.kind)
+                 :distance hit.distance
+                 :world-point hit.world-point
+                 :local-point hit.local-point
+                 :sample hit.sample
+                 :target hit.target})))
+  best)
+
+(fn screen-drag-terrain-target [self start-pos end-pos opts]
+  (local start-hit (self:screen-pos-terrain-domain-hit start-pos opts))
+  (local end-hit (self:screen-pos-terrain-domain-hit end-pos opts))
+  (if (and start-hit
+           end-hit
+           (= start-hit.terrain-id end-hit.terrain-id)
+           (= start-hit.terrain-kind end-hit.terrain-kind))
+      (do
+        (local record start-hit.terrain-record)
+        (local target (and record
+                           (TerrainQuery.target-between-hits record start-hit end-hit)))
+        (and target
+             {:terrain-record record
+              :terrain-id start-hit.terrain-id
+              :terrain-kind start-hit.terrain-kind
+              :start-hit start-hit
+              :end-hit end-hit
+              :target target}))
+      nil))
 
   (fn capture-state [self]
     (local panels [])
@@ -1141,6 +1231,10 @@
 (set self.get-mesh-batches get-mesh-batches)
 (set self.get-reference-point get-reference-point)
 (set self.screen-pos-ray screen-pos-ray)
+(set self.raycast-terrain raycast-terrain)
+(set self.screen-pos-terrain-hit screen-pos-terrain-hit)
+(set self.screen-pos-terrain-domain-hit screen-pos-terrain-domain-hit)
+(set self.screen-drag-terrain-target screen-drag-terrain-target)
 (set self.on-viewport-changed on-viewport-changed)
 (set self.capture-state capture-state)
 (set self.restore-state restore-state)

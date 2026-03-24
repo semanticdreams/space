@@ -40,6 +40,8 @@
 (local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
 (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
 (local TerrainEditors (require :graph/terrain-editors))
+(local TerrainTools (require :graph/terrain-tools))
+ (local WorldData (require :graph/world-data))
 
 (local LinkEntityStore (require :entities/link))
 (local CodeEntityStore (require :entities/code))
@@ -343,18 +345,37 @@
                           :terrain-id terrain-id
                           :key key}))))))
 
-  (graph:register-key-loader "terrain-editor"
-    (prefix-loader "terrain-editor:"
-      (fn [rest key]
+	  (graph:register-key-loader "terrain-editor"
+	    (prefix-loader "terrain-editor:"
+	      (fn [rest key]
         (local parts (split-key-parts rest))
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local terrain-id (. parts 2))
           (when world-manager
-            (TerrainEditors.create-editor-node {:world-id world-id
-                                                :world-manager world-manager
-                                                :terrain-id terrain-id
-                                                :key key}))))))
-  true)
+	            (TerrainEditors.create-editor-node {:world-id world-id
+	                                                :world-manager world-manager
+	                                                :terrain-id terrain-id
+	                                                :key key}))))))
+	  (graph:register-key-loader "terrain-tool"
+	    (prefix-loader "terrain-tool:"
+	      (fn [rest key]
+	        (local parts (split-key-parts rest))
+	        (when (>= (length parts) 3)
+	          (local world-id (. parts 1))
+	          (local terrain-id (. parts 2))
+	          (local tool-id (. parts 3))
+	          (when world-manager
+	            (local terrain-entry
+	              (WorldData.find-terrain world-manager world-id terrain-id))
+	            (local terrain-kind (and terrain-entry terrain-entry.kind))
+	            (when terrain-kind
+	              (TerrainTools.create-tool-node {:world-id world-id
+	                                              :world-manager world-manager
+	                                              :terrain-id terrain-id
+	                                              :terrain-kind terrain-kind
+	                                              :tool-id tool-id
+	                                              :key key})))))))
+	  true)
 
 M

@@ -41,6 +41,7 @@ void log_write_named_fields(const std::string& name, LogLevel level, const std::
 void log_flush();
 void log_set_frame_id_provider(const std::atomic<uint64_t>* provider);
 void log_set_output_path(const std::string& path);
+std::string log_get_output_path();
 LogField log_kv_string(const std::string& key, const std::string& value, bool quote_value);
 LogField log_kv(const std::string& key, const std::string& value);
 LogField log_kv(const std::string& key, const char* value);

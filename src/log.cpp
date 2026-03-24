@@ -343,6 +343,11 @@ void log_set_output_path(const std::string& path)
     log_init(config);
 }
 
+std::string log_get_output_path()
+{
+    return log_output_path;
+}
+
 Log::Log(const std::string& logger_name)
     : name(logger_name)
 {

@@ -62,6 +62,106 @@
   (assert (not (= (. left-chunk.heights 1) (. right-chunk.heights 1)))
           "negative chunk coordinates should still map to distinct perlin samples"))
 
+(fn flat-fill-can-target-a_rectangle []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (HeightfieldTerrainData.fill-record! record 7.0 {:mode :rect
+                                                   :x0 1
+                                                   :z0 1
+                                                   :x1 2
+                                                   :z1 2})
+  (local heights (. (. record.chunks 1) :heights))
+  (assert (= (. heights 1) 0.0) "samples outside the rect should remain unchanged")
+  (assert (= (. heights 7) 7.0) "rect fill should update sample [1,1]")
+  (assert (= (. heights 8) 7.0) "rect fill should update sample [2,1]")
+  (assert (= (. heights 12) 7.0) "rect fill should update sample [1,2]")
+  (assert (= (. heights 13) 7.0) "rect fill should update sample [2,2]")
+  (assert (= record.options.default-height 0.0)
+          "rect fill should not rewrite default-height for future chunks"))
+
+(fn perlin-application-can-target-a-rectangle []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (HeightfieldTerrainData.apply-perlin-record! record {:target {:mode :rect
+                                                                :x0 1
+                                                                :z0 1
+                                                                :x1 3
+                                                                :z1 3}
+                                                       :seed 99
+                                                       :n1div 30
+                                                       :n2div 4
+                                                       :n3div 1
+                                                       :n1scale 20
+                                                       :n2scale 2
+                                                       :n3scale 1
+                                                       :zroot 2
+                                                       :zpower 2.5})
+  (local heights (. (. record.chunks 1) :heights))
+  (var changed-count 0)
+  (each [idx value (ipairs heights)]
+    (when (not (= value 0.0))
+      (set changed-count (+ changed-count 1))))
+  (assert (= (. heights 1) 0.0) "perlin rect should leave samples outside the target unchanged")
+  (assert (> changed-count 0) "perlin rect should update at least one targeted sample")
+  (assert (= record.options.default-height 0.0)
+          "perlin rect should not rewrite default-height"))
+
+(fn resize-preserves-overlapping-chunks-and-fills-new-ones []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:chunk-samples [5 5]
+                                                :default-height 0.0}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [x z] (+ x (* z 10))))}]}))
+  (HeightfieldTerrainData.resize-record! record {:min-chunk-x -1
+                                                 :min-chunk-z 0
+                                                 :max-chunk-x 1
+                                                 :max-chunk-z 0
+                                                 :fill-height 3.5})
+  (assert (= (length record.chunks) 3) "resize should create the requested chunk coverage")
+  (local left (. record.chunks 1))
+  (local center (. record.chunks 2))
+  (local right (. record.chunks 3))
+  (assert (= (. left.coord 1) -1) "resize should include new negative chunk coverage")
+  (assert (= (. center.coord 1) 0) "resize should preserve overlapping chunk coordinates")
+  (assert (= (. right.coord 1) 1) "resize should include new positive chunk coverage")
+  (assert (= (. center.heights 1) 0) "resize should preserve overlapping chunk data")
+  (assert (= (. center.heights 25) 44) "resize should preserve all overlapping chunk samples")
+  (assert (= (. left.heights 1) 3.5) "resize should fill new chunks with the requested fill height")
+  (assert (= (. right.heights 25) 3.5) "resize should fill every sample in new chunks")
+  (assert (= record.options.default-height 3.5) "resize should update default-height for future chunks"))
+
+(fn adjust-height-supports-rectangles-and-whole-terrain []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:chunk-samples [5 5]
+                                                :default-height 1.0}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 1.0))}]}))
+  (HeightfieldTerrainData.adjust-record! record 2.0 {:mode :rect
+                                                     :x0 1
+                                                     :z0 1
+                                                     :x1 2
+                                                     :z1 2})
+  (local heights (. (. record.chunks 1) :heights))
+  (assert (= (. heights 1) 1.0) "adjust rect should leave outside samples unchanged")
+  (assert (= (. heights 7) 3.0) "adjust rect should raise targeted samples")
+  (assert (= record.options.default-height 1.0) "adjust rect should not rewrite default height")
+  (HeightfieldTerrainData.adjust-record! record -1.5 {:mode :whole})
+  (assert (= (. heights 1) -0.5) "whole adjust should affect every sample")
+  (assert (= (. heights 7) 1.5) "whole adjust should apply on top of prior rect edits")
+  (assert (= record.options.default-height -0.5) "whole adjust should update default height"))
+
 (fn terrain-uploads-to-triangle-buffer []
   (var tracked 0)
   (var untracked 0)
@@ -90,6 +190,57 @@
 
   (entity:drop)
   (assert (> untracked 0) "Heightfield terrain should untrack triangle handle on drop"))
+
+(fn terrain-checker-pattern-alternates-across-chunk-seams []
+  (local vector (VectorBuffer 0))
+  (local ctx {:triangle-vector vector})
+  (local builder
+    (HeightfieldTerrain {:physics false
+                         :sample-spacing [2 2]
+                         :chunks [{:coord [0 0]
+                                   :size [3 2]
+                                   :heights (make-heights 3 2 (fn [_x _z] 0.0))}
+                                  {:coord [1 0]
+                                   :size [3 2]
+                                   :heights (make-heights 3 2 (fn [_x _z] 0.0))}]}))
+  (local entity (builder ctx))
+  (local mesh entity.mesh)
+  (local left-seam-color (. mesh.colors 7))
+  (local right-seam-color (. mesh.colors 13))
+  (assert left-seam-color "Expected a color for the last cell of the left chunk")
+  (assert right-seam-color "Expected a color for the first cell of the right chunk")
+  (assert (or (not (= left-seam-color.x right-seam-color.x))
+              (not (= left-seam-color.y right-seam-color.y))
+              (not (= left-seam-color.z right-seam-color.z)))
+          "Checker pattern should alternate across chunk seams")
+  (entity:drop))
+
+(fn terrain-respects-array-rotation-from-record-data []
+  (local vector (VectorBuffer 0))
+  (local ctx {:triangle-vector vector})
+  (local quarter-turn (glm.quat (/ math.pi 2) (glm.vec3 0 1 0)))
+  (local builder
+    (HeightfieldTerrain {:position [10 -4 20]
+                         :rotation [quarter-turn.w quarter-turn.x quarter-turn.y quarter-turn.z]
+                         :physics false
+                         :sample-spacing [2 2]
+                         :chunks [{:coord [-1 0]
+                                   :size [3 2]
+                                   :heights (make-heights 3 2 (fn [_x _z] 0.0))}]}))
+  (local entity (builder ctx))
+  (assert (< (math.abs (- entity.layout.rotation.w quarter-turn.w)) 1e-4)
+          "heightfield runtime should preserve quaternion w from array rotation data")
+  (assert (< (math.abs (- entity.layout.rotation.x quarter-turn.x)) 1e-4)
+          "heightfield runtime should preserve quaternion x from array rotation data")
+  (assert (< (math.abs (- entity.layout.rotation.y quarter-turn.y)) 1e-4)
+          "heightfield runtime should preserve quaternion y from array rotation data")
+  (assert (< (math.abs (- entity.layout.rotation.z quarter-turn.z)) 1e-4)
+          "heightfield runtime should preserve quaternion z from array rotation data")
+  (assert (< (math.abs (- entity.layout.position.x 10)) 1e-4)
+          "heightfield runtime should rotate the origin offset into world x")
+  (assert (< (math.abs (- entity.layout.position.z 24)) 1e-4)
+          "heightfield runtime should rotate the origin offset into world z")
+  (entity:drop))
 
 (fn heightfield-physics-catches-falling-body []
   (assert bt "Heightfield terrain physics test requires Bullet bindings")
@@ -150,8 +301,20 @@
                      :fn record-normalizes-negative-chunk-coordinates})
 (table.insert tests {:name "Heightfield terrain perlin supports negative chunk coordinates"
                      :fn perlin-application-supports-negative-chunk-coordinates})
+(table.insert tests {:name "Heightfield terrain flat fill supports rectangular targets"
+                     :fn flat-fill-can-target-a_rectangle})
+(table.insert tests {:name "Heightfield terrain perlin supports rectangular targets"
+                     :fn perlin-application-can-target-a-rectangle})
+(table.insert tests {:name "Heightfield terrain resize preserves overlap and fills new chunks"
+                     :fn resize-preserves-overlapping-chunks-and-fills-new-ones})
+(table.insert tests {:name "Heightfield terrain adjust supports rectangles and whole terrain"
+                     :fn adjust-height-supports-rectangles-and-whole-terrain})
 (table.insert tests {:name "Heightfield terrain uploads triangle buffer data"
                      :fn terrain-uploads-to-triangle-buffer})
+(table.insert tests {:name "Heightfield terrain checker pattern alternates across chunk seams"
+                     :fn terrain-checker-pattern-alternates-across-chunk-seams})
+(table.insert tests {:name "Heightfield terrain respects array rotation from record data"
+                     :fn terrain-respects-array-rotation-from-record-data})
 (table.insert tests {:name "Heightfield terrain integrates with Bullet physics"
                      :fn heightfield-physics-catches-falling-body})
 

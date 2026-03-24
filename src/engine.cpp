@@ -437,11 +437,20 @@ void Engine::run() {
                     int width = event.window.data1;
                     int height = event.window.data2;
                     window->updateViewportFromWindowPixels();
+                    int pixel_width = width;
+                    int pixel_height = height;
+                    if (window) {
+                        window->getWindowSizeInPixels(pixel_width, pixel_height);
+                    }
                     lua_engine["width"] = width;
                     lua_engine["height"] = height;
+                    lua_engine["pixel-width"] = pixel_width;
+                    lua_engine["pixel-height"] = pixel_height;
                     sol::table payload = lua_state->create_table();
                     payload["width"] = width;
                     payload["height"] = height;
+                    payload["pixel-width"] = pixel_width;
+                    payload["pixel-height"] = pixel_height;
                     payload["timestamp"] = ns_to_ms(event.common.timestamp);
                     emit_engine_event("window-resized", payload);
                     Uint64 resize_finished = SDL_GetPerformanceCounter();
@@ -456,9 +465,16 @@ void Engine::run() {
                 break;
 
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                lua_engine["pixel-width"] = event.window.data1;
-                lua_engine["pixel-height"] = event.window.data2;
-                window->updateViewportFromWindowPixels();
+                {
+                    lua_engine["pixel-width"] = event.window.data1;
+                    lua_engine["pixel-height"] = event.window.data2;
+                    window->updateViewportFromWindowPixels();
+                    sol::table payload = lua_state->create_table();
+                    payload["width"] = event.window.data1;
+                    payload["height"] = event.window.data2;
+                    payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                    emit_engine_event("window-pixel-size-changed", payload);
+                }
                 break;
 
             case SDL_EVENT_WINDOW_MAXIMIZED:

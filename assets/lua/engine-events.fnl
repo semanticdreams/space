@@ -16,6 +16,7 @@
  :key-up (Signal)
  :key-down (Signal)
  :window-resized (Signal)
+ :window-pixel-size-changed (Signal)
  :window-mode-changed (Signal)
  :window-focus-changed (Signal)
  :window-minimized-changed (Signal)

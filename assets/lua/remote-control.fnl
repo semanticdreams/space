@@ -71,11 +71,17 @@
     (socket:send (.. "ok " (FennelEvaluator.format-result value))))
 
   (fn handle-message [msg]
-    (local source (msg:to-string))
-    (local result (FennelEvaluator.eval-source source))
-    (if result.ok
-        (send-ok result.result)
-        (send-error result.result)))
+    (local (ok err)
+      (pcall
+        (fn []
+          (local source (msg:to-string))
+          (local result (FennelEvaluator.eval-source source))
+          (if result.ok
+              (send-ok result.result)
+              (send-error result.result)))))
+    (when (not ok)
+      (logging.error (.. "[remote-control] unexpected handler error: " (tostring err)))
+      (send-error err)))
 
   (fn tick []
     (when (not closed)
