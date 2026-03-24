@@ -81,6 +81,7 @@
     :tests.test-layered-point
     :tests.test-force-layout
     :tests.test-physics
+    :tests.test-polyhedron-meshes
     :tests.test-ball
     :tests.test-renderers
     :tests.test-focus

@@ -1,5 +1,5 @@
 (local glm (require :glm))
-(local Sphere (require :sphere))
+(local SoccerBallVisual (require :soccer-ball-visual))
 (local Positioned (require :positioned))
 
 (local bt (require :bt))
@@ -67,6 +67,23 @@
        (approx a.y b.y)
        (approx a.z b.z)))
 
+(fn quat-equal? [a b]
+  (if (and a b)
+      (do
+        (local dot (+ (* a.w b.w)
+                      (* a.x b.x)
+                      (* a.y b.y)
+                      (* a.z b.z)))
+        (approx (math.abs dot) 1.0))
+      false))
+
+(fn glm-quat->bt-quat [value]
+  (local rotation (or value (glm.quat 1 0 0 0)))
+  (bt.Quaternion (or rotation.x 0)
+                 (or rotation.y 0)
+                 (or rotation.z 0)
+                 (or rotation.w 1)))
+
 (local Ball {})
 
 (fn create-ball [opts]
@@ -76,17 +93,18 @@
   (local size (resolve-glm-vec3 options.size default-size))
   (local half-size (glm.vec3 (* 0.5 size.x) (* 0.5 size.y) (* 0.5 size.z)))
   (local offset (resolve-glm-vec3 options.position (glm.vec3 24 52 18)))
-  (local color (or options.color (glm.vec4 0.55 0.8 1.0 0.9)))
   (local initial-velocity (resolve-glm-vec3 options.initial-velocity nil))
   (local sphere-shape? (and bt bt.SphereShape))
+  (local visual-builder
+    (or options.visual
+        (SoccerBallVisual {:size size
+                           :hexagon-color options.hexagon-color
+                           :pentagon-color options.pentagon-color})))
 
   (local build
     (fn [ctx]
       (local sphere
-        ((Sphere {:color color
-                  :size size
-                  :segments options.segments
-                  :rings options.rings})
+        (visual-builder
          ctx))
       (local positioned
         ((Positioned {:position offset
@@ -118,21 +136,25 @@
         (+ position
            (rotation:rotate (+ self.offset self.half-size))))
 
-      (fn set-layout-position-from-center [self center]
+      (fn set-layout-transform-from-body [self center rotation]
         (local layout self.layout)
         (when layout
-          (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
+          (local next-rotation (or rotation layout.rotation (glm.quat 1 0 0 0)))
           (local layout-position
-            (- center (rotation:rotate (+ self.offset self.half-size))))
-          (when (not (vec3-equal? layout.position layout-position))
+            (- center (next-rotation:rotate (+ self.offset self.half-size))))
+          (when (or (not (vec3-equal? layout.position layout-position))
+                    (not (quat-equal? layout.rotation next-rotation)))
             (set layout.position layout-position)
+            (set layout.rotation next-rotation)
             (layout:mark-layout-dirty))))
 
       (fn apply-layout-to-body [self]
         (when (and self.body self.body-active? (physics-available?))
+          (local layout (or self.layout {}))
           (local transform (bt.Transform))
           (transform:setIdentity)
           (transform:setOrigin (bt-glm-vec3 (self:center-from-layout)))
+          (transform:setRotation (glm-quat->bt-quat layout.rotation))
           (self.body:setWorldTransform transform)
           (when self.motion-state
             (self.motion-state:setWorldTransform transform))
@@ -150,6 +172,7 @@
           (local transform (bt.Transform))
           (transform:setIdentity)
           (transform:setOrigin (bt-glm-vec3 center))
+          (transform:setRotation (glm-quat->bt-quat (and self.layout self.layout.rotation)))
           (local motion (bt.DefaultMotionState transform))
           (local inertia (bt.Vector3 0 0 0))
           (shape:calculateLocalInertia self.mass inertia)
@@ -179,8 +202,9 @@
               (do
                 (local transform (self.body:getCenterOfMassTransform))
                 (local origin (transform:getOrigin))
+                (local rotation (bt-quat->glm-quat (transform:getRotation)))
                 (local center (glm.vec3 origin.x origin.y origin.z))
-                (self:set-layout-position-from-center center)))))
+                (self:set-layout-transform-from-body center rotation)))))
 
       (fn begin-drag [self]
         (set self.dragging true)
@@ -215,7 +239,7 @@
       (set self.end-drag end-drag)
       (set self.apply-layout-to-body apply-layout-to-body)
       (set self.intersect intersect)
-      (set self.set-layout-position-from-center set-layout-position-from-center)
+      (set self.set-layout-transform-from-body set-layout-transform-from-body)
       (set self.center-from-layout center-from-layout)
       (set self.drop drop)
       self))

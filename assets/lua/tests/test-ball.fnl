@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local Ball (require :ball))
+(local Sphere (require :sphere))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
 (local MathUtils (require :math-utils))
@@ -29,7 +30,21 @@
 
 (fn ball-measure-matches-radius []
   (local builder (Ball {:radius 3
-                            :position (glm.vec3 1 2 3)}))
+                        :position (glm.vec3 1 2 3)}))
+  (local ball (builder (make-test-ctx)))
+
+  (ball.layout:measurer)
+
+  (assert (vec-approx= ball.layout.measure (glm.vec3 6 6 6)))
+
+  (ball:drop))
+
+(fn ball-accepts-custom-visual-builder []
+  (local builder
+    (Ball {:radius 3
+           :position (glm.vec3 1 2 3)
+           :visual (Sphere {:color (glm.vec4 1 0 0 1)
+                            :size (glm.vec3 6 6 6)})}))
   (local ball (builder (make-test-ctx)))
 
   (ball.layout:measurer)
@@ -60,8 +75,46 @@
 
   (ball:drop))
 
+(fn ball-syncs-rotation-from-physics []
+  (assert bt "Ball physics test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+
+  (local builder (Ball {:radius 2
+                        :position (glm.vec3 0 10 0)}))
+  (local ball (builder (make-test-ctx)))
+  (local root (Layout {:name "ball-rotation-root"}))
+  (local target-rotation (glm.quat (* 0.5 math.pi) (glm.vec3 0 1 0)))
+
+  (ball:ensure-body root)
+
+  (local transform (bt.Transform))
+  (transform:setIdentity)
+  (transform:setOrigin (bt.Vector3 0 10 0))
+  (transform:setRotation (bt.Quaternion target-rotation.x
+                                        target-rotation.y
+                                        target-rotation.z
+                                        target-rotation.w))
+  (ball.body:setWorldTransform transform)
+  (when ball.motion-state
+    (ball.motion-state:setWorldTransform transform))
+
+  (ball:sync root)
+
+  (assert (approx ball.layout.rotation.w target-rotation.w)
+          "Ball layout rotation w did not sync from Bullet body")
+  (assert (approx ball.layout.rotation.x target-rotation.x)
+          "Ball layout rotation x did not sync from Bullet body")
+  (assert (approx ball.layout.rotation.y target-rotation.y)
+          "Ball layout rotation y did not sync from Bullet body")
+  (assert (approx ball.layout.rotation.z target-rotation.z)
+          "Ball layout rotation z did not sync from Bullet body")
+
+  (ball:drop))
+
 (table.insert tests {:name "Ball measurer matches default size" :fn ball-measure-matches-radius})
+(table.insert tests {:name "Ball accepts custom visual builder" :fn ball-accepts-custom-visual-builder})
 (table.insert tests {:name "Ball sync updates from Bullet body" :fn ball-syncs-position-from-physics})
+(table.insert tests {:name "Ball sync updates rotation from Bullet body" :fn ball-syncs-rotation-from-physics})
 
 (local main
   (fn []
