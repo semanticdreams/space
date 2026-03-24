@@ -244,6 +244,31 @@
     (assert (= resolved.active_override nil))
     true)))
 
+(fn unfocused-on-battery-prefers-unfocused-cap []
+  (with-temp-dir (fn [root]
+    (local settings (Settings {:config-dir root :filename "settings.toml"}))
+    (RuntimePerformance.ensure-settings-defaults settings)
+    (settings.set-value "runtime_performance.control_mode" "auto" {:save? false})
+    (settings.set-value "runtime_performance.manual_mode" "max" {:save? false})
+    (local state (RuntimePerformance.create-state))
+
+    (RuntimePerformance.set-on-battery state true)
+    (local focused-battery (RuntimePerformance.resolve settings state))
+    (assert (= focused-battery.effective_mode "balanced"))
+    (assert (= focused-battery.active_override "system:on_battery"))
+
+    (RuntimePerformance.set-focused state false)
+    (local unfocused-battery (RuntimePerformance.resolve settings state))
+    (assert (= unfocused-battery.effective_mode "unfocused"))
+    (assert (= unfocused-battery.active_override "system:unfocused"))
+    (assert (= (RuntimePerformance.resolve-fps-cap settings unfocused-battery.effective_mode) 12))
+
+    (RuntimePerformance.set-focused state true)
+    (local restored-focus (RuntimePerformance.resolve settings state))
+    (assert (= restored-focus.effective_mode "balanced"))
+    (assert (= restored-focus.active_override "system:on_battery"))
+    true)))
+
 (fn battery-rule-can-be-disabled []
   (with-temp-dir (fn [root]
     (local settings (Settings {:config-dir root :filename "settings.toml"}))
@@ -353,6 +378,8 @@
                      :fn idle-minimized-does-not-apply-while-focused})
 (table.insert tests {:name "battery and video rules prioritize and restore"
                      :fn battery-and-video-rules-prioritize-and-restore})
+(table.insert tests {:name "unfocused on battery prefers unfocused cap"
+                     :fn unfocused-on-battery-prefers-unfocused-cap})
 (table.insert tests {:name "battery rule can be disabled"
                      :fn battery-rule-can-be-disabled})
 (table.insert tests {:name "auto.enabled false disables all auto sources"
