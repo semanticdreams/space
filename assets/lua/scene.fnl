@@ -31,6 +31,7 @@
 (local safe-vec3? CoordinateGuard.safe-vec3?)
 
 (local built-in-scene-kinds {:graph-node-cube true
+                             :physics-ball true
                              :physics-cuboid true
                              :demo-browser true})
 
@@ -428,6 +429,13 @@
         (when (and entry (= entry.owner owner))
           (table.remove entries idx)))))
 
+  (fn remove-ball-for-owner [entity owner]
+    (when (and entity entity.balls owner)
+      (for [idx (length entity.balls) 1 -1]
+        (local ball (. entity.balls idx))
+        (when (= ball owner)
+          (table.remove entity.balls idx)))))
+
   (fn remove-panel-child [self element]
     (local entity self.entity)
     (local children (and entity entity.children))
@@ -478,6 +486,7 @@
       (when (and removed-element removed-element.drop)
         (removed-element:drop))
       (LayoutPhysicsBodies.remove-runtime-layout-body-for-element entity removed-element)
+      (remove-ball-for-owner entity removed-element)
       (unregister-movables-for-owner self entity removed-element)
       (unregister-resizables-for-owner self entity removed-element)
       (remove-entries-for-owner entity.movables removed-element)
@@ -652,6 +661,40 @@
                                                         :size (vec3->array size)}}))
     (when element
       (self:sync-physics-bodies))
+    element)
+
+  (fn add-ball [self opts]
+    (local options (or opts {}))
+    (local size (or options.size (glm.vec3 18 18 18)))
+    (local radius (or options.radius (* 0.5 size.x)))
+    (local placement (resolve-camera-placement self))
+    (local spawn-layout-position
+      (or options.position
+          (layout-origin-from-center placement.center placement.rotation size)))
+    (local builder
+      (Ball {:radius radius
+             :size size
+             :position (glm.vec3 0 0 0)
+             :color options.color
+             :mass options.mass
+             :friction options.friction
+             :restitution options.restitution
+             :initial-velocity options.initial-velocity}))
+    (local element
+      (add-panel-child self {:builder builder
+                             :skip-cuboid true
+                             :skip-physics true
+                             :position spawn-layout-position
+                             :rotation options.rotation
+                             :persistence {:kind "physics-ball"
+                                           :size (vec3->array size)}}))
+    (when (and self.entity element)
+      (when (not self.entity.balls)
+        (set self.entity.balls []))
+      (table.insert self.entity.balls element)
+      (when self.entity.layout
+        (element:ensure-body self.entity.layout))
+      (self:sync-physics-balls))
     element)
 
   (fn add-graph-node-cube [self opts]
@@ -981,6 +1024,10 @@
           (self:add-physics-body {:size restored-size
                                   :position restored-position
                                   :rotation (array->quat panel.rotation)})
+          (= kind "physics-ball")
+          (self:add-ball {:size restored-size
+                          :position restored-position
+                          :rotation (array->quat panel.rotation)})
           (= kind "demo-browser")
           (self:add-demo-browser {:position restored-position
                                   :rotation (array->quat panel.rotation)})
@@ -1021,6 +1068,7 @@
 (set self.remove-panel-child remove-panel-child)
 (set self.add-demo-entry add-demo-entry)
 (set self.add-demo-browser add-demo-browser)
+(set self.add-ball add-ball)
 (set self.add-physics-body add-physics-body)
 (set self.add-graph-node-cube add-graph-node-cube)
 (set self.set-graph (fn [_self graph] (set self.graph graph)))

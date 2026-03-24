@@ -370,6 +370,47 @@
     (when (not ok)
       (error err))))
 
+(fn scene-add-ball-appears-in-front-of-camera-and-restores []
+  (local camera (Camera {:position (glm.vec3 2 3 4)}))
+  (camera:yaw (math.rad 45))
+  (local setup (setup-scene {:camera camera}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local element (scene:add-ball {:size (glm.vec3 18 18 18)}))
+            (assert element "Expected add-ball to return an element")
+            (assert (= (length (or scene.entity.balls [])) 1)
+                    "Scene should track runtime balls")
+            (local layout element.layout)
+            (local expected-center
+              (+ camera.position (* (camera:get-forward) (glm.vec3 100))))
+            (local half-size (* 0.5 layout.size))
+            (local center (+ layout.position (layout.rotation:rotate half-size)))
+            (assert (vec3-approx= center expected-center)
+                    "Ball center should be placed 100 units in front of the camera")
+
+            (local captured (scene:capture-state))
+            (local panels (or captured.panels []))
+            (assert (= (length panels) 1)
+                    "Expected one persisted scene panel for ball")
+            (local panel (. panels 1))
+            (assert (= panel.kind "physics-ball")
+                    "Ball persistence kind should be physics-ball")
+
+            (scene:remove-panel-child element)
+            (assert (= (length (or scene.entity.balls [])) 0)
+                    "Removing ball should clear runtime ball tracking")
+
+            (scene:restore-state captured)
+            (assert (= (length (or scene.entity.balls [])) 1)
+                    "Scene restore should recreate persisted ball")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (fn scene-physics-body-collides-with-flat-terrain []
   (assert bt "Physics body terrain test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -694,6 +735,8 @@
                      :fn scene-capture-state-requires-restore-strategy})
 (table.insert tests {:name "Scene additions appear in front of the camera" :fn added-dialog-appears-in-front-of-camera})
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
+(table.insert tests {:name "Scene ball appears in front of camera and restores"
+                     :fn scene-add-ball-appears-in-front-of-camera-and-restores})
 (table.insert tests {:name "Scene physics body collides with flat terrain"
                      :fn scene-physics-body-collides-with-flat-terrain})
 (table.insert tests {:name "Scene runtime body falls after drag release"

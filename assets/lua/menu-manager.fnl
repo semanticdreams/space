@@ -115,6 +115,12 @@
                        (when (and scene scene.add-physics-body)
                          (scene:add-physics-body)))})
   (table.insert actions
+                {:name "ball"
+                 :fn (fn [_button _event]
+                       (local scene app.scene)
+                       (when (and scene scene.add-ball)
+                         (scene:add-ball)))})
+  (table.insert actions
                 {:name "Quit"
                  :icon "exit_to_app"
                  :fn (fn [_button _event]
