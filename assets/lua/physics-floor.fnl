@@ -1,6 +1,6 @@
 (local bt (require :bt))
 
-(local default-floor-y -1000.0)
+(local default-floor-y -100.0)
 
 (fn finite-number? [value]
   (and (= (type value) :number)

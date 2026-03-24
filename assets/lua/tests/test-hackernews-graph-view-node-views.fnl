@@ -159,7 +159,46 @@
           (assert (= (and target.last-add-panel-opts
                           target.last-add-panel-opts.persistence
                           target.last-add-panel-opts.persistence.kind)
-                     "graph-node-view")))}])
+                     "graph-node-view")))}
+ {:name "graph view node-views restore skips unresolved nodes"
+  :fn (fn []
+          (local ctx (make-ctx))
+          (local target (make-view-target ctx))
+          (local graph {:lookup (fn [_self _key] nil)
+                        :load-by-key (fn [_self _key] nil)})
+          (local views (GraphViewNodeViews {:ctx ctx
+                                            :graph graph
+                                            :view-target target}))
+          (views:restore-state {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"}]})
+          (assert (= (length target.children) 0)
+                  "restore-state should skip unresolved node views")
+          (local state (views:capture-state))
+          (assert (= (length (or state.open-views [])) 1)
+                  "capture-state should preserve unresolved restored node views")
+          (assert (= (and (. state.open-views 1) (. (. state.open-views 1) :node-key))
+                     "terrain-tool:world-1:apply-perlin"))
+          (views:drop-all))}
+ {:name "graph view node-views panel restorer skips unresolved nodes"
+  :fn (fn []
+          (local ctx (make-ctx))
+          (local target (make-view-target ctx))
+          (local graph {:lookup (fn [_self _key] nil)
+                        :load-by-key (fn [_self _key] nil)})
+          (local views (GraphViewNodeViews {:ctx ctx
+                                            :graph graph
+                                            :view-target target}))
+          (assert (and target.restorer target.restorer.restorer)
+                  "expected graph node views to register panel restorer")
+          ((. target.restorer :restorer) {:node-key "terrain:world-1:node-a"
+                                          :layer "float"})
+          (assert (= (length target.children) 0)
+                  "panel restorer should skip unresolved node views")
+          (local state (views:capture-state))
+          (assert (= (length (or state.open-views [])) 1)
+                  "capture-state should preserve unresolved node views from panel restore")
+          (assert (= (and (. state.open-views 1) (. (. state.open-views 1) :node-key))
+                     "terrain:world-1:node-a"))
+          (views:drop-all))}])
 
 (local main
   (fn []

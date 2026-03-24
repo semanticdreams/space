@@ -351,6 +351,40 @@
   (when (not ok)
     (error err)))
 
+(fn menu-manager-root-ball-invokes-scene []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local calls {:add-ball 0})
+  (local original-scene app.scene)
+  (set app.scene {:add-ball (fn [_self]
+                              (set calls.add-ball (+ calls.add-ball 1)))})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local cb clickables.state.right-void)
+        (assert cb "MenuManager should register a right-click void callback")
+        (cb {:screen {:x 10 :y 20}})
+        (local element (. (. hud.overlay-root.children 1) :element))
+        (local button (find-button-by-name element "ball"))
+        (assert button "Root context menu should include 'ball'")
+        (button:on-click {:button 1})
+        (assert (= calls.add-ball 1)
+                "ball action should invoke scene:add-ball once"))))
+
+  (manager:drop)
+  (set app.scene original-scene)
+
+  (when (not ok)
+    (error err)))
+
 (table.insert tests {:name "Menu actions and depth offset" :fn menu-actions-fire-and-increment-depth})
 (table.insert tests {:name "Menu grows downward from click" :fn menu-grows-downward-from-click})
 (table.insert tests {:name "Menu manager opens and closes menu" :fn menu-manager-opens-and-closes})
@@ -358,6 +392,8 @@
                      :fn menu-manager-root-show-link-entities-adds-related-nodes})
 (table.insert tests {:name "Menu root add cuboid invokes scene"
                      :fn menu-manager-root-add-cuboid-invokes-scene})
+(table.insert tests {:name "Menu root ball invokes scene"
+                     :fn menu-manager-root-ball-invokes-scene})
 
 (local main
   (fn []

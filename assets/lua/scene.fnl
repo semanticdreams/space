@@ -33,6 +33,7 @@
 (local safe-vec3? CoordinateGuard.safe-vec3?)
 
 (local built-in-scene-kinds {:graph-node-cube true
+                             :physics-ball true
                              :physics-cuboid true
                              :demo-browser true})
 
@@ -115,15 +116,30 @@
     ((WidgetCuboid wc-opts)
      ctx runtime-opts)))
 
-(fn collect-positioned-movables [children]
+  (fn collect-positioned-movables [children]
   (var entries [])
   (each [_ metadata (ipairs (or children []))]
     (local element (and metadata metadata.element))
     (local layout (and element element.layout))
     (when layout
+        (table.insert entries {:target layout
+                               :handle element
+                               :owner element})))
+  entries)
+
+(fn collect-ball-movables [entity]
+  (var entries [])
+  (each [_ ball (ipairs (or (and entity entity.balls) []))]
+    (local layout (and ball ball.layout))
+    (when layout
       (table.insert entries {:target layout
-                             :handle element
-                             :owner element})))
+                             :handle ball
+                             :key ball
+                             :owner ball
+                             :on-drag-start (fn [_entry]
+                                              (ball:begin-drag))
+                             :on-drag-end (fn [_entry]
+                                            (ball:end-drag))})))
   entries)
 
 (fn resolve-min-size [layout]
@@ -142,6 +158,11 @@
           (set (. out k) (clone-table v)))
         out)
       value))
+
+(fn vec4->array [value]
+  (if value
+      [value.x value.y value.z value.w]
+      nil))
 
 (fn capture-panel-layout-state [metadata]
   (local element (and metadata metadata.element))
@@ -241,6 +262,8 @@
 (fn compute-entity-movables [self entity]
   (local base (or entity.__scene_base_movables []))
   (local entries (copy-movables base))
+  (each [_ entry (ipairs (collect-ball-movables entity))]
+    (table.insert entries entry))
   (local physics-movables (LayoutPhysicsBodies.collect-movables entity))
   (local physics-targets {})
   (each [_ entry (ipairs physics-movables)]
@@ -513,6 +536,13 @@
         (when (and entry (= entry.owner owner))
           (table.remove entries idx)))))
 
+  (fn remove-ball-for-owner [entity owner]
+    (when (and entity entity.balls owner)
+      (for [idx (length entity.balls) 1 -1]
+        (local ball (. entity.balls idx))
+        (when (= ball owner)
+          (table.remove entity.balls idx)))))
+
   (fn remove-panel-child [self element]
     (local entity self.entity)
     (local children (and entity entity.children))
@@ -563,6 +593,7 @@
       (when (and removed-element removed-element.drop)
         (removed-element:drop))
       (LayoutPhysicsBodies.remove-runtime-layout-body-for-element entity removed-element)
+      (remove-ball-for-owner entity removed-element)
       (unregister-movables-for-owner self entity removed-element)
       (unregister-resizables-for-owner self entity removed-element)
       (remove-entries-for-owner entity.movables removed-element)
@@ -737,6 +768,61 @@
                                                         :size (vec3->array size)}}))
     (when element
       (self:sync-physics-bodies))
+    element)
+
+  (fn add-ball [self opts]
+    (local options (or opts {}))
+    (local size (or options.size (glm.vec3 18 18 18)))
+    (local radius (or options.radius (* 0.5 size.x)))
+    (local placement (resolve-camera-placement self))
+    (local spawn-rotation (or options.rotation placement.rotation))
+    (local spawn-layout-position
+      (or options.position
+          (layout-origin-from-center placement.center spawn-rotation size)))
+    (local builder
+      (Ball {:radius radius
+             :size size
+             :position (glm.vec3 0 0 0)
+             :color options.color
+             :mass options.mass
+             :friction options.friction
+             :restitution options.restitution
+             :initial-velocity options.initial-velocity
+             :hexagon-color options.hexagon-color
+             :pentagon-color options.pentagon-color}))
+    (local element
+      (add-panel-child self {:builder builder
+                             :skip-cuboid true
+                             :skip-physics true
+                             :position spawn-layout-position
+                             :rotation spawn-rotation
+                             :persistence {:kind "physics-ball"
+                                           :size (vec3->array size)
+                                           :radius radius
+                                           :color (vec4->array options.color)
+                                           :mass options.mass
+                                           :friction options.friction
+                                           :restitution options.restitution
+                                           :initial-velocity (and options.initial-velocity
+                                                                  (vec3->array options.initial-velocity))
+                                           :hexagon-color (vec4->array options.hexagon-color)
+                                           :pentagon-color (vec4->array options.pentagon-color)}}))
+    (when (and self.entity element)
+      (when (not self.entity.balls)
+        (set self.entity.balls []))
+      (table.insert self.entity.balls element)
+      (unregister-movables-for-owner self self.entity element)
+      (remove-entries-for-owner self.entity.movables element)
+      (when (not self.entity.movables)
+        (set self.entity.movables []))
+      (local ball-movable (. (collect-ball-movables self.entity) (length self.entity.balls)))
+      (when ball-movable
+        (table.insert self.entity.movables ball-movable)
+        (register-movable-entries self self.entity
+                                  [(normalize-movable-entry self ball-movable)]))
+      (when self.entity.layout
+        (element:ensure-body self.entity.layout))
+      (self:sync-physics-balls))
     element)
 
   (fn add-graph-node-cube [self opts]
@@ -1290,6 +1376,30 @@
           (self:add-physics-body {:size restored-size
                                   :position restored-position
                                   :rotation (array->quat panel.rotation)})
+          (= kind "physics-ball")
+          (self:add-ball {:size restored-size
+                          :radius panel.radius
+                          :position restored-position
+                          :rotation (array->quat panel.rotation)
+                          :color (and panel.color (glm.vec4 (. panel.color 1)
+                                                            (. panel.color 2)
+                                                            (. panel.color 3)
+                                                            (. panel.color 4)))
+                          :mass panel.mass
+                          :friction panel.friction
+                          :restitution panel.restitution
+                          :initial-velocity (and panel.initial-velocity
+                                                 (array->vec3 panel.initial-velocity))
+                          :hexagon-color (and panel.hexagon-color
+                                              (glm.vec4 (. panel.hexagon-color 1)
+                                                        (. panel.hexagon-color 2)
+                                                        (. panel.hexagon-color 3)
+                                                        (. panel.hexagon-color 4)))
+                          :pentagon-color (and panel.pentagon-color
+                                               (glm.vec4 (. panel.pentagon-color 1)
+                                                         (. panel.pentagon-color 2)
+                                                         (. panel.pentagon-color 3)
+                                                         (. panel.pentagon-color 4)))})
           (= kind "demo-browser")
           (self:add-demo-browser {:position restored-position
                                   :rotation (array->quat panel.rotation)})
@@ -1342,6 +1452,7 @@
 (set self.remove-panel-child remove-panel-child)
 (set self.add-demo-entry add-demo-entry)
 (set self.add-demo-browser add-demo-browser)
+(set self.add-ball add-ball)
 (set self.add-physics-body add-physics-body)
 (set self.add-graph-node-cube add-graph-node-cube)
 (set self.set-graph (fn [_self graph] (set self.graph graph)))

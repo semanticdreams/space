@@ -76,6 +76,82 @@
           {:open-node-keys payload.open-node-keys}
           {})))
 
+(fn merge-preserved-graph-views-state [graph existing-state captured-state]
+  (local existing-views (resolve-graph-views-state existing-state))
+  (local captured-views (resolve-graph-views-state captured-state))
+  (local supports-key?
+    (fn [key]
+      (and graph graph.has-key-loader-for-key (graph:has-key-loader-for-key key))))
+  (local existing-open-views
+    (if (= (type existing-views.open-views) :table)
+        existing-views.open-views
+        (icollect [_ key (ipairs (or existing-views.open-node-keys []))]
+                  {:node-key key})))
+  (local captured-open-views
+    (if (= (type captured-views.open-views) :table)
+        captured-views.open-views
+        (icollect [_ key (ipairs (or captured-views.open-node-keys []))]
+                  {:node-key key})))
+  (local captured-keys {})
+  (var merged-open-views [])
+
+  (each [_ entry (ipairs captured-open-views)]
+    (local key (and entry entry.node-key))
+    (when (= (type key) :string)
+      (set (. captured-keys key) true))
+    (table.insert merged-open-views entry))
+
+  (each [_ entry (ipairs existing-open-views)]
+    (local key (and entry entry.node-key))
+    (when (and (= (type key) :string)
+               (not (. captured-keys key))
+               (not (supports-key? key)))
+      (table.insert merged-open-views entry)))
+
+  {:open-views merged-open-views
+   :open-node-keys (icollect [_ entry (ipairs merged-open-views)]
+                             (and entry entry.node-key))})
+
+(fn merge-preserved-graph-state [graph existing-state captured-state]
+  (local existing-core (resolve-graph-core-state existing-state))
+  (local captured-core (resolve-graph-core-state captured-state))
+  (local supports-key?
+    (fn [key]
+      (and graph graph.has-key-loader-for-key (graph:has-key-loader-for-key key))))
+  (local captured-nodes {})
+  (local captured-edges {})
+  (var merged-nodes [])
+  (var merged-edges [])
+
+  (each [_ key (ipairs (or captured-core.nodes []))]
+    (set (. captured-nodes key) true)
+    (table.insert merged-nodes key))
+
+  (each [_ edge (ipairs (or captured-core.edges []))]
+    (local composite (.. (or edge.source "") "->" (or edge.target "")))
+    (set (. captured-edges composite) true)
+    (table.insert merged-edges edge))
+
+  (each [_ key (ipairs (or existing-core.nodes []))]
+    (when (and (not (. captured-nodes key))
+               (not (supports-key? key)))
+      (table.insert merged-nodes key)))
+
+  (each [_ edge (ipairs (or existing-core.edges []))]
+    (local source-key edge.source)
+    (local target-key edge.target)
+    (local composite (.. (or source-key "") "->" (or target-key "")))
+    (local preserve?
+      (and (not (. captured-edges composite))
+           (or (and source-key (not (supports-key? source-key)))
+               (and target-key (not (supports-key? target-key))))))
+    (when preserve?
+      (table.insert merged-edges edge)))
+
+  {:graph {:nodes merged-nodes
+           :edges merged-edges}
+   :views (merge-preserved-graph-views-state graph existing-state captured-state)})
+
 (fn read-world-state [path]
   (if (not (fs.exists path))
       nil
@@ -167,6 +243,8 @@
   (fn apply-runtime-floor! [world]
     (local floor-y (resolve-runtime-floor-y world))
     (set app.physics-floor-y floor-y)
+    (when (and app.engine app.engine.physics)
+      (app.engine.physics:setGravity 0 -25 0))
     (PhysicsFloor.ensure-installed {:floor-y floor-y})
     (when world.state
       (when (not world.state.physics)
@@ -180,6 +258,7 @@
     (local runtime world.runtime)
     (local camera (and runtime runtime.camera))
     (local scene (and runtime runtime.scene))
+    (local graph (and runtime runtime.graph))
     (local graph-view (and runtime runtime.graph-view))
     (local hud (and ctx ctx.hud))
     (when camera
@@ -192,9 +271,19 @@
            {:position (vec3->array position)
             :rotation (quat->array camera.rotation)}))
     (when (and graph-view graph-view.capture-state)
-      (set world.state.graph (graph-view:capture-state)))
+      (set world.state.graph
+           (merge-preserved-graph-state
+             graph
+             world.state.graph
+             (graph-view:capture-state))))
     (when (and scene scene.capture-state)
-      (set world.state.scene (scene:capture-state)))
+      (local captured-scene (scene:capture-state))
+      (local existing-scene (or world.state.scene {}))
+      (set captured-scene.terrains
+           (TerrainRecords.merge-preserved-records
+             existing-scene.terrains
+             captured-scene.terrains))
+      (set world.state.scene captured-scene))
     (when (and hud hud.capture-state)
       (set world.state.hud (hud:capture-state)))
     (local floor-y (resolve-runtime-floor-y world))

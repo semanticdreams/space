@@ -58,6 +58,7 @@ void lua_bind_dial_type(sol::state&);
 void lua_bind_wallet_core(sol::state&);
 #endif
 void lua_bind_libtorrent(sol::state&);
+
 LuaRuntime::LuaRuntime() = default;
 
 void LuaRuntime::init()
@@ -94,8 +95,75 @@ void LuaRuntime::install_fennel(bool correlate)
 
 void LuaRuntime::require_module(const std::string& name)
 {
+    require_module_object(name);
+}
+
+sol::object LuaRuntime::require_module_object(const std::string& name)
+{
     sol::function require = lua["require"];
-    require(name);
+    sol::protected_function protected_require = require;
+    sol::protected_function_result result = protected_require(name);
+    throw_if_invalid(std::move(result));
+    return result.get<sol::object>();
+}
+
+sol::function LuaRuntime::require_table_function(const std::string& module_name, const std::string& function_name)
+{
+    sol::object module_obj = require_module_object(module_name);
+    if (!module_obj.is<sol::table>()) {
+        throw sol::error("module " + module_name + " did not return a table for :" + function_name);
+    }
+
+    sol::table module_table = module_obj.as<sol::table>();
+    sol::object function_obj = module_table[function_name];
+    if (!function_obj.is<sol::function>()) {
+        throw sol::error("module " + module_name + " missing function " + function_name);
+    }
+
+    return function_obj.as<sol::function>();
+}
+
+void LuaRuntime::execute_module_function(const std::string& module_name, const std::string& function_name)
+{
+    call_function(require_table_function(module_name, function_name));
+}
+
+void LuaRuntime::execute_fennel(const std::string& source)
+{
+    call_function(require_table_function("fennel", "eval"), source);
+}
+
+void LuaRuntime::execute_fennel_file(const std::string& path)
+{
+    call_function(require_table_function("fennel", "dofile"), path);
+}
+
+void LuaRuntime::execute_lua_file(const std::string& path)
+{
+    sol::protected_function_result result = lua.safe_script_file(path);
+    throw_if_invalid(std::move(result));
+}
+
+void LuaRuntime::throw_if_invalid(sol::protected_function_result&& result)
+{
+    if (!result.valid()) {
+        sol::error err = result;
+        throw sol::error(err.what());
+    }
+}
+
+void LuaRuntime::call_function(const sol::function& function)
+{
+    sol::protected_function protected_function = function;
+    sol::protected_function_result result = protected_function();
+    throw_if_invalid(std::move(result));
+}
+
+void LuaRuntime::call_function(const sol::function& function, const std::string& argument)
+{
+    sol::protected_function protected_function = function;
+    sol::protected_function_result result = protected_function(argument);
+    throw_if_invalid(std::move(result));
 }
 
 void LuaRuntime::install_fatal_traceback()

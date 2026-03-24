@@ -84,6 +84,7 @@ Clean design is important, refactor when reasonable.
 - In Fennel code, don't use guards and fallbacks unless necessary or asked for.
 - Keep option keys canonical (one name). Don’t add “legacy” aliases (e.g. `:foo` vs `:foo?`) or compatibility shims; migrate existing call sites instead. Only add an alias if the user explicitly asks for it.
 - Do not paper over missing required bindings or data with fallbacks. If a binding like `glm.project` or a required projection/view/viewport is absent, fail loudly instead of silently substituting defaults.
+- Do not fail silently. If required data, startup work, or runtime operations fail, throw or surface an explicit error immediately; never convert real failures into clean exits, ignored return values, or quiet no-ops.
 - Build Fennel classes by constructing the `self` table at the end in a single literal (methods included) instead of creating it early and mutating it with `set`.
 - Avoid using `let` in Fennel, use `local` instead.
 - Note that `if` in Fennel is like `cond` in other lisps, so you can pass it pairs of conditions and expressions. if you pass an uneven number of forms, the last one is the default expression executed when none other matched.

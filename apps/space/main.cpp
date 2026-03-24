@@ -308,11 +308,8 @@ int main(int argc, char *argv[])
 
     if (entry_mode == EntryMode::Command || entry_mode == EntryMode::Stdin) {
         try {
-            sol::function require = lua["require"];
-            sol::table fennel = require("fennel");
-            sol::function eval = fennel["eval"];
             std::string source = (entry_mode == EntryMode::Stdin) ? read_stdin() : entry_target;
-            eval(source);
+            runtime.execute_fennel(source);
         }
         catch (const sol::error &e) {
             std::cerr << "Lua error: " << e.what() << "\n";
@@ -321,12 +318,9 @@ int main(int argc, char *argv[])
     } else if (entry_mode == EntryMode::File) {
         try {
             if (ends_with(entry_target, ".lua")) {
-                lua.script_file(entry_target);
+                runtime.execute_lua_file(entry_target);
             } else {
-                sol::function require = lua["require"];
-                sol::table fennel = require("fennel");
-                sol::function dofile = fennel["dofile"];
-                dofile(entry_target);
+                runtime.execute_fennel_file(entry_target);
             }
         }
         catch (const sol::error &e) {
@@ -334,31 +328,16 @@ int main(int argc, char *argv[])
             return 1;
         }
     } else {
-        if (module_function.empty()) {
-            runtime.require_module(module_name_target);
-        } else {
-            try {
-                sol::function require = lua["require"];
-                sol::object module_obj = require(module_name_target);
-                if (!module_obj.is<sol::table>()) {
-                    std::cerr << "Lua error: module " << module_name_target
-                              << " did not return a table for :" << module_function << "\n";
-                    return 1;
-                }
-                sol::table module_table = module_obj.as<sol::table>();
-                sol::object function_obj = module_table[module_function];
-                if (!function_obj.is<sol::function>()) {
-                    std::cerr << "Lua error: module " << module_name_target
-                              << " missing function " << module_function << "\n";
-                    return 1;
-                }
-                sol::function fn = function_obj.as<sol::function>();
-                fn();
+        try {
+            if (module_function.empty()) {
+                runtime.require_module(module_name_target);
+            } else {
+                runtime.execute_module_function(module_name_target, module_function);
             }
-            catch (const sol::error &e) {
-                std::cerr << "Lua error: " << e.what() << "\n";
-                return 1;
-            }
+        }
+        catch (const sol::error &e) {
+            std::cerr << "Lua error: " << e.what() << "\n";
+            return 1;
         }
     }
 

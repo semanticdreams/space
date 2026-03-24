@@ -3,6 +3,7 @@
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local fs (require :fs))
+(local logging (require :logging))
 (local MathUtils (require :math-utils))
 
 (local array->vec3 (. MathUtils :array->vec3))
@@ -17,6 +18,7 @@
     (local node-views {})
     (local persistence-kind "graph-node-view")
     (var restorer-targets [])
+    (var unresolved-open-views [])
     (local restorer-owner {})
 
     (var open-node-view nil)
@@ -35,6 +37,20 @@
     (fn build-persistence [node-key]
         {:kind persistence-kind
          :node-key node-key})
+
+    (fn same-open-view? [left right]
+        (and (= (and left left.node-key) (and right right.node-key))
+             (= (and left left.panel) (and right right.panel))))
+
+    (fn record-unresolved-open-view [entry]
+        (when (and (= (type entry) :table)
+                   (= (type entry.node-key) :string))
+            (var exists? false)
+            (each [_ current (ipairs unresolved-open-views)]
+                (when (same-open-view? current entry)
+                    (set exists? true)))
+            (when (not exists?)
+                (table.insert unresolved-open-views entry))))
 
     (fn resolve-node-view-builder [node]
         (local view-fn (and node node.view))
@@ -151,6 +167,16 @@
          (fn [_self node opts]
              (ensure-node-view node opts)))
 
+    (fn resolve-restored-node [key]
+        (local node (or (and graph graph.lookup (graph:lookup key))
+                        (and graph graph.load-by-key (graph:load-by-key key))))
+        (if node
+            (for [idx (length unresolved-open-views) 1 -1]
+                (when (= (and (. unresolved-open-views idx) (. (. unresolved-open-views idx) :node-key)) key)
+                    (table.remove unresolved-open-views idx)))
+            (logging.warn (.. "[graph-view] skipping unresolved restored node view: " key)))
+        node)
+
     (fn register-target-restorer [target]
         (when (and target
                    target.register-panel-restorer
@@ -166,12 +192,13 @@
                         (local key panel.node-key)
                         (assert (= (type key) :string)
                                 "graph-node-view restorer requires string :node-key")
-                        (local node (or (and graph graph.lookup (graph:lookup key))
-                                        (and graph graph.load-by-key (graph:load-by-key key))))
-                        (assert node
-                                (.. "graph-node-view restorer could not resolve node: " key))
-                        (open-node-view nil node {:target target
-                                                  :panel panel}))
+                        (local node (resolve-restored-node key))
+                        (when node
+                            (open-node-view nil node {:target target
+                                                      :panel panel}))
+                        (when (not node)
+                            (record-unresolved-open-view {:node-key key
+                                                          :panel panel})))
                     restorer-owner)
                 (table.insert restorer-targets target))))
 
@@ -192,6 +219,14 @@
                     (when panel
                         (set entry.panel panel)))
                 (table.insert records entry)))
+        (each [_ entry (ipairs unresolved-open-views)]
+            (local key (and entry entry.node-key))
+            (var exists? false)
+            (each [_ current (ipairs records)]
+                (when (= current.node-key key)
+                    (set exists? true)))
+            (when (and (= (type key) :string) (not exists?))
+                (table.insert records entry)))
         (table.sort records
                     (fn [a b]
                         (< (or a.node-key "") (or b.node-key ""))))
@@ -206,16 +241,18 @@
                     {:node-key key})))
         (assert (= (type open-views) :table)
                 "GraphViewNodeViews.restore-state requires :open-views table")
+        (set unresolved-open-views [])
         (each [_ entry (ipairs open-views)]
             (assert (= (type entry) :table)
                     "GraphViewNodeViews.restore-state entries must be tables")
             (local key entry.node-key)
             (assert (= (type key) :string)
                     "GraphViewNodeViews.restore-state node-key must be a string")
-            (local node (or (and graph graph.lookup (graph:lookup key))
-                            (and graph graph.load-by-key (graph:load-by-key key))))
-            (assert node (.. "GraphViewNodeViews.restore-state could not resolve node: " key))
-            (ensure-node-view node {:panel entry.panel}))
+            (local node (resolve-restored-node key))
+            (when node
+                (ensure-node-view node {:panel entry.panel}))
+            (when (not node)
+                (record-unresolved-open-view entry)))
         true)
 
     (fn move-view [_self old new]

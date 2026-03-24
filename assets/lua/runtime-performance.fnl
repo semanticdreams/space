@@ -20,7 +20,7 @@
                                              :pause_ui true}}
                          :auto {:enabled true
                                 :system {:unfocused {:enabled true
-                                                     :priority 700
+                                                     :priority 890
                                                      :target_mode "unfocused"}
                                          :on_battery {:enabled true
                                                       :priority 880
