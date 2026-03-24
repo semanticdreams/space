@@ -27,7 +27,13 @@ function normalize_base_url(url)
 
 function entry_heading_anchor(entry)
 {
-    return `_${entry.id}`
+    return '_' + entry.id
+}
+
+function entry_public_url(entry, baseUrl)
+{
+    const normalizedBaseUrl = normalize_base_url(baseUrl)
+    return normalizedBaseUrl + '/dev/devlog#' + entry_heading_anchor(entry)
 }
 
 function resolve_entry_target_url(entry, target, baseUrl)
@@ -39,16 +45,16 @@ function resolve_entry_target_url(entry, target, baseUrl)
     }
 
     if (target.startsWith('#')) {
-        return `${normalizedBaseUrl}${entry.urlPath}${target}`
+        return normalizedBaseUrl + entry.urlPath + target
     }
 
     if (target.startsWith('/')) {
-        return `${normalizedBaseUrl}${target}`
+        return normalizedBaseUrl + target
     }
 
-    const entrySourcePath = `/dev/devlog/${entry.id}`
+    const entrySourcePath = '/dev/devlog/' + entry.id
     const resolvedPath = posix.normalize(posix.join(posix.dirname(entrySourcePath), target))
-    return `${normalizedBaseUrl}${resolvedPath.startsWith('/') ? resolvedPath : `/${resolvedPath}`}`
+    return normalizedBaseUrl + (resolvedPath.startsWith('/') ? resolvedPath : '/' + resolvedPath)
 }
 
 function parse_bracket_content(source, startIndex, openChar, closeChar)
@@ -151,22 +157,30 @@ function parse_link_or_image(source, startIndex, entry, baseUrl)
         return null
     }
 
+    const target = destination.content.trim()
+    const resolvedUrl = resolve_entry_target_url(entry, target, baseUrl)
+    const renderedLabel = render_inline_text(label.content, entry, baseUrl).trim()
+
     if (isImage) {
         return {
+            kind: 'image',
+            alt: renderedLabel,
+            target,
             text: '',
+            url: resolvedUrl,
             nextIndex: destination.nextIndex
         }
     }
 
-    const url = resolve_entry_target_url(entry, destination.content.trim(), baseUrl)
-    const renderedLabel = render_inline_text(label.content, entry, baseUrl).trim()
     return {
-        text: renderedLabel ? `${renderedLabel}: ${url}` : url,
+        kind: 'link',
+        text: renderedLabel ? renderedLabel + ': ' + resolvedUrl : resolvedUrl,
+        url: resolvedUrl,
         nextIndex: destination.nextIndex
     }
 }
 
-function render_inline_text(source, entry, baseUrl)
+export function render_inline_text(source, entry, baseUrl)
 {
     let output = ''
 
@@ -178,20 +192,11 @@ function render_inline_text(source, entry, baseUrl)
             continue
         }
 
-        const image = parse_link_or_image(source, index, entry, baseUrl)
-        if (image) {
-            output += image.text
-            index = image.nextIndex
+        const inlineNode = parse_link_or_image(source, index, entry, baseUrl)
+        if (inlineNode) {
+            output += inlineNode.text
+            index = inlineNode.nextIndex
             continue
-        }
-
-        if (source[index] === '[') {
-            const link = parse_link_or_image(source, index, entry, baseUrl)
-            if (link) {
-                output += link.text
-                index = link.nextIndex
-                continue
-            }
         }
 
         if (source[index] === '\\' && index + 1 < source.length) {
@@ -205,6 +210,75 @@ function render_inline_text(source, entry, baseUrl)
     }
 
     return output
+}
+
+function collect_inline_images(source, entry, baseUrl)
+{
+    const images = []
+
+    for (let index = 0; index < source.length;) {
+        const codeSpan = parse_code_span(source, index)
+        if (codeSpan) {
+            index = codeSpan.nextIndex
+            continue
+        }
+
+        const inlineNode = parse_link_or_image(source, index, entry, baseUrl)
+        if (inlineNode) {
+            if (inlineNode.kind === 'image') {
+                images.push({
+                    alt: inlineNode.alt,
+                    target: inlineNode.target,
+                    url: inlineNode.url
+                })
+            }
+            index = inlineNode.nextIndex
+            continue
+        }
+
+        if (source[index] === '\\' && index + 1 < source.length) {
+            index += 2
+            continue
+        }
+
+        index += 1
+    }
+
+    return images
+}
+
+export function collect_entry_images(entry, baseUrl)
+{
+    const lines = entry.body.replace(/\r\n/g, '\n').split('\n')
+    const images = []
+    const seenUrls = new Set()
+    let inCodeFence = false
+
+    for (const line of lines) {
+        if (/^```/.test(line)) {
+            inCodeFence = !inCodeFence
+            continue
+        }
+
+        if (inCodeFence) {
+            continue
+        }
+
+        for (const image of collect_inline_images(line, entry, baseUrl)) {
+            if (seenUrls.has(image.url)) {
+                continue
+            }
+            seenUrls.add(image.url)
+            images.push(image)
+        }
+    }
+
+    return images
+}
+
+export function collect_entry_image_urls(entry, baseUrl)
+{
+    return collect_entry_images(entry, baseUrl).map((image) => image.url)
 }
 
 function render_paragraph(lines, entry, baseUrl)
@@ -229,7 +303,7 @@ function render_list(lines, entry, baseUrl)
 
         const paragraph = render_paragraph(currentItem, entry, baseUrl)
         if (paragraph.length > 0) {
-            rendered.push(`${currentMarker} ${paragraph}`)
+            rendered.push(currentMarker + ' ' + paragraph)
         }
         currentItem = []
     }
@@ -257,7 +331,7 @@ function render_blockquote(lines, entry, baseUrl)
             return render_inline_text(quoted, entry, baseUrl)
                 .split('\n')
                 .filter((quotedLine) => quotedLine.length > 0)
-                .map((quotedLine) => `> ${quotedLine}`)
+                .map((quotedLine) => '> ' + quotedLine)
         })
         .join('\n')
 }
@@ -306,16 +380,16 @@ function render_blocks(lines, entry, baseUrl)
         }
 
         if (/^\s*>/.test(lines[index])) {
-            const { block, nextIndex } = collect_indented_block(lines, index, (line) => /^\s*>/.test(line))
-            blocks.push(render_blockquote(block, entry, baseUrl))
-            index = nextIndex
+            const collected = collect_indented_block(lines, index, (line) => /^\s*>/.test(line))
+            blocks.push(render_blockquote(collected.block, entry, baseUrl))
+            index = collected.nextIndex
             continue
         }
 
         if (is_list_item(lines[index])) {
-            const { block, nextIndex } = collect_indented_block(lines, index, (line) => !is_blank(line) && (is_list_item(line) || /^\s{2,}\S/.test(line)))
-            blocks.push(render_list(block, entry, baseUrl))
-            index = nextIndex
+            const collected = collect_indented_block(lines, index, (line) => !is_blank(line) && (is_list_item(line) || /^\s{2,}\S/.test(line)))
+            blocks.push(render_list(collected.block, entry, baseUrl))
+            index = collected.nextIndex
             continue
         }
 
@@ -335,16 +409,56 @@ export function format_social_body(entry, baseUrl)
     return render_blocks(entry.body.replace(/\r\n/g, '\n').split('\n'), entry, normalize_base_url(baseUrl))
 }
 
-export function format_social_message(entry, baseUrl)
+export function format_discord_message(entry, baseUrl)
 {
     const normalizedBaseUrl = normalize_base_url(baseUrl)
-    return `Devlog ${entry.id}\n${format_social_body(entry, normalizedBaseUrl)}\n\n${normalizedBaseUrl}/dev/devlog#${entry_heading_anchor(entry)}`
+    const body = format_social_body(entry, normalizedBaseUrl)
+    const entryUrl = entry_public_url(entry, normalizedBaseUrl)
+    const sections = ['Devlog ' + entry.id]
+
+    if (body.length > 0) {
+        sections.push(body)
+    }
+
+    sections.push('<' + entryUrl + '>')
+
+    return {
+        content: sections.join('\n\n'),
+        embeds: collect_entry_images(entry, normalizedBaseUrl).map((image) => ({ image: { url: image.url } }))
+    }
+}
+
+export function format_matrix_message(entry, baseUrl)
+{
+    const normalizedBaseUrl = normalize_base_url(baseUrl)
+    const body = format_social_body(entry, normalizedBaseUrl)
+    const entryUrl = entry_public_url(entry, normalizedBaseUrl)
+    const sections = ['Devlog ' + entry.id]
+
+    if (body.length > 0) {
+        sections.push(body)
+    }
+
+    sections.push(entryUrl)
+
+    return {
+        msgtype: 'm.text',
+        body: sections.join('\n\n')
+    }
+}
+
+export function format_social_message(entry, baseUrl)
+{
+    return format_matrix_message(entry, baseUrl).body
 }
 
 export function social_renderer_test_exports()
 {
     return {
+        collect_entry_images,
+        collect_entry_image_urls,
         entry_heading_anchor,
+        entry_public_url,
         resolve_entry_target_url,
         render_inline_text
     }
