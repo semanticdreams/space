@@ -412,6 +412,104 @@
       (assert (= terrain.id "t-1") "Expected unknown terrain id to remain unchanged")
       true)))
 
+(fn home-world-preserves-unsupported-terrain-on-deactivate []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[{\"id\":\"t-1\",\"kind\":\"heightfield-terrain\",\"options\":{\"width\":64}}]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:scene {:capture-state (fn [_self]
+                                     {:panels []
+                                      :terrains []})}})
+      (world:deactivate {} "switch")
+      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
+      (assert (= (length terrains) 1)
+              "Unsupported terrain should remain in world state after runtime capture")
+      (local terrain (. terrains 1))
+      (assert (= terrain.kind "heightfield-terrain")
+              "Expected unsupported terrain kind to be preserved after deactivate")
+      (assert (= terrain.id "t-1")
+              "Expected unsupported terrain id to remain unchanged after deactivate")
+      true)))
+
+(fn home-world-preserves-unsupported-graph-nodes-on-deactivate []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[\"terrain-editor:world-1:node-a\"],\"edges\":[{\"source\":\"terrain-editor:world-1:node-a\",\"target\":\"start\"}]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local graph-state {:graph {:nodes ["start"]
+                                  :edges []}
+                          :views {:open-node-keys []}})
+      (set world.runtime
+           {:graph {:has-key-loader-for-key (fn [_self key]
+                                             (= key "start"))}
+            :graph-view {:capture-state (fn [_self]
+                                          graph-state)}})
+      (world:deactivate {} "switch")
+      (local nodes (and world.state world.state.graph world.state.graph.graph world.state.graph.graph.nodes))
+      (local edges (and world.state world.state.graph world.state.graph.graph world.state.graph.graph.edges))
+      (assert (= (type nodes) :table) "Expected graph nodes table after deactivate")
+      (assert (= (length nodes) 2)
+              "Unsupported graph node should remain alongside captured supported nodes")
+      (assert (= (. nodes 1) "start")
+              "Captured supported graph node should be preserved")
+      (assert (= (. nodes 2) "terrain-editor:world-1:node-a")
+              "Unsupported graph node should be preserved after deactivate")
+      (assert (= (length edges) 1)
+              "Unsupported graph edge should be preserved after deactivate")
+      (local edge (. edges 1))
+      (assert (= edge.source "terrain-editor:world-1:node-a")
+              "Unsupported graph edge source should be preserved")
+      (assert (= edge.target "start")
+              "Unsupported graph edge target should be preserved")
+      true)))
+
+(fn home-world-preserves-unsupported-graph-views-on-deactivate []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-views\":[{\"node-key\":\"terrain-tool:world-1:apply-perlin\"}]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local graph-state {:graph {:nodes ["start"]
+                                  :edges []}
+                          :views {:open-views [{:node-key "start"}]}})
+      (set world.runtime
+           {:graph {:has-key-loader-for-key (fn [_self key]
+                                             (= key "start"))}
+            :graph-view {:capture-state (fn [_self]
+                                          graph-state)}})
+      (world:deactivate {} "switch")
+      (local open-views (and world.state world.state.graph world.state.graph.views world.state.graph.views.open-views))
+      (assert (= (type open-views) :table) "Expected graph open-views table after deactivate")
+      (assert (= (length open-views) 2)
+              "Unsupported graph view should remain alongside captured supported views")
+      (assert (= (. (. open-views 1) :node-key) "start")
+              "Captured supported graph view should be preserved")
+      (assert (= (. (. open-views 2) :node-key) "terrain-tool:world-1:apply-perlin")
+              "Unsupported graph view should be preserved after deactivate")
+      true)))
+
 (table.insert tests {:name "WorldManager creates and activates default home world"
                      :fn manager-creates-and-activates-default-home})
 (table.insert tests {:name "WorldManager adds and switches home tabs"
@@ -444,6 +542,12 @@
                      :fn home-world-preserves-explicit-empty-terrain-list})
 (table.insert tests {:name "HomeWorld preserves unknown terrain kind state"
                      :fn home-world-preserves-unknown-terrain-kind-state})
+(table.insert tests {:name "HomeWorld preserves unsupported terrain on deactivate"
+                     :fn home-world-preserves-unsupported-terrain-on-deactivate})
+(table.insert tests {:name "HomeWorld preserves unsupported graph nodes on deactivate"
+                     :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
+(table.insert tests {:name "HomeWorld preserves unsupported graph views on deactivate"
+                     :fn home-world-preserves-unsupported-graph-views-on-deactivate})
 
 (local main
   (fn []

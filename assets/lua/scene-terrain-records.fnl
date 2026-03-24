@@ -82,6 +82,9 @@
       default-flat-options
       {}))
 
+(fn supported-kind? [kind]
+  (= kind "flat-terrain"))
+
 (fn normalize-record [record]
   (local raw (or record {}))
   (local kind raw.kind)
@@ -111,12 +114,16 @@
 (fn default-records []
   [(default-flat-record)])
 
+(fn supported-record? [record]
+  (local normalized (normalize-record record))
+  (supported-kind? normalized.kind))
+
 (fn builder-for-record [record]
   (local normalized (normalize-record record))
   (local options (or normalized.options {}))
   (local position (resolve-vec3 options.position (glm.vec3 0 0 0)))
   (local rotation (resolve-quat options.rotation (glm.quat 1 0 0 0)))
-  (if (= normalized.kind "flat-terrain")
+  (if (supported-kind? normalized.kind)
       (do
         (local dark-color (resolve-vec4 (and options.colors options.colors.dark) nil))
         (local light-color (resolve-vec4 (and options.colors options.colors.light) nil))
@@ -136,6 +143,27 @@
                        :colors colors})})
       (error (.. "Unsupported terrain kind for build: " normalized.kind))))
 
+(fn merge-preserved-records [existing-records captured-records]
+  (local existing (normalize-records existing-records))
+  (local captured (normalize-records captured-records))
+  (local captured-by-id {})
+  (local consumed {})
+  (each [_ record (ipairs captured)]
+    (set (. captured-by-id record.id) record))
+  (var merged [])
+  (each [_ record (ipairs existing)]
+    (if (supported-kind? record.kind)
+        (do
+          (local updated (. captured-by-id record.id))
+          (when updated
+            (table.insert merged updated)
+            (set (. consumed record.id) true)))
+        (table.insert merged record)))
+  (each [_ record (ipairs captured)]
+    (when (not (. consumed record.id))
+      (table.insert merged record)))
+  merged)
+
 (fn capture-record [record layout]
   (local normalized (normalize-record record))
   (local captured (clone-table normalized))
@@ -152,7 +180,10 @@
  :normalize-records normalize-records
  :default-flat-record default-flat-record
  :default-records default-records
+ :supported-kind? supported-kind?
+ :supported-record? supported-record?
  :builder-for-record builder-for-record
+ :merge-preserved-records merge-preserved-records
  :capture-record capture-record
  :array->vec3 array->vec3
  :array->quat array->quat}

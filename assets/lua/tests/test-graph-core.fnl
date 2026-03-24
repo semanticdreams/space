@@ -214,6 +214,32 @@
     (assert (. created "test:b"))
     (graph:drop))
 
+(fn graph-core-restore-skips-unresolved-nodes []
+    (local graph (Graph {:with-start false}))
+    (graph:restore-state {:nodes ["unknown-scheme:item"]
+                          :edges []})
+    (assert (= (graph:node-count) 0)
+            "Graph restore-state should skip unresolved nodes")
+    (assert (= (graph:edge-count) 0)
+            "Graph restore-state should not create edges for unresolved nodes")
+    (graph:drop))
+
+(fn graph-core-restore-skips-edges-with-unresolved-endpoints []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test"
+      (fn [key]
+        (Graph.GraphNode {:key key})))
+    (graph:restore-state {:nodes ["test:a" "missing-scheme:b"]
+                          :edges [{:source "test:a"
+                                   :target "missing-scheme:b"}
+                                  {:source "missing-scheme:b"
+                                   :target "test:a"}]})
+    (assert (graph:lookup "test:a")
+            "Graph restore-state should still load resolvable nodes")
+    (assert (= (graph:edge-count) 0)
+            "Graph restore-state should skip edges with unresolved endpoints")
+    (graph:drop))
+
 (table.insert tests {:name "Graph core adds nodes and edges" :fn graph-core-adds-nodes-and-edges})
 (table.insert tests {:name "Graph core replaces nodes and updates edges" :fn graph-core-replaces-node-and-updates-edges})
 (table.insert tests {:name "Graph core removes nodes and edges" :fn graph-core-removes-nodes-and-edges})
@@ -224,6 +250,10 @@
 (table.insert tests {:name "Graph core ensure-identity-key reuses existing identity" :fn graph-core-ensure-identity-key-reuses-existing-identity})
 (table.insert tests {:name "Graph core captures node and edge state" :fn graph-core-captures-state})
 (table.insert tests {:name "Graph core restores node and edge state" :fn graph-core-restores-state})
+(table.insert tests {:name "Graph core restore skips unresolved nodes"
+                     :fn graph-core-restore-skips-unresolved-nodes})
+(table.insert tests {:name "Graph core restore skips edges with unresolved endpoints"
+                     :fn graph-core-restore-skips-edges-with-unresolved-endpoints})
 
 (local main
   (fn []

@@ -3,6 +3,7 @@
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local fs (require :fs))
+(local logging (require :logging))
 (local MathUtils (require :math-utils))
 
 (local array->vec3 (. MathUtils :array->vec3))
@@ -151,6 +152,13 @@
          (fn [_self node opts]
              (ensure-node-view node opts)))
 
+    (fn resolve-restored-node [key]
+        (local node (or (and graph graph.lookup (graph:lookup key))
+                        (and graph graph.load-by-key (graph:load-by-key key))))
+        (when (not node)
+            (logging.warn (.. "[graph-view] skipping unresolved restored node view: " key)))
+        node)
+
     (fn register-target-restorer [target]
         (when (and target
                    target.register-panel-restorer
@@ -166,12 +174,10 @@
                         (local key panel.node-key)
                         (assert (= (type key) :string)
                                 "graph-node-view restorer requires string :node-key")
-                        (local node (or (and graph graph.lookup (graph:lookup key))
-                                        (and graph graph.load-by-key (graph:load-by-key key))))
-                        (assert node
-                                (.. "graph-node-view restorer could not resolve node: " key))
-                        (open-node-view nil node {:target target
-                                                  :panel panel}))
+                        (local node (resolve-restored-node key))
+                        (when node
+                            (open-node-view nil node {:target target
+                                                      :panel panel})))
                     restorer-owner)
                 (table.insert restorer-targets target))))
 
@@ -212,10 +218,9 @@
             (local key entry.node-key)
             (assert (= (type key) :string)
                     "GraphViewNodeViews.restore-state node-key must be a string")
-            (local node (or (and graph graph.lookup (graph:lookup key))
-                            (and graph graph.load-by-key (graph:load-by-key key))))
-            (assert node (.. "GraphViewNodeViews.restore-state could not resolve node: " key))
-            (ensure-node-view node {:panel entry.panel}))
+            (local node (resolve-restored-node key))
+            (when node
+                (ensure-node-view node {:panel entry.panel})))
         true)
 
     (fn move-view [_self old new]

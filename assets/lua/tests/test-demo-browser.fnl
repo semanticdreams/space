@@ -206,6 +206,24 @@
   (when (not ok)
     (error err)))
 
+(fn scene-build-default-skips-unsupported-terrains []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [{:id "t-1"
+                                          :kind "heightfield-terrain"
+                                          :options {:width 64}}]})
+        (local captured (scene:capture-state))
+        (local terrains (or captured.terrains []))
+        (assert (= (length terrains) 0)
+                "Unsupported terrains should be skipped during scene build"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn demo-entry-capture-state-persists-entry-persistence []
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
@@ -734,6 +752,8 @@
 (table.insert tests {:name "Scene capture-state requires restore strategy"
                      :fn scene-capture-state-requires-restore-strategy})
 (table.insert tests {:name "Scene additions appear in front of the camera" :fn added-dialog-appears-in-front-of-camera})
+(table.insert tests {:name "Scene build default skips unsupported terrains"
+                     :fn scene-build-default-skips-unsupported-terrains})
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
 (table.insert tests {:name "Scene ball appears in front of camera and restores"
                      :fn scene-add-ball-appears-in-front-of-camera-and-restores})

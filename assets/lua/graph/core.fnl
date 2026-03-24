@@ -7,6 +7,7 @@
 (local ClassNode (require :graph/nodes/class))
 (local QuitNode (require :graph/nodes/quit))
 (local Signal (require :signal))
+(local logging (require :logging))
 (local LinkEntityStore (require :entities/link))
 (local IdentityStore (require :entities/identity))
 (local Morphs (require :morphs/init))
@@ -251,6 +252,13 @@
                 (add-node self node))
             node))
 
+    (set self.has-key-loader-for-key
+        (fn [_self key]
+            (when (not key) (lua "return false"))
+            (assert (= (type key) "string") "has-key-loader-for-key requires string key")
+            (local scheme (key-scheme key))
+            (not (= (. key-loaders scheme) nil))))
+
     (set self.capture-state
         (fn [_self]
             (local node-keys
@@ -276,6 +284,13 @@
             {:nodes node-keys
              :edges edge-list}))
 
+    (fn resolve-restored-node [key]
+        (local node (or (lookup self key)
+                        (self:load-by-key key)))
+        (when (not node)
+            (logging.warn (.. "[graph] skipping unresolved restored node: " key)))
+        node)
+
     (set self.restore-state
         (fn [_self state]
             (local payload (or state {}))
@@ -286,8 +301,7 @@
             (each [_ key (ipairs node-keys)]
                 (assert (= (type key) :string) "Graph.restore-state node keys must be strings")
                 (when (not (lookup self key))
-                    (local loaded (self:load-by-key key))
-                    (assert loaded (.. "Graph.restore-state could not load node: " key))))
+                    (resolve-restored-node key)))
             (each [_ edge (ipairs edge-list)]
                 (assert (= (type edge) :table) "Graph.restore-state edge entries must be tables")
                 (local source-key edge.source)
@@ -296,16 +310,14 @@
                         "Graph.restore-state edge.source must be a string")
                 (assert (= (type target-key) :string)
                         "Graph.restore-state edge.target must be a string")
-                (local source-node (or (lookup self source-key)
-                                       (self:load-by-key source-key)))
-                (local target-node (or (lookup self target-key)
-                                       (self:load-by-key target-key)))
-                (assert source-node
-                        (.. "Graph.restore-state could not resolve source node: " source-key))
-                (assert target-node
-                        (.. "Graph.restore-state could not resolve target node: " target-key))
-                (self:add-edge (GraphEdge {:source source-node
-                                           :target target-node})))
+                (local source-node (resolve-restored-node source-key))
+                (local target-node (resolve-restored-node target-key))
+                (if (not source-node)
+                    (logging.warn (.. "[graph] skipping restored edge with unresolved source: " source-key))
+                    (if (not target-node)
+                        (logging.warn (.. "[graph] skipping restored edge with unresolved target: " target-key))
+                        (self:add-edge (GraphEdge {:source source-node
+                                                   :target target-node})))))
             true))
 
     (set Graph.GraphNode GraphNode)
