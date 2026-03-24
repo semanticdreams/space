@@ -20,10 +20,6 @@
 (fn physics-available? []
   (and bt app.engine app.engine.physics))
 
-(fn ensure-gravity []
-  (when (physics-available?)
-    (app.engine.physics:setGravity 0 -25 0)))
-
 (fn bt-glm-vec3 [value]
   (bt.Vector3 (or value.x 0) (or value.y 0) (or value.z 0)))
 
@@ -35,6 +31,33 @@
   (if (and w x y z)
       (glm.quat w x y z)
       (glm.quat 1 0 0 0)))
+
+(fn ray-sphere-intersection [ray center radius]
+  (if (and ray center radius)
+      (do
+        (local oc (- ray.origin center))
+        (local a (glm.dot ray.direction ray.direction))
+        (local b (* 2 (glm.dot oc ray.direction)))
+        (local c (- (glm.dot oc oc) (* radius radius)))
+        (local discriminant (- (* b b) (* 4 a c)))
+        (if (>= discriminant 0)
+            (do
+              (local root (math.sqrt discriminant))
+              (local denom (* 2 a))
+              (local t0 (/ (- (- b) root) denom))
+              (local t1 (/ (+ (- b) root) denom))
+              (local distance
+                (if (>= t0 0)
+                    t0
+                    (if (>= t1 0)
+                        t1
+                        nil)))
+              (if distance
+                  (let [point (+ ray.origin (* ray.direction (glm.vec3 distance)))]
+                    (values true point distance))
+                  (values false nil nil)))
+            (values false nil nil)))
+      (values false nil nil)))
 
 (local approx (. MathUtils :approx))
 
@@ -85,33 +108,41 @@
                    :motion-state nil
                    :shape nil
                    :body-active? false
+                   :dragging false
                    :is-physics-ball true})
 
-      (fn parent-transform [_self parent-layout]
-        {:position (or (and parent-layout parent-layout.position) (glm.vec3 0 0 0))
-         :rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0))})
+      (fn center-from-layout [self]
+        (local layout self.layout)
+        (local position (or (and layout layout.position) (glm.vec3 0 0 0)))
+        (local rotation (or (and layout layout.rotation) (glm.quat 1 0 0 0)))
+        (+ position
+           (rotation:rotate (+ self.offset self.half-size))))
 
-      (fn center-from-parent [self parent-layout]
-        (local transform (parent-transform self parent-layout))
-        (+ transform.position
-           (transform.rotation:rotate (+ self.offset self.half-size))))
+      (fn set-layout-position-from-center [self center]
+        (local layout self.layout)
+        (when layout
+          (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
+          (local layout-position
+            (- center (rotation:rotate (+ self.offset self.half-size))))
+          (when (not (vec3-equal? layout.position layout-position))
+            (set layout.position layout-position)
+            (layout:mark-layout-dirty))))
 
-      (fn set-offset-from-center [self center parent-layout]
-        (local transform (parent-transform self parent-layout))
-        (local inverse (transform.rotation:inverse))
-        (local relative (- center transform.position))
-        (local local-center (inverse:rotate relative))
-        (local local-offset (- local-center self.half-size))
-        (when (not (vec3-equal? self.offset local-offset))
-          (set self.offset.x local-offset.x)
-          (set self.offset.y local-offset.y)
-          (set self.offset.z local-offset.z)
-          (self.positioned.layout:mark-layout-dirty)))
+      (fn apply-layout-to-body [self]
+        (when (and self.body self.body-active? (physics-available?))
+          (local transform (bt.Transform))
+          (transform:setIdentity)
+          (transform:setOrigin (bt-glm-vec3 (self:center-from-layout)))
+          (self.body:setWorldTransform transform)
+          (when self.motion-state
+            (self.motion-state:setWorldTransform transform))
+          (self.body:setLinearVelocity (bt.Vector3 0 0 0))
+          (when self.body.setAngularVelocity
+            (self.body:setAngularVelocity (bt.Vector3 0 0 0)))))
 
-      (fn ensure-body [self parent-layout]
+      (fn ensure-body [self]
         (when (and (physics-available?) (not self.body))
-          (ensure-gravity)
-          (local center (self:center-from-parent parent-layout))
+          (local center (self:center-from-layout))
           (local shape
             (if sphere-shape?
                 (bt.SphereShape self.radius)
@@ -128,20 +159,42 @@
             (body:setFriction self.friction))
           (when (and body body.setRestitution)
             (body:setRestitution self.restitution))
-          (when self.initial-velocity
-            (body:setLinearVelocity (bt-glm-vec3 self.initial-velocity)))
+          (if self.initial-velocity
+              (body:setLinearVelocity (bt-glm-vec3 self.initial-velocity))
+              (body:setLinearVelocity (bt.Vector3 0 -0.01 0)))
+          (when body.forceActivationState
+            (body:forceActivationState 1))
+          (when body.activate
+            (body:activate true))
           (app.engine.physics:addRigidBody body)
           (set self.shape shape)
           (set self.motion-state motion)
           (set self.body body)
           (set self.body-active? true)))
 
-      (fn sync [self parent-layout]
+      (fn sync [self]
         (when (and self.body self.body-active? (physics-available?))
-          (local transform (self.body:getCenterOfMassTransform))
-          (local origin (transform:getOrigin))
-          (local center (glm.vec3 origin.x origin.y origin.z))
-          (self:set-offset-from-center center parent-layout)))
+          (if self.dragging
+              (self:apply-layout-to-body)
+              (do
+                (local transform (self.body:getCenterOfMassTransform))
+                (local origin (transform:getOrigin))
+                (local center (glm.vec3 origin.x origin.y origin.z))
+                (self:set-layout-position-from-center center)))))
+
+      (fn begin-drag [self]
+        (set self.dragging true)
+        (self:ensure-body))
+
+      (fn end-drag [self]
+        (set self.dragging false)
+        (when (and self.body self.body-active? (physics-available?))
+          (self:apply-layout-to-body)
+          (when self.body.forceActivationState
+            (self.body:forceActivationState 1))
+          (when self.body.activate
+            (self.body:activate true))
+          (self.body:applyForce (bt.Vector3 0 -0.5 0))))
 
       (fn drop [self]
         (when (and self.body self.body-active? (physics-available?))
@@ -153,10 +206,17 @@
         (when self.positioned
           (self.positioned:drop)))
 
+      (fn intersect [self ray]
+        (ray-sphere-intersection ray (self:center-from-layout) self.radius))
+
       (set self.ensure-body ensure-body)
       (set self.sync sync)
-      (set self.set-offset-from-center set-offset-from-center)
-      (set self.center-from-parent center-from-parent)
+      (set self.begin-drag begin-drag)
+      (set self.end-drag end-drag)
+      (set self.apply-layout-to-body apply-layout-to-body)
+      (set self.intersect intersect)
+      (set self.set-layout-position-from-center set-layout-position-from-center)
+      (set self.center-from-layout center-from-layout)
       (set self.drop drop)
       self))
   build)

@@ -7,6 +7,7 @@
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
 (local Camera (require :camera))
+(local AppProjection (require :app-projection))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
 (local {: FirstPersonControls} (require :first-person-controls))
@@ -14,6 +15,17 @@
 (local tests [])
 
 (local approx (. MathUtils :approx))
+ 
+(local reset-engine-events
+  (fn []
+    (when _G.reset-engine-events
+      (_G.reset-engine-events))))
+
+(fn approx-vec3 [a b]
+  (and a b
+       (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
 
 (fn drag-through-normal-state-moves-scene-entity []
   (local original-scene app.scene)
@@ -26,6 +38,7 @@
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
   (local original-viewport app.viewport)
+  (local original-create-default-projection app.create-default-projection)
   (var scene nil)
   (var movables nil)
   (var intersector nil)
@@ -70,7 +83,8 @@
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
-    (set app.viewport original-viewport))
+    (set app.viewport original-viewport)
+    (set app.create-default-projection original-create-default-projection))
 
   (let [(ok err)
         (pcall
@@ -82,6 +96,7 @@
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
+            (set app.create-default-projection AppProjection.create-default-projection)
             (set scene (Scene {:position (glm.vec3 0 0 0)
                                :rotation (glm.quat 1 0 0 0)}))
             (set app.intersectables intersector)
@@ -105,7 +120,7 @@
             (scene:update)
             (set scene.screen-pos-ray
                  (fn [_self pointer _opts]
-                   {:origin (glm.vec3 pointer.x pointer.y 5)
+                   {:origin (glm.vec3 pointer.x pointer.y 10)
                     :direction (glm.vec3 0 0 -1)}))
 
             (set state (NormalState))
@@ -129,7 +144,125 @@
     (when (not ok)
       (error err))))
 
+(fn drag-through-normal-state-moves-scene-ball []
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (local original-movables app.movables)
+  (local original-intersectables app.intersectables)
+  (local original-camera app.camera)
+  (local original-controls app.first-person-controls)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-events app.engine.events)
+  (local original-create-default-projection app.create-default-projection)
+  (var scene nil)
+  (var movables nil)
+  (var intersector nil)
+  (var clickables nil)
+  (var hoverables nil)
+  (var camera nil)
+  (var controls nil)
+  (var state nil)
+  (var ball nil)
+
+  (fn cleanup []
+    (when state
+      (state.on-leave)
+      (set state nil))
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (when movables
+      (movables:drop)
+      (set movables nil))
+    (when intersector
+      (intersector:drop)
+      (set intersector nil))
+    (when clickables
+      (clickables:drop)
+      (set clickables nil))
+    (when hoverables
+      (hoverables:drop)
+      (set hoverables nil))
+    (when controls
+      (controls:drop)
+      (set controls nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables)
+    (set app.intersectables original-intersectables)
+    (set app.camera original-camera)
+    (set app.first-person-controls original-controls)
+    (set app.hoverables original-hoverables)
+    (set app.clickables original-clickables)
+    (set app.engine.events original-events)
+    (set app.create-default-projection original-create-default-projection))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (reset-engine-events)
+            (set intersector (Intersectables))
+            (set clickables (Clickables {:intersectables intersector}))
+            (set hoverables (Hoverables {:intersectables intersector}))
+            (set movables (Movables {:intersectables intersector}))
+            (set camera (Camera {:position (glm.vec3 0 0 10)}))
+            (set controls (FirstPersonControls {:camera camera}))
+            (set app.create-default-projection AppProjection.create-default-projection)
+            (set scene (Scene {:position (glm.vec3 0 0 0)
+                               :rotation (glm.quat 1 0 0 0)}))
+            (set app.intersectables intersector)
+            (set app.clickables clickables)
+            (set app.hoverables hoverables)
+            (set app.movables movables)
+            (set app.camera camera)
+            (set app.first-person-controls controls)
+            (set app.scene scene)
+            (set app.layout-root scene.layout-root)
+            (app.engine.physics:setGravity 0 -25 0)
+            (scene:build-default {:terrains []})
+            (set ball (scene:add-ball {:size (glm.vec3 6 6 6)
+                                       :position (glm.vec3 0 0 0)}))
+            (scene:update)
+            (set scene.screen-pos-ray
+                 (fn [_self pointer _opts]
+                   {:origin (glm.vec3 pointer.x pointer.y 5)
+                    :direction (glm.vec3 0 0 -1)}))
+
+            (set state (NormalState))
+            (state.on-enter)
+
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 256})
+            (app.engine.events.mouse-motion.emit {:x 7.25 :y 9.25})
+            (assert (app.movables:drag-active?) "Ball drag should begin after motion threshold")
+            (assert ball.dragging "Ball movable should enter dragging mode")
+            (scene:update)
+
+            (assert ball "Scene should create a ball")
+            (assert (> ball.layout.position.x 3.5)
+                    (string.format
+                      "Ball drag should move layout along X (x=%.3f)"
+                      ball.layout.position.x))
+            (assert (> ball.layout.position.y 5.5)
+                    (string.format
+                      "Ball drag should move layout along Y (y=%.3f)"
+                      ball.layout.position.y))
+            (assert (< (math.abs ball.layout.position.z) 1.0)
+                    (string.format
+                      "Ball drag should keep layout near the drag plane (z=%.3f)"
+                      ball.layout.position.z))
+
+            (app.engine.events.mouse-button-up.emit {:button 1})
+            (assert (not (app.movables:drag-active?)) "Ball drag should end on mouse-up")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (table.insert tests {:name "Normal state drags real scene entity" :fn drag-through-normal-state-moves-scene-entity})
+(table.insert tests {:name "Normal state drags scene ball" :fn drag-through-normal-state-moves-scene-ball})
 
 (local main
   (fn []

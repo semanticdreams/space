@@ -85,15 +85,30 @@
     ((WidgetCuboid wc-opts)
      ctx runtime-opts)))
 
-(fn collect-positioned-movables [children]
+  (fn collect-positioned-movables [children]
   (var entries [])
   (each [_ metadata (ipairs (or children []))]
     (local element (and metadata metadata.element))
     (local layout (and element element.layout))
     (when layout
+        (table.insert entries {:target layout
+                               :handle element
+                               :owner element})))
+  entries)
+
+(fn collect-ball-movables [entity]
+  (var entries [])
+  (each [_ ball (ipairs (or (and entity entity.balls) []))]
+    (local layout (and ball ball.layout))
+    (when layout
       (table.insert entries {:target layout
-                             :handle element
-                             :owner element})))
+                             :handle ball
+                             :key ball
+                             :owner ball
+                             :on-drag-start (fn [_entry]
+                                              (ball:begin-drag))
+                             :on-drag-end (fn [_entry]
+                                            (ball:end-drag))})))
   entries)
 
 (fn resolve-min-size [layout]
@@ -157,6 +172,8 @@
 (fn compute-entity-movables [self entity]
   (local base (or entity.__scene_base_movables []))
   (local entries (copy-movables base))
+  (each [_ entry (ipairs (collect-ball-movables entity))]
+    (table.insert entries entry))
   (local physics-movables (LayoutPhysicsBodies.collect-movables entity))
   (local physics-targets {})
   (each [_ entry (ipairs physics-movables)]
@@ -692,6 +709,15 @@
       (when (not self.entity.balls)
         (set self.entity.balls []))
       (table.insert self.entity.balls element)
+      (unregister-movables-for-owner self self.entity element)
+      (remove-entries-for-owner self.entity.movables element)
+      (when (not self.entity.movables)
+        (set self.entity.movables []))
+      (local ball-movable (. (collect-ball-movables self.entity) (length self.entity.balls)))
+      (when ball-movable
+        (table.insert self.entity.movables ball-movable)
+        (register-movable-entries self self.entity
+                                  [(normalize-movable-entry self ball-movable)]))
       (when self.entity.layout
         (element:ensure-body self.entity.layout))
       (self:sync-physics-balls))
