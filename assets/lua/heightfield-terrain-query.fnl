@@ -208,41 +208,6 @@
          :target (sample-target record local-point)})
       best))
 
-(fn triangle-hits-for-cell [record chunk sample-x sample-z ray]
-  (local p00-local (canonical-local-point record chunk sample-x sample-z))
-  (local p01-local (canonical-local-point record chunk sample-x (+ sample-z 1)))
-  (local p10-local (canonical-local-point record chunk (+ sample-x 1) sample-z))
-  (local p11-local (canonical-local-point record chunk (+ sample-x 1) (+ sample-z 1)))
-  (local p00 (local->world record p00-local))
-  (local p01 (local->world record p01-local))
-  (local p10 (local->world record p10-local))
-  (local p11 (local->world record p11-local))
-  [(intersect-triangle ray p00 p01 p10)
-   (intersect-triangle ray p10 p01 p11)])
-
-(fn raycast-record-exact [record ray]
-  (var best nil)
-
-  (fn maybe-remember-hit [hit]
-    (when (and hit (or (not best) (< hit.distance best.distance)))
-      (local local-point (world->local record hit.point))
-      (set best {:distance hit.distance
-                 :world-point hit.point
-                 :local-point local-point
-                 :sample (nearest-sample-coord record local-point)
-                 :target (sample-target record local-point)})))
-
-  (each [_ chunk (ipairs (or record.chunks []))]
-    (local size (chunk-size chunk))
-    (local chunk-width (. size 1))
-    (local chunk-length (. size 2))
-    (for [sample-x 0 (- chunk-width 2)]
-      (for [sample-z 0 (- chunk-length 2)]
-        (each [_ hit (ipairs (triangle-hits-for-cell record chunk sample-x sample-z ray))]
-          (maybe-remember-hit hit)))))
-
-  best)
-
 (fn local-triangle-hits-for-cell [record chunk-map cell-x cell-z ray]
   (local sample-spacing (spacing record))
   (local spacing-x (. sample-spacing 1))
@@ -431,7 +396,6 @@
  :raycast-record-fast raycast-record-fast
  :domain-hit-record M.domain-hit-record
  :screen-rect-target M.screen-rect-target
- :raycast-record-exact raycast-record-exact
  :world->local world->local
  :local->world local->world
  :nearest-sample-coord nearest-sample-coord

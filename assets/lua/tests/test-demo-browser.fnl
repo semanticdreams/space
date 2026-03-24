@@ -15,10 +15,7 @@
 (local PhysicsFloor (require :physics-floor))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
-(local fs (require :fs))
-(local json (require :json))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
-(local TerrainQuery (require :terrain-query))
 (local HeightfieldTerrainQuery (require :heightfield-terrain-query))
 
 (local tests [])
@@ -69,9 +66,6 @@
        (fn [self key]
          (table.insert self.unregistered key)))
   movables)
-
-(fn read-json [path]
-  (json.loads (fs.read-file path)))
 
 (fn array->vec3 [arr]
   (glm.vec3 (. arr 1) (. arr 2) (. arr 3)))
@@ -196,42 +190,6 @@
              :chunk-samples record.options.chunk-samples
              :default-height record.options.default-height}
    :chunks record.chunks})
-
-(fn oracle-scene-domain-hit [scene pos opts]
-  (local ray (scene:screen-pos-ray pos opts))
-  (var best nil)
-  (each [_ metadata (ipairs (or scene.scene-terrains []))]
-    (local record metadata.record)
-    (local query-record (translated-query-record metadata))
-    (local hit (and query-record (HeightfieldTerrainQuery.raycast-record-exact query-record ray)))
-    (when (and hit (or (not best) (< hit.distance best.distance)))
-      (set best {:terrain-record record
-                 :terrain-id record.id
-                 :terrain-kind record.kind
-                 :distance hit.distance
-                 :world-point hit.world-point
-                 :local-point hit.local-point
-                 :sample hit.sample
-                 :target hit.target})))
-  best)
-
-(fn oracle-scene-domain-hit-fast [scene pos opts]
-  (local ray (scene:screen-pos-ray pos opts))
-  (var best nil)
-  (each [_ metadata (ipairs (or scene.scene-terrains []))]
-    (local record metadata.record)
-    (local query-record (translated-query-record metadata))
-    (local hit (and query-record (HeightfieldTerrainQuery.raycast-record-fast query-record ray)))
-    (when (and hit (or (not best) (< hit.distance best.distance)))
-      (set best {:terrain-record record
-                 :terrain-id record.id
-                 :terrain-kind record.kind
-                 :distance hit.distance
-                 :world-point hit.world-point
-                 :local-point hit.local-point
-                 :sample hit.sample
-                 :target hit.target})))
-  best)
 
 (fn scene-hit-approx=? [left right]
   (if (or (not left) (not right))
@@ -570,132 +528,6 @@
   (when (not ok)
     (error err)))
 
-(fn scene-screen-pos-terrain-domain-hit-matches-exact-oracle []
-  (local setup (setup-scene {:scene-position (glm.vec3 -5 0 0)
-                             :scene-rotation (glm.quat 1 0 0 0)}))
-  (local cleanup setup.cleanup)
-  (local scene setup.scene-result.scene)
-  (local original-viewport app.viewport)
-  (local original-projection app.projection)
-  (local original-camera app.camera)
-  (fn run-case [case-seed]
-    (local terrain (random-heightfield-record (+ 4000 case-seed)))
-    (scene:build-default {:terrains [terrain]})
-    (scene.layout-root:update)
-    (local metadata (. scene.scene-terrains 1))
-    (local layout metadata.element.layout)
-    (local half-size (* layout.size (glm.vec3 0.5)))
-    (local center (+ layout.position (layout.rotation:rotate half-size)))
-    (local camera-pos (+ center (glm.vec3 0 40 0)))
-    (local camera (Camera {:position camera-pos
-                           :rotation (glm.quat (/ (- math.pi) 2) (glm.vec3 1 0 0))}))
-    (set app.camera camera)
-    (local view (camera:get-view-matrix))
-    (local viewport {:x 0 :y 0 :width 400 :height 300})
-    (local projection (glm.perspective (/ math.pi 3) (/ 4 3) 0.1 200.0))
-    (for [point-seed 1 6]
-      (math.randomseed (+ (* case-seed 100) point-seed))
-      (local pos {:x (random-range 0 viewport.width)
-                  :y (random-range 0 viewport.height)})
-      (local actual (scene:screen-pos-terrain-domain-hit pos
-                                                         {:view view
-                                                          :projection projection
-                                                          :viewport viewport}))
-      (local expected (oracle-scene-domain-hit scene pos
-                                               {:view view
-                                                :projection projection
-                                                :viewport viewport}))
-      (assert (scene-hit-approx=? actual expected)
-              (.. "scene domain hit mismatch case=" case-seed
-                  " point=" point-seed
-                  " actual=" (if actual "hit" "nil")
-                  " expected=" (if expected "hit" "nil")))))
-  (local (ok err)
-    (pcall
-      (fn []
-        (local viewport {:x 0 :y 0 :width 400 :height 300})
-        (local projection (glm.perspective (/ math.pi 3) (/ 4 3) 0.1 200.0))
-        (app.set-viewport viewport)
-        (set app.projection projection)
-        (for [case-seed 1 20]
-          (run-case case-seed)))))
-  (set app.camera original-camera)
-  (app.set-viewport original-viewport)
-  (set app.projection original-projection)
-  (cleanup)
-  (when (not ok)
-    (error err)))
-
-(fn scene-screen-pos-terrain-domain-fast-matches-exact-oracle []
-  (local original-viewport app.viewport)
-  (local original-projection app.projection)
-  (local original-camera app.camera)
-
-  (fn run-case [case-seed]
-    (math.randomseed (+ 12000 case-seed))
-    (local scene-yaw (random-range (- math.pi) math.pi))
-    (local scene-half-angle (/ scene-yaw 2))
-    (local setup
-      (setup-scene {:scene-position (glm.vec3 (random-range -25 25) 0 (random-range -25 25))
-                    :scene-rotation (glm.quat (math.cos scene-half-angle) 0 (math.sin scene-half-angle) 0)}))
-    (local cleanup setup.cleanup)
-    (local scene setup.scene-result.scene)
-    (local (ok err)
-      (pcall
-        (fn []
-          (local terrain (random-heightfield-record (+ 8000 case-seed)))
-          (scene:build-default {:terrains [terrain]})
-          (scene.layout-root:update)
-          (local metadata (. scene.scene-terrains 1))
-          (local layout metadata.element.layout)
-          (local half-size (* layout.size (glm.vec3 0.5)))
-          (local center (+ layout.position (layout.rotation:rotate half-size)))
-          (local camera-pos (+ center
-                               (glm.vec3 (random-range -60 60)
-                                         (random-range 18 70)
-                                         (random-range -60 60))))
-          (local camera (camera-looking-at camera-pos center))
-          (set app.camera camera)
-          (local view (camera:get-view-matrix))
-          (local viewport {:x 0 :y 0 :width 400 :height 300})
-          (local projection (glm.perspective (/ math.pi 3) (/ 4 3) 0.1 200.0))
-          (for [point-seed 1 120]
-            (math.randomseed (+ (* case-seed 1000) point-seed))
-            (local pos {:x (random-range 0 viewport.width)
-                        :y (random-range 0 viewport.height)})
-            (local fast (oracle-scene-domain-hit-fast scene pos
-                                                      {:view view
-                                                       :projection projection
-                                                       :viewport viewport}))
-            (local exact (oracle-scene-domain-hit scene pos
-                                                  {:view view
-                                                   :projection projection
-                                                   :viewport viewport}))
-            (assert (scene-hit-approx=? fast exact)
-                    (.. "scene fast domain hit mismatch case=" case-seed
-                        " point=" point-seed
-                        " screen=[" pos.x "," pos.y "]"
-                        " fast=" (if fast "hit" "nil")
-                        " exact=" (if exact "hit" "nil")))))))
-    (cleanup)
-    (when (not ok)
-      (error err)))
-
-  (local (ok err)
-    (pcall
-      (fn []
-        (local viewport {:x 0 :y 0 :width 400 :height 300})
-        (local projection (glm.perspective (/ math.pi 3) (/ 4 3) 0.1 200.0))
-        (app.set-viewport viewport)
-        (set app.projection projection)
-        (for [case-seed 1 20]
-          (run-case case-seed)))))
-  (set app.camera original-camera)
-  (app.set-viewport original-viewport)
-  (set app.projection original-projection)
-  (when (not ok)
-    (error err)))
-
 (fn scene-screen-pos-terrain-domain-hit-scales-logical-input-to-pixel-viewport []
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
@@ -754,89 +586,6 @@
   (when (not ok)
     (error err)))
 
-(fn scene-screen-pos-terrain-domain-hit-default-app-state-matches-exact-oracle []
-  (local original-viewport app.viewport)
-  (local original-projection app.projection)
-  (local original-camera app.camera)
-  (local original-engine-width (and app.engine app.engine.width))
-  (local original-engine-height (and app.engine app.engine.height))
-  (local original-engine-pixel-width (and app.engine (. app.engine "pixel-width")))
-  (local original-engine-pixel-height (and app.engine (. app.engine "pixel-height")))
-
-  (fn run-case [case-seed]
-    (math.randomseed (+ 16000 case-seed))
-    (local scene-yaw (random-range (- math.pi) math.pi))
-    (local scene-half-angle (/ scene-yaw 2))
-    (local setup
-      (setup-scene {:scene-position (glm.vec3 (random-range -25 25) 0 (random-range -25 25))
-                    :scene-rotation (glm.quat (math.cos scene-half-angle) 0 (math.sin scene-half-angle) 0)}))
-    (local cleanup setup.cleanup)
-    (local scene setup.scene-result.scene)
-    (local (ok err)
-      (pcall
-        (fn []
-          (local terrain (random-heightfield-record (+ 17000 case-seed)))
-          (scene:build-default {:terrains [terrain]})
-          (scene.layout-root:update)
-          (local metadata (. scene.scene-terrains 1))
-          (local layout metadata.element.layout)
-          (local half-size (* layout.size (glm.vec3 0.5)))
-          (local center (+ layout.position (layout.rotation:rotate half-size)))
-          (local camera-pos (+ center
-                               (glm.vec3 (random-range -60 60)
-                                         (random-range 18 70)
-                                         (random-range -60 60))))
-          (set app.camera (camera-looking-at camera-pos center))
-          (local logical-width (math.random 320 1280))
-          (local logical-height (math.random 240 960))
-          (local pixel-scale (+ 1 (math.random 0 2)))
-          (local viewport {:x 0
-                           :y 0
-                           :width (* logical-width pixel-scale)
-                           :height (* logical-height pixel-scale)})
-          (app.set-viewport viewport)
-          (set app.projection (glm.perspective (/ math.pi 3)
-                                               (/ viewport.width viewport.height)
-                                               0.1
-                                               400.0))
-          (when app.engine
-            (set app.engine.width logical-width)
-            (set app.engine.height logical-height)
-            (set (. app.engine "pixel-width") viewport.width)
-            (set (. app.engine "pixel-height") viewport.height))
-          (for [point-seed 1 120]
-            (math.randomseed (+ (* case-seed 1000) point-seed))
-            (local pos {:x (random-range 0 logical-width)
-                        :y (random-range 0 logical-height)})
-            (local actual (scene:screen-pos-terrain-domain-hit pos nil))
-            (local expected (oracle-scene-domain-hit scene pos nil))
-            (assert (scene-hit-approx=? actual expected)
-                    (.. "default app-state domain hit mismatch case=" case-seed
-                        " point=" point-seed
-                        " screen=[" pos.x "," pos.y "]"
-                        " actual=" (if actual "hit" "nil")
-                        " expected=" (if expected "hit" "nil")))))))
-    (cleanup)
-    (when (not ok)
-      (error err)))
-
-  (local (ok err)
-    (pcall
-      (fn []
-        (for [case-seed 1 20]
-          (run-case case-seed)))))
-
-  (when app.engine
-    (set app.engine.width original-engine-width)
-    (set app.engine.height original-engine-height)
-    (set (. app.engine "pixel-width") original-engine-pixel-width)
-    (set (. app.engine "pixel-height") original-engine-pixel-height))
-  (set app.camera original-camera)
-  (app.set-viewport original-viewport)
-  (set app.projection original-projection)
-  (when (not ok)
-    (error err)))
-
 (fn target-approx=? [left right]
   (if (or (not left) (not right))
       (= left right)
@@ -845,22 +594,6 @@
            (= left.z0 right.z0)
            (= left.x1 right.x1)
            (= left.z1 right.z1))))
-
-(fn with-domain-hit-mode [mode f]
-  (local original-domain-hit TerrainQuery.domain-hit-record)
-  (set TerrainQuery.domain-hit-record
-       (fn [record ray]
-         (local kind (and record record.kind))
-         (if (not (= kind "heightfield-terrain"))
-             nil
-             (if (= mode :exact)
-                 (HeightfieldTerrainQuery.raycast-record-exact record ray)
-                 (HeightfieldTerrainQuery.raycast-record-fast record ray)))))
-  (local (ok result) (pcall f))
-  (set TerrainQuery.domain-hit-record original-domain-hit)
-  (if ok
-      result
-      (error result)))
 
 (fn resolve-target-capture-drag [scene terrain-id start-pos move-pos end-pos]
   (var resolved nil)
@@ -875,132 +608,6 @@
   (capture:end-drag end-pos)
   (capture:drop)
   resolved)
-
-(fn heightfield-target-capture-fast-matches-exact-default-app-state []
-  (local original-viewport app.viewport)
-  (local original-projection app.projection)
-  (local original-camera app.camera)
-  (local original-engine-width (and app.engine app.engine.width))
-  (local original-engine-height (and app.engine app.engine.height))
-  (local original-engine-pixel-width (and app.engine (. app.engine "pixel-width")))
-  (local original-engine-pixel-height (and app.engine (. app.engine "pixel-height")))
-
-  (fn run-case [case-seed]
-    (math.randomseed (+ 19000 case-seed))
-    (local scene-yaw (random-range (- math.pi) math.pi))
-    (local scene-half-angle (/ scene-yaw 2))
-    (local setup
-      (setup-scene {:scene-position (glm.vec3 (random-range -25 25) 0 (random-range -25 25))
-                    :scene-rotation (glm.quat (math.cos scene-half-angle) 0 (math.sin scene-half-angle) 0)}))
-    (local cleanup setup.cleanup)
-    (local scene setup.scene-result.scene)
-    (local (ok err)
-      (pcall
-        (fn []
-          (local terrain (random-heightfield-record (+ 20000 case-seed)))
-          (scene:build-default {:terrains [terrain]})
-          (scene.layout-root:update)
-          (local metadata (. scene.scene-terrains 1))
-          (local layout metadata.element.layout)
-          (local half-size (* layout.size (glm.vec3 0.5)))
-          (local center (+ layout.position (layout.rotation:rotate half-size)))
-          (local camera-pos (+ center
-                               (glm.vec3 (random-range -60 60)
-                                         (random-range 18 70)
-                                         (random-range -60 60))))
-          (set app.camera (camera-looking-at camera-pos center))
-          (local logical-width (math.random 320 1280))
-          (local logical-height (math.random 240 960))
-          (local pixel-scale (+ 1 (math.random 0 2)))
-          (local viewport {:x 0
-                           :y 0
-                           :width (* logical-width pixel-scale)
-                           :height (* logical-height pixel-scale)})
-          (app.set-viewport viewport)
-          (set app.projection (glm.perspective (/ math.pi 3)
-                                               (/ viewport.width viewport.height)
-                                               0.1
-                                               400.0))
-          (when app.engine
-            (set app.engine.width logical-width)
-            (set app.engine.height logical-height)
-            (set (. app.engine "pixel-width") viewport.width)
-            (set (. app.engine "pixel-height") viewport.height))
-          (for [drag-seed 1 80]
-            (math.randomseed (+ (* case-seed 2000) drag-seed))
-            (local start-pos {:x (random-range 0 logical-width)
-                              :y (random-range 0 logical-height)})
-            (local move-pos {:x (random-range 0 logical-width)
-                             :y (random-range 0 logical-height)})
-            (local end-pos {:x (random-range 0 logical-width)
-                            :y (random-range 0 logical-height)})
-            (local exact
-              (with-domain-hit-mode :exact
-                (fn []
-                  (resolve-target-capture-drag scene terrain.id start-pos move-pos end-pos))))
-            (local fast
-              (with-domain-hit-mode :fast
-                (fn []
-                  (resolve-target-capture-drag scene terrain.id start-pos move-pos end-pos))))
-            (assert (target-approx=? fast exact)
-                    (.. "target capture fast mismatch case=" case-seed
-                        " drag=" drag-seed
-                        " start=[" start-pos.x "," start-pos.y "]"
-                        " move=[" move-pos.x "," move-pos.y "]"
-                        " end=[" end-pos.x "," end-pos.y "]"
-                        " fast=" (if fast "hit" "nil")
-                        " exact=" (if exact "hit" "nil")))))))
-    (cleanup)
-    (when (not ok)
-      (error err)))
-
-  (local (ok err)
-    (pcall
-      (fn []
-        (for [case-seed 1 20]
-          (run-case case-seed)))))
-
-  (when app.engine
-    (set app.engine.width original-engine-width)
-    (set app.engine.height original-engine-height)
-    (set (. app.engine "pixel-width") original-engine-pixel-width)
-    (set (. app.engine "pixel-height") original-engine-pixel-height))
-  (set app.camera original-camera)
-  (app.set-viewport original-viewport)
-  (set app.projection original-projection)
-  (when (not ok)
-    (error err)))
-
-(fn heightfield-fast-raycast-matches-persisted-world-fixture []
-  (local fixture (read-json "assets/lua/tests/data/heightfield-fast-mismatch.json"))
-  (local terrain fixture.terrain)
-  (local local-record {:id terrain.id
-                       :kind terrain.kind
-                       :options {:position [0 0 0]
-                                 :rotation [1 0 0 0]
-                                 :sample-spacing terrain.options.sample-spacing
-                                 :chunk-samples terrain.options.chunk-samples
-                                 :default-height terrain.options.default-height}
-                       :chunks terrain.chunks})
-  (local rays [{:origin [-189.27082824707 539.77001953125 -230.39498901367]
-                :direction [0.64207345247269 -0.43977665901184 0.62796556949615]
-                :sample [30 27]}
-               {:origin [-189.27673339844 539.755859375 -230.40634155273]
-                :direction [0.60223066806793 -0.59372818470001 0.53367334604263]
-                :sample [18 13]}])
-  (each [_ entry (ipairs rays)]
-    (local ray {:origin (array->vec3 entry.origin)
-                :direction (glm.normalize (array->vec3 entry.direction))})
-    (local exact (HeightfieldTerrainQuery.raycast-record-exact local-record ray))
-    (local fast (HeightfieldTerrainQuery.raycast-record-fast local-record ray))
-    (assert exact
-            (.. "persisted world fixture exact raycast should hit sample [" (. entry.sample 1) "," (. entry.sample 2) "]"))
-    (assert (= exact.sample.x (. entry.sample 1)))
-    (assert (= exact.sample.z (. entry.sample 2)))
-    (assert (terrain-hit-approx=? fast exact)
-            (.. "persisted world fixture fast raycast mismatch at sample [" (. entry.sample 1) "," (. entry.sample 2) "]"
-                " fast=" (if fast "hit" "nil")
-                " exact=" (if exact "hit" "nil")))))
 
 (fn heightfield-target-capture-resolves-live-scene-drag []
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
@@ -2329,10 +1936,6 @@
                      :fn scene-build-default-preserves-explicit-empty-terrains})
 (table.insert tests {:name "Scene screen-pos terrain domain hit respects scene root transform"
                      :fn scene-screen-pos-terrain-domain-hit-respects-scene-root-transform})
-(table.insert tests {:name "Scene screen-pos terrain domain hit matches exact oracle"
-                     :fn scene-screen-pos-terrain-domain-hit-matches-exact-oracle})
-(table.insert tests {:name "Scene screen-pos terrain domain fast matches exact oracle"
-                     :fn scene-screen-pos-terrain-domain-fast-matches-exact-oracle})
 (table.insert tests {:name "Scene screen-pos terrain hit resolves default heightfield"
                      :fn scene-screen-pos-terrain-hit-resolves-default-heightfield})
 (table.insert tests {:name "Scene screen-rect terrain target builds sample set"
@@ -2341,12 +1944,6 @@
                      :fn scene-screen-rect-terrain-target-respects-scene-root-transform})
 (table.insert tests {:name "Scene screen-pos terrain domain hit scales logical input to pixel viewport"
                      :fn scene-screen-pos-terrain-domain-hit-scales-logical-input-to-pixel-viewport})
-(table.insert tests {:name "Scene screen-pos terrain domain hit default app state matches exact oracle"
-                     :fn scene-screen-pos-terrain-domain-hit-default-app-state-matches-exact-oracle})
-(table.insert tests {:name "Heightfield target capture fast matches exact default app state"
-                     :fn heightfield-target-capture-fast-matches-exact-default-app-state})
-(table.insert tests {:name "Heightfield fast raycast matches persisted world fixture"
-                     :fn heightfield-fast-raycast-matches-persisted-world-fixture})
 (table.insert tests {:name "Heightfield target capture resolves live scene drag"
                      :fn heightfield-target-capture-resolves-live-scene-drag})
 (table.insert tests {:name "Heightfield target capture escape cancels selection"

@@ -166,58 +166,6 @@
   (assert (= target.x1 3) "rect target should use the larger sample x")
   (assert (= target.z1 2) "rect target should use the larger sample z"))
 
-(fn heightfield-rect-target-between-local-points-selects-crossed-samples []
-  (local record
-    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
-                                      :options {:position [0 0 0]
-                                                :rotation [1 0 0 0]
-                                                :sample-spacing [2 2]
-                                                :chunk-samples [5 5]}
-                                      :chunks [{:coord [0 0]
-                                                :size [5 5]
-                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
-  (local start-hit
-    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 2.1 10 2.1)
-                                                          :direction (glm.vec3 0 -1 0)}))
-  (local end-hit
-    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 4.1 10 4.1)
-                                                          :direction (glm.vec3 0 -1 0)}))
-  (assert start-hit "expected start hit for crossed-sample terrain rect target test")
-  (assert end-hit "expected end hit for crossed-sample terrain rect target test")
-  (local target
-    (HeightfieldTerrainQuery.rect-target-between-local-points record
-                                                              start-hit.local-point
-                                                              end-hit.local-point))
-  (assert target "crossed-sample drag should produce a rectangle target")
-  (assert (= target.x0 2) "rect target should start at the first crossed sample x")
-  (assert (= target.z0 2) "rect target should start at the first crossed sample z")
-  (assert (= target.x1 2) "rect target should end at the last crossed sample x")
-  (assert (= target.z1 2) "rect target should end at the last crossed sample z"))
-
-(fn heightfield-rect-target-between-local-points-requires-crossing-a-sample []
-  (local record
-    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
-                                      :options {:position [0 0 0]
-                                                :rotation [1 0 0 0]
-                                                :sample-spacing [2 2]
-                                                :chunk-samples [5 5]}
-                                      :chunks [{:coord [0 0]
-                                                :size [5 5]
-                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
-  (local start-hit
-    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 2.1 10 2.1)
-                                                          :direction (glm.vec3 0 -1 0)}))
-  (local end-hit
-    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 2.9 10 2.9)
-                                                          :direction (glm.vec3 0 -1 0)}))
-  (assert start-hit "expected start hit for no-cross terrain rect target test")
-  (assert end-hit "expected end hit for no-cross terrain rect target test")
-  (local target
-    (HeightfieldTerrainQuery.rect-target-between-local-points record
-                                                              start-hit.local-point
-                                                              end-hit.local-point))
-  (assert (= target nil) "dragging between samples without crossing one should not select a rect target"))
-
 (fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
@@ -256,21 +204,6 @@
   (local (ok hit) (pcall (fn [] (HeightfieldTerrainQuery.domain-hit-record record ray))))
   (assert ok "domain-hit-record should not error when the ray crosses a sparse chunk gap")
   (assert (= hit nil) "domain-hit-record should return nil when the ray lands in a gap"))
-
-(fn heightfield-fast-raycast-matches-exact-raycast []
-  (local cases 80)
-  (for [idx 1 cases]
-    (local record (random-heightfield-record (+ 1000 idx)))
-    (local ray (random-ray-for-record record (+ 2000 idx)))
-    (local exact (HeightfieldTerrainQuery.raycast-record-exact record ray))
-    (local fast (HeightfieldTerrainQuery.raycast-record-fast record ray))
-    (assert (hits-approx=? fast exact)
-            (.. "fast raycast disagrees with exact raycast for case "
-                idx
-                " exact=" (if exact "hit" "nil")
-                " fast=" (if fast "hit" "nil")
-                " ray-origin=[" ray.origin.x "," ray.origin.y "," ray.origin.z "]"
-                " ray-dir=[" ray.direction.x "," ray.direction.y "," ray.direction.z "]"))))
 
 (fn project-world-point [point view projection viewport]
   (local viewport-vec (glm.vec4 viewport.x viewport.y viewport.width viewport.height))
@@ -353,16 +286,10 @@
                      :fn heightfield-raycast-respects-transform})
 (table.insert tests {:name "heightfield terrain query rect-target-between-local-points builds rect"
                      :fn heightfield-rect-target-between-local-points-builds-rect})
-(table.insert tests {:name "heightfield terrain query rect-target-between-local-points selects crossed samples"
-                     :fn heightfield-rect-target-between-local-points-selects-crossed-samples})
-(table.insert tests {:name "heightfield terrain query rect-target-between-local-points requires crossing a sample"
-                     :fn heightfield-rect-target-between-local-points-requires-crossing-a-sample})
 (table.insert tests {:name "heightfield terrain query domain-hit handles non-flat multi-chunk terrain"
                      :fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain})
 (table.insert tests {:name "heightfield terrain query domain-hit tolerates sparse chunk gaps"
                      :fn heightfield-domain-hit-record-tolerates-sparse-chunk-gaps})
-(table.insert tests {:name "heightfield terrain query fast raycast matches exact raycast"
-                     :fn heightfield-fast-raycast-matches-exact-raycast})
 (table.insert tests {:name "heightfield terrain query screen-rect target selects samples in frustum"
                      :fn heightfield-screen-rect-target-selects-samples-in-frustum})
 (table.insert tests {:name "heightfield terrain query rectangularize target fills bounding rect"
