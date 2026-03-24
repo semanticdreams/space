@@ -1,3 +1,5 @@
+(local TerrainQuery (require :terrain-query))
+
 (fn HeightfieldTargetCapture [opts]
   (local options (or opts {}))
   (local scene (assert (or options.scene app.scene)
@@ -10,8 +12,6 @@
   (local on-invalid-target (or options.on-invalid-target (fn [] nil)))
   (local on-active-changed (or options.on-active-changed (fn [_active?] nil)))
   (var active? false)
-  (var start-pos nil)
-  (var last-valid-pos nil)
   (var start-hit nil)
   (var last-valid-hit nil)
   (var drag-active? false)
@@ -23,53 +23,70 @@
         hit
         nil))
 
+  (fn reset-drag-state []
+    (set start-hit nil)
+    (set last-valid-hit nil)
+    (set drag-active? false)
+    (set pending-start? false))
+
+  (fn target-result-between-hits [accepted-start-hit accepted-end-hit]
+    (if (and accepted-start-hit
+             accepted-end-hit
+             (= accepted-start-hit.terrain-id terrain-id)
+             (= accepted-end-hit.terrain-id terrain-id)
+             (= accepted-start-hit.terrain-id accepted-end-hit.terrain-id)
+             (= accepted-start-hit.terrain-kind accepted-end-hit.terrain-kind))
+        (do
+          (local query-record (or accepted-start-hit.query-record
+                                  accepted-start-hit.terrain-record))
+          (local target
+            (and query-record
+                 (TerrainQuery.target-between-hits query-record
+                                                   accepted-start-hit
+                                                   accepted-end-hit)))
+          (and target
+               {:terrain-record accepted-start-hit.terrain-record
+                :terrain-id accepted-start-hit.terrain-id
+                :terrain-kind accepted-start-hit.terrain-kind
+                :start-hit accepted-start-hit
+                :end-hit accepted-end-hit
+                :target target}))
+        nil))
+
   (fn update-last-valid-hit! [pos]
     (local hit (terrain-hit pos))
     (when hit
-      (set last-valid-hit hit)
-      (set last-valid-pos pos))
+      (set last-valid-hit hit))
     hit)
 
   (fn emit-preview-target! []
-    (when (and start-pos last-valid-pos)
-      (local result (scene:screen-drag-terrain-target start-pos last-valid-pos ray-opts))
-      (when (and result (= result.terrain-id terrain-id))
+    (when (and start-hit last-valid-hit)
+      (local result (target-result-between-hits start-hit last-valid-hit))
+      (when result
         (on-preview-target result.target result))))
 
   (fn resolve-target! [end-pos]
     (local end-hit (terrain-hit end-pos))
-    (local resolved-end-pos (if end-hit end-pos last-valid-pos))
+    (local resolved-end-hit (or end-hit last-valid-hit))
     (local result
-      (and start-pos
-           resolved-end-pos
-           (scene:screen-drag-terrain-target start-pos resolved-end-pos ray-opts)))
-    (if (and result (= result.terrain-id terrain-id))
+      (and start-hit
+           resolved-end-hit
+           (target-result-between-hits start-hit resolved-end-hit)))
+    (if result
         (on-target result.target result)
         (on-invalid-target))
-    (set start-pos nil)
-    (set last-valid-pos nil)
-    (set start-hit nil)
-    (set last-valid-hit nil)
-    (set drag-active? false)
-    (set pending-start? false)
+    (reset-drag-state)
     (set active? false)
     (on-active-changed false))
 
   (fn finish []
     (when active?
       (set active? false)
-      (set start-pos nil)
-      (set last-valid-pos nil)
-      (set start-hit nil)
-      (set last-valid-hit nil)
-      (set drag-active? false)
-      (set pending-start? false)
+      (reset-drag-state)
       (on-active-changed false)))
 
   (fn begin-drag [pos]
     (local hit (terrain-hit pos))
-    (set start-pos (and hit pos))
-    (set last-valid-pos (and hit pos))
     (set start-hit hit)
     (set last-valid-hit hit)
     (set drag-active? (not (not hit)))
@@ -83,8 +100,6 @@
         (do
           (local hit (terrain-hit pos))
           (when hit
-            (set start-pos pos)
-            (set last-valid-pos pos)
             (set start-hit hit)
             (set last-valid-hit hit)
             (set drag-active? true)
@@ -98,13 +113,7 @@
   (fn end-drag [pos]
     (if drag-active?
         (resolve-target! pos)
-        (do
-          (set start-pos nil)
-          (set last-valid-pos nil)
-          (set start-hit nil)
-          (set last-valid-hit nil)
-          (set drag-active? false)
-          (set pending-start? false)))
+        (reset-drag-state))
     true)
 
   {:active? (fn [_self] active?)
@@ -118,11 +127,7 @@
    :finish (fn [_self]
              (finish))
    :cancel-selection (fn [_self]
-                       (set start-pos nil)
-                       (set last-valid-pos nil)
-                       (set start-hit nil)
-                       (set last-valid-hit nil)
-                       (set drag-active? false)
+                       (reset-drag-state)
                        (finish))
    :begin-drag (fn [_self pos]
                  (begin-drag pos))

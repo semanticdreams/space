@@ -1137,10 +1137,15 @@
                                      :terrain-id "terrain-a"
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
+        (local start-hit
+          (scene:screen-pos-terrain-domain-hit {:x 40 :y 50}))
+        (local end-hit
+          (scene:screen-pos-terrain-domain-hit {:x 60 :y 50}))
         (local expected
-          (scene:screen-drag-terrain-target {:x 40 :y 50}
-                                            {:x 60 :y 50}
-                                            nil))
+          (and start-hit end-hit
+               (TerrainQuery.target-between-hits start-hit.query-record
+                                                 start-hit
+                                                 end-hit)))
         (capture:begin)
         (capture:begin-drag {:x 95 :y 5})
         (capture:update-drag {:x 40 :y 50})
@@ -1148,11 +1153,11 @@
         (assert resolved-target
                 "target capture should recover when mouse-down misses but the first drag hit lands on terrain")
         (assert expected
-                "scene drag target should resolve the promoted live drag fixture")
-        (assert (= resolved-target.x0 expected.target.x0))
-        (assert (= resolved-target.z0 expected.target.z0))
-        (assert (= resolved-target.x1 expected.target.x1))
-        (assert (= resolved-target.z1 expected.target.z1))
+                "promoted-start fixture should derive an expected terrain target from accepted hits")
+        (assert (= resolved-target.x0 expected.x0))
+        (assert (= resolved-target.z0 expected.z0))
+        (assert (= resolved-target.x1 expected.x1))
+        (assert (= resolved-target.z1 expected.z1))
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -1307,16 +1312,25 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
         (var resolved-target nil)
+        (local start-hit
+          (scene:screen-pos-terrain-domain-hit {:x 40 :y 50}))
+        (local end-hit
+          (scene:screen-pos-terrain-domain-hit {:x 60 :y 50}))
+        (local expected
+          (and start-hit end-hit
+               (TerrainQuery.target-between-hits start-hit.query-record
+                                                 start-hit
+                                                 end-hit)))
+        (local original-screen-drag-terrain-target scene.screen-drag-terrain-target)
         (local capture
           (HeightfieldTargetCapture {:scene scene
                                      :ctx scene.build-context
                                      :terrain-id "terrain-a"
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
-        (local expected
-          (scene:screen-drag-terrain-target {:x 40 :y 50}
-                                            {:x 60 :y 50}
-                                            nil))
+        (set scene.screen-drag-terrain-target
+             (fn [_self _start-pos _end-pos _opts]
+               (error "target capture should derive terrain targets from accepted hits")))
         (capture:begin)
         (capture:begin-drag {:x 40 :y 50})
         (capture:update-drag {:x 60 :y 50})
@@ -1324,11 +1338,12 @@
         (assert resolved-target
                 "default scene ray options should be enough for live terrain picking")
         (assert expected
-                "default scene drag target should resolve the live terrain picking fixture")
-        (assert (= resolved-target.x0 expected.target.x0))
-        (assert (= resolved-target.z0 expected.target.z0))
-        (assert (= resolved-target.x1 expected.target.x1))
-        (assert (= resolved-target.z1 expected.target.z1))
+                "default-ray-opts fixture should derive an expected terrain target from accepted hits")
+        (assert (= resolved-target.x0 expected.x0))
+        (assert (= resolved-target.z0 expected.z0))
+        (assert (= resolved-target.x1 expected.x1))
+        (assert (= resolved-target.z1 expected.z1))
+        (set scene.screen-drag-terrain-target original-screen-drag-terrain-target)
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)

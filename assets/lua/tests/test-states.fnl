@@ -483,6 +483,71 @@
   (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
   (set app.states original-states))
 
+(fn terrain-rect-pick-manager-cleans-up-dropped-session []
+  (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set app.states states)
+  (set app.hud {:build-context {}
+                :world-units-per-pixel 1})
+  (states.set-state :normal)
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-drag (fn [_self _payload] true)
+     :drag-active? (fn [_self] active?)
+     :update-drag (fn [_self _payload] true)
+     :end-drag (fn [_self _payload]
+                 (set active? false)
+                 true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainRectPickManager.begin session)
+  (assert (= (states.active-name) :terrain-rect-pick))
+  (assert (= (TerrainRectPickManager.active-session) session))
+  (assert (TerrainRectPickManager.cleanup-session session)
+          "cleanup-session should clear an owned terrain rect pick session")
+  (assert (= (TerrainRectPickManager.active-session) nil))
+  (assert (= (states.active-name) :normal)
+          "cleanup-session should restore the previous app state")
+  (set app.hud original-hud)
+  (set app.states original-states))
+
+(fn terrain-paint-manager-cleans-up-dropped-session []
+  (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
+  (reset-engine-events)
+  (local original-states app.states)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-paint (TerrainPaintState))
+  (set app.states states)
+  (states.set-state :normal)
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-stroke (fn [_self _payload] true)
+     :update-stroke (fn [_self _payload] true)
+     :end-stroke (fn [_self _payload]
+                   (set active? false)
+                   true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainPaintManager.begin session)
+  (assert (= (states.active-name) :terrain-paint))
+  (assert (= (TerrainPaintManager.active-session) session))
+  (assert (TerrainPaintManager.cleanup-session session)
+          "cleanup-session should clear an owned terrain paint session")
+  (assert (= (TerrainPaintManager.active-session) nil))
+  (assert (= (states.active-name) :normal)
+          "cleanup-session should restore the previous app state")
+  (set app.states original-states))
+
 (fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state []
   (reset-engine-events)
   (local original-states app.states)
@@ -642,6 +707,10 @@
                      :fn terrain-paint-state-routes-and-restores})
 (table.insert tests {:name "Terrain paint state coalesces motion until update"
                      :fn terrain-paint-state-coalesces-motion-until-update})
+(table.insert tests {:name "Terrain rect pick manager cleans up dropped session"
+                     :fn terrain-rect-pick-manager-cleans-up-dropped-session})
+(table.insert tests {:name "Terrain paint manager cleans up dropped session"
+                     :fn terrain-paint-manager-cleans-up-dropped-session})
 (table.insert tests {:name "State switch during mouse up does not deliver same event to new state"
                      :fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state})
 (table.insert tests {:name "Normal state directional focus triggers" :fn normal-state-directional-focus-triggers})

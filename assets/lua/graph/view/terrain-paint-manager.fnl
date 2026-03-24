@@ -8,6 +8,10 @@
   (when (and app.states app.states.set-state)
     (app.states.set-state previous)))
 
+(fn clear-previous-state []
+  (set app.terrain-paint-previous-state nil)
+  nil)
+
 (fn clear-active-session []
   (set app.terrain-paint-session nil)
   nil)
@@ -26,9 +30,21 @@
               (= (current-state-name) :terrain-paint))
           (do
             (clear-active-session)
-            (restore-previous-state)
+            (if (= (current-state-name) :terrain-paint)
+                (restore-previous-state)
+                (clear-previous-state))
             true)
           false)))
+
+(fn cleanup-session [session]
+  (if (= app.terrain-paint-session session)
+      (do
+        (clear-active-session)
+        (if (= (current-state-name) :terrain-paint)
+            (restore-previous-state)
+            (clear-previous-state))
+        true)
+      false))
 
 (fn cancel-active-session []
   (local session (active-session))
@@ -56,4 +72,5 @@
 {:begin begin
  :active-session active-session
  :cleanup-inactive-session cleanup-inactive-session
+ :cleanup-session cleanup-session
  :cancel-active-session cancel-active-session}

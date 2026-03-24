@@ -27,8 +27,7 @@
 
   (fn drop-paint-capture []
     (when paint-capture
-      (when (= (TerrainPaintManager.active-session) paint-capture)
-        (TerrainPaintManager.cancel-active-session))
+      (TerrainPaintManager.cleanup-session paint-capture)
       (paint-capture:drop)
       (set paint-capture nil)))
 
@@ -115,8 +114,7 @@
                         world-changed-handler)
                (target.world-manager.changed:disconnect world-changed-handler true)
                (set world-changed-handler nil))
-             (when paint-capture
-               (paint-capture:drop))
+             (drop-paint-capture)
              (row:drop))})
 
 (fn HeightfieldAdjustToolNodeView [node opts]

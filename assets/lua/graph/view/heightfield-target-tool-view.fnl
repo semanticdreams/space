@@ -86,8 +86,7 @@
 
     (fn drop-target-capture []
       (when target-capture
-        (when (= (TerrainRectPickManager.active-session) target-capture)
-          (TerrainRectPickManager.cancel-active-session))
+        (TerrainRectPickManager.cleanup-session target-capture)
         (target-capture:drop)
         (set target-capture nil)))
 
@@ -217,8 +216,7 @@
                         world-changed-handler)
                (target.world-manager.changed:disconnect world-changed-handler true)
                (set world-changed-handler nil))
-             (when target-capture
-               (target-capture:drop))
+             (drop-target-capture)
              (root-entity:drop))})
   build)
 
