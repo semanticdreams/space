@@ -2168,6 +2168,70 @@
           "Restored graph node size should be kept within vec3 safety threshold")
   true)
 
+(fn scene-restore-state-skips-legacy-panel-without-restorer []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph app.graph)
+  (set app.graph nil)
+  (local graph (Graph {:with-start false}))
+  (scene:set-graph graph)
+  (local node (Graph.GraphNode {:key "legacy-skip-node"
+                                :label "legacy skip target"}))
+  (graph:add-node node {})
+  (local initial-count (length (or scene.entity.children [])))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels [{:kind "physics-ball"
+                                        :position [1 2 3]
+                                        :rotation [1 0 0 0]
+                                        :size [4 4 4]}
+                                       {:kind "graph-node-cube"
+                                        :node-key "legacy-skip-node"
+                                        :label "legacy skip target"
+                                        :position [4 5 6]
+                                        :rotation [1 0 0 0]
+                                        :size [4 4 4]}]}))))
+  (local final-count (length (or scene.entity.children [])))
+  (local restored-metadata (. (or scene.entity.children []) final-count))
+  (set app.graph original-graph)
+  (graph:drop)
+  (cleanup)
+  (assert ok
+          (.. "Expected scene restore to skip legacy panels without failing, got: "
+              (tostring err)))
+  (assert (= final-count (+ initial-count 1))
+          "Scene restore should skip legacy panels without restorers and continue restoring valid ones")
+  (assert (= (and restored-metadata restored-metadata.persistence restored-metadata.persistence.kind)
+             "graph-node-cube")
+          "Scene restore should still restore valid panels after skipping legacy ones")
+  true)
+
+(fn scene-restore-state-does-not-hide-registered-restorer-failures []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local owner {})
+  (local kind "broken-restorer-panel")
+  (scene:register-panel-restorer
+    kind
+    (fn [_panel]
+      (error "expected registered restorer failure"))
+    owner)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels [{:kind kind}]}))))
+  (scene:unregister-panel-restorer kind owner)
+  (cleanup)
+  (assert (not ok)
+          "Scene restore should still fail when a registered restorer throws")
+  (assert (and err (string.find (tostring err) "expected registered restorer failure" 1 true))
+          "Scene restore should surface the original registered restorer failure")
+  true)
+
 (table.insert tests {:name "Demo browser appends dialogs and movables" :fn demo-browser-adds-dialogs-to-scene})
 (table.insert tests {:name "Closing demo dialog removes it from the scene" :fn closing-demo-dialog-removes-positioned-child})
 (table.insert tests {:name "Demo browser capture/restore roundtrip" :fn demo-browser-capture-and-restore-roundtrip})
@@ -2237,6 +2301,10 @@
                      :fn scene-restore-graph-node-cube-sanitizes-poisoned-position})
 (table.insert tests {:name "Scene restore graph node cube sanitizes poisoned size"
                      :fn scene-restore-graph-node-cube-sanitizes-poisoned-size})
+(table.insert tests {:name "Scene restore skips legacy panel without restorer"
+                     :fn scene-restore-state-skips-legacy-panel-without-restorer})
+(table.insert tests {:name "Scene restore does not hide registered restorer failures"
+                     :fn scene-restore-state-does-not-hide-registered-restorer-failures})
 
 (local main
   (fn []

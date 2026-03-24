@@ -1188,34 +1188,53 @@
     {:panels panels
      :terrains terrains})
 
-  (fn resolve-panel-restorer [self panel]
+  (fn resolve-panel-restorer-strategy [self panel]
     (local kind panel.kind)
     (local registered-record (. self.panel-restorers kind))
     (local registered (and registered-record registered-record.restore))
     (if registered
-        registered
+        {:missing? false
+         :restore registered}
         (do
           (local module-name panel.restorer-module)
-          (assert (= (type module-name) :string)
-                  (.. "Scene.restore-state panel kind "
-                      kind
-                      " requires string :restorer-module or registered restorer"))
-          (local (ok module-or-error) (pcall require module-name))
-          (assert ok
-                  (.. "Scene.restore-state failed requiring panel restorer module "
-                      module-name
-                      ": "
-                      (tostring module-or-error)))
-          (local module module-or-error)
-          (local restore (and module module.restore))
-          (assert (= (type restore) :function)
-                  (.. "Scene.restore-state module "
-                      module-name
-                      " must export function :restore"))
-          (fn [payload]
-            (restore {:scene self
-                      :target self
-                      :panel payload})))))
+          (if (not (= (type module-name) :string))
+              {:missing? true
+               :message (.. "Scene.restore-state panel kind "
+                            kind
+                            " requires string :restorer-module or registered restorer")}
+              (do
+                (local (ok module-or-error) (pcall require module-name))
+                (assert ok
+                        (.. "Scene.restore-state failed requiring panel restorer module "
+                            module-name
+                            ": "
+                            (tostring module-or-error)))
+                (local module module-or-error)
+                (local restore (and module module.restore))
+                (assert (= (type restore) :function)
+                        (.. "Scene.restore-state module "
+                            module-name
+                            " must export function :restore"))
+                {:missing? false
+                 :restore (fn [payload]
+                            (restore {:scene self
+                                      :target self
+                                      :panel payload}))})))))
+
+  (fn restore-panel-with-fallback [self panel panel-idx]
+    (local kind panel.kind)
+    (local strategy (resolve-panel-restorer-strategy self panel))
+    (if strategy.missing?
+        (do
+          (logging.warn (string.format
+                          "[scene] skipping restored panel at index %d (kind=%s): %s"
+                          panel-idx
+                          (tostring kind)
+                          (tostring strategy.message)))
+          false)
+        (do
+          (strategy.restore panel)
+          true)))
 
   (fn restore-state [self state]
     (local payload (or state {}))
@@ -1258,8 +1277,7 @@
           (self:add-demo-browser {:position restored-position
                                   :rotation (array->quat panel.rotation)})
           (do
-            (local restorer (resolve-panel-restorer self panel))
-            (restorer panel))))
+            (restore-panel-with-fallback self panel panel-idx))))
     true)
 
 (set self.unregister-entity unregister-entity)
