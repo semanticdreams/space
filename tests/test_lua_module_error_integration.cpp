@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #if !defined(_WIN32)
 #include <sys/wait.h>
@@ -24,6 +25,32 @@ bool set_env_var(const std::string& key, const std::string& value)
 
 std::string shell_quote(const std::string& value)
 {
+#if defined(_WIN32)
+    std::string quoted = "\"";
+    size_t backslash_count = 0;
+    for (char c : value) {
+        if (c == '\\') {
+            backslash_count++;
+            continue;
+        }
+        if (c == '"') {
+            quoted.append(backslash_count * 2 + 1, '\\');
+            quoted.push_back('"');
+            backslash_count = 0;
+            continue;
+        }
+        if (backslash_count > 0) {
+            quoted.append(backslash_count, '\\');
+            backslash_count = 0;
+        }
+        quoted.push_back(c);
+    }
+    if (backslash_count > 0) {
+        quoted.append(backslash_count * 2, '\\');
+    }
+    quoted.push_back('"');
+    return quoted;
+#else
     std::string quoted = "'";
     for (char c : value) {
         if (c == '\'') {
@@ -34,6 +61,7 @@ std::string shell_quote(const std::string& value)
     }
     quoted.push_back('\'');
     return quoted;
+#endif
 }
 
 bool run_command_capture(const std::string& command, std::string& output, int& exit_code)
@@ -74,6 +102,15 @@ bool run_command_capture(const std::string& command, std::string& output, int& e
     return true;
 }
 
+std::string build_command(const fs::path& executable, const std::vector<std::string>& args)
+{
+    std::string command = shell_quote(executable.string());
+    for (const std::string& arg : args) {
+        command += " " + shell_quote(arg);
+    }
+    return command;
+}
+
 bool check(bool condition, const std::string& message)
 {
     if (!condition) {
@@ -88,6 +125,14 @@ bool check(bool condition, const std::string& message)
 int main()
 {
     const fs::path assets_dir = fs::current_path().parent_path() / "assets";
+    const fs::path fennel_file_error = assets_dir / "lua" / "tests" / "file-error.fnl";
+    const fs::path lua_file_error = assets_dir / "lua" / "tests" / "lua-file-error.lua";
+#if defined(_WIN32)
+    const fs::path executable = fs::current_path() / "space.exe";
+#else
+    const fs::path executable = fs::current_path() / "space";
+#endif
+
     if (!set_env_var("SPACE_ASSETS_PATH", assets_dir.string())) {
         std::cerr << "FAIL: failed to set SPACE_ASSETS_PATH\n";
         return 1;
@@ -97,20 +142,56 @@ int main()
         return 1;
     }
 
-    std::string output;
-    int exit_code = 0;
-    const std::string command = "./space -m tests.module-error";
-    if (!check(run_command_capture(command, output, exit_code), "run module error command")) {
-        return 1;
-    }
-    if (!check(exit_code != 0, "module error command should fail")) {
-        std::cerr << output << "\n";
-        return 1;
-    }
-    if (!check(output.find("tests.module-error startup failure") != std::string::npos,
-               "module error should be reported")) {
-        std::cerr << output << "\n";
-        return 1;
+    struct FailureCase {
+        std::string name;
+        std::vector<std::string> args;
+        std::string expected_error;
+    };
+
+    const std::vector<FailureCase> cases = {
+        {
+            "module startup",
+            {"-m", "tests.module-error"},
+            "tests.module-error startup failure",
+        },
+        {
+            "module function",
+            {"-m", "tests.module-function-error:explode"},
+            "tests.module-function-error function failure",
+        },
+        {
+            "command",
+            {"-c", "(error \"tests.command-error failure\")"},
+            "tests.command-error failure",
+        },
+        {
+            "fennel file",
+            {fennel_file_error.string()},
+            "tests.file-error file failure",
+        },
+        {
+            "lua file",
+            {lua_file_error.string()},
+            "tests.lua-file-error file failure",
+        },
+    };
+
+    for (const FailureCase& failure_case : cases) {
+        std::string output;
+        int exit_code = 0;
+        if (!check(run_command_capture(build_command(executable, failure_case.args), output, exit_code),
+                   "run " + failure_case.name + " command")) {
+            return 1;
+        }
+        if (!check(exit_code != 0, failure_case.name + " command should fail")) {
+            std::cerr << output << "\n";
+            return 1;
+        }
+        if (!check(output.find(failure_case.expected_error) != std::string::npos,
+                   failure_case.name + " error should be reported")) {
+            std::cerr << output << "\n";
+            return 1;
+        }
     }
 
     return 0;

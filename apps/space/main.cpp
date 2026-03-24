@@ -106,38 +106,6 @@ std::string sibling_path(const std::string& file_path, const std::string& siblin
     return std::filesystem::absolute(parent / sibling_name).string();
 }
 
-sol::object require_checked(sol::state& lua, const std::string& module_name)
-{
-    sol::function require = lua["require"];
-    sol::protected_function protected_require = require;
-    sol::protected_function_result result = protected_require(module_name);
-    if (!result.valid()) {
-        sol::error err = result;
-        throw sol::error(err.what());
-    }
-    return result.get<sol::object>();
-}
-
-void call_checked(const sol::function& function)
-{
-    sol::protected_function protected_function = function;
-    sol::protected_function_result result = protected_function();
-    if (!result.valid()) {
-        sol::error err = result;
-        throw sol::error(err.what());
-    }
-}
-
-void call_checked(const sol::function& function, const std::string& argument)
-{
-    sol::protected_function protected_function = function;
-    sol::protected_function_result result = protected_function(argument);
-    if (!result.valid()) {
-        sol::error err = result;
-        throw sol::error(err.what());
-    }
-}
-
 int main(int argc, char *argv[])
 {
     LOG_CONFIG.reporting_level = Debug;
@@ -340,10 +308,8 @@ int main(int argc, char *argv[])
 
     if (entry_mode == EntryMode::Command || entry_mode == EntryMode::Stdin) {
         try {
-            sol::table fennel = require_checked(lua, "fennel");
-            sol::function eval = fennel["eval"];
             std::string source = (entry_mode == EntryMode::Stdin) ? read_stdin() : entry_target;
-            call_checked(eval, source);
+            runtime.execute_fennel(source);
         }
         catch (const sol::error &e) {
             std::cerr << "Lua error: " << e.what() << "\n";
@@ -352,11 +318,9 @@ int main(int argc, char *argv[])
     } else if (entry_mode == EntryMode::File) {
         try {
             if (ends_with(entry_target, ".lua")) {
-                lua.script_file(entry_target);
+                runtime.execute_lua_file(entry_target);
             } else {
-                sol::table fennel = require_checked(lua, "fennel");
-                sol::function dofile = fennel["dofile"];
-                call_checked(dofile, entry_target);
+                runtime.execute_fennel_file(entry_target);
             }
         }
         catch (const sol::error &e) {
@@ -364,36 +328,16 @@ int main(int argc, char *argv[])
             return 1;
         }
     } else {
-        if (module_function.empty()) {
-            try {
+        try {
+            if (module_function.empty()) {
                 runtime.require_module(module_name_target);
+            } else {
+                runtime.execute_module_function(module_name_target, module_function);
             }
-            catch (const sol::error &e) {
-                std::cerr << "Lua error: " << e.what() << "\n";
-                return 1;
-            }
-        } else {
-            try {
-                sol::object module_obj = require_checked(lua, module_name_target);
-                if (!module_obj.is<sol::table>()) {
-                    std::cerr << "Lua error: module " << module_name_target
-                              << " did not return a table for :" << module_function << "\n";
-                    return 1;
-                }
-                sol::table module_table = module_obj.as<sol::table>();
-                sol::object function_obj = module_table[module_function];
-                if (!function_obj.is<sol::function>()) {
-                    std::cerr << "Lua error: module " << module_name_target
-                              << " missing function " << module_function << "\n";
-                    return 1;
-                }
-                sol::function fn = function_obj.as<sol::function>();
-                call_checked(fn);
-            }
-            catch (const sol::error &e) {
-                std::cerr << "Lua error: " << e.what() << "\n";
-                return 1;
-            }
+        }
+        catch (const sol::error &e) {
+            std::cerr << "Lua error: " << e.what() << "\n";
+            return 1;
         }
     }
 
