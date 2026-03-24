@@ -2,6 +2,9 @@
 (local PolyhedronMeshes (require :polyhedron-meshes))
 (local PolyhedronWidget (require :polyhedron-widget))
 
+;; Future improvement: subdivide panel fill geometry and spherify the new vertices
+;; onto the target radius so the ball silhouette reads rounder without changing the
+;; truncated-icosahedron panel layout or the spherical Bullet collision shape.
 (local cached-geometry (PolyhedronMeshes.truncated-icosahedron))
 
 (fn face-centroid [vertices]
