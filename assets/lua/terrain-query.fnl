@@ -20,13 +20,13 @@
       (HeightfieldTerrainQuery.domain-hit-record record ray)
       nil))
 
-(fn M.screen-hit-record [record point opts]
+(fn M.screen-rect-target [record start-pos end-pos opts]
   (local kind (and record record.kind))
   (if (= kind "heightfield-terrain")
-      (HeightfieldTerrainQuery.screen-hit-record record point opts)
+      (HeightfieldTerrainQuery.screen-rect-target record start-pos end-pos opts)
       nil))
 
 {:raycast-record M.raycast-record
  :domain-hit-record M.domain-hit-record
- :screen-hit-record M.screen-hit-record
+ :screen-rect-target M.screen-rect-target
  :target-between-hits M.target-between-hits}

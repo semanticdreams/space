@@ -24,11 +24,15 @@
              (tostring target.z1))))
 
   (fn single-sample-target [x z]
-    {:mode :rect
+    {:mode :samples
+     :shape :rect
      :x0 x
      :z0 z
      :x1 x
-     :z1 z})
+     :z1 z
+     :sample-count 1
+     :width 1
+     :length 1})
 
   (fn bresenham-targets [from-target to-target]
     (local x0 from-target.x0)

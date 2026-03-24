@@ -170,7 +170,9 @@
 
     (fn sync-visible-fields [field-keys]
       (each [_ key (ipairs field-keys)]
-        (set-field-text (. fields key) (. draft key))))
+        (local field (. fields key))
+        (when field
+          (set-field-text field (. draft key)))))
 
     (fn sync-validation-state []
       (if apply-when-valid?

@@ -3,9 +3,7 @@
 
 (local M {})
 
-(local field-specs
-  (icollect [_ spec (ipairs (TargetValidation.field-specs))]
-    spec))
+(local field-specs [])
 
 (table.insert field-specs {:key :height :label "Flat Height" :placeholder "Height"})
 
@@ -20,17 +18,7 @@
        (= (or left.height "") (or right.height ""))))
 
 (fn M.validate-field [field-key text]
-  (if (= field-key :target-mode)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-min-x)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-min-z)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-max-x)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-max-z)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :height)
+  (if (= field-key :height)
       (ValidationUtils.validate-number text "Flat height")
       (ValidationUtils.invalid "Unknown field")))
 

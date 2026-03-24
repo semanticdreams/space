@@ -1071,17 +1071,17 @@
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
                       :local-point (glm.vec3 3 0 4)}))
-               :screen-drag-terrain-target
-               (fn [_self start-pos end-pos _opts]
+               :screen-rect-terrain-target
+               (fn [_self _terrain-id start-pos end-pos _opts]
                  (if (and (< start-pos.x 20) (< end-pos.x 20))
                      {:terrain-id "terrain-a"
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
-                      :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+                      :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 1 :z1 2 :sample-count 1 :width 1 :length 1}}
                      {:terrain-id "terrain-a"
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
-                      :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
+                      :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 3 :z1 4 :sample-count 12 :width 3 :length 4}}))})
             (local runtime {:scene scene})
             (local entry (make-world-entry {:id "world-a"
                                             :runtime runtime
@@ -1154,11 +1154,15 @@
             (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
             (app.engine.events.mouse-motion.emit {:x 40 :y 60})
             (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
-            (assert (= (tool-view.fields.target-mode:get-value) "rect"))
-            (assert (= (tool-view.fields.rect-min-x:get-text) "1"))
-            (assert (= (tool-view.fields.rect-min-z:get-text) "2"))
-            (assert (= (tool-view.fields.rect-max-x:get-text) "3"))
-            (assert (= (tool-view.fields.rect-max-z:get-text) "4"))
+            (local draft (and tool-view.form (tool-view.form:get-draft)))
+            (local picked-target (and draft draft.picked-target))
+            (assert picked-target)
+            (assert (= picked-target.x0 1))
+            (assert (= picked-target.z0 2))
+            (assert (= picked-target.x1 3))
+            (assert (= picked-target.z1 4))
+            (assert-codepoints-eq (tool-view.selection-label:get-codepoints)
+                                  (TextUtils.codepoints-from-text "12 samples across [1, 2] to [3, 4]"))
             (assert (= (app.states.active-name) :normal)
                     "Hosted terrain tool pick should restore the previous state after completion")
             (views:drop-all)
@@ -1209,17 +1213,17 @@
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
                       :local-point (glm.vec3 3 0 4)}))
-               :screen-drag-terrain-target
-               (fn [_self start-pos end-pos _opts]
+               :screen-rect-terrain-target
+               (fn [_self _terrain-id start-pos end-pos _opts]
                  (if (and (< start-pos.x 20) (< end-pos.x 20))
                      {:terrain-id "terrain-a"
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
-                      :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+                      :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 1 :z1 2 :sample-count 1 :width 1 :length 1}}
                      {:terrain-id "terrain-a"
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
-                      :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
+                      :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 3 :z1 4 :sample-count 12 :width 3 :length 4}}))})
             (local runtime {:scene scene})
             (local entry (make-world-entry {:id "world-a"
                                             :runtime runtime
@@ -1295,11 +1299,15 @@
             (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
             (app.engine.events.mouse-motion.emit {:x 40 :y 60})
             (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
-            (assert (= (tool-view.fields.target-mode:get-value) "rect"))
-            (assert (= (tool-view.fields.rect-min-x:get-text) "1"))
-            (assert (= (tool-view.fields.rect-min-z:get-text) "2"))
-            (assert (= (tool-view.fields.rect-max-x:get-text) "3"))
-            (assert (= (tool-view.fields.rect-max-z:get-text) "4"))
+            (local draft (and tool-view.form (tool-view.form:get-draft)))
+            (local picked-target (and draft draft.picked-target))
+            (assert picked-target)
+            (assert (= picked-target.x0 1))
+            (assert (= picked-target.z0 2))
+            (assert (= picked-target.x1 3))
+            (assert (= picked-target.z1 4))
+            (assert-codepoints-eq (tool-view.selection-label:get-codepoints)
+                                  (TextUtils.codepoints-from-text "12 samples across [1, 2] to [3, 4]"))
             (set button.intersect original-intersect)
             (views:drop-all)
             (graph:drop)
@@ -1350,17 +1358,17 @@
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
                       :local-point (glm.vec3 3 0 4)}))
-               :screen-drag-terrain-target
-               (fn [_self start-pos end-pos _opts]
+               :screen-rect-terrain-target
+               (fn [_self _terrain-id start-pos end-pos _opts]
                  (if (and (< start-pos.x 20) (< end-pos.x 20))
                      {:terrain-id "terrain-a"
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
-                      :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+                      :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 1 :z1 2 :sample-count 1 :width 1 :length 1}}
                      {:terrain-id "terrain-a"
                       :terrain-kind "heightfield-terrain"
                       :terrain-record terrain-record
-                      :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
+                      :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 3 :z1 4 :sample-count 12 :width 3 :length 4}}))})
             (local runtime {:scene scene})
             (local entry (make-world-entry {:id "world-a"
                                             :runtime runtime
@@ -1436,11 +1444,15 @@
             (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
             (app.engine.events.mouse-motion.emit {:x 40 :y 60})
             (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
-            (assert (= (tool-view.fields.target-mode:get-value) "rect"))
-            (assert (= (tool-view.fields.rect-min-x:get-text) "1"))
-            (assert (= (tool-view.fields.rect-min-z:get-text) "2"))
-            (assert (= (tool-view.fields.rect-max-x:get-text) "3"))
-            (assert (= (tool-view.fields.rect-max-z:get-text) "4"))
+            (local draft (and tool-view.form (tool-view.form:get-draft)))
+            (local picked-target (and draft draft.picked-target))
+            (assert picked-target)
+            (assert (= picked-target.x0 1))
+            (assert (= picked-target.z0 2))
+            (assert (= picked-target.x1 3))
+            (assert (= picked-target.z1 4))
+            (assert-codepoints-eq (tool-view.selection-label:get-codepoints)
+                                  (TextUtils.codepoints-from-text "12 samples across [1, 2] to [3, 4]"))
             (set button.intersect original-intersect)
             (views:drop-all)
             (graph:drop)

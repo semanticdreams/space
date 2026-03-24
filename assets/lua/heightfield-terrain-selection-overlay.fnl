@@ -4,11 +4,21 @@
 
 (fn clone-target [target]
   (if (= (type target) :table)
-      {:mode target.mode
-       :x0 target.x0
-       :z0 target.z0
-       :x1 target.x1
-       :z1 target.z1}
+      (do
+        (local cloned {:mode target.mode
+                       :shape target.shape
+                       :x0 target.x0
+                       :z0 target.z0
+                       :x1 target.x1
+                       :z1 target.z1})
+        (when (= target.mode :samples)
+          (set cloned.sample-count target.sample-count))
+        (when (and (= target.mode :samples)
+                   (not (= target.shape :rect)))
+          (set cloned.samples
+               (icollect [_ sample (ipairs (or target.samples []))]
+                 {:x sample.x :z sample.z})))
+        cloned)
       nil))
 
 (fn resolve-active-theme []
@@ -108,11 +118,41 @@
             (+ point.y lift)
             (- point.z origin-offset.z)))
 
-(fn affected-cell-bounds [target]
-  {:min-cell-x (- target.x0 1)
-   :min-cell-z (- target.z0 1)
-   :max-cell-x target.x1
-   :max-cell-z target.z1})
+(fn cell-key [cell-x cell-z]
+  (.. (tostring cell-x) ":" (tostring cell-z)))
+
+(fn affected-cells [target]
+  (if (and (= target.mode :samples)
+           (not (= target.shape :rect)))
+      (do
+        (local lookup {})
+        (local ordered [])
+        (each [_ sample (ipairs (or target.samples []))]
+          (for [cell-x (- sample.x 1) sample.x]
+            (for [cell-z (- sample.z 1) sample.z]
+              (local key (cell-key cell-x cell-z))
+              (when (not (. lookup key))
+                (local cell {:x cell-x :z cell-z})
+                (set (. lookup key) cell)
+                (table.insert ordered cell)))))
+        {:mode :samples
+         :lookup lookup
+         :cells ordered})
+      {:mode :rect
+       :lookup nil
+       :min-cell-x (- target.x0 1)
+       :min-cell-z (- target.z0 1)
+       :max-cell-x target.x1
+       :max-cell-z target.z1}))
+
+(fn each-affected-cell [target f]
+  (local resolved (affected-cells target))
+  (if (= resolved.mode :samples)
+      (each [_ cell (ipairs resolved.cells)]
+        (f cell.x cell.z resolved.lookup))
+      (for [cell-x resolved.min-cell-x resolved.max-cell-x]
+        (for [cell-z resolved.min-cell-z resolved.max-cell-z]
+          (f cell-x cell-z nil)))))
 
 (fn cell-points [record chunk-map cell-x cell-z]
   (local p00 (HeightfieldTerrainGrid.sample-local-point record chunk-map cell-x cell-z))
@@ -142,9 +182,8 @@
 (fn build-fill-mesh [record chunk-map target origin-offset fill-color lift]
   (local positions [])
   (local colors [])
-  (local bounds (affected-cell-bounds target))
-  (for [cell-x bounds.min-cell-x bounds.max-cell-x]
-    (for [cell-z bounds.min-cell-z bounds.max-cell-z]
+  (each-affected-cell target
+    (fn [cell-x cell-z _lookup]
       (local points (cell-points record chunk-map cell-x cell-z))
       (when points
         (append-triangle positions colors
@@ -166,30 +205,39 @@
   (local half-thickness (/ thickness 2.0))
   (local positions [])
   (local colors [])
-  (local bounds (affected-cell-bounds target))
-  (for [cell-x bounds.min-cell-x bounds.max-cell-x]
-    (for [cell-z bounds.min-cell-z bounds.max-cell-z]
+  (local affected (affected-cells target))
+
+  (fn affected-neighbor? [cell-x cell-z]
+    (if (= affected.mode :samples)
+        (not (= (. affected.lookup (cell-key cell-x cell-z)) nil))
+        (and (>= cell-x affected.min-cell-x)
+             (<= cell-x affected.max-cell-x)
+             (>= cell-z affected.min-cell-z)
+             (<= cell-z affected.max-cell-z))))
+
+  (each-affected-cell target
+    (fn [cell-x cell-z _lookup]
       (local points (cell-points record chunk-map cell-x cell-z))
       (when points
-        (when (not (cell-present? record chunk-map cell-x (- cell-z 1)))
+        (when (not (affected-neighbor? cell-x (- cell-z 1)))
           (append-border-segment positions colors
                                  (rebase-local-point points.p00 origin-offset lift)
                                  (rebase-local-point points.p10 origin-offset lift)
                                  half-thickness
                                  border-color))
-        (when (not (cell-present? record chunk-map cell-x (+ cell-z 1)))
+        (when (not (affected-neighbor? cell-x (+ cell-z 1)))
           (append-border-segment positions colors
                                  (rebase-local-point points.p01 origin-offset lift)
                                  (rebase-local-point points.p11 origin-offset lift)
                                  half-thickness
                                  border-color))
-        (when (not (cell-present? record chunk-map (- cell-x 1) cell-z))
+        (when (not (affected-neighbor? (- cell-x 1) cell-z))
           (append-border-segment positions colors
                                  (rebase-local-point points.p00 origin-offset lift)
                                  (rebase-local-point points.p01 origin-offset lift)
                                  half-thickness
                                  border-color))
-        (when (not (cell-present? record chunk-map (+ cell-x 1) cell-z))
+        (when (not (affected-neighbor? (+ cell-x 1) cell-z))
           (append-border-segment positions colors
                                  (rebase-local-point points.p10 origin-offset lift)
                                  (rebase-local-point points.p11 origin-offset lift)

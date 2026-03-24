@@ -2273,7 +2273,7 @@
   (assert view.fields "HeightfieldFlatToolNodeView should expose fields")
   (assert view.pick-button "HeightfieldFlatToolNodeView should expose the live pick button")
   (assert (not view.pick-button.enabled?) "flat tool live pick should be disabled without an active scene")
-  (assert (= (length Validation.field-specs) 6) "flat tool validation should expose target and height fields")
+  (assert (= (length Validation.field-specs) 1) "flat tool validation should expose only the height field")
   (view:drop))
 
 (fn test-heightfield-flat-tool-node-view-reacts-to-world-activation []
@@ -2304,22 +2304,20 @@
   (var updates 0)
   (local mock-node {:terrain-id "terrain-a"
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-selection-target (fn [_self]
+                                            {:mode :samples :shape :rect :x0 1 :z0 1 :x1 2 :z1 2
+                                             :sample-count 4 :width 2 :length 2})
                     :apply-values (fn [_self _values]
                                            (set updates (+ updates 1))
                                            true)})
   (local builder (HeightfieldFlatToolNodeView mock-node))
   (local view (builder ctx))
-  (view.fields.target-mode:set-value "rect")
-  (view.fields.rect-min-x:set-text "1")
-  (view.fields.rect-min-z:set-text "1")
-  (view.fields.rect-max-x:set-text "2")
-  (view.fields.rect-max-z:set-text "2")
   (view.fields.height:set-text "2")
   (assert view.apply-button.enabled? "flat tool should enable apply when valid")
   (view.apply-button:on-click {})
   (assert (= updates 1) "flat tool should apply once")
   (assert view.apply-button.enabled? "flat tool apply should remain enabled after apply")
-  (assert (= (view.fields.target-mode:get-value) "rect") "flat tool should keep last used target mode")
+  (assert (= (text-entity-value view.selection-label) "4 samples across [1, 1] to [2, 2]"))
   (assert (= (text-entity-value view.status-label) "Applied") "flat tool should show applied status")
   (view:drop))
 
@@ -2329,22 +2327,20 @@
   (var updates 0)
   (local mock-node {:terrain-id "terrain-a"
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-selection-target (fn [_self]
+                                            {:mode :samples :shape :rect :x0 1 :z0 1 :x1 3 :z1 3
+                                             :sample-count 9 :width 3 :length 3})
                     :apply-values (fn [_self _values]
                                     (set updates (+ updates 1))
                                     true)})
   (local builder (HeightfieldPerlinToolNodeView mock-node))
   (local view (builder ctx))
-  (view.fields.target-mode:set-value "rect")
-  (view.fields.rect-min-x:set-text "1")
-  (view.fields.rect-min-z:set-text "1")
-  (view.fields.rect-max-x:set-text "3")
-  (view.fields.rect-max-z:set-text "3")
   (view.fields.seed:set-text "99")
   (assert view.apply-button.enabled? "perlin tool should enable apply when valid")
   (view.apply-button:on-click {})
   (assert (= updates 1) "perlin tool should apply once")
   (assert view.apply-button.enabled? "perlin tool apply should remain enabled after apply")
-  (assert (= (view.fields.target-mode:get-value) "rect") "perlin tool should keep last used target mode")
+  (assert (= (text-entity-value view.selection-label) "9 samples across [1, 1] to [3, 3]"))
   (assert (= (view.fields.seed:get-text) "99") "perlin tool should keep last used params")
   (assert (= (text-entity-value view.status-label) "Applied") "perlin tool should show applied status")
   (view:drop))
@@ -2385,17 +2381,17 @@
             :terrain-kind "heightfield-terrain"
             :terrain-record terrain-record
             :local-point (glm.vec3 3 0 4)}))
-     :screen-drag-terrain-target
-     (fn [_self start-pos end-pos _opts]
+     :screen-rect-terrain-target
+     (fn [_self _terrain-id start-pos end-pos _opts]
        (if (and (< start-pos.x 20) (< end-pos.x 20))
            {:terrain-id "terrain-a"
             :terrain-kind "heightfield-terrain"
             :terrain-record terrain-record
-            :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+            :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 1 :z1 2 :sample-count 1 :width 1 :length 1}}
            {:terrain-id "terrain-a"
             :terrain-kind "heightfield-terrain"
             :terrain-record terrain-record
-            :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
+            :target {:mode :samples :shape :rect :x0 1 :z0 2 :x1 3 :z1 4 :sample-count 12 :width 3 :length 4}}))})
   (local mock-node
     {:terrain-id "terrain-a"
      :world-id "world-a"
@@ -2428,16 +2424,14 @@
     (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
     (assert (= (app.states.active-name) :normal)
             "successful rectangle picking should restore the previous state"))
-  (assert (= (view.fields.target-mode:get-value) "rect")
-          "successful pick should switch the perlin tool target mode to rect")
-  (assert (= (view.fields.rect-min-x:get-text) "1")
-          "successful pick should write rect min x back into the form")
-  (assert (= (view.fields.rect-min-z:get-text) "2")
-          "successful pick should write rect min z back into the form")
-  (assert (= (view.fields.rect-max-x:get-text) "3")
-          "successful pick should write rect max x back into the form")
-  (assert (= (view.fields.rect-max-z:get-text) "4")
-          "successful pick should write rect max z back into the form")
+  (local draft (and view.form (view.form:get-draft)))
+  (local picked-target (and draft draft.picked-target))
+  (assert picked-target "successful pick should store the picked target in the form")
+  (assert (= picked-target.x0 1))
+  (assert (= picked-target.z0 2))
+  (assert (= picked-target.x1 3))
+  (assert (= picked-target.z1 4))
+  (assert (= (text-entity-value view.selection-label) "12 samples across [1, 2] to [3, 4]"))
   (set app.terrain-rect-pick-session original-terrain-rect-pick-session)
   (set app.states original-states)
   (set app.hud original-hud)
@@ -2450,71 +2444,47 @@
   (local mock-node {:terrain-id "terrain-a"
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
                     :get-selection-target (fn [_self]
-                                            {:mode :rect
+                                            {:mode :samples
+                                             :shape :rect
                                              :x0 2
                                              :z0 3
                                              :x1 5
-                                             :z1 7})
+                                             :z1 7
+                                             :sample-count 20
+                                             :width 4
+                                             :length 5})
                     :apply-values (fn [_self _values] true)})
   (local builder (HeightfieldPerlinToolNodeView mock-node))
   (local view (builder ctx))
-  (assert (= (view.fields.target-mode:get-value) "rect"))
-  (assert (= (view.fields.rect-min-x:get-text) "2"))
-  (assert (= (view.fields.rect-min-z:get-text) "3"))
-  (assert (= (view.fields.rect-max-x:get-text) "5"))
-  (assert (= (view.fields.rect-max-z:get-text) "7"))
+  (assert (= (text-entity-value view.selection-label) "20 samples across [2, 3] to [5, 7]"))
   (view:drop))
 
-(fn test-heightfield-perlin-tool-typed-rect-syncs-live-selection []
+(fn test-heightfield-perlin-tool-initial-draft-preserves-selection-target []
   (local HeightfieldPerlinToolNodeView (require :graph/view/views/heightfield-perlin-tool))
   (local ctx (make-build-ctx))
-  (var last-selection-target nil)
-  (var last-preview-target nil)
-  (var clear-preview-count 0)
   (local mock-node {:terrain-id "terrain-a"
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
                     :get-selection-target (fn [_self]
-                                            {:mode :rect
+                                            {:mode :samples
+                                             :shape :rect
                                              :x0 7
                                              :z0 8
                                              :x1 9
-                                             :z1 10})
-                    :set-selection-target (fn [_self target]
-                                            (set last-selection-target target)
-                                            true)
-                    :set-preview-target (fn [_self target]
-                                          (set last-preview-target target)
-                                          true)
-                    :clear-preview-target (fn [_self]
-                                            (set clear-preview-count (+ clear-preview-count 1))
-                                            (set last-preview-target nil)
-                                              true)
+                                             :z1 10
+                                             :sample-count 9
+                                             :width 3
+                                             :length 3})
                     :apply-values (fn [_self _values] true)})
   (local builder (HeightfieldPerlinToolNodeView mock-node))
   (local view (builder ctx))
-  (view.fields.target-mode:set-value "rect")
-  (view.fields.rect-min-x:set-text "1")
-  (view.fields.rect-min-z:set-text "2")
-  (view.fields.rect-max-x:set-text "4")
-  (view.fields.rect-max-z:set-text "6")
-  (assert last-preview-target "valid typed rect should sync live terrain preview")
-  (assert (= last-preview-target.mode :rect))
-  (assert (= last-preview-target.x0 1))
-  (assert (= last-preview-target.z0 2))
-  (assert (= last-preview-target.x1 4))
-  (assert (= last-preview-target.z1 6))
-  (view.fields.rect-max-x:set-text "")
-  (assert (= last-preview-target nil)
-          "invalid typed rect should clear live terrain preview")
-  (assert (> clear-preview-count 0)
-          "invalid typed rect should route through clear-preview-target")
-  (assert (= last-selection-target nil)
-          "invalid typed rect should not overwrite the committed terrain selection")
-  (view.fields.rect-max-x:set-text "4")
-  (assert last-preview-target
-          "restoring a valid typed rect should restore the live terrain preview")
-  (assert (> clear-preview-count 0)
-          "live preview sync should clear invalid targets at least once")
+  (local draft (and view.form (view.form:get-draft)))
+  (local picked-target (and draft draft.picked-target))
+  (assert picked-target)
+  (assert (= picked-target.x0 7))
+  (assert (= picked-target.z0 8))
+  (assert (= picked-target.x1 9))
+  (assert (= picked-target.z1 10))
+  (assert (= (text-entity-value view.selection-label) "9 samples across [7, 8] to [9, 10]"))
   (view:drop))
 
 (fn test-heightfield-resize-tool-node-view-builds []
@@ -2573,7 +2543,7 @@
   (assert view.paint-button "HeightfieldAdjustToolNodeView should expose the live paint button")
   (assert (not view.pick-button.enabled?) "adjust tool live pick should be disabled without an active scene")
   (assert (not view.paint-button.enabled?) "adjust tool live paint should be disabled without an active scene")
-  (assert (= (length Validation.field-specs) 6) "adjust tool validation should expose target and delta fields")
+  (assert (= (length Validation.field-specs) 1) "adjust tool validation should expose only the delta field")
   (view:drop))
 
 (fn test-heightfield-adjust-tool-node-view-reacts-to-world-activation []
@@ -2607,21 +2577,20 @@
   (var updates 0)
   (local mock-node {:terrain-id "terrain-a"
                     :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :get-selection-target (fn [_self]
+                                            {:mode :samples :shape :rect :x0 1 :z0 1 :x1 2 :z1 2
+                                             :sample-count 4 :width 2 :length 2})
                     :apply-values (fn [_self _values]
                                     (set updates (+ updates 1))
                                     true)})
   (local builder (HeightfieldAdjustToolNodeView mock-node))
   (local view (builder ctx))
-  (view.fields.target-mode:set-value "rect")
-  (view.fields.rect-min-x:set-text "1")
-  (view.fields.rect-min-z:set-text "1")
-  (view.fields.rect-max-x:set-text "2")
-  (view.fields.rect-max-z:set-text "2")
   (view.fields.delta:set-text "-0.5")
   (assert view.apply-button.enabled? "adjust tool should enable apply when valid")
   (view.apply-button:on-click {})
   (assert (= updates 1) "adjust tool should apply once")
   (assert view.apply-button.enabled? "adjust tool apply should remain enabled after apply")
+  (assert (= (text-entity-value view.selection-label) "4 samples across [1, 1] to [2, 2]"))
   (assert (= (view.fields.delta:get-text) "-0.5") "adjust tool should keep last used params")
   (assert (= (text-entity-value view.status-label) "Applied") "adjust tool should show applied status")
   (view:drop))
@@ -2677,8 +2646,8 @@
                      :fn test-heightfield-perlin-tool-pick-rectangle-updates-fields})
 (table.insert tests {:name "heightfield perlin tool initializes from existing selection target"
                      :fn test-heightfield-perlin-tool-initializes-from-existing-selection-target})
-(table.insert tests {:name "heightfield perlin tool typed rect syncs live selection"
-                     :fn test-heightfield-perlin-tool-typed-rect-syncs-live-selection})
+(table.insert tests {:name "heightfield perlin tool initial draft preserves selection target"
+                     :fn test-heightfield-perlin-tool-initial-draft-preserves-selection-target})
 (table.insert tests {:name "heightfield resize tool node view builds" :fn test-heightfield-resize-tool-node-view-builds})
 (table.insert tests {:name "heightfield resize tool stays applicable after apply" :fn test-heightfield-resize-tool-stays-applicable-after-apply})
 (table.insert tests {:name "heightfield adjust tool node view builds" :fn test-heightfield-adjust-tool-node-view-builds})

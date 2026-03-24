@@ -9,16 +9,19 @@
 
 
 (fn target->draft-values [target]
-  {:target-mode (if (= target.mode :whole) "whole" "rect")
-   :rect-min-x (tostring target.x0)
-   :rect-min-z (tostring target.z0)
-   :rect-max-x (tostring target.x1)
-   :rect-max-z (tostring target.z1)})
+  {:picked-target target})
 
 (fn format-target [target]
-  (.. "[" (tostring target.x0) ", " (tostring target.z0)
+  (.. (tostring (or target.sample-count (length (or target.samples []))))
+      " samples across ["
+      (tostring target.x0) ", " (tostring target.z0)
       "] to ["
       (tostring target.x1) ", " (tostring target.z1) "]"))
+
+(fn selection-summary [target]
+  (if target
+      (format-target target)
+      "No samples selected"))
 
 (fn merge-draft-with-target [draft target]
   (if target
@@ -67,8 +70,12 @@
                                                 (target:clear-preview-target)))))
                                       :info-text info-text})
        build-ctx))
+    (local selection-label
+      ((Text {:text (selection-summary draft.picked-target)
+              :color (glm.vec4 0.7 0.7 0.7 1)})
+       build-ctx))
     (local pick-status
-      ((Text {:text "Type a rectangle target or pick one from the scene."
+      ((Text {:text "Pick samples from the scene."
               :color (glm.vec4 0.7 0.7 0.7 1)})
        build-ctx))
     (var pick-button nil)
@@ -80,9 +87,12 @@
     (fn set-pick-status [text]
       (pick-status:set-text text {:mark-measure-dirty? false}))
 
+    (fn set-selection-label [next-target]
+      (selection-label:set-text (selection-summary next-target) {:mark-measure-dirty? false}))
+
     (fn update-pick-ui [active?]
       (when active?
-        (set-pick-status "Drag on the terrain in the scene to choose a rectangle.")))
+        (set-pick-status "Drag on the terrain in the scene to choose samples.")))
 
     (fn drop-target-capture []
       (when target-capture
@@ -99,17 +109,18 @@
                                                         (target:set-preview-target preview-target)))
                                  :on-target (fn [resolved-target _result]
                                               (form:set-draft-values (target->draft-values resolved-target))
+                                              (set-selection-label resolved-target)
                                               (when (and target target.clear-preview-target)
                                                 (target:clear-preview-target))
                                               (when (and target target.set-selection-target)
                                                 (target:set-selection-target resolved-target))
                                               (set-pick-status
-                                                (.. "Picked rectangle " (format-target resolved-target))))
+                                                (.. "Picked " (format-target resolved-target))))
                                  :on-invalid-target (fn []
                                                       (when (and target target.clear-preview-target)
                                                         (target:clear-preview-target))
                                                       (set-pick-status
-                                                        "Drag over this terrain to choose a rectangle."))
+                                                        "Drag over this terrain to choose samples."))
                                  :on-active-changed (fn [active?]
                                                      (when (and (not active?)
                                                                 target
@@ -137,8 +148,8 @@
         (update-pick-ui false)
         (set-pick-status
           (if live-pick-available?
-              "Type a rectangle target or pick one from the scene."
-              "Live rectangle picking requires this world to be active.")))
+              "Pick samples from the scene."
+              "Live sample picking requires this world to be active.")))
       nil)
 
     (fn toggle-live-pick []
@@ -147,10 +158,10 @@
           (if (target-capture:active?)
               (TerrainRectPickManager.cancel-active-session)
               (TerrainRectPickManager.begin target-capture))
-          (set-pick-status "Live rectangle picking requires this world to be active.")))
+          (set-pick-status "Live sample picking requires this world to be active.")))
 
     (set pick-button
-         ((Button {:text "Pick Rectangle"
+         ((Button {:text "Pick Samples"
                    :variant :ghost
                    :enabled? false
                    :on-click (fn [_button _event]
@@ -179,7 +190,8 @@
                                    :target target})))
 
     (local content-children
-      [(FlexChild (fn [_] pick-row) 0)])
+      [(FlexChild (fn [_] selection-label) 0)
+       (FlexChild (fn [_] pick-row) 0)])
     (when extra-content
       (table.insert content-children (FlexChild (fn [_] extra-content) 0)))
     (table.insert content-children (FlexChild (fn [_] form) 1))
@@ -205,6 +217,7 @@
      :error-labels form.error-labels
      :status-label form.status-label
      :apply-button form.apply-button
+     :selection-label selection-label
      :pick-button pick-button
      :pick-status pick-status
      :scroll-view root-entity

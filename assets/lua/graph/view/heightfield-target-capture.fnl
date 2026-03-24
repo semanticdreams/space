@@ -1,5 +1,3 @@
-(local TerrainQuery (require :terrain-query))
-
 (fn HeightfieldTargetCapture [opts]
   (local options (or opts {}))
   (local scene (assert (or options.scene app.scene)
@@ -12,66 +10,29 @@
   (local on-invalid-target (or options.on-invalid-target (fn [] nil)))
   (local on-active-changed (or options.on-active-changed (fn [_active?] nil)))
   (var active? false)
-  (var start-hit nil)
-  (var last-valid-hit nil)
+  (var start-pos nil)
+  (var last-pos nil)
   (var drag-active? false)
-  (var pending-start? false)
-
-  (fn terrain-hit [pos]
-    (local hit (scene:screen-pos-terrain-domain-hit pos ray-opts))
-    (if (and hit (= hit.terrain-id terrain-id))
-        hit
-        nil))
 
   (fn reset-drag-state []
-    (set start-hit nil)
-    (set last-valid-hit nil)
-    (set drag-active? false)
-    (set pending-start? false))
+    (set start-pos nil)
+    (set last-pos nil)
+    (set drag-active? false))
 
-  (fn target-result-between-hits [accepted-start-hit accepted-end-hit]
-    (if (and accepted-start-hit
-             accepted-end-hit
-             (= accepted-start-hit.terrain-id terrain-id)
-             (= accepted-end-hit.terrain-id terrain-id)
-             (= accepted-start-hit.terrain-id accepted-end-hit.terrain-id)
-             (= accepted-start-hit.terrain-kind accepted-end-hit.terrain-kind))
-        (do
-          (local query-record (or accepted-start-hit.query-record
-                                  accepted-start-hit.terrain-record))
-          (local target
-            (and query-record
-                 (TerrainQuery.target-between-hits query-record
-                                                   accepted-start-hit
-                                                   accepted-end-hit)))
-          (and target
-               {:terrain-record accepted-start-hit.terrain-record
-                :terrain-id accepted-start-hit.terrain-id
-                :terrain-kind accepted-start-hit.terrain-kind
-                :start-hit accepted-start-hit
-                :end-hit accepted-end-hit
-                :target target}))
-        nil))
-
-  (fn update-last-valid-hit! [pos]
-    (local hit (terrain-hit pos))
-    (when hit
-      (set last-valid-hit hit))
-    hit)
+  (fn target-result [end-pos]
+    (and start-pos
+         end-pos
+         (scene:screen-rect-terrain-target terrain-id start-pos end-pos ray-opts)))
 
   (fn emit-preview-target! []
-    (when (and start-hit last-valid-hit)
-      (local result (target-result-between-hits start-hit last-valid-hit))
+    (when (and start-pos last-pos)
+      (local result (target-result last-pos))
       (when result
         (on-preview-target result.target result))))
 
   (fn resolve-target! [end-pos]
-    (local end-hit (terrain-hit end-pos))
-    (local resolved-end-hit (or end-hit last-valid-hit))
-    (local result
-      (and start-hit
-           resolved-end-hit
-           (target-result-between-hits start-hit resolved-end-hit)))
+    (set last-pos end-pos)
+    (local result (target-result last-pos))
     (if result
         (on-target result.target result)
         (on-invalid-target))
@@ -86,28 +47,15 @@
       (on-active-changed false)))
 
   (fn begin-drag [pos]
-    (local hit (terrain-hit pos))
-    (set start-hit hit)
-    (set last-valid-hit hit)
-    (set drag-active? (not (not hit)))
-    (set pending-start? (not drag-active?))
-    (when drag-active?
-      (emit-preview-target!))
+    (set start-pos pos)
+    (set last-pos pos)
+    (set drag-active? true)
     drag-active?)
 
   (fn update-drag [pos]
-    (if pending-start?
-        (do
-          (local hit (terrain-hit pos))
-          (when hit
-            (set start-hit hit)
-            (set last-valid-hit hit)
-            (set drag-active? true)
-            (set pending-start? false)
-            (emit-preview-target!)))
-        (when drag-active?
-          (update-last-valid-hit! pos)
-          (emit-preview-target!)))
+    (when drag-active?
+      (set last-pos pos)
+      (emit-preview-target!))
     drag-active?)
 
   (fn end-drag [pos]

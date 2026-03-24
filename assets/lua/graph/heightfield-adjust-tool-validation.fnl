@@ -3,9 +3,7 @@
 
 (local M {})
 
-(local field-specs
-  (icollect [_ spec (ipairs (TargetValidation.field-specs))]
-    spec))
+(local field-specs [])
 
 (table.insert field-specs {:key :delta :label "Height Delta" :placeholder "Signed height delta"})
 
@@ -19,17 +17,7 @@
        (= (or left.delta "") (or right.delta ""))))
 
 (fn M.validate-field [field-key text]
-  (if (= field-key :target-mode)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-min-x)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-min-z)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-max-x)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-max-z)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :delta)
+  (if (= field-key :delta)
       (ValidationUtils.validate-number text "Height delta")
       (ValidationUtils.invalid "Unknown field")))
 

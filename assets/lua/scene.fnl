@@ -1154,6 +1154,23 @@
               :target target}))
       nil))
 
+(fn screen-rect-terrain-target [self terrain-id start-pos end-pos opts]
+  (local terrain-entry (find-terrain-entry self.scene-terrains terrain-id))
+  (if (not terrain-entry)
+      nil
+      (do
+        (local metadata terrain-entry.metadata)
+        (local record (and metadata metadata.record))
+        (local query-record (and metadata (terrain-query-record metadata)))
+        (local target
+          (and query-record
+               (TerrainQuery.screen-rect-target query-record start-pos end-pos opts)))
+        (and target
+             {:terrain-record record
+              :terrain-id (and record record.id)
+              :terrain-kind (and record record.kind)
+              :target target}))))
+
   (fn capture-state [self]
     (local panels [])
     (local terrains
@@ -1313,6 +1330,7 @@
 (set self.screen-pos-terrain-hit screen-pos-terrain-hit)
 (set self.screen-pos-terrain-domain-hit screen-pos-terrain-domain-hit)
 (set self.screen-drag-terrain-target screen-drag-terrain-target)
+(set self.screen-rect-terrain-target screen-rect-terrain-target)
 (set self.on-viewport-changed on-viewport-changed)
 (set self.capture-state capture-state)
 (set self.restore-state restore-state)

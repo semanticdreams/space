@@ -2,9 +2,7 @@
 (local TargetValidation (require :graph/heightfield-tool-target-validation))
 (local M {})
 
-(local field-specs
-  (icollect [_ spec (ipairs (TargetValidation.field-specs))]
-    spec))
+(local field-specs [])
 
 (table.insert field-specs {:key :seed :label "Seed" :placeholder "Seed"})
 (table.insert field-specs {:key :n1div :label "Noise 1 Div" :placeholder "Noise 1 div"})
@@ -47,27 +45,12 @@
     (each [_ spec (ipairs field-specs)]
       (local key spec.key)
       (when (and equal?
-                 (not (or (= key :target-mode)
-                          (= key :rect-min-x)
-                          (= key :rect-min-z)
-                          (= key :rect-max-x)
-                          (= key :rect-max-z)))
                  (not (= (or (. left key) "") (or (. right key) ""))))
         (set equal? false))))
   equal?)
 
 (fn M.validate-field [field-key text]
-  (if (= field-key :target-mode)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-min-x)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-min-z)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-max-x)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :rect-max-z)
-      (TargetValidation.validate-field field-key text)
-      (= field-key :seed)
+  (if (= field-key :seed)
       (ValidationUtils.validate-integer-range text "Seed" 0 4294967295)
       (= field-key :n1div)
       (ValidationUtils.validate-positive-number text "Noise 1 div" 0.0001)
@@ -94,17 +77,12 @@
   (var error-count 0)
   (each [_ spec (ipairs field-specs)]
     (local key spec.key)
-    (when (not (or (= key :target-mode)
-                   (= key :rect-min-x)
-                   (= key :rect-min-z)
-                   (= key :rect-max-x)
-                   (= key :rect-max-z)))
-      (local result (M.validate-field key (. draft key)))
-      (if result.ok?
-          (set (. parsed-values key) result.value)
-          (do
-            (set (. errors key) result.error)
-            (set error-count (+ error-count 1))))))
+    (local result (M.validate-field key (. draft key)))
+    (if result.ok?
+        (set (. parsed-values key) result.value)
+        (do
+          (set (. errors key) result.error)
+          (set error-count (+ error-count 1)))))
   (each [key message (pairs (or target-result.errors {}))]
     (set (. errors key) message)
     (set error-count (+ error-count 1)))
