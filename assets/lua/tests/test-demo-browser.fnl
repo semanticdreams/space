@@ -1111,7 +1111,7 @@
   (when (not ok)
     (error err)))
 
-(fn heightfield-target-capture-selects-using-screen-rect-from-initial-drag []
+(fn heightfield-target-capture-requires-both-drag-endpoints-on-terrain []
   (local camera (Camera))
   (camera:set-position (glm.vec3 2 10 2))
   (camera:look-at (glm.vec3 2 0 2))
@@ -1149,23 +1149,12 @@
                                      :terrain-id "terrain-a"
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
-        (local expected
-          (scene:screen-rect-terrain-target "terrain-a"
-                                            {:x 95 :y 5}
-                                            {:x 60 :y 50}
-                                            nil))
         (capture:begin)
         (capture:begin-drag {:x 95 :y 5})
         (capture:update-drag {:x 40 :y 50})
         (capture:end-drag {:x 60 :y 50})
-        (assert resolved-target
-                "target capture should resolve a rectangle from the full drag box even when the drag starts off terrain")
-        (assert expected
-                "screen rect terrain target should resolve the off-terrain drag fixture")
-        (assert (= resolved-target.x0 expected.target.x0))
-        (assert (= resolved-target.z0 expected.target.z0))
-        (assert (= resolved-target.x1 expected.target.x1))
-        (assert (= resolved-target.z1 expected.target.z1))
+        (assert (= resolved-target nil)
+                "target capture should not resolve a rectangle when either drag endpoint misses the terrain")
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -1173,7 +1162,7 @@
   (when (not ok)
     (error err)))
 
-(fn heightfield-target-capture-resolves-final-screen-rect []
+(fn heightfield-target-capture-uses-last-drag-position-on-release []
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -1213,25 +1202,16 @@
                                                 :viewport viewport}
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
-        (local expected
-          (scene:screen-rect-terrain-target "terrain-a"
-                                            {:x 40 :y 50}
-                                            {:x 95 :y 5}
-                                            {:view view
-                                             :projection projection
-                                             :viewport viewport}))
         (capture:begin)
         (capture:begin-drag {:x 40 :y 50})
         (capture:update-drag {:x 60 :y 50})
         (capture:end-drag {:x 95 :y 5})
         (assert resolved-target
-                "target capture should resolve the final drag rectangle directly")
-        (assert expected
-                "screen rect terrain target should resolve the final drag rectangle")
-        (assert (= resolved-target.x0 expected.target.x0))
-        (assert (= resolved-target.x1 expected.target.x1))
-        (assert (= resolved-target.z0 expected.target.z0))
-        (assert (= resolved-target.z1 expected.target.z1))
+                "target capture should commit the last dragged terrain position rather than the raw mouse-up coordinates")
+        (assert (= resolved-target.x0 1))
+        (assert (= resolved-target.x1 3))
+        (assert (= resolved-target.z0 2))
+        (assert (= resolved-target.z1 2))
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -1239,14 +1219,12 @@
   (when (not ok)
     (error err)))
 
-(fn heightfield-target-capture-does-not-use-point-hit-seam []
+(fn heightfield-target-capture-clears-preview-when-drag-leaves-terrain []
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
   (local original-viewport app.viewport)
   (local original-projection app.projection)
-  (local original-screen-pos-terrain-domain-hit scene.screen-pos-terrain-domain-hit)
-  (local original-screen-rect-terrain-target scene.screen-rect-terrain-target)
   (local (ok err)
     (pcall
       (fn []
@@ -1271,38 +1249,25 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
-        (var hit-count 0)
-        (var rect-count 0)
-        (set scene.screen-pos-terrain-domain-hit
-             (fn [self pos ray-opts]
-               (set hit-count (+ hit-count 1))
-               (original-screen-pos-terrain-domain-hit self pos ray-opts)))
-        (set scene.screen-rect-terrain-target
-             (fn [self terrain-id start-pos end-pos ray-opts]
-               (set rect-count (+ rect-count 1))
-               (original-screen-rect-terrain-target self terrain-id start-pos end-pos ray-opts)))
+        (var preview-target false)
         (local capture
           (HeightfieldTargetCapture {:scene scene
                                      :ctx scene.build-context
                                      :terrain-id "terrain-a"
                                      :ray-opts {:view view
                                                 :projection projection
-                                                :viewport viewport}}))
+                                                :viewport viewport}
+                                     :on-preview-target (fn [target _result]
+                                                          (set preview-target target))}))
         (capture:begin)
-        (capture:update-drag {:x 60 :y 50})
-        (assert (= hit-count 0)
-                "target capture should not use terrain point hits before a drag has started")
         (capture:begin-drag {:x 40 :y 50})
-        (assert (= hit-count 0)
-                "target capture should not use terrain point hits when the drag starts")
-        (assert (= rect-count 0)
-                "target capture should not resolve a terrain rect until drag motion updates it")
         (capture:update-drag {:x 60 :y 50})
-        (assert (> rect-count 0)
-                "target capture should resolve terrain rect selection during drag updates")
+        (assert preview-target
+                "target capture should emit a preview while the drag still resolves on terrain")
+        (capture:update-drag {:x 95 :y 5})
+        (assert (= preview-target nil)
+                "target capture should clear the preview as soon as the drag leaves the terrain")
         (capture:drop))))
-  (set scene.screen-pos-terrain-domain-hit original-screen-pos-terrain-domain-hit)
-  (set scene.screen-rect-terrain-target original-screen-rect-terrain-target)
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
   (cleanup)
@@ -1346,20 +1311,12 @@
                                             {:x 40 :y 50}
                                             {:x 60 :y 50}
                                             nil))
-        (local original-screen-drag-terrain-target scene.screen-drag-terrain-target)
-        (local original-screen-pos-terrain-domain-hit scene.screen-pos-terrain-domain-hit)
         (local capture
           (HeightfieldTargetCapture {:scene scene
                                      :ctx scene.build-context
                                      :terrain-id "terrain-a"
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
-        (set scene.screen-pos-terrain-domain-hit
-             (fn [_self _point _opts]
-               (error "target capture should not use terrain point hits for rectangle selection")))
-        (set scene.screen-drag-terrain-target
-             (fn [_self _start-pos _end-pos _opts]
-               (error "target capture should not use the legacy drag-hit seam")))
         (capture:begin)
         (capture:begin-drag {:x 40 :y 50})
         (capture:update-drag {:x 60 :y 50})
@@ -1372,8 +1329,6 @@
         (assert (= resolved-target.z0 expected.target.z0))
         (assert (= resolved-target.x1 expected.target.x1))
         (assert (= resolved-target.z1 expected.target.z1))
-        (set scene.screen-pos-terrain-domain-hit original-screen-pos-terrain-domain-hit)
-        (set scene.screen-drag-terrain-target original-screen-drag-terrain-target)
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -1444,6 +1399,8 @@
         (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
                                         :on-mouse-button-up (fn [_self _payload] nil)
                                         :on-mouse-motion (fn [_self _payload] nil)
+                                        :on-mouse-wheel (fn [_self _payload]
+                                                          (error "terrain rectangle pick state should swallow mouse wheel input"))
                                         :drag-active? (fn [_self] false)})
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-button-down.emit {:button 1 :x 40 :y 50})
@@ -1542,6 +1499,8 @@
         (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
                                         :on-mouse-button-up (fn [_self _payload] nil)
                                         :on-mouse-motion (fn [_self _payload] nil)
+                                        :on-mouse-wheel (fn [_self _payload]
+                                                          (error "terrain rectangle pick state should swallow mouse wheel input"))
                                         :drag-active? (fn [_self] false)})
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
@@ -1619,6 +1578,8 @@
         (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
                                         :on-mouse-button-up (fn [_self _payload] nil)
                                         :on-mouse-motion (fn [_self _payload] nil)
+                                        :on-mouse-wheel (fn [_self _payload]
+                                                          (error "terrain rectangle pick state should swallow mouse wheel input"))
                                         :drag-active? (fn [_self] false)})
         (local states (States))
         (states.add-state :normal {})
@@ -1638,6 +1599,8 @@
         (TerrainRectPickManager.begin capture)
         (assert (= (app.states.active-name) :terrain-rect-pick)
                 "terrain rectangle picking should enter an explicit app state")
+        (local active-state (app.states:active-state))
+        (active-state:on-mouse-wheel {:x 0 :y 1})
         (app.engine.events.mouse-button-down.emit {:button 1 :x 40 :y 50})
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
         (app.engine.events.mouse-button-up.emit {:button 1 :x 60 :y 50})
@@ -2388,12 +2351,12 @@
                      :fn heightfield-target-capture-resolves-live-scene-drag})
 (table.insert tests {:name "Heightfield target capture escape cancels selection"
                      :fn heightfield-target-capture-escape-cancels-selection})
-(table.insert tests {:name "Heightfield target capture selects using screen rect from initial drag"
-                     :fn heightfield-target-capture-selects-using-screen-rect-from-initial-drag})
-(table.insert tests {:name "Heightfield target capture resolves final screen rect"
-                     :fn heightfield-target-capture-resolves-final-screen-rect})
-(table.insert tests {:name "Heightfield target capture does not use point-hit seam"
-                     :fn heightfield-target-capture-does-not-use-point-hit-seam})
+(table.insert tests {:name "Heightfield target capture requires both drag endpoints on terrain"
+                     :fn heightfield-target-capture-requires-both-drag-endpoints-on-terrain})
+(table.insert tests {:name "Heightfield target capture uses last drag position on release"
+                     :fn heightfield-target-capture-uses-last-drag-position-on-release})
+(table.insert tests {:name "Heightfield target capture clears preview when drag leaves terrain"
+                     :fn heightfield-target-capture-clears-preview-when-drag-leaves-terrain})
 (table.insert tests {:name "Heightfield target capture resolves live scene drag with default ray opts"
                      :fn heightfield-target-capture-resolves-live-scene-drag-with-default-ray-opts})
 (table.insert tests {:name "Heightfield paint capture stamps live scene samples"

@@ -165,213 +165,6 @@
          :z1 z-range.max})
       nil))
 
-(fn resolve-screen-rect [start-pos end-pos]
-  (var min-x (math.min start-pos.x end-pos.x))
-  (var max-x (math.max start-pos.x end-pos.x))
-  (var min-y (math.min start-pos.y end-pos.y))
-  (var max-y (math.max start-pos.y end-pos.y))
-  (when (= min-x max-x)
-    (set min-x (- min-x 0.5))
-    (set max-x (+ max-x 0.5)))
-  (when (= min-y max-y)
-    (set min-y (- min-y 0.5))
-    (set max-y (+ max-y 0.5)))
-  {:top-left {:x min-x :y min-y}
-   :top-right {:x max-x :y min-y}
-   :bottom-right {:x max-x :y max-y}
-   :bottom-left {:x min-x :y max-y}})
-
-(fn unproject-screen-point [point depth view projection viewport]
-  (local sample-pos (viewport-utils.input-pos->viewport-pos point viewport app.engine))
-  (if (not sample-pos)
-      nil
-      (do
-        (local px (or sample-pos.x viewport.x))
-        (local py (or sample-pos.y viewport.y))
-        (local inverted-y (- (+ viewport.height viewport.y) py))
-        (local viewport-vec (viewport-utils.to-glm-vec4 viewport))
-        (glm.unproject (glm.vec3 px inverted-y depth) view projection viewport-vec))))
-
-(fn average-points [points]
-  (var total (glm.vec3 0 0 0))
-  (var count 0)
-  (each [_ point (ipairs (or points []))]
-    (when point
-      (set total (+ total point))
-      (set count (+ count 1))))
-  (if (> count 0)
-      (/ total (glm.vec3 count))
-      nil))
-
-(fn plane-from-points [a b c inside-point]
-  (local raw-normal (glm.cross (- b a) (- c a)))
-  (if (< (glm.length raw-normal) 1e-6)
-      nil
-      (do
-        (var normal (glm.normalize raw-normal))
-        (when (< (glm.dot normal (- inside-point a)) 0)
-          (set normal (* normal (glm.vec3 -1))))
-        {:point a
-         :normal normal})))
-
-(fn build-screen-rect-planes [start-pos end-pos view projection viewport]
-  (local rect (resolve-screen-rect start-pos end-pos))
-  (local near-top-left (unproject-screen-point rect.top-left 0.0 view projection viewport))
-  (local near-top-right (unproject-screen-point rect.top-right 0.0 view projection viewport))
-  (local near-bottom-right (unproject-screen-point rect.bottom-right 0.0 view projection viewport))
-  (local near-bottom-left (unproject-screen-point rect.bottom-left 0.0 view projection viewport))
-  (local far-top-left (unproject-screen-point rect.top-left 1.0 view projection viewport))
-  (local far-top-right (unproject-screen-point rect.top-right 1.0 view projection viewport))
-  (local far-bottom-right (unproject-screen-point rect.bottom-right 1.0 view projection viewport))
-  (local far-bottom-left (unproject-screen-point rect.bottom-left 1.0 view projection viewport))
-  (if (or (not near-top-left)
-          (not near-top-right)
-          (not near-bottom-right)
-          (not near-bottom-left)
-          (not far-top-left)
-          (not far-top-right)
-          (not far-bottom-right)
-          (not far-bottom-left))
-      nil
-      (do
-        (local inside-point
-          (average-points [far-top-left
-                           far-top-right
-                           far-bottom-right
-                           far-bottom-left]))
-        (local planes
-          [(plane-from-points near-top-left near-top-right near-bottom-right inside-point)
-           (plane-from-points near-top-left near-bottom-left far-bottom-left inside-point)
-           (plane-from-points near-bottom-right near-top-right far-top-right inside-point)
-           (plane-from-points near-top-right near-top-left far-top-left inside-point)
-           (plane-from-points near-bottom-left near-bottom-right far-bottom-right inside-point)])
-        (if (and (. planes 1) (. planes 2) (. planes 3) (. planes 4) (. planes 5))
-            planes
-            nil))))
-
-(fn local-plane [record plane]
-  (local rotation (resolve-rotation record))
-  (local inverse (rotation:inverse))
-  {:point (world->local record plane.point)
-   :normal (glm.normalize (inverse:rotate plane.normal))})
-
-(fn point-inside-planes? [point planes]
-  (var inside? true)
-  (each [_ plane (ipairs (or planes []))]
-    (when (< (glm.dot plane.normal (- point plane.point)) -1e-6)
-      (set inside? false)))
-  inside?)
-
-(fn chunk-local-corners [record chunk]
-  (local coord (or chunk.coord [0 0]))
-  (local chunk-x (integer-field (or (. coord 1) coord.x 0) 0))
-  (local chunk-z (integer-field (or (. coord 2) coord.y coord.z 0) 0))
-  (local size (chunk-size chunk))
-  (local width (. size 1))
-  (local depth (. size 2))
-  (local sample-counts (chunk-samples record))
-  (local stride-x (- (. sample-counts 1) 1))
-  (local stride-z (- (. sample-counts 2) 1))
-  (local sample-spacing (spacing record))
-  (local spacing-x (. sample-spacing 1))
-  (local spacing-z (. sample-spacing 2))
-  (local min-x (* chunk-x stride-x spacing-x))
-  (local min-z (* chunk-z stride-z spacing-z))
-  (local max-x (+ min-x (* (- width 1) spacing-x)))
-  (local max-z (+ min-z (* (- depth 1) spacing-z)))
-  (var min-y math.huge)
-  (var max-y (- math.huge))
-  (each [_ height (ipairs (or chunk.heights []))]
-    (set min-y (math.min min-y height))
-    (set max-y (math.max max-y height)))
-  (when (= min-y math.huge)
-    (set min-y 0.0)
-    (set max-y 0.0))
-  [(glm.vec3 min-x min-y min-z)
-   (glm.vec3 min-x min-y max-z)
-   (glm.vec3 max-x min-y min-z)
-   (glm.vec3 max-x min-y max-z)
-   (glm.vec3 min-x max-y min-z)
-   (glm.vec3 min-x max-y max-z)
-   (glm.vec3 max-x max-y min-z)
-   (glm.vec3 max-x max-y max-z)])
-
-(fn corners-intersect-planes? [corners planes]
-  (var intersects? true)
-  (each [_ plane (ipairs (or planes []))]
-    (var any-inside? false)
-    (each [_ corner (ipairs (or corners []))]
-      (when (>= (glm.dot plane.normal (- corner plane.point)) -1e-6)
-        (set any-inside? true)))
-    (when (not any-inside?)
-      (set intersects? false)))
-  intersects?)
-
-(fn collect-screen-rect-samples [record planes]
-  (local sample-counts (chunk-samples record))
-  (local stride-x (- (. sample-counts 1) 1))
-  (local stride-z (- (. sample-counts 2) 1))
-  (local seen {})
-  (var min-sample-x nil)
-  (var max-sample-x nil)
-  (var min-sample-z nil)
-  (var max-sample-z nil)
-  (var sample-count 0)
-
-  (fn mark-seen! [sample-x sample-z]
-    (local row (or (. seen sample-z) {}))
-    (when (= (. seen sample-z) nil)
-      (set (. seen sample-z) row))
-    (set (. row sample-x) true))
-
-  (fn seen? [sample-x sample-z]
-    (not (= (. (or (. seen sample-z) {}) sample-x) nil)))
-
-  (fn record-sample! [sample-x sample-z]
-    (set sample-count (+ sample-count 1))
-    (if (= min-sample-x nil)
-        (do
-          (set min-sample-x sample-x)
-          (set max-sample-x sample-x)
-          (set min-sample-z sample-z)
-          (set max-sample-z sample-z))
-        (do
-          (when (< sample-x min-sample-x)
-            (set min-sample-x sample-x))
-          (when (> sample-x max-sample-x)
-            (set max-sample-x sample-x))
-          (when (< sample-z min-sample-z)
-            (set min-sample-z sample-z))
-          (when (> sample-z max-sample-z)
-            (set max-sample-z sample-z)))))
-
-  (each [_ chunk (ipairs (or record.chunks []))]
-    (when (corners-intersect-planes? (chunk-local-corners record chunk) planes)
-      (local coord (or chunk.coord [0 0]))
-      (local chunk-x (integer-field (or (. coord 1) coord.x 0) 0))
-      (local chunk-z (integer-field (or (. coord 2) coord.y coord.z 0) 0))
-      (local base-sample-x (* chunk-x stride-x))
-      (local base-sample-z (* chunk-z stride-z))
-      (local size (chunk-size chunk))
-      (local width (. size 1))
-      (local depth (. size 2))
-      (for [sample-z 0 (- depth 1)]
-        (for [sample-x 0 (- width 1)]
-          (local global-sample-x (+ base-sample-x sample-x))
-          (local global-sample-z (+ base-sample-z sample-z))
-          (when (not (seen? global-sample-x global-sample-z))
-            (local sample-point (canonical-local-point record chunk sample-x sample-z))
-            (when (point-inside-planes? sample-point planes)
-              (mark-seen! global-sample-x global-sample-z)
-              (record-sample! global-sample-x global-sample-z)))))))
-  (if (> sample-count 0)
-      {:x0 min-sample-x
-       :z0 min-sample-z
-       :x1 max-sample-x
-       :z1 max-sample-z
-       :sample-count sample-count}
-      nil))
-
 (fn screen-rect-target [record start-pos end-pos opts]
   (local options (or opts {}))
   (local view (or options.view
@@ -388,20 +181,21 @@
           (not projection))
       nil
       (do
-        (local world-planes (build-screen-rect-planes start-pos end-pos view projection viewport))
-        (if (not world-planes)
+        (local start-ray (app.screen-pos-ray start-pos
+                                             {:view view
+                                              :projection projection
+                                              :viewport viewport}))
+        (local end-ray (app.screen-pos-ray end-pos
+                                           {:view view
+                                            :projection projection
+                                            :viewport viewport}))
+        (local start-hit (and start-ray (M.raycast-record record start-ray)))
+        (local end-hit (and end-ray (M.raycast-record record end-ray)))
+        (if (or (not start-hit) (not end-hit))
             nil
-            (do
-              (local planes [])
-              (each [_ plane (ipairs world-planes)]
-                (table.insert planes (local-plane record plane)))
-              (local selected-bounds (collect-screen-rect-samples record planes))
-              (and selected-bounds
-                   (HeightfieldTerrainData.rectangular-sample-target record
-                     {:x0 selected-bounds.x0
-                      :z0 selected-bounds.z0
-                      :x1 selected-bounds.x1
-                      :z1 selected-bounds.z1})))))))
+            (rect-target-between-local-points record
+                                              start-hit.local-point
+                                              end-hit.local-point)))))
 
 (fn maybe-update-best [record best hit]
   (if (and hit (or (not best) (< hit.distance best.distance)))
@@ -633,17 +427,10 @@
 (fn M.screen-rect-target [record start-pos end-pos opts]
   (screen-rect-target record start-pos end-pos opts))
 
-(fn M.target-between-hits [record start-hit end-hit]
-  (assert record "HeightfieldTerrainQuery.target-between-hits requires a record")
-  (assert start-hit "HeightfieldTerrainQuery.target-between-hits requires a start hit")
-  (assert end-hit "HeightfieldTerrainQuery.target-between-hits requires an end hit")
-  (rect-target-between-local-points record start-hit.local-point end-hit.local-point))
-
 {:raycast-record M.raycast-record
  :raycast-record-fast raycast-record-fast
  :domain-hit-record M.domain-hit-record
  :screen-rect-target M.screen-rect-target
- :target-between-hits M.target-between-hits
  :raycast-record-exact raycast-record-exact
  :world->local world->local
  :local->world local->world

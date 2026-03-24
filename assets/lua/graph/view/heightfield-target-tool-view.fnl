@@ -105,8 +105,11 @@
                                  :ctx build-ctx
                                  :terrain-id (and target target.terrain-id)
                                  :on-preview-target (fn [preview-target _result]
-                                                      (when (and target target.set-preview-target)
-                                                        (target:set-preview-target preview-target)))
+                                                      (if preview-target
+                                                          (when (and target target.set-preview-target)
+                                                            (target:set-preview-target preview-target))
+                                                          (when (and target target.clear-preview-target)
+                                                            (target:clear-preview-target))))
                                  :on-target (fn [resolved-target _result]
                                               (form:set-draft-values (target->draft-values resolved-target))
                                               (set-selection-label resolved-target)

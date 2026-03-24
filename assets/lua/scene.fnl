@@ -1218,28 +1218,6 @@
                  :target hit.target})))
   best)
 
-(fn screen-drag-terrain-target [self start-pos end-pos opts]
-  (local start-hit (self:screen-pos-terrain-domain-hit start-pos opts))
-  (local end-hit (self:screen-pos-terrain-domain-hit end-pos opts))
-  (if (and start-hit
-           end-hit
-           (= start-hit.terrain-id end-hit.terrain-id)
-           (= start-hit.terrain-kind end-hit.terrain-kind))
-      (do
-        (local record start-hit.terrain-record)
-        (local query-record (or start-hit.query-record record))
-        (local target
-          (and query-record
-               (TerrainQuery.target-between-hits query-record start-hit end-hit)))
-        (and target
-             {:terrain-record record
-              :terrain-id start-hit.terrain-id
-              :terrain-kind start-hit.terrain-kind
-              :start-hit start-hit
-              :end-hit end-hit
-              :target target}))
-      nil))
-
 (fn screen-rect-terrain-target [self terrain-id start-pos end-pos opts]
   (local terrain-entry (find-terrain-entry self.scene-terrains terrain-id))
   (if (not terrain-entry)
@@ -1439,7 +1417,6 @@
 (set self.raycast-terrain raycast-terrain)
 (set self.screen-pos-terrain-hit screen-pos-terrain-hit)
 (set self.screen-pos-terrain-domain-hit screen-pos-terrain-domain-hit)
-(set self.screen-drag-terrain-target screen-drag-terrain-target)
 (set self.screen-rect-terrain-target screen-rect-terrain-target)
 (set self.on-viewport-changed on-viewport-changed)
 (set self.capture-state capture-state)

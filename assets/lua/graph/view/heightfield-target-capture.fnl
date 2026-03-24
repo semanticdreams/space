@@ -27,11 +27,11 @@
   (fn emit-preview-target! []
     (when (and start-pos last-pos)
       (local result (target-result last-pos))
-      (when result
-        (on-preview-target result.target result))))
+      (if result
+          (on-preview-target result.target result)
+          (on-preview-target nil nil))))
 
-  (fn resolve-target! [end-pos]
-    (set last-pos end-pos)
+  (fn resolve-target! []
     (local result (target-result last-pos))
     (if result
         (on-target result.target result)
@@ -60,7 +60,10 @@
 
   (fn end-drag [pos]
     (if drag-active?
-        (resolve-target! pos)
+        (do
+          (when (and (not last-pos) pos)
+            (set last-pos pos))
+          (resolve-target!))
         (reset-drag-state))
     true)
 

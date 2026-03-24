@@ -137,7 +137,7 @@
   (assert (= hit.sample.x 2) "translated hit should still resolve the correct local sample x")
   (assert (= hit.sample.z 2) "translated hit should still resolve the correct local sample z"))
 
-(fn heightfield-target-between-hits-builds-rect []
+(fn heightfield-rect-target-between-local-points-builds-rect []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
                                       :options {:position [0 0 0]
@@ -155,15 +155,18 @@
                                                     :direction (glm.vec3 0 -1 0)}))
   (assert start-hit "expected start hit for terrain rect target test")
   (assert end-hit "expected end hit for terrain rect target test")
-  (local target (HeightfieldTerrainQuery.target-between-hits record start-hit end-hit))
-  (assert (= target.mode :samples) "target-between-hits should produce a sample target")
-  (assert (= target.shape :rect) "target-between-hits should use the compact rectangular sample target")
+  (local target
+    (HeightfieldTerrainQuery.rect-target-between-local-points record
+                                                              start-hit.local-point
+                                                              end-hit.local-point))
+  (assert (= target.mode :samples) "rect-target-between-local-points should produce a sample target")
+  (assert (= target.shape :rect) "rect-target-between-local-points should use the compact rectangular sample target")
   (assert (= target.x0 1) "rect target should use the smaller sample x")
   (assert (= target.z0 1) "rect target should use the smaller sample z")
   (assert (= target.x1 3) "rect target should use the larger sample x")
   (assert (= target.z1 2) "rect target should use the larger sample z"))
 
-(fn heightfield-target-between-hits-selects-crossed-samples []
+(fn heightfield-rect-target-between-local-points-selects-crossed-samples []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
                                       :options {:position [0 0 0]
@@ -181,14 +184,17 @@
                                                           :direction (glm.vec3 0 -1 0)}))
   (assert start-hit "expected start hit for crossed-sample terrain rect target test")
   (assert end-hit "expected end hit for crossed-sample terrain rect target test")
-  (local target (HeightfieldTerrainQuery.target-between-hits record start-hit end-hit))
+  (local target
+    (HeightfieldTerrainQuery.rect-target-between-local-points record
+                                                              start-hit.local-point
+                                                              end-hit.local-point))
   (assert target "crossed-sample drag should produce a rectangle target")
   (assert (= target.x0 2) "rect target should start at the first crossed sample x")
   (assert (= target.z0 2) "rect target should start at the first crossed sample z")
   (assert (= target.x1 2) "rect target should end at the last crossed sample x")
   (assert (= target.z1 2) "rect target should end at the last crossed sample z"))
 
-(fn heightfield-target-between-hits-requires-crossing-a-sample []
+(fn heightfield-rect-target-between-local-points-requires-crossing-a-sample []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
                                       :options {:position [0 0 0]
@@ -206,7 +212,10 @@
                                                           :direction (glm.vec3 0 -1 0)}))
   (assert start-hit "expected start hit for no-cross terrain rect target test")
   (assert end-hit "expected end hit for no-cross terrain rect target test")
-  (local target (HeightfieldTerrainQuery.target-between-hits record start-hit end-hit))
+  (local target
+    (HeightfieldTerrainQuery.rect-target-between-local-points record
+                                                              start-hit.local-point
+                                                              end-hit.local-point))
   (assert (= target nil) "dragging between samples without crossing one should not select a rect target"))
 
 (fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain []
@@ -342,12 +351,12 @@
                      :fn heightfield-raycast-hits-flat-terrain})
 (table.insert tests {:name "heightfield terrain query raycast respects transform"
                      :fn heightfield-raycast-respects-transform})
-(table.insert tests {:name "heightfield terrain query target-between-hits builds rect"
-                     :fn heightfield-target-between-hits-builds-rect})
-(table.insert tests {:name "heightfield terrain query target-between-hits selects crossed samples"
-                     :fn heightfield-target-between-hits-selects-crossed-samples})
-(table.insert tests {:name "heightfield terrain query target-between-hits requires crossing a sample"
-                     :fn heightfield-target-between-hits-requires-crossing-a-sample})
+(table.insert tests {:name "heightfield terrain query rect-target-between-local-points builds rect"
+                     :fn heightfield-rect-target-between-local-points-builds-rect})
+(table.insert tests {:name "heightfield terrain query rect-target-between-local-points selects crossed samples"
+                     :fn heightfield-rect-target-between-local-points-selects-crossed-samples})
+(table.insert tests {:name "heightfield terrain query rect-target-between-local-points requires crossing a sample"
+                     :fn heightfield-rect-target-between-local-points-requires-crossing-a-sample})
 (table.insert tests {:name "heightfield terrain query domain-hit handles non-flat multi-chunk terrain"
                      :fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain})
 (table.insert tests {:name "heightfield terrain query domain-hit tolerates sparse chunk gaps"

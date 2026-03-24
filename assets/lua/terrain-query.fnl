@@ -8,12 +8,6 @@
       (HeightfieldTerrainQuery.raycast-record record ray)
       nil))
 
-(fn M.target-between-hits [record start-hit end-hit]
-  (local kind (and record record.kind))
-  (if (= kind "heightfield-terrain")
-      (HeightfieldTerrainQuery.target-between-hits record start-hit end-hit)
-      nil))
-
 (fn M.domain-hit-record [record ray]
   (local kind (and record record.kind))
   (if (= kind "heightfield-terrain")
@@ -28,5 +22,4 @@
 
 {:raycast-record M.raycast-record
  :domain-hit-record M.domain-hit-record
- :screen-rect-target M.screen-rect-target
- :target-between-hits M.target-between-hits}
+ :screen-rect-target M.screen-rect-target}

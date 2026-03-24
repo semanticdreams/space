@@ -67,6 +67,9 @@
       (cleanup-if-needed))
     true)
 
+  (fn handle-mouse-wheel [_payload]
+    true)
+
   (fn handle-updated [_delta]
     (local session (active-session))
     (flush-pending-motion session)
@@ -81,6 +84,7 @@
      :on-mouse-button-down handle-mouse-button-down
      :on-mouse-button-up handle-mouse-button-up
      :on-mouse-motion handle-mouse-motion
+     :on-mouse-wheel handle-mouse-wheel
      :on-updated handle-updated}))
 
 TerrainRectPickState
