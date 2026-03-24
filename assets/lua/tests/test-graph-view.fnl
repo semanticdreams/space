@@ -1059,17 +1059,29 @@
             (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
             (local original-states app.states)
             (local terrain-record (make-heightfield-terrain-record))
-            (local scene {:screen-pos-terrain-domain-hit
-                          (fn [_self pos _opts]
-                              (if (< pos.x 20)
-                                  {:terrain-id "terrain-a"
-                                   :terrain-kind "heightfield-terrain"
-                                   :terrain-record terrain-record
-                                   :local-point (glm.vec3 1 0 2)}
-                                  {:terrain-id "terrain-a"
-                                   :terrain-kind "heightfield-terrain"
-                                   :terrain-record terrain-record
-                                   :local-point (glm.vec3 3 0 4)}))})
+            (local scene
+              {:screen-pos-terrain-domain-hit
+               (fn [_self pos _opts]
+                 (if (< pos.x 20)
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :local-point (glm.vec3 1 0 2)}
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :local-point (glm.vec3 3 0 4)}))
+               :screen-drag-terrain-target
+               (fn [_self start-pos end-pos _opts]
+                 (if (and (< start-pos.x 20) (< end-pos.x 20))
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
             (local runtime {:scene scene})
             (local entry (make-world-entry {:id "world-a"
                                             :runtime runtime
@@ -1185,17 +1197,29 @@
             (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
             (local original-states app.states)
             (local terrain-record (make-heightfield-terrain-record))
-            (local scene {:screen-pos-terrain-domain-hit
-                          (fn [_self pos _opts]
-                              (if (< pos.x 20)
-                                  {:terrain-id "terrain-a"
-                                   :terrain-kind "heightfield-terrain"
-                                   :terrain-record terrain-record
-                                   :local-point (glm.vec3 1 0 2)}
-                                  {:terrain-id "terrain-a"
-                                   :terrain-kind "heightfield-terrain"
-                                   :terrain-record terrain-record
-                                   :local-point (glm.vec3 3 0 4)}))})
+            (local scene
+              {:screen-pos-terrain-domain-hit
+               (fn [_self pos _opts]
+                 (if (< pos.x 20)
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :local-point (glm.vec3 1 0 2)}
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :local-point (glm.vec3 3 0 4)}))
+               :screen-drag-terrain-target
+               (fn [_self start-pos end-pos _opts]
+                 (if (and (< start-pos.x 20) (< end-pos.x 20))
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
             (local runtime {:scene scene})
             (local entry (make-world-entry {:id "world-a"
                                             :runtime runtime
@@ -1314,17 +1338,29 @@
             (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
             (local original-states app.states)
             (local terrain-record (make-heightfield-terrain-record))
-            (local scene {:screen-pos-terrain-domain-hit
-                          (fn [_self pos _opts]
-                              (if (< pos.x 20)
-                                  {:terrain-id "terrain-a"
-                                   :terrain-kind "heightfield-terrain"
-                                   :terrain-record terrain-record
-                                   :local-point (glm.vec3 1 0 2)}
-                                  {:terrain-id "terrain-a"
-                                   :terrain-kind "heightfield-terrain"
-                                   :terrain-record terrain-record
-                                   :local-point (glm.vec3 3 0 4)}))})
+            (local scene
+              {:screen-pos-terrain-domain-hit
+               (fn [_self pos _opts]
+                 (if (< pos.x 20)
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :local-point (glm.vec3 1 0 2)}
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :local-point (glm.vec3 3 0 4)}))
+               :screen-drag-terrain-target
+               (fn [_self start-pos end-pos _opts]
+                 (if (and (< start-pos.x 20) (< end-pos.x 20))
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+                     {:terrain-id "terrain-a"
+                      :terrain-kind "heightfield-terrain"
+                      :terrain-record terrain-record
+                      :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
             (local runtime {:scene scene})
             (local entry (make-world-entry {:id "world-a"
                                             :runtime runtime

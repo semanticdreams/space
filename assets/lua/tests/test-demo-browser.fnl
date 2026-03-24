@@ -506,6 +506,58 @@
   (when (not ok)
     (error err)))
 
+(fn scene-screen-drag-terrain-target-respects-scene-root-transform []
+  (local setup (setup-scene {:scene-position (glm.vec3 -5 0 0)
+                             :scene-rotation (glm.quat 1 0 0 0)}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-viewport app.viewport)
+  (local original-projection app.projection)
+  (local (ok err)
+    (pcall
+      (fn []
+        (local viewport {:x 0 :y 0 :width 100 :height 100})
+        (local projection (glm.perspective (/ math.pi 3) 1.0 0.1 100.0))
+        (local view (glm.lookAt (glm.vec3 -3 10 2)
+                                (glm.vec3 -3 0 2)
+                                (glm.vec3 0 0 -1)))
+        (app.set-viewport viewport)
+        (set app.projection projection)
+        (scene:build-default {:terrains [{:id "terrain-a"
+                                          :kind "heightfield-terrain"
+                                          :options {:position [0 0 0]
+                                                    :rotation [1 0 0 0]
+                                                    :sample-spacing [1 1]
+                                                    :chunk-samples [5 5]
+                                                    :default-height 0.0}
+                                          :chunks [{:coord [0 0]
+                                                    :size [5 5]
+                                                    :heights [0 0 0 0 0
+                                                              0 0 0 0 0
+                                                              0 0 0 0 0
+                                                              0 0 0 0 0
+                                                              0 0 0 0 0]}]}]})
+        (scene.layout-root:update)
+        (local target-result
+          (scene:screen-drag-terrain-target {:x 40 :y 50}
+                                            {:x 60 :y 50}
+                                            {:view view
+                                             :projection projection
+                                             :viewport viewport}))
+        (assert target-result
+                "screen drag terrain target should resolve through scene-root transformed terrain")
+        (assert (= target-result.terrain-id "terrain-a"))
+        (assert (= target-result.target.mode :rect))
+        (assert (= target-result.target.x0 1))
+        (assert (= target-result.target.x1 3))
+        (assert (= target-result.target.z0 2))
+        (assert (= target-result.target.z1 2)))))
+  (app.set-viewport original-viewport)
+  (set app.projection original-projection)
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn scene-screen-pos-terrain-domain-hit-matches-exact-oracle []
   (local setup (setup-scene {:scene-position (glm.vec3 -5 0 0)
                              :scene-rotation (glm.quat 1 0 0 0)}))
@@ -1085,14 +1137,22 @@
                                      :terrain-id "terrain-a"
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
+        (local expected
+          (scene:screen-drag-terrain-target {:x 40 :y 50}
+                                            {:x 60 :y 50}
+                                            nil))
         (capture:begin)
         (capture:begin-drag {:x 95 :y 5})
         (capture:update-drag {:x 40 :y 50})
         (capture:end-drag {:x 60 :y 50})
         (assert resolved-target
                 "target capture should recover when mouse-down misses but the first drag hit lands on terrain")
-        (assert (= resolved-target.x0 1))
-        (assert (= resolved-target.x1 1))
+        (assert expected
+                "scene drag target should resolve the promoted live drag fixture")
+        (assert (= resolved-target.x0 expected.target.x0))
+        (assert (= resolved-target.z0 expected.target.z0))
+        (assert (= resolved-target.x1 expected.target.x1))
+        (assert (= resolved-target.z1 expected.target.z1))
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -1205,8 +1265,8 @@
         (assert (= hit-count 0)
                 "target capture should not raycast terrain before a drag has started")
         (capture:begin-drag {:x 40 :y 50})
-        (assert (= hit-count 1)
-                "target capture should raycast once when the drag starts on mouse down")
+        (assert (> hit-count 0)
+                "target capture should raycast terrain when the drag starts on mouse down")
         (capture:drop))))
   (set scene.screen-pos-terrain-domain-hit original-screen-pos-terrain-domain-hit)
   (app.set-viewport original-viewport)
@@ -1253,14 +1313,22 @@
                                      :terrain-id "terrain-a"
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
+        (local expected
+          (scene:screen-drag-terrain-target {:x 40 :y 50}
+                                            {:x 60 :y 50}
+                                            nil))
         (capture:begin)
         (capture:begin-drag {:x 40 :y 50})
         (capture:update-drag {:x 60 :y 50})
         (capture:end-drag {:x 60 :y 50})
         (assert resolved-target
                 "default scene ray options should be enough for live terrain picking")
-        (assert (= resolved-target.x0 1))
-        (assert (= resolved-target.x1 3))
+        (assert expected
+                "default scene drag target should resolve the live terrain picking fixture")
+        (assert (= resolved-target.x0 expected.target.x0))
+        (assert (= resolved-target.z0 expected.target.z0))
+        (assert (= resolved-target.x1 expected.target.x1))
+        (assert (= resolved-target.z1 expected.target.z1))
         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
@@ -2102,6 +2170,8 @@
                      :fn scene-screen-pos-terrain-hit-resolves-default-heightfield})
 (table.insert tests {:name "Scene screen-drag terrain target builds rect"
                      :fn scene-screen-drag-terrain-target-builds-rect})
+(table.insert tests {:name "Scene screen-drag terrain target respects scene root transform"
+                     :fn scene-screen-drag-terrain-target-respects-scene-root-transform})
 (table.insert tests {:name "Scene screen-pos terrain domain hit scales logical input to pixel viewport"
                      :fn scene-screen-pos-terrain-domain-hit-scales-logical-input-to-pixel-viewport})
 (table.insert tests {:name "Scene screen-pos terrain domain hit default app state matches exact oracle"

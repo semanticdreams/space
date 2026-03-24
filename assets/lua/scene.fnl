@@ -1100,6 +1100,7 @@
     (local hit (and query-record (TerrainQuery.raycast-record query-record ray)))
     (when (and hit (or (not best) (< hit.distance best.distance)))
       (set best {:terrain-record record
+                 :query-record query-record
                  :terrain-id (and record record.id)
                  :terrain-kind (and record record.kind)
                  :distance hit.distance
@@ -1121,6 +1122,7 @@
     (local hit (and query-record (TerrainQuery.domain-hit-record query-record ray)))
     (when (and hit (or (not best) (< hit.distance best.distance)))
       (set best {:terrain-record record
+                 :query-record query-record
                  :terrain-id (and record record.id)
                  :terrain-kind (and record record.kind)
                  :distance hit.distance
@@ -1139,8 +1141,10 @@
            (= start-hit.terrain-kind end-hit.terrain-kind))
       (do
         (local record start-hit.terrain-record)
-        (local target (and record
-                           (TerrainQuery.target-between-hits record start-hit end-hit)))
+        (local query-record (or start-hit.query-record record))
+        (local target
+          (and query-record
+               (TerrainQuery.target-between-hits query-record start-hit end-hit)))
         (and target
              {:terrain-record record
               :terrain-id start-hit.terrain-id

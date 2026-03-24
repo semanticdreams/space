@@ -161,6 +161,52 @@
   (assert (= target.x1 3) "rect target should use the larger sample x")
   (assert (= target.z1 2) "rect target should use the larger sample z"))
 
+(fn heightfield-target-between-hits-selects-crossed-samples []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [2 2]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local start-hit
+    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 2.1 10 2.1)
+                                                          :direction (glm.vec3 0 -1 0)}))
+  (local end-hit
+    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 4.1 10 4.1)
+                                                          :direction (glm.vec3 0 -1 0)}))
+  (assert start-hit "expected start hit for crossed-sample terrain rect target test")
+  (assert end-hit "expected end hit for crossed-sample terrain rect target test")
+  (local target (HeightfieldTerrainQuery.target-between-hits record start-hit end-hit))
+  (assert target "crossed-sample drag should produce a rectangle target")
+  (assert (= target.x0 2) "rect target should start at the first crossed sample x")
+  (assert (= target.z0 2) "rect target should start at the first crossed sample z")
+  (assert (= target.x1 2) "rect target should end at the last crossed sample x")
+  (assert (= target.z1 2) "rect target should end at the last crossed sample z"))
+
+(fn heightfield-target-between-hits-requires-crossing-a-sample []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [2 2]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local start-hit
+    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 2.1 10 2.1)
+                                                          :direction (glm.vec3 0 -1 0)}))
+  (local end-hit
+    (HeightfieldTerrainQuery.raycast-record-exact record {:origin (glm.vec3 2.9 10 2.9)
+                                                          :direction (glm.vec3 0 -1 0)}))
+  (assert start-hit "expected start hit for no-cross terrain rect target test")
+  (assert end-hit "expected end hit for no-cross terrain rect target test")
+  (local target (HeightfieldTerrainQuery.target-between-hits record start-hit end-hit))
+  (assert (= target nil) "dragging between samples without crossing one should not select a rect target"))
+
 (fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
@@ -221,6 +267,10 @@
                      :fn heightfield-raycast-respects-transform})
 (table.insert tests {:name "heightfield terrain query target-between-hits builds rect"
                      :fn heightfield-target-between-hits-builds-rect})
+(table.insert tests {:name "heightfield terrain query target-between-hits selects crossed samples"
+                     :fn heightfield-target-between-hits-selects-crossed-samples})
+(table.insert tests {:name "heightfield terrain query target-between-hits requires crossing a sample"
+                     :fn heightfield-target-between-hits-requires-crossing-a-sample})
 (table.insert tests {:name "heightfield terrain query domain-hit handles non-flat multi-chunk terrain"
                      :fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain})
 (table.insert tests {:name "heightfield terrain query domain-hit tolerates sparse chunk gaps"

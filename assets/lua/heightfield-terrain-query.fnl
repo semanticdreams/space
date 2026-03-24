@@ -88,6 +88,19 @@
    :x1 coord.x
    :z1 coord.z})
 
+(fn covered-sample-range [min-local-value max-local-value spacing bounds-min bounds-max]
+  (local epsilon 1e-6)
+  (local min-sample
+    (math.max bounds-min
+              (math.ceil (/ (- min-local-value epsilon) spacing))))
+  (local max-sample
+    (math.min bounds-max
+              (math.floor (/ (+ max-local-value epsilon) spacing))))
+  (if (> min-sample max-sample)
+      nil
+      {:min min-sample
+       :max max-sample}))
+
 (fn local-plane-hit [record ray]
   (local rotation (resolve-rotation record))
   (local inverse (rotation:inverse))
@@ -124,13 +137,33 @@
    :target (sample-target record local-point)})
 
 (fn rect-target-between-local-points [record start-local-point end-local-point]
-  (local start-sample (nearest-sample-coord record start-local-point))
-  (local end-sample (nearest-sample-coord record end-local-point))
-  {:mode :rect
-   :x0 (math.min start-sample.x end-sample.x)
-   :z0 (math.min start-sample.z end-sample.z)
-   :x1 (math.max start-sample.x end-sample.x)
-   :z1 (math.max start-sample.z end-sample.z)})
+  (local sample-spacing (spacing record))
+  (local spacing-x (. sample-spacing 1))
+  (local spacing-z (. sample-spacing 2))
+  (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (local min-local-x (math.min start-local-point.x end-local-point.x))
+  (local max-local-x (math.max start-local-point.x end-local-point.x))
+  (local min-local-z (math.min start-local-point.z end-local-point.z))
+  (local max-local-z (math.max start-local-point.z end-local-point.z))
+  (local x-range
+    (covered-sample-range min-local-x
+                          max-local-x
+                          spacing-x
+                          bounds.min-sample-x
+                          bounds.max-sample-x))
+  (local z-range
+    (covered-sample-range min-local-z
+                          max-local-z
+                          spacing-z
+                          bounds.min-sample-z
+                          bounds.max-sample-z))
+  (if (and x-range z-range)
+      {:mode :rect
+       :x0 x-range.min
+       :z0 z-range.min
+       :x1 x-range.max
+       :z1 z-range.max}
+      nil))
 
 (fn maybe-update-best [record best hit]
   (if (and hit (or (not best) (< hit.distance best.distance)))

@@ -1881,8 +1881,14 @@
 
 (fn make-build-ctx []
   (local BuildContext (require :build-context))
-  (local ctx (BuildContext {:clickables app.clickables
-                            :hoverables app.hoverables}))
+  (local Intersectables (require :intersectables))
+  (local Clickables (require :clickables))
+  (local Hoverables (require :hoverables))
+  (local intersectables (or app.intersectables (Intersectables)))
+  (local clickables (or app.clickables (Clickables {:intersectables intersectables})))
+  (local hoverables (or app.hoverables (Hoverables {:intersectables intersectables})))
+  (local ctx (BuildContext {:clickables clickables
+                            :hoverables hoverables}))
   (set ctx.icons (make-icons-stub))
   ctx)
 
@@ -2368,16 +2374,28 @@
                                                           0 0 0 0 0
                                                           0 0 0 0 0]}]}))
   (local scene
-    {:screen-pos-terrain-domain-hit (fn [_self pos _opts]
-                                      (if (< pos.x 20)
-                                          {:terrain-id "terrain-a"
-                                           :terrain-kind "heightfield-terrain"
-                                           :terrain-record terrain-record
-                                           :local-point (glm.vec3 1 0 2)}
-                                          {:terrain-id "terrain-a"
-                                           :terrain-kind "heightfield-terrain"
-                                           :terrain-record terrain-record
-                                           :local-point (glm.vec3 3 0 4)}))})
+    {:screen-pos-terrain-domain-hit
+     (fn [_self pos _opts]
+       (if (< pos.x 20)
+           {:terrain-id "terrain-a"
+            :terrain-kind "heightfield-terrain"
+            :terrain-record terrain-record
+            :local-point (glm.vec3 1 0 2)}
+           {:terrain-id "terrain-a"
+            :terrain-kind "heightfield-terrain"
+            :terrain-record terrain-record
+            :local-point (glm.vec3 3 0 4)}))
+     :screen-drag-terrain-target
+     (fn [_self start-pos end-pos _opts]
+       (if (and (< start-pos.x 20) (< end-pos.x 20))
+           {:terrain-id "terrain-a"
+            :terrain-kind "heightfield-terrain"
+            :terrain-record terrain-record
+            :target {:mode :rect :x0 1 :z0 2 :x1 1 :z1 2}}
+           {:terrain-id "terrain-a"
+            :terrain-kind "heightfield-terrain"
+            :terrain-record terrain-record
+            :target {:mode :rect :x0 1 :z0 2 :x1 3 :z1 4}}))})
   (local mock-node
     {:terrain-id "terrain-a"
      :world-id "world-a"
