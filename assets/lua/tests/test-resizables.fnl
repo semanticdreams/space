@@ -2,7 +2,8 @@
 (local MathUtils (require :math-utils))
 (local Intersectables (require :intersectables))
 (local Resizables (require :resizables))
-(local StateBase (require :state-base))
+(local State (require :state))
+(local DefaultConfig (require :state-default-config))
 (local {: Layout} (require :layout))
 
 (local tests [])
@@ -113,7 +114,7 @@
   (assert (> layout.size.x 10) "Resize should update size with intersectables")
   (assert (> layout.size.y 10) "Resize should update size with intersectables"))
 
-(fn state-base-dispatches-alt-resize []
+(fn default-state-dispatches-alt-resize []
   (local originals {:resizables app.resizables
                     :clickables app.clickables
                     :movables app.movables})
@@ -131,7 +132,10 @@
   (set app.resizables resizables)
   (set app.clickables clickables)
   (set app.movables nil)
-  (local state (StateBase.make-state {:name :resizable-test}))
+  (local state (State {:name :resizable-test
+                       :routes (DefaultConfig.routes {})
+                       :enter DefaultConfig.enter
+                       :leave DefaultConfig.leave}))
   (state.on-mouse-button-down {:button 3 :x 0 :y 0 :mod 256})
   (set app.resizables originals.resizables)
   (set app.clickables originals.clickables)
@@ -142,7 +146,7 @@
 (table.insert tests {:name "Resizables clamp to min size" :fn resizable-respects-min-size})
 (table.insert tests {:name "Resizables fire hooks" :fn resizable-fires-hooks})
 (table.insert tests {:name "Resizables integrate with intersectables" :fn resizable-works-with-intersectables})
-(table.insert tests {:name "State base forwards alt resize" :fn state-base-dispatches-alt-resize})
+(table.insert tests {:name "Default state forwards alt resize" :fn default-state-dispatches-alt-resize})
 
 (local main
   (fn []

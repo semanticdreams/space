@@ -85,6 +85,7 @@
   (when test-verbose
     (log-line "[BOOT] require :hoverables"))
   (local Hoverables (require :hoverables))
+  (local Runtime (require :state-runtime))
   (when test-verbose
     (log-line "[BOOT] require :textures"))
   (local textures (require :textures))
@@ -95,7 +96,8 @@
     (fn []
       (assert (and app.engine app.engine.events) "app.engine.events missing in tests")
       (each [_ signal (pairs app.engine.events)]
-        (signal:clear))))
+        (signal:clear))
+      (Runtime.reset)))
 
   ;; Ensure font textures and loaders are available during tests; do not fall back to stubs.
   (set app.disable_font_textures false)

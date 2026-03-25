@@ -1,4 +1,7 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local Defaults (require :state-defaults))
+(local DefaultConfig (require :state-default-config))
 (local glm (require :glm))
 
 (local KEY
@@ -18,18 +21,21 @@
   (app.camera:set-rotation (glm.quat 1 0 0 0)))
 
 (fn CameraState []
-  (local base (StateBase.make-state {:name :camera}))
-  (local base-on-key-down base.on-key-down)
-  (StateBase.make-state
+  (local CameraCommands
+    {:key-down (fn [_ctx payload]
+                 (local key (and payload payload.key))
+                 (if (= key KEY.escape)
+                     (do (set-state :normal) true)
+                     (= key KEY.f)
+                     (do (set-state :fpc) true)
+                     (= key KEY.zero)
+                     (do (reset-camera!) true)
+                     false))})
+  (State
     {:name :camera
-     :on-key-down (fn [payload]
-                    (local key (and payload payload.key))
-                    (if (= key KEY.escape)
-                        (do (set-state :normal) true)
-                        (= key KEY.f)
-                        (do (set-state :fpc) true)
-                        (= key KEY.zero)
-                        (do (reset-camera!) true)
-                        (base-on-key-down payload)))}))
+     :routes (DefaultConfig.routes
+               {:key-down (Routes.FirstHandlerWins [CameraCommands Defaults.DefaultKeyDown])})
+     :enter DefaultConfig.enter
+     :leave DefaultConfig.leave}))
 
 CameraState

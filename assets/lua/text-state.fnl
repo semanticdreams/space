@@ -1,4 +1,8 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local Defaults (require :state-defaults))
+(local DefaultConfig (require :state-default-config))
+(local Runtime (require :state-runtime))
 (local InputState (require :input-state-router))
 
 (local SDLK_RETURN 13)
@@ -33,7 +37,7 @@
 
 (fn resolve-key [payload]
   (local key (and payload payload.key))
-  (if (and key (StateBase.shift-held? payload))
+  (if (and key (Runtime.shift-held? payload))
       (or (. shifted-key-map key) key)
       key))
 
@@ -248,7 +252,7 @@
 
 (fn enter-insert-state [input]
   (input:enter-insert-mode)
-  (StateBase.ignore-next-text-input)
+  (Runtime.ignore-next-text-input)
   (enter-insert-mode)
   true)
 
@@ -413,7 +417,7 @@
       false
       (if (and payload
                (= payload.key SDLK_RETURN)
-               (StateBase.ctrl-held? payload))
+               (Runtime.ctrl-held? payload))
           (do
             (input:submit payload)
             true)
@@ -426,7 +430,7 @@
           true
           (if (handle-text-key state payload)
               true
-              (if (StateBase.handle-focus-tab payload)
+              (if (Runtime.handle-focus-tab payload)
                   true
                   (if (active-input)
                       true
@@ -440,14 +444,21 @@
 
 (fn TextState []
   (var state nil)
+  (local TextLifecycle
+    {:enter (fn [_ctx]
+              (when state
+                (set state.pending-keymap nil))
+              (sync-mode))})
+  (local TextCommands
+    {:key-down (fn [_ctx payload]
+                 (on-key-down state payload))})
   (set state
-       (StateBase.make-state {:name :text
-                              :on-key-down (fn [payload]
-                                             (on-key-down state payload))
-                              :on-enter (fn []
-                                          (when state
-                                            (set state.pending-keymap nil))
-                                          (sync-mode))}))
+       (State
+         {:name :text
+          :routes (DefaultConfig.routes
+                    {:key-down (Routes.FirstHandlerWins [TextCommands])})
+          :enter [Defaults.HoverLifecycle TextLifecycle]
+          :leave [Defaults.HoverLifecycle]}))
   (set state.keymap (make-default-keymap))
   (set state.pending-keymap nil)
   state)

@@ -1,6 +1,8 @@
 (local glm (require :glm))
-(local StateBase (require :state-base))
-(local InputState (require :input-state-router))
+(local State (require :state))
+(local DefaultConfig (require :state-default-config))
+(local Defaults (require :state-defaults))
+(local Routes (require :state-routes))
 (local bt (require :bt))
 (local Utils (require :car-state-utils))
 (local physics-available? (. Utils :physics-available?))
@@ -271,7 +273,7 @@
       (local transform (state.vehicle:getChassisWorldTransform))
       (sync-layout-from-transform transform)))
 
-  (fn on-key-down [_self payload]
+  (fn on-key-down [payload]
     (local key (and payload payload.key))
     (if (= key SDLK_ESCAPE)
         (do
@@ -286,7 +288,7 @@
             (set (. state.keys key) true))
           true)))
 
-  (fn on-key-up [_self payload]
+  (fn on-key-up [payload]
     (local key (and payload payload.key))
     (when key
       (set (. state.keys key) nil))
@@ -302,18 +304,31 @@
     (cleanup-vehicle)
     (cleanup-ground))
 
-  (fn on-updated [_self delta]
+  (fn on-updated [delta]
     (apply-controls nil)
     (update-layout-from-physics))
 
+  (local CarLifecycle
+    {:enter (fn [_ctx]
+              (on-enter))
+     :leave (fn [_ctx]
+              (on-leave))})
+  (local CarControls
+    {:key-down (fn [_ctx payload]
+                 (on-key-down payload))
+     :key-up (fn [_ctx payload]
+               (on-key-up payload))
+     :updated (fn [_ctx delta]
+                (on-updated delta))})
   (local result
-    (StateBase.make-state {:name :car
-                           :on-enter on-enter
-                           :on-leave on-leave
-                           :on-key-down on-key-down
-                           :on-key-up on-key-up
-                           :on-updated on-updated}))
-  (set result.on-updated on-updated)
+    (State
+      {:name :car
+       :routes (DefaultConfig.routes
+                 {:key-down (Routes.FirstHandlerWins [CarControls])
+                  :key-up (Routes.FirstHandlerWins [CarControls])
+                  :updated (Routes.FirstHandlerWins [CarControls])})
+       :enter [Defaults.HoverLifecycle CarLifecycle]
+       :leave [Defaults.HoverLifecycle CarLifecycle]}))
   (set result.__car_state state)
   result)
 

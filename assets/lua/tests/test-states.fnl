@@ -14,7 +14,9 @@
 (local TerrainPaintState (require :terrain-paint-state))
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 (local InputState (require :input-state-router))
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Runtime (require :state-runtime))
+(local DefaultConfig (require :state-default-config))
 (local InputModel (require :input-model))
 (local TestSupport (require :tests/test-support))
 
@@ -580,18 +582,22 @@
   (var next-state-mouse-up 0)
   (states.add-state
     :normal
-    (StateBase.make-state
-      {:name :normal
-       :on-mouse-button-up (fn [_payload]
-                             (states.set-state :next)
-                             true)}))
+    (State {:name :normal
+            :routes (DefaultConfig.routes
+                      {:mouse-button-up (fn [_event-name _ctx _payload]
+                                          (states.set-state :next)
+                                          true)})
+            :enter DefaultConfig.enter
+            :leave DefaultConfig.leave}))
   (states.add-state
     :next
-    (StateBase.make-state
-      {:name :next
-       :on-mouse-button-up (fn [_payload]
-                             (set next-state-mouse-up (+ next-state-mouse-up 1))
-                             true)}))
+    (State {:name :next
+            :routes (DefaultConfig.routes
+                      {:mouse-button-up (fn [_event-name _ctx _payload]
+                                          (set next-state-mouse-up (+ next-state-mouse-up 1))
+                                          true)})
+            :enter DefaultConfig.enter
+            :leave DefaultConfig.leave}))
   (set app.states states)
   (states.set-state :normal)
   (app.engine.events.mouse-button-up.emit {:button 1 :x 10 :y 20})
@@ -1002,7 +1008,7 @@
       (InputState.connect-input input)
       (local state (TextState))
       (state.on-key-down {:key (string.byte "i")})
-      (StateBase.dispatch-text-input nil)
+      (Runtime.dispatch-text-input nil)
       (assert (= (. transitions 1) :insert))
       (assert (= input.mode :insert))
       (state.on-key-down {:key (string.byte "h")})
@@ -1052,7 +1058,7 @@
       (local below (make-input-stub {:text "foo\nbar" :multiline? true}))
       (InputState.connect-input below)
       (state.on-key-down {:key (string.byte "o")})
-      (StateBase.dispatch-text-input nil)
+      (Runtime.dispatch-text-input nil)
       (assert (= below.mode :insert))
       (assert (= (below.model:get-text) "foo\n\nbar"))
       (InputState.disconnect-input below)
@@ -1061,7 +1067,7 @@
       (InputState.connect-input above)
       (above:move-caret-to 4)
       (state.on-key-down {:key (string.byte "o") :mod SHIFT-MOD})
-      (StateBase.dispatch-text-input nil)
+      (Runtime.dispatch-text-input nil)
       (assert (= (above.model:get-text) "foo\n\nbar\nbaz"))
       (assert (= above.mode :insert))
       (assert (= above.model.cursor-line 1))
@@ -1090,7 +1096,7 @@
       (local input (make-input-stub {:text "  foo" :multiline? true}))
       (InputState.connect-input input)
       (state.on-key-down {:key (string.byte "i") :mod SHIFT-MOD})
-      (StateBase.dispatch-text-input nil)
+      (Runtime.dispatch-text-input nil)
       (assert (= input.mode :insert))
       (assert (= input.model.cursor-column 2))
       (InputState.disconnect-input input)
@@ -1098,7 +1104,7 @@
       (local append (make-input-stub {:text "bar" :multiline? true}))
       (InputState.connect-input append)
       (state.on-key-down {:key (string.byte "a") :mod SHIFT-MOD})
-      (StateBase.dispatch-text-input nil)
+      (Runtime.dispatch-text-input nil)
       (assert (= append.mode :insert))
       (assert (= append.model.cursor-column 3))
       (InputState.disconnect-input append))))

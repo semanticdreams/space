@@ -5,9 +5,29 @@
 (local InputState (require :input-state-router))
 (local States (require :states))
 (local NormalState (require :normal-state))
+(local Signal (require :signal))
 (local terminal (require :terminal))
 
 (local tests [])
+
+(local reset-engine-events
+  (fn []
+    (when _G.reset-engine-events
+      (_G.reset-engine-events))))
+
+(fn fresh-engine-events []
+  {:text-input (Signal)
+   :text-editing (Signal)
+   :key-down (Signal)
+   :key-up (Signal)
+   :mouse-button-down (Signal)
+   :mouse-button-up (Signal)
+   :mouse-motion (Signal)
+   :mouse-wheel (Signal)
+   :gamepad-button-down (Signal)
+   :gamepad-axis-motion (Signal)
+   :gamepad-removed (Signal)
+   :updated (Signal)})
 
 (fn with-terminal-stub [body opts]
   (local original-Terminal terminal.Terminal)
@@ -63,16 +83,17 @@
 
 (fn setup-state []
   (reset-engine-events)
+  (set app.focus nil)
   (set app.states (States))
   (app.states.add-state :normal (NormalState))
   (app.states.set-state :normal)
-  (local state (app.states.get-state :normal))
-  (state.on-enter)
-  state)
+  (app.states.get-state :normal))
 
 (fn teardown-state [state]
   (when state
-    (state.on-leave)))
+    (state.on-leave))
+  (set app.focus nil)
+  (set app.states nil))
 
 (fn make-widget [options]
   (local builder (TerminalWidget options))
@@ -98,7 +119,17 @@
 (fn terminal-focus-connects-input []
   (with-terminal-stub
     (fn [calls]
+      (local original-events app.engine.events)
+      (set app.engine.events (fresh-engine-events))
+      (local text-input-signal app.engine.events.text-input)
+      (local original-connect text-input-signal.connect)
+      (var text-input-connect-count 0)
+      (set text-input-signal.connect
+           (fn [first handler]
+             (set text-input-connect-count (+ text-input-connect-count 1))
+             (original-connect first handler)))
       (local state (setup-state))
+      (set text-input-signal.connect original-connect)
       (local manager (FocusManager {:root-name "root"}))
       (local root (manager:get-root-scope))
       (local scope (manager:create-scope {:name "hud"}))
@@ -126,7 +157,9 @@
       (other:request-focus)
       (app.engine.events.text-input.emit {:text "bye"})
       (assert (not (= (InputState.active-input) widget)))
-      (assert (= (# calls.text) 2))
+      (assert (= text-input-connect-count 1))
+      (assert (= (# calls.text) 1))
+      (assert (= (. calls.text 1) "hi"))
       (assert (>= (# calls.keys) 1))
       (assert (>= (# calls.mouse) 1))
       (local mouse-call (. calls.mouse 1))
@@ -135,7 +168,8 @@
       (assert mouse-call.pressed)
       (widget:drop)
       (manager:drop)
-      (teardown-state state))))
+      (teardown-state state)
+      (set app.engine.events original-events))))
 
 (fn terminal-updates-on-frame []
   (with-terminal-stub

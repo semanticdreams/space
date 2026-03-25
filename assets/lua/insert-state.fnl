@@ -1,4 +1,8 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local Defaults (require :state-defaults))
+(local DefaultConfig (require :state-default-config))
+(local Runtime (require :state-runtime))
 (local InputState (require :input-state-router))
 
 (local SDLK_ESCAPE 27)
@@ -21,7 +25,7 @@
       false
       (if (and payload
                (= payload.key SDLK_RETURN)
-               (StateBase.ctrl-held? payload))
+               (Runtime.ctrl-held? payload))
           (do
             (input:submit payload)
             true)
@@ -77,13 +81,22 @@
     (input:enter-insert-mode)))
 
 (fn InsertState []
-  (StateBase.make-state {:name :insert
-                         :on-key-down on-key-down
-                         :on-enter sync-insert-mode
-                         :on-leave (fn []
-                                     (local input (active-input))
-                                     (when input
-                                       (input:enter-normal-mode)))
-                         :on-text-input StateBase.dispatch-text-input}))
+  (local InsertLifecycle
+    {:enter (fn [_ctx]
+              (sync-insert-mode))
+     :leave (fn [_ctx]
+              (local input (active-input))
+              (when input
+                (input:enter-normal-mode)))})
+  (local InsertCommands
+    {:key-down (fn [_ctx payload]
+                 (on-key-down payload))})
+  (State
+    {:name :insert
+     :routes (DefaultConfig.routes
+               {:key-down (Routes.FirstHandlerWins [InsertCommands])
+                :text-input (Routes.FirstHandlerWins [Defaults.DefaultTextInput])})
+     :enter [Defaults.HoverLifecycle InsertLifecycle]
+     :leave [Defaults.HoverLifecycle InsertLifecycle]}))
 
 InsertState

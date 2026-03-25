@@ -5,8 +5,11 @@
 (local BuildContext (require :build-context))
 (local Graph (require :graph/init))
 (local GraphView (require :graph/view))
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local DefaultConfig (require :state-default-config))
 (local Camera (require :camera))
+(local AppProjection (require :app-projection))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
 (local {:FocusManager FocusManager} (require :focus))
@@ -65,7 +68,10 @@
     (selector:drop))
 
 (fn selection-input-prefers-selection-only-for-primary-button []
-    (local state (StateBase.make-state {:name :selection-test}))
+    (local state (State {:name :selection-test
+                         :routes (DefaultConfig.routes {})
+                         :enter DefaultConfig.enter
+                         :leave DefaultConfig.leave}))
     (local original-selector app.object-selector)
     (local original-first-person app.first-person-controls)
     (local original-clickables app.clickables)
@@ -301,6 +307,8 @@
     (local original-projection app.projection)
     (set app.viewport {:x 0 :y 0 :width 1600 :height 900})
     (set app.camera (Camera {:position (glm.vec3 0 0 30)}))
+    (when (not app.create-default-projection)
+      (set app.create-default-projection AppProjection.create-default-projection))
     (set app.projection (app.create-default-projection))
     (local selector (ObjectSelector {:enabled? true}))
     (local selectable {:position (glm.vec3 -4.528 -9.146 0)})

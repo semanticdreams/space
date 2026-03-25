@@ -12,6 +12,22 @@ The core design problem is accidental inheritance:
 
 The replacement should be a composable state system with zero implicit input behavior.
 
+## Implementation Status
+
+This design is now implemented.
+
+The legacy `StateBase` layer has been removed. The runtime is now centered on:
+
+- `assets/lua/state.fnl`
+- `assets/lua/state-routes.fnl`
+- `assets/lua/state-runtime.fnl`
+- `assets/lua/state-defaults.fnl`
+- `assets/lua/state-default-config.fnl`
+
+Production states such as `normal`, `terrain-rect-pick`, `terrain-paint`, `leader`, `camera`, `fpc`, `text`, `insert`, `quit`, `car`, and `tetris` now build on `State` directly.
+
+The existing outer state-manager contract remains in place: runtime states still expose methods such as `on-enter`, `on-leave`, `on-key-down`, and `on-mouse-motion`. That compatibility surface is now produced by the new composer rather than inherited from `StateBase`.
+
 ## Goals
 
 - States start with no input behavior by default.
@@ -232,6 +248,8 @@ The composer should own:
 - route lookup per event
 - production of compatibility methods such as `on-key-down`, `on-updated`, and `on-enter`
 
+The implemented composer also treats `on-enter` and `on-leave` as idempotent. Entering the same runtime state twice does not duplicate signal subscriptions, and leaving a state that is already inactive is a no-op.
+
 The composer should not:
 
 - inject default handlers
@@ -419,6 +437,79 @@ These ports should preserve current behavior, but they should be expressed in th
 - Delete `StateBase.make-state`
 - Move any remaining generic helpers into the new runtime modules or dedicated reusable handlers
 - Reject any fallback path that silently restores inherited default behavior
+
+This phase is complete. `StateBase` has been deleted rather than left as a compatibility shim.
+
+## Implementation Notes
+
+The final implementation did not follow the migration plan literally in every detail. A few practical decisions mattered:
+
+- `normal` was rebuilt using explicit route composition plus a reusable default route/config layer instead of recreating an implicit base-state policy bundle.
+- Shared behavior was split into two levels:
+  - route combinators in `state-routes.fnl`
+  - reusable default behavior and runtime helpers in `state-defaults.fnl`, `state-default-config.fnl`, and `state-runtime.fnl`
+- Compatibility was preserved only at the edge where `states.fnl` expects state objects with `on-*` methods.
+- Tests that previously depended on `StateBase` helpers were migrated to use `State`, `state-runtime`, or explicit default config directly.
+
+## Problems Encountered
+
+Several migration issues showed up during implementation and test cleanup.
+
+### Duplicate signal subscriptions
+
+The biggest issue was duplicated engine-signal subscriptions during tests.
+
+Some tests manually called `state.on-enter` after also activating the state through `states.set-state`, which already calls `on-enter`. Under the new system that produced duplicated signal handlers and repeated input delivery.
+
+The fix was:
+
+- make `State.on-enter` and `State.on-leave` idempotent
+- stop manually double-entering states in affected tests where possible
+
+This was an important hardening step for the new runtime, not just a test workaround.
+
+### Test reset leaked state transitions
+
+The original test cleanup path sometimes called `InputState.release-active-input`. That function can transition from `:text` or `:insert` back to `:normal`. In the test environment that could re-enter a state while signals were being reset, leaving unexpected listeners attached.
+
+The fix was:
+
+- add an explicit reset path for input runtime state that does not perform state transitions
+- have the shared test runner reset composable-state runtime state directly
+
+This clarified an architectural distinction that matters going forward:
+
+- runtime reset for tests
+- user-facing input release during actual app execution
+
+These are not the same operation and should not share one API.
+
+### Suite-level event contamination
+
+One terminal widget test was stable in isolation but failed under the full `tests.fast` order. The cause was leaked or unexpected engine-signal state from earlier tests in the same process.
+
+The fix was to isolate that test with a fresh temporary engine-events table for the duration of the case. That keeps the focus-routing assertion about terminal behavior rather than making it sensitive to unrelated suite history.
+
+### Parser cleanup during migration
+
+One migrated state (`tetris-state`) hit a Fennel parse issue after the routing rewrite because the nested input logic had become too structurally dense.
+
+The fix was to pull the key handling into a helper function and flatten the state route definition. This reinforced a useful implementation rule:
+
+- if migrating a handler makes nesting awkward, factor the logic out rather than forcing the route declaration to carry it
+
+## Testing Notes
+
+The final migration was validated with the full test suite:
+
+- `make test`
+
+That run passed with:
+
+- `space_fnl_tests`
+  - `Executed 1222 Lua tests`
+- all C++/integration CTest targets
+- `100% tests passed, 0 tests failed out of 8`
 
 ## Benefits
 

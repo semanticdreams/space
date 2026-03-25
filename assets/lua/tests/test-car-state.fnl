@@ -8,6 +8,11 @@
 (local tests [])
 
 (local bt (require :bt))
+(local reset-engine-events
+  (fn []
+    (when _G.reset-engine-events
+      (_G.reset-engine-events))))
+
 (fn ensure-events-and-states []
   (when (not (and app.engine app.engine.events app.engine.events.updated))
     (reset-engine-events))

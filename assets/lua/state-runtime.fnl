@@ -1,0 +1,165 @@
+(local InputState (require :input-state-router))
+(local Modifiers (require :input-modifiers))
+
+(local SDLK_TAB 9)
+(local SDLK_LEFT 1073741904)
+(local SDLK_RIGHT 1073741903)
+(local SDLK_DOWN 1073741905)
+(local SDLK_UP 1073741906)
+(local KEY_H (string.byte "h"))
+(local KEY_J (string.byte "j"))
+(local KEY_K (string.byte "k"))
+(local KEY_L (string.byte "l"))
+
+(var ignore-next-text-input-count 0)
+
+(fn shift-held? [payload]
+  (Modifiers.shift-held? (and payload payload.mod)))
+
+(fn ctrl-held? [payload]
+  (Modifiers.ctrl-held? (and payload payload.mod)))
+
+(fn alt-held? [payload]
+  (Modifiers.alt-held? (and payload payload.mod)))
+
+(fn clickables-active? []
+  (assert app.clickables "state runtime requires app.clickables")
+  app.clickables.active?)
+
+(fn movables-active? []
+  (and app.movables
+       (if app.movables.drag-engaged?
+           (app.movables:drag-engaged?)
+           (and app.movables.drag-active?
+                (app.movables:drag-active?)))))
+
+(fn resizables-active? []
+  (and app.resizables
+       (if app.resizables.drag-engaged?
+           (app.resizables:drag-engaged?)
+           (and app.resizables.drag-active?
+                (app.resizables:drag-active?)))))
+
+(fn selection-handler []
+  (and app.object-selector app.object-selector))
+
+(fn selection-active? []
+  (local handler (selection-handler))
+  (and handler (handler:active?)))
+
+(fn hover-eligible? []
+  (assert app.hoverables "state runtime requires app.hoverables")
+  (and app.hoverables
+       (not (clickables-active?))
+       (not (movables-active?))
+       (not (resizables-active?))
+       (or (not app.first-person-controls)
+           (let [drag? (and app.first-person-controls app.first-person-controls.drag-active?)]
+             (not (and drag? (drag? app.first-person-controls)))))))
+
+(fn handle-hover [payload]
+  (when (hover-eligible?)
+    (app.hoverables:on-mouse-motion payload)))
+
+(fn hovered-object []
+  (assert app.hoverables "state runtime requires app.hoverables")
+  (local getter app.hoverables.get-active-object)
+  (local entry (and (not getter) app.hoverables.active-entry))
+  (if getter
+      (app.hoverables:get-active-object)
+      (and entry entry.object)))
+
+(fn dispatch-hovered-mouse-wheel [payload]
+  (local hovered (hovered-object))
+  (and hovered
+       hovered.on-mouse-wheel
+       (hovered:on-mouse-wheel payload)))
+
+(fn dispatch-mouse-wheel [payload]
+  (local handled (dispatch-hovered-mouse-wheel payload))
+  (if handled
+      true
+      (and app.first-person-controls
+           (app.first-person-controls:on-mouse-wheel payload))))
+
+(fn handle-focus-tab [payload]
+  (if (and app.focus
+           payload
+           (= payload.key SDLK_TAB)
+           (not (ctrl-held? payload))
+           (not (alt-held? payload)))
+      (do
+        (app.focus:focus-next {:backwards? (shift-held? payload)})
+        true)
+      false))
+
+(fn focus-direction-for-key [key]
+  (if (or (= key SDLK_LEFT) (= key KEY_H))
+      :left
+      (if (or (= key SDLK_RIGHT) (= key KEY_L))
+          :right
+          (if (or (= key SDLK_UP) (= key KEY_K))
+              :up
+              (if (or (= key SDLK_DOWN) (= key KEY_J))
+                  :down
+                  nil)))))
+
+(fn handle-focus-direction [payload]
+  (if (and app.focus payload)
+      (let [direction (focus-direction-for-key payload.key)]
+        (if direction
+            (if (InputState.active-input)
+                false
+                (do
+                  (app.focus:focus-direction {:direction direction
+                                              :camera app.camera})
+                  true))
+            false))
+      false))
+
+(fn ignore-next-text-input []
+  (set ignore-next-text-input-count (+ ignore-next-text-input-count 1)))
+
+(fn consume-text-input-ignore []
+  (if (> ignore-next-text-input-count 0)
+      (do
+        (set ignore-next-text-input-count (- ignore-next-text-input-count 1))
+        true)
+      false))
+
+(fn dispatch-text-input [payload]
+  (if (consume-text-input-ignore)
+      true
+      (InputState.dispatch-input :on-text-input payload)))
+
+(fn dispatch-text-editing [payload]
+  (InputState.dispatch-input :on-text-editing payload))
+
+(fn reset []
+  (set ignore-next-text-input-count 0)
+  (when InputState.reset
+    (InputState.reset)))
+
+{:shift-held? shift-held?
+ :ctrl-held? ctrl-held?
+ :alt-held? alt-held?
+ :clickables-active? clickables-active?
+ :movables-active? movables-active?
+ :resizables-active? resizables-active?
+ :selection-handler selection-handler
+ :selection-active? selection-active?
+ :hover-eligible? hover-eligible?
+ :handle-hover handle-hover
+ :hovered-object hovered-object
+ :dispatch-hovered-mouse-wheel dispatch-hovered-mouse-wheel
+ :dispatch-mouse-wheel dispatch-mouse-wheel
+ :handle-focus-tab handle-focus-tab
+ :handle-focus-direction handle-focus-direction
+ :ignore-next-text-input ignore-next-text-input
+ :dispatch-text-input dispatch-text-input
+ :dispatch-text-editing dispatch-text-editing
+ :reset reset
+ :dispatch-input InputState.dispatch-input
+ :connect-input InputState.connect-input
+ :disconnect-input InputState.disconnect-input
+ :active-input (fn [] (InputState.active-input))}

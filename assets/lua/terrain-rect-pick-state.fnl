@@ -1,4 +1,6 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local Defaults (require :state-defaults))
 (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
 
 
@@ -16,75 +18,68 @@
       (session:update-drag pending-motion)
       (set pending-motion nil)))
 
-  (fn handle-enter []
-    (when (not (active-session))
-      (cleanup-if-needed)))
+  (local TerrainRectPick
+    {:enter (fn [_ctx]
+              (when (not (active-session))
+                (cleanup-if-needed)))
+     :leave (fn [_ctx]
+              (set pending-motion nil)
+              nil)
+     :key-down (fn [_ctx payload]
+                 (local session (active-session))
+                 (if session
+                     (do
+                       (session:on-key-down payload)
+                       (cleanup-if-needed)
+                       true)
+                     (do
+                       (cleanup-if-needed)
+                       true)))
+     :mouse-button-down (fn [_ctx payload]
+                          (local session (active-session))
+                          (when (and session (= payload.button 1))
+                            (set pending-motion nil)
+                            (session:begin-drag {:x payload.x
+                                                 :y payload.y
+                                                 :mod payload.mod
+                                                 :timestamp payload.timestamp})
+                            (cleanup-if-needed))
+                          true)
+     :mouse-button-up (fn [_ctx payload]
+                        (local session (active-session))
+                        (when (and session (= payload.button 1))
+                          (flush-pending-motion session)
+                          (session:end-drag {:x payload.x
+                                             :y payload.y
+                                             :mod payload.mod
+                                             :timestamp payload.timestamp})
+                          (cleanup-if-needed))
+                        true)
+     :mouse-motion (fn [_ctx payload]
+                     (local session (active-session))
+                     (when session
+                       (set pending-motion {:x payload.x
+                                            :y payload.y
+                                            :mod payload.mod
+                                            :timestamp payload.timestamp})
+                       (cleanup-if-needed))
+                     true)
+     :mouse-wheel (fn [_ctx _payload] true)
+     :updated (fn [_ctx _delta]
+                (local session (active-session))
+                (flush-pending-motion session)
+                (cleanup-if-needed)
+                true)})
 
-  (fn handle-leave []
-    (set pending-motion nil)
-    nil)
-
-  (fn handle-key-down [payload]
-    (local session (active-session))
-    (if session
-        (do
-          (session:on-key-down payload)
-          (cleanup-if-needed)
-          true)
-        (do
-          (cleanup-if-needed)
-          true)))
-
-  (fn handle-mouse-button-down [payload]
-    (local session (active-session))
-    (when (and session (= payload.button 1))
-      (set pending-motion nil)
-      (session:begin-drag {:x payload.x
-                           :y payload.y
-                           :mod payload.mod
-                           :timestamp payload.timestamp})
-      (cleanup-if-needed))
-    true)
-
-  (fn handle-mouse-button-up [payload]
-    (local session (active-session))
-    (when (and session (= payload.button 1))
-      (flush-pending-motion session)
-      (session:end-drag {:x payload.x
-                         :y payload.y
-                         :mod payload.mod
-                         :timestamp payload.timestamp})
-      (cleanup-if-needed))
-    true)
-
-  (fn handle-mouse-motion [payload]
-    (local session (active-session))
-    (when session
-      (set pending-motion {:x payload.x
-                           :y payload.y
-                           :mod payload.mod
-                           :timestamp payload.timestamp})
-      (cleanup-if-needed))
-    true)
-
-  (fn handle-mouse-wheel [_payload]
-    true)
-
-  (fn handle-updated [_delta]
-    (local session (active-session))
-    (flush-pending-motion session)
-    (cleanup-if-needed)
-    true)
-
-  (StateBase.make-state
+  (State
     {:name :terrain-rect-pick
-     :on-enter handle-enter
-     :on-leave handle-leave
-     :on-key-down handle-key-down
-     :on-mouse-button-down handle-mouse-button-down
-     :on-mouse-button-up handle-mouse-button-up
-     :on-mouse-motion handle-mouse-motion
-     :on-mouse-wheel handle-mouse-wheel
-     :on-updated handle-updated}))
+     :routes {:key-down (Routes.FirstHandlerWins [TerrainRectPick])
+              :mouse-button-down (Routes.FirstHandlerWins [TerrainRectPick])
+              :mouse-button-up (Routes.FirstHandlerWins [TerrainRectPick])
+              :mouse-motion (Routes.FirstHandlerWins [TerrainRectPick])
+              :mouse-wheel (Routes.FirstHandlerWins [TerrainRectPick])
+              :updated (Routes.Broadcast [TerrainRectPick])}
+     :enter [Defaults.HoverLifecycle TerrainRectPick]
+     :leave [Defaults.HoverLifecycle TerrainRectPick]}))
 
 TerrainRectPickState

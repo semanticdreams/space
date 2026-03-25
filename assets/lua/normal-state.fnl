@@ -1,4 +1,7 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local Defaults (require :state-defaults))
+(local DefaultConfig (require :state-default-config))
 (local GraphView (require :graph/view))
 
 (local KEY_SPACE (string.byte " "))
@@ -8,8 +11,6 @@
 (local SDLK_F4 1073741885)
 
 (fn NormalState []
-  (local base (StateBase.make-state {:name :normal}))
-  (local base-on-key-down base.on-key-down)
   (fn create-graph-view []
     (if (and app.graph-view-factory (= (type app.graph-view-factory) :function))
         (app.graph-view-factory)
@@ -49,39 +50,38 @@
     (launchable.open-panel {:scene app.scene})
     true)
 
-  (fn handle-key-down [payload]
-    (local key (and payload payload.key))
-    (if (= key KEY_SPACE)
-        (do
-          (when (and app.engine app.states app.states.set-state)
-            (app.states.set-state :leader))
-          true)
-        (= key SDLK_RETURN)
-        (let [focus-manager app.focus
-              graph-view app.graph-view]
-          (if (and focus-manager focus-manager.activate-focused-from-payload)
-              (if (focus-manager:activate-focused-from-payload payload)
-                  true
-                  (if (and graph-view graph-view.open-focused-node)
-                      (or (graph-view:open-focused-node)
-                          (base-on-key-down payload))
-                      (base-on-key-down payload)))
-              (if (and graph-view graph-view.open-focused-node)
-                  (or (graph-view:open-focused-node)
-                      (base-on-key-down payload))
-                  (base-on-key-down payload))))
-        (= key SDLK_DELETE)
-        (if (remove-selected-nodes)
-            true
-            (base-on-key-down payload))
-        (= key SDLK_F4)
-        (toggle-graph-view)
-        (= key KEY_BACKQUOTE)
-        (open-fennel-interpreter)
-        (base-on-key-down payload)))
+  (local NormalCommands
+    {:key-down
+     (fn [ctx payload]
+       (local key (and payload payload.key))
+       (local set-state (. ctx :set-state))
+       (if (= key KEY_SPACE)
+           (do
+             (set-state :leader)
+             true)
+           (= key SDLK_RETURN)
+           (let [focus-manager app.focus
+                 graph-view app.graph-view]
+             (if (and focus-manager focus-manager.activate-focused-from-payload)
+                 (if (focus-manager:activate-focused-from-payload payload)
+                     true
+                     (and graph-view graph-view.open-focused-node
+                          (graph-view:open-focused-node)))
+                 (and graph-view graph-view.open-focused-node
+                      (graph-view:open-focused-node))))
+           (= key SDLK_DELETE)
+           (remove-selected-nodes)
+           (= key SDLK_F4)
+           (toggle-graph-view)
+           (= key KEY_BACKQUOTE)
+           (open-fennel-interpreter)
+           false))})
 
-  (StateBase.make-state
+  (State
     {:name :normal
-     :on-key-down handle-key-down}))
+     :routes (DefaultConfig.routes
+               {:key-down (Routes.FirstHandlerWins [NormalCommands Defaults.DefaultKeyDown])})
+     :enter DefaultConfig.enter
+     :leave DefaultConfig.leave}))
 
 NormalState

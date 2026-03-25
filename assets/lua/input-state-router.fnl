@@ -41,6 +41,11 @@
     (release-active-input))
   active-input)
 
+(fn reset []
+  (set active-input nil)
+  (set-text-input-enabled false)
+  nil)
+
 (fn dispatch-input [method payload]
   (local current active-input)
   (if (and current method (. current method))
@@ -51,6 +56,7 @@
  :disconnect-input disconnect-input
  :dispatch-input dispatch-input
  :active-input (fn [] active-input)
+ :reset reset
  :release-active-input release-active-input}
 
 ;

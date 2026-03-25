@@ -1,5 +1,5 @@
 (local Harness (require :tests.e2e.harness))
-(local StateBase (require :state-base))
+(local Runtime (require :state-runtime))
 (local Fixture (require :tests.e2e.scroll-view-fixture))
 
 (fn run [ctx]
@@ -15,8 +15,8 @@
   (assert view "scroll-view snapshot missing view")
   (local pointer (Fixture.scrollbar-center-screen ctx view))
   (app.hoverables:on-mouse-motion pointer)
-  (StateBase.dispatch-mouse-wheel {:x pointer.x :y -1})
-  (StateBase.dispatch-mouse-wheel {:x pointer.x :y -1})
+  (Runtime.dispatch-mouse-wheel {:x pointer.x :y -1})
+  (Runtime.dispatch-mouse-wheel {:x pointer.x :y -1})
   (Harness.draw-targets ctx.width ctx.height [{:target target}])
   (Harness.capture-snapshot {:name "scroll-view"
                              :width ctx.width

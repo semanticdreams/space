@@ -1,4 +1,6 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local DefaultConfig (require :state-default-config))
 
 (local KEY
   {:escape 27
@@ -9,16 +11,21 @@
     (app.states.set-state name)))
 
 (fn QuitState []
-  (StateBase.make-state
+  (local QuitCommands
+    {:key-down (fn [_ctx payload]
+                 (local key (and payload payload.key))
+                 (if (= key KEY.escape)
+                     (do (set-state :normal) true)
+                     (= key KEY.q) (do
+                                     (assert app.engine.quit "app.engine.quit binding missing")
+                                     (app.engine.quit)
+                                     true)
+                     true))})
+  (State
     {:name :quit
-     :on-key-down (fn [payload]
-                    (local key (and payload payload.key))
-                    (if (= key KEY.escape)
-                        (do (set-state :normal) true)
-                        (= key KEY.q) (do
-                                        (assert app.engine.quit "app.engine.quit binding missing")
-                                        (app.engine.quit)
-                                        true)
-                        true))}))
+     :routes (DefaultConfig.routes
+               {:key-down (Routes.FirstHandlerWins [QuitCommands])})
+     :enter DefaultConfig.enter
+     :leave DefaultConfig.leave}))
 
 QuitState

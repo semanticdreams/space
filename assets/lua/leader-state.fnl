@@ -1,4 +1,6 @@
-(local StateBase (require :state-base))
+(local State (require :state))
+(local Routes (require :state-routes))
+(local DefaultConfig (require :state-default-config))
 (local LauncherLaunchable (require :launchables/launcher))
 
 (local KEY
@@ -15,17 +17,22 @@
   (LauncherLaunchable.open-panel {:hud app.hud}))
 
 (fn LeaderState []
-  (StateBase.make-state
+  (local LeaderCommands
+    {:key-down (fn [_ctx payload]
+                 (local key (and payload payload.key))
+                 (if (= key KEY.escape)
+                     (do (set-state :normal) true)
+                     (= key KEY.c) (do (set-state :camera) true)
+                     (= key KEY.q) (do (set-state :quit) true)
+                     (= key KEY.p) (do
+                                     (open-launcher)
+                                     true)
+                     true))})
+  (State
     {:name :leader
-     :on-key-down (fn [payload]
-                    (local key (and payload payload.key))
-                    (if (= key KEY.escape)
-                        (do (set-state :normal) true)
-                        (= key KEY.c) (do (set-state :camera) true)
-                        (= key KEY.q) (do (set-state :quit) true)
-                        (= key KEY.p) (do
-                                        (open-launcher)
-                                        true)
-                        true))}))
+     :routes (DefaultConfig.routes
+               {:key-down (Routes.FirstHandlerWins [LeaderCommands])})
+     :enter DefaultConfig.enter
+     :leave DefaultConfig.leave}))
 
 LeaderState
