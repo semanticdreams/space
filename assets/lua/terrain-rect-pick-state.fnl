@@ -1,5 +1,7 @@
 (local State (require :state))
 (local Routes (require :state-routes))
+(local PointerHandlers (require :state-handlers/pointer))
+(local CameraHandlers (require :state-handlers/camera))
 (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
 
 
@@ -75,7 +77,11 @@
               :mouse-button-down (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-button-up (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-motion (Routes.FirstHandlerWins [TerrainRectPick])
-              :updated (Routes.Broadcast [TerrainRectPick])}
+              :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                                    PointerHandlers.HoveredMouseWheel
+                                                    PointerHandlers.CameraMouseWheel])
+              :updated (Routes.Chain [TerrainRectPick
+                                      CameraHandlers.CameraUpdated])}
      :enter [TerrainRectPick]
      :leave [TerrainRectPick]}))
 

@@ -499,6 +499,44 @@
   (set app.states original-states)
   (TestSupport.resume-active-state suspended-state))
 
+(fn terrain-rect-pick-state-forwards-camera-wheel-and-updates []
+  (reset-engine-events)
+  (local original-states app.states)
+  (var suspended-state nil)
+  (local original-hud app.hud)
+  (local original-controls app.first-person-controls)
+  (local original-hoverables app.hoverables)
+  (local states (States))
+  (local controls (create-controls-stub))
+  (states.add-state :normal {})
+  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
+  (set app.states states)
+  (set app.hud {:build-context {}
+                :world-units-per-pixel 1})
+  (set app.first-person-controls controls)
+  (set app.hoverables (make-hoverables-stub))
+  (states.set-state :normal)
+  (local session
+    {:active? (fn [_self] true)
+     :begin (fn [_self] true)
+     :cancel-selection (fn [_self] nil)
+     :begin-drag (fn [_self _payload] true)
+     :drag-active? (fn [_self] true)
+     :update-drag (fn [_self _payload] true)
+     :end-drag (fn [_self _payload] true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainRectPickManager.begin session)
+  (app.engine.events.mouse-wheel.emit {:x 0 :y 2})
+  (app.engine.events.updated.emit 0.125)
+  (assert (= controls.record.mouse_wheel 2))
+  (assert (= controls.record.updated 0.125))
+  (set app.hoverables original-hoverables)
+  (set app.first-person-controls original-controls)
+  (set app.hud original-hud)
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
+
 (fn terrain-paint-state-routes-and-restores []
   (reset-engine-events)
   (local original-states app.states)
@@ -599,6 +637,22 @@
   (app.engine.events.mouse-wheel:emit {:x 0 :y 3})
   (state:on-leave)
   (assert (= controls.record.mouse_wheel 3))
+  (set app.first-person-controls original-controls)
+  (set app.hoverables original-hoverables))
+
+(fn terrain-paint-state-forwards-camera-updates []
+  (reset-engine-events)
+  (local original-controls app.first-person-controls)
+  (local original-hoverables app.hoverables)
+  (local controls (create-controls-stub))
+  (local hoverables (make-hoverables-stub))
+  (set app.first-person-controls controls)
+  (set app.hoverables hoverables)
+  (local state (TerrainPaintState))
+  (state:on-enter)
+  (app.engine.events.updated.emit 0.125)
+  (state:on-leave)
+  (assert (= controls.record.updated 0.125))
   (set app.first-person-controls original-controls)
   (set app.hoverables original-hoverables))
 
@@ -860,12 +914,16 @@
                      :fn terrain-rect-pick-state-coalesces-motion-until-update})
 (table.insert tests {:name "Terrain rect pick state flushes pending motion on mouse up"
                      :fn terrain-rect-pick-state-flushes-pending-motion-on-mouse-up})
+(table.insert tests {:name "Terrain rect pick state forwards camera wheel and updates"
+                     :fn terrain-rect-pick-state-forwards-camera-wheel-and-updates})
 (table.insert tests {:name "Terrain paint state routes and restores"
                      :fn terrain-paint-state-routes-and-restores})
 (table.insert tests {:name "Terrain paint state coalesces motion until update"
                      :fn terrain-paint-state-coalesces-motion-until-update})
 (table.insert tests {:name "Terrain paint state forwards mouse wheel"
                      :fn terrain-paint-state-forwards-mouse-wheel})
+(table.insert tests {:name "Terrain paint state forwards camera updates"
+                     :fn terrain-paint-state-forwards-camera-updates})
 (table.insert tests {:name "Terrain rect pick manager cleans up dropped session"
                      :fn terrain-rect-pick-manager-cleans-up-dropped-session})
 (table.insert tests {:name "Terrain paint manager cleans up dropped session"

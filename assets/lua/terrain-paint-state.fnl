@@ -1,6 +1,7 @@
 (local State (require :state))
 (local Routes (require :state-routes))
 (local PointerHandlers (require :state-handlers/pointer))
+(local CameraHandlers (require :state-handlers/camera))
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 
 (fn active-session []
@@ -77,7 +78,8 @@
               :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
                                                     PointerHandlers.HoveredMouseWheel
                                                     PointerHandlers.CameraMouseWheel])
-              :updated (Routes.Broadcast [TerrainPaint])}
+              :updated (Routes.Chain [TerrainPaint
+                                      CameraHandlers.CameraUpdated])}
      :enter [TerrainPaint]
      :leave [TerrainPaint]}))
 
