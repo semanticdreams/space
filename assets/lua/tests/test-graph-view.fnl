@@ -23,6 +23,7 @@
 (local JsonUtils (require :json-utils))
 (local fs (require :fs))
 (local PathUtils (require :tests.path-utils))
+(local TestSupport (require :tests/test-support))
 
 (local tests [])
 (local appdirs (require :appdirs))
@@ -1058,6 +1059,7 @@
             (local original-fpc app.first-person-controls)
             (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
             (local original-states app.states)
+            (var suspended-state nil)
             (local terrain-record (make-heightfield-terrain-record))
             (local scene
               {:screen-pos-terrain-domain-hit
@@ -1128,6 +1130,7 @@
             (states.add-state :normal {})
             (states.add-state :terrain-rect-pick (TerrainRectPickState))
             (states.set-state :normal)
+            (set suspended-state (TestSupport.suspend-active-state original-states))
             (set app.states states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
@@ -1177,6 +1180,7 @@
             (set app.resizables original-resizables)
             (set app.first-person-controls original-fpc)
             (set app.states original-states)
+            (TestSupport.resume-active-state suspended-state)
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
 
@@ -1200,6 +1204,7 @@
             (local original-fpc app.first-person-controls)
             (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
             (local original-states app.states)
+            (var suspended-state nil)
             (local terrain-record (make-heightfield-terrain-record))
             (local scene
               {:screen-pos-terrain-domain-hit
@@ -1270,6 +1275,7 @@
             (states.add-state :normal {})
             (states.add-state :terrain-rect-pick (TerrainRectPickState))
             (states.set-state :normal)
+            (set suspended-state (TestSupport.suspend-active-state original-states))
             (set app.states states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
@@ -1321,6 +1327,7 @@
             (set app.resizables original-resizables)
             (set app.first-person-controls original-fpc)
             (set app.states original-states)
+            (TestSupport.resume-active-state suspended-state)
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
 
@@ -1345,6 +1352,7 @@
             (local original-fpc app.first-person-controls)
             (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
             (local original-states app.states)
+            (var suspended-state nil)
             (local terrain-record (make-heightfield-terrain-record))
             (local scene
               {:screen-pos-terrain-domain-hit
@@ -1415,6 +1423,7 @@
             (states.add-state :normal (NormalState))
             (states.add-state :terrain-rect-pick (TerrainRectPickState))
             (states.set-state :normal)
+            (set suspended-state (TestSupport.suspend-active-state original-states))
             (set app.states states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
@@ -1466,6 +1475,7 @@
             (set app.resizables original-resizables)
             (set app.first-person-controls original-fpc)
             (set app.states original-states)
+            (TestSupport.resume-active-state suspended-state)
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
 (fn graph-layout-module-updates-lines-and-labels []

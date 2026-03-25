@@ -3,6 +3,7 @@
 (local Signal (require :signal))
 (local Graph (require :graph/init))
 (local GraphKeyLoaders (require :graph/key-loaders))
+(local TestSupport (require :tests/test-support))
 
 (local tests [])
 
@@ -2353,6 +2354,7 @@
   (local world-changed (Signal))
   (local original-terrain-rect-pick-session app.terrain-rect-pick-session)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-hud app.hud)
   (local original-clickables app.clickables)
   (local terrain-record
@@ -2405,6 +2407,7 @@
   (states.add-state :normal {})
   (states.add-state :terrain-rect-pick (TerrainRectPickState))
   (states.set-state :normal)
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
                        :on-mouse-button-up (fn [_self _payload] nil)
@@ -2434,6 +2437,7 @@
   (assert (= (text-entity-value view.selection-label) "12 samples across [1, 2] to [3, 4]"))
   (set app.terrain-rect-pick-session original-terrain-rect-pick-session)
   (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state)
   (set app.hud original-hud)
   (set app.clickables original-clickables)
   (view:drop))

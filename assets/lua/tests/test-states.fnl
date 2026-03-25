@@ -16,6 +16,7 @@
 (local InputState (require :input-state-router))
 (local StateBase (require :state-base))
 (local InputModel (require :input-model))
+(local TestSupport (require :tests/test-support))
 
 (local tests [])
 
@@ -222,10 +223,12 @@
 (fn terrain-rect-pick-state-routes-and-restores []
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
@@ -266,15 +269,18 @@
   (assert (= (states.active-name) :normal)
           "terrain rect pick state should restore the previous state when the session completes")
   (set app.hud original-hud)
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-coalesces-motion-until-update []
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
@@ -310,15 +316,18 @@
   (assert (= (. (. forwarded 2) 3) 60))
   (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
   (set app.hud original-hud)
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-flushes-pending-motion-on-mouse-up []
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
@@ -352,15 +361,18 @@
   (assert (= (. (. forwarded 2) 3) 40))
   (assert (= (. (. forwarded 3) 1) :button))
   (set app.hud original-hud)
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-forwards-pending-start-motion-before-drag-active []
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
@@ -400,14 +412,17 @@
   (app.engine.events.mouse-button-up.emit {:button 1 :x 30 :y 40})
   (assert (= (. (. forwarded 3) 1) :button))
   (set app.hud original-hud)
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-routes-and-restores []
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-paint (TerrainPaintState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (states.set-state :normal)
   (local forwarded [])
@@ -443,14 +458,17 @@
   (assert (= (. (. forwarded 3) 1) :button))
   (assert (= (states.active-name) :normal)
           "terrain paint state should restore the previous state when the session completes")
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-coalesces-motion-until-update []
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-paint (TerrainPaintState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (states.set-state :normal)
   (local forwarded [])
@@ -481,16 +499,19 @@
   (assert (= (. (. forwarded 2) 2) 50))
   (assert (= (. (. forwarded 2) 3) 60))
   (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-manager-cleans-up-dropped-session []
   (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
@@ -516,15 +537,18 @@
   (assert (= (states.active-name) :normal)
           "cleanup-session should restore the previous app state")
   (set app.hud original-hud)
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-manager-cleans-up-dropped-session []
   (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
   (reset-engine-events)
   (local original-states app.states)
+  (var suspended-state nil)
   (local states (States))
   (states.add-state :normal {})
   (states.add-state :terrain-paint (TerrainPaintState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
   (set app.states states)
   (states.set-state :normal)
   (var active? false)
@@ -546,7 +570,8 @@
   (assert (= (TerrainPaintManager.active-session) nil))
   (assert (= (states.active-name) :normal)
           "cleanup-session should restore the previous app state")
-  (set app.states original-states))
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
 
 (fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state []
   (reset-engine-events)
