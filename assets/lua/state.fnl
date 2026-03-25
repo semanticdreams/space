@@ -33,13 +33,27 @@
     (tset copy route-key (and routes (. routes route-key))))
   copy)
 
+(fn collect-active-route-entries [routes]
+  (local entries [])
+  (each [_ entry (ipairs engine-event-order)]
+    (local route-key (. entry 1))
+    (when (. routes route-key)
+      (table.insert entries entry)))
+  entries)
+
+(fn require-engine-events [state-name]
+  (assert (and app app.engine app.engine.events)
+          (.. "State " (tostring state-name) " requires app.engine.events"))
+  app.engine.events)
+
 (fn make-ctx [state]
   (var current-event nil)
   {:app app
    :state state
    :set-state (fn [name]
-                (when (and app.engine app.states app.states.set-state)
-                  (app.states.set-state name)))
+                (assert (and app.states app.states.set-state)
+                        (.. "State " (tostring state.name) " requires app.states.set-state"))
+                (app.states.set-state name))
    :connect-input Runtime.connect-input
    :disconnect-input Runtime.disconnect-input
    :active-input Runtime.active-input
@@ -75,6 +89,7 @@
   (assert opts "State requires options")
   (assert-known-route-keys opts.routes)
   (local routes (clone-routes (or opts.routes {})))
+  (local active-route-entries (collect-active-route-entries routes))
   (local state {:name opts.name})
   (local ctx (make-ctx state))
   (local event-handlers {})
@@ -102,23 +117,27 @@
 
   (fn on-enter []
     (when (not entered?)
-      (each [_ entry (ipairs engine-event-order)]
+      (local events (require-engine-events state.name))
+      (each [_ entry (ipairs active-route-entries)]
         (local route-key (. entry 1))
         (local signal-key (. entry 2))
-        (local signal (. app.engine.events signal-key))
-        (when signal
-          (signal.connect (. event-handlers route-key))))
+        (local signal (. events signal-key))
+        (assert signal
+                (.. "State " (tostring state.name) " requires engine event signal " (tostring signal-key)))
+        (signal.connect (. event-handlers route-key)))
       (set entered? true)
       (run-lifecycle opts.enter :enter ctx)))
 
   (fn on-leave []
     (when entered?
-      (each [_ entry (ipairs engine-event-order)]
+      (local events (require-engine-events state.name))
+      (each [_ entry (ipairs active-route-entries)]
         (local route-key (. entry 1))
         (local signal-key (. entry 2))
-        (local signal (. app.engine.events signal-key))
-        (when signal
-          (signal.disconnect (. event-handlers route-key))))
+        (local signal (. events signal-key))
+        (assert signal
+                (.. "State " (tostring state.name) " requires engine event signal " (tostring signal-key)))
+        (signal.disconnect (. event-handlers route-key)))
       (set entered? false)
       (run-lifecycle opts.leave :leave ctx)))
 

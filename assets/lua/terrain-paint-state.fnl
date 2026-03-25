@@ -1,5 +1,6 @@
 (local State (require :state))
 (local Routes (require :state-routes))
+(local PointerHandlers (require :state-handlers/pointer))
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 
 (fn active-session []
@@ -73,6 +74,9 @@
               :mouse-button-down (Routes.FirstHandlerWins [TerrainPaint])
               :mouse-button-up (Routes.FirstHandlerWins [TerrainPaint])
               :mouse-motion (Routes.FirstHandlerWins [TerrainPaint])
+              :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                                    PointerHandlers.HoveredMouseWheel
+                                                    PointerHandlers.CameraMouseWheel])
               :updated (Routes.Broadcast [TerrainPaint])}
      :enter [TerrainPaint]
      :leave [TerrainPaint]}))

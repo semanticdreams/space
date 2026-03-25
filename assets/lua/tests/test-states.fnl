@@ -48,6 +48,31 @@
 (local KEY_DOWN 1073741905)
 (local KEY_UP 1073741906)
 
+(fn fresh-engine-events []
+  (local Signal (require :signal))
+  {:text-input (Signal)
+   :text-editing (Signal)
+   :key-down (Signal)
+   :key-up (Signal)
+   :mouse-button-down (Signal)
+   :mouse-button-up (Signal)
+   :mouse-motion (Signal)
+   :mouse-wheel (Signal)
+   :gamepad-button-down (Signal)
+   :gamepad-axis-motion (Signal)
+   :gamepad-removed (Signal)
+   :updated (Signal)})
+
+(fn fresh-engine-events-with-connect-log [log]
+  (local events (fresh-engine-events))
+  (each [name signal (pairs events)]
+    (local original-connect signal.connect)
+    (set signal.connect
+         (fn [first handler]
+           (table.insert log name)
+           (original-connect first handler))))
+  events)
+
 (fn transitions-call-enter-and-leave []
   (local states (States))
   (local log [])
@@ -561,6 +586,22 @@
   (set app.states original-states)
   (TestSupport.resume-active-state suspended-state))
 
+(fn terrain-paint-state-forwards-mouse-wheel []
+  (reset-engine-events)
+  (local original-controls app.first-person-controls)
+  (local original-hoverables app.hoverables)
+  (local controls (create-controls-stub))
+  (local hoverables (make-hoverables-stub))
+  (set app.first-person-controls controls)
+  (set app.hoverables hoverables)
+  (local state (TerrainPaintState))
+  (state:on-enter)
+  (app.engine.events.mouse-wheel:emit {:x 0 :y 3})
+  (state:on-leave)
+  (assert (= controls.record.mouse_wheel 3))
+  (set app.first-person-controls original-controls)
+  (set app.hoverables original-hoverables))
+
 (fn terrain-rect-pick-manager-cleans-up-dropped-session []
   (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
   (reset-engine-events)
@@ -662,6 +703,34 @@
           "switching states during mouse-up should not deliver the same mouse-up to the newly entered state")
   (assert (= (states.active-name) :next))
   (set app.states original-states))
+
+(fn state-enter-fails-fast-when-used-engine-signal-missing []
+  (local original-events app.engine.events)
+  (set app.engine.events (fresh-engine-events))
+  (set app.engine.events.mouse-wheel nil)
+  (local (ok err) (pcall
+                    (fn []
+                      (local broken (State {:name :broken
+                                            :routes {:mouse-wheel (fn [_event-name _ctx _payload] true)}}))
+                      ((. broken :on-enter)))))
+  (set app.engine.events original-events)
+  (assert (not ok))
+  (assert (and err (string.find err "requires engine event signal mouse%-wheel"))))
+
+(fn state-enters-only-connect-declared-routes []
+  (local original-events app.engine.events)
+  (local connect-log [])
+  (set app.engine.events (fresh-engine-events-with-connect-log connect-log))
+  (local state
+    (State {:name :subset
+            :routes {:key-down (fn [_event-name _ctx _payload] true)
+                     :updated (fn [_event-name _ctx _payload] true)}}))
+  (state:on-enter)
+  (state:on-leave)
+  (set app.engine.events original-events)
+  (assert (= (# connect-log) 2))
+  (assert (= (. connect-log 1) :key-down))
+  (assert (= (. connect-log 2) :updated)))
 
 (fn normal-state-delete-removes-graph-selection []
   (reset-engine-events)
@@ -795,12 +864,18 @@
                      :fn terrain-paint-state-routes-and-restores})
 (table.insert tests {:name "Terrain paint state coalesces motion until update"
                      :fn terrain-paint-state-coalesces-motion-until-update})
+(table.insert tests {:name "Terrain paint state forwards mouse wheel"
+                     :fn terrain-paint-state-forwards-mouse-wheel})
 (table.insert tests {:name "Terrain rect pick manager cleans up dropped session"
                      :fn terrain-rect-pick-manager-cleans-up-dropped-session})
 (table.insert tests {:name "Terrain paint manager cleans up dropped session"
                      :fn terrain-paint-manager-cleans-up-dropped-session})
 (table.insert tests {:name "State switch during mouse up does not deliver same event to new state"
                      :fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state})
+(table.insert tests {:name "State enter fails fast when used engine signal missing"
+                     :fn state-enter-fails-fast-when-used-engine-signal-missing})
+(table.insert tests {:name "State enters only connect declared routes"
+                     :fn state-enters-only-connect-declared-routes})
 (table.insert tests {:name "Normal state directional focus triggers" :fn normal-state-directional-focus-triggers})
 (table.insert tests {:name "Normal state directional focus skips while input active"
                      :fn normal-state-directional-focus-skips-with-input})
