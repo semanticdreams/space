@@ -590,6 +590,7 @@
 (set app.screen-locked-handler nil)
 (set app.runtime-performance-input-handlers {})
 (set app.update-handler nil)
+(set app.engine-tick-handler nil)
 (set app.global-shortcuts-handler nil)
 (set app.remote-control nil)
 (set app.remote-control-endpoint nil)
@@ -894,6 +895,17 @@
     (set app.update-handler nil))
   (when (and app.engine.events app.engine.events.updated)
     (set app.update-handler (app.engine.events.updated:connect app.update)))
+  (when (and app.engine-tick-handler app.engine.events app.engine.events.engine-tick)
+    (app.engine.events.engine-tick:disconnect app.engine-tick-handler true)
+    (set app.engine-tick-handler nil))
+  (when (and app.engine.events app.engine.events.engine-tick)
+    (set app.engine-tick-handler
+         (app.engine.events.engine-tick:connect
+           (fn [_payload]
+             (when app.remote-control
+               (app.remote-control:tick))
+             (when (and app.kernels app.kernels.tick)
+               (app.kernels:tick))))))
   (when (and app.global-shortcuts-handler app.engine.events app.engine.events.key-down)
     (app.engine.events.key-down:disconnect app.global-shortcuts-handler true)
     (set app.global-shortcuts-handler nil))
@@ -1034,11 +1046,7 @@
   (when (and app.settings app.runtime-performance-state)
     (if (RuntimePerformance.update-idle-state app.settings app.runtime-performance-state (os.clock))
         (apply-runtime-performance-settings)))
-  (when app.remote-control
-    (app.remote-control:tick))
   (flush-window-settings-save)
-  (when (and app.kernels app.kernels.tick)
-    (app.kernels:tick))
   (local ui-paused (= app.runtime-performance-ui-paused true))
   (when (not ui-paused)
     (when (and app.world-manager app.world-manager.update)
@@ -1067,6 +1075,9 @@
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)
     (set app.update-handler nil))
+  (when (and app.engine-tick-handler app.engine.events app.engine.events.engine-tick)
+    (app.engine.events.engine-tick:disconnect app.engine-tick-handler true)
+    (set app.engine-tick-handler nil))
   (when (and app.window-resized-handler app.engine.events app.engine.events.window-resized)
     (app.engine.events.window-resized:disconnect app.window-resized-handler true)
     (set app.window-resized-handler nil))

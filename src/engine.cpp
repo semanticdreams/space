@@ -883,6 +883,12 @@ void Engine::run() {
 
         lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
         dispatch_lua_work();
+        {
+            sol::table payload = lua_state->create_table();
+            payload["dt"] = static_cast<uint32_t>(dt);
+            payload["frame-id"] = frame_id.load(std::memory_order_relaxed);
+            emit_engine_event("engine-tick", payload);
+        }
         const bool render_enabled = !ui_paused_ || has_force_ui_frame;
         if (render_enabled) {
             window->updateFpsCounter(dt);

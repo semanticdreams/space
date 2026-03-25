@@ -1,7 +1,8 @@
 (local Signal (require :signal))
 
 
-{:updated (Signal)
+{:engine-tick (Signal)
+ :updated (Signal)
  :gamepad-added (Signal)
  :gamepad-removed (Signal)
  :gamepad-axis-motion (Signal)
