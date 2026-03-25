@@ -283,6 +283,67 @@
       (assert (= draw-call.args.mode gl.GL_TRIANGLES))
       (assert (= draw-call.args.count (/ (vector:length) 8))))))
 
+(fn instanced-color-mesh-renderer-draws-instanced-and-updates-dirty-instance-window []
+  (with-open-gl
+    (fn [mock]
+      (local InstancedColorMeshRenderer (reload "instanced-color-mesh-renderer"))
+      (local renderer (InstancedColorMeshRenderer))
+      (local vertex-vector (fake-vector 60))
+      (local instance-vector (VectorBuffer 0))
+      (local handle (instance-vector:allocate 32))
+      (instance-vector:set-glm-mat4 handle 0 (glm.mat4 1))
+      (instance-vector:set-glm-mat4 handle 16 (glm.translate (glm.mat4 1) (glm.vec3 2 0 0)))
+      (local batch {:vertex-vector vertex-vector
+                    :indices [0 1 2 0 2 3]
+                    :index-count 6
+                    :instance-vector instance-vector
+                    :visible? true
+                    :unlit false
+                    :get-instance-batches (fn [_self]
+                                            [{:firsts [0]
+                                              :counts [2]}])})
+      (renderer:render [batch] {:projection true} {:view true})
+      (local index-upload (only (mock:get-gl-calls "glBufferDataUInt")))
+      (assert (= index-upload.args.target 0x8893))
+      (local draw-call (only (mock:get-gl-calls "glDrawElementsInstanced")))
+      (assert (= draw-call.args.mode gl.GL_TRIANGLES))
+      (assert (= draw-call.args.count 6))
+      (assert (= draw-call.args.type gl.GL_UNSIGNED_INT))
+      (assert (= draw-call.args.instances 2))
+
+      (mock:reset)
+      (instance-vector:set-glm-mat4-diff handle 16 (glm.translate (glm.mat4 1) (glm.vec3 4 0 0)))
+      (renderer:render [batch] {:projection true} {:view true})
+      (local sub-updates
+        (collect-calls (mock:get-gl-calls "bufferSubDataFromVectorBuffer")
+                       "bufferSubDataFromVectorBuffer"
+                       (fn [args] (= args.target gl.GL_ARRAY_BUFFER))))
+      (assert (= (# sub-updates) 1)
+              "instanced color mesh renderer should issue one dirty subdata update for instance changes"))))
+
+(fn instanced-color-mesh-batch-drop-requires-removed-instances []
+  (local InstancedColorMeshBatch (reload "instanced-color-mesh-batch"))
+  (local batches [])
+  (local ctx {:register-instanced-color-mesh-batch (fn [_self batch]
+                                                     (table.insert batches batch)
+                                                     batch)
+              :unregister-instanced-color-mesh-batch (fn [_self batch]
+                                                       (for [idx 1 (length batches)]
+                                                         (when (= (. batches idx) batch)
+                                                           (table.remove batches idx)
+                                                           (lua "break")))
+                                                       nil)})
+  (local batch (InstancedColorMeshBatch ctx {:vertices [{:color (glm.vec4 1 1 1 1)
+                                                         :normal (glm.vec3 0 1 0)
+                                                         :position (glm.vec3 0 0 0)}]
+                                            :indices [0]}))
+  (local instance (batch:add-instance (glm.mat4 1)))
+  (local ok (pcall (fn [] (batch:drop))))
+  (assert (not ok) "Dropping a batch with live instances should fail loudly")
+  (batch:remove-instance instance)
+  (batch:drop)
+  (assert (= (length batches) 0)))
+
 (fn text-renderer-uploads-font-state []
   (with-open-gl
     (fn [mock]
@@ -389,6 +450,10 @@
 (table.insert tests {:name "Quad renderer updates dirty instance window"
                      :fn quad-renderer-updates-dirty-instance-window})
 (table.insert tests {:name "Mesh renderer draws textured triangles" :fn mesh-renderer-draws-textured-triangles})
+(table.insert tests {:name "Instanced color mesh renderer draws instanced meshes and updates dirty instances"
+                     :fn instanced-color-mesh-renderer-draws-instanced-and-updates-dirty-instance-window})
+(table.insert tests {:name "Instanced color mesh batch drop requires removed instances"
+                     :fn instanced-color-mesh-batch-drop-requires-removed-instances})
 (table.insert tests {:name "Text renderer uploads font metadata and texture" :fn text-renderer-uploads-font-state})
 (table.insert tests {:name "Image renderer uses draw batcher and fallback draws" :fn image-renderer-respects-draw-batcher})
 (table.insert tests {:name "Text SSBO renderer uses group SSBO and instanced draws"

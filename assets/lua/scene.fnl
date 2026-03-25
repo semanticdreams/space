@@ -11,7 +11,6 @@
 (local GraphNodeCube (require :graph-node-cube))
 (local Sized (require :sized))
 (local SceneWorldState (require :scene-world-state))
-(local Ball (require :ball))
 (local GltfMesh (require :gltf-mesh))
 (local BuildContext (require :build-context))
 (local viewport-utils (require :viewport-utils))
@@ -32,8 +31,12 @@
 (local array->quat (. MathUtils :array->quat))
 (local safe-vec3? CoordinateGuard.safe-vec3?)
 
+;; Built-in kinds here are only for scene-owned restore strategies.
+;; Balls have already moved to the generic object protocol via add-object.
+;; Physics bodies, graph-node cubes, and the demo browser should eventually
+;; follow the same direction. Terrain is still special for now because scene
+;; owns terrain queries, replacement, and selection infrastructure.
 (local built-in-scene-kinds {:graph-node-cube true
-                             :physics-ball true
                              :physics-cuboid true
                              :demo-browser true})
 
@@ -100,19 +103,20 @@
                                :owner element})))
   entries)
 
-(fn collect-ball-movables [entity]
+(fn collect-scene-object-movables [entity]
   (var entries [])
-  (each [_ ball (ipairs (or (and entity entity.balls) []))]
-    (local layout (and ball ball.layout))
-    (when layout
+  (each [_ entry (ipairs (or (and entity entity.scene-objects) []))]
+    (local movable (and entry entry.movable))
+    (local element (and entry entry.element))
+    (local layout (and element element.layout))
+    (when (and movable layout)
       (table.insert entries {:target layout
-                             :handle ball
-                             :key ball
-                             :owner ball
-                             :on-drag-start (fn [_entry]
-                                              (ball:begin-drag))
-                             :on-drag-end (fn [_entry]
-                                            (ball:end-drag))})))
+                             :handle (or movable.handle element)
+                             :key (or movable.key element)
+                             :owner (or movable.owner element)
+                             :pointer-target movable.pointer-target
+                             :on-drag-start movable.on-drag-start
+                             :on-drag-end movable.on-drag-end})))
   entries)
 
 (fn resolve-min-size [layout]
@@ -235,8 +239,12 @@
 (fn compute-entity-movables [self entity]
   (local base (or entity.__scene_base_movables []))
   (local entries (copy-movables base))
-  (each [_ entry (ipairs (collect-ball-movables entity))]
-    (table.insert entries entry))
+  (local scene-object-movables (collect-scene-object-movables entity))
+  (local scene-object-targets {})
+  (each [_ entry (ipairs scene-object-movables)]
+    (table.insert entries entry)
+    (when (and entry entry.target)
+      (set (. scene-object-targets entry.target) true)))
   (local physics-movables (LayoutPhysicsBodies.collect-movables entity))
   (local physics-targets {})
   (each [_ entry (ipairs physics-movables)]
@@ -246,7 +254,8 @@
     (when (and entry entry.target)
       (set (. physics-targets entry.target) true)))
   (each [_ entry (ipairs (collect-positioned-movables self.scene-children))]
-    (when (not (. physics-targets entry.target))
+    (when (and (not (. physics-targets entry.target))
+               (not (. scene-object-targets entry.target)))
       (table.insert entries entry)))
   entries)
 
@@ -287,11 +296,6 @@
     (local entity (builder ctx))
     (set entity.scene-children scene-children)
     (set entity.scene-terrains terrain-children)
-    ;(local balls
-    ;  (icollect [_ metadata (ipairs entity.children)]
-    ;    (and metadata metadata.element metadata.element.is-physics-ball
-    ;         metadata.element)))
-    ;(set entity.balls (or balls []))
     ;(DemoLines.attach ctx entity)
     ;(DemoPoints.attach ctx entity)
     (DemoAudio.attach entity)
@@ -468,6 +472,34 @@
       (set entity.__scene_resizable_keys nil)
       (set entity.__scene_resizable_records nil)))
 
+  (fn refresh-entity-bindings [self entity]
+    (when entity
+      (unregister-entity-movables self entity)
+      (unregister-entity-resizables self entity)
+      (set entity.movables (compute-entity-movables self entity))
+      (set entity.resizables (compute-entity-resizables self entity))
+      (register-entity-movables self entity)
+      (register-entity-resizables self entity)))
+
+  (fn register-scene-object [self entry]
+    (local entity self.entity)
+    (assert entity "Scene.register-scene-object requires an attached entity")
+    (when (not entity.scene-objects)
+      (set entity.scene-objects []))
+    (table.insert entity.scene-objects entry)
+    (refresh-entity-bindings self entity)
+    true)
+
+  (fn unregister-scene-object [self owner]
+    (local entity self.entity)
+    (when (and entity entity.scene-objects owner)
+      (for [idx (length entity.scene-objects) 1 -1]
+        (local entry (. entity.scene-objects idx))
+        (when (= (and entry entry.owner) owner)
+          (table.remove entity.scene-objects idx))))
+    (refresh-entity-bindings self entity)
+    true)
+
   (fn remove-key-once [keys key]
     (when keys
       (var idx-to-remove nil)
@@ -508,13 +540,6 @@
         (local entry (. entries idx))
         (when (and entry (= entry.owner owner))
           (table.remove entries idx)))))
-
-  (fn remove-ball-for-owner [entity owner]
-    (when (and entity entity.balls owner)
-      (for [idx (length entity.balls) 1 -1]
-        (local ball (. entity.balls idx))
-        (when (= ball owner)
-          (table.remove entity.balls idx)))))
 
   (fn remove-panel-child [self element]
     (local entity self.entity)
@@ -566,7 +591,9 @@
       (when (and removed-element removed-element.drop)
         (removed-element:drop))
       (LayoutPhysicsBodies.remove-runtime-layout-body-for-element entity removed-element)
-      (remove-ball-for-owner entity removed-element)
+      (self:unregister-scene-object removed-element)
+      (when (and removed-metadata removed-metadata.object removed-metadata.object.scene-on-removed)
+        (removed-metadata.object:scene-on-removed self removed-element))
       (unregister-movables-for-owner self entity removed-element)
       (unregister-resizables-for-owner self entity removed-element)
       (remove-entries-for-owner entity.movables removed-element)
@@ -635,6 +662,7 @@
       (set element (builder self.build-context builder-options))
       (local metadata {:flex (or opts.flex 0)
                        :element element
+                       :object (and opts opts.object)
                        :position (glm.vec3 0 0 0)
                        :rotation local-rotation
                        :persistence (and opts.persistence
@@ -708,6 +736,31 @@
                                     [(normalize-resizable-entry self panel-resizable)]))
       element))
 
+  (fn add-object [self object opts]
+    (assert object "Scene.add-object requires an object")
+    (local object-config
+      (if object.scene-object-options
+          (object:scene-object-options)
+          {}))
+    (local options (or opts {}))
+    (local element
+      (add-panel-child self {:builder (or object-config.builder object)
+                             :object object
+                             :builder-options object-config.builder-options
+                             :skip-cuboid (if (not (= options.skip-cuboid nil))
+                                              options.skip-cuboid
+                                              object-config.skip-cuboid)
+                             :skip-physics (if (not (= options.skip-physics nil))
+                                              options.skip-physics
+                                              object-config.skip-physics)
+                             :flex (or options.flex object-config.flex 0)
+                             :position (or options.position object-config.position)
+                             :rotation (or options.rotation object-config.rotation)
+                             :persistence (or object-config.persistence options.persistence)}))
+    (when (and element object.scene-on-added)
+      (object:scene-on-added self element))
+    element)
+
   (fn add-demo-entry [self entry]
     (when (and entry entry.builder)
       (assert entry.persistence
@@ -741,61 +794,6 @@
                                                         :size (vec3->array size)}}))
     (when element
       (self:sync-physics-bodies))
-    element)
-
-  (fn add-ball [self opts]
-    (local options (or opts {}))
-    (local size (or options.size (glm.vec3 18 18 18)))
-    (local radius (or options.radius (* 0.5 size.x)))
-    (local placement (resolve-camera-placement self))
-    (local spawn-rotation (or options.rotation placement.rotation))
-    (local spawn-layout-position
-      (or options.position
-          (layout-origin-from-center placement.center spawn-rotation size)))
-    (local builder
-      (Ball {:radius radius
-             :size size
-             :position (glm.vec3 0 0 0)
-             :color options.color
-             :mass options.mass
-             :friction options.friction
-             :restitution options.restitution
-             :initial-velocity options.initial-velocity
-             :hexagon-color options.hexagon-color
-             :pentagon-color options.pentagon-color}))
-    (local element
-      (add-panel-child self {:builder builder
-                             :skip-cuboid true
-                             :skip-physics true
-                             :position spawn-layout-position
-                             :rotation spawn-rotation
-                             :persistence {:kind "physics-ball"
-                                           :size (vec3->array size)
-                                           :radius radius
-                                           :color (vec4->array options.color)
-                                           :mass options.mass
-                                           :friction options.friction
-                                           :restitution options.restitution
-                                           :initial-velocity (and options.initial-velocity
-                                                                  (vec3->array options.initial-velocity))
-                                           :hexagon-color (vec4->array options.hexagon-color)
-                                           :pentagon-color (vec4->array options.pentagon-color)}}))
-    (when (and self.entity element)
-      (when (not self.entity.balls)
-        (set self.entity.balls []))
-      (table.insert self.entity.balls element)
-      (unregister-movables-for-owner self self.entity element)
-      (remove-entries-for-owner self.entity.movables element)
-      (when (not self.entity.movables)
-        (set self.entity.movables []))
-      (local ball-movable (. (collect-ball-movables self.entity) (length self.entity.balls)))
-      (when ball-movable
-        (table.insert self.entity.movables ball-movable)
-        (register-movable-entries self self.entity
-                                  [(normalize-movable-entry self ball-movable)]))
-      (when self.entity.layout
-        (element:ensure-body self.entity.layout))
-      (self:sync-physics-balls))
     element)
 
   (fn add-graph-node-cube [self opts]
@@ -878,8 +876,14 @@
   (fn sync-physics-bodies [self]
     (LayoutPhysicsBodies.sync self.entity))
 
-  (fn sync-physics-balls [self]
-    (Ball.sync-all self.entity))
+  (fn sync-scene-objects [self]
+    (local entity self.entity)
+    (when (and entity entity.scene-objects)
+      (each [_ entry (ipairs entity.scene-objects)]
+        (when (and entry entry.ensure-body)
+          (entry:ensure-body entity))
+        (when (and entry entry.sync)
+          (entry:sync entity)))))
 
   (fn replace-terrain-record [self terrain-id record]
     (local runtime-entry (require-terrain-runtime-entry self terrain-id))
@@ -1005,6 +1009,8 @@
         (set entity.scene-children []))
       (when (not entity.scene-terrains)
         (set entity.scene-terrains []))
+      (when (not entity.scene-objects)
+        (set entity.scene-objects []))
       (when (not entity.children)
         (set entity.children []))
       (set self.scene-children entity.scene-children)
@@ -1017,7 +1023,6 @@
       (entity.layout:mark-measure-dirty)
       (set self.reference-point resolved-position)
       (LayoutPhysicsBodies.attach entity entity.__physics_bodies_spec)
-      (Ball.attach-all entity)
       (set entity.movables (compute-entity-movables self entity))
       (set entity.resizables (compute-entity-resizables self entity))
       (register-entity-movables self entity)
@@ -1037,7 +1042,7 @@
 
 (fn update [self]
   (self:sync-physics-bodies)
-  (self:sync-physics-balls)
+  (self:sync-scene-objects)
   (self.layout-root:update))
 
   (fn drop [self]
@@ -1094,6 +1099,11 @@
   (and self.build-context
        self.build-context.get-mesh-batches
        (self.build-context:get-mesh-batches)))
+
+(fn get-instanced-color-mesh-batches [self]
+  (and self.build-context
+       self.build-context.get-instanced-color-mesh-batches
+       (self.build-context:get-instanced-color-mesh-batches)))
 
 (fn get-reference-point [self]
   self.reference-point)
@@ -1342,30 +1352,6 @@
           (self:add-physics-body {:size restored-size
                                   :position restored-position
                                   :rotation (array->quat panel.rotation)})
-          (= kind "physics-ball")
-          (self:add-ball {:size restored-size
-                          :radius panel.radius
-                          :position restored-position
-                          :rotation (array->quat panel.rotation)
-                          :color (and panel.color (glm.vec4 (. panel.color 1)
-                                                            (. panel.color 2)
-                                                            (. panel.color 3)
-                                                            (. panel.color 4)))
-                          :mass panel.mass
-                          :friction panel.friction
-                          :restitution panel.restitution
-                          :initial-velocity (and panel.initial-velocity
-                                                 (array->vec3 panel.initial-velocity))
-                          :hexagon-color (and panel.hexagon-color
-                                              (glm.vec4 (. panel.hexagon-color 1)
-                                                        (. panel.hexagon-color 2)
-                                                        (. panel.hexagon-color 3)
-                                                        (. panel.hexagon-color 4)))
-                          :pentagon-color (and panel.pentagon-color
-                                               (glm.vec4 (. panel.pentagon-color 1)
-                                                         (. panel.pentagon-color 2)
-                                                         (. panel.pentagon-color 3)
-                                                         (. panel.pentagon-color 4)))})
           (= kind "demo-browser")
           (self:add-demo-browser {:position restored-position
                                   :rotation (array->quat panel.rotation)})
@@ -1380,7 +1366,7 @@
 (set self.update update)
 (set self.drop drop)
 (set self.sync-physics-bodies sync-physics-bodies)
-(set self.sync-physics-balls sync-physics-balls)
+(set self.sync-scene-objects sync-scene-objects)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)
 (set self.remove-terrain remove-terrain)
@@ -1398,6 +1384,7 @@
 (set self.get-quad-draw-list get-quad-draw-list)
 (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
 (set self.get-mesh-batches get-mesh-batches)
+(set self.get-instanced-color-mesh-batches get-instanced-color-mesh-batches)
 (set self.get-reference-point get-reference-point)
 (set self.screen-pos-ray screen-pos-ray)
 (set self.raycast-terrain raycast-terrain)
@@ -1411,12 +1398,14 @@
 (set self.capture-panel-element-state capture-panel-element-state)
 (set self.register-panel-restorer register-panel-restorer)
 (set self.unregister-panel-restorer unregister-panel-restorer)
+(set self.register-scene-object register-scene-object)
+(set self.unregister-scene-object unregister-scene-object)
 (set self.add-widget-as-cuboid add-widget-as-cuboid)
+(set self.add-object add-object)
 (set self.add-panel-child add-panel-child)
 (set self.remove-panel-child remove-panel-child)
 (set self.add-demo-entry add-demo-entry)
 (set self.add-demo-browser add-demo-browser)
-(set self.add-ball add-ball)
 (set self.add-physics-body add-physics-body)
 (set self.add-graph-node-cube add-graph-node-cube)
 (set self.set-graph (fn [_self graph] (set self.graph graph)))

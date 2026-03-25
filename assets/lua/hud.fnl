@@ -690,6 +690,10 @@
 
   (fn get-image-batches [self]
     self.build-context.image-batches)
+  (fn get-instanced-color-mesh-batches [self]
+    (and self.build-context
+         self.build-context.get-instanced-color-mesh-batches
+         (self.build-context:get-instanced-color-mesh-batches)))
   (fn get-quad-draw-list [self]
     (and self.build-context
          self.build-context.get-quad-draw-list
@@ -766,6 +770,7 @@
   (set self.get-point-vector get-point-vector)
   (set self.get-line-strips get-line-strips)
   (set self.get-image-batches get-image-batches)
+  (set self.get-instanced-color-mesh-batches get-instanced-color-mesh-batches)
   (set self.get-quad-draw-list get-quad-draw-list)
   (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
   (set self.reset-projection reset-projection)

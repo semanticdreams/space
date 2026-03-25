@@ -36,6 +36,7 @@ sol::table create_gl_table(sol::state_view lua)
     gl["GL_PROGRAM_POINT_SIZE"] = GL_PROGRAM_POINT_SIZE;
     gl["GL_LESS"] = GL_LESS;
     gl["GL_ARRAY_BUFFER"] = GL_ARRAY_BUFFER;
+    gl["GL_ELEMENT_ARRAY_BUFFER"] = GL_ELEMENT_ARRAY_BUFFER;
     gl["GL_SHADER_STORAGE_BUFFER"] = GL_SHADER_STORAGE_BUFFER;
     gl["GL_STATIC_DRAW"] = GL_STATIC_DRAW;
     gl["GL_STREAM_DRAW"] = GL_STREAM_DRAW;
@@ -108,6 +109,17 @@ sol::table create_gl_table(sol::state_view lua)
     });
     gl.set_function("glDrawArraysInstanced", [](GLenum mode, GLint first, GLsizei count, GLsizei instancecount) {
         glDrawArraysInstanced(mode, first, count, instancecount);
+    });
+    gl.set_function("glDrawElementsInstanced", [](GLenum mode,
+                                                 GLsizei count,
+                                                 GLenum type,
+                                                 size_t index_offset_bytes,
+                                                 GLsizei instancecount) {
+        glDrawElementsInstanced(mode,
+                                count,
+                                type,
+                                reinterpret_cast<const void*>(static_cast<uintptr_t>(index_offset_bytes)),
+                                instancecount);
     });
     gl.set_function("glMultiDrawArrays", [](GLenum mode,
                                            sol::as_table_t<std::vector<int>> first_list,
@@ -327,6 +339,13 @@ sol::table create_gl_table(sol::state_view lua)
     });
     gl.set_function("glBufferData", [](GLenum target, sol::as_table_t<std::vector<float>> data, GLenum usage) {
         glBufferData(target, data.value().size() * sizeof(float), data.value().data(), usage);
+    });
+    gl.set_function("glBufferDataUInt", [](GLenum target, sol::as_table_t<std::vector<uint32_t>> data, GLenum usage) {
+        const std::vector<uint32_t>& values = data.value();
+        glBufferData(target,
+                     static_cast<GLsizeiptr>(values.size() * sizeof(uint32_t)),
+                     values.data(),
+                     usage);
     });
     gl.set_function("glBufferSubData", [](GLenum target, size_t offset, const std::string& bytes) {
         if (bytes.empty()) {

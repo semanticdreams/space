@@ -64,6 +64,7 @@
   (local gl {})
   (each [constant value (pairs
                           {:GL_ARRAY_BUFFER 0x8892
+                           :GL_ELEMENT_ARRAY_BUFFER 0x8893
                            :GL_SHADER_STORAGE_BUFFER 0x90D2
                            :GL_FRAMEBUFFER 0x8D40
                            :GL_RENDERBUFFER 0x8D41
@@ -317,6 +318,15 @@
                      :count count
                      :instances instancecount})))
 
+  (set gl.glDrawElementsInstanced
+       (fn [mode count type index-offset-bytes instancecount]
+         (record-gl "glDrawElementsInstanced"
+                    {:mode mode
+                     :count count
+                     :type type
+                     :index-offset-bytes index-offset-bytes
+                     :instances instancecount})))
+
   (set gl.glBlitFramebuffer
        (fn [srcX0 srcY0 srcX1 srcY1 dstX0 dstY0 dstX1 dstY1 mask filter]
          (record-gl "glBlitFramebuffer"
@@ -339,6 +349,11 @@
   (set gl.glBufferData
        (fn [target data usage]
          (record-gl "glBufferData"
+                    {:target target :data data :usage usage})))
+
+  (set gl.glBufferDataUInt
+       (fn [target data usage]
+         (record-gl "glBufferDataUInt"
                     {:target target :data data :usage usage})))
 
   (set gl.clipboard-set

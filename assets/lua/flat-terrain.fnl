@@ -154,6 +154,7 @@
            (let [size (resolve-glm-vec3 opts.size (glm.vec3 1 1 1))
                   position (resolve-glm-vec3 opts.position (glm.vec3 0 0 0))
                   rotation (resolve-glm-quat opts.rotation (glm.quat 1 0 0 0))
+                  restitution (or opts.physics-restitution 1.0)
                   thickness (or opts.thickness 1.0)
                   half-extents (glm.vec3 (* 0.5 size.x) (* 0.5 thickness) (* 0.5 size.z))
                   center (+ position
@@ -169,6 +170,7 @@
              (local motion-state (bt.DefaultMotionState transform))
              (local zero (bt.Vector3 0 0 0))
              (local info (bt.RigidBodyConstructionInfo 0 motion-state shape zero))
+             (set info.m-restitution restitution)
              (local body (bt.RigidBody info))
              (app.engine.physics:addRigidBody body)
              (local plane {:shape shape

@@ -228,6 +228,8 @@
                  :get-text-ssbo-draw-list (fn [self] (self.build-context:get-text-ssbo-draw-list))
                  :get-image-batches (fn [self] self.build-context.image-batches)
                  :get-mesh-batches (fn [self] (self.build-context:get-mesh-batches))
+                 :get-instanced-color-mesh-batches
+                 (fn [self] (self.build-context:get-instanced-color-mesh-batches))
                  :drop (fn [self]
                          (when self.root-layout
                            (self.root-layout:drop))
@@ -302,6 +304,8 @@
                  :get-text-ssbo-draw-list (fn [self] (self.build-context:get-text-ssbo-draw-list))
                  :get-image-batches (fn [self] self.build-context.image-batches)
                  :get-mesh-batches (fn [self] (self.build-context:get-mesh-batches))
+                 :get-instanced-color-mesh-batches
+                 (fn [self] (self.build-context:get-instanced-color-mesh-batches))
                  :drop (fn [self]
                          (when self.root-layout
                            (self.root-layout:drop))

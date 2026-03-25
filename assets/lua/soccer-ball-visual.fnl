@@ -1,87 +1,140 @@
 (local glm (require :glm))
-(local PolyhedronMeshes (require :polyhedron-meshes))
-(local PolyhedronWidget (require :polyhedron-widget))
+(local MathUtils (require :math-utils))
+(local {: Layout : resolve-mark-flag} (require :layout))
+(local InstancedColorMeshBatch (require :instanced-color-mesh-batch))
+(local SharedInstancedMeshCache (require :shared-instanced-mesh-cache))
+(local SoccerBallMesh (require :soccer-ball-mesh))
 
-;; Future improvement: subdivide panel fill geometry and spherify the new vertices
-;; onto the target radius so the ball silhouette reads rounder without changing the
-;; truncated-icosahedron panel layout or the spherical Bullet collision shape.
-(local cached-geometry (PolyhedronMeshes.truncated-icosahedron))
+(fn resolve-size [value fallback]
+  (if
+    (= value nil) fallback
+    (= (type value) :userdata) value
+    (= (type value) :number) (glm.vec3 value value value)
+    (= (type value) :table)
+      (do
+        (local x (or (. value 1) value.x (. value "x") (and fallback fallback.x) 0))
+        (local y (or (. value 2) value.y (. value "y") (and fallback fallback.y) 0))
+        (local z (or (. value 3) value.z (. value "z") (and fallback fallback.z) 0))
+        (glm.vec3 x y z))
+    fallback))
 
-(fn face-centroid [vertices]
-  (/ (accumulate [sum (glm.vec3 0 0 0) _ vertex (ipairs vertices)]
-                 (+ sum vertex))
-     (glm.vec3 (length vertices)
-               (length vertices)
-               (length vertices))))
+(local approx (. MathUtils :approx))
 
-(fn lerp-vec3 [a b t]
-  (+ (* a (glm.vec3 (- 1 t)))
-     (* b (glm.vec3 t))))
+(fn vec3-equal? [a b]
+  (and a b
+       (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
 
-(fn resolve-face-color [options face]
-  (if (= face.kind :pentagon)
-      (or options.pentagon-color (glm.vec4 0.08 0.08 0.08 1.0))
-      (or options.hexagon-color
-          options.color
-          (glm.vec4 0.96 0.96 0.92 1.0))))
+(fn quat-equal? [a b]
+  (and a b
+       (approx a.w b.w)
+       (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
 
-(fn triangulate-face [vertices color]
-  (local centroid (face-centroid vertices))
-  (local triangles [])
-  (for [idx 1 (length vertices)]
-    (local next-idx
-      (if (= idx (length vertices))
-          1
-          (+ idx 1)))
-    (table.insert triangles {:a centroid
-                             :b (. vertices idx)
-                             :c (. vertices next-idx)
-                             :color color}))
-  triangles)
+(fn clamp [value min-value max-value]
+  (math.max min-value (math.min max-value value)))
 
-(fn triangulate-face-ring [outer inner color]
-  (local triangles [])
-  (for [idx 1 (length outer)]
-    (local next-idx
-      (if (= idx (length outer))
-          1
-          (+ idx 1)))
-    (table.insert triangles {:a (. outer idx)
-                             :b (. inner idx)
-                             :c (. inner next-idx)
-                             :color color})
-    (table.insert triangles {:a (. outer idx)
-                             :b (. inner next-idx)
-                             :c (. outer next-idx)
-                             :color color}))
-  triangles)
+(fn axis-angle-from-quat [rotation]
+  (local safe-rotation (or rotation (glm.quat 1 0 0 0)))
+  (local normalized (safe-rotation:normalize))
+  (local w (clamp normalized.w -1 1))
+  (local angle (* 2 (math.acos w)))
+  (local s (math.sqrt (math.max 0 (- 1 (* w w)))))
+  (if (< s 1e-6)
+      (values angle (glm.vec3 1 0 0))
+      (values angle (glm.vec3 (/ normalized.x s)
+                              (/ normalized.y s)
+                              (/ normalized.z s)))))
 
-(fn append-triangles [dst triangles]
-  (each [_ triangle (ipairs triangles)]
-    (table.insert dst triangle))
-  dst)
+(fn model-matrix [position scale rotation]
+  (local translate (glm.translate (glm.mat4 1) (or position (glm.vec3 0 0 0))))
+  (local (angle axis) (axis-angle-from-quat rotation))
+  (local rotate (glm.rotate (glm.mat4 1) angle axis))
+  (local scale-mat (glm.scale (glm.mat4 1) (or scale (glm.vec3 1 1 1))))
+  (local offset (glm.translate (glm.mat4 1) (or scale (glm.vec3 1 1 1))))
+  (* translate (* rotate (* offset scale-mat))))
 
-(fn styled-face-triangles [options face]
-  (local fill-color (resolve-face-color options face))
-  (local seam-color (or options.seam-color (glm.vec4 0.72 0.72 0.72 1.0)))
-  (local inset-factor (or options.seam-inset 0.05))
-  (local centroid (face-centroid face.vertices))
-  (local inner
-    (icollect [_ vertex (ipairs face.vertices)]
-              (lerp-vec3 vertex centroid inset-factor)))
-  (local triangles [])
-  (append-triangles triangles (triangulate-face-ring face.vertices inner seam-color))
-  (append-triangles triangles (triangulate-face inner fill-color))
-  triangles)
+(fn style-cache-key [options]
+  (local style (SoccerBallMesh.style-key options))
+  (.. "soccer-ball|seam="
+      (SoccerBallMesh.vec4-key style.seam-color)
+      "|inset="
+      (SoccerBallMesh.scalar-key style.seam-inset)
+      "|pentagon="
+      (SoccerBallMesh.vec4-key style.pentagon-color)
+      "|hexagon="
+      (SoccerBallMesh.vec4-key style.hexagon-color)))
+
+(fn ensure-shared-batch [ctx options]
+  (local key (style-cache-key options))
+  (SharedInstancedMeshCache.acquire
+    ctx
+    key
+    (fn []
+      (local mesh (SoccerBallMesh.build-mesh options))
+      (InstancedColorMeshBatch
+        ctx
+        {:vertices mesh.vertices
+         :indices mesh.indices
+         :unlit false}))))
 
 (fn SoccerBallVisual [opts]
   (local options (or opts {}))
-  (local triangles [])
-  (each [_ face (ipairs cached-geometry.faces)]
-    (append-triangles triangles (styled-face-triangles options face)))
+  (local default-size (resolve-size options.size (glm.vec3 16 16 16)))
 
-  (PolyhedronWidget {:name "soccer-ball"
-                     :size options.size
-                     :triangles triangles}))
+  (fn build [ctx]
+    (local shared-entry (ensure-shared-batch ctx options))
+    (local entity {:visible? true
+                   :render-visible? true})
+    (local instance (shared-entry.batch:add-instance (glm.mat4 1)))
+    (var last-state nil)
+
+    (fn measurer [self]
+      (set self.measure default-size))
+
+    (fn layouter [self]
+      (local should-render (and entity.visible? (not (self:effective-culled?))))
+      (shared-entry.batch:set-instance-visible instance should-render)
+      (set entity.render-visible? should-render)
+      (when should-render
+        (local half-size (* self.size (glm.vec3 0.5 0.5 0.5)))
+        (local next-state {:scale half-size
+                           :position self.position
+                           :rotation self.rotation})
+        (local changed
+          (or (not last-state)
+              (not (vec3-equal? last-state.scale next-state.scale))
+              (not (vec3-equal? last-state.position next-state.position))
+              (not (quat-equal? last-state.rotation next-state.rotation))))
+        (when changed
+          (shared-entry.batch:update-instance-model
+            instance
+            (model-matrix self.position half-size self.rotation))
+          (set last-state next-state))))
+
+    (local layout
+      (Layout {:name "soccer-ball"
+               :measurer measurer
+               :layouter layouter}))
+
+    (fn set-visible [self visible? opts2]
+      (local desired (not (not visible?)))
+      (local mark-layout-dirty? (resolve-mark-flag opts2 :mark-layout-dirty? false))
+      (when (not (= desired self.visible?))
+        (set self.visible? desired)
+        (shared-entry.batch:set-instance-visible instance desired)
+        (when (and mark-layout-dirty? self.layout)
+          (self.layout:mark-layout-dirty))))
+
+    {:layout layout
+     :set-visible set-visible
+     :drop (fn [self]
+             (self.layout:drop)
+             (shared-entry.batch:remove-instance instance)
+             (SharedInstancedMeshCache.release ctx shared-entry))
+     :visible? true
+     :render-visible? true}))
 
 SoccerBallVisual

@@ -357,10 +357,10 @@
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
-  (local calls {:add-ball 0})
+  (local calls {:add-object 0})
   (local original-scene app.scene)
-  (set app.scene {:add-ball (fn [_self]
-                              (set calls.add-ball (+ calls.add-ball 1)))})
+  (set app.scene {:add-object (fn [_self _object]
+                                (set calls.add-object (+ calls.add-object 1)))})
 
   (local manager
     (MenuManager {:clickables clickables
@@ -376,8 +376,8 @@
         (local button (find-button-by-name element "ball"))
         (assert button "Root context menu should include 'ball'")
         (button:on-click {:button 1})
-        (assert (= calls.add-ball 1)
-                "ball action should invoke scene:add-ball once"))))
+        (assert (= calls.add-object 1)
+                "ball action should invoke scene:add-object once"))))
 
   (manager:drop)
   (set app.scene original-scene)

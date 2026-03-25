@@ -77,6 +77,7 @@
                               (. record.options.rotation 2)
                               (. record.options.rotation 3)
                               (. record.options.rotation 4)))
+    (local restitution (or record.options.physics-restitution 1.0))
     (local shape (bt.HeightfieldTerrainShape shape-data.width
                                              shape-data.length
                                              shape-data.heights
@@ -91,6 +92,7 @@
     (local motion-state (bt.DefaultMotionState transform))
     (local zero (bt.Vector3 0 0 0))
     (local info (bt.RigidBodyConstructionInfo 0 motion-state shape zero))
+    (set info.m-restitution restitution)
     (local body (bt.RigidBody info))
     (app.engine.physics:addRigidBody body)
     (local entry {:shape-data shape-data

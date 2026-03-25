@@ -3,6 +3,7 @@
 (local PointRenderer (require :point-renderer))
 (local ImageRenderer (require :image-renderer))
 (local MeshRenderer (require :mesh-renderer))
+(local InstancedColorMeshRenderer (require :instanced-color-mesh-renderer))
 (local QuadRenderer (require :quad-renderer))
 (local TextSsboRenderer (require :text-ssbo-renderer))
 (local SkyboxRenderer (require :skybox-renderer))
@@ -24,6 +25,7 @@
   (local point-renderer (PointRenderer))
   (local image-renderer (ImageRenderer))
   (local mesh-renderer (MeshRenderer))
+  (local instanced-color-mesh-renderer (InstancedColorMeshRenderer))
   (local quad-renderer (QuadRenderer))
   (local text-ssbo-renderer (TextSsboRenderer))
   (local skybox-renderer (SkyboxRenderer {:brightness 0.1}))
@@ -75,6 +77,11 @@
         (local mesh-batches (and target.get-mesh-batches (target:get-mesh-batches)))
         (when (and mesh-batches (> (length mesh-batches) 0))
           (mesh-renderer:render mesh-batches projection view))
+        (local instanced-color-mesh-batches
+          (and target.get-instanced-color-mesh-batches
+               (target:get-instanced-color-mesh-batches)))
+        (when (and instanced-color-mesh-batches (> (length instanced-color-mesh-batches) 0))
+          (instanced-color-mesh-renderer:render instanced-color-mesh-batches projection view))
         (local image-batches (and target.get-image-batches (target:get-image-batches)))
         (when image-batches
           (image-renderer:render image-batches projection view))

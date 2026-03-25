@@ -45,6 +45,7 @@
        (if (not (PhysicsBridge.available?))
            nil
            (do
+             (local restitution (or opts.physics-restitution 1.0))
              (local triangle-mesh (bt.TriangleMesh))
              (mesh:add-to-triangle-mesh triangle-mesh opts.position opts.rotation opts.scale true)
              (local shape (bt.BvhTriangleMeshShape triangle-mesh true))
@@ -53,6 +54,7 @@
              (local motion-state (bt.DefaultMotionState transform))
              (local zero (bt.Vector3 0 0 0))
              (local info (bt.RigidBodyConstructionInfo 0 motion-state shape zero))
+             (set info.m-restitution restitution)
              (local body (bt.RigidBody info))
              (app.engine.physics:addRigidBody body)
              (local entry {:triangle-mesh triangle-mesh

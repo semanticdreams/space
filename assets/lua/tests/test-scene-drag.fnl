@@ -2,6 +2,7 @@
 (local _ (require :main))
 (local NormalState (require :normal-state))
 (local Scene (require :scene))
+(local Ball (require :ball))
 (local Movables (require :movables))
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
@@ -224,8 +225,8 @@
             (set app.layout-root scene.layout-root)
             (app.engine.physics:setGravity 0 -25 0)
             (scene:build-default {:terrains []})
-            (set ball (scene:add-ball {:size (glm.vec3 6 6 6)
-                                       :position (glm.vec3 0 0 0)}))
+            (set ball (scene:add-object (Ball {:size (glm.vec3 6 6 6)})
+                                        {:position (glm.vec3 0 0 0)}))
             (scene:update)
             (set scene.screen-pos-ray
                  (fn [_self pointer _opts]

@@ -12,6 +12,7 @@
   (local point-vector (VectorBuffer))
   (local image-batches {})
   (local mesh-batches [])
+  (local instanced-color-mesh-batches [])
   (local line-strips [])
   (local triangle-batches (DrawBatcher {:stride 8}))
   (local quad-sources [])
@@ -33,6 +34,7 @@
      :point-vector point-vector
      :image-batches image-batches
      :mesh-batches mesh-batches
+     :instanced-color-mesh-batches instanced-color-mesh-batches
      :line-strips line-strips
      :pointer-target options.pointer-target
      :clickables options.clickables
@@ -159,6 +161,20 @@
   (set ctx.get-mesh-batches
        (fn [_self]
          mesh-batches))
+  (set ctx.register-instanced-color-mesh-batch
+       (fn [_self batch]
+         (table.insert instanced-color-mesh-batches batch)
+         batch))
+  (set ctx.unregister-instanced-color-mesh-batch
+       (fn [_self batch]
+         (for [i 1 (length instanced-color-mesh-batches)]
+           (when (= (. instanced-color-mesh-batches i) batch)
+             (table.remove instanced-color-mesh-batches i)
+             (lua "break")))
+         nil))
+  (set ctx.get-instanced-color-mesh-batches
+       (fn [_self]
+         instanced-color-mesh-batches))
   (set ctx.track-image-handle
        (fn [_self batch handle clip-region model]
          (local batcher (and batch batch.draw-batcher))

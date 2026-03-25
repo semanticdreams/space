@@ -7,6 +7,7 @@
 #include <BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
 #include <BulletCollision/CollisionShapes/btBoxShape.h>
 #include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
+#include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
 #include <BulletCollision/CollisionShapes/btTriangleMesh.h>
 #include <btBulletDynamicsCommon.h>
@@ -100,7 +101,16 @@ sol::table create_physics_table(sol::state_view lua)
 
     bt.new_usertype<btCollisionShape>("CollisionShape",
         "getName", &btCollisionShape::getName,
-        "getShapeType", &btCollisionShape::getShapeType
+        "getShapeType", &btCollisionShape::getShapeType,
+        "setLocalScaling", [](btCollisionShape& self, const btVector3& scaling) {
+            self.setLocalScaling(scaling);
+        },
+        "getLocalScaling", [](btCollisionShape& self) {
+            return self.getLocalScaling();
+        },
+        "calculateLocalInertia", [](btCollisionShape& self, btScalar mass, btVector3& inertia) {
+            self.calculateLocalInertia(mass, inertia);
+        }
     );
 
     bt.new_usertype<btTriangleMesh>("TriangleMesh",
@@ -139,15 +149,11 @@ sol::table create_physics_table(sol::state_view lua)
 
     bt.new_usertype<btBoxShape>("BoxShape",
         sol::no_constructor,
-        "setLocalScaling", [](btBoxShape& self, const btVector3& scaling) {
-            self.setLocalScaling(scaling);
-        },
-        "calculateLocalInertia", [](btBoxShape& self, btScalar mass, btVector3& inertia) {
-            self.calculateLocalInertia(mass, inertia);
-        },
-        "getLocalScaling", [](btBoxShape& self) {
-            return self.getLocalScaling();
-        },
+        sol::base_classes, sol::bases<btCollisionShape>()
+    );
+
+    bt.new_usertype<btSphereShape>("SphereShape",
+        sol::no_constructor,
         sol::base_classes, sol::bases<btCollisionShape>()
     );
 
@@ -175,8 +181,110 @@ sol::table create_physics_table(sol::state_view lua)
         sol::no_constructor,
         "m-mass", &RigidBodyCI::m_mass,
         "m-motionState", &RigidBodyCI::m_motionState,
+        "m-startWorldTransform", &RigidBodyCI::m_startWorldTransform,
         "m-collisionShape", &RigidBodyCI::m_collisionShape,
-        "m-localInertia", &RigidBodyCI::m_localInertia
+        "m-localInertia", &RigidBodyCI::m_localInertia,
+        "m-linearDamping", &RigidBodyCI::m_linearDamping,
+        "m-angularDamping", &RigidBodyCI::m_angularDamping,
+        "m-friction", &RigidBodyCI::m_friction,
+        "m-rollingFriction", &RigidBodyCI::m_rollingFriction,
+        "m-spinningFriction", &RigidBodyCI::m_spinningFriction,
+        "m-restitution", &RigidBodyCI::m_restitution,
+        "m-linearSleepingThreshold", &RigidBodyCI::m_linearSleepingThreshold,
+        "m-angularSleepingThreshold", &RigidBodyCI::m_angularSleepingThreshold,
+        "m-additionalDamping", &RigidBodyCI::m_additionalDamping,
+        "m-additionalDampingFactor", &RigidBodyCI::m_additionalDampingFactor,
+        "m-additionalLinearDampingThresholdSqr", &RigidBodyCI::m_additionalLinearDampingThresholdSqr,
+        "m-additionalAngularDampingThresholdSqr", &RigidBodyCI::m_additionalAngularDampingThresholdSqr,
+        "m-additionalAngularDampingFactor", &RigidBodyCI::m_additionalAngularDampingFactor
+    );
+
+    bt.new_usertype<btCollisionObject>("CollisionObject",
+        sol::no_constructor,
+        "getCollisionShape", [](btCollisionObject& self) {
+            return self.getCollisionShape();
+        },
+        "setCollisionShape", &btCollisionObject::setCollisionShape,
+        "getActivationState", &btCollisionObject::getActivationState,
+        "setActivationState", &btCollisionObject::setActivationState,
+        "forceActivationState", &btCollisionObject::forceActivationState,
+        "activate", sol::overload(
+            [](btCollisionObject& self) {
+                self.activate();
+            },
+            [](btCollisionObject& self, bool forceActivation) {
+                self.activate(forceActivation);
+            }
+        ),
+        "isActive", &btCollisionObject::isActive,
+        "isStaticObject", &btCollisionObject::isStaticObject,
+        "isKinematicObject", &btCollisionObject::isKinematicObject,
+        "isStaticOrKinematicObject", &btCollisionObject::isStaticOrKinematicObject,
+        "hasContactResponse", &btCollisionObject::hasContactResponse,
+        "getAnisotropicFriction", [](btCollisionObject& self) {
+            return self.getAnisotropicFriction();
+        },
+        "setAnisotropicFriction", sol::overload(
+            [](btCollisionObject& self, const btVector3& anisotropicFriction) {
+                self.setAnisotropicFriction(anisotropicFriction);
+            },
+            [](btCollisionObject& self, const btVector3& anisotropicFriction, int frictionMode) {
+                self.setAnisotropicFriction(anisotropicFriction, frictionMode);
+            }
+        ),
+        "hasAnisotropicFriction", sol::overload(
+            [](btCollisionObject& self) {
+                return self.hasAnisotropicFriction();
+            },
+            [](btCollisionObject& self, int frictionMode) {
+                return self.hasAnisotropicFriction(frictionMode);
+            }
+        ),
+        "setContactProcessingThreshold", &btCollisionObject::setContactProcessingThreshold,
+        "getContactProcessingThreshold", &btCollisionObject::getContactProcessingThreshold,
+        "setDeactivationTime", &btCollisionObject::setDeactivationTime,
+        "getDeactivationTime", &btCollisionObject::getDeactivationTime,
+        "setRestitution", &btCollisionObject::setRestitution,
+        "getRestitution", &btCollisionObject::getRestitution,
+        "setFriction", &btCollisionObject::setFriction,
+        "getFriction", &btCollisionObject::getFriction,
+        "setRollingFriction", &btCollisionObject::setRollingFriction,
+        "getRollingFriction", &btCollisionObject::getRollingFriction,
+        "setSpinningFriction", &btCollisionObject::setSpinningFriction,
+        "getSpinningFriction", &btCollisionObject::getSpinningFriction,
+        "setContactStiffnessAndDamping", &btCollisionObject::setContactStiffnessAndDamping,
+        "getContactStiffness", &btCollisionObject::getContactStiffness,
+        "getContactDamping", &btCollisionObject::getContactDamping,
+        "getWorldTransform", [](btCollisionObject& self) {
+            return btTransform(self.getWorldTransform());
+        },
+        "setWorldTransform", &btCollisionObject::setWorldTransform,
+        "getInterpolationWorldTransform", [](btCollisionObject& self) {
+            return btTransform(self.getInterpolationWorldTransform());
+        },
+        "setInterpolationWorldTransform", &btCollisionObject::setInterpolationWorldTransform,
+        "setInterpolationLinearVelocity", &btCollisionObject::setInterpolationLinearVelocity,
+        "setInterpolationAngularVelocity", &btCollisionObject::setInterpolationAngularVelocity,
+        "getInterpolationLinearVelocity", [](btCollisionObject& self) {
+            return self.getInterpolationLinearVelocity();
+        },
+        "getInterpolationAngularVelocity", [](btCollisionObject& self) {
+            return self.getInterpolationAngularVelocity();
+        },
+        "getHitFraction", &btCollisionObject::getHitFraction,
+        "setHitFraction", &btCollisionObject::setHitFraction,
+        "getCollisionFlags", &btCollisionObject::getCollisionFlags,
+        "setCollisionFlags", &btCollisionObject::setCollisionFlags,
+        "getCcdSweptSphereRadius", &btCollisionObject::getCcdSweptSphereRadius,
+        "setCcdSweptSphereRadius", &btCollisionObject::setCcdSweptSphereRadius,
+        "getCcdMotionThreshold", &btCollisionObject::getCcdMotionThreshold,
+        "setCcdMotionThreshold", &btCollisionObject::setCcdMotionThreshold,
+        "getUserIndex", &btCollisionObject::getUserIndex,
+        "setUserIndex", &btCollisionObject::setUserIndex,
+        "getUserIndex2", &btCollisionObject::getUserIndex2,
+        "setUserIndex2", &btCollisionObject::setUserIndex2,
+        "getUserIndex3", &btCollisionObject::getUserIndex3,
+        "setUserIndex3", &btCollisionObject::setUserIndex3
     );
 
     bt.new_usertype<btRigidBody>("RigidBody",
@@ -192,29 +300,79 @@ sol::table create_physics_table(sol::state_view lua)
         "getCenterOfMassTransform", [](btRigidBody& self) {
             return btTransform(self.getCenterOfMassTransform());
         },
+        "setCenterOfMassTransform", &btRigidBody::setCenterOfMassTransform,
+        "getCenterOfMassPosition", [](btRigidBody& self) {
+            return self.getCenterOfMassPosition();
+        },
+        "getOrientation", [](btRigidBody& self) {
+            return self.getOrientation();
+        },
         "setMassProps", &btRigidBody::setMassProps,
+        "getMass", &btRigidBody::getMass,
+        "getInvMass", &btRigidBody::getInvMass,
         "setLinearVelocity", &btRigidBody::setLinearVelocity,
-        "setFriction", &btRigidBody::setFriction,
-        "setRollingFriction", &btRigidBody::setRollingFriction,
-        "setRestitution", &btRigidBody::setRestitution,
-        "activate", sol::overload(
-            [](btRigidBody& self) {
-                self.activate();
-            },
-            [](btRigidBody& self, bool force) {
-                self.activate(force);
-            }
-        ),
-        "setActivationState", &btRigidBody::setActivationState,
-        "forceActivationState", &btRigidBody::forceActivationState,
+        "setAngularVelocity", &btRigidBody::setAngularVelocity,
         "getLinearVelocity", [](btRigidBody& self) {
             return self.getLinearVelocity();
         },
+        "getAngularVelocity", [](btRigidBody& self) {
+            return self.getAngularVelocity();
+        },
+        "getVelocityInLocalPoint", &btRigidBody::getVelocityInLocalPoint,
+        "setGravity", &btRigidBody::setGravity,
+        "clearGravity", &btRigidBody::clearGravity,
+        "getGravity", [](btRigidBody& self) {
+            return self.getGravity();
+        },
+        "setDamping", &btRigidBody::setDamping,
+        "getLinearDamping", &btRigidBody::getLinearDamping,
+        "getAngularDamping", &btRigidBody::getAngularDamping,
+        "applyDamping", &btRigidBody::applyDamping,
+        "getLinearSleepingThreshold", &btRigidBody::getLinearSleepingThreshold,
+        "getAngularSleepingThreshold", &btRigidBody::getAngularSleepingThreshold,
+        "setSleepingThresholds", &btRigidBody::setSleepingThresholds,
+        "getLinearFactor", [](btRigidBody& self) {
+            return self.getLinearFactor();
+        },
+        "setLinearFactor", &btRigidBody::setLinearFactor,
+        "getAngularFactor", [](btRigidBody& self) {
+            return self.getAngularFactor();
+        },
+        "setAngularFactor", sol::overload(
+            [](btRigidBody& self, const btVector3& angularFactor) {
+                self.setAngularFactor(angularFactor);
+            },
+            [](btRigidBody& self, btScalar angularFactor) {
+                self.setAngularFactor(angularFactor);
+            }
+        ),
+        "getTotalForce", [](btRigidBody& self) {
+            return self.getTotalForce();
+        },
+        "getTotalTorque", [](btRigidBody& self) {
+            return self.getTotalTorque();
+        },
+        "getInvInertiaDiagLocal", [](btRigidBody& self) {
+            return self.getInvInertiaDiagLocal();
+        },
+        "setInvInertiaDiagLocal", &btRigidBody::setInvInertiaDiagLocal,
         "applyForce", &btRigidBody::applyCentralForce,
+        "applyCentralForce", &btRigidBody::applyCentralForce,
+        "applyTorque", &btRigidBody::applyTorque,
+        "applyForceAtPosition", &btRigidBody::applyForce,
+        "applyCentralImpulse", &btRigidBody::applyCentralImpulse,
+        "applyTorqueImpulse", &btRigidBody::applyTorqueImpulse,
+        "applyImpulse", &btRigidBody::applyImpulse,
+        "clearForces", &btRigidBody::clearForces,
+        "translate", &btRigidBody::translate,
+        "isInWorld", &btRigidBody::isInWorld,
+        "getFlags", &btRigidBody::getFlags,
+        "setFlags", &btRigidBody::setFlags,
         "setPosition", &btRigidBody::setWorldTransform,
         "getPosition", [](btRigidBody& self) {
             return btTransform(self.getWorldTransform());
-        }
+        },
+        sol::base_classes, sol::bases<btCollisionObject>()
     );
 
     bt.new_usertype<btCollisionConfiguration>("CollisionConfiguration");
@@ -270,6 +428,8 @@ sol::table create_physics_table(sol::state_view lua)
             return sol::as_table(result);
         },
         "setGravity", &btSoftRigidDynamicsWorld::setGravity,
+        "getGravity", &btSoftRigidDynamicsWorld::getGravity,
+        "clearForces", &btSoftRigidDynamicsWorld::clearForces,
         "addAction", &btSoftRigidDynamicsWorld::addAction,
         "removeAction", &btSoftRigidDynamicsWorld::removeAction,
         sol::base_classes, sol::bases<btDiscreteDynamicsWorld>()
@@ -300,6 +460,8 @@ sol::table create_physics_table(sol::state_view lua)
             return sol::as_table(result);
         },
         "setGravity", &btDiscreteDynamicsWorld::setGravity,
+        "getGravity", &btDiscreteDynamicsWorld::getGravity,
+        "clearForces", &btDiscreteDynamicsWorld::clearForces,
         "addAction", &btDiscreteDynamicsWorld::addAction,
         "removeAction", &btDiscreteDynamicsWorld::removeAction,
         sol::base_classes, sol::bases<btDynamicsWorld>()
@@ -404,6 +566,9 @@ sol::table create_physics_table(sol::state_view lua)
     bt.set_function("BoxShape", [](const btVector3& halfExtents) {
         return std::make_unique<btBoxShape>(halfExtents);
     });
+    bt.set_function("SphereShape", [](btScalar radius) {
+        return std::make_unique<btSphereShape>(radius);
+    });
     bt.set_function("DefaultMotionState", sol::overload(
         []() { return std::make_unique<btDefaultMotionState>(); },
         [](const btTransform& transform) { return std::make_unique<btDefaultMotionState>(transform); }
@@ -462,6 +627,34 @@ sol::table create_physics_table(sol::state_view lua)
         "getWorld", &Physics::getWorld,
         "update", &Physics::update
     );
+
+    bt["ACTIVE_TAG"] = ACTIVE_TAG;
+    bt["ISLAND_SLEEPING"] = ISLAND_SLEEPING;
+    bt["WANTS_DEACTIVATION"] = WANTS_DEACTIVATION;
+    bt["DISABLE_DEACTIVATION"] = DISABLE_DEACTIVATION;
+    bt["DISABLE_SIMULATION"] = DISABLE_SIMULATION;
+
+    bt["CF_STATIC_OBJECT"] = btCollisionObject::CF_STATIC_OBJECT;
+    bt["CF_KINEMATIC_OBJECT"] = btCollisionObject::CF_KINEMATIC_OBJECT;
+    bt["CF_NO_CONTACT_RESPONSE"] = btCollisionObject::CF_NO_CONTACT_RESPONSE;
+    bt["CF_CUSTOM_MATERIAL_CALLBACK"] = btCollisionObject::CF_CUSTOM_MATERIAL_CALLBACK;
+    bt["CF_CHARACTER_OBJECT"] = btCollisionObject::CF_CHARACTER_OBJECT;
+    bt["CF_DISABLE_VISUALIZE_OBJECT"] = btCollisionObject::CF_DISABLE_VISUALIZE_OBJECT;
+    bt["CF_DISABLE_SPU_COLLISION_PROCESSING"] = btCollisionObject::CF_DISABLE_SPU_COLLISION_PROCESSING;
+    bt["CF_HAS_CONTACT_STIFFNESS_DAMPING"] = btCollisionObject::CF_HAS_CONTACT_STIFFNESS_DAMPING;
+    bt["CF_HAS_CUSTOM_DEBUG_RENDERING_COLOR"] = btCollisionObject::CF_HAS_CUSTOM_DEBUG_RENDERING_COLOR;
+    bt["CF_HAS_FRICTION_ANCHOR"] = btCollisionObject::CF_HAS_FRICTION_ANCHOR;
+    bt["CF_HAS_COLLISION_SOUND_TRIGGER"] = btCollisionObject::CF_HAS_COLLISION_SOUND_TRIGGER;
+
+    bt["CF_ANISOTROPIC_FRICTION_DISABLED"] = btCollisionObject::CF_ANISOTROPIC_FRICTION_DISABLED;
+    bt["CF_ANISOTROPIC_FRICTION"] = btCollisionObject::CF_ANISOTROPIC_FRICTION;
+    bt["CF_ANISOTROPIC_ROLLING_FRICTION"] = btCollisionObject::CF_ANISOTROPIC_ROLLING_FRICTION;
+
+    bt["BT_DISABLE_WORLD_GRAVITY"] = BT_DISABLE_WORLD_GRAVITY;
+    bt["BT_ENABLE_GYROSCOPIC_FORCE_EXPLICIT"] = BT_ENABLE_GYROSCOPIC_FORCE_EXPLICIT;
+    bt["BT_ENABLE_GYROSCOPIC_FORCE_IMPLICIT_WORLD"] = BT_ENABLE_GYROSCOPIC_FORCE_IMPLICIT_WORLD;
+    bt["BT_ENABLE_GYROSCOPIC_FORCE_IMPLICIT_BODY"] = BT_ENABLE_GYROSCOPIC_FORCE_IMPLICIT_BODY;
+    bt["BT_ENABLE_GYROPSCOPIC_FORCE"] = BT_ENABLE_GYROPSCOPIC_FORCE;
     return bt;
 }
 

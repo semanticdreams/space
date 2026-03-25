@@ -21,6 +21,7 @@
 (fn ensure-installed [opts]
   (when (available?)
     (local floor-y (resolve-floor-y opts))
+    (local floor-restitution (or (and opts opts.restitution) 1.0))
     (local existing app.__physics-global-floor)
     (local physics app.engine.physics)
     (local already-installed?
@@ -28,7 +29,8 @@
            existing.body
            existing.physics
            (= existing.physics physics)
-           (= existing.y floor-y)))
+           (= existing.y floor-y)
+           (= existing.restitution floor-restitution)))
     (when (not already-installed?)
       (when (and existing existing.body existing.physics)
         (pcall (fn []
@@ -39,10 +41,12 @@
       (local motion-state (bt.DefaultMotionState transform))
       (local inertia (bt.Vector3 0 0 0))
       (local info (bt.RigidBodyConstructionInfo 0 motion-state shape inertia))
+      (set info.m-restitution floor-restitution)
       (local body (bt.RigidBody info))
       (physics:addRigidBody body)
       (set app.__physics-global-floor
            {:y floor-y
+            :restitution floor-restitution
             :shape shape
             :motion-state motion-state
             :body body
