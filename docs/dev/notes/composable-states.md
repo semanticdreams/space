@@ -15,8 +15,8 @@ The replacement should be a composable state system with zero implicit input beh
 ## Goals
 
 - States start with no input behavior by default.
-- A state gains behavior only by composing explicit components.
-- Input routing strategy is pluggable rather than hardcoded in one base helper.
+- A state gains behavior only by composing explicit handlers.
+- Input routing is declared per event rather than hardcoded in one base helper.
 - Modal states do not need special blocking logic to stay exclusive.
 - Shared behaviors like hover tracking, click dispatch, and camera controls remain reusable.
 
@@ -72,83 +72,194 @@ A state starts with no behavior. If it should react to mouse wheel, update hover
 
 ### 2. Composition over inheritance
 
-Reusable behavior should live in input components, not in one shared base state with broad defaults.
+Reusable behavior should live in explicit handlers, not in one shared base state with broad defaults.
 
 ### 3. Dispatch is a strategy
 
-The mechanism that delivers an event to components should itself be configurable.
+The mechanism that delivers an event to handlers should itself be configurable.
 
 ### 4. Modal exclusivity should fall out of composition
 
-A modal state should be exclusive because it only composes exclusive components, not because it inherits broad behavior and then blocks it.
+A modal state should be exclusive because it only composes exclusive handlers, not because it inherits broad behavior and then blocks it.
 
 ## State Shape
 
 A state is assembled from:
 
 - metadata
-- a list of input components
-- a dispatch strategy
+- a routing table keyed by event name
+- optional enter/leave handler lists
+
+The important architectural constraint is that this is the final shape, not a wrapper over `StateBase.make-state`. The new system may preserve the current external state-manager interface for compatibility, but the new core should not inherit old default-policy concepts.
 
 Example shape:
 
 ```fennel
-{:name :terrain-rect-pick
- :components [PickDragSession EscapeCancel]
- :dispatch (Dispatch.first-handler-wins)}
+(State
+  {:name :terrain-rect-pick
+   :routes
+   {:key-down (FirstHandlerWins [EscapeCancel TerrainRectPick])
+    :mouse-button-down (FirstHandlerWins [TerrainRectPick])
+    :mouse-motion (FirstHandlerWins [TerrainRectPick])
+    :mouse-button-up (FirstHandlerWins [TerrainRectPick])
+    :updated (Broadcast [TerrainRectPick])}
+   :enter [TerrainRectPick]
+   :leave [TerrainRectPick]})
 ```
 
 Another state might use:
 
 ```fennel
-{:name :normal
- :components [InputFields
-              Clickables
-              HoverTracking
-              Movables
-              Resizables
-              SelectionBox
-              CameraControls
-              CameraUpdate]
- :dispatch (Dispatch.priority-chain)}
+(State
+  {:name :normal
+   :routes
+   {:key-down (FirstHandlerWins [InputDispatch FocusDispatch])
+    :key-up (FirstHandlerWins [InputDispatch])
+    :mouse-button-down (FirstHandlerWins [InputDispatch
+                                          ResizableDispatch
+                                          ClickableDispatch
+                                          MovableDispatch
+                                          SelectionDispatch
+                                          CameraMouseButtons])
+    :mouse-button-up (FirstHandlerWins [InputDispatch
+                                        ResizableDispatch
+                                        ClickableDispatch
+                                        MovableDispatch
+                                        SelectionDispatch
+                                        CameraMouseButtons])
+    :mouse-motion (FirstHandlerWins [InputDispatch
+                                     MovableDispatch
+                                     ResizableDispatch
+                                     SelectionDispatch
+                                     CameraMouseMotion
+                                     HoverTracking])
+    :mouse-wheel (FirstHandlerWins [InputDispatch
+                                    HoveredWheelDispatch
+                                    CameraMouseWheel])
+    :updated (Broadcast [CameraUpdate HoverUpdate])}
+   :enter [HoverTracking]
+   :leave [HoverTracking]})
 ```
 
-## Component Shape
+## Handler Shape
 
-A component exposes only the handlers it cares about:
+A handler module exposes only the event functions it cares about:
 
 ```fennel
-{:on-enter ...
- :on-leave ...
- :on-key-down ...
- :on-mouse-button-down ...
- :on-mouse-motion ...
- :on-mouse-wheel ...
- :on-updated ...}
+{:enter ...
+ :leave ...
+ :key-down ...
+ :mouse-button-down ...
+ :mouse-motion ...
+ :mouse-wheel ...
+ :updated ...}
 ```
 
-Unspecified handlers mean “this component has no opinion.”
+Unspecified handlers mean “this handler has no opinion.”
+
+The routing table is the primary declaration of state behavior. A handler may appear in multiple event routes. That repetition is intentional because it keeps event ownership and ordering visible in the state definition.
+
+## Final Runtime API
+
+The implementation should target a small final runtime API:
+
+- `State`
+  - composes a state definition into a runtime state object
+- `FirstHandlerWins`
+  - tries handlers in order until one handles the event
+- `Broadcast`
+  - invokes all handlers for an event
+
+Example target module boundaries:
+
+- `state.fnl`
+  - owns `State`
+- `state-routes.fnl`
+  - owns route combinators such as `FirstHandlerWins` and `Broadcast`
+- `state-handlers/*.fnl`
+  - owns reusable handlers such as `HoverTracking`, `ClickableDispatch`, `EscapeCancel`, and `TerrainRectPick`
+
+The runtime may expose compatibility fields like `on-key-down` and `on-mouse-motion` so the existing state manager can keep working during migration, but those are an outer integration seam only. They must be produced by the new composer rather than defining the new architecture.
+
+## Handler Contract
+
+Handlers should be plain tables of event functions plus optional lifecycle functions. They should not inherit from a base state and should not receive hidden default behavior.
+
+Recommended handler function shape:
+
+```fennel
+{:enter (fn [ctx] ...)
+ :leave (fn [ctx] ...)
+ :key-down (fn [ctx payload] ...)
+ :mouse-button-down (fn [ctx payload] ...)
+ :mouse-motion (fn [ctx payload] ...)
+ :updated (fn [ctx delta] ...)}
+```
+
+Return convention:
+
+- `true`
+  - this handler handled the event
+- `false` or `nil`
+  - this handler did not handle the event
+
+Handlers may mutate their own internal state or app/runtime state. The design goal is explicit composition, not artificial purity.
+
+## Runtime Context
+
+Handlers should receive an explicit runtime context rather than depending on hidden ambient behavior from `StateBase`.
+
+Minimum expected context:
+
+```fennel
+{:app app
+ :state runtime-state
+ :set-state (fn [name] ...)
+ :active-input (fn [] ...)
+ :connect-input (fn [input] ...)
+ :disconnect-input (fn [input] ...)}
+```
+
+This context is where generic helpers should live. For example, active-input lookup or state switching can be provided through `ctx` rather than reimplemented in every handler module.
+
+## Composer Responsibilities
+
+The composer should own:
+
+- state-local runtime context construction
+- engine event subscription and unsubscription
+- enter/leave lifecycle dispatch
+- route lookup per event
+- production of compatibility methods such as `on-key-down`, `on-updated`, and `on-enter`
+
+The composer should not:
+
+- inject default handlers
+- encode the old `normal` behavior implicitly
+- require handler modules to follow `StateBase` naming or structure internally
 
 ## Dispatch Strategies
 
-The state builder should not hardcode one event-routing rule. It should accept a dispatch strategy object or function family.
+The state builder should not hardcode one event-routing rule. Each event route should accept a strategy combinator.
 
 Useful built-in strategies:
 
-- `first-handler-wins`
-  - components are called in order until one returns `true`
-- `priority-chain`
+- `FirstHandlerWins`
+  - handlers are called in order until one returns `true`
+- `Broadcast`
+  - all handlers receive the event
+- `PriorityChain`
   - like first-handler-wins, but with explicit phases or priorities
-- `broadcast`
-  - all components receive the event
-- `capture-bubble`
+- `CaptureBubble`
   - useful for layered UI or nested scopes
 
-This matters because some behaviors should compete, while others should co-exist.
+This matters because some behaviors should compete, while others should co-exist, and different events often need different routing semantics.
 
-## Recommended First Components
+For the initial implementation, only `FirstHandlerWins` and `Broadcast` are required. Additional strategies should be added only when a concrete state needs them.
 
-Initial reusable components should align with existing behavior seams:
+## Recommended First Handlers
+
+Initial reusable handlers should align with existing behavior seams:
 
 - `HoverTracking`
 - `ClickableDispatch`
@@ -160,10 +271,10 @@ Initial reusable components should align with existing behavior seams:
 - `CameraMouseWheel`
 - `CameraUpdate`
 - `EscapeCancel`
-- `TerrainRectPickSession`
-- `TerrainPaintSession`
+- `TerrainRectPick`
+- `TerrainPaint`
 
-The important point is to separate camera wheel, camera motion, and camera per-frame update into different components so modal states can include none of them.
+The important point is to separate camera wheel, camera motion, and camera per-frame update into different handlers so modal states can include none of them.
 
 ## Example: Terrain Rect Pick
 
@@ -180,63 +291,93 @@ Current conceptual intent:
 Under a composable system:
 
 ```fennel
-State.compose
+(State
   {:name :terrain-rect-pick
-   :components [(TerrainRectPickSession)
-                (EscapeCancel)]
-   :dispatch (Dispatch.first-handler-wins)}
+   :routes
+   {:key-down (FirstHandlerWins [EscapeCancel TerrainRectPick])
+    :mouse-button-down (FirstHandlerWins [TerrainRectPick])
+    :mouse-motion (FirstHandlerWins [TerrainRectPick])
+    :mouse-button-up (FirstHandlerWins [TerrainRectPick])
+    :updated (Broadcast [TerrainRectPick])}
+   :enter [TerrainRectPick]
+   :leave [TerrainRectPick]})
 ```
 
-This state is exclusive because nothing camera-related or UI-routing-related is composed into it.
+This state is exclusive because nothing camera-related or UI-routing-related appears in its routes.
 
 ## Example: Terrain Paint
 
 ```fennel
-State.compose
+(State
   {:name :terrain-paint
-   :components [(TerrainPaintSession)
-                (EscapeCancel)]
-   :dispatch (Dispatch.first-handler-wins)}
+   :routes
+   {:key-down (FirstHandlerWins [EscapeCancel TerrainPaint])
+    :mouse-button-down (FirstHandlerWins [TerrainPaint])
+    :mouse-motion (FirstHandlerWins [TerrainPaint])
+    :mouse-button-up (FirstHandlerWins [TerrainPaint])
+    :updated (Broadcast [TerrainPaint])}
+   :enter [TerrainPaint]
+   :leave [TerrainPaint]})
 ```
 
-Again, there is no need for explicit “reject wheel” or “block controls” logic if those components are absent.
+Again, there is no need for explicit “reject wheel” or “block controls” logic if those handlers are absent.
 
 ## Example: Normal State
 
 `normal` is the state that should explicitly assemble the shared app interaction model:
 
 ```fennel
-State.compose
+(State
   {:name :normal
-   :components [(InputDispatch)
-                (MovableDispatch)
-                (ResizableDispatch)
-                (ClickableDispatch)
-                (SelectionDispatch)
-                (CameraMouseMotion)
-                (CameraMouseWheel)
-                (CameraUpdate)
-                (HoverTracking)]
-   :dispatch (Dispatch.priority-chain)}
+   :routes
+   {:key-down (FirstHandlerWins [InputDispatch FocusDispatch])
+    :key-up (FirstHandlerWins [InputDispatch])
+    :mouse-button-down (FirstHandlerWins [InputDispatch
+                                          ResizableDispatch
+                                          ClickableDispatch
+                                          MovableDispatch
+                                          SelectionDispatch
+                                          CameraMouseButtons])
+    :mouse-button-up (FirstHandlerWins [InputDispatch
+                                        ResizableDispatch
+                                        ClickableDispatch
+                                        MovableDispatch
+                                        SelectionDispatch
+                                        CameraMouseButtons])
+    :mouse-motion (FirstHandlerWins [InputDispatch
+                                     MovableDispatch
+                                     ResizableDispatch
+                                     SelectionDispatch
+                                     CameraMouseMotion
+                                     HoverTracking])
+    :mouse-wheel (FirstHandlerWins [InputDispatch
+                                    HoveredWheelDispatch
+                                    CameraMouseWheel])
+    :updated (Broadcast [CameraUpdate HoverUpdate])}
+   :enter [HoverTracking]
+   :leave [HoverTracking]})
 ```
 
 This is a better fit for broad default behavior than forcing every state to inherit it.
 
 ## Migration Plan
 
-### Phase 1: Introduce a new composer alongside `StateBase`
+### Phase 1: Implement the final core
 
-- Add a new state composer, for example `state-compose.fnl`
-- Keep `StateBase.make-state` unchanged during initial adoption
-- Implement a small set of dispatch strategies
+- Add the new state composer in a dedicated module such as `state.fnl`
+- Add route combinators in a dedicated module such as `state-routes.fnl`
+- Define the explicit runtime context passed to handlers
+- Keep compatibility only at the outer boundary by having `State` return fields like `on-key-down` and `on-leave`
 
-### Phase 2: Extract modal session components
+This phase should not reuse `StateBase.make-state` internally.
 
-- Extract `TerrainRectPickSession`
-- Extract `TerrainPaintSession`
-- Move escape-cancel behavior into a small reusable component
+### Phase 2: Extract modal session handlers
 
-### Phase 3: Migrate modal editor states first
+- Extract `TerrainRectPick`
+- Extract `TerrainPaint`
+- Move escape-cancel behavior into a small reusable handler
+
+### Phase 3: Prove the design on modal editor states
 
 Migrate these states first because they benefit most from zero-default behavior:
 
@@ -245,9 +386,9 @@ Migrate these states first because they benefit most from zero-default behavior:
 
 These should become the proving ground for the new design.
 
-### Phase 4: Extract shared default components
+### Phase 4: Extract shared default handlers
 
-Split current broad default behavior into explicit reusable components:
+Split current broad default behavior into explicit reusable handlers:
 
 - hover
 - click routing
@@ -256,9 +397,28 @@ Split current broad default behavior into explicit reusable components:
 - camera motion
 - camera update
 
-### Phase 5: Rebuild `normal` on composition
+### Phase 5: Rebuild `normal` from explicit routes
 
-Once components are stable, rebuild `:normal` from explicit pieces and retire the broad inherited default model.
+Once handlers are stable, rebuild `:normal` from explicit pieces and retire the broad inherited default model.
+
+### Phase 6: Migrate the remaining specialized states
+
+Migrate the remaining states directly into the new model:
+
+- `leader`
+- `camera`
+- `fpc`
+- `insert`
+- `text`
+- any other state-specific modules
+
+These ports should preserve current behavior, but they should be expressed in the final handler/route model rather than translated through `StateBase`.
+
+### Phase 7: Remove `StateBase`
+
+- Delete `StateBase.make-state`
+- Move any remaining generic helpers into the new runtime modules or dedicated reusable handlers
+- Reject any fallback path that silently restores inherited default behavior
 
 ## Benefits
 
@@ -271,19 +431,23 @@ Once components are stable, rebuild `:normal` from explicit pieces and retire th
 ## Risks
 
 - More initial structure than a single base helper
-- Requires clear component boundaries or it can become another implicit system
-- Ordering between components must be explicit and tested
+- Requires clear handler boundaries or it can become another implicit system
+- Ordering between handlers must be explicit and tested
 
 ## Recommended Direction
 
-Move toward zero-base composable states with pluggable dispatch strategy.
+Move toward zero-base composable states with explicit per-event routes.
 
 The key decision is not merely “opt-in” vs “opt-out.” The key decision is to stop encoding interaction policy inside one inherited state base.
 
+Implementation should be guided by the final architecture, not by the structure of the current state system. Existing behavior is the migration spec. The current internals are not.
+
 States should declare:
 
-- which behaviors they compose
+- which handlers run for each event
 - in what order
-- under which dispatch strategy
+- under which routing strategy
+
+Compatibility is acceptable only at the outer boundary where the state manager expects methods like `on-enter` and `on-key-down`. It is not acceptable to rebuild the new core as a thin wrapper around `StateBase`.
 
 That makes modal exclusivity, normal navigation, and future specialized modes all first-class cases of the same design.
