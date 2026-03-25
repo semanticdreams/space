@@ -16,7 +16,13 @@
 (local InputState (require :input-state-router))
 (local State (require :state))
 (local Runtime (require :state-runtime))
-(local DefaultConfig (require :state-default-config))
+(local HoverHandlers (require :state-handlers/hover))
+(local TextInputHandlers (require :state-handlers/text-input))
+(local FocusHandlers (require :state-handlers/focus))
+(local PointerHandlers (require :state-handlers/pointer))
+(local GamepadHandlers (require :state-handlers/gamepad))
+(local CameraHandlers (require :state-handlers/camera))
+(local Routes (require :state-routes))
 (local InputModel (require :input-model))
 (local TestSupport (require :tests/test-support))
 
@@ -147,6 +153,57 @@
                              events.updated])]
       (when (and signal signal.clear)
         (signal:clear)))))
+
+(fn interactive-routes [overrides]
+  (local route-overrides (or overrides {}))
+  {:text-input (or route-overrides.text-input
+                   (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch]))
+   :text-editing (or route-overrides.text-editing
+                     (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch]))
+   :key-down (or route-overrides.key-down
+                 (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
+                                          FocusHandlers.FocusTabKeyDown
+                                          FocusHandlers.FocusDirectionKeyDown
+                                          FocusHandlers.ActiveInputKeyBlock]))
+   :key-up (or route-overrides.key-up
+               (Routes.FirstHandlerWins [FocusHandlers.InputKeyUpDispatch
+                                        FocusHandlers.ActiveInputKeyBlock]))
+   :mouse-button-down (or route-overrides.mouse-button-down
+                          (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
+                                         PointerHandlers.ResizableMouseButtonDown
+                                         PointerHandlers.ClickableMouseButtonDown
+                                         PointerHandlers.MovableMouseButtonDown
+                                         PointerHandlers.SelectionMouseButtonDown
+                                         PointerHandlers.CameraMouseButtonDown]))
+   :mouse-button-up (or route-overrides.mouse-button-up
+                        (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
+                                       PointerHandlers.ResizableMouseButtonUp
+                                       PointerHandlers.ClickableMouseButtonUp
+                                       PointerHandlers.MovableMouseButtonUp
+                                       PointerHandlers.SelectionMouseButtonUp
+                                       PointerHandlers.CameraMouseButtonUp
+                                       HoverHandlers.HoverAfterMouseButtonUp]))
+   :mouse-motion (or route-overrides.mouse-motion
+                     (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
+                                    PointerHandlers.MovableMouseMotion
+                                    PointerHandlers.ResizableMouseMotion
+                                    PointerHandlers.CameraDragMouseMotion
+                                    PointerHandlers.SelectionMouseMotion
+                                    PointerHandlers.CameraMouseMotion
+                                    HoverHandlers.HoverMouseMotion]))
+   :mouse-wheel (or route-overrides.mouse-wheel
+                    (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                             PointerHandlers.HoveredMouseWheel
+                                             PointerHandlers.CameraMouseWheel]))
+   :gamepad-button-down (or route-overrides.gamepad-button-down
+                            (Routes.FirstHandlerWins [GamepadHandlers.GamepadButtonDown]))
+   :gamepad-axis-motion (or route-overrides.gamepad-axis-motion
+                            (Routes.FirstHandlerWins [GamepadHandlers.GamepadAxisMotion]))
+   :gamepad-removed (or route-overrides.gamepad-removed
+                        (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved]))
+   :updated (or route-overrides.updated
+                (Routes.Chain [CameraHandlers.CameraUpdated
+                               HoverHandlers.HoverUpdated]))})
 
 (fn normal-state-forwards-events []
   (reset-engine-events)
@@ -583,21 +640,21 @@
   (states.add-state
     :normal
     (State {:name :normal
-            :routes (DefaultConfig.routes
+            :routes (interactive-routes
                       {:mouse-button-up (fn [_event-name _ctx _payload]
                                           (states.set-state :next)
                                           true)})
-            :enter DefaultConfig.enter
-            :leave DefaultConfig.leave}))
+            :enter [HoverHandlers.HoverLifecycle]
+            :leave [HoverHandlers.HoverLifecycle]}))
   (states.add-state
     :next
     (State {:name :next
-            :routes (DefaultConfig.routes
+            :routes (interactive-routes
                       {:mouse-button-up (fn [_event-name _ctx _payload]
                                           (set next-state-mouse-up (+ next-state-mouse-up 1))
                                           true)})
-            :enter DefaultConfig.enter
-            :leave DefaultConfig.leave}))
+            :enter [HoverHandlers.HoverLifecycle]
+            :leave [HoverHandlers.HoverLifecycle]}))
   (set app.states states)
   (states.set-state :normal)
   (app.engine.events.mouse-button-up.emit {:button 1 :x 10 :y 20})

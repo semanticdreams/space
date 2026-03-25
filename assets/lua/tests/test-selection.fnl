@@ -7,7 +7,9 @@
 (local GraphView (require :graph/view))
 (local State (require :state))
 (local Routes (require :state-routes))
-(local DefaultConfig (require :state-default-config))
+(local HoverHandlers (require :state-handlers/hover))
+(local PointerHandlers (require :state-handlers/pointer))
+(local CameraHandlers (require :state-handlers/camera))
 (local Camera (require :camera))
 (local AppProjection (require :app-projection))
 (local Clickables (require :clickables))
@@ -69,9 +71,29 @@
 
 (fn selection-input-prefers-selection-only-for-primary-button []
     (local state (State {:name :selection-test
-                         :routes (DefaultConfig.routes {})
-                         :enter DefaultConfig.enter
-                         :leave DefaultConfig.leave}))
+                         :routes {:mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
+                                                                   PointerHandlers.ResizableMouseButtonDown
+                                                                   PointerHandlers.ClickableMouseButtonDown
+                                                                   PointerHandlers.MovableMouseButtonDown
+                                                                   PointerHandlers.SelectionMouseButtonDown
+                                                                   PointerHandlers.CameraMouseButtonDown])
+                                  :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
+                                                                 PointerHandlers.ResizableMouseButtonUp
+                                                                 PointerHandlers.ClickableMouseButtonUp
+                                                                 PointerHandlers.MovableMouseButtonUp
+                                                                 PointerHandlers.SelectionMouseButtonUp
+                                                                 PointerHandlers.CameraMouseButtonUp
+                                                                 HoverHandlers.HoverAfterMouseButtonUp])
+                                  :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
+                                                               PointerHandlers.MovableMouseMotion
+                                                               PointerHandlers.ResizableMouseMotion
+                                                               PointerHandlers.CameraDragMouseMotion
+                                                               PointerHandlers.SelectionMouseMotion
+                                                               PointerHandlers.CameraMouseMotion
+                                                               HoverHandlers.HoverMouseMotion])
+                                  :updated (Routes.Chain [CameraHandlers.CameraUpdated])}
+                         :enter [HoverHandlers.HoverLifecycle]
+                         :leave [HoverHandlers.HoverLifecycle]}))
     (local original-selector app.object-selector)
     (local original-first-person app.first-person-controls)
     (local original-clickables app.clickables)

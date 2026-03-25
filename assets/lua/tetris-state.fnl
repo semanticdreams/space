@@ -1,7 +1,11 @@
 (local State (require :state))
 (local Routes (require :state-routes))
-(local Defaults (require :state-defaults))
-(local DefaultConfig (require :state-default-config))
+(local HoverHandlers (require :state-handlers/hover))
+(local TextInputHandlers (require :state-handlers/text-input))
+(local FocusHandlers (require :state-handlers/focus))
+(local PointerHandlers (require :state-handlers/pointer))
+(local GamepadHandlers (require :state-handlers/gamepad))
+(local CameraHandlers (require :state-handlers/camera))
 (local Runtime (require :state-runtime))
 (local TetrisStateRouter (require :tetris-state-router))
 
@@ -36,9 +40,42 @@
                  (handle-key-down payload))})
   (State
     {:name :tetris
-     :routes (DefaultConfig.routes
-               {:key-down (Routes.FirstHandlerWins [TetrisCommands Defaults.DefaultKeyDown])})
-     :enter DefaultConfig.enter
-     :leave DefaultConfig.leave}))
+     :routes {:text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
+              :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
+              :key-down (Routes.FirstHandlerWins [TetrisCommands
+                                                 FocusHandlers.InputKeyDownDispatch
+                                                 FocusHandlers.ActiveInputKeyBlock])
+              :key-up (Routes.FirstHandlerWins [FocusHandlers.InputKeyUpDispatch
+                                               FocusHandlers.ActiveInputKeyBlock])
+              :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
+                                                PointerHandlers.ResizableMouseButtonDown
+                                                PointerHandlers.ClickableMouseButtonDown
+                                                PointerHandlers.MovableMouseButtonDown
+                                                PointerHandlers.SelectionMouseButtonDown
+                                                PointerHandlers.CameraMouseButtonDown])
+              :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
+                                              PointerHandlers.ResizableMouseButtonUp
+                                              PointerHandlers.ClickableMouseButtonUp
+                                              PointerHandlers.MovableMouseButtonUp
+                                              PointerHandlers.SelectionMouseButtonUp
+                                              PointerHandlers.CameraMouseButtonUp
+                                              HoverHandlers.HoverAfterMouseButtonUp])
+              :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
+                                           PointerHandlers.MovableMouseMotion
+                                           PointerHandlers.ResizableMouseMotion
+                                           PointerHandlers.CameraDragMouseMotion
+                                           PointerHandlers.SelectionMouseMotion
+                                           PointerHandlers.CameraMouseMotion
+                                           HoverHandlers.HoverMouseMotion])
+              :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                                    PointerHandlers.HoveredMouseWheel
+                                                    PointerHandlers.CameraMouseWheel])
+              :gamepad-button-down (Routes.FirstHandlerWins [GamepadHandlers.GamepadButtonDown])
+              :gamepad-axis-motion (Routes.FirstHandlerWins [GamepadHandlers.GamepadAxisMotion])
+              :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
+              :updated (Routes.Chain [CameraHandlers.CameraUpdated
+                                      HoverHandlers.HoverUpdated])}
+     :enter [HoverHandlers.HoverLifecycle]
+     :leave [HoverHandlers.HoverLifecycle]}))
 
 TetrisState

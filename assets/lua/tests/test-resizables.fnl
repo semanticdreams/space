@@ -3,7 +3,9 @@
 (local Intersectables (require :intersectables))
 (local Resizables (require :resizables))
 (local State (require :state))
-(local DefaultConfig (require :state-default-config))
+(local Routes (require :state-routes))
+(local HoverHandlers (require :state-handlers/hover))
+(local PointerHandlers (require :state-handlers/pointer))
 (local {: Layout} (require :layout))
 
 (local tests [])
@@ -133,9 +135,14 @@
   (set app.clickables clickables)
   (set app.movables nil)
   (local state (State {:name :resizable-test
-                       :routes (DefaultConfig.routes {})
-                       :enter DefaultConfig.enter
-                       :leave DefaultConfig.leave}))
+                       :routes {:mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
+                                                                 PointerHandlers.ResizableMouseButtonDown
+                                                                 PointerHandlers.ClickableMouseButtonDown
+                                                                 PointerHandlers.MovableMouseButtonDown
+                                                                 PointerHandlers.SelectionMouseButtonDown
+                                                                 PointerHandlers.CameraMouseButtonDown])}
+                       :enter [HoverHandlers.HoverLifecycle]
+                       :leave [HoverHandlers.HoverLifecycle]}))
   (state.on-mouse-button-down {:button 3 :x 0 :y 0 :mod 256})
   (set app.resizables originals.resizables)
   (set app.clickables originals.clickables)

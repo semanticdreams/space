@@ -3,10 +3,6 @@
 
 (local KEY_ESCAPE 27)
 
-(fn set-state [name]
-  (when (and app.engine app.states app.states.set-state)
-    (app.states.set-state name)))
-
 (fn dispatch-control [handler payload]
   (when (and app.first-person-controls handler)
     (handler app.first-person-controls payload)))
@@ -14,9 +10,9 @@
 (fn FpcState []
   (local ControlsOnly
     {:text-input (fn [_ctx _payload] false)
-     :key-down (fn [_ctx payload]
+     :key-down (fn [ctx payload]
                  (if (= (and payload payload.key) KEY_ESCAPE)
-                     (do (set-state :normal) true)
+                     (do ((. ctx :set-state) :normal) true)
                      (dispatch-control (. app.first-person-controls :on-key-down) payload)))
      :key-up (fn [_ctx payload]
                (dispatch-control (. app.first-person-controls :on-key-up) payload))

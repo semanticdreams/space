@@ -1,6 +1,5 @@
 (local State (require :state))
 (local Routes (require :state-routes))
-(local Defaults (require :state-defaults))
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 
 (fn active-session []
@@ -75,7 +74,7 @@
               :mouse-button-up (Routes.FirstHandlerWins [TerrainPaint])
               :mouse-motion (Routes.FirstHandlerWins [TerrainPaint])
               :updated (Routes.Broadcast [TerrainPaint])}
-     :enter [Defaults.HoverLifecycle TerrainPaint]
-     :leave [Defaults.HoverLifecycle TerrainPaint]}))
+     :enter [TerrainPaint]
+     :leave [TerrainPaint]}))
 
 TerrainPaintState

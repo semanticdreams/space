@@ -21,10 +21,11 @@ The legacy `StateBase` layer has been removed. The runtime is now centered on:
 - `assets/lua/state.fnl`
 - `assets/lua/state-routes.fnl`
 - `assets/lua/state-runtime.fnl`
-- `assets/lua/state-defaults.fnl`
-- `assets/lua/state-default-config.fnl`
+- `assets/lua/state-handlers/*.fnl`
 
 Production states such as `normal`, `terrain-rect-pick`, `terrain-paint`, `leader`, `camera`, `fpc`, `text`, `insert`, `quit`, `car`, and `tetris` now build on `State` directly.
+
+There is no shared default route bundle. Each state now declares its own `:routes`, `:enter`, and `:leave` lists explicitly, reusing only opt-in handler tables from focused modules under `state-handlers/`.
 
 The existing outer state-manager contract remains in place: runtime states still expose methods such as `on-enter`, `on-leave`, `on-key-down`, and `on-mouse-motion`. That compatibility surface is now produced by the new composer rather than inherited from `StateBase`.
 
@@ -185,6 +186,8 @@ The implementation should target a small final runtime API:
   - tries handlers in order until one handles the event
 - `Broadcast`
   - invokes all handlers for an event
+- `Chain`
+  - runs handlers in order, keeping sequencing visible for side-effectful routing such as pointer dispatch
 
 Example target module boundaries:
 
@@ -193,7 +196,7 @@ Example target module boundaries:
 - `state-routes.fnl`
   - owns route combinators such as `FirstHandlerWins` and `Broadcast`
 - `state-handlers/*.fnl`
-  - owns reusable handlers such as `HoverTracking`, `ClickableDispatch`, `EscapeCancel`, and `TerrainRectPick`
+  - own reusable handler tables grouped by concern such as hover, focus, pointer routing, gamepad, and camera update
 
 The runtime may expose compatibility fields like `on-key-down` and `on-mouse-motion` so the existing state manager can keep working during migration, but those are an outer integration seam only. They must be produced by the new composer rather than defining the new architecture.
 
@@ -238,6 +241,8 @@ Minimum expected context:
 
 This context is where generic helpers should live. For example, active-input lookup or state switching can be provided through `ctx` rather than reimplemented in every handler module.
 
+Route combinators may extend `ctx` with event-local helpers when needed. The current runtime uses event-local context fields for chained routing, such as “has this event already been consumed within this route?”
+
 ## Composer Responsibilities
 
 The composer should own:
@@ -273,7 +278,7 @@ Useful built-in strategies:
 
 This matters because some behaviors should compete, while others should co-exist, and different events often need different routing semantics.
 
-For the initial implementation, only `FirstHandlerWins` and `Broadcast` are required. Additional strategies should be added only when a concrete state needs them.
+For the initial implementation, `FirstHandlerWins`, `Broadcast`, and `Chain` are sufficient. Additional strategies should be added only when a concrete state needs them.
 
 ## Recommended First Handlers
 
@@ -348,35 +353,42 @@ Again, there is no need for explicit “reject wheel” or “block controls” 
 (State
   {:name :normal
    :routes
-   {:key-down (FirstHandlerWins [InputDispatch FocusDispatch])
-    :key-up (FirstHandlerWins [InputDispatch])
-    :mouse-button-down (FirstHandlerWins [InputDispatch
-                                          ResizableDispatch
-                                          ClickableDispatch
-                                          MovableDispatch
-                                          SelectionDispatch
-                                          CameraMouseButtons])
-    :mouse-button-up (FirstHandlerWins [InputDispatch
-                                        ResizableDispatch
-                                        ClickableDispatch
-                                        MovableDispatch
-                                        SelectionDispatch
-                                        CameraMouseButtons])
-    :mouse-motion (FirstHandlerWins [InputDispatch
-                                     MovableDispatch
-                                     ResizableDispatch
-                                     SelectionDispatch
-                                     CameraMouseMotion
-                                     HoverTracking])
+   {:key-down (FirstHandlerWins [NormalCommands
+                                 InputKeyDownDispatch
+                                 FocusTabKeyDown
+                                 FocusDirectionKeyDown
+                                 ActiveInputKeyBlock])
+    :key-up (FirstHandlerWins [InputKeyUpDispatch
+                               ActiveInputKeyBlock])
+    :mouse-button-down (Chain [InputMouseButtonDownDispatch
+                               ResizableMouseButtonDown
+                               ClickableMouseButtonDown
+                               MovableMouseButtonDown
+                               SelectionMouseButtonDown
+                               CameraMouseButtonDown])
+    :mouse-button-up (Chain [InputMouseButtonUpDispatch
+                             ResizableMouseButtonUp
+                             ClickableMouseButtonUp
+                             MovableMouseButtonUp
+                             SelectionMouseButtonUp
+                             CameraMouseButtonUp
+                             HoverAfterMouseButtonUp])
+    :mouse-motion (Chain [InputMouseMotionDispatch
+                          MovableMouseMotion
+                          ResizableMouseMotion
+                          CameraDragMouseMotion
+                          SelectionMouseMotion
+                          CameraMouseMotion
+                          HoverMouseMotion])
     :mouse-wheel (FirstHandlerWins [InputDispatch
                                     HoveredWheelDispatch
                                     CameraMouseWheel])
-    :updated (Broadcast [CameraUpdate HoverUpdate])}
-   :enter [HoverTracking]
-   :leave [HoverTracking]})
+    :updated (Chain [CameraUpdated HoverUpdated])}
+   :enter [HoverLifecycle]
+   :leave [HoverLifecycle]})
 ```
 
-This is a better fit for broad default behavior than forcing every state to inherit it.
+This keeps the full interaction policy visible in the state itself instead of hiding it behind a premerged default bundle.
 
 ## Migration Plan
 

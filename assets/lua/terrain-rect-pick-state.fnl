@@ -1,6 +1,5 @@
 (local State (require :state))
 (local Routes (require :state-routes))
-(local Defaults (require :state-defaults))
 (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
 
 
@@ -64,7 +63,6 @@
                                             :timestamp payload.timestamp})
                        (cleanup-if-needed))
                      true)
-     :mouse-wheel (fn [_ctx _payload] true)
      :updated (fn [_ctx _delta]
                 (local session (active-session))
                 (flush-pending-motion session)
@@ -77,9 +75,8 @@
               :mouse-button-down (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-button-up (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-motion (Routes.FirstHandlerWins [TerrainRectPick])
-              :mouse-wheel (Routes.FirstHandlerWins [TerrainRectPick])
               :updated (Routes.Broadcast [TerrainRectPick])}
-     :enter [Defaults.HoverLifecycle TerrainRectPick]
-     :leave [Defaults.HoverLifecycle TerrainRectPick]}))
+     :enter [TerrainRectPick]
+     :leave [TerrainRectPick]}))
 
 TerrainRectPickState

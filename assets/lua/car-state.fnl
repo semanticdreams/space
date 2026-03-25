@@ -1,7 +1,9 @@
 (local glm (require :glm))
 (local State (require :state))
-(local DefaultConfig (require :state-default-config))
-(local Defaults (require :state-defaults))
+(local HoverHandlers (require :state-handlers/hover))
+(local TextInputHandlers (require :state-handlers/text-input))
+(local PointerHandlers (require :state-handlers/pointer))
+(local GamepadHandlers (require :state-handlers/gamepad))
 (local Routes (require :state-routes))
 (local bt (require :bt))
 (local Utils (require :car-state-utils))
@@ -323,12 +325,40 @@
   (local result
     (State
       {:name :car
-       :routes (DefaultConfig.routes
-                 {:key-down (Routes.FirstHandlerWins [CarControls])
-                  :key-up (Routes.FirstHandlerWins [CarControls])
-                  :updated (Routes.FirstHandlerWins [CarControls])})
-       :enter [Defaults.HoverLifecycle CarLifecycle]
-       :leave [Defaults.HoverLifecycle CarLifecycle]}))
+       :routes {:text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
+                :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
+                :key-down (Routes.FirstHandlerWins [CarControls])
+                :key-up (Routes.FirstHandlerWins [CarControls])
+                :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
+                                                  PointerHandlers.ResizableMouseButtonDown
+                                                  PointerHandlers.ClickableMouseButtonDown
+                                                  PointerHandlers.MovableMouseButtonDown
+                                                  PointerHandlers.SelectionMouseButtonDown
+                                                  PointerHandlers.CameraMouseButtonDown])
+                :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
+                                                PointerHandlers.ResizableMouseButtonUp
+                                                PointerHandlers.ClickableMouseButtonUp
+                                                PointerHandlers.MovableMouseButtonUp
+                                                PointerHandlers.SelectionMouseButtonUp
+                                                PointerHandlers.CameraMouseButtonUp
+                                                HoverHandlers.HoverAfterMouseButtonUp])
+                :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
+                                             PointerHandlers.MovableMouseMotion
+                                             PointerHandlers.ResizableMouseMotion
+                                             PointerHandlers.CameraDragMouseMotion
+                                             PointerHandlers.SelectionMouseMotion
+                                             PointerHandlers.CameraMouseMotion
+                                             HoverHandlers.HoverMouseMotion])
+                :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                                      PointerHandlers.HoveredMouseWheel
+                                                      PointerHandlers.CameraMouseWheel])
+                :gamepad-button-down (Routes.FirstHandlerWins [GamepadHandlers.GamepadButtonDown])
+                :gamepad-axis-motion (Routes.FirstHandlerWins [GamepadHandlers.GamepadAxisMotion])
+                :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
+                :updated (Routes.Chain [CarControls
+                                        HoverHandlers.HoverUpdated])}
+       :enter [HoverHandlers.HoverLifecycle CarLifecycle]
+       :leave [HoverHandlers.HoverLifecycle CarLifecycle]}))
   (set result.__car_state state)
   result)
 

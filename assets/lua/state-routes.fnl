@@ -32,5 +32,17 @@
           (set handled true))))
     handled))
 
+(fn Chain [handlers]
+  (local ordered (normalize-handlers handlers))
+  (fn [event-name ctx payload]
+    (var handled false)
+    (each [_ handler (ipairs ordered)]
+      (local event-handler (resolve-handler handler event-name))
+      (when event-handler
+        (when (event-handler ctx payload)
+          (set handled true))))
+    handled))
+
 {:FirstHandlerWins FirstHandlerWins
- :Broadcast Broadcast}
+ :Broadcast Broadcast
+ :Chain Chain}

@@ -14,6 +14,18 @@
    [:gamepad-removed :gamepad-removed :on-gamepad-removed]
    [:updated :updated :on-updated]])
 
+(local known-route-keys
+  (let [keys {}]
+    (each [_ entry (ipairs engine-event-order)]
+      (tset keys (. entry 1) true))
+    keys))
+
+(fn assert-known-route-keys [routes]
+  (when routes
+    (each [route-key _ (pairs routes)]
+      (assert (. known-route-keys route-key)
+              (.. "State received unknown route key: " (tostring route-key))))))
+
 (fn clone-routes [routes]
   (local copy {})
   (each [_ entry (ipairs engine-event-order)]
@@ -22,6 +34,7 @@
   copy)
 
 (fn make-ctx [state]
+  (var current-event nil)
   {:app app
    :state state
    :set-state (fn [name]
@@ -29,7 +42,19 @@
                   (app.states.set-state name)))
    :connect-input Runtime.connect-input
    :disconnect-input Runtime.disconnect-input
-   :active-input Runtime.active-input})
+   :active-input Runtime.active-input
+   :event-consumed? (fn []
+                      (and current-event current-event.consumed?))
+   :mark-event-consumed! (fn []
+                           (when current-event
+                             (set current-event.consumed? true))
+                           true)
+   :begin-event (fn [event]
+                  (local previous-event current-event)
+                  (set current-event event)
+                  previous-event)
+   :end-event (fn [previous-event]
+                (set current-event previous-event))})
 
 (fn run-lifecycle [handlers event-name ctx]
   (when handlers
@@ -48,16 +73,23 @@
 
 (fn State [opts]
   (assert opts "State requires options")
+  (assert-known-route-keys opts.routes)
   (local routes (clone-routes (or opts.routes {})))
   (local state {:name opts.name})
   (local ctx (make-ctx state))
   (local event-handlers {})
   (var entered? false)
+  (local reusable-event {:consumed? false})
 
   (fn call-route [event-name payload]
     (local route (and routes (. routes event-name)))
     (if route
-        (route event-name ctx payload)
+        (do
+          (set reusable-event.consumed? false)
+          (local previous-event (ctx.begin-event reusable-event))
+          (local result (route event-name ctx payload))
+          (ctx.end-event previous-event)
+          result)
         false))
 
   (each [_ entry (ipairs engine-event-order)]
