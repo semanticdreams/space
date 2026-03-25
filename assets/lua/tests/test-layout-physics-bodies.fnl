@@ -231,6 +231,9 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
+  (local original-floor app.physics-floor-y)
+  (set app.physics-floor-y PhysicsFloor.default-floor-y)
+  (configure-test-physics-world {:floor-y app.physics-floor-y})
   (local panel-size {:value (glm.vec3 5 3 5)})
   (local panel-builder (make-probe-panel-builder panel-size))
 
@@ -252,6 +255,7 @@
                     (string.format
                       "Panel should settle near floor, not remain high (y=%.3f)"
                       panel.layout.position.y))))]
+    (set app.physics-floor-y original-floor)
     (cleanup)
     (when (not ok)
       (error err))))

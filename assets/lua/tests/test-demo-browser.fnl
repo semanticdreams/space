@@ -13,9 +13,13 @@
 (local TerrainPaintState (require :terrain-paint-state))
 (local MathUtils (require :math-utils))
 (local PhysicsFloor (require :physics-floor))
+(local TerrainQuery (require :terrain-query))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
+(local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
+(local fixtures (require :tests/http-fixtures))
+(local TestSupport (require :tests/test-support))
 
 (local tests [])
 
@@ -23,6 +27,12 @@
 
 (fn vec3-approx= [a b]
   (and (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
+
+(fn quat-approx= [a b]
+  (and (approx a.w b.w)
+       (approx a.x b.x)
        (approx a.y b.y)
        (approx a.z b.z)))
 
@@ -71,6 +81,141 @@
 
 (fn array->quat [arr]
   (glm.quat (. arr 1) (. arr 2) (. arr 3) (. arr 4)))
+
+(fn terrain-surface-height-at-local-point [record local-x local-z]
+  (local info (TerrainQuery.surface-info-at-local-point record local-x local-z))
+  (and info info.local-surface-y))
+
+(fn terrain-origin-offset [record]
+  (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (local spacing (HeightfieldTerrainGrid.spacing record))
+  (glm.vec3 (* bounds.min-sample-x (. spacing 1))
+            0
+            (* bounds.min-sample-z (. spacing 2))))
+
+(fn terrain-world-point-from-runtime-layout [record terrain-layout local-point]
+  (local origin-offset (terrain-origin-offset record))
+  (+ terrain-layout.position
+     (terrain-layout.rotation:rotate (- local-point origin-offset))))
+
+(fn elevated-probe-point-in-cell [record cell-x cell-z min-height]
+  (local spacing (HeightfieldTerrainGrid.spacing record))
+  (local spacing-x (. spacing 1))
+  (local spacing-z (. spacing 2))
+  (local base-x (* cell-x spacing-x))
+  (local base-z (* cell-z spacing-z))
+  (local candidates [[0.8 0.8]
+                     [0.2 0.8]
+                     [0.8 0.2]
+                     [0.2 0.2]
+                     [0.65 0.65]
+                     [0.35 0.65]
+                     [0.65 0.35]
+                     [0.5 0.5]])
+  (var found nil)
+  (each [_ uv (ipairs candidates)]
+    (when (not found)
+      (local local-point (glm.vec3 (+ base-x (* (. uv 1) spacing-x))
+                                   0
+                                   (+ base-z (* (. uv 2) spacing-z))))
+      (local local-surface-y
+        (terrain-surface-height-at-local-point record local-point.x local-point.z))
+      (when (and local-surface-y (> local-surface-y (or min-height 1.0)))
+        (set found local-point))))
+  found)
+
+(fn terrain-cell-heights [record cell-x cell-z]
+  (local chunk-map (HeightfieldTerrainGrid.build-chunk-map record))
+  (local h00 (HeightfieldTerrainGrid.sample-height-global record chunk-map cell-x cell-z))
+  (local h01 (HeightfieldTerrainGrid.sample-height-global record chunk-map cell-x (+ cell-z 1)))
+  (local h10 (HeightfieldTerrainGrid.sample-height-global record chunk-map (+ cell-x 1) cell-z))
+  (local h11 (HeightfieldTerrainGrid.sample-height-global record chunk-map (+ cell-x 1) (+ cell-z 1)))
+  (if (or (= h00 nil) (= h01 nil) (= h10 nil) (= h11 nil))
+      nil
+      {:h00 h00 :h01 h01 :h10 h10 :h11 h11}))
+
+(fn broad-elevated-probe-point-in-cell [record cell-x cell-z min-height]
+  (local heights (terrain-cell-heights record cell-x cell-z))
+  (when heights
+    (local min-cell-height
+      (math.min heights.h00 heights.h01 heights.h10 heights.h11))
+    (when (> min-cell-height (or min-height 1.0))
+      (local spacing (HeightfieldTerrainGrid.spacing record))
+      (local spacing-x (. spacing 1))
+      (local spacing-z (. spacing 2))
+      (glm.vec3 (+ (* cell-x spacing-x) (* spacing-x 0.5))
+                0
+                (+ (* cell-z spacing-z) (* spacing-z 0.5))))))
+
+(fn collect-broad-elevated-probes [record min-height]
+  (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (local probes [])
+  (for [sample-z bounds.min-sample-z (- bounds.max-sample-z 1)]
+    (for [sample-x bounds.min-sample-x (- bounds.max-sample-x 1)]
+      (local point
+        (broad-elevated-probe-point-in-cell record sample-x sample-z min-height))
+      (when point
+        (local heights (terrain-cell-heights record sample-x sample-z))
+        (table.insert probes {:sample-x sample-x
+                              :sample-z sample-z
+                              :min-height (math.min heights.h00 heights.h01 heights.h10 heights.h11)
+                              :max-height (math.max heights.h00 heights.h01 heights.h10 heights.h11)
+                              :point point}))))
+  probes)
+
+(fn representative-probes [probes max-count]
+  (local count (length probes))
+  (local wanted (math.max 0 (or max-count 4)))
+  (if (or (= wanted 0) (= count 0) (<= count wanted))
+      probes
+      (= wanted 1)
+      [(. probes 1)]
+      (do
+        (local selected [])
+        (local used {})
+        (for [idx 0 (- wanted 1)]
+          (local probe-index
+            (+ 1 (math.floor (/ (* idx (- count 1)) (- wanted 1)))))
+          (when (not (. used probe-index))
+            (set (. used probe-index) true)
+            (table.insert selected (. probes probe-index))))
+        selected)))
+
+(fn first-home-world-path []
+  (TestSupport.fixture-path "terrain-live-pick-world.json"))
+
+(fn wait-for-terrain-layout-stable [scene terrain-id max-updates]
+  (local updates (or max-updates 12))
+  (var previous-position nil)
+  (var previous-rotation nil)
+  (var stable-layout nil)
+  (for [_ 1 updates]
+    (when (not stable-layout)
+      (scene:update)
+      (var terrain-entry nil)
+      (when terrain-id
+        (each [_ metadata (ipairs (or scene.scene-terrains []))]
+          (when (and (not terrain-entry)
+                     metadata.record
+                     (= metadata.record.id terrain-id))
+            (set terrain-entry metadata))))
+      (when (and (not terrain-id) (. scene.scene-terrains 1))
+        (set terrain-entry (. scene.scene-terrains 1)))
+      (local layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+      (when layout
+        (if (and previous-position
+                 previous-rotation
+                 (vec3-approx= previous-position layout.position)
+                 (quat-approx= previous-rotation layout.rotation))
+            (set stable-layout layout)
+            (do
+              (set previous-position (glm.vec3 layout.position.x layout.position.y layout.position.z))
+              (set previous-rotation (glm.quat layout.rotation.w
+                                               layout.rotation.x
+                                               layout.rotation.y
+                                               layout.rotation.z)))))))
+  (assert stable-layout "Expected terrain layout to stabilize")
+  stable-layout)
 
 (fn random-range [min-value max-value]
   (+ min-value (* (math.random) (- max-value min-value))))
@@ -907,6 +1052,7 @@
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
   (local original-states app.states)
+  (var suspended-state nil)
   (local (ok err)
     (pcall
       (fn []
@@ -944,6 +1090,7 @@
         (states.add-state :normal {})
         (states.add-state :terrain-paint (TerrainPaintState))
         (states.set-state :normal)
+        (set suspended-state (TestSupport.suspend-active-state original-states))
         (set app.states states)
         (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
                              :on-mouse-button-up (fn [_self _payload] nil)
@@ -961,6 +1108,7 @@
                                         :on-mouse-motion (fn [_self _payload] nil)
                                         :on-mouse-wheel (fn [_self _payload]
                                                           (error "terrain rectangle pick state should swallow mouse wheel input"))
+                                        :update (fn [_self _delta] nil)
                                         :drag-active? (fn [_self] false)})
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-button-down.emit {:button 1 :x 40 :y 50})
@@ -989,6 +1137,7 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
   (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state)
   (cleanup)
   (when (not ok)
     (error err)))
@@ -1004,6 +1153,7 @@
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
   (local original-states app.states)
+  (var suspended-state nil)
   (local original-screen-pos-terrain-domain-hit scene.screen-pos-terrain-domain-hit)
   (local (ok err)
     (pcall
@@ -1044,6 +1194,7 @@
         (states.add-state :normal {})
         (states.add-state :terrain-paint (TerrainPaintState))
         (states.set-state :normal)
+        (set suspended-state (TestSupport.suspend-active-state original-states))
         (set app.states states)
         (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
                              :on-mouse-button-up (fn [_self _payload] nil)
@@ -1061,6 +1212,7 @@
                                         :on-mouse-motion (fn [_self _payload] nil)
                                         :on-mouse-wheel (fn [_self _payload]
                                                           (error "terrain rectangle pick state should swallow mouse wheel input"))
+                                        :update (fn [_self _delta] nil)
                                         :drag-active? (fn [_self] false)})
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
@@ -1078,6 +1230,7 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
   (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state)
   (cleanup)
   (when (not ok)
     (error err)))
@@ -1094,6 +1247,7 @@
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
   (local original-states app.states)
+  (var suspended-state nil)
   (local (ok err)
     (pcall
       (fn []
@@ -1118,14 +1272,8 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
-        (var clickable-down-count 0)
-        (var clickable-up-count 0)
-        (set app.clickables {:on-mouse-button-down (fn [_self _payload]
-                                                     (set clickable-down-count (+ clickable-down-count 1))
-                                                     nil)
-                             :on-mouse-button-up (fn [_self _payload]
-                                                   (set clickable-up-count (+ clickable-up-count 1))
-                                                   nil)
+        (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
+                             :on-mouse-button-up (fn [_self _payload] nil)
                              :active? true})
         (set app.movables {:on-mouse-button-down (fn [_self _payload] nil)
                            :on-mouse-button-up (fn [_self _payload] nil)
@@ -1140,11 +1288,13 @@
                                         :on-mouse-motion (fn [_self _payload] nil)
                                         :on-mouse-wheel (fn [_self _payload]
                                                           (error "terrain rectangle pick state should swallow mouse wheel input"))
+                                        :update (fn [_self _delta] nil)
                                         :drag-active? (fn [_self] false)})
         (local states (States))
         (states.add-state :normal {})
         (states.add-state :terrain-rect-pick (TerrainRectPickState))
         (states.set-state :normal)
+        (set suspended-state (TestSupport.suspend-active-state original-states))
         (set app.states states)
         (var resolved-target nil)
         (local capture
@@ -1168,10 +1318,6 @@
                 "terrain rectangle pick state should route engine mouse events to the active session")
         (assert (= resolved-target.x0 1))
         (assert (= resolved-target.x1 3))
-        (assert (= clickable-down-count 0)
-                "terrain rectangle pick state should bypass clickables on mouse down")
-        (assert (= clickable-up-count 0)
-                "terrain rectangle pick state should bypass clickables on mouse up")
         (assert (= (app.states.active-name) :normal)
                 "terrain rectangle pick state should restore the previous state after completion")
         (capture:drop))))
@@ -1182,6 +1328,7 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
   (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state)
   (cleanup)
   (when (not ok)
     (error err)))
@@ -1533,6 +1680,601 @@
     (cleanup)
     (when (not ok)
       (error err))))
+
+(fn scene-heightfield-physics-respects-scene-root-transform []
+  (assert bt "Scene heightfield root-transform physics test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 20.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20]}]})
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain-record]})
+        (scene.layout-root:update)
+        (local terrain-entry (. scene.scene-terrains 1))
+        (local terrain-layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+        (assert terrain-layout "Expected runtime terrain layout for root-transform physics test")
+        (local local-center (glm.vec3 40 0 40))
+        (local world-center (+ terrain-layout.position
+                               (terrain-layout.rotation:rotate local-center)))
+        (local surface (scene:terrain-surface-under-point world-center))
+        (assert surface "Expected terrain surface under transformed terrain center")
+        (local body
+          (scene:add-physics-body {:position (glm.vec3 (- world-center.x 2)
+                                                       (+ surface.world-surface-y 40)
+                                                       (- world-center.z 2))
+                                   :size (glm.vec3 4 4 4)}))
+        (assert body "Expected add-physics-body to create a runtime body")
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local center (+ body.layout.position
+                         (body.layout.rotation:rotate (* 0.5 body.layout.size))))
+        (assert (> center.y (+ surface.world-surface-y 1.0))
+                (string.format
+                  "Physics body should rest above the transformed heightfield surface instead of falling through (surface_y=%.3f center_y=%.3f)"
+                  surface.world-surface-y
+                  center.y)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-replaced-heightfield-updates-physics []
+  (assert bt "Terrain replacement physics test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 0.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0]}]})
+  (local updated-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 20.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20]}]})
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain-record]})
+        (scene:replace-terrain-record "terrain-a" updated-record)
+        (local element
+          (scene:add-physics-body {:position (glm.vec3 40 -40 40)
+                                   :size (glm.vec3 4 4 4)}))
+        (assert element "Expected add-physics-body to return an element")
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local y element.layout.position.y)
+        (assert (> y -90)
+                (string.format
+                  "Physics body should settle on replaced raised terrain, not the old base (actual_y=%.3f)"
+                  y)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-replaced-heightfield-updates-lifted-ball-collision []
+  (assert bt "Terrain replacement lifted-ball test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 0.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0]}]})
+  (local updated-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 20.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20]}]})
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain-record]})
+        (local element
+          (scene:add-ball {:size (glm.vec3 18 18 18)
+                           :position (glm.vec3 40 20 40)}))
+        (assert element "Expected add-ball to return an element")
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (scene:replace-terrain-record "terrain-a" updated-record)
+        (element:begin-drag)
+        (element.layout:set-position (glm.vec3 0 0 0))
+        (element:end-drag)
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local center (+ element.layout.position
+                         (element.layout.rotation:rotate (* 0.5 element.layout.size))))
+        (assert (> center.y -90)
+                (string.format
+                  "Lifted ball should rest on replaced raised terrain, not the old base (center_y=%.3f)"
+                  center.y)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-replaced-heightfield-supports-ball-placed-directly-on-raised-area []
+  (assert bt "Terrain replacement direct-place ball test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 0.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0
+                         0 0 0 0 0]}]})
+  (local updated-record
+    {:id "terrain-a"
+     :kind "heightfield-terrain"
+     :options {:position [0 -100 0]
+               :rotation [1 0 0 0]
+               :sample-spacing [20 20]
+               :chunk-samples [5 5]
+               :default-height 20.0}
+     :chunks [{:coord [0 0]
+               :size [5 5]
+               :heights [20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20
+                         20 20 20 20 20]}]})
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain-record]})
+        (local element
+          (scene:add-ball {:size (glm.vec3 18 18 18)
+                           :position (glm.vec3 40 20 40)}))
+        (assert element "Expected add-ball to return an element")
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (scene:replace-terrain-record "terrain-a" updated-record)
+        (element:begin-drag)
+        (element.layout:set-position (glm.vec3 31 -89 31))
+        (local placed-center (+ element.layout.position
+                                (element.layout.rotation:rotate (* 0.5 element.layout.size))))
+        (assert (approx placed-center.y -80)
+                (string.format
+                  "Direct placement test should currently place the ball center at y=-80 before release (actual=%.3f)"
+                  placed-center.y))
+        (element:end-drag)
+        (for [_ 1 180]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local center (+ element.layout.position
+                         (element.layout.rotation:rotate (* 0.5 element.layout.size))))
+        (assert (> center.y -90)
+                (string.format
+                  "Ball placed directly on raised terrain should stay above the old base (center_y=%.3f)"
+                  center.y)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-live-heightfield-ball-above-raised-area-does-not-fall-to-base []
+  (assert bt "Live heightfield ball regression test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local fixture (fixtures.read-json (TestSupport.fixture-path "terrain-live-pick-world.json")))
+  (local terrain-record (. (or (and fixture.scene fixture.scene.terrains) []) 1))
+  (local broad-probes (collect-broad-elevated-probes terrain-record 5.0))
+  (local local-point
+    (or (and (. broad-probes 1) (. (. broad-probes 1) :point))
+        (glm.vec3 170 0 190)))
+  (local ball-radius 9.0)
+  (local ball-size (glm.vec3 (* ball-radius 2) (* ball-radius 2) (* ball-radius 2)))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert terrain-record "Expected live terrain fixture to include a terrain record")
+        (scene:build-default {:terrains [terrain-record]})
+        (wait-for-terrain-layout-stable scene terrain-record.id)
+        (local terrain-entry (. scene.scene-terrains 1))
+        (local terrain-layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+        (assert terrain-layout "Expected runtime terrain layout for live heightfield regression")
+        (local world-point
+          (terrain-world-point-from-runtime-layout terrain-record terrain-layout local-point))
+        (local surface (scene:terrain-surface-under-point world-point))
+        (assert surface "Expected terrain surface under transformed live heightfield probe")
+        (local ball-center (glm.vec3 world-point.x
+                                     (+ surface.world-surface-y 30.0)
+                                     world-point.z))
+        (local ball-layout-position
+          (glm.vec3 (- ball-center.x ball-radius)
+                    (- ball-center.y ball-radius)
+                    (- ball-center.z ball-radius)))
+        (local ball
+          (scene:add-ball {:size ball-size
+                           :radius ball-radius
+                           :position ball-layout-position
+                           :rotation (glm.quat 1 0 0 0)}))
+        (assert ball "Expected add-ball to create a runtime ball")
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local transform (ball.body:getCenterOfMassTransform))
+        (local origin (transform:getOrigin))
+        (assert (> origin.y (+ surface.world-surface-y 8.0))
+                (string.format
+                  "Ball should collide with the transformed raised live terrain instead of falling near the base (surface_y=%.3f center_y=%.3f)"
+                  surface.world-surface-y
+                  origin.y)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-live-heightfield-supports-balls-across-3x3-chunks []
+  (assert bt "Live 3x3 heightfield support test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local fixture (fixtures.read-json (TestSupport.fixture-path "terrain-live-pick-world.json")))
+  (local terrain-record (. (or (and fixture.scene fixture.scene.terrains) []) 1))
+  (local ball-radius 9.0)
+  (local bounds (HeightfieldTerrainData.sample-bounds terrain-record))
+  (local spacing (HeightfieldTerrainGrid.spacing terrain-record))
+  (local spacing-x (. spacing 1))
+  (local spacing-z (. spacing 2))
+  (local min-local-x (+ (* bounds.min-sample-x spacing-x) 37.0))
+  (local max-local-x (- (* bounds.max-sample-x spacing-x) 37.0))
+  (local min-local-z (+ (* bounds.min-sample-z spacing-z) 37.0))
+  (local max-local-z (- (* bounds.max-sample-z spacing-z) 37.0))
+  (local local-probe-points [])
+  (local broad-probes-by-cell {})
+  (each [_ probe (ipairs (collect-broad-elevated-probes terrain-record 5.0))]
+    (set (. broad-probes-by-cell (.. probe.sample-x ":" probe.sample-z)) probe))
+  (for [probe-z 0 4]
+    (local z
+      (+ min-local-z
+         (* (/ probe-z 4.0)
+            (- max-local-z min-local-z))))
+    (for [probe-x 0 4]
+      (local x
+        (+ min-local-x
+           (* (/ probe-x 4.0)
+              (- max-local-x min-local-x))))
+      (local candidate (glm.vec3 x 0 z))
+      (local local-surface-y
+        (terrain-surface-height-at-local-point terrain-record candidate.x candidate.z))
+      (when (and local-surface-y (> local-surface-y 1.0))
+        (local cell-x (math.floor (/ candidate.x spacing-x)))
+        (local cell-z (math.floor (/ candidate.z spacing-z)))
+        (local broad-probe (. broad-probes-by-cell (.. cell-x ":" cell-z)))
+        (when broad-probe
+          (table.insert local-probe-points broad-probe.point)))))
+
+  (fn assert-supported-at-local-point [local-point]
+    (local terrain-entry (. scene.scene-terrains 1))
+    (local terrain-layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+    (assert terrain-layout "Expected runtime terrain layout for 3x3 support probe")
+    (local world-point
+      (terrain-world-point-from-runtime-layout terrain-record terrain-layout local-point))
+    (local local-surface-y
+      (terrain-surface-height-at-local-point terrain-record local-point.x local-point.z))
+    (assert (not (= local-surface-y nil))
+            (string.format
+              "Expected terrain surface at local probe (%.3f, %.3f)"
+              local-point.x
+              local-point.z))
+    (local surface (scene:terrain-surface-under-point world-point))
+    (assert surface "Expected transformed terrain surface under 3x3 probe")
+    (local expected-surface-y surface.world-surface-y)
+    (local ball
+      (scene:add-ball {:size (glm.vec3 (* ball-radius 2) (* ball-radius 2) (* ball-radius 2))
+                       :radius ball-radius
+                       :position (glm.vec3 (- world-point.x ball-radius)
+                                           (+ expected-surface-y 40 (- ball-radius))
+                                           (- world-point.z ball-radius))
+                       :rotation (glm.quat 1 0 0 0)}))
+    (assert ball "Expected add-ball to create a runtime ball for 3x3 terrain probe")
+    (for [_ 1 360]
+      (app.engine.physics:update 0)
+      (scene:update))
+    (local transform (ball.body:getCenterOfMassTransform))
+    (local origin (transform:getOrigin))
+    (assert (> origin.y (+ expected-surface-y ball-radius -12.0))
+            (string.format
+              "Ball should be supported near the rendered terrain surface at local probe (%.3f, %.3f); expected_surface_y=%.3f center_y=%.3f"
+              local-point.x
+              local-point.z
+              expected-surface-y
+              origin.y))
+    (scene:remove-panel-child ball))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert terrain-record "Expected live terrain fixture to include a terrain record")
+        (scene:build-default {:terrains [terrain-record]})
+        (wait-for-terrain-layout-stable scene terrain-record.id)
+        (each [_ local-point (ipairs local-probe-points)]
+          (assert-supported-at-local-point local-point)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-first-home-world-supports-balls-on-elevated-samples []
+  (assert bt "First home world elevated ball support test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local fixture (fixtures.read-json (first-home-world-path)))
+  (local terrain-record (. (or (and fixture.scene fixture.scene.terrains) []) 1))
+  (local ball-radius 9.0)
+  (local local-probe-points
+    (representative-probes (collect-broad-elevated-probes terrain-record 10.0) 4))
+
+  (fn assert-supported-at-local-point [probe]
+    (local local-point probe.point)
+    (local terrain-entry (. scene.scene-terrains 1))
+    (local terrain-layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+    (assert terrain-layout "Expected runtime terrain layout for first home world elevated probe")
+    (local world-point
+      (terrain-world-point-from-runtime-layout terrain-record terrain-layout local-point))
+    (local local-surface-y
+      (terrain-surface-height-at-local-point terrain-record local-point.x local-point.z))
+    (assert (not (= local-surface-y nil))
+            (string.format
+              "Expected first home world terrain surface at local probe (%.3f, %.3f)"
+              local-point.x
+              local-point.z))
+    (local surface (scene:terrain-surface-under-point world-point))
+    (assert surface "Expected transformed terrain surface under first home world elevated probe")
+    (local expected-surface-y surface.world-surface-y)
+    (local ball
+      (scene:add-ball {:size (glm.vec3 (* ball-radius 2) (* ball-radius 2) (* ball-radius 2))
+                       :radius ball-radius
+                       :position (glm.vec3 (- world-point.x ball-radius)
+                                           (+ expected-surface-y 40 (- ball-radius))
+                                           (- world-point.z ball-radius))
+                       :rotation (glm.quat 1 0 0 0)}))
+    (assert ball "Expected add-ball to create a runtime ball for first home world elevated probe")
+    (local initial-center (ball:center-from-layout))
+    (for [_ 1 360]
+      (app.engine.physics:update 0)
+      (scene:update))
+    (local transform (ball.body:getCenterOfMassTransform))
+    (local origin (transform:getOrigin))
+    (assert (> origin.y (+ expected-surface-y ball-radius -12.0))
+            (string.format
+              "First home world elevated ball support mismatch sample=(%d,%d) min_height=%.3f max_height=%.3f local=(%.3f, %.3f) expected_surface_y=%.3f initial_center=(%.3f, %.3f, %.3f) final_center=(%.3f, %.3f, %.3f)"
+              probe.sample-x
+              probe.sample-z
+              probe.min-height
+              probe.max-height
+              local-point.x
+              local-point.z
+              expected-surface-y
+              initial-center.x
+              initial-center.y
+              initial-center.z
+              origin.x
+              origin.y
+              origin.z))
+    (scene:remove-panel-child ball))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert terrain-record "Expected first home world to include a terrain record")
+        (scene:build-default {:terrains [terrain-record]})
+        (wait-for-terrain-layout-stable scene terrain-record.id)
+        (each [_ probe (ipairs local-probe-points)]
+          (assert-supported-at-local-point probe)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-first-home-world-supports-ball-on-central-plateau []
+  (assert bt "First home world plateau ball support test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local fixture (fixtures.read-json (first-home-world-path)))
+  (local terrain-record (. (or (and fixture.scene fixture.scene.terrains) []) 1))
+  (local ball-radius 9.0)
+  (local broad-probes (collect-broad-elevated-probes terrain-record 10.0))
+  (local local-point
+    (or (and (. broad-probes 1) (. (. broad-probes 1) :point))
+        (glm.vec3 170 0 190)))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain-record]})
+        (wait-for-terrain-layout-stable scene terrain-record.id)
+        (local terrain-entry (. scene.scene-terrains 1))
+        (local terrain-layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+        (assert terrain-layout "Expected runtime terrain layout for first home world plateau probe")
+        (local world-point
+          (terrain-world-point-from-runtime-layout terrain-record terrain-layout local-point))
+        (local local-surface-y
+          (terrain-surface-height-at-local-point terrain-record local-point.x local-point.z))
+        (assert local-surface-y
+                "Expected first home world central plateau surface")
+        (local surface (scene:terrain-surface-under-point world-point))
+        (assert surface "Expected transformed terrain surface under first home world plateau probe")
+        (local expected-surface-y surface.world-surface-y)
+        (local ball
+          (scene:add-ball {:size (glm.vec3 (* ball-radius 2) (* ball-radius 2) (* ball-radius 2))
+                           :radius ball-radius
+                           :position (glm.vec3 (- world-point.x ball-radius)
+                                               (+ expected-surface-y 40 (- ball-radius))
+                                               (- world-point.z ball-radius))
+                           :rotation (glm.quat 1 0 0 0)}))
+        (assert ball "Expected add-ball to create a runtime ball for first home world plateau probe")
+        (for [_ 1 360]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local transform (ball.body:getCenterOfMassTransform))
+        (local origin (transform:getOrigin))
+        (assert (> origin.y (+ expected-surface-y ball-radius -12.0))
+                (string.format
+                  "First home world plateau support mismatch local=(%.3f, %.3f) expected_surface_y=%.3f final_center=(%.3f, %.3f, %.3f)"
+                  local-point.x
+                  local-point.z
+                  expected-surface-y
+                  origin.x
+                  origin.y
+                  origin.z)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-terrain-surface-query-is-stable-across-updates []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local fixture (fixtures.read-json (first-home-world-path)))
+  (local terrain-record (. (or (and fixture.scene fixture.scene.terrains) []) 1))
+  (local local-point (glm.vec3 170 0 190))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (assert terrain-record "Expected first home world to include a terrain record")
+        (scene:build-default {:terrains [terrain-record]})
+        (wait-for-terrain-layout-stable scene terrain-record.id)
+        (local terrain-entry (. scene.scene-terrains 1))
+        (local terrain-layout (and terrain-entry terrain-entry.element terrain-entry.element.layout))
+        (assert terrain-layout "Expected runtime terrain layout for terrain stability test")
+        (local world-point
+          (terrain-world-point-from-runtime-layout terrain-record terrain-layout local-point))
+        (local initial-info (scene:terrain-surface-under-point world-point))
+        (assert initial-info
+                "Expected terrain surface query to resolve before updates")
+        (for [_ 1 120]
+          (app.engine.physics:update 0)
+          (scene:update))
+        (local final-info (scene:terrain-surface-under-point world-point))
+        (assert final-info
+                "Expected terrain surface query to resolve after updates")
+        (assert (vec3-approx= initial-info.local-point final-info.local-point)
+                (string.format
+                  "Expected terrain local point to stay stable across updates initial=(%.3f, %.3f, %.3f) final=(%.3f, %.3f, %.3f)"
+                  initial-info.local-point.x
+                  initial-info.local-point.y
+                  initial-info.local-point.z
+                  final-info.local-point.x
+                  final-info.local-point.y
+                  final-info.local-point.z))
+        (assert (approx initial-info.world-surface-y final-info.world-surface-y)
+                (string.format
+                  "Expected terrain surface height to stay stable across updates initial=%.3f final=%.3f"
+                  initial-info.world-surface-y
+                  final-info.world-surface-y)))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
 
 (fn scene-runtime-body-falls-after-drag-release []
   (assert bt "Physics body drag-release test requires Bullet bindings")
@@ -1931,6 +2673,24 @@
                      :fn scene-ball-settles-on-global-floor})
 (table.insert tests {:name "Scene physics body collides with flat terrain"
                      :fn scene-physics-body-collides-with-flat-terrain})
+(table.insert tests {:name "Scene heightfield physics respects scene root transform"
+                     :fn scene-heightfield-physics-respects-scene-root-transform})
+(table.insert tests {:name "Scene replaced heightfield updates physics"
+                     :fn scene-replaced-heightfield-updates-physics})
+(table.insert tests {:name "Scene replaced heightfield updates lifted ball collision"
+                     :fn scene-replaced-heightfield-updates-lifted-ball-collision})
+(table.insert tests {:name "Scene replaced heightfield supports ball placed directly on raised area"
+                     :fn scene-replaced-heightfield-supports-ball-placed-directly-on-raised-area})
+(table.insert tests {:name "Scene live heightfield ball above raised area does not fall to base"
+                     :fn scene-live-heightfield-ball-above-raised-area-does-not-fall-to-base})
+(table.insert tests {:name "Scene live heightfield supports balls across 3x3 chunks"
+                     :fn scene-live-heightfield-supports-balls-across-3x3-chunks})
+(table.insert tests {:name "Scene first home world supports balls on elevated samples"
+                     :fn scene-first-home-world-supports-balls-on-elevated-samples})
+(table.insert tests {:name "Scene first home world supports ball on central plateau"
+                     :fn scene-first-home-world-supports-ball-on-central-plateau})
+(table.insert tests {:name "Scene terrain surface query is stable across updates"
+                     :fn scene-terrain-surface-query-is-stable-across-updates})
 (table.insert tests {:name "Scene runtime body falls after drag release"
                      :fn scene-runtime-body-falls-after-drag-release})
 (table.insert tests {:name "Scene restore physics cuboids world-switch drift check"

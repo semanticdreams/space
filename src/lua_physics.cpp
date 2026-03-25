@@ -1,9 +1,12 @@
 #include <sol/sol.hpp>
+#include <algorithm>
 #include <memory>
+#include <limits>
 #include <vector>
 #include <stdexcept>
 #include <BulletCollision/CollisionShapes/btBvhTriangleMeshShape.h>
 #include <BulletCollision/CollisionShapes/btBoxShape.h>
+#include <BulletCollision/CollisionShapes/btHeightfieldTerrainShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
 #include <BulletCollision/CollisionShapes/btTriangleMesh.h>
 #include <btBulletDynamicsCommon.h>
@@ -15,6 +18,45 @@
 #include "physics.h"
 
 namespace {
+
+class LuaHeightfieldTerrainShape : public btHeightfieldTerrainShape {
+public:
+    LuaHeightfieldTerrainShape(int width,
+                               int length,
+                               std::unique_ptr<btScalar[]> heights,
+                               btScalar min_height,
+                               btScalar max_height,
+                               int up_axis,
+                               bool flip_quad_edges)
+        : btHeightfieldTerrainShape(width,
+                                    length,
+                                    heights.get(),
+                                    btScalar(1.0),
+                                    min_height,
+                                    max_height,
+                                    up_axis,
+                                    PHY_FLOAT,
+                                    flip_quad_edges)
+        , heights_(std::move(heights))
+    {
+    }
+
+private:
+    std::unique_ptr<btScalar[]> heights_;
+};
+
+std::unique_ptr<btScalar[]> copy_heightfield_samples(const sol::table& heights, int sample_count)
+{
+    auto out = std::make_unique<btScalar[]>(sample_count);
+    for (int i = 0; i < sample_count; ++i) {
+        sol::object value = heights[i + 1];
+        if (!value.valid() || !value.is<double>()) {
+            throw sol::error("bt.HeightfieldTerrainShape heights must be a dense numeric array");
+        }
+        out[i] = static_cast<btScalar>(value.as<double>());
+    }
+    return out;
+}
 
 sol::table create_physics_table(sol::state_view lua)
 {
@@ -74,6 +116,19 @@ sol::table create_physics_table(sol::state_view lua)
 
     bt.new_usertype<btBvhTriangleMeshShape>("BvhTriangleMeshShape",
         sol::no_constructor,
+        sol::base_classes, sol::bases<btCollisionShape>()
+    );
+
+    bt.new_usertype<LuaHeightfieldTerrainShape>("HeightfieldTerrainShape",
+        sol::no_constructor,
+        "setLocalScaling", &LuaHeightfieldTerrainShape::setLocalScaling,
+        "getLocalScaling", [](LuaHeightfieldTerrainShape& self) {
+            return self.getLocalScaling();
+        },
+        "setUseDiamondSubdivision", &LuaHeightfieldTerrainShape::setUseDiamondSubdivision,
+        "setUseZigzagSubdivision", &LuaHeightfieldTerrainShape::setUseZigzagSubdivision,
+        "setFlipTriangleWinding", &LuaHeightfieldTerrainShape::setFlipTriangleWinding,
+        "buildAccelerator", &LuaHeightfieldTerrainShape::buildAccelerator,
         sol::base_classes, sol::bases<btCollisionShape>()
     );
 
@@ -318,6 +373,31 @@ sol::table create_physics_table(sol::state_view lua)
             return std::make_unique<btBvhTriangleMeshShape>(mesh, useQuantizedAabbCompression);
         }
     ));
+    bt.set_function("HeightfieldTerrainShape",
+        [](int width,
+           int length,
+           sol::table heights,
+           btScalar minHeight,
+           btScalar maxHeight,
+           sol::optional<int> upAxis,
+           sol::optional<bool> flipQuadEdges) {
+            if (width <= 1 || length <= 1) {
+                throw sol::error("bt.HeightfieldTerrainShape requires width and length greater than 1");
+            }
+            const int sample_count = width * length;
+            const int table_length = static_cast<int>(heights.size());
+            if (table_length != sample_count) {
+                throw sol::error("bt.HeightfieldTerrainShape heights length must equal width * length");
+            }
+            auto copied_heights = copy_heightfield_samples(heights, sample_count);
+            return std::make_unique<LuaHeightfieldTerrainShape>(width,
+                                                                length,
+                                                                std::move(copied_heights),
+                                                                minHeight,
+                                                                maxHeight,
+                                                                upAxis.value_or(1),
+                                                                flipQuadEdges.value_or(false));
+        });
     bt.set_function("StaticPlaneShape", [](const btVector3& normal, btScalar constant) {
         return std::make_unique<btStaticPlaneShape>(normal, constant);
     });
@@ -375,6 +455,8 @@ sol::table create_physics_table(sol::state_view lua)
         "setGravity", &Physics::setGravity,
         "addRigidBody", &Physics::addRigidBody,
         "removeRigidBody", &Physics::removeRigidBody,
+        "updateSingleAabb", &Physics::updateSingleAabb,
+        "syncMovedRigidBody", &Physics::syncMovedRigidBody,
         "addAction", &Physics::addAction,
         "removeAction", &Physics::removeAction,
         "getWorld", &Physics::getWorld,

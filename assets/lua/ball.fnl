@@ -20,6 +20,10 @@
 (fn physics-available? []
   (and bt app.engine app.engine.physics))
 
+(fn sync-moved-body [body]
+  (when (and body (physics-available?) app.engine.physics.syncMovedRigidBody)
+    (app.engine.physics:syncMovedRigidBody body)))
+
 (fn bt-glm-vec3 [value]
   (bt.Vector3 (or value.x 0) (or value.y 0) (or value.z 0)))
 
@@ -214,6 +218,7 @@
         (set self.dragging false)
         (when (and self.body self.body-active? (physics-available?))
           (self:apply-layout-to-body)
+          (sync-moved-body self.body)
           (when self.body.forceActivationState
             (self.body:forceActivationState 1))
           (when self.body.activate

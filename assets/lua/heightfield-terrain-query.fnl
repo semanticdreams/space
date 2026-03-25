@@ -169,6 +169,68 @@
         nil))
   target)
 
+(fn surface-info-at-local-point [record local-x local-z]
+  (local sample-spacing (spacing record))
+  (local spacing-x (. sample-spacing 1))
+  (local spacing-z (. sample-spacing 2))
+  (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (local min-local-x (* bounds.min-sample-x spacing-x))
+  (local min-local-z (* bounds.min-sample-z spacing-z))
+  (local max-local-x (* bounds.max-sample-x spacing-x))
+  (local max-local-z (* bounds.max-sample-z spacing-z))
+  (if (or (< local-x min-local-x)
+          (> local-x max-local-x)
+          (< local-z min-local-z)
+          (> local-z max-local-z))
+      nil
+      (do
+        (local chunk-map (build-chunk-map record))
+        (local max-cell-x (- bounds.max-sample-x 1))
+        (local max-cell-z (- bounds.max-sample-z 1))
+        (local raw-cell-x (math.floor (/ local-x spacing-x)))
+        (local raw-cell-z (math.floor (/ local-z spacing-z)))
+        (local cell-x (math.max bounds.min-sample-x (math.min raw-cell-x max-cell-x)))
+        (local cell-z (math.max bounds.min-sample-z (math.min raw-cell-z max-cell-z)))
+        (local h00 (sample-height-global record chunk-map cell-x cell-z))
+        (local h01 (sample-height-global record chunk-map cell-x (+ cell-z 1)))
+        (local h10 (sample-height-global record chunk-map (+ cell-x 1) cell-z))
+        (local h11 (sample-height-global record chunk-map (+ cell-x 1) (+ cell-z 1)))
+        (if (or (= h00 nil) (= h01 nil) (= h10 nil) (= h11 nil))
+            nil
+            (do
+              (local local-u (/ (- local-x (* cell-x spacing-x)) spacing-x))
+              (local local-v (/ (- local-z (* cell-z spacing-z)) spacing-z))
+              (local local-y
+                (if (<= (+ local-u local-v) 1.0)
+                    (+ (* h00 (- 1.0 local-u local-v))
+                       (* h01 local-v)
+                       (* h10 local-u))
+                    (+ (* h10 (- 1.0 local-v))
+                       (* h01 (- 1.0 local-u))
+                       (* h11 (- (+ local-u local-v) 1.0)))))
+              {:local-point (glm.vec3 local-x local-y local-z)
+               :local-surface-y local-y
+               :cell-x cell-x
+               :cell-z cell-z
+               :u local-u
+               :v local-v
+               :h00 h00
+               :h01 h01
+               :h10 h10
+               :h11 h11})))))
+
+(fn surface-info-at-world-point [record world-point]
+  (if (and record world-point)
+      (do
+        (local local-point (world->local record world-point))
+        (local info (surface-info-at-local-point record local-point.x local-point.z))
+        (if info
+            (do
+              (set info.world-point (local->world record info.local-point))
+              info)
+            nil))
+      nil))
+
 (fn screen-rect-target [record start-pos end-pos opts]
   (local options (or opts {}))
   (local view (or options.view
@@ -444,6 +506,8 @@
  :raycast-record-fast raycast-record-fast
  :domain-hit-record M.domain-hit-record
  :screen-rect-target M.screen-rect-target
+ :surface-info-at-local-point surface-info-at-local-point
+ :surface-info-at-world-point surface-info-at-world-point
  :world->local world->local
  :local->world local->world
  :nearest-sample-coord nearest-sample-coord

@@ -19,7 +19,7 @@
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
 (local TerrainQuery (require :terrain-query))
-(local HeightfieldTerrainData (require :heightfield-terrain-data))
+(local TerrainQueryRecord (require :terrain-query-record))
 
 (local default-position (glm.vec3 -5 0 0))
 (local default-rotation (glm.quat (math.rad 30) (glm.vec3 0 1 0)))
@@ -42,34 +42,7 @@
       (glm.normalize value)
       fallback))
 
-(fn terrain-query-record [metadata]
-  (local record (and metadata metadata.record))
-  (local layout (and metadata metadata.element metadata.element.layout))
-  (if (or (not record)
-          (not layout)
-          (not (= record.kind "heightfield-terrain")))
-      record
-      (do
-        (local bounds (HeightfieldTerrainData.sample-bounds record))
-        (local spacing (or (and record.options record.options.sample-spacing) [20 20]))
-        (local spacing-x (or (. spacing 1) spacing.x 20))
-        (local spacing-z (or (. spacing 2) spacing.y spacing.z 20))
-        (local canonical-origin-offset
-          (glm.vec3 (* bounds.min-sample-x spacing-x)
-                    0
-                    (* bounds.min-sample-z spacing-z)))
-        (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
-        (local canonical-position
-          (- layout.position (rotation:rotate canonical-origin-offset)))
-        (local options {})
-        (each [key value (pairs (or record.options {}))]
-          (set (. options key) value))
-        (set options.position [canonical-position.x canonical-position.y canonical-position.z])
-        (set options.rotation [rotation.w rotation.x rotation.y rotation.z])
-        {:id record.id
-         :kind record.kind
-         :options options
-         :chunks record.chunks})))
+(local terrain-query-record TerrainQueryRecord.from-metadata)
 
 (fn resolve-camera-placement [self]
   (local camera app.camera)
@@ -1180,6 +1153,37 @@
                  :target hit.target})))
   best)
 
+(fn terrain-surface-under-point [self world-point]
+  (var best nil)
+  (each [_ metadata (ipairs (or self.scene-terrains []))]
+    (local record (and metadata metadata.record))
+    (local query-record (terrain-query-record metadata))
+    (local info (and query-record
+                     world-point
+                     (TerrainQuery.surface-info-at-world-point query-record world-point)))
+    (when info
+      (local world-surface-y (and info.world-point info.world-point.y))
+      (when (and world-surface-y
+                 (or (not best)
+                     (> world-surface-y (. best :world-surface-y))))
+        (set best {:terrain-record record
+                   :query-record query-record
+                   :terrain-id (and record record.id)
+                   :terrain-kind (and record record.kind)
+                   :world-point info.world-point
+                   :world-surface-y world-surface-y
+                   :local-point info.local-point
+                   :local-surface-y info.local-surface-y
+                   :cell-x info.cell-x
+                   :cell-z info.cell-z
+                   :u info.u
+                   :v info.v
+                   :h00 info.h00
+                   :h01 info.h01
+                   :h10 info.h10
+                   :h11 info.h11}))))
+  best)
+
 (fn screen-pos-terrain-hit [self pos opts]
   (self:raycast-terrain (self:screen-pos-ray pos opts)))
 
@@ -1397,6 +1401,7 @@
 (set self.get-reference-point get-reference-point)
 (set self.screen-pos-ray screen-pos-ray)
 (set self.raycast-terrain raycast-terrain)
+(set self.terrain-surface-under-point terrain-surface-under-point)
 (set self.screen-pos-terrain-hit screen-pos-terrain-hit)
 (set self.screen-pos-terrain-domain-hit screen-pos-terrain-domain-hit)
 (set self.screen-rect-terrain-target screen-rect-terrain-target)

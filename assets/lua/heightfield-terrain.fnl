@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (local {: Layout} (require :layout))
-(local bt (require :bt))
 (local HeightfieldTerrainSelectionOverlay (require :heightfield-terrain-selection-overlay))
+(local HeightfieldTerrainPhysics (require :heightfield-terrain-physics))
 
 (fn finite-number? [value]
   (and (= (type value) :number)
@@ -51,6 +51,12 @@
   (local heights (or chunk.heights []))
   (local idx (+ (* sample-z width) sample-x 1))
   (or (. heights idx) 0.0))
+
+(fn quat->array [rotation]
+  [rotation.w rotation.x rotation.y rotation.z])
+
+(fn vec3->array [value]
+  [value.x value.y value.z])
 
 (fn checker-color [cell-x cell-z avg-height]
   (local base
@@ -217,48 +223,16 @@
 
   state)
 
-(local PhysicsBridge {})
-
-(fn PhysicsBridge.available? []
-  (and bt app.engine app.engine.physics))
-
-(fn PhysicsBridge.vec3->bt [value]
-  (bt.Vector3 value.x value.y value.z))
-
-(set PhysicsBridge.create-static-mesh
-     (fn [mesh opts]
-       (if (not (PhysicsBridge.available?))
-           nil
-           (do
-             (local position (resolve-glm-vec3 opts.position (glm.vec3 0 0 0)))
-             (local rotation (resolve-glm-quat opts.rotation (glm.quat 1 0 0 0)))
-             (local triangle-mesh (bt.TriangleMesh))
-             (for [i 1 mesh.vertex-count 3]
-               (local v0 (+ position (rotation:rotate (. mesh.positions i))))
-               (local v1 (+ position (rotation:rotate (. mesh.positions (+ i 1)))))
-               (local v2 (+ position (rotation:rotate (. mesh.positions (+ i 2)))))
-               (triangle-mesh:addTriangle (PhysicsBridge.vec3->bt v0)
-                                          (PhysicsBridge.vec3->bt v1)
-                                          (PhysicsBridge.vec3->bt v2)
-                                          true))
-             (local shape (bt.BvhTriangleMeshShape triangle-mesh true))
-             (local transform (bt.Transform))
-             (transform:setIdentity)
-             (local motion-state (bt.DefaultMotionState transform))
-             (local zero (bt.Vector3 0 0 0))
-             (local info (bt.RigidBodyConstructionInfo 0 motion-state shape zero))
-             (local body (bt.RigidBody info))
-             (app.engine.physics:addRigidBody body)
-             (local entry {:triangle-mesh triangle-mesh
-                           :shape shape
-                           :motion-state motion-state
-                           :body body})
-             (set entry.drop
-                  (fn [self]
-                    (when (and self.body (PhysicsBridge.available?))
-                      (app.engine.physics:removeRigidBody self.body))
-                    (set self.body nil)))
-             entry))))
+(fn build-heightfield-physics-record [opts]
+  {:kind "heightfield-terrain"
+   :options {:position (vec3->array (resolve-glm-vec3 opts.position (glm.vec3 0 0 0)))
+             :rotation (quat->array (resolve-glm-quat opts.rotation (glm.quat 1 0 0 0)))
+             :sample-spacing (or opts.sample-spacing [20 20])
+             :chunk-samples (or opts.chunk-samples
+                                (and (. (or opts.chunks []) 1)
+                                     (. (. (or opts.chunks []) 1) :size))
+                                [17 17])}
+   :chunks (or opts.chunks [])})
 
 (fn HeightfieldTerrain [opts]
   (local options (or opts {}))
@@ -267,7 +241,9 @@
   (local opacity (or options.opacity 1.0))
   (local enable-physics (if (= options.physics nil) true (not (not options.physics))))
   (local overlay-record {:kind "heightfield-terrain"
-                         :options {:sample-spacing (or options.sample-spacing [20 20])
+                         :options {:position (vec3->array position)
+                                   :rotation (quat->array rotation)
+                                   :sample-spacing (or options.sample-spacing [20 20])
                                    :chunk-samples (or options.chunk-samples
                                                       (and (. (or options.chunks []) 1)
                                                            (. (. (or options.chunks []) 1) :size))
@@ -290,13 +266,16 @@
     (var updated-handler nil)
     (local physics
       (if enable-physics
-          (PhysicsBridge.create-static-mesh mesh {:position layout-position :rotation rotation})
+          (HeightfieldTerrainPhysics.create-heightfield
+            (build-heightfield-physics-record options))
           nil))
 
     (fn measurer [self]
       (set self.measure world-size))
 
     (fn layouter [self]
+      (when (and physics physics.sync-layout-transform)
+        (physics:sync-layout-transform self.position self.rotation))
       (local culled? (self:effective-culled?))
       (renderable:set-visible (not culled?))
       (when (not culled?)

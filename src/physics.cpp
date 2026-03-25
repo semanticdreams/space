@@ -43,6 +43,29 @@ void Physics::removeRigidBody(btRigidBody* body)
     dynamicsWorld->removeRigidBody(body);
 }
 
+void Physics::updateSingleAabb(btRigidBody* body)
+{
+    dynamicsWorld->updateSingleAabb(body);
+}
+
+void Physics::syncMovedRigidBody(btRigidBody* body)
+{
+    if (!body) {
+        return;
+    }
+
+    dynamicsWorld->updateSingleAabb(body);
+
+    btBroadphaseProxy* handle = body->getBroadphaseHandle();
+    if (handle) {
+        dynamicsWorld->getBroadphase()->getOverlappingPairCache()->cleanProxyFromPairs(
+            handle,
+            dynamicsWorld->getDispatcher());
+    }
+
+    body->activate(true);
+}
+
 void Physics::addAction(btActionInterface* action)
 {
     dynamicsWorld->addAction(action);
