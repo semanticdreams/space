@@ -86,6 +86,15 @@
          (table.insert self.unregistered key)))
   movables)
 
+(fn make-clickables-menu-stub []
+  (local state {:registered-right-click []
+                :unregistered-right-click []})
+  {:state state
+   :register-right-click (fn [_self obj]
+                           (table.insert state.registered-right-click obj))
+   :unregister-right-click (fn [_self obj]
+                             (table.insert state.unregistered-right-click obj))})
+
 (fn array->vec3 [arr]
   (glm.vec3 (. arr 1) (. arr 2) (. arr 3)))
 
@@ -1891,6 +1900,57 @@
   (when (not ok)
     (error err))))
 
+(fn scene-ball-context-menu-removes-ball []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-clickables app.clickables)
+  (local original-menu-manager app.menu-manager)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local clickables (make-clickables-menu-stub))
+            (var opened nil)
+            (set app.clickables clickables)
+            (set app.menu-manager {:open (fn [_self opts]
+                                           (set opened opts))})
+
+            (local element (scene:add-object (Ball {:size (glm.vec3 18 18 18)
+                                                    :radius 7})))
+            (assert element "Expected add-ball to return an element")
+            (assert (= (length (runtime-balls scene)) 1)
+                    "Scene should track runtime balls before context-menu removal")
+            (assert (= (length clickables.state.registered-right-click) 1)
+                    "Ball should register one right-click target when added to the scene")
+
+            (local target (. clickables.state.registered-right-click 1))
+            (assert target.on-right-click
+                    "Ball context-menu target should expose an on-right-click handler")
+            (target:on-right-click {:point (glm.vec3 3 4 0)})
+
+            (assert opened "Ball right click should open a menu")
+            (assert (= opened.position.x 3) "Ball context menu should open at the click point")
+            (assert (= opened.position.y 4) "Ball context menu should open at the click point")
+            (assert (= (length opened.actions) 1)
+                    "Ball context menu should currently expose one action")
+            (assert (= (. opened.actions 1 :name) "Remove")
+                    "Ball context menu should expose a Remove action")
+
+            ((. opened.actions 1 :fn) nil {})
+
+            (assert (= (length (runtime-balls scene)) 0)
+                    "Ball remove action should remove the runtime ball from the scene")
+            (assert (= (length clickables.state.unregistered-right-click) 1)
+                    "Removing a ball should unregister its right-click target")
+            (assert (= (. clickables.state.unregistered-right-click 1) target)
+                    "Ball should unregister the same right-click target it registered")))]
+    (set app.clickables original-clickables)
+    (set app.menu-manager original-menu-manager)
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (fn scene-ball-settles-on-configured-containment-floor []
   (assert bt "Scene ball configured containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -2954,6 +3014,8 @@
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
 (table.insert tests {:name "Scene ball appears in front of camera and restores"
                      :fn scene-add-ball-appears-in-front-of-camera-and-restores})
+(table.insert tests {:name "Scene ball context menu removes ball"
+                     :fn scene-ball-context-menu-removes-ball})
 (table.insert tests {:name "Scene ball settles on configured containment floor"
                      :fn scene-ball-settles-on-configured-containment-floor})
 (table.insert tests {:name "Scene physics body collides with flat terrain"

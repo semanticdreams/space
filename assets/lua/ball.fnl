@@ -57,6 +57,22 @@
       (glm.quat w x y z)
       (glm.quat 1 0 0 0)))
 
+(fn resolve-menu-position [event]
+  (local screen (and event event.screen))
+  (if (and screen app.hud app.hud.screen-pos-ray)
+      (do
+        (local ray (app.hud:screen-pos-ray {:x (or screen.x 0)
+                                            :y (or screen.y 0)}))
+        (if (and ray ray.origin ray.direction)
+            (do
+              (local dz (or ray.direction.z 0))
+              (local t (if (not (= dz 0))
+                           (/ (- 0 ray.origin.z) dz)
+                           0))
+              (+ ray.origin (* ray.direction t)))
+            (or (and event event.point) (glm.vec3 0 0 0))))
+      (or (and event event.point) (glm.vec3 0 0 0))))
+
 (fn ray-sphere-intersection [ray center radius]
   (if (and ray center radius)
       (do
@@ -396,6 +412,8 @@
           (self.body:applyForce (bt.Vector3 0 -0.5 0))))
 
       (fn drop [self]
+        (when self.unregister-context-menu-target
+          (self:unregister-context-menu-target))
         (when (and self.body self.body-active? (physics-available?))
           (app.engine.physics:removeRigidBody self.body))
         (set self.body-active? false)
@@ -467,6 +485,29 @@
                       :pentagon-color (vec4->array persistence-options.pentagon-color)}})
      :scene-on-added
      (fn [_self scene element]
+       (when (and app.clickables element.intersect)
+         (local right-click-target
+           {:pointer-target app.scene
+            :intersect (fn [_target ray]
+                         (element:intersect ray))
+            :on-right-click
+            (fn [_target event]
+              (local manager app.menu-manager)
+              (when manager
+                (manager:open {:actions [{:name "Remove"
+                                          :icon "close"
+                                          :fn (fn [_button _click-event]
+                                                (scene:remove-panel-child element))}]
+                               :position (resolve-menu-position event)
+                               :open-button (and event event.button)}))
+              true)})
+         (app.clickables:register-right-click right-click-target)
+         (set element.__context-menu-target right-click-target)
+         (set element.unregister-context-menu-target
+              (fn [self]
+                (when self.__context-menu-target
+                  (app.clickables:unregister-right-click self.__context-menu-target)
+                  (set self.__context-menu-target nil)))))
        (scene:register-scene-object
          {:owner element
           :element element
@@ -493,7 +534,11 @@
                            (element:ensure-body entity.layout)))
           :sync (fn [_entry entity]
                   (when (and element.sync entity.layout)
-                    (element:sync entity.layout)))}) )})
+                    (element:sync entity.layout)))}) )
+     :scene-on-removed
+     (fn [_self _scene element]
+       (when element.unregister-context-menu-target
+         (element:unregister-context-menu-target)) )})
   (setmetatable object {:__call (fn [_self ctx] (build ctx))})
   object)
 
