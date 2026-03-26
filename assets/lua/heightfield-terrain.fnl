@@ -320,6 +320,11 @@
     {:layout layout
      :drop drop
      :mesh mesh
+     :get-local-bounds (fn [_self]
+                         {:min (glm.vec3 0 mesh.min-height 0)
+                          :max (glm.vec3 mesh.max-local-x
+                                         mesh.max-height
+                                         mesh.max-local-z)})
      :set-selection-target (fn [self target]
                              (selection-overlay:set-selection-target target)
                              (when self.layout

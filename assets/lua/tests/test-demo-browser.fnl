@@ -13,7 +13,7 @@
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 (local TerrainPaintState (require :terrain-paint-state))
 (local MathUtils (require :math-utils))
-(local PhysicsFloor (require :physics-floor))
+(local PhysicsContainment (require :physics-containment))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local TerrainQuery (require :terrain-query))
 (local {: Layout} (require :layout))
@@ -230,10 +230,19 @@
 (fn random-range [min-value max-value]
   (+ min-value (* (math.random) (- max-value min-value))))
 
-(fn configure-test-physics-world []
+(fn manual-containment-config [min-y]
+  {:mode "manual-bounds"
+   :bounds {:min [-500 min-y -500]
+            :max [500 500 500]}})
+
+(fn configure-test-physics-world [opts]
+  (local options (or opts {}))
   (when (and app.engine app.engine.physics)
     (app.engine.physics:setGravity 0 -25 0)
-    (PhysicsFloor.ensure-installed {})))
+    (PhysicsContainment.ensure-installed
+      {:config (or options.config
+                   app.physics-containment-config
+                   (PhysicsContainment.default-config))})))
 
 (fn setup-scene [opts]
   (local options (or opts {}))
@@ -242,6 +251,7 @@
   (local original-movables app.movables)
   (local original-camera app.camera)
   (local original-hud app.hud)
+  (local original-containment-config app.physics-containment-config)
   (var scene nil)
   (var movables nil)
   (var hud nil)
@@ -255,7 +265,9 @@
     (set app.layout-root original-layout-root)
     (set app.movables original-movables)
     (set app.camera original-camera)
-    (set app.hud original-hud))
+    (set app.hud original-hud)
+    (PhysicsContainment.clear)
+    (set app.physics-containment-config original-containment-config))
 
   (let [(ok payload)
         (pcall (fn []
@@ -272,7 +284,9 @@
                  (set app.movables movables)
                  (when options.camera
                    (set app.camera options.camera))
-                 (configure-test-physics-world)
+                 (when options.containment-config
+                   (set app.physics-containment-config options.containment-config))
+                 (configure-test-physics-world {:config options.containment-config})
                  (scene:build-default)
                  {:scene scene :movables movables :icons icons :hud hud}))]
     (if ok
@@ -588,8 +602,8 @@
 (fn scene-recover-terrain-bound-physics-cuboid-repositions-body []
   (assert bt "Terrain-bound cuboid recovery test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -620,7 +634,7 @@
                   "Expected cuboid body center above terrain after recovery (center_y=%.3f)"
                   center.y)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
@@ -1877,9 +1891,11 @@
   (when (not ok)
     (error err))))
 
-(fn scene-ball-settles-on-global-floor []
-  (assert bt "Scene ball floor test requires Bullet bindings")
+(fn scene-ball-settles-on-configured-containment-floor []
+  (assert bt "Scene ball configured containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -100))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -1898,13 +1914,14 @@
                          (element.layout.rotation:rotate (* 0.5 element.layout.size))))
         (assert (> center.y -100)
                 (string.format
-                  "Ball should not fall through global floor at y=-100 (center_y=%.3f)"
+                  "Ball should not fall through configured containment floor at y=-100 (center_y=%.3f)"
                   center.y))
         (assert (< center.y -70)
                 (string.format
-                  "Ball should settle near global floor, not remain high (center_y=%.3f)"
+                  "Ball should settle near configured containment floor, not remain high (center_y=%.3f)"
                   center.y)))))
   (cleanup)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
@@ -1938,8 +1955,8 @@
 (fn scene-heightfield-physics-respects-scene-root-transform []
   (assert bt "Scene heightfield root-transform physics test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -1989,15 +2006,15 @@
                   surface.world-surface-y
                   center.y)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-replaced-heightfield-updates-physics []
   (assert bt "Terrain replacement physics test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2050,15 +2067,15 @@
                   "Physics body should settle on replaced raised terrain, not the old base (actual_y=%.3f)"
                   y)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-replaced-heightfield-updates-lifted-ball-collision []
   (assert bt "Terrain replacement lifted-ball test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2118,15 +2135,15 @@
                   "Lifted ball should rest on replaced raised terrain, not the old base (center_y=%.3f)"
                   center.y)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-replaced-heightfield-supports-ball-placed-directly-on-raised-area []
   (assert bt "Terrain replacement direct-place ball test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2196,15 +2213,15 @@
                   "Ball placed directly on raised terrain should stay above the old base (center_y=%.3f)"
                   center.y)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-live-heightfield-ball-above-raised-area-does-not-fall-to-base []
   (assert bt "Live heightfield ball regression test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2254,15 +2271,15 @@
                   surface.world-surface-y
                   origin.y)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-live-heightfield-supports-balls-across-3x3-chunks []
   (assert bt "Live 3x3 heightfield support test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2348,15 +2365,15 @@
         (each [_ local-point (ipairs local-probe-points)]
           (assert-supported-at-local-point local-point)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-first-home-world-supports-balls-on-elevated-samples []
   (assert bt "First home world elevated ball support test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2424,15 +2441,15 @@
         (each [_ probe (ipairs local-probe-points)]
           (assert-supported-at-local-point probe)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
 (fn scene-first-home-world-supports-ball-on-central-plateau []
   (assert bt "First home world plateau ball support test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
-  (local original-floor-y app.physics-floor-y)
-  (set app.physics-floor-y -1000)
+  (local original-containment-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1000))
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
@@ -2484,7 +2501,7 @@
                   origin.y
                   origin.z)))))
   (cleanup)
-  (set app.physics-floor-y original-floor-y)
+  (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
@@ -2937,8 +2954,8 @@
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
 (table.insert tests {:name "Scene ball appears in front of camera and restores"
                      :fn scene-add-ball-appears-in-front-of-camera-and-restores})
-(table.insert tests {:name "Scene ball settles on global floor"
-                     :fn scene-ball-settles-on-global-floor})
+(table.insert tests {:name "Scene ball settles on configured containment floor"
+                     :fn scene-ball-settles-on-configured-containment-floor})
 (table.insert tests {:name "Scene physics body collides with flat terrain"
                      :fn scene-physics-body-collides-with-flat-terrain})
 (table.insert tests {:name "Scene heightfield physics respects scene root transform"

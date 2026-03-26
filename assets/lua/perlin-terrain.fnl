@@ -205,6 +205,13 @@
     {:layout layout
      :drop drop
      :mesh mesh
-     :physics physics}))
+     :physics physics
+     :get-local-bounds (fn [_self]
+                         {:min (glm.vec3 0
+                                         (* (mesh:min-height) scale.y)
+                                         0)
+                          :max (glm.vec3 (* (mesh:width) scale.x)
+                                         (* (mesh:max-height) scale.y)
+                                         (* (mesh:length) scale.z))})}))
 
 PerlinTerrain

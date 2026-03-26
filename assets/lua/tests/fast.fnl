@@ -9,6 +9,7 @@
     :tests.test-remote-control
     :tests.test-render-capture
     :tests.test-next-frame
+    :tests.test-runtime-timers
     :tests.test-audio-input
     :tests.test-aubio
     :tests.test-aubio-helpers
@@ -60,6 +61,7 @@
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
     :tests.test-terrain-query
+    :tests.test-physics-containment
     :tests.test-movables
     :tests.test-resizables
     :tests.test-scene-drag

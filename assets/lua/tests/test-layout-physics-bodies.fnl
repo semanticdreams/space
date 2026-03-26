@@ -3,7 +3,7 @@
 (local Camera (require :camera))
 (local {: FirstPersonControls} (require :first-person-controls))
 (local MathUtils (require :math-utils))
-(local PhysicsFloor (require :physics-floor))
+(local PhysicsContainment (require :physics-containment))
 (local {: Layout} (require :layout))
 (local PerlinTerrain (require :perlin-terrain))
 (local bt (require :bt))
@@ -45,15 +45,19 @@
 
 (fn configure-test-physics-world [opts]
   (local options (or opts {}))
-  (local floor-y (or options.floor-y app.physics-floor-y))
+  (local config
+    (or options.config
+        app.physics-containment-config
+        (PhysicsContainment.default-config)))
   (when (and app.engine app.engine.physics)
     (app.engine.physics:setGravity 0 -25 0)
-    (PhysicsFloor.ensure-installed {:floor-y floor-y})))
+    (PhysicsContainment.ensure-installed {:config config})))
 
 (fn setup-scene []
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
   (local original-movables app.movables)
+  (local original-containment-config app.physics-containment-config)
   (var scene nil)
 
   (fn cleanup []
@@ -62,7 +66,9 @@
       (set scene nil))
     (set app.scene original-scene)
     (set app.layout-root original-layout-root)
-    (set app.movables original-movables))
+    (set app.movables original-movables)
+    (PhysicsContainment.clear)
+    (set app.physics-containment-config original-containment-config))
 
   (let [(ok payload)
         (pcall (fn []
@@ -79,6 +85,11 @@
         (do
           (cleanup)
           (error payload)))))
+
+(fn manual-containment-config [min-y]
+  {:mode "manual-bounds"
+   :bounds {:min [-500 min-y -500]
+            :max [500 500 500]}})
 
 (fn find-physics-entry-for-element [scene element]
   (accumulate [result nil _ entry (ipairs (or scene.entity.physics-bodies []))]
@@ -225,15 +236,15 @@
     (when (not ok)
       (error err))))
 
-(fn physical-panel-stops-at-global-floor-plane []
-  (assert bt "Global floor test requires Bullet bindings")
+(fn physical-panel-stops-at-global-containment-floor []
+  (assert bt "Global containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-floor app.physics-floor-y)
-  (set app.physics-floor-y PhysicsFloor.default-floor-y)
-  (configure-test-physics-world {:floor-y app.physics-floor-y})
+  (local original-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -500))
+  (configure-test-physics-world {:config app.physics-containment-config})
   (local panel-size {:value (glm.vec3 5 3 5)})
   (local panel-builder (make-probe-panel-builder panel-size))
 
@@ -243,32 +254,32 @@
             (local panel (scene:add-panel-child {:builder panel-builder
                                                  :skip-cuboid true
                                                  :position (glm.vec3 5000 40 0)}))
-            (assert panel "Expected panel on global floor test")
+            (assert panel "Expected panel on global containment test")
             (for [_ 1 1200]
               (app.engine.physics:update 0)
               (scene:update))
-            (assert (> panel.layout.position.y -105)
+            (assert (> panel.layout.position.y -505)
                     (string.format
-                      "Panel should not fall through global floor at y=-100 (y=%.3f)"
+                      "Panel should not fall through containment floor at y=-500 (y=%.3f)"
                       panel.layout.position.y))
-            (assert (< panel.layout.position.y -10)
+            (assert (< panel.layout.position.y -410)
                     (string.format
-                      "Panel should settle near floor, not remain high (y=%.3f)"
+                      "Panel should settle near containment floor, not remain high (y=%.3f)"
                       panel.layout.position.y))))]
-    (set app.physics-floor-y original-floor)
+    (set app.physics-containment-config original-config)
     (cleanup)
     (when (not ok)
       (error err))))
 
-(fn physical-panel-respects-configured-floor-height []
-  (assert bt "Configured floor test requires Bullet bindings")
+(fn physical-panel-respects-configured-containment-floor-height []
+  (assert bt "Configured containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-floor app.physics-floor-y)
-  (set app.physics-floor-y -1500)
-  (configure-test-physics-world {:floor-y app.physics-floor-y})
+  (local original-config app.physics-containment-config)
+  (set app.physics-containment-config (manual-containment-config -1500))
+  (configure-test-physics-world {:config app.physics-containment-config})
   (local panel-size {:value (glm.vec3 5 3 5)})
   (local panel-builder (make-probe-panel-builder panel-size))
 
@@ -278,19 +289,19 @@
         (local panel (scene:add-panel-child {:builder panel-builder
                                              :skip-cuboid true
                                              :position (glm.vec3 8000 40 0)}))
-        (assert panel "Expected panel on configured floor test")
+        (assert panel "Expected panel on configured containment test")
         (for [_ 1 1500]
           (app.engine.physics:update 0)
           (scene:update))
         (assert (> panel.layout.position.y -1510)
                 (string.format
-                  "Panel should not fall through configured floor at y=-1500 (y=%.3f)"
+                  "Panel should not fall through configured containment floor at y=-1500 (y=%.3f)"
                   panel.layout.position.y))
         (assert (< panel.layout.position.y -1400)
                 (string.format
-                  "Panel should settle near configured floor, not remain high (y=%.3f)"
+                  "Panel should settle near configured containment floor, not remain high (y=%.3f)"
                   panel.layout.position.y)))))
-  (set app.physics-floor-y original-floor)
+  (set app.physics-containment-config original-config)
   (cleanup)
   (when (not ok)
     (error err)))
@@ -369,10 +380,10 @@
                      :fn physical-panel-collides-with-perlin-terrain})
 (table.insert tests {:name "Physical panel rebuilds shape on resize"
                      :fn physical-panel-rebuilds-body-on-resize})
-(table.insert tests {:name "Physical panel stops at global floor plane"
-                     :fn physical-panel-stops-at-global-floor-plane})
-(table.insert tests {:name "Physical panel respects configured floor height"
-                     :fn physical-panel-respects-configured-floor-height})
+(table.insert tests {:name "Physical panel stops at global containment floor"
+                     :fn physical-panel-stops-at-global-containment-floor})
+(table.insert tests {:name "Physical panel respects configured containment floor height"
+                     :fn physical-panel-respects-configured-containment-floor-height})
 (table.insert tests {:name "Graph-node cube add tolerates ms FPC update"
                      :fn graph-node-cube-add-does-not-crash-after-ms-fpc-update})
 (table.insert tests {:name "Physics sync recovers from out-of-bounds body transform"

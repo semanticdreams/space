@@ -242,6 +242,11 @@
         (plane:drop)))
 
     {:layout layout
-     :drop drop}))
+     :drop drop
+     :get-local-bounds (fn [_self]
+                         {:min (glm.vec3 0 0 0)
+                          :max (glm.vec3 (* mesh.width scale.x)
+                                         0
+                                         (* mesh.length scale.z))})}))
 
 FlatTerrain

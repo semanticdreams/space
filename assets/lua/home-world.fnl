@@ -12,7 +12,7 @@
 (local ObjectSelector (require :object-selector))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
-(local PhysicsFloor (require :physics-floor))
+(local PhysicsContainment (require :physics-containment))
 (local TerrainRecords (require :scene-terrain-records))
 
 (local vec3->array (. MathUtils :vec3->array))
@@ -23,7 +23,8 @@
 (local sanitize-vec3 CoordinateGuard.sanitize-vec3)
 (local finite-number? CoordinateGuard.finite-number?)
 
-(local default-floor-y PhysicsFloor.default-floor-y)
+(local default-containment-config
+  (PhysicsContainment.serialize-config (PhysicsContainment.default-config)))
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -53,7 +54,7 @@
 (fn default-state []
   {:camera {:position [0 0 30]
             :rotation [1 0 0 0]}
-   :physics {:floor-y default-floor-y}
+   :physics {:containment default-containment-config}
    :graph {:graph {:nodes []
                    :edges []}
            :views {:open-node-keys []}}
@@ -213,14 +214,27 @@
           (set camera-state.position [0 0 30])))
     (set world.state.camera camera-state)
     (local physics-state (or (and world.state world.state.physics) {}))
-    (local floor-y physics-state.floor-y)
-    (if (finite-number? floor-y)
-        (set physics-state.floor-y floor-y)
-        (do
-          (logging.warn (string.format
-                          "[world] %s invalid persisted physics.floor-y; resetting to default"
-                          world.id))
-          (set physics-state.floor-y default-floor-y)))
+    (local containment
+      (if (= (type physics-state.containment) :table)
+          physics-state.containment
+          (if (finite-number? physics-state.floor-y)
+              (do
+                (logging.warn (string.format
+                                "[world] %s migrating persisted physics.floor-y to containment bounds"
+                                world.id))
+                {:mode "manual-bounds"
+                 :bounds {:min [-500 physics-state.floor-y -500]
+                          :max [500 500 500]}})
+              (do
+                (when (not (= physics-state.floor-y nil))
+                  (logging.warn (string.format
+                                  "[world] %s invalid persisted physics containment; resetting to default"
+                                  world.id)))
+                default-containment-config))))
+    (set physics-state.containment
+         (PhysicsContainment.serialize-config
+           (PhysicsContainment.normalize-config containment)))
+    (set physics-state.floor-y nil)
     (set world.state.physics physics-state))
 
   (fn save-state [world]
@@ -230,29 +244,41 @@
       (error (string.format "HomeWorld failed to write %s: %s" world.state-path err)))
     true)
 
-  (fn resolve-runtime-floor-y [world]
+  (fn resolve-runtime-containment-config [world]
     (local runtime world.runtime)
-    (local runtime-floor (and runtime runtime.physics-floor-y))
-    (local state-floor (and world.state world.state.physics world.state.physics.floor-y))
-    (if (finite-number? runtime-floor)
-        runtime-floor
-        (if (finite-number? state-floor)
-            state-floor
-            default-floor-y)))
+    (local runtime-config (and runtime runtime.physics-containment-config))
+    (local state-config (and world.state world.state.physics world.state.physics.containment))
+    (PhysicsContainment.serialize-config
+      (PhysicsContainment.normalize-config (or runtime-config state-config default-containment-config))))
 
-  (fn apply-runtime-floor! [world]
-    (local floor-y (resolve-runtime-floor-y world))
-    (set app.physics-floor-y floor-y)
-    (when (and app.engine app.engine.physics)
-      (app.engine.physics:setGravity 0 -25 0))
-    (PhysicsFloor.ensure-installed {:floor-y floor-y})
+  (fn apply-runtime-containment! [world opts]
+    (local options (or opts {}))
+    (local config (resolve-runtime-containment-config world))
+    (local scene (or options.scene
+                     (and world.runtime world.runtime.scene)))
+    (set app.physics-containment-config config)
+    (PhysicsContainment.ensure-installed {:scene scene
+                                          :config config})
     (when world.state
       (when (not world.state.physics)
         (set world.state.physics {}))
-      (set world.state.physics.floor-y floor-y))
+      (set world.state.physics.containment config))
     (when world.runtime
-      (set world.runtime.physics-floor-y floor-y))
-    floor-y)
+      (set world.runtime.physics-containment-config config))
+    config)
+
+  (fn clear-active-runtime-containment! [world]
+    (local runtime world.runtime)
+    (local runtime-scene (and runtime runtime.scene))
+    (when (and runtime-scene
+               (= app.physics-containment-scene runtime-scene))
+      (PhysicsContainment.clear))
+    true)
+
+  (fn apply-runtime-physics-policy! []
+    (when (and app.engine app.engine.physics)
+      (app.engine.physics:setGravity 0 -25 0))
+    true)
 
   (fn capture-runtime-state [world ctx]
     (local runtime world.runtime)
@@ -286,9 +312,8 @@
       (set world.state.scene captured-scene))
     (when (and hud hud.capture-state)
       (set world.state.hud (hud:capture-state)))
-    (local floor-y (resolve-runtime-floor-y world))
     (local physics-state (or world.state.physics {}))
-    (set physics-state.floor-y floor-y)
+    (set physics-state.containment (resolve-runtime-containment-config world))
     (set world.state.physics physics-state))
 
   (fn queue-runtime-restore-state [world]
@@ -301,7 +326,6 @@
 
   (fn create-runtime [world ctx]
     (local camera-state (or (and world.state world.state.camera) {}))
-    (local floor-y (apply-runtime-floor! world))
     (local (ok parsed-camera-position) (pcall array->vec3 camera-state.position))
     (local loaded-camera-position
       (if ok
@@ -331,6 +355,11 @@
               :icons ctx.icons
               :states ctx.states
               :movables ctx.movables
+              :on-terrains-changed
+              (fn [updated-scene]
+                (PhysicsContainment.schedule-refresh
+                  {:scene updated-scene
+                   :config (resolve-runtime-containment-config world)}))
               :graph graph}))
     (local object-selector
       (ObjectSelector {:ctx (and ctx.hud ctx.hud.build-context)
@@ -355,9 +384,11 @@
       (graph:restore-state graph-state))
     (when (and scene scene.restore-state world.state.scene)
       (scene:restore-state world.state.scene))
+    (local containment-config
+      (apply-runtime-containment! world {:scene scene}))
     (local runtime
       {:camera camera
-       :physics-floor-y floor-y
+       :physics-containment-config containment-config
        :first-person-controls controls
        :scene-scope scene-scope
        :scene scene
@@ -382,6 +413,7 @@
     (local runtime world.runtime)
     (when runtime
       (capture-runtime-state world ctx)
+      (clear-active-runtime-containment! world)
       (when runtime.first-person-controls
         (runtime.first-person-controls:drop)
         (set runtime.first-person-controls nil))
@@ -415,12 +447,14 @@
     (world:init ctx)
     (when (not world.runtime)
       (set world.runtime (create-runtime world ctx)))
-    (apply-runtime-floor! world)
+    (apply-runtime-physics-policy!)
+    (apply-runtime-containment! world)
     (set world.active? true))
 
   (fn deactivate [world ctx reason]
     (capture-runtime-state world ctx)
     (queue-runtime-restore-state world)
+    (clear-active-runtime-containment! world)
     (set world.active? false)
     (when reason
       (logging.info (string.format "[world] %s deactivated (%s)" world.id reason))))
@@ -431,7 +465,8 @@
   (fn resume [world ctx]
     (when (not world.runtime)
       (set world.runtime (create-runtime world ctx)))
-    (apply-runtime-floor! world)
+    (apply-runtime-physics-policy!)
+    (apply-runtime-containment! world)
     (set world.active? true))
 
   (fn drop [world ctx reason]

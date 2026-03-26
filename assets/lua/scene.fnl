@@ -136,6 +136,12 @@
         out)
       value))
 
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
 (fn vec4->array [value]
   (if value
       [value.x value.y value.z value.w]
@@ -353,11 +359,68 @@
                :physics-body-count 0
                :default-position (or options.position default-position)
                :default-rotation (or options.rotation default-rotation)
+               :on-terrains-changed options.on-terrains-changed
                :reference-point default-position
                :focus-manager focus-manager
                :focus-scope focus-scope})
 
   (set ctx.pointer-target self)
+
+  (fn clone-vec3 [value]
+    (and value
+         (glm.vec3 value.x value.y value.z)))
+
+  (fn clone-quat [value]
+    (and value
+         (glm.quat value.w value.x value.y value.z)))
+
+  (fn vec3-approx= [left right]
+    (and left
+         right
+         (< (math.abs (- left.x right.x)) 1e-6)
+         (< (math.abs (- left.y right.y)) 1e-6)
+         (< (math.abs (- left.z right.z)) 1e-6)))
+
+  (fn quat-approx= [left right]
+    (and left
+         right
+         (< (math.abs (- left.w right.w)) 1e-6)
+         (< (math.abs (- left.x right.x)) 1e-6)
+         (< (math.abs (- left.y right.y)) 1e-6)
+         (< (math.abs (- left.z right.z)) 1e-6)))
+
+  (fn capture-terrain-runtime-state [self]
+    (icollect [_ metadata (ipairs (or self.scene-terrains []))]
+      (do
+        (local record (and metadata metadata.record))
+        (local layout (and metadata metadata.element metadata.element.layout))
+        {:id (and record record.id)
+         :position (clone-vec3 (and layout layout.position))
+         :rotation (clone-quat (and layout layout.rotation))})))
+
+  (fn terrain-runtime-state= [left right]
+    (and (= (length (or left [])) (length (or right [])))
+         (accumulate [same? true idx entry (ipairs (or left []))]
+           (if (not same?)
+               false
+               (do
+                 (local other (. right idx))
+                 (and other
+                      (= entry.id other.id)
+                      (vec3-approx= entry.position other.position)
+                      (quat-approx= entry.rotation other.rotation)))))))
+
+  (fn notify-terrains-changed [self]
+    (set self.__terrain-runtime-state (capture-terrain-runtime-state self))
+    (when self.on-terrains-changed
+      (self.on-terrains-changed self)))
+
+  (fn sync-terrain-runtime-state [self]
+    (local current (capture-terrain-runtime-state self))
+    (when (not (terrain-runtime-state= self.__terrain-runtime-state current))
+      (set self.__terrain-runtime-state current)
+      (when self.on-terrains-changed
+        (self.on-terrains-changed self))))
   (apply-active-theme ctx)
 
   (fn normalize-movable-entry [_self entry]
@@ -942,6 +1005,7 @@
       (entity.layout:mark-measure-dirty)
       (entity.layout:mark-layout-dirty))
     (self:sync-physics-bodies)
+    (notify-terrains-changed self)
     true)
 
   (fn set-terrain-selection-target [self terrain-id target]
@@ -998,6 +1062,7 @@
       (entity.layout:mark-measure-dirty)
       (entity.layout:mark-layout-dirty))
     (self:sync-physics-bodies)
+    (notify-terrains-changed self)
     true)
 
   (fn remove-terrain [self terrain-id]
@@ -1014,6 +1079,7 @@
       (entity.layout:mark-measure-dirty)
       (entity.layout:mark-layout-dirty))
     (self:sync-physics-bodies)
+    (notify-terrains-changed self)
     true)
 
   (fn attach-entity [self entity]
@@ -1049,7 +1115,8 @@
       (set entity.resizables (compute-entity-resizables self entity))
       (register-entity-movables self entity)
       (register-entity-resizables self entity)
-      (self:sync-physics-bodies)))
+      (self:sync-physics-bodies))
+    (notify-terrains-changed self))
 
   (fn build [self builder]
     (set self.builder builder)
@@ -1062,10 +1129,11 @@
 (fn build-default [self opts]
   (self:build (make-default-builder opts)))
 
-(fn update [self]
-  (self:sync-physics-bodies)
-  (self:sync-scene-objects)
-  (self.layout-root:update))
+  (fn update [self]
+    (self:sync-physics-bodies)
+    (self:sync-scene-objects)
+    (self.layout-root:update)
+    (sync-terrain-runtime-state self))
 
   (fn drop [self]
   (when self.entity
