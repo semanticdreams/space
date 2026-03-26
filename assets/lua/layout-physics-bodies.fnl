@@ -487,6 +487,33 @@
       (table.insert entries movable-entry)))
   entries)
 
+(fn reposition-element [entity element next-layout-position next-layout-rotation]
+  (local entries (get-entries entity))
+  (var matched-entry nil)
+  (each [_ entry (ipairs entries)]
+    (when (and (not matched-entry)
+               (= entry.positioned element))
+      (set matched-entry entry)))
+  (if (not matched-entry)
+      false
+      (do
+        (local layout (and element element.layout))
+        (assert layout "LayoutPhysicsBodies.reposition-element requires element layout")
+        (local rotation (or next-layout-rotation layout.rotation (glm.quat 1 0 0 0)))
+        (set layout.position next-layout-position)
+        (set layout.rotation rotation)
+        (layout:mark-layout-dirty)
+        (local base (entity-transform entity))
+        (local inverse (base.rotation:inverse))
+        (local world-center (+ layout.position (layout.rotation:rotate (half-size matched-entry))))
+        (update-entry-offset-from-world-center! matched-entry base.position inverse world-center)
+        (ensure-body-matches-layout-size matched-entry)
+        (apply-layout-to-body matched-entry)
+        (activate-entry-body! matched-entry)
+        (when matched-entry.body
+          (sync-moved-body matched-entry.body))
+        true)))
+
 (set attach-movables
      (fn [entity entries]
        (local movable-entries
@@ -513,5 +540,6 @@
 {:attach attach
  :add-runtime-layout-body add-runtime-layout-body
  :remove-runtime-layout-body-for-element remove-runtime-layout-body-for-element
+ :reposition-element reposition-element
  :collect-movables collect-movables
  :sync sync}

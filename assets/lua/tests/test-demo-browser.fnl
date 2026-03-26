@@ -14,6 +14,7 @@
 (local TerrainPaintState (require :terrain-paint-state))
 (local MathUtils (require :math-utils))
 (local PhysicsFloor (require :physics-floor))
+(local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local TerrainQuery (require :terrain-query))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
@@ -286,6 +287,66 @@
     (table.insert heights 0.0))
   heights)
 
+(fn flat-heightfield-record [opts]
+  (local options (or opts {}))
+  (local chunk-width (or options.chunk-width 5))
+  (local chunk-depth (or options.chunk-depth 5))
+  (local height (or options.height 0.0))
+  {:id (or options.id "terrain-a")
+   :kind "heightfield-terrain"
+   :options {:position (or options.position [0 -100 0])
+             :rotation (or options.rotation [1 0 0 0])
+             :sample-spacing (or options.sample-spacing [20 20])
+             :chunk-samples [chunk-width chunk-depth]
+             :default-height height}
+   :chunks [{:coord [0 0]
+             :size [chunk-width chunk-depth]
+             :heights
+             (icollect [_ _height-index (ipairs (random-flat-heights chunk-width chunk-depth))]
+               height)}]})
+
+(fn make-fixed-panel-builder [opts]
+  (local options (or opts {}))
+  (local size (or options.size (glm.vec3 10 10 10)))
+  (fn [_ctx _builder-options]
+    (local layout
+      (Layout {:name (or options.name "fixed-panel")
+               :measurer (fn [self]
+                           (set self.measure size))
+               :layouter (fn [self]
+                           (set self.size self.measure))}))
+    {:layout layout
+     :drop (fn [_self]
+             (layout:drop))}))
+
+(fn make-terrain-bound-test-object [opts]
+  (local options (or opts {}))
+  {:scene-object-options
+   (fn [_self]
+     {:builder (make-fixed-panel-builder {:size (or options.size (glm.vec3 10 10 10))
+                                          :name (or options.name "terrain-bound-test-object")})
+      :skip-cuboid true
+      :skip-physics true
+      :terrain-binding {:enabled? true
+                        :get-support-bounds
+                        (fn [entry]
+                          (local origin (entry:get-origin-position))
+                          (local support-offset (or options.support-offset (glm.vec3 0 0 0)))
+                          {:position (+ origin support-offset)
+                           :rotation (or options.support-rotation (glm.quat 1 0 0 0))
+                           :size (or options.support-size
+                                     options.size
+                                     (glm.vec3 10 10 10))})}})})
+
+(fn make-unbound-test-object [opts]
+  (local options (or opts {}))
+  {:scene-object-options
+   (fn [_self]
+     {:builder (make-fixed-panel-builder {:size (or options.size (glm.vec3 10 10 10))
+                                          :name (or options.name "unbound-test-object")})
+      :skip-cuboid true
+      :skip-physics true})})
+
 (fn random-heightfield-record [seed]
   (math.randomseed seed)
   (local chunk-width 5)
@@ -415,6 +476,188 @@
         (assert (= terrain.kind "heightfield-terrain")
                 "Expected default terrain kind heightfield-terrain")
         (assert terrain.id "Expected captured terrain id"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
+(fn scene-recover-terrain-bound-panel-uses-lowest-overlapping-terrain []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local low-terrain (flat-heightfield-record {:id "low-terrain"
+                                               :position [0 -100 0]
+                                               :height 0.0}))
+  (local high-terrain (flat-heightfield-record {:id "high-terrain"
+                                                :position [0 -80 0]
+                                                :height 0.0}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [low-terrain high-terrain]})
+        (local element
+          (scene:add-panel-child {:builder (make-fixed-panel-builder {:name "recover-lowest-panel"})
+                                  :skip-physics true
+                                  :position (glm.vec3 30 -220 30)}))
+        (assert element "Expected scene panel child")
+        (local results (SceneTerrainRecovery.recover scene))
+        (assert (= (length results) 1) "Expected one recovered terrain-bound entry")
+        (assert (approx element.layout.position.x 30.0))
+        (assert (approx element.layout.position.z 30.0))
+        (assert (approx element.layout.position.y -100.0)
+                (string.format
+                  "Panel should recover to the lowest overlapping terrain surface (actual_y=%.3f)"
+                  element.layout.position.y)))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
+(fn scene-recover-terrain-bound-object-moves-to-nearest-terrain []
+  (local setup (setup-scene {:scene-rotation (glm.quat 1 0 0 0)}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain (flat-heightfield-record {:id "terrain-a"
+                                           :position [0 -100 0]
+                                           :height 0.0}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain]})
+        (local object
+          (make-terrain-bound-test-object {:name "nearest-terrain-object"
+                                           :support-offset (glm.vec3 0 -5 0)}))
+        (local element
+          (scene:add-object object
+                            {:position (glm.vec3 130 -260 150)}))
+        (assert element "Expected terrain-bound test object")
+        (local entries (SceneTerrainRecovery.collect-entries scene))
+        (assert (= (length entries) 1) "Expected one terrain-bound entry")
+        (local results (SceneTerrainRecovery.recover scene))
+        (local result (. results 1))
+        (assert (= (length results) 1) "Expected one recovery result")
+        (assert (= result.mode :nearest)
+                "Object outside all terrain domains should snap to nearest terrain")
+        (assert result.target "Expected nearest-terrain recovery target")
+        (assert (approx element.layout.position.x result.target.world-point.x)
+                (string.format
+                  "Expected recovered x to match nearest terrain target (actual_x=%.3f target_x=%.3f)"
+                  element.layout.position.x
+                  result.target.world-point.x))
+        (assert (approx element.layout.position.z result.target.world-point.z)
+                (string.format
+                  "Expected recovered z to match nearest terrain target (actual_z=%.3f target_z=%.3f)"
+                  element.layout.position.z
+                  result.target.world-point.z))
+        (assert (approx element.layout.position.y (- result.target.world-surface-y -5.0))
+                (string.format
+                  "Expected support bounds to control recovery placement (actual_y=%.3f)"
+                  element.layout.position.y)))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
+(fn scene-recover-ignores-unbound-scene-object []
+  (local setup (setup-scene {:scene-rotation (glm.quat 1 0 0 0)}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain (flat-heightfield-record {:id "terrain-a"
+                                           :position [0 -100 0]
+                                           :height 0.0}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain]})
+        (local object
+          (make-unbound-test-object {:name "unbound-object"}))
+        (local element
+          (scene:add-object object
+                            {:position (glm.vec3 30 -260 30)}))
+        (assert element "Expected unbound test object")
+        (local entries (SceneTerrainRecovery.collect-entries scene))
+        (assert (= (length entries) 0)
+                "Objects without explicit terrain binding should not be recovery candidates")
+        (local before-y element.layout.position.y)
+        (local results (SceneTerrainRecovery.recover scene))
+        (assert (= (length results) 0)
+                "Recovery should skip objects without explicit terrain binding")
+        (assert (= element.layout.position.y before-y)
+                "Unbound object position should remain unchanged"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
+(fn scene-recover-terrain-bound-physics-cuboid-repositions-body []
+  (assert bt "Terrain-bound cuboid recovery test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-floor-y app.physics-floor-y)
+  (set app.physics-floor-y -1000)
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain (flat-heightfield-record {:id "terrain-a"
+                                           :position [0 -100 0]
+                                           :height 0.0}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain]})
+        (local element
+          (scene:add-physics-body {:position (glm.vec3 30 -240 30)
+                                   :size (glm.vec3 4 4 4)}))
+        (assert element "Expected add-physics-body to return an element")
+        (local results (SceneTerrainRecovery.recover scene))
+        (assert (= (length results) 1) "Expected one recovery result")
+        (assert (= (. (. results 1) :mode) :vertical)
+                "Physics cuboid below terrain should recover in place")
+        (scene:update)
+        (local center (+ element.layout.position
+                         (element.layout.rotation:rotate (* 0.5 element.layout.size))))
+        (assert (approx element.layout.position.y -100.0)
+                (string.format
+                  "Expected cuboid origin to rest on terrain (actual_y=%.3f)"
+                  element.layout.position.y))
+        (assert (> center.y -99.0)
+                (string.format
+                  "Expected cuboid body center above terrain after recovery (center_y=%.3f)"
+                  center.y)))))
+  (cleanup)
+  (set app.physics-floor-y original-floor-y)
+  (when (not ok)
+    (error err)))
+
+(fn scene-recover-nearest-terrain-respects-scene-root-transform []
+  (local setup (setup-scene {:scene-position (glm.vec3 50 0 20)
+                             :scene-rotation (glm.quat 1 0 0 0)}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local terrain (flat-heightfield-record {:id "terrain-a"
+                                           :position [0 -100 0]
+                                           :height 0.0}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:build-default {:terrains [terrain]})
+        (local object
+          (make-terrain-bound-test-object {:name "root-transform-nearest-object"}))
+        (local element
+          (scene:add-object object
+                            {:position (glm.vec3 200 -260 120)}))
+        (assert element "Expected terrain-bound test object")
+        (local results (SceneTerrainRecovery.recover scene))
+        (assert (= (length results) 1) "Expected one recovery result")
+        (assert (= (. (. results 1) :mode) :nearest)
+                "Object outside all terrain domains should snap to nearest terrain")
+        (assert (approx element.layout.position.x 130.0)
+                (string.format
+                  "Expected nearest terrain x to respect scene root transform (actual_x=%.3f)"
+                  element.layout.position.x))
+        (assert (approx element.layout.position.z 100.0)
+                (string.format
+                  "Expected nearest terrain z to respect scene root transform (actual_z=%.3f)"
+                  element.layout.position.z))
+        (assert (approx element.layout.position.y -100.0)
+                (string.format
+                  "Expected recovered y to match transformed terrain surface (actual_y=%.3f)"
+                  element.layout.position.y)))))
   (cleanup)
   (when (not ok)
     (error err)))
@@ -2642,6 +2885,16 @@
 (table.insert tests {:name "Demo browser capture/restore roundtrip" :fn demo-browser-capture-and-restore-roundtrip})
 (table.insert tests {:name "Scene capture-state includes default terrain"
                      :fn scene-capture-state-includes-default-terrain})
+(table.insert tests {:name "Scene recover terrain-bound panel uses lowest overlapping terrain"
+                     :fn scene-recover-terrain-bound-panel-uses-lowest-overlapping-terrain})
+(table.insert tests {:name "Scene recover terrain-bound object moves to nearest terrain"
+                     :fn scene-recover-terrain-bound-object-moves-to-nearest-terrain})
+(table.insert tests {:name "Scene recover ignores unbound scene object"
+                     :fn scene-recover-ignores-unbound-scene-object})
+(table.insert tests {:name "Scene recover terrain-bound physics cuboid repositions body"
+                     :fn scene-recover-terrain-bound-physics-cuboid-repositions-body})
+(table.insert tests {:name "Scene recover nearest terrain respects scene root transform"
+                     :fn scene-recover-nearest-terrain-respects-scene-root-transform})
 (table.insert tests {:name "Scene build-default preserves explicit empty terrains"
                      :fn scene-build-default-preserves-explicit-empty-terrains})
 (table.insert tests {:name "Scene screen-pos terrain domain hit respects scene root transform"

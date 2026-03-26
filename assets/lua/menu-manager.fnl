@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local Menu (require :menu))
 (local Ball (require :ball))
+(local SceneTerrainRecovery (require :scene-terrain-recovery))
 
 (local SDLK_ESCAPE 27)
 
@@ -121,6 +122,12 @@
                        (local scene app.scene)
                        (when (and scene scene.add-object)
                          (scene:add-object (Ball {}))))})
+  (table.insert actions
+                {:name "Recover Terrain-Bound Objects"
+                 :fn (fn [_button _event]
+                       (local scene app.scene)
+                       (when scene
+                         (SceneTerrainRecovery.recover scene)))})
   (table.insert actions
                 {:name "Quit"
                  :icon "exit_to_app"

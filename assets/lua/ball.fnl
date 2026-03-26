@@ -333,6 +333,18 @@
           (when self.body.setAngularVelocity
             (self.body:setAngularVelocity (bt.Vector3 0 0 0)))))
 
+      (fn teleport-origin-position [self next-position]
+        (self:ensure-body)
+        (set self.layout.position next-position)
+        (self.layout:mark-layout-dirty)
+        (when (and self.body self.body-active? (physics-available?))
+          (self:apply-layout-to-body)
+          (sync-moved-body self.body)
+          (when self.body.forceActivationState
+            (self.body:forceActivationState self.activation-state))
+          (when self.body.activate
+            (self.body:activate true))))
+
       (fn ensure-body [self]
         (when (and (physics-available?) (not self.body))
           (local center (self:center-from-layout))
@@ -401,6 +413,7 @@
       (set self.begin-drag begin-drag)
       (set self.end-drag end-drag)
       (set self.apply-layout-to-body apply-layout-to-body)
+      (set self.teleport-origin-position teleport-origin-position)
       (set self.intersect intersect)
       (set self.set-layout-transform-from-body set-layout-transform-from-body)
       (set self.center-from-layout center-from-layout)
@@ -457,6 +470,17 @@
        (scene:register-scene-object
          {:owner element
           :element element
+          :terrain-binding {:enabled? true
+                            :get-origin-position (fn [_entry]
+                                                   element.layout.position)
+                            :get-support-bounds (fn [_entry]
+                                                  {:position element.layout.position
+                                                   :rotation element.layout.rotation
+                                                   :size (or element.layout.size
+                                                             element.layout.measure
+                                                             (glm.vec3 0 0 0))})
+                            :move-origin-position! (fn [_entry next-position]
+                                                     (element:teleport-origin-position next-position))}
           :movable {:handle element
                     :key element
                     :owner element

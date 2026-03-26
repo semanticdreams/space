@@ -161,6 +161,22 @@
         (set found metadata))))
   found)
 
+(fn clone-terrain-binding [binding]
+  (if (= binding nil)
+      nil
+      (do
+        (assert (= (type binding) :table)
+                "Scene terrain binding must be a table")
+        (local out (clone-table binding))
+        (if (= out.enabled? nil)
+            (set out.enabled? true))
+        out)))
+
+(fn resolve-terrain-binding [opts object-config]
+  (local explicit (and opts opts.terrain-binding))
+  (local object-binding (and object-config object-config.terrain-binding))
+  (clone-terrain-binding (or explicit object-binding nil)))
+
 (fn find-metadata-index-by-element [children element]
   (var found nil)
   (when (and children element)
@@ -665,6 +681,11 @@
                        :object (and opts opts.object)
                        :position (glm.vec3 0 0 0)
                        :rotation local-rotation
+                       :terrain-binding
+                       (if (and opts opts.object)
+                           (clone-terrain-binding (and opts opts.terrain-binding))
+                           (or (clone-terrain-binding (and opts opts.terrain-binding))
+                               {:enabled? true}))
                        :persistence (and opts.persistence
                                          (clone-table opts.persistence))})
       (local children (or entity.children []))
@@ -747,6 +768,7 @@
       (add-panel-child self {:builder (or object-config.builder object)
                              :object object
                              :builder-options object-config.builder-options
+                             :terrain-binding (resolve-terrain-binding options object-config)
                              :skip-cuboid (if (not (= options.skip-cuboid nil))
                                               options.skip-cuboid
                                               object-config.skip-cuboid)
