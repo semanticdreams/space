@@ -6,7 +6,17 @@
       [(glm.vec3 0 0 0) (glm.vec3 1 0 0)]))
 
 (fn ensure-color [color]
-  (or color (glm.vec3 1 1 1)))
+  (if color
+      (if (= color.w nil)
+          (glm.vec4 color.x color.y color.z 1.0)
+          color)
+      (glm.vec4 1 1 1 1)))
+
+(fn ensure-segments [segments]
+  (if (and segments (>= (length segments) 1))
+      segments
+      [{:start (glm.vec3 0 0 0)
+        :end (glm.vec3 1 0 0)}]))
 
 (fn Lines [opts]
   (local line-vector opts.line-vector)
@@ -18,16 +28,16 @@
     (when params.start
       (line-vector:set-glm-vec3 handle 0 params.start))
     (when params.color
-      (line-vector:set-glm-vec3 handle 3 params.color)
-      (line-vector:set-glm-vec3 handle 9 params.color))
+      (line-vector:set-glm-vec4 handle 3 params.color)
+      (line-vector:set-glm-vec4 handle 10 params.color))
     (when params.end
-      (line-vector:set-glm-vec3 handle 6 params.end)))
+      (line-vector:set-glm-vec3 handle 7 params.end)))
 
   (fn new-line [_self params]
     (local defaults {:start (or params.start (glm.vec3 0 0 0))
                      :end (or params.end (glm.vec3 0 1 0))
                      :color (ensure-color params.color)})
-    (local handle (line-vector:allocate 12))
+    (local handle (line-vector:allocate 14))
     (apply-line handle defaults)
     (local line {:handle handle
                  :start defaults.start
@@ -50,24 +60,59 @@
                      (line-vector:delete handle)))
     line)
 
+  (fn write-segments [handle segments color]
+    (local resolved (ensure-segments segments))
+    (line-vector:reallocate handle (* (length resolved) 14))
+    (each [idx segment (ipairs resolved)]
+      (local offset (* (- idx 1) 14))
+      (line-vector:set-glm-vec3 handle offset (or segment.start (glm.vec3 0 0 0)))
+      (line-vector:set-glm-vec4 handle (+ offset 3) color)
+      (line-vector:set-glm-vec3 handle (+ offset 7) (or segment.end (glm.vec3 0 0 0)))
+      (line-vector:set-glm-vec4 handle (+ offset 10) color)))
+
+  (fn new-line-batch [_self params]
+    (local initial-color (ensure-color params.color))
+    (local initial-segments (ensure-segments params.segments))
+    (local handle (line-vector:allocate 14))
+    (write-segments handle initial-segments initial-color)
+    (local batch {:handle handle
+                  :segments initial-segments
+                  :color initial-color})
+    (set batch.set-segments
+         (fn [self segments]
+           (local resolved (ensure-segments segments))
+           (write-segments handle resolved self.color)
+           (set self.segments resolved)
+           self))
+    (set batch.set-color
+         (fn [self color]
+           (local resolved (ensure-color color))
+           (write-segments handle self.segments resolved)
+           (set self.color resolved)
+           self))
+    (set batch.drop
+         (fn [_self]
+           (line-vector:delete handle)))
+    batch)
+
   (assert register-line-strip "Lines.create-line-strip requires register-line-strip support")
   (assert unregister-line-strip "Lines.create-line-strip requires unregister-line-strip support")
 
   (fn write-strip-points [vector handle points color]
     (local count (length points))
-    (vector:reallocate handle (* count 6))
+    (vector:reallocate handle (* count 7))
     (for [i 1 count]
-      (local offset (* (- i 1) 6))
+      (local offset (* (- i 1) 7))
       (vector:set-glm-vec3 handle offset (. points i))
-      (vector:set-glm-vec3 handle (+ offset 3) color)))
+      (vector:set-glm-vec4 handle (+ offset 3) color)))
 
   (fn rewrite-strip-color [vector handle count color]
     (for [i 0 (- count 1)]
-      (vector:set-glm-vec3 handle (+ 3 (* i 6)) color)))
+      (vector:set-glm-vec4 handle (+ 3 (* i 7)) color)))
 
   (fn new-line-strip [_self params]
     (local vector (VectorBuffer))
-    (local handle (vector:allocate 12))
+    (local handle (vector:allocate 14))
     (local initial-color (ensure-color params.color))
     (local initial-points (ensure-points params.points))
     (register-line-strip vector)
@@ -94,6 +139,7 @@
     strip)
 
   {:create-line new-line
+   :create-line-batch new-line-batch
    :create-line-strip new-line-strip})
 
 Lines

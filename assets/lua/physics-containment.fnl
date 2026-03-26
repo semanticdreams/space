@@ -13,6 +13,8 @@
                         :top 500.0})
 (local default-restitution 1.0)
 (local default-debounce-ms 1000.0)
+(local default-visualization {:enabled true
+                              :color (glm.vec4 0.45 0.72 0.95 0.28)})
 
 (fn finite-number? [value]
   (and (= (type value) :number)
@@ -54,6 +56,37 @@
            (finite-number? resolved.x)
            (finite-number? resolved.y)
            (finite-number? resolved.z))
+      resolved
+      fallback))
+
+(fn vec4->array [value]
+  [value.x value.y value.z value.w])
+
+(fn color-value [value fallback]
+  (local resolved
+    (if (= value nil)
+        nil
+        (if (= (type value) :userdata)
+            (if (= value.w nil)
+                (glm.vec4 value.x value.y value.z 1.0)
+                value)
+            (if (= (type value) :table)
+                (do
+                  (local x (. value 1))
+                  (local y (. value 2))
+                  (local z (. value 3))
+                  (local w (. value 4))
+                  (if (and (finite-number? x)
+                           (finite-number? y)
+                           (finite-number? z))
+                      (glm.vec4 x y z (if (finite-number? w) w 1.0))
+                      nil))
+                nil))))
+  (if (and resolved
+           (finite-number? resolved.x)
+           (finite-number? resolved.y)
+           (finite-number? resolved.z)
+           (finite-number? resolved.w))
       resolved
       fallback))
 
@@ -100,11 +133,23 @@
              (>= source.debounce-ms 0))
         source.debounce-ms
         default-debounce-ms))
+  (local visualization-source
+    (if (= (type source.visualization) :table)
+        source.visualization
+        {}))
+  (local visualization-enabled
+    (if (= visualization-source.enabled nil)
+        default-visualization.enabled
+        (not (not visualization-source.enabled))))
+  (local visualization-color
+    (color-value visualization-source.color default-visualization.color))
   {:mode mode
    :bounds (normalize-bounds source.bounds)
    :padding (normalize-padding source.padding)
    :restitution restitution
-   :debounce-ms debounce-ms})
+   :debounce-ms debounce-ms
+   :visualization {:enabled visualization-enabled
+                   :color visualization-color}})
 
 (fn serialize-config [value]
   (local config (normalize-config value))
@@ -115,7 +160,9 @@
              :bottom config.padding.bottom
              :top config.padding.top}
    :restitution config.restitution
-   :debounce-ms config.debounce-ms})
+   :debounce-ms config.debounce-ms
+   :visualization {:enabled config.visualization.enabled
+                   :color (vec4->array config.visualization.color)}})
 
 (fn default-config []
   (normalize-config {}))
@@ -207,12 +254,61 @@
 
 (fn drop-installed []
   (local existing app.__physics-global-containment)
+  (when (and existing existing.visualization existing.visualization.drop)
+    (existing.visualization:drop))
   (when (and existing existing.planes)
     (each [_ plane (ipairs existing.planes)]
       (when (and plane plane.body plane.physics)
         (pcall (fn []
                  (plane.physics:removeRigidBody plane.body))))))
   (set app.__physics-global-containment nil))
+
+(fn containment-corners [bounds]
+  (local min bounds.min)
+  (local max bounds.max)
+  {:a (glm.vec3 min.x min.y min.z)
+   :b (glm.vec3 max.x min.y min.z)
+   :c (glm.vec3 max.x min.y max.z)
+   :d (glm.vec3 min.x min.y max.z)
+   :e (glm.vec3 min.x max.y min.z)
+   :f (glm.vec3 max.x max.y min.z)
+   :g (glm.vec3 max.x max.y max.z)
+   :h (glm.vec3 min.x max.y max.z)})
+
+(fn create-visualization [scene bounds config]
+  (local lines (and scene scene.build-context scene.build-context.lines))
+  (if (or (not lines)
+          (not config.visualization.enabled))
+      nil
+      (do
+        (local corners (containment-corners bounds))
+        (local edge-color config.visualization.color)
+        (local edge-segments [])
+
+        (fn add-segment [segments start end]
+          (table.insert segments {:start start
+                                  :end end}))
+
+        ;; box edges
+        (add-segment edge-segments corners.a corners.b)
+        (add-segment edge-segments corners.b corners.c)
+        (add-segment edge-segments corners.c corners.d)
+        (add-segment edge-segments corners.d corners.a)
+        (add-segment edge-segments corners.e corners.f)
+        (add-segment edge-segments corners.f corners.g)
+        (add-segment edge-segments corners.g corners.h)
+        (add-segment edge-segments corners.h corners.e)
+        (add-segment edge-segments corners.a corners.e)
+        (add-segment edge-segments corners.b corners.f)
+        (add-segment edge-segments corners.c corners.g)
+        (add-segment edge-segments corners.d corners.h)
+        (local edge-batch (lines:create-line-batch {:segments edge-segments
+                                                    :color edge-color}))
+
+        {:drop (fn [_self]
+                 (when (and edge-batch edge-batch.drop)
+                   (edge-batch:drop)))
+         :line-count (length edge-segments)})))
 
 (fn install-plane [physics spec restitution]
   (local shape (bt.StaticPlaneShape spec.normal spec.constant))
@@ -263,7 +359,8 @@
                     :bounds bounds
                     :mode config.mode
                     :restitution config.restitution
-                    :planes planes})
+                    :planes planes
+                    :visualization (create-visualization scene bounds config)})
               true)))))
 
 (fn ensure-refresh-debouncer []
@@ -314,6 +411,7 @@
  :default-padding default-padding
  :default-restitution default-restitution
  :default-debounce-ms default-debounce-ms
+ :default-visualization default-visualization
  :default-config default-config
  :normalize-config normalize-config
  :serialize-config serialize-config

@@ -3,14 +3,17 @@
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (local {: LayoutRoot} (require :layout))
 (local Signal (require :signal))
+(local Scene (require :scene))
 (local HeightfieldTerrain (require :heightfield-terrain))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
 (local TerrainRecords (require :scene-terrain-records))
+(local MathUtils (require :math-utils))
 (local fixtures (require :tests/http-fixtures))
 (local TestSupport (require :tests/test-support))
 
 (local tests [])
+(local approx (. MathUtils :approx))
 
 (fn make-heights [width depth value-fn]
   (local heights [])
@@ -27,6 +30,72 @@
 
 (fn array->quat [arr]
   (glm.quat (. arr 1) (. arr 2) (. arr 3) (. arr 4)))
+
+(fn vec3-approx= [a b]
+  (and (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
+
+(fn quat-approx= [a b]
+  (and (approx a.w b.w)
+       (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)))
+
+(fn with-scene [scene-opts f]
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (var scene nil)
+  (local (ok result)
+    (pcall
+      (fn []
+        (set scene (Scene scene-opts))
+        (set app.scene scene)
+        (set app.layout-root scene.layout-root)
+        (f scene))))
+  (when scene
+    (scene:drop))
+  (set app.scene original-scene)
+  (set app.layout-root original-layout-root)
+  (if ok
+      result
+      (error result)))
+
+(fn terrain-layout-by-id [scene terrain-id]
+  (var found nil)
+  (each [_ metadata (ipairs (or scene.scene-terrains []))]
+    (when (and (not found)
+               metadata
+               metadata.record
+               (= metadata.record.id terrain-id))
+      (set found (and metadata.element metadata.element.layout))))
+  found)
+
+(fn wait-for-terrain-layout-stable [scene terrain-id max-updates]
+  (local updates (or max-updates 12))
+  (var previous-position nil)
+  (var previous-rotation nil)
+  (var stable-layout nil)
+  (for [_ 1 updates]
+    (when (not stable-layout)
+      (scene:update)
+      (local layout (terrain-layout-by-id scene terrain-id))
+      (when layout
+        (if (and previous-position
+                 previous-rotation
+                 (vec3-approx= previous-position layout.position)
+                 (quat-approx= previous-rotation layout.rotation))
+            (set stable-layout layout)
+            (do
+              (set previous-position (glm.vec3 layout.position.x
+                                               layout.position.y
+                                               layout.position.z))
+              (set previous-rotation (glm.quat layout.rotation.w
+                                               layout.rotation.x
+                                               layout.rotation.y
+                                               layout.rotation.z)))))))
+  (assert stable-layout "Expected terrain layout to stabilize")
+  stable-layout)
 
 (fn terrain-surface-height-at-local-point [record local-x local-z]
   (local spacing (HeightfieldTerrainGrid.spacing record))
@@ -161,6 +230,167 @@
   (assert (> changed-count 0) "perlin rect should update at least one targeted sample")
   (assert (= record.options.default-height 0.0)
           "perlin rect should not rewrite default-height"))
+
+(fn capture-record-preserves-heightfield-local-layout-transform []
+  (local record
+    (TerrainRecords.normalize-record {:id "terrain-a"
+                                      :kind "heightfield-terrain"
+                                      :options {:position [-600.3301 -100 199.9989]
+                                                :rotation [-0.8660248517990112 0 -0.4999997019767761 0]
+                                                :sample-spacing [20 20]
+                                                :chunk-samples [5 5]
+                                                :default-height 0.0}
+                                      :chunks [{:coord [-2 -1]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-1 -1]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-2 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-1 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local canonical-position (array->vec3 record.options.position))
+  (local rotation (array->quat record.options.rotation))
+  (local captured
+    (TerrainRecords.capture-record record {:position canonical-position
+                                           :rotation rotation}))
+  (local captured-position (array->vec3 captured.options.position))
+  (local captured-rotation (array->quat captured.options.rotation))
+  (assert (approx captured-position.x canonical-position.x))
+  (assert (approx captured-position.y canonical-position.y))
+  (assert (approx captured-position.z canonical-position.z))
+  (assert (approx captured-rotation.w rotation.w))
+  (assert (approx captured-rotation.x rotation.x))
+  (assert (approx captured-rotation.y rotation.y))
+  (assert (approx captured-rotation.z rotation.z)))
+
+(fn capture-record-removes-parent-scene-transform []
+  (local record
+    (TerrainRecords.normalize-record {:id "terrain-a"
+                                      :kind "heightfield-terrain"
+                                      :options {:position [-600.3301 -100 199.9989]
+                                                :rotation [-0.8660248517990112 0 -0.4999997019767761 0]
+                                                :sample-spacing [20 20]
+                                                :chunk-samples [5 5]
+                                                :default-height 0.0}
+                                      :chunks [{:coord [-2 -1]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-1 -1]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-2 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-1 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local local-position (array->vec3 record.options.position))
+  (local local-rotation (array->quat record.options.rotation))
+  (local parent-position (glm.vec3 -5 0 0))
+  (local parent-rotation (glm.quat (math.rad 30) (glm.vec3 0 1 0)))
+  (local world-layout-position (+ parent-position
+                                  (parent-rotation:rotate local-position)))
+  (local world-layout-rotation (* parent-rotation local-rotation))
+  (local captured
+    (TerrainRecords.capture-record record {:position world-layout-position
+                                           :rotation world-layout-rotation
+                                           :parent {:position parent-position
+                                                    :rotation parent-rotation}}))
+  (local captured-position (array->vec3 captured.options.position))
+  (local captured-rotation (array->quat captured.options.rotation))
+  (assert (approx captured-position.x local-position.x))
+  (assert (approx captured-position.y local-position.y))
+  (assert (approx captured-position.z local-position.z))
+  (assert (approx captured-rotation.w local-rotation.w))
+  (assert (approx captured-rotation.x local-rotation.x))
+  (assert (approx captured-rotation.y local-rotation.y))
+  (assert (approx captured-rotation.z local-rotation.z)))
+
+(fn scene-heightfield-capture-remains-stable-across-rebuilds []
+  (local original-record
+    (TerrainRecords.normalize-record
+      {:id "terrain-a"
+       :kind "heightfield-terrain"
+       :options {:position [-480 -100 -480]
+                 :rotation [1 0 0 0]
+                 :sample-spacing [20 20]
+                 :chunk-samples [17 17]
+                 :default-height 0.0}
+       :chunks [{:coord [-1 -1]
+                 :size [17 17]
+                 :heights (make-heights 17 17 (fn [_x _z] 0.0))}
+                {:coord [0 -1]
+                 :size [17 17]
+                 :heights (make-heights 17 17 (fn [x z]
+                                                (if (and (>= x 8) (>= z 8))
+                                                    12.0
+                                                    0.0)))}
+                {:coord [-1 0]
+                 :size [17 17]
+                 :heights (make-heights 17 17 (fn [x z]
+                                                (if (and (<= x 4) (<= z 4))
+                                                    7.0
+                                                    0.0)))}
+                {:coord [0 0]
+                 :size [17 17]
+                 :heights (make-heights 17 17 (fn [x z]
+                                                (+ (* 0.5 x) (* 0.25 z))))}]}))
+  (local scene-position (glm.vec3 25 0 -35))
+  (local scene-rotation (glm.quat (math.rad 18) (glm.vec3 0 1 0)))
+  (local captured0
+    (with-scene
+      {:position scene-position
+       :rotation scene-rotation}
+      (fn [scene]
+        (scene:build-default {:terrains [original-record]})
+        (local layout (wait-for-terrain-layout-stable scene original-record.id))
+        (assert layout "Expected runtime terrain layout before capture")
+        (scene:capture-state))))
+  (local terrain0 (. captured0.terrains 1))
+  (assert terrain0 "Expected captured terrain state")
+  (assert (= terrain0.id original-record.id))
+  (assert (vec3-approx= (array->vec3 terrain0.options.position)
+                        (array->vec3 original-record.options.position)))
+  (assert (quat-approx= (array->quat terrain0.options.rotation)
+                        (array->quat original-record.options.rotation)))
+
+  (var current captured0)
+  (var baseline-layout-position nil)
+  (var baseline-layout-rotation nil)
+  (for [_cycle 1 3]
+    (set current
+         (with-scene
+           {:position scene-position
+            :rotation scene-rotation}
+           (fn [scene]
+             (scene:build-default {:terrains current.terrains})
+             (local layout (wait-for-terrain-layout-stable scene original-record.id))
+             (assert layout "Expected runtime terrain layout after rebuild")
+             (if baseline-layout-position
+                 (do
+                   (assert (vec3-approx= baseline-layout-position layout.position)
+                           "Terrain layout position should remain stable across capture/rebuild cycles")
+                   (assert (quat-approx= baseline-layout-rotation layout.rotation)
+                           "Terrain layout rotation should remain stable across capture/rebuild cycles"))
+                 (do
+                   (set baseline-layout-position
+                        (glm.vec3 layout.position.x layout.position.y layout.position.z))
+                   (set baseline-layout-rotation
+                        (glm.quat layout.rotation.w layout.rotation.x layout.rotation.y layout.rotation.z))))
+             (local captured (scene:capture-state))
+             (local terrain (. captured.terrains 1))
+             (assert terrain "Expected terrain in captured scene state")
+             (assert (vec3-approx= (array->vec3 terrain.options.position)
+                                   (array->vec3 original-record.options.position))
+                     "Captured terrain position should stay canonical across rebuild cycles")
+             (assert (quat-approx= (array->quat terrain.options.rotation)
+                                   (array->quat original-record.options.rotation))
+                     "Captured terrain rotation should stay canonical across rebuild cycles")
+             captured)))))
 
 (fn resize-preserves-overlapping-chunks-and-fills-new-ones []
   (local record
@@ -764,6 +994,12 @@
                      :fn flat-fill-can-target-a_rectangle})
 (table.insert tests {:name "Heightfield terrain perlin supports rectangular targets"
                      :fn perlin-application-can-target-a-rectangle})
+(table.insert tests {:name "Heightfield terrain capture preserves local layout transform"
+                     :fn capture-record-preserves-heightfield-local-layout-transform})
+(table.insert tests {:name "Heightfield terrain capture removes parent scene transform"
+                     :fn capture-record-removes-parent-scene-transform})
+(table.insert tests {:name "Heightfield terrain scene capture remains stable across rebuilds"
+                     :fn scene-heightfield-capture-remains-stable-across-rebuilds})
 (table.insert tests {:name "Heightfield terrain resize preserves overlap and fills new chunks"
                      :fn resize-preserves-overlapping-chunks-and-fills-new-ones})
 (table.insert tests {:name "Heightfield terrain adjust supports rectangles and whole terrain"

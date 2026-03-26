@@ -17,9 +17,9 @@
   (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
   (gl.glEnableVertexAttribArray 0)
   (gl.glEnableVertexAttribArray 1)
-  (local stride (* 6 4))
+  (local stride (* 7 4))
   (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE stride 0)
-  (gl.glVertexAttribPointer 1 3 gl.GL_FLOAT gl.GL_FALSE stride (* 4 3))
+  (gl.glVertexAttribPointer 1 4 gl.GL_FLOAT gl.GL_FALSE stride (* 4 3))
 
   (fn draw-buffer [_self vector mode projection view]
     (when (and vector (> (vector:length) 0))
@@ -30,7 +30,7 @@
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
       (shader:setMatrix4 "uClipMatrix" (ClipUtils.no-clip-matrix))
-      (gl.glDrawArrays mode 0 (/ (vector:length) 6))))
+      (gl.glDrawArrays mode 0 (/ (vector:length) 7))))
 
   (fn render-lines [self vector projection view]
     (self:draw-buffer vector gl.GL_LINES projection view))

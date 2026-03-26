@@ -19,6 +19,12 @@
     (set count (+ count 1)))
   count)
 
+(fn timer-ids [state]
+  (var ids [])
+  (each [id _timer (pairs state.timers)]
+    (table.insert ids id))
+  ids)
+
 (fn disconnect-update-handler [state]
   (when (and state.update-handler
              app.engine
@@ -43,21 +49,30 @@
                (if (finite-number? delta)
                    (math.max delta 0)
                    0))
-             (local finished [])
-             (each [id timer (pairs state.timers)]
-               (if (= timer.kind :interval)
-                   (do
-                     (set timer.remaining_ms (- timer.remaining_ms elapsed))
-                     (while (<= timer.remaining_ms 0)
-                       (timer.callback)
-                       (set timer.remaining_ms (+ timer.remaining_ms timer.interval_ms))))
-                   (do
-                     (set timer.remaining_ms (- timer.remaining_ms elapsed))
-                     (when (<= timer.remaining_ms 0)
-                       (timer.callback)
-                       (table.insert finished id)))))
-             (each [_ id (ipairs finished)]
-               (set (. state.timers id) nil))
+             (each [_ id (ipairs (timer-ids state))]
+               (local timer (. state.timers id))
+               (when timer
+                 (if (= timer.kind :interval)
+                     (do
+                       (set timer.remaining_ms (- timer.remaining_ms elapsed))
+                       (var active? true)
+                       (while active?
+                         (var current (. state.timers id))
+                         (if (or (not current)
+                                 (not (= current timer))
+                                 (> current.remaining_ms 0))
+                             (set active? false)
+                             (do
+                               (timer.callback)
+                               (set current (. state.timers id))
+                               (when (and current (= current timer))
+                                 (set current.remaining_ms
+                                      (+ current.remaining_ms current.interval_ms)))))))
+                     (do
+                       (set timer.remaining_ms (- timer.remaining_ms elapsed))
+                       (when (<= timer.remaining_ms 0)
+                         (set (. state.timers id) nil)
+                         (timer.callback))))))
              (when (= (active-timer-count state) 0)
                (disconnect-update-handler state)))))))
 

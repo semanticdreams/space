@@ -1,5 +1,6 @@
 (local tests [])
 (local glm (require :glm))
+(local bt (require :bt))
 (local Scene (require :scene))
 (local PhysicsContainment (require :physics-containment))
 
@@ -30,6 +31,38 @@
   (local world (and app.engine app.engine.physics (app.engine.physics:getWorld)))
   (assert world "Physics world is required for containment tests")
   (length (world:getCollisionObjectArray)))
+
+(fn body-center [body]
+  (local transform (body:getCenterOfMassTransform))
+  (local origin (transform:getOrigin))
+  (glm.vec3 origin.x origin.y origin.z))
+
+(fn with-dynamic-box [opts f]
+  (assert (and app.engine app.engine.physics) "Physics instance not available for dynamic box test")
+  (local options (or opts {}))
+  (local size (or options.size (glm.vec3 2 2 2)))
+  (local center (or options.center (glm.vec3 0 0 0)))
+  (local velocity (or options.velocity (glm.vec3 0 0 0)))
+  (local shape (bt.BoxShape (bt.Vector3 (* 0.5 size.x)
+                                        (* 0.5 size.y)
+                                        (* 0.5 size.z))))
+  (local transform (bt.Transform))
+  (transform:setIdentity)
+  (transform:setOrigin (bt.Vector3 center.x center.y center.z))
+  (local motion-state (bt.DefaultMotionState transform))
+  (local inertia (bt.Vector3 0 0 0))
+  (shape:calculateLocalInertia 1.0 inertia)
+  (local info (bt.RigidBodyConstructionInfo 1.0 motion-state shape inertia))
+  (local body (bt.RigidBody info))
+  (app.engine.physics:addRigidBody body)
+  (body:setLinearVelocity (bt.Vector3 velocity.x velocity.y velocity.z))
+  (local (ok result)
+    (pcall (fn []
+             (f body))))
+  (app.engine.physics:removeRigidBody body)
+  (if ok
+      result
+      (error result)))
 
 (fn with-scene [scene-opts f]
   (local original-scene app.scene)
@@ -133,6 +166,50 @@
       (assert (= app.__physics-global-containment nil)
               "Clearing containment should cancel pending refreshes"))))
 
+(fn manual-bounds-block-horizontal-escape []
+  (local original-config app.physics-containment-config)
+  (PhysicsContainment.clear)
+  (set app.physics-containment-config {:mode "manual-bounds"
+                                       :bounds {:min [-50 -50 -50]
+                                                :max [50 50 50]}})
+  (assert (PhysicsContainment.ensure-installed
+            {:config app.physics-containment-config})
+          "Expected manual containment install to succeed")
+  (with-dynamic-box
+    {:center (glm.vec3 0 0 0)
+     :velocity (glm.vec3 60 0 0)}
+    (fn [body]
+      (for [_ 1 240]
+        (app.engine.physics:update 0))
+      (local center (body-center body))
+      (assert (< center.x 56)
+              (string.format
+                "Containment should stop the body near the max-x wall (x=%.3f)"
+                center.x))))
+  (set app.physics-containment-config original-config))
+
+(fn manual-bounds-block-horizontal-escape-from-negative-side []
+  (local original-config app.physics-containment-config)
+  (PhysicsContainment.clear)
+  (set app.physics-containment-config {:mode "manual-bounds"
+                                       :bounds {:min [-50 -50 -50]
+                                                :max [50 50 50]}})
+  (assert (PhysicsContainment.ensure-installed
+            {:config app.physics-containment-config})
+          "Expected manual containment install to succeed")
+  (with-dynamic-box
+    {:center (glm.vec3 0 0 0)
+     :velocity (glm.vec3 -60 0 0)}
+    (fn [body]
+      (for [_ 1 240]
+        (app.engine.physics:update 0))
+      (local center (body-center body))
+      (assert (> center.x -56)
+              (string.format
+                "Containment should stop the body near the min-x wall (x=%.3f)"
+                center.x))))
+  (set app.physics-containment-config original-config))
+
 (fn automatic-bounds-follow-terrain-record-replacements []
   (with-scene
     {:position (glm.vec3 0 0 0)
@@ -161,10 +238,19 @@
                                                        21 22 23 24 25])]
                               15.0)}]})
       (app.engine.events.updated:emit 1000)
+      (local bounds app.__physics-global-containment.bounds)
       (assert (vec3= app.__physics-global-containment.bounds.min (glm.vec3 10 -135 20))
-              "Containment should refresh horizontal placement after terrain record replacement")
+              (string.format
+                "Containment should refresh horizontal placement after terrain record replacement (actual min=%.3f,%.3f,%.3f)"
+                bounds.min.x
+                bounds.min.y
+                bounds.min.z))
       (assert (vec3= app.__physics-global-containment.bounds.max (glm.vec3 130 415 60))
-              "Containment should refresh size and height after terrain record replacement"))))
+              (string.format
+                "Containment should refresh size and height after terrain record replacement (actual max=%.3f,%.3f,%.3f)"
+                bounds.max.x
+                bounds.max.y
+                bounds.max.z)))))
 
 (table.insert tests {:name "PhysicsContainment installs default manual containment box"
                      :fn installs-default-manual-containment-box})
@@ -176,6 +262,10 @@
                      :fn automatic-bounds-follow-terrain-transform-changes})
 (table.insert tests {:name "PhysicsContainment clear cancels pending refresh"
                      :fn clear-cancels-pending-refresh})
+(table.insert tests {:name "PhysicsContainment manual bounds block horizontal escape"
+                     :fn manual-bounds-block-horizontal-escape})
+(table.insert tests {:name "PhysicsContainment manual bounds block horizontal escape from negative side"
+                     :fn manual-bounds-block-horizontal-escape-from-negative-side})
 (table.insert tests {:name "PhysicsContainment automatic bounds follow terrain record replacements"
                      :fn automatic-bounds-follow-terrain-record-replacements})
 

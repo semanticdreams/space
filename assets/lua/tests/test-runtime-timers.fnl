@@ -56,11 +56,51 @@
   (assert (= app.__runtime_timers.update-handler nil)
           "Dropping the debouncer should disconnect shared update handler"))
 
+(fn runtime-interval-callback-can-drop-itself []
+  (reset-timers)
+  (var calls 0)
+  (var timer nil)
+  (set timer
+       (RuntimeTimers.Interval {:interval-ms 100
+                                :callback (fn []
+                                            (set calls (+ calls 1))
+                                            (timer:drop))}))
+  (timer:start)
+  (app.engine.events.updated:emit 250)
+  (assert (= calls 1)
+          "Self-dropping interval should stop after the first callback")
+  (assert (= app.__runtime_timers.update-handler nil)
+          "Self-dropping interval should disconnect the shared handler"))
+
+(fn runtime-timeout-callback-can-clear-service []
+  (reset-timers)
+  (local calls [])
+  (local timeout-a
+    (RuntimeTimers.Timeout {:delay-ms 100
+                            :callback (fn []
+                                        (table.insert calls "a")
+                                        (RuntimeTimers.clear))}))
+  (local timeout-b
+    (RuntimeTimers.Timeout {:delay-ms 100
+                            :callback (fn []
+                                        (table.insert calls "b"))}))
+  (timeout-a:start)
+  (timeout-b:start)
+  (app.engine.events.updated:emit 100)
+  (assert (= (length calls) 1)
+          "Clearing from a callback should stop sibling timers in the same tick")
+  (assert (= app.__runtime_timers.update-handler nil)
+          "Clearing from a callback should disconnect the shared handler"))
+
 (table.insert tests {:name "RuntimeTimers timeout fires once" :fn runtime-timeout-fires-once})
 (table.insert tests {:name "RuntimeTimers interval repeats and drops cleanly"
                      :fn runtime-interval-repeats-and-drops-cleanly})
 (table.insert tests {:name "RuntimeTimers debouncer resets delay and uses latest payload"
                      :fn runtime-debouncer-resets-delay-and-uses-latest-payload})
+(table.insert tests {:name "RuntimeTimers interval callback can drop itself"
+                     :fn runtime-interval-callback-can-drop-itself})
+(table.insert tests {:name "RuntimeTimers timeout callback can clear service"
+                     :fn runtime-timeout-callback-can-clear-service})
 
 (local main
   (fn []

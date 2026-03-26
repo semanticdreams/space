@@ -339,10 +339,19 @@
   (local normalized (normalize-record record))
   (local captured (clone-table normalized))
   (local options (clone-table (or captured.options {})))
-  (when (and layout layout.position)
-    (set options.position (vec3->array layout.position)))
-  (when (and layout layout.rotation)
-    (set options.rotation (quat->array layout.rotation)))
+  (local local-layout
+    (if (and layout layout.parent layout.parent.position layout.parent.rotation
+             layout.position layout.rotation)
+        (do
+          (local parent-inverse (layout.parent.rotation:inverse))
+          {:position (parent-inverse:rotate
+                       (- layout.position layout.parent.position))
+           :rotation (* parent-inverse layout.rotation)})
+        layout))
+  (when (and local-layout local-layout.position)
+    (set options.position (vec3->array local-layout.position)))
+  (when (and local-layout local-layout.rotation)
+    (set options.rotation (quat->array local-layout.rotation)))
   (set captured.options options)
   captured)
 

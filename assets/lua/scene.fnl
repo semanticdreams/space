@@ -20,8 +20,8 @@
 (local TerrainQuery (require :terrain-query))
 (local TerrainQueryRecord (require :terrain-query-record))
 
-(local default-position (glm.vec3 -5 0 0))
-(local default-rotation (glm.quat (math.rad 30) (glm.vec3 0 1 0)))
+(local default-position (glm.vec3 0 0 0))
+(local default-rotation (glm.quat 1 0 0 0))
 (local default-depth-scale 0)
 (local default-camera-distance 100.0)
 
