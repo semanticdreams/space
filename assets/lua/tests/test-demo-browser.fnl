@@ -16,6 +16,7 @@
 (local PhysicsContainment (require :physics-containment))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local TerrainQuery (require :terrain-query))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
@@ -105,17 +106,10 @@
   (local info (TerrainQuery.surface-info-at-local-point record local-x local-z))
   (and info info.local-surface-y))
 
-(fn terrain-origin-offset [record]
-  (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local spacing (HeightfieldTerrainGrid.spacing record))
-  (glm.vec3 (* bounds.min-sample-x (. spacing 1))
-            0
-            (* bounds.min-sample-z (. spacing 2))))
-
 (fn terrain-world-point-from-runtime-layout [record terrain-layout local-point]
-  (local origin-offset (terrain-origin-offset record))
   (+ terrain-layout.position
-     (terrain-layout.rotation:rotate (- local-point origin-offset))))
+     (terrain-layout.rotation:rotate
+       (HeightfieldTerrainSpace.canonical-local->runtime-local record local-point))))
 
 (fn elevated-probe-point-in-cell [record cell-x cell-z min-height]
   (local spacing (HeightfieldTerrainGrid.spacing record))

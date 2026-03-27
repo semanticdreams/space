@@ -67,7 +67,16 @@
       (write-local-geometry self)
       (set geometry-state next-state)))
 
-  (fn update [self]
+  (fn update [self args]
+    (local has-args (not (= args nil)))
+    (when has-args
+      (set self.position (or args.position default-position))
+      (set self.rotation (or args.rotation default-rotation))
+      (set self.scale (or args.scale default-scale))
+      (set self.offset (or args.offset default-offset))
+      (set self.opacity (or args.opacity 1.0))
+      (set self.depth-offset-index (or args.depth-index 0))
+      (set self.clip-region args.clip-region))
     (if (not self.visible?)
         (release-handle)
         (do

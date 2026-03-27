@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local bt (require :bt))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
 
@@ -46,9 +47,6 @@
    :max-height max-height
    :spacing-x spacing-x
    :spacing-z spacing-z
-   :origin-offset (glm.vec3 (* bounds.min-sample-x spacing-x)
-                            0.0
-                            (* bounds.min-sample-z spacing-z))
    :center-offset (glm.vec3 (* 0.5 (- bounds.width 1) spacing-x)
                             (* 0.5 (+ min-height max-height))
                             (* 0.5 (- bounds.length 1) spacing-z))})
@@ -70,13 +68,8 @@
 (fn create-heightfield [record]
   (when bt
     (local shape-data (build-shape-data record))
-    (local position (glm.vec3 (. record.options.position 1)
-                              (. record.options.position 2)
-                              (. record.options.position 3)))
-    (local rotation (glm.quat (. record.options.rotation 1)
-                              (. record.options.rotation 2)
-                              (. record.options.rotation 3)
-                              (. record.options.rotation 4)))
+    (local position (HeightfieldTerrainSpace.resolve-position record))
+    (local rotation (HeightfieldTerrainSpace.resolve-rotation record))
     (local restitution (or record.options.physics-restitution 1.0))
     (local shape (bt.HeightfieldTerrainShape shape-data.width
                                              shape-data.length
@@ -87,7 +80,8 @@
                                              false))
     (shape:setLocalScaling (bt.Vector3 shape-data.spacing-x 1.0 shape-data.spacing-z))
     (shape:buildAccelerator)
-    (local layout-position (+ position (rotation:rotate shape-data.origin-offset)))
+    (local layout-position
+      (HeightfieldTerrainSpace.runtime-layout-position record position rotation))
     (local transform (transform-for-layout shape-data layout-position rotation))
     (local motion-state (bt.DefaultMotionState transform))
     (local zero (bt.Vector3 0 0 0))

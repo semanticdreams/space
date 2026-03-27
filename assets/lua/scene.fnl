@@ -18,7 +18,7 @@
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
 (local TerrainQuery (require :terrain-query))
-(local TerrainQueryRecord (require :terrain-query-record))
+(local TerrainLayoutRecord (require :terrain-layout-record))
 
 (local default-position (glm.vec3 0 0 0))
 (local default-rotation (glm.quat 1 0 0 0))
@@ -45,7 +45,14 @@
       (glm.normalize value)
       fallback))
 
-(local terrain-query-record TerrainQueryRecord.from-metadata)
+(local terrain-layout-record TerrainLayoutRecord.from-metadata)
+
+(fn terrain-child-transform [record fallback-position fallback-rotation element]
+  (if (= (and record record.kind) "heightfield-terrain")
+      {:position (and element element.layout element.layout.position)
+       :rotation (and element element.layout element.layout.rotation)}
+      {:position fallback-position
+       :rotation fallback-rotation}))
 
 (fn resolve-camera-placement [self]
   (local camera app.camera)
@@ -309,9 +316,14 @@
                       (local element (terrain-builder child-ctx))
                       (table.insert terrain-children {:element element
                                                       :record terrain-record})
+                      (local transform
+                        (terrain-child-transform terrain-record
+                                                 terrain-position
+                                                 terrain-rotation
+                                                 element))
                       {:element element
-                       :position terrain-position
-                       :rotation terrain-rotation})))
+                       :position transform.position
+                       :rotation transform.rotation})))
     (local builder
       (Container {:children
                   container-children}))
@@ -989,9 +1001,14 @@
           nil))
     (local new-terrain-metadata {:element new-element
                                  :record terrain-spec.record})
+    (local transform
+      (terrain-child-transform terrain-spec.record
+                               terrain-spec.position
+                               terrain-spec.rotation
+                               new-element))
     (local new-child-metadata {:element new-element
-                               :position terrain-spec.position
-                               :rotation terrain-spec.rotation
+                               :position transform.position
+                               :rotation transform.rotation
                                :transform-applied? false})
     (set (. self.scene-terrains terrain-entry.index) new-terrain-metadata)
     (entity.layout:remove-child child-index)
@@ -1045,9 +1062,14 @@
                 (or (and record record.id) "?")))
     (local new-terrain-metadata {:element new-element
                                  :record terrain-spec.record})
+    (local transform
+      (terrain-child-transform terrain-spec.record
+                               terrain-spec.position
+                               terrain-spec.rotation
+                               new-element))
     (local new-child-metadata {:element new-element
-                               :position terrain-spec.position
-                               :rotation terrain-spec.rotation
+                               :position transform.position
+                               :rotation transform.rotation
                                :transform-applied? false})
     (when (not entity.scene-terrains)
       (set entity.scene-terrains []))
@@ -1239,7 +1261,7 @@
   (var best nil)
   (each [_ metadata (ipairs (or self.scene-terrains []))]
     (local record (and metadata metadata.record))
-    (local query-record (terrain-query-record metadata))
+    (local query-record (terrain-layout-record metadata))
     (local hit (and query-record (TerrainQuery.raycast-record query-record ray)))
     (when (and hit (or (not best) (< hit.distance best.distance)))
       (set best {:terrain-record record
@@ -1257,7 +1279,7 @@
   (var best nil)
   (each [_ metadata (ipairs (or self.scene-terrains []))]
     (local record (and metadata metadata.record))
-    (local query-record (terrain-query-record metadata))
+    (local query-record (terrain-layout-record metadata))
     (local info (and query-record
                      world-point
                      (TerrainQuery.surface-info-at-world-point query-record world-point)))
@@ -1292,7 +1314,7 @@
   (var best nil)
   (each [_ metadata (ipairs (or self.scene-terrains []))]
     (local record (and metadata metadata.record))
-    (local query-record (terrain-query-record metadata))
+    (local query-record (terrain-layout-record metadata))
     (local hit (and query-record (TerrainQuery.domain-hit-record query-record ray)))
     (when (and hit (or (not best) (< hit.distance best.distance)))
       (set best {:terrain-record record
@@ -1313,7 +1335,7 @@
       (do
         (local metadata terrain-entry.metadata)
         (local record (and metadata metadata.record))
-        (local query-record (and metadata (terrain-query-record metadata)))
+        (local query-record (and metadata (terrain-layout-record metadata)))
         (local target
           (and query-record
                (TerrainQuery.screen-rect-target query-record start-pos end-pos opts)))

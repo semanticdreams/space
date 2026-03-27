@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local HeightfieldTerrainQuery (require :heightfield-terrain-query))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
+(local TerrainLayoutRecord (require :terrain-layout-record))
 (local TerrainRecords (require :scene-terrain-records))
 (local MathUtils (require :math-utils))
 
@@ -184,6 +185,41 @@
   (assert (= target.x1 3) "rect target should use the larger sample x")
   (assert (= target.z1 2) "rect target should use the larger sample z"))
 
+(fn heightfield-rect-target-between-local-points-respects-rebased-runtime-origin []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [1 1]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [-3 -3]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-2 -3]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-3 -2]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-2 -2]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local runtime-record
+    (TerrainLayoutRecord.from-runtime-layout record
+                                            {:position (glm.vec3 -12 0 -12)
+                                             :rotation (glm.quat 1 0 0 0)}))
+  (local target
+    (HeightfieldTerrainQuery.rect-target-between-local-points runtime-record
+                                                              (glm.vec3 1 0 2)
+                                                              (glm.vec3 3 0 2)))
+  (assert (= target.mode :samples) "rebased rect-target-between-local-points should produce a sample target")
+  (assert (= target.shape :rect) "rebased rect-target-between-local-points should use the compact rectangular sample target")
+  (assert (= target.sample-count 3) "rebased rect-target-between-local-points should preserve the dragged sample width")
+  (assert (= target.x0 -11) "rebased rect-target-between-local-points should convert runtime local x back to canonical sample x")
+  (assert (= target.z0 -10) "rebased rect-target-between-local-points should convert runtime local z back to canonical sample z")
+  (assert (= target.x1 -9) "rebased rect-target-between-local-points should preserve the dragged canonical x range")
+  (assert (= target.z1 -10) "rebased rect-target-between-local-points should preserve the dragged canonical z range"))
+
 (fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
@@ -272,6 +308,61 @@
   (assert (= target.z1 3))
   (assert (= target.samples nil)))
 
+(fn heightfield-screen-rect-target-respects-rebased-runtime-origin []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [1 1]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [-3 -3]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-2 -3]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-3 -2]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}
+                                               {:coord [-2 -2]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local runtime-record
+    (TerrainLayoutRecord.from-runtime-layout record
+                                            {:position (glm.vec3 -12 0 -12)
+                                             :rotation (glm.quat 1 0 0 0)}))
+  (local viewport {:x 0 :y 0 :width 100 :height 100})
+  (local projection (glm.ortho -11.5 -8.5 -11.5 -8.5 0.1 40.0))
+  (local view (glm.lookAt (glm.vec3 -10 10 -10)
+                          (glm.vec3 -10 0 -10)
+                          (glm.vec3 0 0 -1)))
+  (local top-left
+    (project-world-point (HeightfieldTerrainQuery.local->world runtime-record (glm.vec3 1 0 2))
+                         view
+                         projection
+                         viewport))
+  (local bottom-right
+    (project-world-point (HeightfieldTerrainQuery.local->world runtime-record (glm.vec3 3 0 2))
+                         view
+                         projection
+                         viewport))
+  (local target
+    (HeightfieldTerrainQuery.screen-rect-target runtime-record
+                                                {:x top-left.x :y top-left.y}
+                                                {:x bottom-right.x :y bottom-right.y}
+                                                {:view view
+                                                 :projection projection
+                                                 :viewport viewport}))
+  (assert target "screen-rect-target should resolve a rebased runtime target")
+  (assert (= target.mode :samples))
+  (assert (= target.shape :rect))
+  (assert (= target.sample-count 3))
+  (assert (= target.x0 -11))
+  (assert (= target.z0 -10))
+  (assert (= target.x1 -9))
+  (assert (= target.z1 -10))
+  (assert (= target.samples nil)))
+
 (fn heightfield-rectangularize-target-fills-bounding-rect []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
@@ -306,12 +397,16 @@
                      :fn heightfield-raycast-detects-second-triangle-hit})
 (table.insert tests {:name "heightfield terrain query rect-target-between-local-points builds rect"
                      :fn heightfield-rect-target-between-local-points-builds-rect})
+(table.insert tests {:name "heightfield terrain query rect-target-between-local-points respects rebased runtime origin"
+                     :fn heightfield-rect-target-between-local-points-respects-rebased-runtime-origin})
 (table.insert tests {:name "heightfield terrain query domain-hit handles non-flat multi-chunk terrain"
                      :fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain})
 (table.insert tests {:name "heightfield terrain query domain-hit tolerates sparse chunk gaps"
                      :fn heightfield-domain-hit-record-tolerates-sparse-chunk-gaps})
 (table.insert tests {:name "heightfield terrain query screen-rect target selects samples in frustum"
                      :fn heightfield-screen-rect-target-selects-samples-in-frustum})
+(table.insert tests {:name "heightfield terrain query screen-rect target respects rebased runtime origin"
+                     :fn heightfield-screen-rect-target-respects-rebased-runtime-origin})
 (table.insert tests {:name "heightfield terrain query rectangularize target fills bounding rect"
                      :fn heightfield-rectangularize-target-fills-bounding-rect})
 

@@ -1,84 +1,40 @@
 (local glm (require :glm))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local {:intersect-triangle intersect-triangle} (require :ray-triangle))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
-(local MathUtils (require :math-utils))
 (local viewport-utils (require :viewport-utils))
-
-(local array->vec3 (. MathUtils :array->vec3))
-(local array->quat (. MathUtils :array->quat))
 
 (local M {})
 
 (local ray-axis-epsilon 1e-6)
 
-(fn resolve-position [record]
-  (array->vec3 (or (and record record.options record.options.position) [0 0 0])))
-
-(fn resolve-rotation [record]
-  (array->quat (or (and record record.options record.options.rotation) [1 0 0 0])))
+(local resolve-rotation HeightfieldTerrainSpace.resolve-rotation)
+(local query-local->canonical-local (. HeightfieldTerrainSpace :query-local->canonical-local))
+(local canonical-local->query-local (. HeightfieldTerrainSpace :canonical-local->query-local))
+(local canonical-domain-bounds (. HeightfieldTerrainSpace :canonical-domain-bounds))
+(local query-domain-bounds (. HeightfieldTerrainSpace :query-domain-bounds))
+(local local->world HeightfieldTerrainSpace.local->world)
+(local world->local HeightfieldTerrainSpace.world->local)
 
 (local spacing HeightfieldTerrainGrid.spacing)
-(local chunk-samples HeightfieldTerrainGrid.chunk-samples)
-(local integer-field HeightfieldTerrainGrid.integer-field)
-(local chunk-key HeightfieldTerrainGrid.chunk-key)
 (local build-chunk-map HeightfieldTerrainGrid.build-chunk-map)
 (local sample-height-global HeightfieldTerrainGrid.sample-height-global)
-(local sample-local-point HeightfieldTerrainGrid.sample-local-point)
-
-(fn chunk-height [chunk sample-x sample-z]
-  (local size (or chunk.size [17 17]))
-  (local width (or (. size 1) size.x 17))
-  (local idx (+ (* sample-z width) sample-x 1))
-  (or (. chunk.heights idx) 0.0))
-
-(fn chunk-size [chunk]
-  (local size (or chunk.size [17 17]))
-  [(integer-field (or (. size 1) size.x 17) 17)
-   (integer-field (or (. size 2) size.y size.z 17) 17)])
-
-(fn floor-div [value divisor]
-  (math.floor (/ value divisor)))
-
-(fn canonical-local-point [record chunk sample-x sample-z]
-  (local coord (or chunk.coord [0 0]))
-  (local chunk-x (integer-field (or (. coord 1) coord.x 0) 0))
-  (local chunk-z (integer-field (or (. coord 2) coord.y coord.z 0) 0))
-  (local sample-counts (chunk-samples record))
-  (local sample-width (. sample-counts 1))
-  (local sample-depth (. sample-counts 2))
-  (local sample-spacing (spacing record))
-  (local spacing-x (. sample-spacing 1))
-  (local spacing-z (. sample-spacing 2))
-  (glm.vec3 (+ (* chunk-x (- sample-width 1) spacing-x)
-               (* sample-x spacing-x))
-            (chunk-height chunk sample-x sample-z)
-            (+ (* chunk-z (- sample-depth 1) spacing-z)
-               (* sample-z spacing-z))))
-
-(fn local->world [record local-point]
-  (local rotation (resolve-rotation record))
-  (+ (resolve-position record)
-     (rotation:rotate local-point)))
-
-(fn world->local [record world-point]
-  (local rotation (resolve-rotation record))
-  (local inverse (rotation:inverse))
-  (inverse:rotate (- world-point (resolve-position record))))
 
 (fn nearest-sample-coord [record local-point]
   (local sample-spacing (spacing record))
   (local spacing-x (. sample-spacing 1))
   (local spacing-z (. sample-spacing 2))
   (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (local canonical-local (query-local->canonical-local record local-point))
   (local sample-x
     (math.max bounds.min-sample-x
               (math.min bounds.max-sample-x
-                        (math.floor (+ (/ local-point.x spacing-x) 0.5)))))
+                        (math.floor (+ (/ canonical-local.x spacing-x) 0.5)))))
   (local sample-z
     (math.max bounds.min-sample-z
               (math.min bounds.max-sample-z
-                        (math.floor (+ (/ local-point.z spacing-z) 0.5)))))
+                        (math.floor (+ (/ canonical-local.z spacing-z) 0.5)))))
   {:x sample-x
    :z sample-z})
 
@@ -103,50 +59,17 @@
       {:min min-sample
        :max max-sample}))
 
-(fn local-plane-hit [record ray]
-  (local rotation (resolve-rotation record))
-  (local inverse (rotation:inverse))
-  (local local-origin (world->local record ray.origin))
-  (local local-direction (inverse:rotate ray.direction))
-  (local dir-y local-direction.y)
-  (if (< (math.abs dir-y) 1e-6)
-      nil
-      (let [distance (/ (- local-origin.y) dir-y)]
-        (if (< distance 0)
-            nil
-            (+ local-origin (* local-direction distance))))))
-
-(fn local-point-inside-bounds? [record local-point]
-  (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local sample-spacing (spacing record))
-  (local spacing-x (. sample-spacing 1))
-  (local spacing-z (. sample-spacing 2))
-  (local min-x (* bounds.min-sample-x spacing-x))
-  (local max-x (* bounds.max-sample-x spacing-x))
-  (local min-z (* bounds.min-sample-z spacing-z))
-  (local max-z (* bounds.max-sample-z spacing-z))
-  (and (>= local-point.x (- min-x 1e-6))
-       (<= local-point.x (+ max-x 1e-6))
-       (>= local-point.z (- min-z 1e-6))
-       (<= local-point.z (+ max-z 1e-6))))
-
-(fn make-domain-hit [record local-point ray]
-  (local world-point (local->world record local-point))
-  {:distance (glm.length (- world-point ray.origin))
-   :world-point world-point
-   :local-point local-point
-   :sample (nearest-sample-coord record local-point)
-   :target (sample-target record local-point)})
-
 (fn rect-target-between-local-points [record start-local-point end-local-point]
   (local sample-spacing (spacing record))
   (local spacing-x (. sample-spacing 1))
   (local spacing-z (. sample-spacing 2))
   (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local min-local-x (math.min start-local-point.x end-local-point.x))
-  (local max-local-x (math.max start-local-point.x end-local-point.x))
-  (local min-local-z (math.min start-local-point.z end-local-point.z))
-  (local max-local-z (math.max start-local-point.z end-local-point.z))
+  (local start-canonical (query-local->canonical-local record start-local-point))
+  (local end-canonical (query-local->canonical-local record end-local-point))
+  (local min-local-x (math.min start-canonical.x end-canonical.x))
+  (local max-local-x (math.max start-canonical.x end-canonical.x))
+  (local min-local-z (math.min start-canonical.z end-canonical.z))
+  (local max-local-z (math.max start-canonical.z end-canonical.z))
   (local x-range
     (covered-sample-range min-local-x
                           max-local-x
@@ -174,21 +97,20 @@
   (local spacing-x (. sample-spacing 1))
   (local spacing-z (. sample-spacing 2))
   (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local min-local-x (* bounds.min-sample-x spacing-x))
-  (local min-local-z (* bounds.min-sample-z spacing-z))
-  (local max-local-x (* bounds.max-sample-x spacing-x))
-  (local max-local-z (* bounds.max-sample-z spacing-z))
-  (if (or (< local-x min-local-x)
-          (> local-x max-local-x)
-          (< local-z min-local-z)
-          (> local-z max-local-z))
+  (local canonical-local
+    (query-local->canonical-local record (glm.vec3 local-x 0 local-z)))
+  (local domain-bounds (canonical-domain-bounds record))
+  (if (or (< canonical-local.x domain-bounds.min-x)
+          (> canonical-local.x domain-bounds.max-x)
+          (< canonical-local.z domain-bounds.min-z)
+          (> canonical-local.z domain-bounds.max-z))
       nil
       (do
         (local chunk-map (build-chunk-map record))
         (local max-cell-x (- bounds.max-sample-x 1))
         (local max-cell-z (- bounds.max-sample-z 1))
-        (local raw-cell-x (math.floor (/ local-x spacing-x)))
-        (local raw-cell-z (math.floor (/ local-z spacing-z)))
+        (local raw-cell-x (math.floor (/ canonical-local.x spacing-x)))
+        (local raw-cell-z (math.floor (/ canonical-local.z spacing-z)))
         (local cell-x (math.max bounds.min-sample-x (math.min raw-cell-x max-cell-x)))
         (local cell-z (math.max bounds.min-sample-z (math.min raw-cell-z max-cell-z)))
         (local h00 (sample-height-global record chunk-map cell-x cell-z))
@@ -198,8 +120,8 @@
         (if (or (= h00 nil) (= h01 nil) (= h10 nil) (= h11 nil))
             nil
             (do
-              (local local-u (/ (- local-x (* cell-x spacing-x)) spacing-x))
-              (local local-v (/ (- local-z (* cell-z spacing-z)) spacing-z))
+              (local local-u (/ (- canonical-local.x (* cell-x spacing-x)) spacing-x))
+              (local local-v (/ (- canonical-local.z (* cell-z spacing-z)) spacing-z))
               (local local-y
                 (if (<= (+ local-u local-v) 1.0)
                     (+ (* h00 (- 1.0 local-u local-v))
@@ -284,10 +206,10 @@
   (local h11 (sample-height-global record chunk-map (+ cell-x 1) (+ cell-z 1)))
   (if (or (= h00 nil) (= h01 nil) (= h10 nil) (= h11 nil))
       []
-      (let [p00 (glm.vec3 (+ 0.0 (* cell-x spacing-x)) (+ 0.0 h00) (+ 0.0 (* cell-z spacing-z)))
-            p01 (glm.vec3 (+ 0.0 (* cell-x spacing-x)) (+ 0.0 h01) (+ 0.0 (* (+ cell-z 1) spacing-z)))
-            p10 (glm.vec3 (+ 0.0 (* (+ cell-x 1) spacing-x)) (+ 0.0 h10) (+ 0.0 (* cell-z spacing-z)))
-            p11 (glm.vec3 (+ 0.0 (* (+ cell-x 1) spacing-x)) (+ 0.0 h11) (+ 0.0 (* (+ cell-z 1) spacing-z)))
+      (let [p00 (canonical-local->query-local record (glm.vec3 (* cell-x spacing-x) (+ 0.0 h00) (* cell-z spacing-z)))
+            p01 (canonical-local->query-local record (glm.vec3 (* cell-x spacing-x) (+ 0.0 h01) (* (+ cell-z 1) spacing-z)))
+            p10 (canonical-local->query-local record (glm.vec3 (* (+ cell-x 1) spacing-x) (+ 0.0 h10) (* cell-z spacing-z)))
+            p11 (canonical-local->query-local record (glm.vec3 (* (+ cell-x 1) spacing-x) (+ 0.0 h11) (* (+ cell-z 1) spacing-z)))
             tri0 (intersect-triangle ray p00 p01 p10)
             tri1 (intersect-triangle ray p10 p01 p11)
             hits []]
@@ -304,14 +226,7 @@
    :direction (inverse:rotate ray.direction)})
 
 (fn xz-ray-interval [record ray]
-  (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local sample-spacing (spacing record))
-  (local spacing-x (. sample-spacing 1))
-  (local spacing-z (. sample-spacing 2))
-  (local min-x (* bounds.min-sample-x spacing-x))
-  (local max-x (* bounds.max-sample-x spacing-x))
-  (local min-z (* bounds.min-sample-z spacing-z))
-  (local max-z (* bounds.max-sample-z spacing-z))
+  (local bounds (query-domain-bounds record))
   (local ox ray.origin.x)
   (local oz ray.origin.z)
   (local dx ray.direction.x)
@@ -333,8 +248,8 @@
             (set t-max axis-exit))
           (<= t-min t-max))))
 
-  (if (and (update-axis ox dx min-x max-x)
-           (update-axis oz dz min-z max-z)
+  (if (and (update-axis ox dx bounds.min-x bounds.max-x)
+           (update-axis oz dz bounds.min-z bounds.max-z)
            (>= t-max 0))
       {:t0 (math.max t-min 0.0)
        :t1 t-max}
@@ -346,6 +261,7 @@
   (local spacing-x (. sample-spacing 1))
   (local spacing-z (. sample-spacing 2))
   (local start-point (+ local-ray-value.origin (* local-ray-value.direction (+ interval.t0 1e-6))))
+  (local start-canonical (query-local->canonical-local record start-point))
   (local clamp-cell-x
     (fn [value]
       (math.max bounds.min-sample-x
@@ -354,8 +270,8 @@
     (fn [value]
       (math.max bounds.min-sample-z
                 (math.min (- bounds.max-sample-z 1) value))))
-  (local cell-x (clamp-cell-x (math.floor (/ start-point.x spacing-x))))
-  (local cell-z (clamp-cell-z (math.floor (/ start-point.z spacing-z))))
+  (local cell-x (clamp-cell-x (math.floor (/ start-canonical.x spacing-x))))
+  (local cell-z (clamp-cell-z (math.floor (/ start-canonical.z spacing-z))))
   (local direction-x
     (if (< (math.abs local-ray-value.direction.x) ray-axis-epsilon)
         0.0
@@ -370,14 +286,22 @@
   (local step-z
     (if (> direction-z 0) 1
         (if (< direction-z 0) -1 0)))
+  (local next-boundary-point-x
+    (and (not (= step-x 0))
+         (canonical-local->query-local record
+                                       (glm.vec3 (* (+ cell-x (if (> step-x 0) 1 0)) spacing-x)
+                                                 0
+                                                 0))))
+  (local next-boundary-point-z
+    (and (not (= step-z 0))
+         (canonical-local->query-local record
+                                       (glm.vec3 0
+                                                 0
+                                                 (* (+ cell-z (if (> step-z 0) 1 0)) spacing-z)))))
   (local next-boundary-x
-    (if (= step-x 0)
-        nil
-        (* (+ cell-x (if (> step-x 0) 1 0)) spacing-x)))
+    (and next-boundary-point-x next-boundary-point-x.x))
   (local next-boundary-z
-    (if (= step-z 0)
-        nil
-        (* (+ cell-z (if (> step-z 0) 1 0)) spacing-z)))
+    (and next-boundary-point-z next-boundary-point-z.z))
   {:bounds bounds
    :chunk-map (build-chunk-map record)
    :cell-x cell-x
@@ -427,7 +351,16 @@
   (local best-ref {:best nil})
 
   (fn near-boundary? [value spacing]
-    (< (math.abs (- value (* (math.floor (/ value spacing)) spacing))) 1e-6))
+    (local canonical-point
+      (query-local->canonical-local record
+                                    (if (= spacing spacing-x)
+                                        (glm.vec3 value 0 0)
+                                        (glm.vec3 0 0 value))))
+    (local canonical-value
+      (if (= spacing spacing-x)
+          canonical-point.x
+          canonical-point.z))
+    (< (math.abs (- canonical-value (* (math.floor (/ canonical-value spacing)) spacing))) 1e-6))
 
   (local candidate-cells-x [cell-x])
   (local candidate-cells-z [cell-z])

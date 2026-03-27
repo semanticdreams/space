@@ -42,6 +42,10 @@
        (approx a.y b.y)
        (approx a.z b.z)))
 
+(fn model-origin [model]
+  (local p (* model (glm.vec4 0 0 0 1)))
+  (glm.vec3 p.x p.y p.z))
+
 (fn with-scene [scene-opts f]
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
@@ -510,6 +514,46 @@
 
   (entity:drop)
   (assert (> untracked 0) "Heightfield terrain should untrack triangle handle on drop"))
+
+(fn terrain-render-batch-follows-runtime-layout-transform []
+  (var tracked-model nil)
+  (local vector (VectorBuffer 0))
+  (local ctx {:triangle-vector vector
+              :track-triangle-handle (fn [_self _handle _clip model]
+                                       (set tracked-model model))
+              :untrack-triangle-handle (fn [_self _handle] nil)})
+  (local builder
+    (HeightfieldTerrain {:position (glm.vec3 30 -12 45)
+                         :physics false
+                         :sample-spacing [2 2]
+                         :chunks [{:coord [-3 -3]
+                                   :size [3 3]
+                                   :heights (make-heights 3 3 (fn [_x _z] 0.0))}
+                                  {:coord [-2 -3]
+                                   :size [3 3]
+                                   :heights (make-heights 3 3 (fn [_x _z] 0.0))}
+                                  {:coord [-3 -2]
+                                   :size [3 3]
+                                   :heights (make-heights 3 3 (fn [_x _z] 0.0))}
+                                  {:coord [-2 -2]
+                                   :size [3 3]
+                                   :heights (make-heights 3 3 (fn [_x _z] 0.0))}]}))
+  (local entity (builder ctx))
+  (local root (LayoutRoot {:log-dirt? false}))
+  (entity.layout:set-root root)
+  (root:update)
+  (assert tracked-model "Heightfield terrain should submit a tracked model matrix")
+  (local origin (model-origin tracked-model))
+  (assert (vec3-approx= origin entity.layout.position)
+          (string.format
+            "Heightfield terrain render batch origin should match layout position, got [%.3f, %.3f, %.3f] expected [%.3f, %.3f, %.3f]"
+            origin.x
+            origin.y
+            origin.z
+            entity.layout.position.x
+            entity.layout.position.y
+            entity.layout.position.z))
+  (entity:drop))
 
 (fn terrain-checker-pattern-alternates-across-chunk-seams []
   (local vector (VectorBuffer 0))
@@ -1050,6 +1094,8 @@
                      :fn adjust-height-supports-rectangles-and-whole-terrain})
 (table.insert tests {:name "Heightfield terrain uploads triangle buffer data"
                      :fn terrain-uploads-to-triangle-buffer})
+(table.insert tests {:name "Heightfield terrain render batch follows runtime layout transform"
+                     :fn terrain-render-batch-follows-runtime-layout-transform})
 (table.insert tests {:name "Heightfield terrain checker pattern alternates across chunk seams"
                      :fn terrain-checker-pattern-alternates-across-chunk-seams})
 (table.insert tests {:name "Heightfield terrain physics catches falling body on raised area"

@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local {: Layout} (require :layout))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local HeightfieldTerrainSelectionOverlay (require :heightfield-terrain-selection-overlay))
 (local HeightfieldTerrainPhysics (require :heightfield-terrain-physics))
 (local {: StaticTriangleBuffer} (require :static-triangle-buffer))
@@ -73,23 +74,21 @@
             (math.max 0.0 (math.min 1.0 (+ base.z tint)))
             1.0))
 
-(fn build-mesh [opts]
-  (local chunks (or opts.chunks []))
-  (local spacing (or opts.sample-spacing [20 20]))
+(fn build-mesh [record]
+  (local chunks (or record.chunks []))
+  (local spacing (or (and record.options record.options.sample-spacing) [20 20]))
   (local spacing-x (or (. spacing 1) spacing.x 20))
   (local spacing-z (or (. spacing 2) spacing.y spacing.z 20))
+  (local bounds (HeightfieldTerrainSpace.canonical-domain-bounds record))
   (local positions [])
   (local colors [])
-  (var min-local-x 0.0)
-  (var min-local-z 0.0)
-  (var max-local-x 0.0)
-  (var max-local-z 0.0)
   (var min-height 0.0)
   (var max-height 0.0)
   (var first-height? true)
 
   (fn push-vertex [position color]
-    (table.insert positions position)
+    (table.insert positions
+                  (HeightfieldTerrainSpace.canonical-local->runtime-local record position))
     (table.insert colors color)
     (if first-height?
         (do
@@ -97,18 +96,10 @@
           (set max-height position.y)
           (set first-height? false))
         (do
-	          (when (< position.y min-height)
-	            (set min-height position.y))
-	          (when (> position.y max-height)
-	            (set max-height position.y))))
-	    (when (< position.x min-local-x)
-	      (set min-local-x position.x))
-	    (when (< position.z min-local-z)
-	      (set min-local-z position.z))
-	    (when (> position.x max-local-x)
-	      (set max-local-x position.x))
-	    (when (> position.z max-local-z)
-	      (set max-local-z position.z)))
+          (when (< position.y min-height)
+            (set min-height position.y))
+          (when (> position.y max-height)
+            (set max-height position.y)))))
 
   (each [_ chunk (ipairs chunks)]
     (local coord (chunk-xy chunk))
@@ -144,19 +135,11 @@
 	        (push-vertex p01 color)
 	        (push-vertex p11 color))))
 
-  (local origin-offset (glm.vec3 min-local-x 0.0 min-local-z))
-  (local rebased-positions
-    (icollect [_ position (ipairs positions)]
-      (glm.vec3 (- position.x min-local-x)
-                position.y
-                (- position.z min-local-z))))
-
-  {:positions rebased-positions
+  {:positions positions
    :colors colors
    :vertex-count (length positions)
-   :origin-offset origin-offset
-   :max-local-x (- max-local-x min-local-x)
-   :max-local-z (- max-local-z min-local-z)
+   :max-local-x (- bounds.max-x bounds.min-x)
+   :max-local-z (- bounds.max-z bounds.min-z)
    :min-height min-height
    :max-height max-height})
 
@@ -165,10 +148,10 @@
                              :colors mesh.colors
                              :opacity params.opacity}))
 
-(fn build-heightfield-physics-record [opts]
+(fn build-heightfield-record [opts position rotation]
   {:kind "heightfield-terrain"
-   :options {:position (vec3->array (resolve-glm-vec3 opts.position (glm.vec3 0 0 0)))
-             :rotation (quat->array (resolve-glm-quat opts.rotation (glm.quat 1 0 0 0)))
+   :options {:position (vec3->array position)
+             :rotation (quat->array rotation)
              :sample-spacing (or opts.sample-spacing [20 20])
              :chunk-samples (or opts.chunk-samples
                                 (and (. (or opts.chunks []) 1)
@@ -182,19 +165,10 @@
   (local rotation (resolve-glm-quat options.rotation (glm.quat 1 0 0 0)))
   (local opacity (or options.opacity 1.0))
   (local enable-physics (if (= options.physics nil) true (not (not options.physics))))
-  (local overlay-record {:kind "heightfield-terrain"
-                         :options {:position (vec3->array position)
-                                   :rotation (quat->array rotation)
-                                   :sample-spacing (or options.sample-spacing [20 20])
-                                   :chunk-samples (or options.chunk-samples
-                                                      (and (. (or options.chunks []) 1)
-                                                           (. (. (or options.chunks []) 1) :size))
-                                                      [17 17])}
-                         :chunks (or options.chunks [])})
-  (local mesh (build-mesh {:chunks options.chunks
-                           :sample-spacing options.sample-spacing}))
-  (local origin-offset (or mesh.origin-offset (glm.vec3 0 0 0)))
-  (local layout-position (+ position (rotation:rotate origin-offset)))
+  (local terrain-record (build-heightfield-record options position rotation))
+  (local mesh (build-mesh terrain-record))
+  (local layout-position
+    (HeightfieldTerrainSpace.runtime-layout-position terrain-record position rotation))
   (local terrain-height (math.max (- mesh.max-height mesh.min-height) 1.0))
   (local world-size (glm.vec3 mesh.max-local-x
                               terrain-height
@@ -202,14 +176,11 @@
 
   (fn build [ctx]
     (local renderable (RenderBuffer ctx mesh {:opacity opacity}))
-    (local selection-overlay
-      (HeightfieldTerrainSelectionOverlay ctx {:record overlay-record
-                                               :origin-offset origin-offset}))
+    (local selection-overlay (HeightfieldTerrainSelectionOverlay ctx {:record terrain-record}))
     (var updated-handler nil)
     (local physics
       (if enable-physics
-          (HeightfieldTerrainPhysics.create-heightfield
-            (build-heightfield-physics-record options))
+          (HeightfieldTerrainPhysics.create-heightfield terrain-record)
           nil))
 
     (fn measurer [self]

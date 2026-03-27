@@ -1,4 +1,5 @@
 (local glm (require :glm))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
 
@@ -113,10 +114,11 @@
   (table.insert colors color)
   (table.insert colors color))
 
-(fn rebase-local-point [point origin-offset lift]
-  (glm.vec3 (- point.x origin-offset.x)
-            (+ point.y lift)
-            (- point.z origin-offset.z)))
+(fn runtime-local-point [record point lift]
+  (local rebased (HeightfieldTerrainSpace.canonical-local->runtime-local record point))
+  (glm.vec3 rebased.x
+            (+ rebased.y lift)
+            rebased.z))
 
 (fn cell-key [cell-x cell-z]
   (.. (tostring cell-x) ":" (tostring cell-z)))
@@ -179,7 +181,7 @@
     (append-triangle positions colors v0 v1 v2 color)
     (append-triangle positions colors v2 v1 v3 color)))
 
-(fn build-fill-mesh [record chunk-map target origin-offset fill-color lift]
+(fn build-fill-mesh [record chunk-map target fill-color lift]
   (local positions [])
   (local colors [])
   (each-affected-cell target
@@ -187,19 +189,19 @@
       (local points (cell-points record chunk-map cell-x cell-z))
       (when points
         (append-triangle positions colors
-                         (rebase-local-point points.p00 origin-offset lift)
-                         (rebase-local-point points.p01 origin-offset lift)
-                         (rebase-local-point points.p10 origin-offset lift)
+                         (runtime-local-point record points.p00 lift)
+                         (runtime-local-point record points.p01 lift)
+                         (runtime-local-point record points.p10 lift)
                          fill-color)
         (append-triangle positions colors
-                         (rebase-local-point points.p10 origin-offset lift)
-                         (rebase-local-point points.p01 origin-offset lift)
-                         (rebase-local-point points.p11 origin-offset lift)
+                         (runtime-local-point record points.p10 lift)
+                         (runtime-local-point record points.p01 lift)
+                         (runtime-local-point record points.p11 lift)
                          fill-color))))
   {:positions positions
    :colors colors})
 
-(fn build-border-mesh [record chunk-map target origin-offset border-color lift]
+(fn build-border-mesh [record chunk-map target border-color lift]
   (local sample-spacing (HeightfieldTerrainGrid.spacing record))
   (local thickness (* 0.12 (math.min (. sample-spacing 1) (. sample-spacing 2))))
   (local half-thickness (/ thickness 2.0))
@@ -221,26 +223,26 @@
       (when points
         (when (not (affected-neighbor? cell-x (- cell-z 1)))
           (append-border-segment positions colors
-                                 (rebase-local-point points.p00 origin-offset lift)
-                                 (rebase-local-point points.p10 origin-offset lift)
+                                 (runtime-local-point record points.p00 lift)
+                                 (runtime-local-point record points.p10 lift)
                                  half-thickness
                                  border-color))
         (when (not (affected-neighbor? cell-x (+ cell-z 1)))
           (append-border-segment positions colors
-                                 (rebase-local-point points.p01 origin-offset lift)
-                                 (rebase-local-point points.p11 origin-offset lift)
+                                 (runtime-local-point record points.p01 lift)
+                                 (runtime-local-point record points.p11 lift)
                                  half-thickness
                                  border-color))
         (when (not (affected-neighbor? (- cell-x 1) cell-z))
           (append-border-segment positions colors
-                                 (rebase-local-point points.p00 origin-offset lift)
-                                 (rebase-local-point points.p01 origin-offset lift)
+                                 (runtime-local-point record points.p00 lift)
+                                 (runtime-local-point record points.p01 lift)
                                  half-thickness
                                  border-color))
         (when (not (affected-neighbor? (+ cell-x 1) cell-z))
           (append-border-segment positions colors
-                                 (rebase-local-point points.p10 origin-offset lift)
-                                 (rebase-local-point points.p11 origin-offset lift)
+                                 (runtime-local-point record points.p10 lift)
+                                 (runtime-local-point record points.p11 lift)
                                  half-thickness
                                  border-color)))))
   {:positions positions
@@ -250,7 +252,6 @@
   (local options (or opts {}))
   (local record (assert options.record
                         "HeightfieldTerrainSelectionOverlay requires :record"))
-  (local origin-offset (or options.origin-offset (glm.vec3 0 0 0)))
   (local chunk-map (HeightfieldTerrainGrid.build-chunk-map record))
   (local fill-buffer (make-triangle-buffer ctx))
   (local border-buffer (make-triangle-buffer ctx))
@@ -271,8 +272,8 @@
           (local lift (* 0.01 (math.min (. sample-spacing 1) (. sample-spacing 2))))
           (set last-fill-color colors.fill)
           (set last-border-color colors.border)
-          (set fill-mesh (build-fill-mesh record chunk-map active-target origin-offset colors.fill lift))
-          (set border-mesh (build-border-mesh record chunk-map active-target origin-offset colors.border (* lift 1.5)))
+          (set fill-mesh (build-fill-mesh record chunk-map active-target colors.fill lift))
+          (set border-mesh (build-border-mesh record chunk-map active-target colors.border (* lift 1.5)))
           (fill-buffer:set-mesh fill-mesh)
           (border-buffer:set-mesh border-mesh))
         (do

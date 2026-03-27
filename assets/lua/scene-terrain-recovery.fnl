@@ -1,14 +1,9 @@
 (local glm (require :glm))
-(local MathUtils (require :math-utils))
 (local BoundsUtils (require :bounds-utils))
-(local HeightfieldTerrainData (require :heightfield-terrain-data))
-(local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local LayoutPhysicsBodies (require :layout-physics-bodies))
 (local TerrainQuery (require :terrain-query))
-(local TerrainQueryRecord (require :terrain-query-record))
-
-(local array->vec3 (. MathUtils :array->vec3))
-(local array->quat (. MathUtils :array->quat))
+(local TerrainLayoutRecord (require :terrain-layout-record))
 
 (local default-below-surface-threshold 1.0)
 (local identity-bounds {:position (glm.vec3 0 0 0)
@@ -34,38 +29,17 @@
         (layout:mark-layout-dirty)
         true)))
 
-(fn resolve-position [record]
-  (array->vec3 (or (and record record.options record.options.position) [0 0 0])))
-
-(fn resolve-rotation [record]
-  (array->quat (or (and record record.options record.options.rotation) [1 0 0 0])))
-
 (fn clamp [value min-value max-value]
   (math.max min-value (math.min max-value value)))
 
 (fn terrain-domain-bounds [record]
-  (local bounds (HeightfieldTerrainData.sample-bounds record))
-  (local sample-spacing (HeightfieldTerrainGrid.spacing record))
-  {:min-x (* bounds.min-sample-x (. sample-spacing 1))
-   :max-x (* bounds.max-sample-x (. sample-spacing 1))
-   :min-z (* bounds.min-sample-z (. sample-spacing 2))
-   :max-z (* bounds.max-sample-z (. sample-spacing 2))})
-
-(fn world->local [record world-point]
-  (local rotation (resolve-rotation record))
-  (local inverse (rotation:inverse))
-  (inverse:rotate (- world-point (resolve-position record))))
-
-(fn local->world [record local-point]
-  (local rotation (resolve-rotation record))
-  (+ (resolve-position record)
-     (rotation:rotate local-point)))
+  (HeightfieldTerrainSpace.query-domain-bounds record))
 
 (fn lowest-surface-at-origin [scene origin]
   (var best nil)
   (each [_ metadata (ipairs (or (and scene scene.scene-terrains) []))]
     (local record (and metadata metadata.record))
-    (local query-record (TerrainQueryRecord.from-metadata metadata))
+    (local query-record (TerrainLayoutRecord.from-metadata metadata))
     (local info
       (and query-record origin
            (TerrainQuery.surface-info-at-world-point query-record origin)))
@@ -93,16 +67,16 @@
   (var best nil)
   (each [_ metadata (ipairs (or (and scene scene.scene-terrains) []))]
     (local record (and metadata metadata.record))
-    (local query-record (TerrainQueryRecord.from-metadata metadata))
+    (local query-record (TerrainLayoutRecord.from-metadata metadata))
     (when query-record
       (local bounds (terrain-domain-bounds-world query-record))
-      (local local-point (world->local query-record origin))
+      (local local-point (HeightfieldTerrainSpace.world->local query-record origin))
       (local clamped-local-x (clamp local-point.x bounds.min-x bounds.max-x))
       (local clamped-local-z (clamp local-point.z bounds.min-z bounds.max-z))
       (local info
         (TerrainQuery.surface-info-at-local-point query-record clamped-local-x clamped-local-z))
       (when info
-        (local world-point (local->world query-record info.local-point))
+        (local world-point (HeightfieldTerrainSpace.local->world query-record info.local-point))
         (local dx (- world-point.x origin.x))
         (local dz (- world-point.z origin.z))
         (local horizontal-distance (math.sqrt (+ (* dx dx) (* dz dz))))
