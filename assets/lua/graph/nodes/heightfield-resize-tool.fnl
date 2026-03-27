@@ -2,6 +2,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local Signal (require :signal))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
+(local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local HeightfieldResizeToolNodeView (require :graph/view/views/heightfield-resize-tool))
 (local WorldData (require :graph/world-data))
 
@@ -43,6 +44,17 @@
            (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
              (fn [record]
                (HeightfieldTerrainData.resize-record! record validated))))
+         (when updated
+           (self.changed:emit (clone-table updated)))
+         updated))
+  (set node.apply-values-centered-on-origin
+       (fn [self validated]
+         (local updated
+           (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
+             (fn [record]
+               (HeightfieldTerrainData.resize-record! record validated)
+               (local centered-record (HeightfieldTerrainSpace.record-centered-on-origin-xz record))
+               (set record.options centered-record.options))))
          (when updated
            (self.changed:emit (clone-table updated)))
          updated))

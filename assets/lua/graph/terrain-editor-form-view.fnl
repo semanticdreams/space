@@ -56,6 +56,7 @@
   (local validation (assert options.validation "TerrainEditorFormView requires :validation"))
   (local info-text (assert options.info-text "TerrainEditorFormView requires :info-text"))
   (local name (or options.name "terrain-editor-form-view"))
+  (local action-buttons (or options.action-buttons []))
   (local wrap-scroll? (if (= options.wrap-scroll? nil) true (not (not options.wrap-scroll?))))
   (local refresh-on-change? (if (= options.refresh-on-change? nil) true (not (not options.refresh-on-change?))))
   (local apply-when-valid? (if (= options.apply-when-valid? nil) false (not (not options.apply-when-valid?))))
@@ -85,6 +86,7 @@
     (local view {})
     (local fields {})
     (local error-labels {})
+    (local extra-buttons {})
     (var draft (baseline-draft))
     (local errors {})
     (var syncing? false)
@@ -116,6 +118,19 @@
             validation-result.ok?
             dirty?))
       (view.apply-button:set-enabled can-apply?)
+      (each [_ action (ipairs action-buttons)]
+        (local button (. extra-buttons action.key))
+        (when button
+          (local enabled?
+            (if action.enabled?
+                (not (not (action.enabled? {:draft (clone-table draft)
+                                            :dirty? dirty?
+                                            :validation-result (or validation-result
+                                                                   (validation.validate-draft draft))
+                                            :errors errors
+                                            :view view})))
+                true))
+          (button:set-enabled enabled?)))
       (if apply-failed?
           (status-label:set-text "Apply failed" {:mark-measure-dirty? false})
           (if (> error-count 0)
@@ -231,6 +246,37 @@
        build-ctx))
     (set view.apply-button apply-button)
 
+    (each [_ action (ipairs action-buttons)]
+      (local set-draft-values
+        (fn [next-values]
+          (view:set-draft-values next-values)))
+      (local handle-action-click
+        (fn [_button _event]
+          (action.on-click {:view view
+                            :draft (clone-table draft)
+                            :set-draft-values set-draft-values})))
+      (local button-options
+        {:text action.text
+         :variant (or action.variant :secondary)
+         :enabled? (if (= action.enabled? nil) true false)
+         :on-click handle-action-click})
+      (local button
+        ((Button button-options) build-ctx))
+      (set (. extra-buttons action.key) button)
+      (when action.view-key
+        (set (. view action.view-key) button)))
+    (set view.extra-buttons extra-buttons)
+
+    (fn action-row-children []
+      (local children [(FlexChild (fn [_] status-label) 1)])
+      (each [_ action (ipairs action-buttons)]
+        (table.insert children
+                      (FlexChild (fn [_]
+                                   (. extra-buttons action.key))
+                                 0)))
+      (table.insert children (FlexChild (fn [_] apply-button) 0))
+      children)
+
     (local field-widgets {})
     (each [_ spec (ipairs validation.field-specs)]
       (local field-key spec.key)
@@ -270,8 +316,8 @@
       ((Flex {:axis 1
               :xalign :stretch
               :xspacing 0.4
-              :children [(FlexChild (fn [_] status-label) 1)
-                         (FlexChild (fn [_] apply-button) 0)]})
+              :children (action-row-children)
+              })
        build-ctx))
 
     (local content

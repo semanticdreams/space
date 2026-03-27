@@ -65,6 +65,12 @@
    :min-z (* bounds.min-sample-z (. spacing 2))
    :max-z (* bounds.max-sample-z (. spacing 2))})
 
+(fn canonical-domain-center-local [record]
+  (local bounds (canonical-domain-bounds record))
+  (glm.vec3 (* 0.5 (+ bounds.min-x bounds.max-x))
+            0
+            (* 0.5 (+ bounds.min-z bounds.max-z))))
+
 (fn query-domain-bounds [record]
   (local bounds (canonical-domain-bounds record))
   (local origin-offset (query-local-origin-offset record))
@@ -83,6 +89,13 @@
   (local inverse (rotation:inverse))
   (inverse:rotate (- world-point (resolve-position record))))
 
+(fn centered-position-on-origin-xz [record]
+  (local local-center (canonical-domain-center-local record))
+  (local rotation (resolve-rotation record))
+  (local world-center (local->world record local-center))
+  (- (glm.vec3 0 world-center.y 0)
+     (rotation:rotate local-center)))
+
 (fn with-position-rotation [record position rotation]
   (local out (copy-record record))
   (local options (clone-options out.options))
@@ -90,6 +103,11 @@
   (set options.rotation (quat->array rotation))
   (set out.options options)
   out)
+
+(fn record-centered-on-origin-xz [record]
+  (with-position-rotation record
+                          (centered-position-on-origin-xz record)
+                          (resolve-rotation record)))
 
 (fn record-with-runtime-layout [record layout]
   (if (or (not record)
@@ -130,8 +148,11 @@
  :canonical-local->query-local canonical-local->query-local
  :query-local->canonical-local query-local->canonical-local
  :canonical-domain-bounds canonical-domain-bounds
+ :canonical-domain-center-local canonical-domain-center-local
  :query-domain-bounds query-domain-bounds
  :local->world local->world
  :world->local world->local
+ :centered-position-on-origin-xz centered-position-on-origin-xz
+ :record-centered-on-origin-xz record-centered-on-origin-xz
  :record-with-runtime-layout record-with-runtime-layout
  :record-with-canonical-layout record-with-canonical-layout}

@@ -2502,8 +2502,42 @@
   (local view (builder ctx))
   (assert view.layout "HeightfieldResizeToolNodeView should have layout")
   (assert view.fields "HeightfieldResizeToolNodeView should expose fields")
+  (assert view.center-on-origin-button "HeightfieldResizeToolNodeView should expose center-on-origin button")
   (assert (= (length Validation.field-specs) 5) "resize tool validation should expose chunk bounds and fill height")
   (view:drop))
+
+(fn test-heightfield-resize-tool-node-center-on-origin-updates-world-state []
+  (local {:HeightfieldResizeToolNode HeightfieldResizeToolNode} (require :graph/nodes/heightfield-resize-tool))
+  (local terrain-record
+    (make-heightfield-terrain-record {:id "terrain-a"
+                                      :default-height 0.0
+                                      :chunk-samples [5 5]
+                                      :position [100 -20 50]}))
+  (local state {:scene {:panels [] :terrains [terrain-record]}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world"
+                                  :active? true
+                                  :state state}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :active? true
+                                      :entry entry}))
+  (local node (HeightfieldResizeToolNode {:world-id "test-world"
+                                          :world-manager manager
+                                          :terrain-id "terrain-a"}))
+  (local updated
+    (node:apply-values-centered-on-origin {:min-chunk-x -2
+                                           :min-chunk-z 0
+                                           :max-chunk-x 1
+                                           :max-chunk-z 1
+                                           :fill-height 4.0}))
+  (assert updated "center-on-origin apply should update world state")
+  (assert (= (. updated.options.position 1) 0)
+          "center-on-origin apply should shift canonical terrain X so the resized footprint centers on world origin")
+  (assert (= (. updated.options.position 2) -20)
+          "center-on-origin apply should preserve terrain Y position")
+  (assert (= (. updated.options.position 3) -80)
+          "center-on-origin apply should shift canonical terrain Z so the resized footprint centers on world origin")
+  (node:drop))
 
 (fn test-heightfield-resize-tool-stays-applicable-after-apply []
   (local HeightfieldResizeToolNodeView (require :graph/view/views/heightfield-resize-tool))
@@ -2525,6 +2559,30 @@
   (assert view.apply-button.enabled? "resize tool apply should remain enabled after apply")
   (assert (= (view.fields.min-chunk-x:get-text) "-1") "resize tool should keep last used params")
   (assert (= (text-entity-value view.status-label) "Applied") "resize tool should show applied status")
+  (view:drop))
+
+(fn test-heightfield-resize-tool-center-on-origin-button-applies-centered-resize []
+  (local HeightfieldResizeToolNodeView (require :graph/view/views/heightfield-resize-tool))
+  (local ctx (make-build-ctx))
+  (var centered-values nil)
+  (local mock-node {:terrain-id "terrain-a"
+                    :get-record (fn [] (make-heightfield-terrain-record {:id "terrain-a"}))
+                    :apply-values (fn [_self _validated] true)
+                    :apply-values-centered-on-origin (fn [_self validated]
+                                                      (set centered-values validated)
+                                                      true)})
+  (local builder (HeightfieldResizeToolNodeView mock-node))
+  (local view (builder ctx))
+  (view.fields.min-chunk-x:set-text "2")
+  (view.fields.max-chunk-x:set-text "5")
+  (view.fields.min-chunk-z:set-text "-4")
+  (view.fields.max-chunk-z:set-text "2")
+  (view.center-on-origin-button:on-click {})
+  (assert centered-values "center-on-origin button should invoke the centered apply path")
+  (assert (= centered-values.min-chunk-x 2) "center-on-origin button should use current X min draft value")
+  (assert (= centered-values.max-chunk-x 5) "center-on-origin button should use current X max draft value")
+  (assert (= centered-values.min-chunk-z -4) "center-on-origin button should use current Z min draft value")
+  (assert (= centered-values.max-chunk-z 2) "center-on-origin button should use current Z max draft value")
   (view:drop))
 
 (fn test-heightfield-adjust-tool-node-view-builds []
@@ -2653,7 +2711,11 @@
 (table.insert tests {:name "heightfield perlin tool initial draft preserves selection target"
                      :fn test-heightfield-perlin-tool-initial-draft-preserves-selection-target})
 (table.insert tests {:name "heightfield resize tool node view builds" :fn test-heightfield-resize-tool-node-view-builds})
+(table.insert tests {:name "heightfield resize tool node center-on-origin updates world state"
+                     :fn test-heightfield-resize-tool-node-center-on-origin-updates-world-state})
 (table.insert tests {:name "heightfield resize tool stays applicable after apply" :fn test-heightfield-resize-tool-stays-applicable-after-apply})
+(table.insert tests {:name "heightfield resize tool center-on-origin button applies centered resize"
+                     :fn test-heightfield-resize-tool-center-on-origin-button-applies-centered-resize})
 (table.insert tests {:name "heightfield adjust tool node view builds" :fn test-heightfield-adjust-tool-node-view-builds})
 (table.insert tests {:name "heightfield adjust tool node view reacts to world activation" :fn test-heightfield-adjust-tool-node-view-reacts-to-world-activation})
 (table.insert tests {:name "heightfield adjust tool stays applicable after apply" :fn test-heightfield-adjust-tool-stays-applicable-after-apply})

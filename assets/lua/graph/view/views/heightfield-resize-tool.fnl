@@ -8,6 +8,21 @@
     (var draft (Validation.draft-from-record (and target target.get-record (target:get-record))))
     ((TerrainEditorFormView target {:validation Validation
                                     :name "heightfield-resize-tool-view"
+                                    :action-buttons
+                                    [{:key :center-on-origin
+                                      :view-key :center-on-origin-button
+                                      :text "Center On Origin"
+                                      :enabled? (fn [state]
+                                                  (local result (Validation.validate-draft state.draft))
+                                                  (not (not (and target
+                                                                 target.apply-values-centered-on-origin
+                                                                 result.ok?))))
+                                      :on-click (fn [state]
+                                                  (local result (Validation.validate-draft state.draft))
+                                                  (when (and result.ok?
+                                                             target
+                                                             target.apply-values-centered-on-origin)
+                                                    (target:apply-values-centered-on-origin result.values)))}]
                                     :apply-when-valid? true
                                     :refresh-on-change? false
                                     :read-baseline-draft (fn []
