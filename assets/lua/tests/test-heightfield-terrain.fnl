@@ -231,6 +231,48 @@
   (assert (= record.options.default-height 0.0)
           "perlin rect should not rewrite default-height"))
 
+(fn perlin-defaults-on-50x50-heightfield-produce-balanced-relief []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:chunk-samples [50 50]}
+                                      :chunks [{:coord [0 0]
+                                                :size [50 50]
+                                                :heights (make-heights 50 50 (fn [_x _z] 0.0))}]}))
+  (HeightfieldTerrainData.apply-perlin-record! record {:seed 1337
+                                                       :n1div 30
+                                                       :n2div 4
+                                                       :n3div 1
+                                                       :n1scale 20
+                                                       :n2scale 2
+                                                       :n3scale 1
+                                                       :zroot 2
+                                                       :zpower 2.5})
+  (local heights (. (. record.chunks 1) :heights))
+  (local total (length heights))
+  (var min-height math.huge)
+  (var max-height (- math.huge))
+  (each [_ value (ipairs heights)]
+    (when (< value min-height)
+      (set min-height value))
+    (when (> value max-height)
+      (set max-height value)))
+  (local height-range (- max-height min-height))
+  (local low-threshold (+ min-height (* height-range 0.25)))
+  (local high-threshold (+ min-height (* height-range 0.75)))
+  (var low-count 0)
+  (var high-count 0)
+  (each [_ value (ipairs heights)]
+    (when (<= value low-threshold)
+      (set low-count (+ low-count 1)))
+    (when (>= value high-threshold)
+      (set high-count (+ high-count 1))))
+  (assert (>= height-range 20.0)
+          "default perlin on a 50x50 heightfield should span at least 20 units of height")
+  (assert (>= (/ low-count total) 0.2)
+          "default perlin on a 50x50 heightfield should contain broad low areas near the terrain bottom")
+  (assert (>= (/ high-count total) 0.08)
+          "default perlin on a 50x50 heightfield should contain broad high areas far above the terrain bottom"))
+
 (fn capture-record-preserves-heightfield-local-layout-transform []
   (local record
     (TerrainRecords.normalize-record {:id "terrain-a"
@@ -994,6 +1036,8 @@
                      :fn flat-fill-can-target-a_rectangle})
 (table.insert tests {:name "Heightfield terrain perlin supports rectangular targets"
                      :fn perlin-application-can-target-a-rectangle})
+(table.insert tests {:name "Heightfield terrain default perlin on 50x50 produces balanced relief"
+                     :fn perlin-defaults-on-50x50-heightfield-produce-balanced-relief})
 (table.insert tests {:name "Heightfield terrain capture preserves local layout transform"
                      :fn capture-record-preserves-heightfield-local-layout-transform})
 (table.insert tests {:name "Heightfield terrain capture removes parent scene transform"
