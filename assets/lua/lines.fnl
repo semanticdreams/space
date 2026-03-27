@@ -7,9 +7,15 @@
 
 (fn ensure-color [color]
   (if color
-      (if (= color.w nil)
-          (glm.vec4 color.x color.y color.z 1.0)
-          color)
+      (if (= (type color) :userdata)
+          (do
+            (local mt (debug.getmetatable color))
+            (if (= mt.__name "sol.glm::vec<4, float, glm::packed_highp>")
+                color
+                (glm.vec4 color.x color.y color.z 1.0)))
+          (if (. color 4)
+              (glm.vec4 (. color 1) (. color 2) (. color 3) (. color 4))
+              (glm.vec4 (. color 1) (. color 2) (. color 3) 1.0)))
       (glm.vec4 1 1 1 1)))
 
 (fn ensure-segments [segments]

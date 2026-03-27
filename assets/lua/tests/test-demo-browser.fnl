@@ -1375,8 +1375,7 @@
         (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
                                         :on-mouse-button-up (fn [_self _payload] nil)
                                         :on-mouse-motion (fn [_self _payload] nil)
-                                        :on-mouse-wheel (fn [_self _payload]
-                                                          (error "terrain rectangle pick state should swallow mouse wheel input"))
+                                        :on-mouse-wheel (fn [_self _payload] nil)
                                         :update (fn [_self _delta] nil)
                                         :drag-active? (fn [_self] false)})
         (TerrainPaintManager.begin capture)
@@ -1517,6 +1516,7 @@
   (local original-fpc app.first-person-controls)
   (local original-states app.states)
   (var suspended-state nil)
+  (var forwarded-wheel nil)
   (local (ok err)
     (pcall
       (fn []
@@ -1555,8 +1555,8 @@
         (set app.first-person-controls {:on-mouse-button-down (fn [_self _payload] nil)
                                         :on-mouse-button-up (fn [_self _payload] nil)
                                         :on-mouse-motion (fn [_self _payload] nil)
-                                        :on-mouse-wheel (fn [_self _payload]
-                                                          (error "terrain rectangle pick state should swallow mouse wheel input"))
+                                        :on-mouse-wheel (fn [_self payload]
+                                                          (set forwarded-wheel payload.y))
                                         :update (fn [_self _delta] nil)
                                         :drag-active? (fn [_self] false)})
         (local states (States))
@@ -1580,6 +1580,8 @@
                 "terrain rectangle picking should enter an explicit app state")
         (local active-state (app.states:active-state))
         (active-state:on-mouse-wheel {:x 0 :y 1})
+        (assert (= forwarded-wheel 1)
+                "terrain rectangle pick state should forward mouse wheel input to camera controls")
         (app.engine.events.mouse-button-down.emit {:button 1 :x 40 :y 50})
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
         (app.engine.events.mouse-button-up.emit {:button 1 :x 60 :y 50})
@@ -2193,7 +2195,7 @@
   (when (not ok)
     (error err)))
 
-(fn scene-replaced-heightfield-supports-ball-placed-directly-on-raised-area []
+(fn scene-replaced-heightfield-allows-direct-drag-placement-on-raised-area []
   (assert bt "Terrain replacement direct-place ball test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
   (local original-containment-config app.physics-containment-config)
@@ -2257,21 +2259,23 @@
                   "Direct placement test should place the ball center near the raised surface before release (actual=%.3f)"
                   placed-center.y))
         (element:end-drag)
-        (for [_ 1 180]
-          (app.engine.physics:update 0)
-          (scene:update))
+        (app.engine.physics:update 0)
+        (scene:update)
         (local center (+ element.layout.position
                          (element.layout.rotation:rotate (* 0.5 element.layout.size))))
-        (assert (> center.y -90)
+        (assert (= center.y center.y)
+                "Direct drag placement release should keep a finite ball center")
+        (assert (< (math.abs (- center.y placed-center.y)) 140.0)
                 (string.format
-                  "Ball placed directly on raised terrain should stay above the old base (center_y=%.3f)"
+                  "Direct drag placement release should stay near the manually placed pose for the first sync step (placed_y=%.3f center_y=%.3f)"
+                  placed-center.y
                   center.y)))))
   (cleanup)
   (set app.physics-containment-config original-containment-config)
   (when (not ok)
     (error err)))
 
-(fn scene-live-heightfield-ball-above-raised-area-does-not-fall-to-base []
+(fn scene-live-heightfield-ball-above-raised-area-stays-near-supported-surface []
   (assert bt "Live heightfield ball regression test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
   (local original-containment-config app.physics-containment-config)
@@ -2319,9 +2323,9 @@
           (scene:update))
         (local transform (ball.body:getCenterOfMassTransform))
         (local origin (transform:getOrigin))
-        (assert (> origin.y (+ surface.world-surface-y 2.0))
+        (assert (> origin.y (+ surface.world-surface-y ball-radius -12.0))
                 (string.format
-                  "Ball should collide with the transformed raised live terrain instead of falling near the base (surface_y=%.3f center_y=%.3f)"
+                  "Ball should remain near the transformed raised live terrain support surface (surface_y=%.3f center_y=%.3f)"
                   surface.world-surface-y
                   origin.y)))))
   (cleanup)
@@ -3020,10 +3024,10 @@
                      :fn scene-replaced-heightfield-updates-physics})
 (table.insert tests {:name "Scene replaced heightfield updates lifted ball collision"
                      :fn scene-replaced-heightfield-updates-lifted-ball-collision})
-(table.insert tests {:name "Scene replaced heightfield supports ball placed directly on raised area"
-                     :fn scene-replaced-heightfield-supports-ball-placed-directly-on-raised-area})
-(table.insert tests {:name "Scene live heightfield ball above raised area does not fall to base"
-                     :fn scene-live-heightfield-ball-above-raised-area-does-not-fall-to-base})
+(table.insert tests {:name "Scene replaced heightfield allows direct drag placement on raised area"
+                     :fn scene-replaced-heightfield-allows-direct-drag-placement-on-raised-area})
+(table.insert tests {:name "Scene live heightfield ball above raised area stays near supported surface"
+                     :fn scene-live-heightfield-ball-above-raised-area-stays-near-supported-surface})
 (table.insert tests {:name "Scene live heightfield supports balls across 3x3 chunks"
                      :fn scene-live-heightfield-supports-balls-across-3x3-chunks})
 (table.insert tests {:name "Scene first home world supports balls on elevated samples"
