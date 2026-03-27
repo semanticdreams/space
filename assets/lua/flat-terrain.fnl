@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local {: Layout} (require :layout))
+(local {: StaticTriangleBuffer} (require :static-triangle-buffer))
 
 (local colors (require :colors))
 (local bt (require :bt))
@@ -66,75 +67,19 @@
         :width grid-width
         :length grid-length}))
 
+(fn scaled-mesh [mesh scale]
+  {:positions
+   (icollect [_ canonical (ipairs mesh.positions)]
+     (glm.vec3 (* canonical.x scale.x)
+               (* canonical.y scale.y)
+               (* canonical.z scale.z)))
+   :colors mesh.colors
+   :vertex-count mesh.vertex-count})
+
 (fn RenderBuffer [ctx mesh params]
-       (assert (and ctx ctx.triangle-vector)
-               "FlatTerrain requires a triangle-vector in the build context")
-       (local vector ctx.triangle-vector)
-       (local vertex-count mesh.vertex-count)
-       (local stride (* vertex-count 8))
-       (var handle (vector:allocate stride))
-
-       (fn ensure-handle []
-         (when (not handle)
-           (set handle (vector:allocate stride))))
-
-       (fn release-handle []
-         (when handle
-           (when (and ctx ctx.untrack-triangle-handle)
-             (ctx:untrack-triangle-handle handle))
-           (vector:delete handle)
-           (set handle nil)))
-
-       (local state {:visible? true
-                     :scale params.scale
-                     :opacity params.opacity
-                     :clip-region nil
-                     :depth-index 0})
-
-       (set state.set-visible
-            (fn [self visible?]
-              (local desired (not (not visible?)))
-              (when (not (= desired self.visible?))
-                (set self.visible? desired)
-                (if desired
-                    (ensure-handle)
-                    (release-handle)))))
-
-       (set state.update
-            (fn [self args]
-              (when (not self.visible?)
-                (self:set-visible true))
-              (ensure-handle)
-              (local rotation (or args.rotation (glm.quat 1 0 0 0)))
-              (local position (or args.position (glm.vec3 0 0 0)))
-              (local clip-region args.clip-region)
-              (local depth-index (or args.depth-index 0))
-              (local scale self.scale)
-              (local opacity (or args.opacity self.opacity))
-              (set self.clip-region clip-region)
-              (set self.depth-index depth-index)
-              (for [i 1 vertex-count]
-                (local vertex-offset (* (- i 1) 8))
-                (local canonical (. mesh.positions i))
-                (local scaled
-                  (glm.vec3 (* canonical.x scale.x)
-                        (* canonical.y scale.y)
-                        (* canonical.z scale.z)))
-                (local rotated (rotation:rotate scaled))
-                (local final-position (+ position rotated))
-                (vector:set-glm-vec3 handle vertex-offset final-position)
-                (local base-color (. mesh.colors i))
-                (local final-color
-                  (glm.vec4 base-color.x base-color.y base-color.z (* base-color.w opacity)))
-                (vector:set-glm-vec4 handle (+ vertex-offset 3) final-color)
-                (vector:set-float handle (+ vertex-offset 7) depth-index))
-              (when (and ctx ctx.track-triangle-handle)
-                (ctx:track-triangle-handle handle clip-region))))
-
-       (set state.drop (fn [_self]
-                         (release-handle)))
-
-       state)
+  (StaticTriangleBuffer ctx {:positions (. mesh :positions)
+                             :colors (. mesh :colors)
+                             :opacity params.opacity}))
 
 (local PhysicsBridge {})
 
@@ -199,17 +144,18 @@
                  :light (resolve-glm-vec4 (and theme-colors theme-colors.light)
                                          (glm.vec4 0.7 0.7 0.7 1.0))})
 
-  (local mesh (MeshBuilder.generate {:width terrain-width
-                                     :length terrain-length
-                                     :dark colors.dark
-                                     :light colors.light}))
+  (local base-mesh (MeshBuilder.generate {:width terrain-width
+                                          :length terrain-length
+                                          :dark colors.dark
+                                          :light colors.light}))
+  (local mesh (scaled-mesh base-mesh scale))
 
-  (local world-size (glm.vec3 (* mesh.width scale.x)
+  (local world-size (glm.vec3 (* base-mesh.width scale.x)
                           scale.y
-                          (* mesh.length scale.z)))
+                          (* base-mesh.length scale.z)))
 
   (fn build [ctx]
-    (local renderable (RenderBuffer ctx mesh {:scale scale :opacity opacity}))
+    (local renderable (RenderBuffer ctx mesh {:opacity opacity}))
     (local plane
       (PhysicsBridge.create-plane {:position position
                                    :rotation rotation
@@ -245,8 +191,8 @@
      :drop drop
      :get-local-bounds (fn [_self]
                          {:min (glm.vec3 0 0 0)
-                          :max (glm.vec3 (* mesh.width scale.x)
+                          :max (glm.vec3 (* base-mesh.width scale.x)
                                          0
-                                         (* mesh.length scale.z))})}))
+                                         (* base-mesh.length scale.z))})}))
 
 FlatTerrain

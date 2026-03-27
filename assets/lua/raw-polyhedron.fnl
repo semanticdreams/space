@@ -1,4 +1,5 @@
 (local glm (require :glm))
+(local {: model-matrix} (require :static-triangle-buffer))
 
 (fn resolve-glm-vec3 [value fallback]
   (if
@@ -12,29 +13,6 @@
         (local z (or (. value 3) value.z (. value "z") (and fallback fallback.z) 0))
         (glm.vec3 x y z))
     fallback))
-
-(fn clamp [value min-value max-value]
-  (math.max min-value (math.min max-value value)))
-
-(fn axis-angle-from-quat [rotation]
-  (local safe-rotation (or rotation (glm.quat 1 0 0 0)))
-  (local normalized (safe-rotation:normalize))
-  (local w (clamp normalized.w -1 1))
-  (local angle (* 2 (math.acos w)))
-  (local s (math.sqrt (math.max 0 (- 1 (* w w)))))
-  (if (< s 1e-6)
-      (values angle (glm.vec3 1 0 0))
-      (values angle (glm.vec3 (/ normalized.x s)
-                              (/ normalized.y s)
-                              (/ normalized.z s)))))
-
-(fn model-matrix [position scale rotation]
-  (local translate (glm.translate (glm.mat4 1) (or position (glm.vec3 0 0 0))))
-  (local (angle axis) (axis-angle-from-quat rotation))
-  (local rotate (glm.rotate (glm.mat4 1) angle axis))
-  (local scale-mat (glm.scale (glm.mat4 1) (or scale (glm.vec3 1 1 1))))
-  (local offset (glm.translate (glm.mat4 1) (or scale (glm.vec3 1 1 1))))
-  (* translate (* rotate (* offset scale-mat))))
 
 (fn RawPolyhedron [opts]
   (local options (or opts {}))
@@ -98,9 +76,13 @@
             (ensure-handle)
             (ensure-local-geometry self)
             (local model
+              ;; RawPolyhedron local vertices are authored in [-1, 0] / [0, 1]-style
+              ;; box space, so the scale vector also acts as the local offset needed
+              ;; to move that geometry into the expected render-space origin.
               (model-matrix (or self.position default-position)
+                            (or self.rotation default-rotation)
                             (or self.scale default-scale)
-                            (or self.rotation default-rotation)))
+                            (or self.scale default-scale)))
             (when (and ctx ctx.track-triangle-handle)
               (ctx:track-triangle-handle handle self.clip-region model)))))
 

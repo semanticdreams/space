@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local MathUtils (require :math-utils))
 (local {: Layout : resolve-mark-flag} (require :layout))
+(local {: model-matrix} (require :static-triangle-buffer))
 (local InstancedColorMeshBatch (require :instanced-color-mesh-batch))
 (local SharedInstancedMeshCache (require :shared-instanced-mesh-cache))
 (local SoccerBallMesh (require :soccer-ball-mesh))
@@ -32,29 +33,6 @@
        (approx a.x b.x)
        (approx a.y b.y)
        (approx a.z b.z)))
-
-(fn clamp [value min-value max-value]
-  (math.max min-value (math.min max-value value)))
-
-(fn axis-angle-from-quat [rotation]
-  (local safe-rotation (or rotation (glm.quat 1 0 0 0)))
-  (local normalized (safe-rotation:normalize))
-  (local w (clamp normalized.w -1 1))
-  (local angle (* 2 (math.acos w)))
-  (local s (math.sqrt (math.max 0 (- 1 (* w w)))))
-  (if (< s 1e-6)
-      (values angle (glm.vec3 1 0 0))
-      (values angle (glm.vec3 (/ normalized.x s)
-                              (/ normalized.y s)
-                              (/ normalized.z s)))))
-
-(fn model-matrix [position scale rotation]
-  (local translate (glm.translate (glm.mat4 1) (or position (glm.vec3 0 0 0))))
-  (local (angle axis) (axis-angle-from-quat rotation))
-  (local rotate (glm.rotate (glm.mat4 1) angle axis))
-  (local scale-mat (glm.scale (glm.mat4 1) (or scale (glm.vec3 1 1 1))))
-  (local offset (glm.translate (glm.mat4 1) (or scale (glm.vec3 1 1 1))))
-  (* translate (* rotate (* offset scale-mat))))
 
 (fn style-cache-key [options]
   (local style (SoccerBallMesh.style-key options))
@@ -111,7 +89,7 @@
         (when changed
           (shared-entry.batch:update-instance-model
             instance
-            (model-matrix self.position half-size self.rotation))
+            (model-matrix self.position self.rotation half-size half-size))
           (set last-state next-state))))
 
     (local layout

@@ -942,7 +942,7 @@
                   (= (string.lower profiler-env) "false")
                   (= (string.lower profiler-env) "off")))))
   (set app.profiler (and profiler-enabled
-                           (FrameProfiler {:threshold-ms 20.0
+                           (FrameProfiler {:threshold-ms 60.0
                                            :log-interval 0
                                            :enabled true})))
 

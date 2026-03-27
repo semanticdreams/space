@@ -42,6 +42,11 @@
 (fn bt-glm-vec3 [value]
   (bt.Vector3 (or value.x 0) (or value.y 0) (or value.z 0)))
 
+(fn glm-from-bt-vec3 [value]
+  (if value
+      (glm.vec3 (or value.x 0) (or value.y 0) (or value.z 0))
+      (glm.vec3 0 0 0)))
+
 (fn resolve-bt-vec3 [value fallback]
   (local resolved (resolve-glm-vec3 value fallback))
   (if resolved
@@ -333,7 +338,10 @@
                     (not (quat-equal? layout.rotation next-rotation)))
             (set layout.position layout-position)
             (set layout.rotation next-rotation)
-            (layout:mark-layout-dirty))))
+            ;; Ball motion only changes the positioned subtree transform; relayout it
+            ;; directly instead of queueing a broader layout pass.
+            (layout:layouter true)
+            true)))
 
       (fn apply-layout-to-body [self]
         (when (and self.body self.body-active? (physics-available?))
@@ -383,18 +391,28 @@
           (set self.shape shape)
           (set self.motion-state motion)
           (set self.body body)
+          (set self.last-physics-active? true)
           (set self.body-active? true)))
 
       (fn sync [self]
         (when (and self.body self.body-active? (physics-available?))
           (if self.dragging
-              (self:apply-layout-to-body)
               (do
-                (local transform (self.body:getCenterOfMassTransform))
-                (local origin (transform:getOrigin))
-                (local rotation (bt-quat->glm-quat (transform:getRotation)))
-                (local center (glm.vec3 origin.x origin.y origin.z))
-                (self:set-layout-transform-from-body center rotation)))))
+                (set self.last-physics-active? true)
+                (self:apply-layout-to-body))
+              (do
+                ;; Bullet already tracks whether a rigid body is sleeping. Keep one
+                ;; final body->layout sync when a ball goes inactive, then skip the
+                ;; steady-state transform reads until the body wakes again.
+                (local physics-active?
+                  (if self.body.isActive
+                      (self.body:isActive)
+                      true))
+                (when (or physics-active? self.last-physics-active?)
+                  (set self.last-physics-active? physics-active?)
+                  (local center (glm-from-bt-vec3 (self.body:getCenterOfMassPosition)))
+                  (local rotation (bt-quat->glm-quat (self.body:getOrientation)))
+                  (self:set-layout-transform-from-body center rotation))))))
 
       (fn begin-drag [self]
         (set self.dragging true)
@@ -417,6 +435,7 @@
         (when (and self.body self.body-active? (physics-available?))
           (app.engine.physics:removeRigidBody self.body))
         (set self.body-active? false)
+        (set self.last-physics-active? false)
         (set self.body nil)
         (set self.motion-state nil)
         (set self.shape nil)
@@ -437,108 +456,114 @@
       (set self.center-from-layout center-from-layout)
       (set self.drop drop)
       self))
+  (local scene-object-options
+    (fn [_self]
+      {:skip-cuboid true
+       :skip-physics true
+       :persistence {:kind "physics-ball"
+                     :restorer-module "ball"
+                     :radius persistence-options.radius
+                     :size (vec3->array persistence-options.size)
+                     :mass persistence-options.mass
+                     :friction persistence-options.friction
+                     :rolling-friction persistence-options.rolling-friction
+                     :spinning-friction persistence-options.spinning-friction
+                     :restitution persistence-options.restitution
+                     :linear-damping persistence-options.linear-damping
+                     :angular-damping persistence-options.angular-damping
+                     :linear-sleeping-threshold persistence-options.linear-sleeping-threshold
+                     :angular-sleeping-threshold persistence-options.angular-sleeping-threshold
+                     :additional-damping persistence-options.additional-damping
+                     :additional-damping-factor persistence-options.additional-damping-factor
+                     :additional-linear-damping-threshold-sqr persistence-options.additional-linear-damping-threshold-sqr
+                     :additional-angular-damping-threshold-sqr persistence-options.additional-angular-damping-threshold-sqr
+                     :additional-angular-damping-factor persistence-options.additional-angular-damping-factor
+                     :initial-velocity (and persistence-options.initial-velocity
+                                            (vec3->array persistence-options.initial-velocity))
+                     :initial-angular-velocity (and persistence-options.initial-angular-velocity
+                                                    (vec3->array persistence-options.initial-angular-velocity))
+                     :gravity (and persistence-options.gravity
+                                   (vec3->array persistence-options.gravity))
+                     :linear-factor (and persistence-options.linear-factor
+                                         (vec3->array persistence-options.linear-factor))
+                     :angular-factor (serialize-angular-factor persistence-options.angular-factor)
+                     :anisotropic-friction (and persistence-options.anisotropic-friction
+                                                (vec3->array persistence-options.anisotropic-friction))
+                     :anisotropic-friction-mode persistence-options.anisotropic-friction-mode
+                     :contact-processing-threshold persistence-options.contact-processing-threshold
+                     :contact-stiffness persistence-options.contact-stiffness
+                     :contact-damping persistence-options.contact-damping
+                     :ccd-motion-threshold persistence-options.ccd-motion-threshold
+                     :ccd-swept-sphere-radius persistence-options.ccd-swept-sphere-radius
+                     :collision-flags persistence-options.collision-flags
+                     :body-flags persistence-options.body-flags
+                     :deactivation-time persistence-options.deactivation-time
+                     :activation-state persistence-options.activation-state
+                     :hexagon-color (vec4->array persistence-options.hexagon-color)
+                     :pentagon-color (vec4->array persistence-options.pentagon-color)}}))
+
+  (local scene-on-added
+    (fn [_self scene element]
+      (when (and app.clickables element.intersect)
+        (local right-click-target
+          {:pointer-target app.scene
+           :intersect (fn [_target ray]
+                        (element:intersect ray))
+           :on-right-click
+           (fn [_target event]
+             (local manager app.menu-manager)
+             (when manager
+               (manager:open {:actions [{:name "Remove"
+                                         :icon "close"
+                                         :fn (fn [_button _click-event]
+                                               (scene:remove-panel-child element))}]
+                              :position (resolve-menu-position event)
+                              :open-button (and event event.button)}))
+             true)})
+        (app.clickables:register-right-click right-click-target)
+        (set element.__context-menu-target right-click-target)
+        (set element.unregister-context-menu-target
+             (fn [self]
+               (when self.__context-menu-target
+                 (app.clickables:unregister-right-click self.__context-menu-target)
+                 (set self.__context-menu-target nil)))))
+      (scene:register-scene-object
+       {:owner element
+        :element element
+        :terrain-binding {:enabled? true
+                          :get-origin-position (fn [_entry]
+                                                 element.layout.position)
+                          :get-support-bounds (fn [_entry]
+                                                {:position element.layout.position
+                                                 :rotation element.layout.rotation
+                                                 :size (or element.layout.size
+                                                           element.layout.measure
+                                                           (glm.vec3 0 0 0))})
+                          :move-origin-position! (fn [_entry next-position]
+                                                   (element:teleport-origin-position next-position))}
+        :movable {:handle element
+                  :key element
+                  :owner element
+                  :on-drag-start (fn [_entry]
+                                   (element:begin-drag))
+                  :on-drag-end (fn [_entry]
+                                 (element:end-drag))}
+        :ensure-body (fn [_entry entity]
+                       (when (and element.ensure-body entity.layout)
+                         (element:ensure-body entity.layout)))
+        :sync (fn [_entry entity]
+                (when (and element.sync entity.layout)
+                  (element:sync entity.layout)))})))
+
+  (local scene-on-removed
+    (fn [_self _scene element]
+      (when element.unregister-context-menu-target
+        (element:unregister-context-menu-target))))
+
   (local object
-    {:scene-object-options
-     (fn [_self]
-       {:skip-cuboid true
-        :skip-physics true
-        :persistence {:kind "physics-ball"
-                      :restorer-module "ball"
-                      :radius persistence-options.radius
-                      :size (vec3->array persistence-options.size)
-                      :mass persistence-options.mass
-                      :friction persistence-options.friction
-                      :rolling-friction persistence-options.rolling-friction
-                      :spinning-friction persistence-options.spinning-friction
-                      :restitution persistence-options.restitution
-                      :linear-damping persistence-options.linear-damping
-                      :angular-damping persistence-options.angular-damping
-                      :linear-sleeping-threshold persistence-options.linear-sleeping-threshold
-                      :angular-sleeping-threshold persistence-options.angular-sleeping-threshold
-                      :additional-damping persistence-options.additional-damping
-                      :additional-damping-factor persistence-options.additional-damping-factor
-                      :additional-linear-damping-threshold-sqr persistence-options.additional-linear-damping-threshold-sqr
-                      :additional-angular-damping-threshold-sqr persistence-options.additional-angular-damping-threshold-sqr
-                      :additional-angular-damping-factor persistence-options.additional-angular-damping-factor
-                      :initial-velocity (and persistence-options.initial-velocity
-                                             (vec3->array persistence-options.initial-velocity))
-                      :initial-angular-velocity (and persistence-options.initial-angular-velocity
-                                                     (vec3->array persistence-options.initial-angular-velocity))
-                      :gravity (and persistence-options.gravity
-                                    (vec3->array persistence-options.gravity))
-                      :linear-factor (and persistence-options.linear-factor
-                                          (vec3->array persistence-options.linear-factor))
-                      :angular-factor (serialize-angular-factor persistence-options.angular-factor)
-                      :anisotropic-friction (and persistence-options.anisotropic-friction
-                                                 (vec3->array persistence-options.anisotropic-friction))
-                      :anisotropic-friction-mode persistence-options.anisotropic-friction-mode
-                      :contact-processing-threshold persistence-options.contact-processing-threshold
-                      :contact-stiffness persistence-options.contact-stiffness
-                      :contact-damping persistence-options.contact-damping
-                      :ccd-motion-threshold persistence-options.ccd-motion-threshold
-                      :ccd-swept-sphere-radius persistence-options.ccd-swept-sphere-radius
-                      :collision-flags persistence-options.collision-flags
-                      :body-flags persistence-options.body-flags
-                      :deactivation-time persistence-options.deactivation-time
-                      :activation-state persistence-options.activation-state
-                      :hexagon-color (vec4->array persistence-options.hexagon-color)
-                      :pentagon-color (vec4->array persistence-options.pentagon-color)}})
-     :scene-on-added
-     (fn [_self scene element]
-       (when (and app.clickables element.intersect)
-         (local right-click-target
-           {:pointer-target app.scene
-            :intersect (fn [_target ray]
-                         (element:intersect ray))
-            :on-right-click
-            (fn [_target event]
-              (local manager app.menu-manager)
-              (when manager
-                (manager:open {:actions [{:name "Remove"
-                                          :icon "close"
-                                          :fn (fn [_button _click-event]
-                                                (scene:remove-panel-child element))}]
-                               :position (resolve-menu-position event)
-                               :open-button (and event event.button)}))
-              true)})
-         (app.clickables:register-right-click right-click-target)
-         (set element.__context-menu-target right-click-target)
-         (set element.unregister-context-menu-target
-              (fn [self]
-                (when self.__context-menu-target
-                  (app.clickables:unregister-right-click self.__context-menu-target)
-                  (set self.__context-menu-target nil)))))
-       (scene:register-scene-object
-         {:owner element
-          :element element
-          :terrain-binding {:enabled? true
-                            :get-origin-position (fn [_entry]
-                                                   element.layout.position)
-                            :get-support-bounds (fn [_entry]
-                                                  {:position element.layout.position
-                                                   :rotation element.layout.rotation
-                                                   :size (or element.layout.size
-                                                             element.layout.measure
-                                                             (glm.vec3 0 0 0))})
-                            :move-origin-position! (fn [_entry next-position]
-                                                     (element:teleport-origin-position next-position))}
-          :movable {:handle element
-                    :key element
-                    :owner element
-                    :on-drag-start (fn [_entry]
-                                     (element:begin-drag))
-                    :on-drag-end (fn [_entry]
-                                   (element:end-drag))}
-          :ensure-body (fn [_entry entity]
-                         (when (and element.ensure-body entity.layout)
-                           (element:ensure-body entity.layout)))
-          :sync (fn [_entry entity]
-                  (when (and element.sync entity.layout)
-                    (element:sync entity.layout)))}) )
-     :scene-on-removed
-     (fn [_self _scene element]
-       (when element.unregister-context-menu-target
-         (element:unregister-context-menu-target)) )})
+    {:scene-object-options scene-object-options
+     :scene-on-added scene-on-added
+     :scene-on-removed scene-on-removed})
   (setmetatable object {:__call (fn [_self ctx] (build ctx))})
   object)
 
