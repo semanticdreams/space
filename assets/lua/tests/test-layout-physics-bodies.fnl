@@ -57,26 +57,35 @@
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
   (local original-movables app.movables)
+  (local original-camera app.camera)
   (local original-containment-config app.physics-containment-config)
   (var scene nil)
+  (var camera nil)
 
   (fn cleanup []
     (when scene
       (scene:drop)
       (set scene nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
     (set app.scene original-scene)
     (set app.layout-root original-layout-root)
     (set app.movables original-movables)
+    (set app.camera original-camera)
     (PhysicsContainment.clear)
     (set app.physics-containment-config original-containment-config))
 
   (let [(ok payload)
         (pcall (fn []
                  (local movables (make-stub-movables))
-                 (set scene (Scene {:icons (make-icons-stub)}))
+                 (set camera (Camera {:position (glm.vec3 0 0 0)}))
+                 (set scene (Scene {:icons (make-icons-stub)
+                                    :camera camera}))
                  (set app.scene scene)
                  (set app.layout-root scene.layout-root)
                  (set app.movables movables)
+                 (set app.camera camera)
                  (configure-test-physics-world)
                  (scene:build-default)
                  {:scene scene :movables movables}))]
@@ -321,6 +330,7 @@
     (controls:update 1000))
   (controls:on-key-up {:key 44})
   (set app.camera camera)
+  (scene:set-camera camera)
   (let [(ok err)
         (pcall
           (fn []

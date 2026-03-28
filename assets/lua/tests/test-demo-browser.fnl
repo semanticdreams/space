@@ -13,6 +13,7 @@
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 (local TerrainPaintState (require :terrain-paint-state))
 (local MathUtils (require :math-utils))
+(local AppProjection (require :app-projection))
 (local PhysicsContainment (require :physics-containment))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local TerrainQuery (require :terrain-query))
@@ -255,30 +256,44 @@
   (local original-movables app.movables)
   (local original-camera app.camera)
   (local original-hud app.hud)
+  (local original-create-default-projection app.create-default-projection)
   (local original-containment-config app.physics-containment-config)
   (var scene nil)
   (var movables nil)
   (var hud nil)
+  (var camera nil)
+  (var owns-camera? false)
   (local icons (make-icons-stub))
 
   (fn cleanup []
     (when scene
       (scene:drop)
       (set scene nil))
+    (when (and owns-camera? camera)
+      (camera:drop)
+      (set camera nil))
     (set app.scene original-scene)
     (set app.layout-root original-layout-root)
     (set app.movables original-movables)
     (set app.camera original-camera)
     (set app.hud original-hud)
+    (set app.create-default-projection original-create-default-projection)
     (PhysicsContainment.clear)
     (set app.physics-containment-config original-containment-config))
 
   (let [(ok payload)
         (pcall (fn []
                  (set movables (make-stub-movables))
+                 (set camera
+                      (or options.camera
+                          (do
+                            (set owns-camera? true)
+                            (Camera {:position (or options.scene-position (glm.vec3 0 0 0))
+                                     :rotation (or options.scene-rotation (glm.quat 1 0 0 0))}))))
                  (set scene (Scene {:icons icons
                                     :position (or options.scene-position nil)
-                                    :rotation (or options.scene-rotation nil)}))
+                                    :rotation (or options.scene-rotation nil)
+                                    :camera camera}))
                  (set hud {:world-units-per-pixel 1})
                  (set hud.build-context (BuildContext {:pointer-target hud}))
                  (set hud.on-viewport-changed (fn [_self _viewport] nil))
@@ -286,8 +301,8 @@
                  (set app.hud hud)
                  (set app.layout-root scene.layout-root)
                  (set app.movables movables)
-                 (when options.camera
-                   (set app.camera options.camera))
+                 (set app.camera camera)
+                 (set app.create-default-projection AppProjection.create-default-projection)
                  (when options.containment-config
                    (set app.physics-containment-config options.containment-config))
                  (configure-test-physics-world {:config options.containment-config})

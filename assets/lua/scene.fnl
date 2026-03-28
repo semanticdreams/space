@@ -19,6 +19,7 @@
 (local logging (require :logging))
 (local TerrainQuery (require :terrain-query))
 (local TerrainLayoutRecord (require :terrain-layout-record))
+(local LightingViewState (require :lighting-view-state))
 (local default-position (glm.vec3 0 0 0))
 (local default-rotation (glm.quat 1 0 0 0))
 (local default-depth-scale 0)
@@ -54,8 +55,10 @@
        :rotation fallback-rotation}))
 
 (fn resolve-camera-placement [self]
-  (local camera app.camera)
-  (local origin (or (and camera camera.position) self.default-position))
+  (local camera self.camera)
+  (assert camera "Scene camera placement requires self.camera")
+  (assert camera.position "Scene camera placement requires self.camera.position")
+  (local origin camera.position)
   (local fallback-forward (self.default-rotation:rotate (glm.vec3 0 0 -1)))
   (local forward
     (normalize-or (and camera camera.get-forward (camera:get-forward))
@@ -373,7 +376,8 @@
                :on-terrains-changed options.on-terrains-changed
                :reference-point default-position
                :focus-manager focus-manager
-               :focus-scope focus-scope})
+               :focus-scope focus-scope
+               :camera options.camera})
 
   (set ctx.pointer-target self)
 
@@ -739,16 +743,22 @@
             (user-on-close dialog button event))
           (self:remove-panel-child (or element dialog))))
       (set builder-options.on-close handle-close)
-      (local placement (resolve-camera-placement self))
-      (when (and opts opts.rotation)
-        (set placement.rotation opts.rotation))
       ;; Scene APIs now treat opts.position as layout-origin coordinates.
       (local requested-layout-position (and opts opts.position))
+      (local requested-rotation (and opts opts.rotation))
+      (local placement
+        (if (or (not requested-layout-position)
+                (not requested-rotation))
+            (resolve-camera-placement self)
+            nil))
+      (local resolved-rotation
+        (or requested-rotation
+            (and placement placement.rotation)))
       (local parent-layout entity.layout)
       (local parent-position (or (and parent-layout parent-layout.position) (glm.vec3 0 0 0)))
       (local parent-rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0)))
       (local parent-inverse (parent-rotation:inverse))
-      (local local-rotation (* parent-inverse placement.rotation))
+      (local local-rotation (* parent-inverse resolved-rotation))
       (set element (builder self.build-context builder-options))
       (local metadata {:flex (or opts.flex 0)
                        :element element
@@ -774,13 +784,13 @@
       (when (and entity.layout element element.layout)
         (entity.layout:add-child element.layout)
         (element.layout:measurer)
-        (set element.layout.rotation placement.rotation)
+        (set element.layout.rotation resolved-rotation)
         (local measure (or element.layout.measure (glm.vec3 0 0 0)))
         (set element.layout.size measure)
         (local layout-position
           (if requested-layout-position
               requested-layout-position
-              (layout-origin-from-center placement.center placement.rotation measure)))
+              (layout-origin-from-center placement.center resolved-rotation measure)))
         (set element.layout.position layout-position)
         (set metadata.position
              (parent-inverse:rotate (- layout-position parent-position)))
@@ -1169,12 +1179,21 @@
     (set self.focus-scope nil)))
 
 (fn reset-projection [self]
+  (assert (and app app.create-default-projection)
+          "Scene.reset-projection requires app.create-default-projection")
   (set self.projection (app.create-default-projection)))
 
-(fn get-view-matrix [_self]
-  (if app.camera
-    (app.camera:get-view-matrix)
-    (glm.mat4 1)))
+(fn set-camera [self camera]
+  (set self.camera camera))
+
+(fn get-view-matrix [self]
+  (assert self.camera "Scene.get-view-matrix requires self.camera")
+  (self.camera:get-view-matrix))
+
+(fn get-lighting-view-state [self]
+  (assert self.camera "Scene.get-lighting-view-state requires self.camera")
+  (assert self.camera.position "Scene.get-lighting-view-state requires self.camera.position")
+  (LightingViewState.perspective self.camera.position))
 
 (fn get-triangle-vector [self]
   self.build-context.triangle-vector)
@@ -1502,7 +1521,9 @@
 (set self.clear-terrain-selection-target clear-terrain-selection-target)
 (set self.get-terrain-selection-target get-terrain-selection-target)
 (set self.reset-projection reset-projection)
+(set self.set-camera set-camera)
 (set self.get-view-matrix get-view-matrix)
+(set self.get-lighting-view-state get-lighting-view-state)
 (set self.get-triangle-vector get-triangle-vector)
 (set self.get-triangle-batches get-triangle-batches)
 (set self.get-line-vector get-line-vector)

@@ -374,6 +374,7 @@
     (local scene
       (Scene {:focus-manager ctx.focus-manager
               :focus-scope scene-scope
+              :camera camera
               :icons ctx.icons
               :states ctx.states
               :movables ctx.movables

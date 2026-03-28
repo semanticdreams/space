@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local gl (require :gl))
+(local LightingViewState (require :lighting-view-state))
 
 (local TriangleRenderer (require :triangle-renderer))
 (local RawGradientTriangle (require :raw-gradient-triangle))
@@ -32,6 +33,12 @@
 
   (local projection (or options.projection (glm.mat4 1)))
   (local view (or options.view (glm.mat4 1)))
+  (local lighting-view-state
+    (if options.view
+        (assert options.lighting-view-state
+                "SubApp with custom :view requires :lighting-view-state")
+        (or options.lighting-view-state
+            (LightingViewState.orthographic (glm.vec3 0 0 1)))))
 
   (var clip-region nil)
   (var depth-offset-index 0)
@@ -127,7 +134,7 @@
     (gl.glDepthFunc gl.GL_LESS)
     (gl.glClearColor 0.08 0.09 0.12 1.0)
     (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
-    (triangle-renderer:render triangle-vector projection view nil)
+    (triangle-renderer:render triangle-vector projection view lighting-view-state nil)
     (gl.glBindFramebuffer gl.GL_FRAMEBUFFER 0))
 
   (fn render [_self image-renderer projection-matrix view-matrix]

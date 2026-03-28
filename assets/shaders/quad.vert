@@ -15,6 +15,7 @@ uniform mat4 model;
 
 smooth out vec4 theColor;
 smooth out vec3 worldPos;
+smooth out vec3 worldNormal;
 flat out float depth_offset_index;
 flat out uint clipGroup;
 
@@ -23,9 +24,12 @@ void main()
     mat4 local = mat4(aLocalCol0, aLocalCol1, aLocalCol2, aLocalCol3);
     mat4 worldTransform = model * local;
     vec4 world = worldTransform * vec4(aCorner, 0.0, 1.0);
+    vec3 tangentU = worldTransform[0].xyz;
+    vec3 tangentV = worldTransform[1].xyz;
     gl_Position = projection * view * world;
     theColor = aColor;
     worldPos = world.xyz;
+    worldNormal = cross(tangentU, tangentV);
     depth_offset_index = aDepthOffsetIndex;
     clipGroup = aClipGroup;
 }

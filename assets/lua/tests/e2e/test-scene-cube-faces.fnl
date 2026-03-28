@@ -9,6 +9,7 @@
 (local Sized (require :sized))
 (local Aligned (require :aligned))
 (local {: Layout} (require :layout))
+(local LightingViewState (require :lighting-view-state))
 
 (fn make-face-builder [label bg-color]
   (fn [ctx]
@@ -87,6 +88,7 @@
   (local scene-target
     (Harness.make-scene-target {:builder (fn [child-ctx]
                                            (build-cube-scene child-ctx))
+                                :lighting-view-state (LightingViewState.perspective camera.position)
                                 :view-matrix (camera:get-view-matrix)}))
   (Harness.draw-targets ctx.width ctx.height [{:target scene-target}])
   (Harness.capture-snapshot {:name "scene-cube-faces"

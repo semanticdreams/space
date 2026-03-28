@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local ClipUtils (require :clip-utils))
 (local LightUtils (require :light-utils))
+(local LightingViewState (require :lighting-view-state))
 
 (local gl (require :gl))
 (local shaders (require :shaders))
@@ -68,7 +69,7 @@
               (when (. vector :clear-dirty)
                 (vector:clear-dirty)))))))
 
-  (fn render [self vector projection view batches]
+  (fn render [self vector projection view lighting-view-state batches]
     (when (and vector (> (vector:length) 0))
       (gl.glBindVertexArray vao)
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
@@ -79,7 +80,9 @@
       (LightUtils.apply-lights shader lights)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
-      (shader:setVector3f "viewPos" (glm.vec3 0.0))
+      (LightingViewState.apply-uniforms shader
+                                        (assert lighting-view-state
+                                                "TriangleRenderer.render requires lighting-view-state"))
       (each [_ bucket (ipairs (self:resolve-batches vector batches))]
         (shader:setMatrix4 "uClipMatrix"
                            (ClipUtils.resolve-matrix bucket.clip))

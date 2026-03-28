@@ -5,6 +5,7 @@
 (local MockOpenGL (require :mock-opengl))
 (local terminal-native (require :terminal))
 (local MathUtils (require :math-utils))
+(local LightingViewState (require :lighting-view-state))
 (local package package)
 
 (local blank-cell {:codepoint 32
@@ -194,12 +195,14 @@
       (assert (cleared?))
       (local QuadRenderer (reload "quad-renderer"))
       (local quad (QuadRenderer))
+      (local lighting-view-state (LightingViewState.orthographic (glm.vec3 0 0 1)))
       (local quad-draw-list (ctx:get-quad-draw-list))
       (assert (= (# quad-draw-list) 2))
       (each [_ entry (ipairs quad-draw-list)]
         (quad:render entry.vector
                      {:projection true}
                      {:view true}
+                     lighting-view-state
                      entry.batches
                      entry.clip-vector
                      entry.clip-group-vector))
@@ -232,10 +235,12 @@
       (assert (= (# quad-draw-list) 2))
       (local QuadRenderer (reload "quad-renderer"))
       (local quad (QuadRenderer))
+      (local lighting-view-state (LightingViewState.orthographic (glm.vec3 0 0 1)))
       (each [_ entry (ipairs quad-draw-list)]
         (quad:render entry.vector
                      {:projection true}
                      {:view true}
+                     lighting-view-state
                      entry.batches
                      entry.clip-vector
                      entry.clip-group-vector))
@@ -341,10 +346,12 @@
       (assert (= (# quad-draw-list) 1))
       (local QuadRenderer (reload "quad-renderer"))
       (local quad (QuadRenderer))
+      (local lighting-view-state (LightingViewState.orthographic (glm.vec3 0 0 1)))
       (each [_ entry (ipairs quad-draw-list)]
         (quad:render entry.vector
                      {:projection true}
                      {:view true}
+                     lighting-view-state
                      entry.batches
                      entry.clip-vector
                      entry.clip-group-vector))

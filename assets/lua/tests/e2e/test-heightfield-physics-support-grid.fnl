@@ -9,6 +9,7 @@
 (local fixtures (require :tests/http-fixtures))
 (local {: Layout} (require :layout))
 (local TestSupport (require :tests/test-support))
+(local LightingViewState (require :lighting-view-state))
 
 (fn array->vec3 [arr]
   (glm.vec3 (. arr 1) (. arr 2) (. arr 3)))
@@ -208,6 +209,7 @@
                   built)
        :child-position (glm.vec3 480 110 0)
        :projection (scene-projection ctx)
+       :lighting-view-state (LightingViewState.perspective camera.position)
        :view-matrix (camera:get-view-matrix)}))
   (assert built "heightfield physics support snapshot should build scene")
   (settle-balls! built.balls 540)
@@ -215,6 +217,7 @@
   (camera:set-position
     (+ (array->vec3 built.camera-state.position)
        (camera.rotation:rotate (glm.vec3 120 0 180))))
+  (set scene-target.lighting-view-state (LightingViewState.perspective camera.position))
   (set scene-target.view-matrix (camera:get-view-matrix))
   (local report (build-report built))
   (JsonUtils.write-json! (report-path) report)

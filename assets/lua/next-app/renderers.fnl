@@ -4,6 +4,7 @@
 (local QuadRenderer (require :quad-renderer))
 (local TextSsboRenderer (require :text-ssbo-renderer))
 (local TextSsboBatcher (require :text-ssbo-batcher))
+(local LightingViewState (require :lighting-view-state))
 
 (local NextLayout (require :next-app/layout))
 (local NextFlex (require :next-app/flex))
@@ -20,8 +21,30 @@
 (local CuboidWidget (require :next-app/cuboid-widget))
 (local NextNode NextLayout.Node)
 
+(local default-cuboid-camera-position (glm.vec3 1.7 1.3 3.0))
+(local default-cuboid-camera-target (glm.vec3 0 0 0))
+(local default-cuboid-camera-up (glm.vec3 0 1 0))
+(local default-orthographic-lighting-direction (glm.vec3 0 0 1))
+
 (fn identity-rotation []
   (glm.quat 1 0 0 0))
+
+(fn assert-vec3 [value context]
+  (assert value (.. context " requires glm.vec3"))
+  (assert (and (not (= value.x nil))
+               (not (= value.y nil))
+               (not (= value.z nil)))
+          (.. context " requires glm.vec3"))
+  value)
+
+(fn resolve-cuboid-camera [renderer-options]
+  (local camera (or renderer-options.camera {}))
+  {:position (assert-vec3 (or camera.position default-cuboid-camera-position)
+                          "NextAppRenderers cuboid camera position")
+   :target (assert-vec3 (or camera.target default-cuboid-camera-target)
+                        "NextAppRenderers cuboid camera target")
+   :up (assert-vec3 (or camera.up default-cuboid-camera-up)
+                    "NextAppRenderers cuboid camera up")})
 
 (fn make-rng [seed]
   (var state (or seed 1))
@@ -485,8 +508,13 @@
   (local text-renderer (TextSsboRenderer))
   (local text-batcher (TextSsboBatcher {}))
   (local quad-batcher (QuadBatcher {:instance-stride quad-renderer.instance-stride}))
+  (local explicit-lighting-view-state
+    (and renderer-options.lighting-view-state
+         (LightingViewState.normalize-state renderer-options.lighting-view-state
+                                            "NextAppRenderers lighting view state")))
   (var projection (glm.mat4 1))
   (var view (glm.mat4 1))
+  (var lighting-view-state nil)
   (var viewport-width (or (and options.size options.size.x) 300))
   (var viewport-height (or (and options.size options.size.y) 200))
   (local ui (build-ui-root renderer-options))
@@ -539,14 +567,21 @@
   (fn update-projection []
     (if (= renderer-options.cuboid-only? true)
         (do
+          (local camera (resolve-cuboid-camera renderer-options))
           (local aspect (if (= viewport-height 0) 1 (/ viewport-width viewport-height)))
           (set projection (glm.perspective (math.rad 52) aspect 0.01 20.0))
-          (set view (glm.lookAt (glm.vec3 1.7 1.3 3.0)
-                                (glm.vec3 0 0 0)
-                                (glm.vec3 0 1 0))))
+          (set view (glm.lookAt camera.position
+                                camera.target
+                                camera.up))
+          (set lighting-view-state
+               (or explicit-lighting-view-state
+                   (LightingViewState.perspective camera.position))))
         (do
           (set projection (glm.mat4 1))
-          (set view (glm.mat4 1)))))
+          (set view (glm.mat4 1))
+          (set lighting-view-state
+               (or explicit-lighting-view-state
+                   (LightingViewState.orthographic default-orthographic-lighting-direction))))))
 
   (fn emit-subtree [node inherited-clip-matrix force-reemit]
     (local subtree-version (or node._subtree-render-version 0))
@@ -625,6 +660,7 @@
     (quad-renderer:render (quad-batcher:get-vector)
                           projection
                           view
+                          lighting-view-state
                           (quad-batcher:get-batches)
                           (quad-batcher:get-clip-vector)
                           (quad-batcher:get-clip-group-vector))

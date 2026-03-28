@@ -2,6 +2,7 @@
 (local glm (require :glm))
 (local WidgetCuboid (require :widget-cuboid))
 (local Camera (require :camera))
+(local LightingViewState (require :lighting-view-state))
 
 (fn run [ctx]
   (var scene-button nil)
@@ -17,6 +18,7 @@
                                            ((WidgetCuboid {:child scene-builder
                                                            :depth-scale 0.5
                                                            :min-depth 2}) ctx))
+                                :lighting-view-state (LightingViewState.perspective camera.position)
                                 :view-matrix (camera:get-view-matrix)
                                 :child-position (glm.vec3 0 0 0)
                                 :child-rotation (glm.quat (math.rad -10) (glm.vec3 0 1 0))}))

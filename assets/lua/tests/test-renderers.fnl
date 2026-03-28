@@ -8,7 +8,9 @@
 
 (local gl (require :gl))
 (local glm (require :glm))
+(local LightingViewState (require :lighting-view-state))
 (local {:VectorBuffer VectorBuffer :VectorHandle VectorHandle} (require :vector-buffer))
+
 (fn only [items]
   (assert (= (# items) 1) (.. "Expected exactly one entry, found " (# items)))
   (. items 1))
@@ -31,12 +33,70 @@
   (set (. package.loaded module-name) nil)
   (require module-name))
 
+(fn reload-renderers-module []
+  (each [_ module-name (ipairs [:renderers
+                                :triangle-renderer
+                                :line-renderer
+                                :point-renderer
+                                :image-renderer
+                                :mesh-renderer
+                                :instanced-color-mesh-renderer
+                                :quad-renderer
+                                :text-ssbo-renderer
+                                :skybox-renderer
+                                :fxaa
+                                :lighting-view-state
+                                :render-batch-predicates])]
+    (set (. package.loaded module-name) nil))
+  (require :renderers))
+
+(fn with-renderers-constructor-deps [cb]
+  (local textures (require :textures))
+  (local original-load-cubemap textures.load-cubemap)
+  (local original-load-cubemap-async textures.load-cubemap-async)
+  (when (not (or original-load-cubemap original-load-cubemap-async))
+    (set textures.load-cubemap
+         (fn [_files]
+           {:id 1
+            :ready true
+            :drop (fn [_self] nil)})))
+  (let [(ok result) (pcall cb)]
+    (set textures.load-cubemap original-load-cubemap)
+    (set textures.load-cubemap-async original-load-cubemap-async)
+    (if ok
+        result
+        (error result))))
+
 (fn collect-calls [calls method predicate]
   (local matches [])
   (each [_ call (ipairs calls)]
     (when (and (= call.name method) (predicate call.args))
       (table.insert matches call)))
   matches)
+
+(fn assert-perspective-lighting-uniforms [shader position]
+  (local mode-call
+    (only (collect-calls shader.calls "setInteger"
+                         (fn [args] (= args.uniform "lightingViewMode")))))
+  (assert (= mode-call.args.value LightingViewState.perspective-uniform-mode))
+  (local pos-call
+    (only (collect-calls shader.calls "setVector3f"
+                         (fn [args] (= args.uniform "lightingViewPos")))))
+  (assert (= (. pos-call.args.value 1) position.x))
+  (assert (= (. pos-call.args.value 2) position.y))
+  (assert (= (. pos-call.args.value 3) position.z)))
+
+(fn assert-orthographic-lighting-uniforms [shader direction]
+  (local mode-call
+    (only (collect-calls shader.calls "setInteger"
+                         (fn [args] (= args.uniform "lightingViewMode")))))
+  (assert (= mode-call.args.value LightingViewState.orthographic-uniform-mode))
+  (local dir-call
+    (only (collect-calls shader.calls "setVector3f"
+                         (fn [args] (= args.uniform "lightingViewDir")))))
+  (assert (= (. dir-call.args.value 1) direction.x))
+  (assert (= (. dir-call.args.value 2) direction.y))
+  (assert (= (. dir-call.args.value 3) direction.z)))
 
 (fn triangle-resolve-batches-falls-back []
   (with-open-gl
@@ -61,10 +121,12 @@
       (local renderer (TriangleRenderer))
       (local projection {:type :projection})
       (local view {:type :view})
+      (local camera-position (glm.vec3 7 8 9))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
       (local vector (fake-vector 120))
       (local batches [{:clip nil :model nil :firsts [3] :counts [6]}
                       {:clip {:enabled true} :model nil :firsts [12] :counts [9]}])
-      (renderer:render vector projection view batches)
+      (renderer:render vector projection view lighting-view-state batches)
       (local buffer-calls (mock:get-gl-calls "bufferDataFromVectorBuffer"))
       (assert (= (# buffer-calls) 1))
       (assert (= (. (. buffer-calls 1) :args :vector) vector))
@@ -81,6 +143,7 @@
       (local view-call (only (collect-calls shader.calls "setMatrix4"
                                             (fn [args] (= args.uniform "view")))))
       (assert (= view-call.args.value view))
+      (assert-perspective-lighting-uniforms shader camera-position)
       (local clip-calls (collect-calls shader.calls "setMatrix4"
                                        (fn [args] (= args.uniform "uClipMatrix"))))
       (assert (= (# clip-calls) 2)))))
@@ -92,23 +155,25 @@
       (local renderer (TriangleRenderer))
       (local projection {:type :projection})
       (local view {:type :view})
+      (local camera-position (glm.vec3 1 2 3))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
       (local vector (VectorBuffer 0))
       (local handle (vector:allocate 24))
       (vector:set-glm-vec3 handle 0 (glm.vec3 1 2 3))
       (vector:set-glm-vec4 handle 3 (glm.vec4 0.1 0.2 0.3 0.4))
       (vector:set-float handle 7 1.0)
-      (renderer:render vector projection view nil)
+      (renderer:render vector projection view lighting-view-state nil)
       (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 1))
       (assert (= (# (mock:get-gl-calls "bufferSubDataFromVectorBuffer")) 0))
 
       (mock:reset)
-      (renderer:render vector projection view nil)
+      (renderer:render vector projection view lighting-view-state nil)
       (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 0))
       (assert (= (# (mock:get-gl-calls "bufferSubDataFromVectorBuffer")) 0))
 
       (vector:set-float handle 0 2.0)
       (mock:reset)
-      (renderer:render vector projection view nil)
+      (renderer:render vector projection view lighting-view-state nil)
       (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 0))
       (local sub (only (mock:get-gl-calls "bufferSubDataFromVectorBuffer")))
       (assert (= sub.args.target gl.GL_ARRAY_BUFFER))
@@ -206,11 +271,30 @@
       (assert (= draw-call.args.count 4))
       (assert (= draw-call.args.instances (/ (vector:length) 9))))))
 
+(fn quad-renderer-base-strip-has-positive-local-winding []
+  (with-open-gl
+    (fn [mock]
+      (local QuadRenderer (reload "quad-renderer"))
+      (QuadRenderer)
+      (local upload (only (mock:get-gl-calls "glBufferData")))
+      (local data upload.args.data)
+      (assert (= (# data) 8))
+      (local v0 (glm.vec3 (. data 1) (. data 2) 0))
+      (local v1 (glm.vec3 (. data 3) (. data 4) 0))
+      (local v2 (glm.vec3 (. data 5) (. data 6) 0))
+      (local v3 (glm.vec3 (. data 7) (. data 8) 0))
+      (local tri0-normal (glm.cross (- v1 v0) (- v2 v0)))
+      (local tri1-normal (glm.cross (- v3 v1) (- v2 v1)))
+      (assert (> tri0-normal.z 0) "Quad strip first triangle should face local +Z")
+      (assert (> tri1-normal.z 0) "Quad strip second triangle should face local +Z"))))
+
 (fn quad-renderer-draws-instanced-batches-with-clipping-and-lighting []
   (with-open-gl
     (fn [mock]
       (local QuadRenderer (reload "quad-renderer"))
       (local renderer (QuadRenderer))
+      (local camera-position (glm.vec3 7 8 9))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
       (mock:reset)
       (local vector (fake-vector (* 21 8)))
       (local clip-vector (fake-vector (* 16 3)))
@@ -219,6 +303,7 @@
       (renderer:render vector
                        {:projection true}
                        {:view true}
+                       lighting-view-state
                        [{:model model-a
                          :firsts [0 3]
                          :counts [2 1]}
@@ -248,11 +333,33 @@
                                         (fn [args] (= args.uniform "model"))))
       (assert (= (# model-calls) 2))
       (assert (= (. (. model-calls 1) :args :value) model-a))
+      (assert-perspective-lighting-uniforms shader camera-position)
       (local ambient-call (only (collect-calls shader.calls "setVector3f"
                                                (fn [args] (= args.uniform "ambientLight")))))
       (assert ambient-call "quad renderer should upload lighting uniforms")
       (assert (>= (renderer:get-last-upload-seconds) 0)
               "quad renderer should expose upload timing"))))
+
+(fn quad-renderer-uploads-orthographic-lighting-direction []
+  (with-open-gl
+    (fn [_mock]
+      (local QuadRenderer (reload "quad-renderer"))
+      (local renderer (QuadRenderer))
+      (local direction (glm.vec3 0 0 1))
+      (local lighting-view-state (LightingViewState.orthographic direction))
+      (local vector (fake-vector (* 21 2)))
+      (local clip-vector (fake-vector 16))
+      (local clip-group-vector (fake-vector 2))
+      (renderer:render vector
+                       {:projection true}
+                       {:view true}
+                       lighting-view-state
+                       [{:model nil
+                         :firsts [0]
+                         :counts [2]}]
+                       clip-vector
+                       clip-group-vector)
+      (assert-orthographic-lighting-uniforms renderer.shader direction))))
 
 (fn quad-renderer-updates-dirty-instance-window []
   (with-open-gl
@@ -264,14 +371,28 @@
       (vector:set-glm-mat4 handle 0 (glm.mat4 1))
       (vector:set-glm-vec4 handle 16 (glm.vec4 1 1 1 1))
       (vector:set-float handle 20 0)
+      (local camera-position (glm.vec3 2 3 4))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
       (local clip-vector (fake-vector 16))
       (local clip-group-vector (fake-vector 2))
       (local batches [{:model nil :firsts [0] :counts [2]}])
-      (renderer:render vector {:projection true} {:view true} batches clip-vector clip-group-vector)
+      (renderer:render vector
+                       {:projection true}
+                       {:view true}
+                       lighting-view-state
+                       batches
+                       clip-vector
+                       clip-group-vector)
 
       (mock:reset)
       (vector:set-float handle 0 2.0)
-      (renderer:render vector {:projection true} {:view true} batches clip-vector clip-group-vector)
+      (renderer:render vector
+                       {:projection true}
+                       {:view true}
+                       lighting-view-state
+                       batches
+                       clip-vector
+                       clip-group-vector)
 
       (local sub-updates
         (collect-calls (mock:get-gl-calls "bufferSubDataFromVectorBuffer")
@@ -288,15 +409,18 @@
       (local vector (fake-vector 48))
       (local projection {:projection true})
       (local view {:view true})
+      (local camera-position (glm.vec3 3 4 5))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
       (local texture {:id 7})
-      (renderer:render [{:vector vector :texture texture}] projection view)
+      (renderer:render [{:vector vector :texture texture}] projection view lighting-view-state)
       (local buffer-call (only (mock:get-gl-calls "bufferDataFromVectorBuffer")))
       (assert (= buffer-call.args.vector vector))
       (local bind-calls (mock:get-gl-calls "glBindTexture"))
       (assert (= (. (. bind-calls 1) :args :texture) 7))
       (local draw-call (only (mock:get-gl-calls "glDrawArrays")))
       (assert (= draw-call.args.mode gl.GL_TRIANGLES))
-      (assert (= draw-call.args.count (/ (vector:length) 8))))))
+      (assert (= draw-call.args.count (/ (vector:length) 8)))
+      (assert-perspective-lighting-uniforms renderer.shader camera-position))))
 
 (fn instanced-color-mesh-renderer-draws-instanced-and-updates-dirty-instance-window []
   (with-open-gl
@@ -317,7 +441,9 @@
                     :get-instance-batches (fn [_self]
                                             [{:firsts [0]
                                               :counts [2]}])})
-      (renderer:render [batch] {:projection true} {:view true})
+      (local camera-position (glm.vec3 5 6 7))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
+      (renderer:render [batch] {:projection true} {:view true} lighting-view-state)
       (local index-upload (only (mock:get-gl-calls "glBufferDataUInt")))
       (assert (= index-upload.args.target 0x8893))
       (local draw-call (only (mock:get-gl-calls "glDrawElementsInstanced")))
@@ -325,16 +451,55 @@
       (assert (= draw-call.args.count 6))
       (assert (= draw-call.args.type gl.GL_UNSIGNED_INT))
       (assert (= draw-call.args.instances 2))
+      (assert-perspective-lighting-uniforms renderer.shader camera-position)
 
       (mock:reset)
       (instance-vector:set-glm-mat4-diff handle 16 (glm.translate (glm.mat4 1) (glm.vec3 4 0 0)))
-      (renderer:render [batch] {:projection true} {:view true})
+      (renderer:render [batch] {:projection true} {:view true} lighting-view-state)
       (local sub-updates
         (collect-calls (mock:get-gl-calls "bufferSubDataFromVectorBuffer")
                        "bufferSubDataFromVectorBuffer"
                        (fn [args] (= args.target gl.GL_ARRAY_BUFFER))))
       (assert (= (# sub-updates) 1)
               "instanced color mesh renderer should issue one dirty subdata update for instance changes"))))
+
+(fn renderers-draw-target-skips-lighting-state-for-empty-lit-geometry []
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          (renderers:draw-target
+            {:projection {:projection true}
+             :get-view-matrix (fn [_self] {:view true})
+             :get-triangle-vector (fn [_self] (fake-vector 0))
+             :get-mesh-batches (fn [_self] [{:vector (fake-vector 0)}])
+             :get-instanced-color-mesh-batches
+             (fn [_self] [{:vertex-vector (fake-vector 0)
+                           :instance-vector (fake-vector 0)}])
+             :get-quad-draw-list
+             (fn [_self] [{:vector (fake-vector 0)
+                           :batches []
+                           :clip-vector (fake-vector 0)
+                           :clip-group-vector (fake-vector 0)}])}))))))
+
+(fn renderers-draw-target-requires-lighting-state-for-lit-geometry []
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          (local (ok err)
+            (pcall (fn []
+                     (renderers:draw-target
+                       {:projection {:projection true}
+                        :get-view-matrix (fn [_self] {:view true})
+                        :get-triangle-vector (fn [_self] (fake-vector 8))}))))
+          (assert (not ok))
+          (assert err)
+          (assert (string.find (tostring err) "lighting")))))))
 
 (fn instanced-color-mesh-batch-drop-requires-removed-instances []
   (local InstancedColorMeshBatch (reload "instanced-color-mesh-batch"))
@@ -460,8 +625,12 @@
 (table.insert tests {:name "DrawBatcher splits noncontiguous runs" :fn draw-batcher-splits-noncontiguous-runs})
 (table.insert tests {:name "Line renderer draws lines and strips" :fn line-renderer-draws-lines-and-strips})
 (table.insert tests {:name "Point renderer uses instanced quads" :fn point-renderer-uses-instanced-quads})
+(table.insert tests {:name "Quad renderer base strip has positive local winding"
+                     :fn quad-renderer-base-strip-has-positive-local-winding})
 (table.insert tests {:name "Quad renderer draws instanced batches with clipping and lighting"
                      :fn quad-renderer-draws-instanced-batches-with-clipping-and-lighting})
+(table.insert tests {:name "Quad renderer uploads orthographic lighting view direction"
+                     :fn quad-renderer-uploads-orthographic-lighting-direction})
 (table.insert tests {:name "Quad renderer updates dirty instance window"
                      :fn quad-renderer-updates-dirty-instance-window})
 (table.insert tests {:name "Mesh renderer draws textured triangles" :fn mesh-renderer-draws-textured-triangles})
@@ -473,6 +642,10 @@
 (table.insert tests {:name "Image renderer uses draw batcher and fallback draws" :fn image-renderer-respects-draw-batcher})
 (table.insert tests {:name "Text SSBO renderer uses group SSBO and instanced draws"
                      :fn text-ssbo-renderer-uses-ssbo-groups-and-instanced-draws})
+(table.insert tests {:name "Renderers draw-target skips lighting state for empty lit geometry"
+                     :fn renderers-draw-target-skips-lighting-state-for-empty-lit-geometry})
+(table.insert tests {:name "Renderers draw-target requires lighting state for lit geometry"
+                     :fn renderers-draw-target-requires-lighting-state-for-lit-geometry})
 
 (local main
   (fn []

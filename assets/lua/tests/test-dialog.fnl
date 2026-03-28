@@ -4,6 +4,8 @@
 (local DefaultDialog (require :default-dialog))
 (local Scene (require :scene))
 (local Hud (require :hud))
+(local Camera (require :camera))
+(local AppProjection (require :app-projection))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
 (local Tiles (require :tiles))
@@ -134,6 +136,9 @@
   {:x (+ (/ world.x units-per-pixel) (/ viewport.width 2))
    :y (- (/ viewport.height 2) (/ world.y units-per-pixel))})
 
+(fn make-default-camera []
+  (Camera {:position (glm.vec3 0 0 0)}))
+
 (fn make-test-hud-builder []
   (fn [ctx]
     (local tiles ((Tiles {:rows 4
@@ -241,9 +246,12 @@
   (local options (or opts {}))
   (local originals {:scene app.scene
                     :layout-root app.layout-root
-                    :hud app.hud})
+                    :hud app.hud
+                    :camera app.camera
+                    :create-default-projection app.create-default-projection})
   (var scene nil)
   (var hud nil)
+  (var camera nil)
 
   (fn cleanup []
     (when scene
@@ -252,14 +260,23 @@
     (when hud
       (hud:drop)
       (set hud nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
     (set app.scene originals.scene)
     (set app.layout-root originals.layout-root)
-    (set app.hud originals.hud))
+    (set app.hud originals.hud)
+    (set app.camera originals.camera)
+    (set app.create-default-projection originals.create-default-projection))
 
   (let [(ok result)
         (pcall
           (fn []
-            (set scene (Scene {:icons options.icons}))
+            (set camera (make-default-camera))
+            (set app.camera camera)
+            (set app.create-default-projection AppProjection.create-default-projection)
+            (set scene (Scene {:icons options.icons
+                               :camera camera}))
             (set hud (Hud {:scene scene
                                :icons options.icons}))
             (set app.scene scene)
@@ -542,10 +559,13 @@
       (local originals {:scene app.scene
                         :layout-root app.layout-root
                         :hud app.hud
-                        :movables app.movables})
+                        :movables app.movables
+                        :camera app.camera
+                        :create-default-projection app.create-default-projection})
       (var scene nil)
       (var hud nil)
       (local movables (make-stub-movables))
+      (var camera nil)
 
       (fn cleanup []
         (when scene
@@ -554,15 +574,24 @@
         (when hud
           (hud:drop)
           (set hud nil))
+        (when camera
+          (camera:drop)
+          (set camera nil))
         (set app.scene originals.scene)
         (set app.layout-root originals.layout-root)
         (set app.hud originals.hud)
-        (set app.movables originals.movables))
+        (set app.movables originals.movables)
+        (set app.camera originals.camera)
+        (set app.create-default-projection originals.create-default-projection))
 
       (let [(ok err)
             (pcall
               (fn []
-                (set scene (Scene {:icons _env.icons}))
+                (set camera (make-default-camera))
+                (set app.camera camera)
+                (set app.create-default-projection AppProjection.create-default-projection)
+                (set scene (Scene {:icons _env.icons
+                                   :camera camera}))
                 (set hud (Hud {:scene scene
                                :icons _env.icons}))
                 (set app.scene scene)
@@ -609,10 +638,13 @@
       (local originals {:scene app.scene
                         :layout-root app.layout-root
                         :hud app.hud
-                        :movables app.movables})
+                        :movables app.movables
+                        :camera app.camera
+                        :create-default-projection app.create-default-projection})
       (var scene nil)
       (var hud nil)
       (local movables (make-stub-movables))
+      (var camera nil)
 
       (fn cleanup []
         (when scene
@@ -621,15 +653,24 @@
         (when hud
           (hud:drop)
           (set hud nil))
+        (when camera
+          (camera:drop)
+          (set camera nil))
         (set app.scene originals.scene)
         (set app.layout-root originals.layout-root)
         (set app.hud originals.hud)
-        (set app.movables originals.movables))
+        (set app.movables originals.movables)
+        (set app.camera originals.camera)
+        (set app.create-default-projection originals.create-default-projection))
 
       (let [(ok err)
             (pcall
               (fn []
-                (set scene (Scene {:icons _env.icons}))
+                (set camera (make-default-camera))
+                (set app.camera camera)
+                (set app.create-default-projection AppProjection.create-default-projection)
+                (set scene (Scene {:icons _env.icons
+                                   :camera camera}))
                 (set hud (Hud {:scene scene
                                :icons _env.icons}))
                 (set app.scene scene)
@@ -678,11 +719,14 @@
                         :layout-root app.layout-root
                         :hud app.hud
                         :movables app.movables
-                        :resizables app.resizables})
+                        :resizables app.resizables
+                        :camera app.camera
+                        :create-default-projection app.create-default-projection})
       (var scene nil)
       (var hud nil)
       (var resizables nil)
       (var intersector nil)
+      (var camera nil)
 
       (fn cleanup []
         (when scene
@@ -691,17 +735,26 @@
         (when hud
           (hud:drop)
           (set hud nil))
+        (when camera
+          (camera:drop)
+          (set camera nil))
         (set app.scene originals.scene)
         (set app.layout-root originals.layout-root)
         (set app.hud originals.hud)
         (set app.movables originals.movables)
-        (set app.resizables originals.resizables))
+        (set app.resizables originals.resizables)
+        (set app.camera originals.camera)
+        (set app.create-default-projection originals.create-default-projection))
       (fn run-test []
         (set intersector (make-resize-intersector))
         (set resizables (Resizables {:intersectables intersector}))
         (set app.resizables resizables)
+        (set camera (make-default-camera))
+        (set app.camera camera)
+        (set app.create-default-projection AppProjection.create-default-projection)
 
-        (set scene (Scene {:icons _env.icons}))
+        (set scene (Scene {:icons _env.icons
+                           :camera camera}))
         (set hud (Hud {:scene scene
                        :icons _env.icons}))
         (set app.scene scene)
@@ -743,8 +796,12 @@
   (set app.intersectables (Intersectables))
   (set app.resizables (Resizables {:intersectables app.intersectables}))
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (set app.create-default-projection AppProjection.create-default-projection)
+  (local camera (make-default-camera))
+  (set app.camera camera)
 
-  (local scene (Scene {:icons env.icons}))
+  (local scene (Scene {:icons env.icons
+                       :camera camera}))
   (local hud (Hud {:scene scene
                    :icons env.icons}))
   (set app.scene scene)
@@ -791,7 +848,9 @@
   (local final-size (or layout.size layout.measure (glm.vec3 0 0 0)))
   (assert (> final-size.x initial-size.x)
           "HUD float resize should increase width")
-  {:scene scene :hud hud})
+  {:scene scene
+   :hud hud
+   :camera camera})
 
 (fn run-with-cleanup [cleanup f]
   (local (ok err)
@@ -810,6 +869,7 @@
                         :resizables app.resizables})
       (var scene nil)
       (var hud nil)
+      (var camera nil)
 
       (fn cleanup []
         (when scene
@@ -818,6 +878,9 @@
         (when hud
           (hud:drop)
           (set hud nil))
+        (when camera
+          (camera:drop)
+          (set camera nil))
         (set app.scene originals.scene)
         (set app.layout-root originals.layout-root)
         (set app.hud originals.hud)
@@ -829,17 +892,19 @@
         (fn []
           (local result (run-hud-float-resize-test env))
           (set scene result.scene)
-          (set hud result.hud))))))
+          (set hud result.hud)
+          (set camera result.camera))))))
 
 (fn run-scene-resize-test [env]
   (set app.intersectables (Intersectables))
   (set app.resizables (Resizables {:intersectables app.intersectables}))
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
-  (local projection-module (require :app-projection))
-  (set app.create-default-projection projection-module.create-default-projection)
-  (set app.camera nil)
+  (set app.create-default-projection AppProjection.create-default-projection)
+  (local camera (make-default-camera))
+  (set app.camera camera)
 
-  (local scene (Scene {:icons env.icons}))
+  (local scene (Scene {:icons env.icons
+                       :camera camera}))
   (set app.scene scene)
   (set app.layout-root scene.layout-root)
   (scene:build-default)
@@ -877,7 +942,8 @@
   (local final-size (or layout.size layout.measure (glm.vec3 0 0 0)))
   (assert (> final-size.x initial-size.x)
           "Scene resize should increase width")
-  scene)
+  {:scene scene
+   :camera camera})
 
 (fn scene-resize-updates-layout []
   (with-dialog-stubs
@@ -890,11 +956,15 @@
                         :create-default-projection app.create-default-projection
                         :camera app.camera})
       (var scene nil)
+      (var camera nil)
 
       (fn cleanup []
         (when scene
           (scene:drop)
           (set scene nil))
+        (when camera
+          (camera:drop)
+          (set camera nil))
         (set app.scene originals.scene)
         (set app.layout-root originals.layout-root)
         (set app.intersectables originals.intersectables)
@@ -906,7 +976,9 @@
       (run-with-cleanup
         cleanup
         (fn []
-          (set scene (run-scene-resize-test env)))))))
+          (local result (run-scene-resize-test env))
+          (set scene result.scene)
+          (set camera result.camera))))))
 
 (fn hud-capture-state-requires-panel-persistence []
   (with-dialog-stubs
@@ -1018,10 +1090,16 @@
     (fn [env]
       (local originals {:scene app.scene
                         :layout-root app.layout-root
-                        :hud app.hud})
-      (local scene (Scene {:icons env.icons}))
+                        :hud app.hud
+                        :camera app.camera
+                        :create-default-projection app.create-default-projection})
+      (local camera (make-default-camera))
+      (local scene (Scene {:icons env.icons
+                           :camera camera}))
       (local hud (Hud {:scene scene
                        :icons env.icons}))
+      (set app.camera camera)
+      (set app.create-default-projection AppProjection.create-default-projection)
       (set app.scene scene)
       (set app.layout-root scene.layout-root)
       (set app.hud hud)
@@ -1044,9 +1122,12 @@
               "Hud.restore-state should preserve float panel position")
       (hud:drop)
       (scene:drop)
+      (camera:drop)
       (set app.scene originals.scene)
       (set app.layout-root originals.layout-root)
       (set app.hud originals.hud)
+      (set app.camera originals.camera)
+      (set app.create-default-projection originals.create-default-projection)
       true)))
 
 (table.insert tests {:name "Dialog requires a title" :fn dialog-requires-title})

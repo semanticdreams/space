@@ -5,6 +5,7 @@
 (local textures (require :textures))
 (local {: Layout} (require :layout))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
+(local LightingViewState (require :lighting-view-state))
 
 (fn make-test-texture []
   (assert textures.load-texture-from-pixels
@@ -257,6 +258,7 @@
                                              {:texture options.texture
                                               :rotation options.rotation
                                               :scene-offset options.scene-offset}))
+                                :lighting-view-state (LightingViewState.perspective camera.position)
                                 :view-matrix (camera:get-view-matrix)}))
   (Harness.draw-targets ctx.width ctx.height [{:target target}])
   (Harness.capture-snapshot {:name name

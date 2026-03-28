@@ -7,6 +7,7 @@
 (local Padding (require :padding))
 (local Stack (require :stack))
 (local MathUtils (require :math-utils))
+(local LightingViewState (require :lighting-view-state))
 
 (local identity-view (glm.mat4 1))
 (local default-world-scale 0.05)
@@ -671,6 +672,9 @@
   (fn get-view-matrix [_self]
     identity-view)
 
+  (fn get-lighting-view-state [_self]
+    (LightingViewState.orthographic (glm.vec3 0.0 0.0 1.0)))
+
   (fn get-triangle-vector [self]
     self.build-context.triangle-vector)
 
@@ -764,6 +768,7 @@
   (set self.drop drop)
   (set self.update-root-transform update-root-transform)
   (set self.get-view-matrix get-view-matrix)
+  (set self.get-lighting-view-state get-lighting-view-state)
   (set self.get-triangle-vector get-triangle-vector)
   (set self.get-triangle-batches get-triangle-batches)
   (set self.get-line-vector get-line-vector)

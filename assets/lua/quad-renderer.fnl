@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local LightUtils (require :light-utils))
+(local LightingViewState (require :lighting-view-state))
 (local os os)
 
 (local gl (require :gl))
@@ -225,7 +226,7 @@
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER active-clip-group-buffer)
       (gl.glVertexAttribIPointer 7 1 gl.GL_UNSIGNED_INT 4 (* first 4))))
 
-  (fn draw-pass [self projection view vector batches]
+  (fn draw-pass [self projection view lighting-view-state vector batches]
     (local draw-start-local (os.clock))
     (when gpu-query-supported?
       (gl.glBeginQuery gl.GL_TIME_ELAPSED (. draw-gpu-queries active-query-slot)))
@@ -235,7 +236,9 @@
     (LightUtils.apply-lights shader lights)
     (shader:setMatrix4 "projection" projection)
     (shader:setMatrix4 "view" view)
-    (shader:setVector3f "viewPos" (glm.vec3 0.0))
+    (LightingViewState.apply-uniforms shader
+                                      (assert lighting-view-state
+                                              "QuadRenderer.draw-pass requires lighting-view-state"))
     (each [_ bucket (ipairs (self:resolve-batches vector batches))]
       (shader:setMatrix4 "model" (or bucket.model (glm.mat4 1)))
       (each [i first (ipairs bucket.firsts)]
@@ -248,7 +251,7 @@
       (set (. draw-query-submitted active-query-slot) true))
     (- (os.clock) draw-start-local))
 
-  (fn render [self vector projection view batches clip-vector clip-group-vector]
+  (fn render [self vector projection view lighting-view-state batches clip-vector clip-group-vector]
     (when (and vector (> (vector:length) 0))
       (self:rotate-query-slot)
       (self:update-gpu-query-result upload-gpu-queries
@@ -275,7 +278,11 @@
         (gl.glEndQuery gl.GL_TIME_ELAPSED)
         (set (. upload-query-submitted active-query-slot) true))
       (set last-upload-seconds (- (os.clock) upload-start))
-      (set last-draw-seconds (self:draw-pass projection view vector batches))))
+      (set last-draw-seconds (self:draw-pass projection
+                                             view
+                                             lighting-view-state
+                                             vector
+                                             batches))))
 
   {:shader shader
    :instance-stride instance-stride

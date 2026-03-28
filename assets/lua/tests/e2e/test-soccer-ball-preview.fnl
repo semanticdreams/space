@@ -2,7 +2,8 @@
 (local glm (require :glm))
 (local Camera (require :camera))
 (local Ball (require :ball))
- (local {: Layout} (require :layout))
+(local {: Layout} (require :layout))
+(local LightingViewState (require :lighting-view-state))
 
 (fn run [ctx]
   (local camera (Camera {:position (glm.vec3 0 0 42)}))
@@ -46,6 +47,7 @@
                   (left-ball:drop)
                   (right-ball:drop))})
        :view-matrix (camera:get-view-matrix)
+       :lighting-view-state (LightingViewState.perspective camera.position)
        :child-position (glm.vec3 0 0 0)
        :child-rotation (glm.quat 1 0 0 0)}))
   (Harness.draw-targets ctx.width ctx.height [{:target scene-target}])

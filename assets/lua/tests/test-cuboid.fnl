@@ -80,6 +80,14 @@
 (local expected-axis-orders
   [[1 2 3] [1 2 3] [3 2 1] [3 2 1] [1 3 2] [1 3 2]])
 
+(local expected-outward-normals
+  [(glm.vec3 0 0 1)
+   (glm.vec3 0 0 -1)
+   (glm.vec3 1 0 0)
+   (glm.vec3 -1 0 0)
+   (glm.vec3 0 1 0)
+   (glm.vec3 0 -1 0)])
+
 (fn cuboid-layouter-positions-faces []
   (local faces
     (icollect [_ _ (ipairs expected-face-rotations)]
@@ -116,6 +124,23 @@
   (cuboid:drop))
 
 (table.insert tests {:name "Cuboid layouter orients faces" :fn cuboid-layouter-positions-faces})
+
+(fn cuboid-face-basis-preserves-outward-winding []
+  (local parent-rotation
+    (* (glm.quat (math.rad 35) (glm.vec3 0 1 0))
+       (glm.quat (math.rad -17) (glm.vec3 1 0 0))))
+
+  (each [i local-rotation (ipairs expected-face-rotations)]
+    (local world-rotation (* parent-rotation local-rotation))
+    (local tangent-u (world-rotation:rotate (glm.vec3 1 0 0)))
+    (local tangent-v (world-rotation:rotate (glm.vec3 0 1 0)))
+    (local winding-normal (glm.cross tangent-u tangent-v))
+    (local outward (parent-rotation:rotate (. expected-outward-normals i)))
+    (assert (vec-approx= winding-normal outward)
+            (.. "Cuboid face " i " winding should point outward"))))
+
+(table.insert tests {:name "Cuboid face basis preserves outward winding"
+                     :fn cuboid-face-basis-preserves-outward-winding})
 
 (local main
   (fn []

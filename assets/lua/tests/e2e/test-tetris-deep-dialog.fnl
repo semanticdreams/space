@@ -2,6 +2,7 @@
 (local Camera (require :camera))
 (local glm (require :glm))
 (local TetrisView (require :tetris-view))
+(local LightingViewState (require :lighting-view-state))
 
 (fn stamp-cell! [grid x y id]
   (local row (and grid (. grid y)))
@@ -57,6 +58,7 @@
                     (dialog.update_status))
                   dialog)
        :view-matrix (camera:get-view-matrix)
+       :lighting-view-state (LightingViewState.perspective camera.position)
        :child-position (glm.vec3 0 0 0)
        :child-rotation (* (glm.quat (math.rad -8) (glm.vec3 1 0 0))
                           (glm.quat (math.rad 12) (glm.vec3 0 1 0)))}))

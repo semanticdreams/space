@@ -1,5 +1,6 @@
-(local glm (require :glm))
 (local LightUtils (require :light-utils))
+(local LightingViewState (require :lighting-view-state))
+(local RenderBatchPredicates (require :render-batch-predicates))
 
 (local gl (require :gl))
 (local shaders (require :shaders))
@@ -160,16 +161,20 @@
             (self:bind-instance-window first)
             (gl.glDrawElementsInstanced gl.GL_TRIANGLES index-count gl.GL_UNSIGNED_INT 0 count))))))
 
-  (fn render [_self batches projection view]
+  (fn render [_self batches projection view lighting-view-state]
     (when (and batches (> (length batches) 0))
       (gl.glBindVertexArray vao)
       (shader:use)
-      (local lights (assert (and app app.lights)
-                            "InstancedColorMeshRenderer requires app.lights; call AppBootstrap.init-lights"))
-      (LightUtils.apply-lights shader lights)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
-      (shader:setVector3f "viewPos" (or (and app app.camera app.camera.position) (glm.vec3 0.0)))
+      (when (RenderBatchPredicates.instanced-color-mesh-batches-require-lighting? batches)
+        (local lights (assert (and app app.lights)
+                              "InstancedColorMeshRenderer requires app.lights; call AppBootstrap.init-lights"))
+        (LightUtils.apply-lights shader lights)
+        (LightingViewState.apply-uniforms
+          shader
+          (assert lighting-view-state
+                  "InstancedColorMeshRenderer.render requires lighting-view-state for lit batches")))
       (each [_ batch (ipairs batches)]
         (render-batch _self batch))))
 

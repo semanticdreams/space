@@ -714,6 +714,8 @@
   (set app.graph (and runtime runtime.graph))
   (set app.graph-view (and runtime runtime.graph-view))
   (set app.layout-root (and app.scene app.scene.layout-root))
+  (when (and app.scene app.scene.set-camera)
+    (app.scene:set-camera app.camera))
   (when app.hud
     (set app.hud.scene app.scene)
     (when app.hud.build-context

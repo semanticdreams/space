@@ -2,6 +2,8 @@
 (local glm (require :glm))
 (local shaders (require :shaders))
 (local LightUtils (require :light-utils))
+(local LightingViewState (require :lighting-view-state))
+(local RenderBatchPredicates (require :render-batch-predicates))
 
 (fn MeshRenderer []
   (local shader
@@ -25,17 +27,20 @@
   (gl.glVertexAttribPointer 1 3 gl.GL_FLOAT gl.GL_FALSE stride (* 4 2))
   (gl.glVertexAttribPointer 2 3 gl.GL_FLOAT gl.GL_FALSE stride (* 4 5))
 
-  (fn render [_self batches projection view]
+  (fn render [_self batches projection view lighting-view-state]
     (when (and batches (> (length batches) 0))
       (gl.glBindVertexArray vao)
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
       (shader:use)
-      (local lights (assert (and app app.lights)
-                            "MeshRenderer requires app.lights; call AppBootstrap.init-lights"))
-      (LightUtils.apply-lights shader lights)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
-      (shader:setVector3f "viewPos" (or (and app app.camera app.camera.position) (glm.vec3 0.0)))
+      (when (RenderBatchPredicates.mesh-batches-require-lighting? batches)
+        (local lights (assert (and app app.lights)
+                              "MeshRenderer requires app.lights; call AppBootstrap.init-lights"))
+        (LightUtils.apply-lights shader lights)
+        (LightingViewState.apply-uniforms shader
+                                          (assert lighting-view-state
+                                                  "MeshRenderer.render requires lighting-view-state for lit batches")))
       (each [_ batch (ipairs batches)]
         (when (not (= batch.visible? false))
           (local vector batch.vector)

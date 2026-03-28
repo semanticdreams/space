@@ -8,6 +8,8 @@
 (local TextSsboRenderer (require :text-ssbo-renderer))
 (local SkyboxRenderer (require :skybox-renderer))
 (local Fxaa (require :fxaa))
+(local LightingViewState (require :lighting-view-state))
+(local RenderBatchPredicates (require :render-batch-predicates))
 
 (local gl (require :gl))
 
@@ -69,29 +71,55 @@
       (local draw-text (bool-option options :text true))
       (local view (target:get-view-matrix))
       (local projection target.projection)
+      (var lighting-view-state nil)
+      (fn require-lighting-view-state []
+        (when (not lighting-view-state)
+          (assert target.get-lighting-view-state
+                  "Render target requires get-lighting-view-state for lit geometry")
+          (set lighting-view-state
+               (LightingViewState.normalize-state
+                 (target:get-lighting-view-state)
+                 "Render target lighting view state")))
+        lighting-view-state)
       (when draw-geometry
         (local triangle-vector (and target.get-triangle-vector (target:get-triangle-vector)))
         (local triangle-batches (and target.get-triangle-batches (target:get-triangle-batches)))
-        (when triangle-vector
-          (triangle-renderer:render triangle-vector projection view triangle-batches))
+        (when (RenderBatchPredicates.vector-has-elements? triangle-vector)
+          (triangle-renderer:render triangle-vector
+                                    projection
+                                    view
+                                    (require-lighting-view-state)
+                                    triangle-batches))
         (local mesh-batches (and target.get-mesh-batches (target:get-mesh-batches)))
         (when (and mesh-batches (> (length mesh-batches) 0))
-          (mesh-renderer:render mesh-batches projection view))
+          (mesh-renderer:render mesh-batches
+                                projection
+                                view
+                                (if (RenderBatchPredicates.mesh-batches-require-lighting? mesh-batches)
+                                    (require-lighting-view-state)
+                                    nil)))
         (local instanced-color-mesh-batches
           (and target.get-instanced-color-mesh-batches
                (target:get-instanced-color-mesh-batches)))
         (when (and instanced-color-mesh-batches (> (length instanced-color-mesh-batches) 0))
-          (instanced-color-mesh-renderer:render instanced-color-mesh-batches projection view))
+          (instanced-color-mesh-renderer:render instanced-color-mesh-batches
+                                                projection
+                                                view
+                                                (if (RenderBatchPredicates.instanced-color-mesh-batches-require-lighting?
+                                                      instanced-color-mesh-batches)
+                                                    (require-lighting-view-state)
+                                                    nil)))
         (local image-batches (and target.get-image-batches (target:get-image-batches)))
         (when image-batches
           (image-renderer:render image-batches projection view))
         (local quad-draw-list (and target.get-quad-draw-list (target:get-quad-draw-list)))
         (when quad-draw-list
           (each [_ entry (ipairs quad-draw-list)]
-            (when (and entry entry.vector entry.batches entry.clip-vector entry.clip-group-vector)
+            (when (RenderBatchPredicates.renderable-quad-draw-entry? entry)
               (quad-renderer:render entry.vector
                                     projection
                                     view
+                                    (require-lighting-view-state)
                                     entry.batches
                                     entry.clip-vector
                                     entry.clip-group-vector))))

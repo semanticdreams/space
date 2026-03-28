@@ -25,6 +25,7 @@
 (local HudLayout (require :hud-layout))
 (local {: ControlPanelLayout} (require :hud-control-panel-layout))
 (local {: StatusPanelLayout} (require :hud-status-panel-layout))
+(local LightingViewState (require :lighting-view-state))
 
 (fn number-or [value fallback]
   (if (not (= value nil)) value fallback))
@@ -179,6 +180,9 @@
 
 (fn make-screen-target [opts]
   (local options (or opts {}))
+  (when options.view-matrix
+    (assert options.lighting-view-state
+            "make-screen-target with custom :view-matrix requires :lighting-view-state"))
   (local width (or options.width 640))
   (local height (or options.height 360))
   (local units-per-pixel (or options.world-units-per-pixel 0.05))
@@ -206,6 +210,8 @@
                  :projection (or options.projection
                                  (glm.ortho 0 world-width 0 world-height -100.0 100.0))
                  :view-matrix (or options.view-matrix (glm.mat4 1))
+                 :lighting-view-state (or options.lighting-view-state
+                                          (LightingViewState.orthographic (glm.vec3 0 0 1)))
                  :screen-pos-ray (fn [self pos opts]
                                    (local options (or opts {}))
                                    (local viewport (viewport->table (or options.viewport app.viewport)))
@@ -219,6 +225,7 @@
                  :world-size world-size
                  :update (fn [self] (self.layout-root:update))
                  :get-view-matrix (fn [self] (or self.view-matrix (glm.mat4 1)))
+                 :get-lighting-view-state (fn [self] self.lighting-view-state)
                  :get-triangle-vector (fn [self] self.build-context.triangle-vector)
                  :get-triangle-batches (fn [self] (self.build-context:get-triangle-batches))
                  :get-line-vector (fn [self] self.build-context.line-vector)
@@ -271,6 +278,9 @@
 
 (fn make-scene-target [opts]
   (local options (or opts {}))
+  (when options.view-matrix
+    (assert options.lighting-view-state
+            "make-scene-target with custom :view-matrix requires :lighting-view-state"))
   (local layout-root (LayoutRoot))
   (local focus-manager options.focus-manager)
   (local focus-scope (or options.focus-scope
@@ -291,10 +301,13 @@
                  :build-context ctx
                  :projection (or options.projection (app.create-default-projection))
                  :view-matrix (or options.view-matrix (glm.mat4 1))
+                 :lighting-view-state (or options.lighting-view-state
+                                          (LightingViewState.perspective (glm.vec3 0 0 0)))
                  :element nil
                  :root-layout nil
                  :update (fn [self] (self.layout-root:update))
                  :get-view-matrix (fn [self] (or self.view-matrix (glm.mat4 1)))
+                 :get-lighting-view-state (fn [self] self.lighting-view-state)
                  :get-triangle-vector (fn [self] self.build-context.triangle-vector)
                  :get-triangle-batches (fn [self] (self.build-context:get-triangle-batches))
                  :get-line-vector (fn [self] self.build-context.line-vector)

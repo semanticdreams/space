@@ -6,11 +6,14 @@
 
 smooth in vec4 theColor;
 smooth in vec3 worldPos;
+smooth in vec3 worldNormal;
 flat in float depth_offset_index;
 flat in uint clipGroup;
 out vec4 fragColor;
 
-uniform vec3 viewPos;
+uniform int lightingViewMode;
+uniform vec3 lightingViewPos;
+uniform vec3 lightingViewDir;
 uniform vec3 ambientLight;
 uniform int dirLightCount;
 uniform DirLight dirLights[MAX_DIR_LIGHTS];
@@ -33,8 +36,11 @@ void main()
         discard;
     }
 
-    vec3 normal = normalize(cross(dFdy(worldPos), dFdx(worldPos)));
-    vec3 viewDir = normalize(viewPos - worldPos);
+    vec3 normal = normalize(worldNormal);
+    vec3 viewDir = ResolveLightingViewDir(lightingViewMode,
+                                          lightingViewPos,
+                                          lightingViewDir,
+                                          worldPos);
     vec3 lightingViewDir = viewDir;
     vec3 light = ambientLight;
     light += CalcDirLights(dirLights, dirLightCount, normal, lightingViewDir);

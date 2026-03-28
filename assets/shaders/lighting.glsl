@@ -1,6 +1,8 @@
 #define MAX_DIR_LIGHTS 4
 #define MAX_POINT_LIGHTS 8
 #define MAX_SPOT_LIGHTS 4
+#define LIGHTING_VIEW_MODE_PERSPECTIVE 0
+#define LIGHTING_VIEW_MODE_ORTHOGRAPHIC 1
 
 struct DirLight {
     vec3 direction;
@@ -114,4 +116,12 @@ vec3 CalcSpotLights(SpotLight lights[MAX_SPOT_LIGHTS], int count, vec3 normal, v
         result += CalcSpotLight(lights[i], normal, fragPos, viewDir);
     }
     return result;
+}
+
+vec3 ResolveLightingViewDir(int mode, vec3 viewPos, vec3 viewDir, vec3 fragPos)
+{
+    if (mode == LIGHTING_VIEW_MODE_ORTHOGRAPHIC) {
+        return normalize(viewDir);
+    }
+    return normalize(viewPos - fragPos);
 }
