@@ -78,6 +78,7 @@
     :tests.test-ripgrep
     :tests.test-ripgrep-view
     :tests.test-process
+    :tests.test-codex-sdk
     :tests.test-sysinfo
     :tests.test-flamegraph
     :tests.test-points

@@ -49,6 +49,8 @@ struct SpawnedProcess
     bool stdin_closed { false };
     std::string stdout_buffer;
     std::string stderr_buffer;
+    std::string unread_stdout_buffer;
+    std::string unread_stderr_buffer;
     std::chrono::steady_clock::time_point start_time;
     std::optional<double> timeout_seconds;
     bool finished { false };
@@ -345,6 +347,49 @@ bool drain_pipe_nonblocking(HANDLE pipe, std::string& out)
     }
 }
 
+bool drain_pipe_nonblocking(HANDLE pipe, std::string& out, std::string* unread)
+{
+    if (pipe == nullptr || pipe == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    char buffer[4096];
+    while (true) {
+        DWORD available = 0;
+        BOOL peek_ok = PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr);
+        if (!peek_ok) {
+            DWORD err = GetLastError();
+            if (err == ERROR_BROKEN_PIPE || err == ERROR_PIPE_NOT_CONNECTED) {
+                return false;
+            }
+            return false;
+        }
+
+        if (available == 0) {
+            return true;
+        }
+
+        DWORD to_read = available;
+        if (to_read > sizeof(buffer)) {
+            to_read = sizeof(buffer);
+        }
+
+        DWORD read_bytes = 0;
+        BOOL read_ok = ReadFile(pipe, buffer, to_read, &read_bytes, nullptr);
+        if (!read_ok || read_bytes == 0) {
+            DWORD err = GetLastError();
+            if (err == ERROR_BROKEN_PIPE || err == ERROR_PIPE_NOT_CONNECTED) {
+                return false;
+            }
+            return false;
+        }
+        out.append(buffer, static_cast<std::size_t>(read_bytes));
+        if (unread != nullptr) {
+            unread->append(buffer, static_cast<std::size_t>(read_bytes));
+        }
+    }
+}
+
 void finalize_process(SpawnedProcess& proc)
 {
     if (proc.finished) {
@@ -352,10 +397,10 @@ void finalize_process(SpawnedProcess& proc)
     }
 
     if (proc.stdout_read != nullptr) {
-        drain_pipe_nonblocking(proc.stdout_read, proc.stdout_buffer);
+        drain_pipe_nonblocking(proc.stdout_read, proc.stdout_buffer, &proc.unread_stdout_buffer);
     }
     if (proc.stderr_read != nullptr) {
-        drain_pipe_nonblocking(proc.stderr_read, proc.stderr_buffer);
+        drain_pipe_nonblocking(proc.stderr_read, proc.stderr_buffer, &proc.unread_stderr_buffer);
     }
 
     DWORD exit_code = 1;
@@ -386,12 +431,12 @@ void poll_process(SpawnedProcess& proc)
     }
 
     if (proc.stdout_read != nullptr) {
-        if (!drain_pipe_nonblocking(proc.stdout_read, proc.stdout_buffer)) {
+        if (!drain_pipe_nonblocking(proc.stdout_read, proc.stdout_buffer, &proc.unread_stdout_buffer)) {
             close_handle(proc.stdout_read);
         }
     }
     if (proc.stderr_read != nullptr) {
-        if (!drain_pipe_nonblocking(proc.stderr_read, proc.stderr_buffer)) {
+        if (!drain_pipe_nonblocking(proc.stderr_read, proc.stderr_buffer, &proc.unread_stderr_buffer)) {
             close_handle(proc.stderr_read);
         }
     }
@@ -709,6 +754,33 @@ void lua_bind_process(sol::state& lua)
             }
             poll_process(it->second);
             return !it->second.finished;
+        });
+
+        process_table.set_function("read", [mgr](sol::this_state state, uint64_t id) {
+            sol::state_view view(state);
+            std::string stdout_chunk;
+            std::string stderr_chunk;
+            bool finished = false;
+
+            {
+                std::lock_guard<std::mutex> lock(mgr->mutex);
+                auto it = mgr->processes.find(id);
+                if (it == mgr->processes.end()) {
+                    throw sol::error("process.read: invalid process id");
+                }
+                poll_process(it->second);
+                stdout_chunk = std::move(it->second.unread_stdout_buffer);
+                stderr_chunk = std::move(it->second.unread_stderr_buffer);
+                it->second.unread_stdout_buffer.clear();
+                it->second.unread_stderr_buffer.clear();
+                finished = it->second.finished;
+            }
+
+            sol::table output = view.create_table();
+            output["stdout"] = stdout_chunk;
+            output["stderr"] = stderr_chunk;
+            output["finished"] = finished;
+            return output;
         });
 
         process_table.set_function("poll", [mgr](sol::this_state state, sol::optional<uint64_t> max_results) {

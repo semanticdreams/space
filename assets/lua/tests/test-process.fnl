@@ -207,6 +207,24 @@
   (assert (= result.exit-code 0) "exit code should be 0")
   (assert (string.find (normalize-eol result.stdout) "hello world") "stdout should contain written data"))
 
+(fn test-spawn-read-incremental []
+  (if is-windows
+      true
+      (do
+        (local id (process.spawn {:args ["cat"]}))
+        (process.write id "hello")
+        (short-delay)
+        (local first (process.read id))
+        (assert (= first.finished false) "process should still be running")
+        (assert (= first.stdout "hello") "incremental stdout should be readable")
+        (assert (= first.stderr "") "stderr should be empty")
+        (local second (process.read id))
+        (assert (= second.stdout "") "read should clear unread stdout")
+        (process.close-stdin id)
+        (local result (process.wait id))
+        (assert (= result.exit-code 0) "exit code should be 0")
+        (assert (= result.stdout "hello") "full stdout should still be preserved"))))
+
 (fn test-spawn-poll []
   (process.spawn {:args (if is-windows (shell-args "echo one") ["echo" "one"])})
   (process.spawn {:args (if is-windows (shell-args "echo two") ["echo" "two"])})
@@ -296,6 +314,7 @@
 (table.insert tests {:name "spawn and wait" :fn test-spawn-and-wait})
 (table.insert tests {:name "spawn running and kill" :fn test-spawn-running-and-kill})
 (table.insert tests {:name "spawn write and close stdin" :fn test-spawn-write-and-close-stdin})
+(table.insert tests {:name "spawn read exposes incremental stdout" :fn test-spawn-read-incremental})
 (table.insert tests {:name "spawn poll" :fn test-spawn-poll})
 (table.insert tests {:name "spawn poll max results" :fn test-spawn-poll-max-results})
 (table.insert tests {:name "spawn timeout" :fn test-spawn-timeout})

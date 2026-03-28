@@ -55,6 +55,8 @@ struct SpawnedProcess
     bool stdin_closed { false };
     std::string stdout_buffer;
     std::string stderr_buffer;
+    std::string unread_stdout_buffer;
+    std::string unread_stderr_buffer;
     std::chrono::steady_clock::time_point start_time;
     std::optional<double> timeout_seconds;
     bool finished { false };
@@ -96,6 +98,28 @@ bool drain_fd(int fd, std::string& out)
         ssize_t bytes = read(fd, buffer, sizeof(buffer));
         if (bytes > 0) {
             out.append(buffer, static_cast<std::size_t>(bytes));
+            continue;
+        }
+        if (bytes == 0) {
+            return false;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return true;
+        }
+        return false;
+    }
+}
+
+bool drain_fd(int fd, std::string& out, std::string* unread)
+{
+    char buffer[4096];
+    while (true) {
+        ssize_t bytes = read(fd, buffer, sizeof(buffer));
+        if (bytes > 0) {
+            out.append(buffer, static_cast<std::size_t>(bytes));
+            if (unread != nullptr) {
+                unread->append(buffer, static_cast<std::size_t>(bytes));
+            }
             continue;
         }
         if (bytes == 0) {
@@ -614,13 +638,13 @@ void poll_process(SpawnedProcess& proc)
 
     // Read available data
     if (proc.stdout_fd >= 0) {
-        if (!drain_fd(proc.stdout_fd, proc.stdout_buffer)) {
+        if (!drain_fd(proc.stdout_fd, proc.stdout_buffer, &proc.unread_stdout_buffer)) {
             close(proc.stdout_fd);
             proc.stdout_fd = -1;
         }
     }
     if (proc.stderr_fd >= 0) {
-        if (!drain_fd(proc.stderr_fd, proc.stderr_buffer)) {
+        if (!drain_fd(proc.stderr_fd, proc.stderr_buffer, &proc.unread_stderr_buffer)) {
             close(proc.stderr_fd);
             proc.stderr_fd = -1;
         }
@@ -632,12 +656,12 @@ void poll_process(SpawnedProcess& proc)
     if (wait_result == proc.pid) {
         // Drain any remaining data
         if (proc.stdout_fd >= 0) {
-            drain_fd(proc.stdout_fd, proc.stdout_buffer);
+            drain_fd(proc.stdout_fd, proc.stdout_buffer, &proc.unread_stdout_buffer);
             close(proc.stdout_fd);
             proc.stdout_fd = -1;
         }
         if (proc.stderr_fd >= 0) {
-            drain_fd(proc.stderr_fd, proc.stderr_buffer);
+            drain_fd(proc.stderr_fd, proc.stderr_buffer, &proc.unread_stderr_buffer);
             close(proc.stderr_fd);
             proc.stderr_fd = -1;
         }
@@ -691,12 +715,12 @@ void poll_process(SpawnedProcess& proc)
 
             // Drain remaining
             if (proc.stdout_fd >= 0) {
-                drain_fd(proc.stdout_fd, proc.stdout_buffer);
+                drain_fd(proc.stdout_fd, proc.stdout_buffer, &proc.unread_stdout_buffer);
                 close(proc.stdout_fd);
                 proc.stdout_fd = -1;
             }
             if (proc.stderr_fd >= 0) {
-                drain_fd(proc.stderr_fd, proc.stderr_buffer);
+                drain_fd(proc.stderr_fd, proc.stderr_buffer, &proc.unread_stderr_buffer);
                 close(proc.stderr_fd);
                 proc.stderr_fd = -1;
             }
@@ -806,6 +830,33 @@ void lua_bind_process(sol::state& lua)
                 return false;
             }
             return !it->second.finished;
+        });
+
+        process_table.set_function("read", [mgr](sol::this_state state, uint64_t id) {
+            sol::state_view lua_view(state);
+            std::string stdout_chunk;
+            std::string stderr_chunk;
+            bool finished = false;
+
+            {
+                std::lock_guard<std::mutex> lock(mgr->mutex);
+                auto it = mgr->processes.find(id);
+                if (it == mgr->processes.end()) {
+                    throw sol::error("process.read: invalid process id");
+                }
+                poll_process(it->second);
+                stdout_chunk = std::move(it->second.unread_stdout_buffer);
+                stderr_chunk = std::move(it->second.unread_stderr_buffer);
+                it->second.unread_stdout_buffer.clear();
+                it->second.unread_stderr_buffer.clear();
+                finished = it->second.finished;
+            }
+
+            sol::table output = lua_view.create_table();
+            output["stdout"] = stdout_chunk;
+            output["stderr"] = stderr_chunk;
+            output["finished"] = finished;
+            return output;
         });
 
         // Poll for completed processes (manual polling mode)
