@@ -7,7 +7,7 @@
 (local Sized (require :sized))
 (local {: Flex : FlexChild} (require :flex))
 (local {: Layout} (require :layout))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 
 (fn copy-table [source]
   (local clone {})

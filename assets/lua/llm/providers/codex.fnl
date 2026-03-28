@@ -1,5 +1,5 @@
-(local Exec (require :codex-sdk/exec))
-(local ThreadModule (require :codex-sdk/thread))
+(local Exec (require :llm/providers/codex/exec))
+(local ThreadModule (require :llm/providers/codex/thread))
 
 (fn start-thread [self options]
   (ThreadModule.Thread self.exec self.options (or options {}) nil))

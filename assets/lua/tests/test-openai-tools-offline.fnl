@@ -1,4 +1,4 @@
-(local OpenAI (require :openai))
+(local OpenAI (require :llm/providers/openai))
 (local fixtures (require :tests/http-fixtures))
 (local json (require :json))
 

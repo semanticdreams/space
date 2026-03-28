@@ -4,7 +4,7 @@
 (local LlmConversationNode (require :graph/nodes/llm-conversation))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local Signal (require :signal))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local Utils (require :graph/view/utils))
 
 (fn conversation-label [record]

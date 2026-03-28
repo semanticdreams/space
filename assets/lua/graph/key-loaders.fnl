@@ -49,7 +49,7 @@
 (local ListEntityStore (require :entities/list))
 (local NotebookStore (require :notebooks/store))
 (local StringEntityStore (require :entities/string))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local Kernels (require :kernels))
 
 (local M {})

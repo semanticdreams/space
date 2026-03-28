@@ -33,7 +33,7 @@ implicit: the message node you trigger from is the branch head.
 
 ## OpenAI integration (existing client)
 
-The OpenAI client lives in `assets/lua/openai.fnl`. It supports:
+The OpenAI client lives in `assets/lua/llm/providers/openai.fnl`. It supports:
 
 - `create-response` (POST `/responses`)
 - `get-response`, `delete-response`, `list-input-items`

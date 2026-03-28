@@ -3,7 +3,7 @@
 (local fs (require :fs))
 (local json (require :json))
 (local JsonUtils (require :json-utils))
-(local Ids (require :llm/ids))
+(local Ids (require :llm/conversations/ids))
 (local Settings (require :settings))
 
 (fn ensure-dir [path]

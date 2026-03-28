@@ -1,6 +1,6 @@
 (local _ (require :main))
 (local LlmConversationMessagesView (require :llm-conversation-messages-view))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local fs (require :fs))
 
 (local tests [])

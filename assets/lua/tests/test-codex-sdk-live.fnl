@@ -1,6 +1,6 @@
 (local json (require :json))
 (local fs (require :fs))
-(local CodexSdk (require :codex-sdk))
+(local CodexSdk (require :llm/providers/codex))
 (local tempfile (require :tempfile))
 
 (local tests [])

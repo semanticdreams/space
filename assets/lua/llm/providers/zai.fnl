@@ -1,6 +1,5 @@
 (local json (require :json))
 (local HttpCommon (require :http/common))
-(local http (require :http))
 (local fs (require :fs))
 (local appdirs (require :appdirs))
 (local logging (require :logging))
@@ -19,7 +18,8 @@
 
 (fn Zai [opts]
   (local options (or opts {}))
-  (local http-binding (or options.http http))
+  (local http-binding (or options.http
+                          (require :http)))
   (assert http-binding "ZAI client requires the http binding")
   (assert json "ZAI client requires the json binding")
 
@@ -164,4 +164,3 @@
   client)
 
 Zai
-

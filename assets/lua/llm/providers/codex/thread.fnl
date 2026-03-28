@@ -1,10 +1,10 @@
 (local json (require :json))
 (local process (require :process))
 (local callbacks (require :callbacks))
-(local Input (require :codex-sdk/input))
-(local Events (require :codex-sdk/events))
-(local Exec (require :codex-sdk/exec))
-(local SchemaFile (require :codex-sdk/schema-file))
+(local Input (require :llm/providers/codex/input))
+(local Events (require :llm/providers/codex/events))
+(local Exec (require :llm/providers/codex/exec))
+(local SchemaFile (require :llm/providers/codex/schema-file))
 
 (fn parse-json-line [line]
   (local (ok parsed-or-error) (pcall json.loads line))

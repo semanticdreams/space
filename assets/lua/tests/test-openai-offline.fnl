@@ -1,4 +1,4 @@
-(local OpenAI (require :openai))
+(local OpenAI (require :llm/providers/openai))
 (local fixtures (require :tests/http-fixtures))
 
 (local fixture-path (app.engine.get-asset-path "lua/tests/data/openai-fixture.json"))

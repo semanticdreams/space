@@ -2,7 +2,7 @@
 (local fs (require :fs))
 (local json (require :json))
 (local callbacks (require :callbacks))
-(local CodexSdk (require :codex-sdk))
+(local CodexSdk (require :llm/providers/codex))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "codex-sdk"))

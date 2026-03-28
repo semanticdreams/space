@@ -446,7 +446,7 @@
       (local LinkEntityStore (require :entities/link))
       (local NotebookStore (require :notebooks/store))
       (local Kernels (require :kernels))
-      (local LlmStore (require :llm/store))
+      (local LlmStore (require :llm/conversations/store))
       (local string-store (StringEntityStore.StringEntityStore {:base-dir (fs.join-path dir "string")}))
       (local list-store (ListEntityStore.ListEntityStore {:base-dir (fs.join-path dir "list")}))
       (local link-store (LinkEntityStore.LinkEntityStore {:base-dir (fs.join-path dir "link")}))

@@ -2,8 +2,8 @@
     (global app {:engine {:get-asset-path (fn [p] nil)}})
     (tset _G.app :engine {:get-asset-path (fn [p] nil)}))
 
-(local Store (require :llm/store))
-(local LlmRequests (require :llm/requests))
+(local Store (require :llm/conversations/store))
+(local LlmRequests (require :llm/conversations/requests))
 (local LlmConversationNode (require :graph/nodes/llm-conversation))
 (local Bash (require :llm/tools/bash))
 (local ReadFile (require :llm/tools/read-file))

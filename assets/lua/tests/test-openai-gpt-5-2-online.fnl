@@ -1,6 +1,6 @@
 (local callbacks (require :callbacks))
-(local LlmRequests (require :llm/requests))
-(local LlmStore (require :llm/store))
+(local LlmRequests (require :llm/conversations/requests))
+(local LlmStore (require :llm/conversations/store))
 (local fs (require :fs))
 
 (var client nil)
@@ -14,7 +14,7 @@
 
 (fn ensure-client []
     (when (not client)
-        (local OpenAI (require :openai))
+        (local OpenAI (require :llm/providers/openai))
         (set client (OpenAI {:timeout_ms 120000
                              :connect_timeout_ms 15000
                              :user_agent "space-openai-gpt-5.2-online/1.0"}))))

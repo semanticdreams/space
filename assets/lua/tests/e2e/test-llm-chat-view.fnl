@@ -1,6 +1,6 @@
 (local Harness (require :tests.e2e.harness))
 (local LlmChatView (require :llm-chat-view))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local Sized (require :sized))
 (local glm (require :glm))
 (local fs (require :fs))

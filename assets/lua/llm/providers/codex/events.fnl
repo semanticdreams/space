@@ -1,4 +1,4 @@
-(local Items (require :codex-sdk/items))
+(local Items (require :llm/providers/codex/items))
 
 (fn normalize-usage [usage]
   (if usage

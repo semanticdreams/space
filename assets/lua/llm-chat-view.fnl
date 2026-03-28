@@ -8,8 +8,8 @@
 (local ScrollView (require :scroll-view))
 (local {: Flex : FlexChild} (require :flex))
 (local Label (require :label))
-(local LlmStore (require :llm/store))
-(local LlmRequests (require :llm/requests))
+(local LlmStore (require :llm/conversations/store))
+(local LlmRequests (require :llm/conversations/requests))
 (local {: truncate-with-ellipsis} (require :graph/view/utils))
 
 (fn entry-label [record]

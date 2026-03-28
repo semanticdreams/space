@@ -1,6 +1,6 @@
 (local json (require :json))
 (local fixtures (require :tests/http-fixtures))
-(local OpenAI (require :openai))
+(local OpenAI (require :llm/providers/openai))
 (local callbacks (require :callbacks))
 
 (local client (OpenAI {:user_agent "space-openai-record-tools/1.0"}))

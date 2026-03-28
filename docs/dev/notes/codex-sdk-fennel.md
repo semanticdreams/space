@@ -55,7 +55,7 @@ Stay close to the upstream TypeScript surface, but use Fennel factory tables and
 Proposed shape:
 
 ```fennel
-(local Codex (require :codex-sdk))
+(local Codex (require :llm/providers/codex))
 
 (local client
   (Codex.Codex {:codex-path "/custom/codex"
@@ -323,25 +323,27 @@ One reasonable v1 layout under `assets/lua/`:
 
 ```text
 assets/lua/
-  codex-sdk.fnl
-  codex-sdk/
-    exec.fnl
-    thread.fnl
-    events.fnl
-    items.fnl
-    input.fnl
-    schema-file.fnl
+  llm/
+    providers/
+      codex.fnl
+      codex/
+        exec.fnl
+        thread.fnl
+        events.fnl
+        items.fnl
+        input.fnl
+        schema-file.fnl
 ```
 
 Suggested responsibilities:
 
-- `codex-sdk.fnl`: public entry point and `Codex.Codex`
-- `codex-sdk/exec.fnl`: argv/env construction and subprocess management
-- `codex-sdk/thread.fnl`: thread object, `run`, `run-streamed`, id management
-- `codex-sdk/events.fnl`: event normalization
-- `codex-sdk/items.fnl`: item normalization
-- `codex-sdk/input.fnl`: prompt/image normalization
-- `codex-sdk/schema-file.fnl`: temp schema creation and cleanup
+- `llm/providers/codex.fnl`: public entry point and `Codex.Codex`
+- `llm/providers/codex/exec.fnl`: argv/env construction and subprocess management
+- `llm/providers/codex/thread.fnl`: thread object, `run`, `run-streamed`, id management
+- `llm/providers/codex/events.fnl`: event normalization
+- `llm/providers/codex/items.fnl`: item normalization
+- `llm/providers/codex/input.fnl`: prompt/image normalization
+- `llm/providers/codex/schema-file.fnl`: temp schema creation and cleanup
 
 This keeps the code modular without creating premature layers.
 

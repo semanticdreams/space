@@ -1,10 +1,10 @@
 (local Graph (require :graph/init))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local LlmConversationNode (require :graph/nodes/llm-conversation))
 (local LlmConversationsNode (require :graph/nodes/llm-conversations))
 (local LlmMessageNode (require :graph/nodes/llm-message))
 (local LlmToolNode (require :graph/nodes/llm-tool))
-(local LlmRequests (require :llm/requests))
+(local LlmRequests (require :llm/conversations/requests))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local fixtures (require :tests/http-fixtures))
 (local fs (require :fs))
@@ -31,7 +31,7 @@
     (local (ok result)
         (pcall
             (fn []
-                (local OpenAI (require :openai))
+                (local OpenAI (require :llm/providers/openai))
                 (set client (OpenAI {:api_key "offline-key"
                                      :user_agent "space-openai-offline/1.0"
                                      :http install.mock.binding}))

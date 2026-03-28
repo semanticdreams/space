@@ -6,7 +6,7 @@
 (local LlmToolCallNode (require :graph/nodes/llm-tool-call))
 (local LlmToolResultNode (require :graph/nodes/llm-tool-result))
 (local Signal (require :signal))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local fs (require :fs))
 (local Utils (require :graph/view/utils))
 

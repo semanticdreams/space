@@ -13,7 +13,7 @@
 
 (fn ensure-client []
     (when (not client)
-        (local OpenAI (require :openai))
+        (local OpenAI (require :llm/providers/openai))
         (set client (OpenAI {:timeout_ms 60000
                              :connect_timeout_ms 10000
                              :user_agent "space-openai-test/1.0"}))))

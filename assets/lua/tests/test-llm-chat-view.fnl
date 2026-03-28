@@ -1,7 +1,7 @@
 (local _ (require :main))
 (local LlmChatView (require :llm-chat-view))
-(local LlmRequests (require :llm/requests))
-(local LlmStore (require :llm/store))
+(local LlmRequests (require :llm/conversations/requests))
+(local LlmStore (require :llm/conversations/store))
 (local glm (require :glm))
 (local fs (require :fs))
 

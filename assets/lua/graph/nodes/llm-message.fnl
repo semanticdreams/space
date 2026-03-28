@@ -4,8 +4,8 @@
 (local LlmMessageView (require :graph/view/views/llm-message))
 (local LlmTools (require :llm/tools/init))
 (local Signal (require :signal))
-(local LlmStore (require :llm/store))
-(local LlmRequests (require :llm/requests))
+(local LlmStore (require :llm/conversations/store))
+(local LlmRequests (require :llm/conversations/requests))
 (local LlmToolCallNode (require :graph/nodes/llm-tool-call))
 (local LlmToolResultNode (require :graph/nodes/llm-tool-result))
 (local Utils (require :graph/view/utils))
@@ -501,7 +501,7 @@
                  self.openai
                  (and convo convo.openai)
                  (do
-                     (local OpenAI (require :openai))
+                     (local OpenAI (require :llm/providers/openai))
                      (OpenAI (or (and opts opts.openai-opts) {}))))))
 
     (set node.resolve-tools

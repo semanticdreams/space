@@ -2,7 +2,7 @@
 (local {:GraphNode GraphNode} (require :graph/node-base))
 (local LlmToolCallView (require :graph/view/views/llm-tool-call))
 (local Signal (require :signal))
-(local LlmStore (require :llm/store))
+(local LlmStore (require :llm/conversations/store))
 (local LlmTools (require :llm/tools/init))
 (local LlmConversationUtils (require :graph/nodes/llm-conversation-utils))
 (local json (require :json))
