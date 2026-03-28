@@ -1,9 +1,11 @@
 (local tests [])
 (local fs (require :fs))
+(local json (require :json))
 (local bt (require :bt))
 (local WorldManager (require :world-manager))
 (local HomeWorld (require :home-world))
 (local PhysicsContainment (require :physics-containment))
+(local LightSystemModule (require :light-system))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "world-manager-test-tmp"))
@@ -22,6 +24,10 @@
   (if ok
       result
       (error result)))
+
+(fn write-world-json! [world-dir state]
+  (fs.write-file (fs.join-path world-dir "world.json")
+                 (json.dumps state)))
 
 (fn make-fake-world-factory [stats]
   (fn [opts]
@@ -250,8 +256,16 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[1001000,0,0],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [1001000 0 0]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -269,8 +283,19 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"physics\":{\"containment\":{\"mode\":\"manual-bounds\",\"bounds\":{\"min\":[-500,-1234,-500],\"max\":[500,500,500]}}},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :physics {:containment {:mode "manual-bounds"
+                                                  :bounds {:min [-500 -1234 -500]
+                                                           :max [500 500 500]}}}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -287,8 +312,17 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"physics\":{\"containment\":\"invalid\"},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :physics {:containment "invalid"}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -306,8 +340,19 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"physics\":{\"containment\":{\"mode\":\"manual-bounds\",\"bounds\":{\"min\":[-500,-1450,-500],\"max\":[500,500,500]}}},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :physics {:containment {:mode "manual-bounds"
+                                                  :bounds {:min [-500 -1450 -500]
+                                                           :max [500 500 500]}}}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -382,7 +427,209 @@
       (local terrains (and world.state world.state.scene world.state.scene.terrains))
       (assert (= (type terrains) :table) "Expected world scene terrains table")
       (assert (= (length terrains) 1) "Expected exactly one default terrain for new world")
-      (assert (= (. (. terrains 1) :kind) "heightfield-terrain") "Default terrain should be heightfield-terrain")
+	      (assert (= (. (. terrains 1) :kind) "heightfield-terrain") "Default terrain should be heightfield-terrain")
+	      true)))
+
+(fn home-world-new-state-seeds-default-lights []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local lights (and world.state world.state.scene world.state.scene.lights))
+      (assert (= (type lights) :table) "Expected world scene lights table")
+      (assert (= (type lights.ambient) :table) "Expected ambient light record")
+      (assert (= (length lights.directional) 1) "Expected exactly one default directional light")
+      (assert (= (length lights.point) 0) "Expected no default point lights")
+      (assert (= (length lights.spot) 0) "Expected no default spot lights")
+      true)))
+
+(fn home-world-loads-persisted-lights []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[],\"lights\":{\"ambient\":{\"id\":\"ambient\",\"color\":[0.1,0.2,0.3],\"enabled?\":true},\"directional\":[],\"point\":[{\"id\":\"point-1\",\"position\":[1,2,3],\"ambient\":[0,0,0],\"diffuse\":[1,1,1],\"specular\":[1,1,1],\"specular-power\":8,\"constant\":1,\"linear\":0.2,\"quadratic\":0.05,\"enabled?\":true}],\"spot\":[]}},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local lights (and world.state world.state.scene world.state.scene.lights))
+      (assert (= (. (. lights.ambient.color) 2) 0.2) "Expected persisted ambient light to load")
+      (assert (= (length lights.point) 1) "Expected persisted point light to load")
+      (assert (= (. (. lights.point 1) :linear) 0.2) "Expected persisted point attenuation to load")
+      true)))
+
+(fn home-world-fails-loudly-when-persisted-lights-are-missing []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (fs.write-file (fs.join-path world-dir "world.json")
+                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (local (ok err)
+        (pcall (fn []
+                 (world:init {}))))
+      (assert (not ok) "HomeWorld should fail loudly when persisted scene lights are missing")
+      (assert (string.find (tostring err) "scene.lights" 1 true)
+              "HomeWorld should report missing persisted scene lights")
+      true)))
+
+(fn home-world-persists-updated-ambient-light-across-reload []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.state.scene.lights
+           (LightSystemModule.normalize-state
+             {:ambient {:id "ambient" :color [0.25 0.5 0.75] :enabled? true}
+              :directional world.state.scene.lights.directional
+              :point world.state.scene.lights.point
+              :spot world.state.scene.lights.spot}))
+      (world:save-state)
+      (local reloaded (HomeWorld {:id "world-a"
+                                  :name "home"
+                                  :type "home"
+                                  :dir world-dir}))
+      (reloaded:init {})
+      (local ambient (and reloaded.state reloaded.state.scene reloaded.state.scene.lights reloaded.state.scene.lights.ambient))
+      (assert ambient "Expected ambient light after reload")
+      (assert (= (. ambient.color 1) 0.25) "Expected persisted ambient x value after reload")
+      (assert (= (. ambient.color 2) 0.5) "Expected persisted ambient y value after reload")
+      (assert (= (. ambient.color 3) 0.75) "Expected persisted ambient z value after reload")
+      true)))
+
+(fn home-world-persists-updated-non-ambient-lights-across-reload []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.state.scene.lights
+           (LightSystemModule.normalize-state
+             {:ambient {:id "ambient" :color [0.0 0.0 1.0] :enabled? true}
+              :directional [{:id "directional-1"
+                             :direction [0.0 -1.0 0.0]
+                             :ambient [0.1 0.2 0.3]
+                             :diffuse [0.9 0.8 0.7]
+                             :specular [1.0 0.75 0.5]
+                             :specular-power 16
+                             :enabled? true}]
+              :point [{:id "point-1"
+                       :position [1.0 2.0 3.0]
+                       :ambient [0.1 0.1 0.1]
+                       :diffuse [0.9 0.8 0.7]
+                       :specular [1.0 1.0 0.9]
+                       :specular-power 18
+                       :constant 1.2
+                       :linear 0.3
+                       :quadratic 0.07
+                       :enabled? true}]
+              :spot [{:id "spot-1"
+                      :position [4.0 5.0 6.0]
+                      :direction [0.0 -1.0 0.0]
+                      :ambient [0.2 0.1 0.0]
+                      :diffuse [0.8 0.7 0.6]
+                      :specular [1.0 0.9 0.8]
+                      :specular-power 22
+                      :cutoff 0.9
+                      :outer-cutoff 0.8
+                      :constant 1.1
+                      :linear 0.2
+                      :quadratic 0.03
+                      :enabled? true}]}))
+      (world:save-state)
+      (local reloaded (HomeWorld {:id "world-a"
+                                  :name "home"
+                                  :type "home"
+                                  :dir world-dir}))
+      (reloaded:init {})
+      (local lights (and reloaded.state reloaded.state.scene reloaded.state.scene.lights))
+      (assert (= (length lights.directional) 1) "Expected persisted directional light after reload")
+      (assert (= (. (. lights.directional 1) :direction 2) -1.0)
+              "Expected persisted directional direction after reload")
+      (assert (= (length lights.point) 1) "Expected persisted point light after reload")
+      (assert (= (. (. lights.point 1) :linear) 0.3)
+              "Expected persisted point attenuation after reload")
+      (assert (= (length lights.spot) 1) "Expected persisted spot light after reload")
+      (assert (= (. (. lights.spot 1) :outer-cutoff) 0.8)
+              "Expected persisted spot cutoff after reload")
+      true)))
+
+(fn home-world-activate-reapplies-runtime-light-state []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.state.scene.lights
+           (LightSystemModule.normalize-state
+             {:ambient {:id "ambient" :color [0.25 0.5 0.75] :enabled? true}
+              :directional []
+              :point [{:id "point-1"
+                       :position [4 5 6]
+                       :ambient [0 0 0]
+                       :diffuse [1 1 1]
+                       :specular [1 1 1]
+                       :specular-power 8
+                       :constant 1
+                       :linear 0.3
+                       :quadratic 0.07
+                       :enabled? true}]
+              :spot []}))
+      (var applied nil)
+      (set world.runtime {:scene {:set-light-state (fn [_self lights]
+                                                     (set applied lights)
+                                                     true)}})
+      (world:activate {})
+      (assert applied "World activation should reapply persisted light state to runtime scene")
+      (assert (= (. (. applied.ambient.color) 3) 0.75) "Applied ambient light should match world state")
+      (assert (= (. (. applied.point 1) :linear) 0.3) "Applied point light should match world state")
+      true)))
+
+(fn home-world-deactivate-requires-scene-lights []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:scene {:capture-state (fn [_self]
+                                     {:panels []
+                                      :terrains []})}})
+      (local (ok err)
+        (pcall (fn []
+                 (world:deactivate {} "switch"))))
+      (assert (not ok) "World deactivate should fail when scene capture omits lights")
+      (assert (string.find (tostring err) "requires scene lights")
+              "Expected missing lights failure during world capture")
       true)))
 
 (fn home-world-preserves-explicit-empty-terrain-list []
@@ -390,8 +637,16 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -407,8 +662,18 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[{\"id\":\"t-1\",\"kind\":\"voxel-terrain\",\"options\":{\"chunk-size\":32}}]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains [{:id "t-1"
+                                              :kind "voxel-terrain"
+                                              :options {:chunk-size 32}}]
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -427,8 +692,18 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[{\"id\":\"t-1\",\"kind\":\"legacy-terrain\",\"options\":{\"width\":64}}]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains [{:id "t-1"
+                                              :kind "legacy-terrain"
+                                              :options {:width 64}}]
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -437,7 +712,8 @@
       (set world.runtime
            {:scene {:capture-state (fn [_self]
                                      {:panels []
-                                      :terrains []})}})
+                                      :terrains []
+                                      :lights (LightSystemModule.default-state)})}})
       (world:deactivate {} "switch")
       (local terrains (and world.state world.state.scene world.state.scene.terrains))
       (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
@@ -455,8 +731,17 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[\"terrain-editor:world-1:node-a\"],\"edges\":[{\"source\":\"terrain-editor:world-1:node-a\",\"target\":\"start\"}]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes ["terrain-editor:world-1:node-a"]
+                                          :edges [{:source "terrain-editor:world-1:node-a"
+                                                   :target "start"}]}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -494,8 +779,16 @@
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-views\":[{\"node-key\":\"terrain-tool:world-1:apply-perlin\"}]}},\"scene\":{\"panels\":[],\"terrains\":[]},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"}]}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -548,6 +841,20 @@
                      :fn home-world-deactivate-queues-hud-and-graph-restore-state})
 (table.insert tests {:name "HomeWorld new state seeds default terrain"
                      :fn home-world-new-state-seeds-default-terrain})
+(table.insert tests {:name "HomeWorld new state seeds default lights"
+                     :fn home-world-new-state-seeds-default-lights})
+(table.insert tests {:name "HomeWorld loads persisted lights"
+                     :fn home-world-loads-persisted-lights})
+(table.insert tests {:name "HomeWorld fails loudly when persisted lights are missing"
+                     :fn home-world-fails-loudly-when-persisted-lights-are-missing})
+(table.insert tests {:name "HomeWorld persists updated ambient light across reload"
+                     :fn home-world-persists-updated-ambient-light-across-reload})
+(table.insert tests {:name "HomeWorld persists updated non-ambient lights across reload"
+                     :fn home-world-persists-updated-non-ambient-lights-across-reload})
+(table.insert tests {:name "HomeWorld activate reapplies runtime light state"
+                     :fn home-world-activate-reapplies-runtime-light-state})
+(table.insert tests {:name "HomeWorld deactivate requires scene lights"
+                     :fn home-world-deactivate-requires-scene-lights})
 (table.insert tests {:name "HomeWorld preserves explicit empty terrain list"
                      :fn home-world-preserves-explicit-empty-terrain-list})
 (table.insert tests {:name "HomeWorld preserves unknown terrain kind state"

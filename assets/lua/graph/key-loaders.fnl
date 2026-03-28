@@ -36,6 +36,9 @@
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
 (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+(local {:LightsNode LightsNode} (require :graph/nodes/lights))
+(local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+(local {:LightNode LightNode} (require :graph/nodes/light))
 (local {:ScenePanelNode ScenePanelNode} (require :graph/nodes/scene-panel))
 (local {:HudPanelNode HudPanelNode} (require :graph/nodes/hud-panel))
 (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
@@ -303,6 +306,42 @@
           (TerrainsNode {:world-id world-id
                          :world-manager world-manager
                          :key key})))))
+
+  (graph:register-key-loader "lights"
+    (prefix-loader "lights:"
+      (fn [world-id key]
+        (when world-manager
+          (LightsNode {:world-id world-id
+                       :world-manager world-manager
+                       :key key})))))
+
+  (graph:register-key-loader "light-type"
+    (prefix-loader "light-type:"
+      (fn [rest key]
+        (local parts (split-key-parts rest))
+        (when (>= (length parts) 2)
+          (local world-id (. parts 1))
+          (local type-key (. parts 2))
+          (when world-manager
+            (LightTypeNode {:world-id world-id
+                            :world-manager world-manager
+                            :type-key type-key
+                            :key key}))))))
+
+  (graph:register-key-loader "light"
+    (prefix-loader "light:"
+      (fn [rest key]
+        (local parts (split-key-parts rest))
+        (when (>= (length parts) 3)
+          (local world-id (. parts 1))
+          (local type-key (. parts 2))
+          (local light-id (. parts 3))
+          (when world-manager
+            (LightNode {:world-id world-id
+                        :world-manager world-manager
+                        :type-key type-key
+                        :light-id light-id
+                        :key key}))))))
 
   (graph:register-key-loader "scene-panel"
     (prefix-loader "scene-panel:"

@@ -3,6 +3,7 @@
 (local Signal (require :signal))
 (local Graph (require :graph/init))
 (local GraphKeyLoaders (require :graph/key-loaders))
+(local LightSystemModule (require :light-system))
 (local TestSupport (require :tests/test-support))
 
 (local tests [])
@@ -26,7 +27,7 @@
 (fn make-world-entry [opts]
   (local options (or opts {}))
   (local runtime (or options.runtime nil))
-  (local state (or options.state {:scene {:panels [] :terrains []}
+  (local state (or options.state {:scene {:panels [] :terrains [] :lights (LightSystemModule.default-state)}
                                   :hud {:panels []}}))
   {:id (or options.id "test-world")
    :name (or options.name "Test World")
@@ -94,19 +95,50 @@
                                 :size chunk-samples
                                 :heights heights}] )})
 
+(fn make-light-state [opts]
+  (local options (or opts {}))
+  (local state (LightSystemModule.default-state))
+  (when (not (= options.ambient nil))
+    (set state.ambient options.ambient))
+  (when (not (= options.directional nil))
+    (set state.directional options.directional))
+  (when (not (= options.point nil))
+    (set state.point options.point))
+  (when (not (= options.spot nil))
+    (set state.spot options.spot))
+  state)
+
+(fn make-light-record [type-key opts]
+  (local options (or opts {}))
+  (LightSystemModule.default-record-for-type type-key
+                                             {:id options.id
+                                              :index options.index}))
+
 (fn make-scene-runtime [opts]
   (local options (or opts {}))
+  (var lights (or options.lights (LightSystemModule.default-state)))
   (local scene {:capture-state (fn [_self]
                                  {:panels (or options.panels [])
-                                  :terrains (or options.terrains [])})
+                                  :terrains (or options.terrains [])
+                                  :lights lights})
                 :build-default (fn [_self payload]
                                  (when options.on-build-default
                                    (options.on-build-default payload))
                                  true)
                  :restore-state (fn [_self payload]
+                                  (assert (and payload payload.lights)
+                                          "test scene runtime restore-state requires lights")
+                                  (set lights payload.lights)
                                   (when options.on-restore-state
                                     (options.on-restore-state payload))
                                   true)
+                :set-light-state (fn [_self value]
+                                   (set lights value)
+                                   (when options.on-set-light-state
+                                     (options.on-set-light-state value))
+                                   true)
+                :get-light-state (fn [_self]
+                                   lights)
                 :replace-terrain-record (fn [_self terrain-id record]
                                           (when options.on-replace-terrain-record
                                             (options.on-replace-terrain-record terrain-id record))
@@ -201,6 +233,21 @@
   (assert HeightfieldTerrainNode "heightfield-terrain module should export HeightfieldTerrainNode")
   (assert (= (type HeightfieldTerrainNode) "function") "HeightfieldTerrainNode should be a function"))
 
+(fn test-lights-node-module-exports []
+  (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+  (assert LightsNode "lights module should export LightsNode")
+  (assert (= (type LightsNode) "function") "LightsNode should be a function"))
+
+(fn test-light-type-node-module-exports []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (assert LightTypeNode "light-type module should export LightTypeNode")
+  (assert (= (type LightTypeNode) "function") "LightTypeNode should be a function"))
+
+(fn test-light-node-module-exports []
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (assert LightNode "light module should export LightNode")
+  (assert (= (type LightNode) "function") "LightNode should be a function"))
+
 (fn test-world-data-resolve-active-scene-uses-active-world-id []
   (local WorldData (require :graph/world-data))
   (local runtime (make-scene-runtime {:terrains []}))
@@ -269,6 +316,21 @@
   (local (ok err) (pcall (fn [] (HeightfieldTerrainNode {}))))
   (assert (not ok) "HeightfieldTerrainNode should require world-id"))
 
+(fn test-lights-node-requires-world-id []
+  (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+  (local (ok err) (pcall (fn [] (LightsNode {}))))
+  (assert (not ok) "LightsNode should require world-id"))
+
+(fn test-light-type-node-requires-world-id []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local (ok err) (pcall (fn [] (LightTypeNode {}))))
+  (assert (not ok) "LightTypeNode should require world-id"))
+
+(fn test-light-node-requires-world-id []
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local (ok err) (pcall (fn [] (LightNode {}))))
+  (assert (not ok) "LightNode should require world-id"))
+
 (fn test-worlds-node-has-correct-key []
   (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
   (local mock-manager {:changed (Signal) :list-tabs (fn [] []) :get-world-entry (fn [_self _id] nil)})
@@ -306,6 +368,14 @@
                              :world-manager (make-world-manager {:id "test-world-123"})}))
   (assert (= node.key "terrains:test-world-123") "TerrainsNode key should include world-id")
   (assert (= node.label "terrains") "TerrainsNode label should be 'terrains'")
+  (node:drop))
+
+(fn test-lights-node-has-correct-key []
+  (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+  (local node (LightsNode {:world-id "test-world-123"
+                           :world-manager (make-world-manager {:id "test-world-123"})}))
+  (assert (= node.key "lights:test-world-123") "LightsNode key should include world-id")
+  (assert (= node.label "lights") "LightsNode label should be 'lights'")
   (node:drop))
 
 (fn test-scene-panel-node-has-correct-key []
@@ -404,13 +474,15 @@
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (assert node.emit-categories "WorldNode should have emit-categories method")
   (local categories (node:emit-categories))
-  (assert (= (length categories) 3) "WorldNode should have 3 categories")
+  (assert (= (length categories) 4) "WorldNode should have 4 categories")
   (local cat1 (. categories 1))
   (local cat2 (. categories 2))
   (local cat3 (. categories 3))
+  (local cat4 (. categories 4))
   (assert (= cat1.key "scene-panels") "first category should be scene-panels")
   (assert (= cat2.key "hud-panels") "second category should be hud-panels")
   (assert (= cat3.key "terrains") "third category should be terrains")
+  (assert (= cat4.key "lights") "fourth category should be lights")
   (node:drop))
 
 (fn test-world-node-add-category-node []
@@ -465,6 +537,21 @@
   (assert node.emit-items "TerrainsNode should have emit-items method")
   (local items (node:emit-items))
   (assert (= (type items) :table) "emit-items should return a table")
+  (node:drop))
+
+(fn test-lights-node-has-emit-items []
+  (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state)}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightsNode {:world-id "test-world"
+                           :world-manager (make-world-manager {:id "test-world" :entry entry})}))
+  (local items (node:emit-items))
+  (assert (= (length items) 4) "lights node should expose four light types")
+  (assert (= (. (. items 1) 1 :type-key) "ambient") "first light type should be ambient")
+  (assert (= (. (. items 2) 1 :type-key) "directional") "second light type should be directional")
   (node:drop))
 
 (fn test-world-node-has-actions []
@@ -1183,6 +1270,273 @@
   (assert (= editor.key "terrain-editor:test-world:terrain-a") "heightfield terrain editor key should be stable")
   (graph:drop))
 
+(fn test-light-type-node-add-light-updates-world-state []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point []})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightTypeNode {:world-id "test-world"
+                              :world-manager (make-world-manager {:id "test-world" :entry entry})
+                              :type-key "point"}))
+  (local added (node:add-light))
+  (assert added "adding a point light should return the created record")
+  (assert (= (length state.scene.lights.point) 1) "adding a point light should append to world state")
+  (assert (= (. added :id) "point-1") "point light ids should be stable")
+  (node:drop))
+
+(fn test-light-type-node-add-light-uses-defaults-not-existing-light []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local first-point (make-light-record "point" {:id "point-1"}))
+  (set first-point.linear 0.77)
+  (set first-point.quadratic 0.66)
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point [first-point]})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightTypeNode {:world-id "test-world"
+                              :world-manager (make-world-manager {:id "test-world" :entry entry})
+                              :type-key "point"}))
+  (local added (node:add-light))
+  (assert added "adding a second point light should return the created record")
+  (assert (= added.linear 0.09) "new point lights should use defaults instead of cloning existing siblings")
+  (assert (= added.quadratic 0.032) "new point lights should keep canonical default attenuation")
+  (node:drop))
+
+(fn test-light-type-node-blocks-addition-past-limit []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local point-lights [])
+  (for [idx 1 (LightSystemModule.max-count-for-type "point")]
+    (table.insert point-lights (make-light-record "point" {:id (.. "point-" idx) :index idx})))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point point-lights})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightTypeNode {:world-id "test-world"
+                              :world-manager (make-world-manager {:id "test-world" :entry entry})
+                              :type-key "point"}))
+  (assert (not (node:can-add-light?)) "point light type node should stop additions at max count")
+  (local (ok err) (pcall (fn [] (node:add-light))))
+  (assert (not ok) "point light type node should fail loudly past the limit")
+  (assert (string.find err "Reached max point lights")
+          "point light type node should report the count limit")
+  (assert (> (length (node:limit-error-text)) 0) "point light type node should expose a limit error")
+  (node:drop))
+
+(fn test-ambient-light-type-node-disables-addition []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state)}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightTypeNode {:world-id "test-world"
+                              :world-manager (make-world-manager {:id "test-world" :entry entry})
+                              :type-key "ambient"}))
+  (assert (not (node:show-add-controls?)) "ambient light type node should not behave like an addable collection")
+  (assert (= (node:limit-error-text) "") "ambient light type node should not expose a fake max-count error")
+  (local (ok err) (pcall (fn [] (node:add-light))))
+  (assert (not ok) "ambient light type node should fail loudly when add is requested directly")
+  (assert (string.find err "cannot be added")
+          "ambient light type node should explain the singleton constraint")
+  (node:drop))
+
+(fn test-world-data-light-reads-fail-loudly-when-lights-missing []
+  (local WorldData (require :graph/world-data))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights nil}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local (ok err)
+    (pcall (fn []
+             (WorldData.list-light-types manager "test-world"))))
+  (assert (not ok) "light reads should fail loudly when persisted scene lights are missing")
+  (assert (string.find (tostring err) "requires scene.lights" 1 true)
+          "missing scene lights should be reported directly")
+  (assert (= state.scene.lights nil)
+          "light reads should not materialize missing scene lights"))
+
+(fn test-light-node-updates-world-state-and-active-scene []
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
+                :hud {:panels []}})
+  (var synced-lights nil)
+  (local runtime (make-scene-runtime {:lights state.scene.lights
+                                      :on-set-light-state (fn [value]
+                                                            (set synced-lights value))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state state
+                                  :runtime runtime
+                                  :active? true}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry entry
+                                      :active-world-id "test-world"}))
+  (local node (LightNode {:world-id "test-world"
+                          :world-manager manager
+                          :type-key "point"
+                          :light-id "point-1"}))
+  (node:apply-values {:enabled true
+                      :position [1 2 3]
+                      :ambient [0.1 0.1 0.1]
+                      :diffuse [0.9 0.8 0.7]
+                      :specular [1 1 1]
+                      :specular-power 16
+                      :constant 1.0
+                      :linear 0.2
+                      :quadratic 0.05})
+  (assert (= (. (. state.scene.lights.point 1) :linear) 0.2) "light updates should persist to world state")
+  (assert synced-lights "light updates should sync the active scene")
+  (assert (= (. (. (. synced-lights :point) 1) :position 1) 1) "synced light state should include updated position")
+  (node:drop))
+
+(fn test-ambient-light-node-updates-world-state-and-active-scene []
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state)}
+                :hud {:panels []}})
+  (var synced-lights nil)
+  (local runtime (make-scene-runtime {:lights state.scene.lights
+                                      :on-set-light-state (fn [value]
+                                                            (set synced-lights value))}))
+  (local entry (make-world-entry {:id "test-world"
+                                  :state state
+                                  :runtime runtime
+                                  :active? true}))
+  (local manager (make-world-manager {:id "test-world"
+                                      :entry entry
+                                      :active-world-id "test-world"}))
+  (local node (LightNode {:world-id "test-world"
+                          :world-manager manager
+                          :type-key "ambient"
+                          :light-id "ambient"}))
+  (node:apply-values {:enabled true
+                      :color [0.25 0.5 0.75]})
+  (assert (= (. (. state.scene.lights.ambient.color) 1) 0.25)
+          "ambient light updates should persist to world state")
+  (assert synced-lights "ambient light updates should sync the active scene")
+  (assert (= (. (. synced-lights.ambient.color) 3) 0.75)
+          "synced ambient light state should include updated color")
+  (node:drop))
+
+(fn test-world-data-light-updates-validate-through-normalization []
+  (local WorldData (require :graph/world-data))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local (ok err)
+    (pcall (fn []
+             (WorldData.update-light-record manager "test-world" "point" "point-1"
+               (fn [record]
+                 (set record.linear "bad"))))))
+  (assert (not ok) "world-data light updates should fail loudly for invalid light values")
+  (assert (string.find err "linear attenuation")
+          "invalid light updates should report the normalization error"))
+
+(fn test-world-data-light-update-fails-loudly-when-missing []
+  (local WorldData (require :graph/world-data))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local (ok err)
+    (pcall (fn []
+             (WorldData.update-light-record manager "test-world" "point" "point-9"
+               (fn [_record] nil)))))
+  (assert (not ok) "world-data should fail loudly when updating a missing light")
+  (assert (string.find (tostring err) "Cannot update missing point light point-9" 1 true)
+          "missing light update should identify the absent light"))
+
+(fn test-light-node-removes-world-state-entry []
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})
+                                                           (make-light-record "point" {:id "point-2" :index 2})]})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightNode {:world-id "test-world"
+                          :world-manager (make-world-manager {:id "test-world" :entry entry})
+                          :type-key "point"
+                          :light-id "point-1"}))
+  (assert (node:remove-light) "light removal should succeed")
+  (assert (= (length state.scene.lights.point) 1) "light removal should mutate world state")
+  (assert (= (. (. state.scene.lights.point 1) :id) "point-2") "light removal should target the requested light")
+  (node:drop))
+
+(fn test-world-data-light-remove-fails-loudly-when-missing []
+  (local WorldData (require :graph/world-data))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local (ok err)
+    (pcall (fn []
+             (WorldData.remove-light manager "test-world" "point" "point-9"))))
+  (assert (not ok) "world-data should fail loudly when removing a missing light")
+  (assert (string.find (tostring err) "Cannot remove missing point light point-9" 1 true)
+          "missing light removal should identify the absent light"))
+
+(fn test-world-data-light-mutations-fail-loudly-when-world-missing []
+  (local WorldData (require :graph/world-data))
+  (local manager {:changed (Signal)
+                  :list-tabs (fn [_self] [])
+                  :get-world-entry (fn [_self _world-id] nil)
+                  :active-world (fn [_self] nil)
+                  :active-world-id (fn [_self] nil)})
+  (local (ok-add err-add)
+    (pcall (fn []
+             (WorldData.add-light manager "missing-world" "point"))))
+  (assert (not ok-add) "add-light should fail loudly when the world is missing")
+  (assert (string.find (tostring err-add) "missing world missing-world" 1 true)
+          "add-light should identify the missing world")
+  (local (ok-update err-update)
+    (pcall
+      (fn []
+        (WorldData.update-light-record manager "missing-world" "point" "point-1"
+          (fn [_record] nil)))))
+  (assert (not ok-update) "update-light-record should fail loudly when the world is missing")
+  (assert (string.find (tostring err-update) "missing world missing-world" 1 true)
+          "update-light-record should identify the missing world")
+  (local (ok-remove err-remove)
+    (pcall (fn []
+             (WorldData.remove-light manager "missing-world" "point" "point-1"))))
+  (assert (not ok-remove) "remove-light should fail loudly when the world is missing")
+  (assert (string.find (tostring err-remove) "missing world missing-world" 1 true)
+          "remove-light should identify the missing world"))
+
+(fn test-ambient-light-node-is-not-removable []
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state)}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightNode {:world-id "test-world"
+                          :world-manager (make-world-manager {:id "test-world" :entry entry})
+                          :type-key "ambient"
+                          :light-id "ambient"}))
+  (assert (= (length node.actions) 0) "ambient light node should not expose a remove action")
+  (assert (not (node:removable?)) "ambient light node should report itself as non-removable")
+  (local (ok err) (pcall (fn [] (node:remove-light))))
+  (assert (not ok) "ambient light removal should fail loudly")
+  (assert (string.find err "cannot be removed") "ambient removal error should explain the constraint")
+  (node:drop))
+
 (fn test-terrain-node-open-tool-adds-edge []
   (local {:TerrainNode TerrainNode} (require :graph/nodes/terrain))
   (local graph (Graph {:with-start false}))
@@ -1747,11 +2101,136 @@
       (result:drop)
       (graph:drop))))
 
+(fn test-graph-key-loaders-loads-lights-nodes []
+  (with-temp-dir
+    (fn [dir]
+      (local graph (Graph {:with-start false}))
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels []
+                                                      :terrains []
+                                                      :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}
+                                              :hud {:panels []}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
+      (local lights-node (graph:load-by-key "lights:test-world"))
+      (local type-node (graph:load-by-key "light-type:test-world:point"))
+      (local light-node (graph:load-by-key "light:test-world:point:point-1"))
+      (assert lights-node "lights loader should create node")
+      (assert type-node "light type loader should create node")
+      (assert light-node "light loader should create node")
+      (lights-node:drop)
+      (type-node:drop)
+      (light-node:drop)
+      (graph:drop))))
+
+(fn test-light-node-view-builds []
+  (local LightNodeView (require :graph/view/views/light))
+  (local BuildContext (require :build-context))
+  (local Intersectables (require :intersectables))
+  (local Clickables (require :clickables))
+  (local Hoverables (require :hoverables))
+  (local intersectables (or app.intersectables (Intersectables)))
+  (local clickables (or app.clickables (Clickables {:intersectables intersectables})))
+  (local hoverables (or app.hoverables (Hoverables {:intersectables intersectables})))
+  (local ctx (BuildContext {:clickables clickables
+                            :hoverables hoverables}))
+  (set ctx.icons {:get (fn [_self _name] 4242)
+                  :resolve (fn [_self _name]
+                             {:type :font
+                              :codepoint 4242
+                              :font {:metadata {:metrics {:ascender 1 :descender -1}
+                                                :atlas {:width 1 :height 1}}
+                                     :glyph-map {65533 {:advance 1}
+                                                 4242 {:advance 1}}}})})
+  (local mock-node {:type-key "point"
+                    :light-id "point-1"
+                    :get-record (fn []
+                                  (make-light-record "point" {:id "point-1"}))
+                    :changed (Signal)
+                    :apply-values (fn [_validated] true)
+                    :remove-light (fn [] true)})
+  (local builder (LightNodeView mock-node))
+  (local view (builder ctx))
+  (assert view "LightNodeView should build")
+  (assert view.layout "LightNodeView should expose layout")
+  (view:drop))
+
+(fn test-light-type-node-view-hides-ambient-add-controls []
+  (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
+  (local LightTypeNodeView (require :graph/view/views/light-type))
+  (local BuildContext (require :build-context))
+  (local Intersectables (require :intersectables))
+  (local Clickables (require :clickables))
+  (local Hoverables (require :hoverables))
+  (local intersectables (or app.intersectables (Intersectables)))
+  (local clickables (or app.clickables (Clickables {:intersectables intersectables})))
+  (local hoverables (or app.hoverables (Hoverables {:intersectables intersectables})))
+  (local ctx (BuildContext {:clickables clickables
+                            :hoverables hoverables}))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (make-light-state)}
+                :hud {:panels []}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local node (LightTypeNode {:world-id "test-world"
+                              :world-manager (make-world-manager {:id "test-world" :entry entry})
+                              :type-key "ambient"}))
+  (local builder (LightTypeNodeView node))
+  (local view (builder ctx))
+  (assert (not view.add-button) "ambient light type view should not render an add button")
+  (assert (not view.error-label) "ambient light type view should not render a fake limit error")
+  (view:drop)
+  (node:drop))
+
+(fn test-light-node-view-remove-fails-loudly-without-dropping-node []
+  (local LightNodeView (require :graph/view/views/light))
+  (local BuildContext (require :build-context))
+  (local Intersectables (require :intersectables))
+  (local Clickables (require :clickables))
+  (local Hoverables (require :hoverables))
+  (local intersectables (or app.intersectables (Intersectables)))
+  (local clickables (or app.clickables (Clickables {:intersectables intersectables})))
+  (local hoverables (or app.hoverables (Hoverables {:intersectables intersectables})))
+  (local ctx (BuildContext {:clickables clickables
+                            :hoverables hoverables}))
+  (set ctx.icons {:get (fn [_self _name] 4242)
+                  :resolve (fn [_self _name]
+                             {:type :font
+                              :codepoint 4242
+                              :font {:metadata {:metrics {:ascender 1 :descender -1}
+                                                :atlas {:width 1 :height 1}}
+                                     :glyph-map {65533 {:advance 1}
+                                                 4242 {:advance 1}}}})})
+  (var removed nil)
+  (local mock-node {:type-key "point"
+                    :light-id "point-1"
+                    :get-record (fn []
+                                  (make-light-record "point" {:id "point-1"}))
+                    :changed (Signal)
+                    :apply-values (fn [_validated] true)
+                    :remove-light (fn [] false)
+                    :removable? (fn [] true)
+                    :graph {:remove-nodes (fn [_self nodes]
+                                            (set removed nodes))}})
+  (local builder (LightNodeView mock-node))
+  (local view (builder ctx))
+  (local remove-button (. (. view :extra-buttons) :remove))
+  (local (ok err)
+    (pcall (fn []
+             (remove-button:on-click {}))))
+  (assert (not ok) "light node view remove should fail loudly when deletion fails")
+  (assert (string.find (tostring err) "Failed to remove light point-1" 1 true)
+          "light node view remove should explain the failure")
+  (assert (= removed nil) "light node view remove should not drop the node when deletion fails")
+  (view:drop))
+
 (table.insert tests {:name "worlds node module exports" :fn test-worlds-node-module-exports})
 (table.insert tests {:name "world node module exports" :fn test-world-node-module-exports})
 (table.insert tests {:name "scene panels node module exports" :fn test-scene-panels-node-module-exports})
 (table.insert tests {:name "hud panels node module exports" :fn test-hud-panels-node-module-exports})
 (table.insert tests {:name "terrains node module exports" :fn test-terrains-node-module-exports})
+(table.insert tests {:name "lights node module exports" :fn test-lights-node-module-exports})
+(table.insert tests {:name "light type node module exports" :fn test-light-type-node-module-exports})
+(table.insert tests {:name "light node module exports" :fn test-light-node-module-exports})
 (table.insert tests {:name "scene panel node module exports" :fn test-scene-panel-node-module-exports})
 (table.insert tests {:name "hud panel node module exports" :fn test-hud-panel-node-module-exports})
 (table.insert tests {:name "terrain node module exports" :fn test-terrain-node-module-exports})
@@ -1765,6 +2244,9 @@
 (table.insert tests {:name "scene panels node requires world-id" :fn test-scene-panels-node-requires-world-id})
 (table.insert tests {:name "hud panels node requires world-id" :fn test-hud-panels-node-requires-world-id})
 (table.insert tests {:name "terrains node requires world-id" :fn test-terrains-node-requires-world-id})
+(table.insert tests {:name "lights node requires world-id" :fn test-lights-node-requires-world-id})
+(table.insert tests {:name "light type node requires world-id" :fn test-light-type-node-requires-world-id})
+(table.insert tests {:name "light node requires world-id" :fn test-light-node-requires-world-id})
 (table.insert tests {:name "scene panel node requires world-id" :fn test-scene-panel-node-requires-world-id})
 (table.insert tests {:name "hud panel node requires world-id" :fn test-hud-panel-node-requires-world-id})
 (table.insert tests {:name "terrain node requires world-id" :fn test-terrain-node-requires-world-id})
@@ -1776,6 +2258,7 @@
 (table.insert tests {:name "scene panels node has correct key" :fn test-scene-panels-node-has-correct-key})
 (table.insert tests {:name "hud panels node has correct key" :fn test-hud-panels-node-has-correct-key})
 (table.insert tests {:name "terrains node has correct key" :fn test-terrains-node-has-correct-key})
+(table.insert tests {:name "lights node has correct key" :fn test-lights-node-has-correct-key})
 (table.insert tests {:name "scene panel node has correct key" :fn test-scene-panel-node-has-correct-key})
 (table.insert tests {:name "hud panel node has correct key" :fn test-hud-panel-node-has-correct-key})
 (table.insert tests {:name "terrain node has correct key" :fn test-terrain-node-has-correct-key})
@@ -1790,6 +2273,7 @@
 (table.insert tests {:name "scene panels node has emit items" :fn test-scene-panels-node-has-emit-items})
 (table.insert tests {:name "hud panels node has emit items" :fn test-hud-panels-node-has-emit-items})
 (table.insert tests {:name "terrains node has emit items" :fn test-terrains-node-has-emit-items})
+(table.insert tests {:name "lights node has emit items" :fn test-lights-node-has-emit-items})
 (table.insert tests {:name "world node has actions" :fn test-world-node-has-actions})
 (table.insert tests {:name "scene panel node has remove action" :fn test-scene-panel-node-has-remove-action})
 (table.insert tests {:name "hud panel node has remove action" :fn test-hud-panel-node-has-remove-action})
@@ -1830,6 +2314,19 @@
 (table.insert tests {:name "terrains node adds active scene terrain in place" :fn test-terrains-node-adds-active-scene-terrain-in-place})
 (table.insert tests {:name "terrains node add terrain errors on unsupported kind" :fn test-terrains-node-add-terrain-errors-on-unsupported-kind})
 (table.insert tests {:name "terrains node adds new terrain node to graph when present" :fn test-terrains-node-adds-new-terrain-node-to-graph-when-present})
+(table.insert tests {:name "light type node add light updates world state" :fn test-light-type-node-add-light-updates-world-state})
+(table.insert tests {:name "light type node add light uses defaults not existing light" :fn test-light-type-node-add-light-uses-defaults-not-existing-light})
+(table.insert tests {:name "light type node blocks addition past limit" :fn test-light-type-node-blocks-addition-past-limit})
+(table.insert tests {:name "ambient light type node disables addition" :fn test-ambient-light-type-node-disables-addition})
+(table.insert tests {:name "world-data light reads fail loudly when lights missing" :fn test-world-data-light-reads-fail-loudly-when-lights-missing})
+(table.insert tests {:name "light node updates world state and active scene" :fn test-light-node-updates-world-state-and-active-scene})
+(table.insert tests {:name "ambient light node updates world state and active scene" :fn test-ambient-light-node-updates-world-state-and-active-scene})
+(table.insert tests {:name "world-data light updates validate through normalization" :fn test-world-data-light-updates-validate-through-normalization})
+(table.insert tests {:name "world-data light update fails loudly when missing" :fn test-world-data-light-update-fails-loudly-when-missing})
+(table.insert tests {:name "light node removes world state entry" :fn test-light-node-removes-world-state-entry})
+(table.insert tests {:name "world-data light remove fails loudly when missing" :fn test-world-data-light-remove-fails-loudly-when-missing})
+(table.insert tests {:name "world-data light mutations fail loudly when world missing" :fn test-world-data-light-mutations-fail-loudly-when-world-missing})
+(table.insert tests {:name "ambient light node is not removable" :fn test-ambient-light-node-is-not-removable})
 (table.insert tests {:name "flat terrain node remove updates world state" :fn test-flat-terrain-node-remove-updates-world-state})
 (table.insert tests {:name "flat terrain node removes active scene in place" :fn test-flat-terrain-node-removes-active-scene-in-place})
 (table.insert tests {:name "flat terrain node errors when active runtime remove fails" :fn test-flat-terrain-node-errors-when-active-runtime-remove-fails})
@@ -1850,6 +2347,7 @@
 (table.insert tests {:name "graph key loaders loads scene panels node" :fn test-graph-key-loaders-loads-scene-panels-node})
 (table.insert tests {:name "graph key loaders loads hud panels node" :fn test-graph-key-loaders-loads-hud-panels-node})
 (table.insert tests {:name "graph key loaders loads terrains node" :fn test-graph-key-loaders-loads-terrains-node})
+(table.insert tests {:name "graph key loaders loads lights nodes" :fn test-graph-key-loaders-loads-lights-nodes})
 (table.insert tests {:name "graph key loaders loads scene panel node" :fn test-graph-key-loaders-loads-scene-panel-node})
 (table.insert tests {:name "graph key loaders loads hud panel node" :fn test-graph-key-loaders-loads-hud-panel-node})
 (table.insert tests {:name "graph key loaders loads terrain node" :fn test-graph-key-loaders-loads-terrain-node})
@@ -1901,6 +2399,205 @@
 (fn text-entity-value [entity]
   (codepoints->text (entity:get-codepoints)))
 
+(fn approx= [left right]
+  (< (math.abs (- left right)) 1e-6))
+
+(fn make-light-node-view-harness [opts]
+  (local options (or opts {}))
+  (local {:LightNode LightNode} (require :graph/nodes/light))
+  (local LightNodeView (require :graph/view/views/light))
+  (local ctx (make-build-ctx))
+  (local state {:scene {:panels []
+                        :terrains []
+                        :lights (or options.lights (make-light-state))}
+                :hud {:panels []}})
+  (var saved-lights nil)
+  (var synced-lights nil)
+  (local runtime (make-scene-runtime {:lights state.scene.lights
+                                      :on-set-light-state (fn [value]
+                                                            (set synced-lights value))}))
+  (local entry (make-world-entry {:id (or options.world-id "test-world")
+                                  :state state
+                                  :runtime runtime
+                                  :active? true
+                                  :on-save (fn [saved-state]
+                                             (set saved-lights
+                                                  (and saved-state
+                                                       saved-state.scene
+                                                       saved-state.scene.lights)))}))
+  (local manager (make-world-manager {:id entry.id
+                                      :entry entry
+                                      :active-world-id entry.id}))
+  (local node (LightNode {:world-id entry.id
+                          :world-manager manager
+                          :type-key options.type-key
+                          :light-id options.light-id}))
+  (local builder (LightNodeView node))
+  (local view (builder ctx))
+  {:state state
+   :view view
+   :node node
+   :synced-lights (fn [_self] synced-lights)
+   :saved-lights (fn [_self] saved-lights)
+   :drop (fn [self]
+           (when self.view
+             (self.view:drop))
+           (when self.node
+             (self.node:drop)))})
+
+(fn test-light-node-view-applies-ambient-changes []
+  (local harness (make-light-node-view-harness {:type-key "ambient"
+                                                :light-id "ambient"
+                                                :lights (make-light-state)}))
+  (local state harness.state)
+  (local view harness.view)
+  (view.fields.color:set-text "0.25, 0.5, 0.75")
+  (assert view.apply-button.enabled? "ambient apply should enable when the draft is dirty")
+  (view.apply-button:on-click {})
+  (assert (= (. (. state.scene.lights.ambient.color) 1) 0.25)
+          "ambient view apply should persist x color to world state")
+  (assert (= (. (. state.scene.lights.ambient.color) 2) 0.5)
+          "ambient view apply should persist y color to world state")
+  (assert (= (. (. state.scene.lights.ambient.color) 3) 0.75)
+          "ambient view apply should persist z color to world state")
+  (local synced-lights (harness:synced-lights))
+  (assert synced-lights "ambient view apply should sync the active scene")
+  (assert (= (. (. synced-lights.ambient.color) 2) 0.5)
+          "ambient view apply should sync updated ambient color")
+  (local saved-lights (harness:saved-lights))
+  (assert saved-lights "ambient view apply should persist world state")
+  (assert (= (. (. saved-lights.ambient.color) 3) 0.75)
+          "ambient view apply should save the updated ambient color")
+  (assert (= (text-entity-value view.status-label) "Applied")
+          "ambient view apply should show applied status")
+  (harness:drop))
+
+(fn test-light-node-view-rounds-serialized-values []
+  (local harness (make-light-node-view-harness {:type-key "ambient"
+                                                :light-id "ambient"
+                                                :lights (make-light-state)}))
+  (local state harness.state)
+  (local view harness.view)
+  (view.fields.color:set-text "0.3, 0, 0")
+  (view.apply-button:on-click {})
+  (assert (= (. (. state.scene.lights.ambient.color) 1) 0.3)
+          "ambient serialized light state should keep clean rounded values")
+  (assert (= (. (view:get-draft) :color) "0.3, 0, 0")
+          "ambient editor draft should stay human-readable after apply")
+  (harness:drop))
+
+(fn test-light-node-view-applies-directional-changes []
+  (local harness
+    (make-light-node-view-harness
+      {:type-key "directional"
+       :light-id "directional-1"
+       :lights (make-light-state {:directional [(make-light-record "directional" {:id "directional-1"})]})}))
+  (local state harness.state)
+  (local view harness.view)
+  (view.fields.direction:set-text "0, -1, 0")
+  (view.fields.ambient:set-text "0.1, 0.2, 0.3")
+  (view.fields.diffuse:set-text "0.9, 0.8, 0.7")
+  (view.fields.specular:set-text "1.0, 0.75, 0.5")
+  (view.fields.specular-power:set-text "16")
+  (assert view.apply-button.enabled? "directional apply should enable when the draft is dirty")
+  (view.apply-button:on-click {})
+  (assert (= (. (. (. state.scene.lights.directional 1) :direction) 2) -1.0)
+          "directional view apply should persist direction to world state")
+  (assert (approx= (. (. (. state.scene.lights.directional 1) :ambient) 2) 0.2)
+          "directional view apply should persist ambient color to world state")
+  (assert (= (. (. (. state.scene.lights.directional 1) :specular) 3) 0.5)
+          "directional view apply should persist specular color to world state")
+  (assert (= (. (. state.scene.lights.directional 1) :specular-power) 16)
+          "directional view apply should persist specular power to world state")
+  (local synced-lights (harness:synced-lights))
+  (assert synced-lights "directional view apply should sync the active scene")
+  (assert (approx= (. (. (. synced-lights :directional) 1) :diffuse 1) 0.9)
+          "directional view apply should sync diffuse color")
+  (local saved-lights (harness:saved-lights))
+  (assert saved-lights "directional view apply should persist world state")
+  (assert (approx= (. (. (. saved-lights :directional) 1) :ambient 3) 0.3)
+          "directional view apply should save ambient color")
+  (assert (= (text-entity-value view.status-label) "Applied")
+          "directional view apply should show applied status")
+  (harness:drop))
+
+(fn test-light-node-view-applies-point-changes []
+  (local harness
+    (make-light-node-view-harness
+      {:type-key "point"
+       :light-id "point-1"
+       :lights (make-light-state {:point [(make-light-record "point" {:id "point-1"})]})}))
+  (local state harness.state)
+  (local view harness.view)
+  (view.fields.position:set-text "1, 2, 3")
+  (view.fields.ambient:set-text "0.1, 0.1, 0.1")
+  (view.fields.diffuse:set-text "0.9, 0.8, 0.7")
+  (view.fields.specular:set-text "1.0, 1.0, 0.9")
+  (view.fields.specular-power:set-text "18")
+  (view.fields.constant:set-text "1.2")
+  (view.fields.linear:set-text "0.3")
+  (view.fields.quadratic:set-text "0.07")
+  (assert view.apply-button.enabled? "point apply should enable when the draft is dirty")
+  (view.apply-button:on-click {})
+  (assert (= (. (. (. state.scene.lights.point 1) :position) 3) 3.0)
+          "point view apply should persist position to world state")
+  (assert (= (. (. state.scene.lights.point 1) :linear) 0.3)
+          "point view apply should persist linear attenuation to world state")
+  (assert (= (. (. state.scene.lights.point 1) :quadratic) 0.07)
+          "point view apply should persist quadratic attenuation to world state")
+  (local synced-lights (harness:synced-lights))
+  (assert synced-lights "point view apply should sync the active scene")
+  (assert (= (. (. (. synced-lights :point) 1) :constant) 1.2)
+          "point view apply should sync constant attenuation")
+  (local saved-lights (harness:saved-lights))
+  (assert saved-lights "point view apply should persist world state")
+  (assert (approx= (. (. (. saved-lights :point) 1) :diffuse 2) 0.8)
+          "point view apply should save diffuse color")
+  (assert (= (text-entity-value view.status-label) "Applied")
+          "point view apply should show applied status")
+  (harness:drop))
+
+(fn test-light-node-view-applies-spot-changes []
+  (local harness
+    (make-light-node-view-harness
+      {:type-key "spot"
+       :light-id "spot-1"
+       :lights (make-light-state {:spot [(make-light-record "spot" {:id "spot-1"})]})}))
+  (local state harness.state)
+  (local view harness.view)
+  (view.fields.position:set-text "4, 5, 6")
+  (view.fields.direction:set-text "0, -1, 0")
+  (view.fields.ambient:set-text "0.2, 0.1, 0.0")
+  (view.fields.diffuse:set-text "0.8, 0.7, 0.6")
+  (view.fields.specular:set-text "1.0, 0.9, 0.8")
+  (view.fields.specular-power:set-text "22")
+  (view.fields.cutoff:set-text "0.9")
+  (view.fields.outer-cutoff:set-text "0.8")
+  (view.fields.constant:set-text "1.1")
+  (view.fields.linear:set-text "0.2")
+  (view.fields.quadratic:set-text "0.03")
+  (assert view.apply-button.enabled? "spot apply should enable when the draft is dirty")
+  (view.apply-button:on-click {})
+  (assert (= (. (. (. state.scene.lights.spot 1) :position) 1) 4.0)
+          "spot view apply should persist position to world state")
+  (assert (= (. (. (. state.scene.lights.spot 1) :direction) 2) -1.0)
+          "spot view apply should persist direction to world state")
+  (assert (= (. (. state.scene.lights.spot 1) :cutoff) 0.9)
+          "spot view apply should persist cutoff to world state")
+  (assert (= (. (. state.scene.lights.spot 1) :outer-cutoff) 0.8)
+          "spot view apply should persist outer cutoff to world state")
+  (local synced-lights (harness:synced-lights))
+  (assert synced-lights "spot view apply should sync the active scene")
+  (assert (= (. (. (. synced-lights :spot) 1) :linear) 0.2)
+          "spot view apply should sync linear attenuation")
+  (local saved-lights (harness:saved-lights))
+  (assert saved-lights "spot view apply should persist world state")
+  (assert (= (. (. (. saved-lights :spot) 1) :specular-power) 22)
+          "spot view apply should save specular power")
+  (assert (= (text-entity-value view.status-label) "Applied")
+          "spot view apply should show applied status")
+  (harness:drop))
+
 (fn test-world-node-view-builds []
   (local WorldNodeView (require :graph/view/views/world))
   (local ctx (make-build-ctx))
@@ -1924,9 +2621,10 @@
   (local view (builder ctx))
   (view:set-categories [{:key "scene-panels" :label "scene panels"}
                        {:key "hud-panels" :label "hud panels"}
-                       {:key "terrains" :label "terrains"}])
+                       {:key "terrains" :label "terrains"}
+                       {:key "lights" :label "lights"}])
   (assert view.search "WorldNodeView should have search after set-categories")
-  (assert (= (length (or view.search.items [])) 3) "search should have 3 items")
+  (assert (= (length (or view.search.items [])) 4) "search should have 4 items")
   (view:drop))
 
 (fn test-world-node-view-refresh-categories []
@@ -2098,6 +2796,30 @@
   (local result (Validation.validate-draft draft))
   (assert (not result.ok?) "validation should reject invalid draft values")
   (assert (= (. (. result :errors) :width) "Width must be an integer") "width validation should require integers"))
+
+(fn test-light-editor-validation-validates-ambient-draft []
+  (local LightValidation (require :graph/light-editor-validation))
+  (local validation (LightValidation.validation-for-type "ambient"))
+  (local draft (validation.draft-from-record (make-light-record "ambient" {:id "ambient"})))
+  (set (. draft :enabled) "maybe")
+  (set (. draft :color) "1, 2")
+  (local result (validation.validate-draft draft))
+  (assert (not result.ok?) "ambient light validation should reject invalid values")
+  (assert (= (. (. result :errors) :enabled) "Value must be true or false")
+          "ambient validation should validate enabled state")
+  (assert (. (. result :errors) :color)
+          "ambient validation should validate color vector"))
+
+(fn test-light-editor-validation-validates-spot-cutoff-order []
+  (local LightValidation (require :graph/light-editor-validation))
+  (local validation (LightValidation.validation-for-type "spot"))
+  (local draft (validation.draft-from-record (make-light-record "spot" {:id "spot-1"})))
+  (set (. draft :cutoff) "0.5")
+  (set (. draft :outer-cutoff) "0.6")
+  (local result (validation.validate-draft draft))
+  (assert (not result.ok?) "spot light validation should reject inverted cutoff order")
+  (assert (= (. (. result :errors) :cutoff) "Cutoff must be greater than outer cutoff")
+          "spot validation should enforce cutoff ordering"))
 
 (fn test-perlin-terrain-node-view-builds []
   (local Validation (require :graph/perlin-terrain-editor-validation))
@@ -2688,11 +3410,21 @@
 (table.insert tests {:name "world node view search submitted" :fn test-world-node-view-search-submitted})
 (table.insert tests {:name "terrains node view builds add controls" :fn test-terrains-node-view-builds-add-controls})
 (table.insert tests {:name "terrains node view add button uses selected kind" :fn test-terrains-node-view-add-button-uses-selected-kind})
+(table.insert tests {:name "light type node view hides ambient add controls" :fn test-light-type-node-view-hides-ambient-add-controls})
+(table.insert tests {:name "light node view builds" :fn test-light-node-view-builds})
+(table.insert tests {:name "light node view remove fails loudly without dropping node" :fn test-light-node-view-remove-fails-loudly-without-dropping-node})
+(table.insert tests {:name "light node view applies ambient changes" :fn test-light-node-view-applies-ambient-changes})
+(table.insert tests {:name "light node view rounds serialized values" :fn test-light-node-view-rounds-serialized-values})
+(table.insert tests {:name "light node view applies directional changes" :fn test-light-node-view-applies-directional-changes})
+(table.insert tests {:name "light node view applies point changes" :fn test-light-node-view-applies-point-changes})
+(table.insert tests {:name "light node view applies spot changes" :fn test-light-node-view-applies-spot-changes})
 (table.insert tests {:name "terrain node view builds scrollable summary" :fn test-terrain-node-view-builds-scrollable-summary})
 (table.insert tests {:name "flat terrain node view builds" :fn test-flat-terrain-node-view-builds})
 (table.insert tests {:name "flat terrain node view defers updates until apply" :fn test-flat-terrain-node-view-defers-updates-until-apply})
 (table.insert tests {:name "flat terrain node view shows validation errors" :fn test-flat-terrain-node-view-shows-validation-errors})
 (table.insert tests {:name "terrain editor validation validates draft" :fn test-terrain-editor-validation-validates-draft})
+(table.insert tests {:name "light editor validation validates ambient draft" :fn test-light-editor-validation-validates-ambient-draft})
+(table.insert tests {:name "light editor validation validates spot cutoff order" :fn test-light-editor-validation-validates-spot-cutoff-order})
 (table.insert tests {:name "perlin terrain node view builds" :fn test-perlin-terrain-node-view-builds})
 (table.insert tests {:name "perlin terrain node view defers updates until apply" :fn test-perlin-terrain-node-view-defers-updates-until-apply})
 (table.insert tests {:name "perlin terrain node view shows validation errors" :fn test-perlin-terrain-node-view-shows-validation-errors})

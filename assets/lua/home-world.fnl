@@ -14,6 +14,7 @@
 (local CoordinateGuard (require :coordinate-guard))
 (local PhysicsContainment (require :physics-containment))
 (local TerrainRecords (require :scene-terrain-records))
+(local LightSystemModule (require :light-system))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -51,7 +52,7 @@
             (set (. out k) (clone-table v))))
         out)))
 
-(fn default-state []
+(fn base-default-state []
   {:camera {:position [0 0 30]
             :rotation [1 0 0 0]}
    :physics {:containment default-containment-config}
@@ -61,6 +62,11 @@
    :scene {:panels []
            :terrains []}
    :hud {:panels []}})
+
+(fn default-state []
+  (local state (base-default-state))
+  (set state.scene.lights (LightSystemModule.default-state))
+  state)
 
 (fn resolve-graph-core-state [state]
   (local payload (or state {}))
@@ -193,11 +199,19 @@
 
   (fn load-state [world]
     (local persisted (read-world-state world.state-path))
-    (set world.state (merge-state-defaults (default-state) persisted))
-    (when (not persisted)
-      (when (not world.state.scene)
-        (set world.state.scene {}))
-      (set world.state.scene.terrains (TerrainRecords.default-records)))
+    (if persisted
+        (do
+          (set world.state (merge-state-defaults (base-default-state) persisted))
+          (local persisted-lights (and persisted.scene persisted.scene.lights))
+          (assert persisted-lights
+                  (string.format "HomeWorld %s persisted state requires scene.lights" world.id))
+          (set world.state.scene.lights
+               (LightSystemModule.normalize-complete-state persisted-lights
+                                                          (string.format "HomeWorld.load-state %s"
+                                                                         world.id))))
+        (do
+          (set world.state (default-state))
+          (set world.state.scene.terrains (TerrainRecords.default-records))))
     (local camera-state (or (and world.state world.state.camera) {}))
     (local raw-position camera-state.position)
     (local (ok parsed-position) (pcall array->vec3 raw-position))
@@ -280,6 +294,13 @@
       (app.engine.physics:setGravity 0 -25 0))
     true)
 
+  (fn apply-runtime-light-state! [world]
+    (local runtime world.runtime)
+    (local scene (and runtime runtime.scene))
+    (local scene-state (and world.state world.state.scene))
+    (when (and scene scene.set-light-state)
+      (scene:set-light-state (and scene-state scene-state.lights))))
+
   (fn capture-runtime-state [world ctx]
     (local runtime world.runtime)
     (local camera (and runtime runtime.camera))
@@ -309,6 +330,7 @@
            (TerrainRecords.merge-preserved-records
              existing-scene.terrains
              captured-scene.terrains))
+      (assert captured-scene.lights "HomeWorld.capture-runtime-state requires scene lights")
       (set world.state.scene captured-scene))
     (when (and hud hud.capture-state)
       (set world.state.hud (hud:capture-state)))
@@ -449,6 +471,7 @@
       (set world.runtime (create-runtime world ctx)))
     (apply-runtime-physics-policy!)
     (apply-runtime-containment! world)
+    (apply-runtime-light-state! world)
     (set world.active? true))
 
   (fn deactivate [world ctx reason]

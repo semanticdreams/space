@@ -512,10 +512,10 @@
       (when (and (= renderer-options.cuboid-only? true)
                  app
                  app.lights)
-        (app.lights.set-ambient (glm.vec3 1 1 1))
-        (app.lights.set-directional [])
-        (app.lights.set-point [])
-        (app.lights.set-spot []))
+        (app.lights:set-ambient (glm.vec3 1 1 1))
+        (app.lights:set-directional [])
+        (app.lights:set-point [])
+        (app.lights:set-spot []))
       (if (= scenario :focused)
           (do
             (when ui.run-button

@@ -2,10 +2,6 @@
 (local Font (require :font))
 (local {: adjust : make-button-variant} (require :widget-theme-utils))
 
-(local terrain-center (glm.vec3 0 -100 0))
-(local light-position (glm.vec3 0 200 100))
-(local light-direction (glm.normalize (- light-position terrain-center)))
-
 (fn DarkTheme []
   (local font (Font {:metadata-path "ubuntu-font/msdf/UbuntuMono-R.json"
                      :texture-path "ubuntu-font/msdf/UbuntuMono-R.png"
@@ -37,33 +33,6 @@
            :selection-border-color (glm.vec4 0.2 0.55 0.95 0.95)}
    :terrain-selection {:fill (glm.vec4 0.24 0.58 0.98 0.22)
                        :border (glm.vec4 0.34 0.68 1.0 0.98)}
-   :lights {:ambient (glm.vec3 0 0 0)
-            :directional [{:direction light-direction
-                           :ambient (glm.vec3 0.6 0.6 0.6)
-                           :diffuse (glm.vec3 0.9 0.9 0.9)
-                           :specular (glm.vec3 1.1 1.1 1.1)
-                           :specular-power 8.0}]
-            :point [{:enabled? false
-                     :position (glm.vec3 0 0 0)
-                     :ambient (glm.vec3 0.0 0.0 0.0)
-                     :diffuse (glm.vec3 1.0 1.0 1.0)
-                     :specular (glm.vec3 1.0 1.0 1.0)
-                     :specular-power 8.0
-                     :constant 1.0
-                     :linear 0.09
-                     :quadratic 0.032}]
-            :spot [{:enabled? false
-                    :position (glm.vec3 0 0 0)
-                    :direction (glm.vec3 0 0 -1)
-                    :ambient (glm.vec3 0.0 0.0 0.0)
-                    :diffuse (glm.vec3 1.0 1.0 1.0)
-                    :specular (glm.vec3 1.0 1.0 1.0)
-                    :specular-power 8.0
-                    :cutoff (math.cos (math.rad 12.5))
-                    :outer-cutoff (math.cos (math.rad 17.5))
-                    :constant 1.0
-                    :linear 0.09
-                    :quadratic 0.032}]}
    :skybox {:brightness -0.8}
    :flat-terrain {:dark (glm.vec4 0.12 0.14 0.18 1.0)
                   :light (glm.vec4 0.18 0.21 0.27 1.0)}

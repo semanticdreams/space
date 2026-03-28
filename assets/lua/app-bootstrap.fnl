@@ -16,14 +16,8 @@
   app.themes)
 
 (fn init-lights []
-  (local LightSystem (require :light-system))
-  (local theme (and app.themes app.themes.get-active-theme
-                    (app.themes.get-active-theme)))
-  (local defaults (and theme theme.lights))
-  (local active (and defaults {:ambient defaults.ambient
-                               :directional defaults.directional}))
-  (set app.lights (LightSystem {:defaults defaults
-                                :active active}))
+  (local {:LightSystem LightSystem} (require :light-system))
+  (set app.lights (LightSystem {}))
   app.lights)
 
 (fn init-input-systems []

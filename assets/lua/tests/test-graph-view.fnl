@@ -19,6 +19,7 @@
 (local Intersectables (require :intersectables))
 (local {:FocusManager FocusManager} (require :focus))
 (local Signal (require :signal))
+(local LightSystemModule (require :light-system))
 (local json (require :json))
 (local JsonUtils (require :json-utils))
 (local fs (require :fs))
@@ -165,7 +166,7 @@
     (local options (or opts {}))
     {:id (or options.id "world-a")
      :name (or options.name "World A")
-     :world {:state (or options.state {:scene {:panels [] :terrains []}
+     :world {:state (or options.state {:scene {:panels [] :terrains [] :lights (LightSystemModule.default-state)}
                                        :hud {:panels []}})
              :get-runtime (fn [_self] options.runtime)
              :save-state (fn [_self] true)}})

@@ -1,5 +1,5 @@
 (local Harness (require :tests.e2e.harness))
-(local LightSystem (require :light-system))
+(local {:LightSystem LightSystem} (require :light-system))
 (local Camera (require :camera))
 (local glm (require :glm))
 (local textures (require :textures))
@@ -268,12 +268,16 @@
 
 (fn run [ctx]
   (local ambient-only
-    (LightSystem {:active {:ambient (glm.vec3 0.55 0.55 0.55)
+    (LightSystem {:active {:ambient {:id "ambient"
+                                     :color (glm.vec3 0.55 0.55 0.55)
+                                     :enabled? true}
                            :directional []
                            :point []
                            :spot []}}))
   (local directional-only
-    (LightSystem {:active {:ambient (glm.vec3 0.03 0.03 0.03)
+    (LightSystem {:active {:ambient {:id "ambient"
+                                     :color (glm.vec3 0.03 0.03 0.03)
+                                     :enabled? true}
                            :directional [{:direction (glm.normalize (glm.vec3 0.5 1.0 0.2))
                                           :ambient (glm.vec3 0.02 0.02 0.02)
                                           :diffuse (glm.vec3 1.2 1.1 1.0)
@@ -285,7 +289,9 @@
                            :point []
                            :spot []}}))
   (local point-only
-    (LightSystem {:active {:ambient (glm.vec3 0.02 0.02 0.02)
+    (LightSystem {:active {:ambient {:id "ambient"
+                                     :color (glm.vec3 0.02 0.02 0.02)
+                                     :enabled? true}
                            :directional []
                            :point [{:position (glm.vec3 -8 4 -10)
                                     :ambient (glm.vec3 0.0 0.0 0.0)
@@ -299,11 +305,13 @@
                                     :diffuse (glm.vec3 0.7 1.2 2.4)
                                     :specular (glm.vec3 0.9 1.4 2.0)
                                     :constant 1.0
-                                    :linear 0.02
-                                    :quadratic 0.002}]
+                                   :linear 0.02
+                                   :quadratic 0.002}]
                            :spot []}}))
   (local spot-only
-    (LightSystem {:active {:ambient (glm.vec3 0.02 0.02 0.02)
+    (LightSystem {:active {:ambient {:id "ambient"
+                                     :color (glm.vec3 0.02 0.02 0.02)
+                                     :enabled? true}
                            :directional []
                            :point []
                            :spot [{:position (glm.vec3 -10 12 -4)

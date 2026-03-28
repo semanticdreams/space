@@ -1,4 +1,5 @@
 (local TerrainRecords (require :scene-terrain-records))
+(local LightSystemModule (require :light-system))
 
 (local M {})
 
@@ -76,6 +77,9 @@
   (local world (resolve-world world-manager world-id))
   (or (and world world.state world.state.scene world.state.scene.terrains) []))
 
+(fn resolve-default-light-state []
+  (LightSystemModule.default-state))
+
 (fn ensure-scene-state [world]
   (when (not world.state)
     (set world.state {}))
@@ -85,6 +89,13 @@
     (set world.state.scene.panels []))
   (when (not world.state.scene.terrains)
     (set world.state.scene.terrains []))
+  world.state.scene)
+
+(fn require-scene-state [world context]
+  (local label (or context "WorldData"))
+  (assert world (.. label " requires world"))
+  (assert world.state (.. label " requires world.state"))
+  (assert world.state.scene (.. label " requires world.state.scene"))
   world.state.scene)
 
 (fn emit-world-change [world-manager world-id reason]
@@ -97,6 +108,10 @@
   (when (and world world.save-state)
     (world:save-state))
   world)
+
+(fn require-active-scene-light-method [scene method-name]
+  (assert (. scene method-name)
+          (.. "Active scene is missing " method-name " for world light sync")))
 
 (fn require-active-scene-method [scene terrain-id method-name]
   (assert (. scene method-name)
@@ -122,6 +137,94 @@
     (require-active-scene-method scene record.id :add-terrain-record)
     (assert (scene:add-terrain-record record)
             (.. "Active scene failed to add terrain " record.id))))
+
+(fn scene-state-lights [world-manager world-id]
+  (local world (resolve-world world-manager world-id))
+  (if (not world)
+      nil
+      (do
+        (local scene-state (require-scene-state world (.. "WorldData[" world-id "]")))
+        (LightSystemModule.normalize-complete-state
+          (assert scene-state.lights
+                  (.. "WorldData[" world-id "] requires scene.lights"))
+          (.. "WorldData[" world-id "] scene.lights")))))
+
+(fn normalize-light-state [lights context]
+  (LightSystemModule.normalize-complete-state lights context))
+
+(fn persist-light-state! [scene-state lights context]
+  (local normalized (normalize-light-state lights (or context "WorldData.persist-light-state!")))
+  (set scene-state.lights normalized)
+  normalized)
+
+(fn sync-active-light-state [world-manager world-id lights]
+  (local scene (resolve-scene world-manager world-id))
+  (when scene
+    (require-active-scene-light-method scene :set-light-state)
+    (scene:set-light-state lights)))
+
+(fn list-light-types [world-manager world-id]
+  (local lights (scene-state-lights world-manager world-id))
+  (icollect [_ spec (ipairs (LightSystemModule.list-type-specs))]
+    (do
+      (local type-key spec.key)
+      (local count (LightSystemModule.state-count lights type-key))
+      [{:type-key type-key
+        :label spec.label
+        :plural-label (. spec :plural-label)
+        :max-count (. spec :max-count)
+        :count count}
+       (.. spec.label " (" (tostring count) "/" (tostring (. spec :max-count)) ")")])))
+
+(fn list-lights [world-manager world-id type-key]
+  (local lights (scene-state-lights world-manager world-id))
+  (local produced [])
+  (if (not lights)
+      produced
+      (if (= type-key "ambient")
+          (when lights.ambient
+            (local record lights.ambient)
+            (local light-id (or record.id "ambient"))
+            (table.insert produced [{:light-id light-id
+                                     :type-key type-key
+                                     :record record
+                                     :label "ambient"
+                                     :source "state"}
+                                    "ambient"]))
+          (each [_ record (ipairs (or (. lights type-key) []))]
+            (local light-id (or record.id "unknown"))
+            (local label (.. type-key " [" light-id "]"))
+            (table.insert produced [{:light-id light-id
+                                     :type-key type-key
+                                     :record record
+                                     :label label
+                                     :source "state"}
+                                    label]))))
+  produced)
+
+(fn find-light [world-manager world-id type-key light-id]
+  (var resolved nil)
+  (each [_ item (ipairs (list-lights world-manager world-id type-key))]
+    (local entry (. item 1))
+    (when (and (not resolved) (= (and entry entry.light-id) light-id))
+      (set resolved entry)))
+  resolved)
+
+(fn next-light-id [world-manager world-id type-key]
+  (local used {})
+  (each [_ item (ipairs (list-lights world-manager world-id type-key))]
+    (local entry (. item 1))
+    (when (and entry entry.light-id)
+      (set (. used entry.light-id) true)))
+  (if (= type-key "ambient")
+      "ambient"
+      (do
+        (var idx 1)
+        (var candidate (.. type-key "-" (tostring idx)))
+        (while (. used candidate)
+          (set idx (+ idx 1))
+          (set candidate (.. type-key "-" (tostring idx))))
+        candidate)))
 
 (fn find-terrain-state-index [world-manager world-id terrain-id]
   (local terrains (terrain-state-records world-manager world-id))
@@ -264,6 +367,109 @@
       (set resolved entry)))
   resolved)
 
+(fn update-light-record [world-manager world-id type-key light-id updater]
+  (local world (resolve-world world-manager world-id))
+  (assert world (.. "Cannot update light in missing world " world-id))
+  (local scene-state (require-scene-state world (.. "WorldData.update-light-record[" world-id "]")))
+  (local lights (persist-light-state! scene-state
+                                      scene-state.lights
+                                      (.. "WorldData.update-light-record[" world-id "]")))
+  (if (= type-key "ambient")
+      (do
+        (local current lights.ambient)
+        (assert current (.. "Missing ambient light in world " world-id))
+        (local next-record (clone-table current))
+        (updater next-record)
+        (set next-record.id "ambient")
+        (set lights.ambient next-record)
+        (local normalized (persist-light-state! scene-state
+                                                lights
+                                                (.. "WorldData.update-light-record[" world-id "]")))
+        (sync-active-light-state world-manager world-id normalized)
+        (persist-world world-manager world-id)
+        (emit-world-change world-manager world-id "light-updated")
+        (. normalized :ambient))
+      (do
+        (local items (or (. lights type-key) []))
+        (set (. lights type-key) items)
+        (var found-index nil)
+        (each [idx record (ipairs items)]
+          (when (and (not found-index) (= (and record record.id) light-id))
+            (set found-index idx)))
+        (local current (and found-index (. items found-index)))
+        (assert current
+                (.. "Cannot update missing " type-key " light " light-id
+                    " in world " world-id))
+        (local next-record (clone-table current))
+        (updater next-record)
+        (set next-record.id light-id)
+        (set (. items found-index) next-record)
+        (local normalized (persist-light-state! scene-state
+                                                lights
+                                                (.. "WorldData.update-light-record[" world-id "]")))
+        (sync-active-light-state world-manager world-id normalized)
+        (persist-world world-manager world-id)
+        (emit-world-change world-manager world-id "light-updated")
+        (. (. normalized type-key) found-index))))
+
+(fn add-light [world-manager world-id type-key]
+  (local world (resolve-world world-manager world-id))
+  (assert world (.. "Cannot add light to missing world " world-id))
+  (local scene-state (require-scene-state world (.. "WorldData.add-light[" world-id "]")))
+  (local lights (persist-light-state! scene-state
+                                      scene-state.lights
+                                      (.. "WorldData.add-light[" world-id "]")))
+  (local spec (LightSystemModule.type-spec type-key))
+  (assert spec (.. "Unsupported light type " (tostring type-key)))
+  (assert (not (= type-key "ambient"))
+          "Ambient light is a required singleton and cannot be added")
+  (local count (LightSystemModule.state-count lights type-key))
+  (assert (< count (. spec :max-count))
+          (.. "Cannot add more than " (tostring (. spec :max-count))
+              " " type-key " lights"))
+  (local light-id (next-light-id world-manager world-id type-key))
+  (local record (LightSystemModule.default-record-for-type type-key
+                                                           {:id light-id
+                                                            :index (+ count 1)
+                                                            :defaults (resolve-default-light-state)}))
+  (when (not (. lights type-key))
+    (set (. lights type-key) []))
+  (table.insert (. lights type-key) record)
+  (local normalized (persist-light-state! scene-state
+                                          lights
+                                          (.. "WorldData.add-light[" world-id "]")))
+  (sync-active-light-state world-manager world-id normalized)
+  (persist-world world-manager world-id)
+  (emit-world-change world-manager world-id "light-added")
+  (. (. normalized type-key) (+ count 1)))
+
+(fn remove-light [world-manager world-id type-key light-id]
+  (local world (resolve-world world-manager world-id))
+  (assert world (.. "Cannot remove light from missing world " world-id))
+  (local scene-state (require-scene-state world (.. "WorldData.remove-light[" world-id "]")))
+  (local lights (persist-light-state! scene-state
+                                      scene-state.lights
+                                      (.. "WorldData.remove-light[" world-id "]")))
+  (if (= type-key "ambient")
+      (error "Ambient light is required and cannot be removed")
+      (do
+        (local items (or (. lights type-key) []))
+        (var found-index nil)
+        (each [idx record (ipairs items)]
+          (when (and (not found-index) (= (and record record.id) light-id))
+            (set found-index idx)))
+        (assert found-index
+                (.. "Cannot remove missing " type-key " light " light-id
+                    " from world " world-id))
+        (table.remove items found-index)
+        (local normalized (persist-light-state! scene-state
+                                                lights
+                                                (.. "WorldData.remove-light[" world-id "]")))
+        (sync-active-light-state world-manager world-id normalized)
+        (persist-world world-manager world-id)
+        (emit-world-change world-manager world-id "light-removed")
+        true)))
+
 (fn remove-scene-panel [world-manager world-id panel-index]
   (local scene (resolve-scene world-manager world-id))
   (if (and scene scene.scene-children scene.remove-panel-child)
@@ -401,14 +607,20 @@
  :list-scene-panels list-scene-panels
  :list-hud-panels list-hud-panels
  :list-terrains list-terrains
+ :list-light-types list-light-types
+ :list-lights list-lights
  :find-scene-panel find-scene-panel
  :find-hud-panel find-hud-panel
  :find-terrain find-terrain
+ :find-light find-light
  :add-terrain add-terrain
+ :add-light add-light
  :update-terrain-record update-terrain-record
+ :update-light-record update-light-record
  :set-terrain-selection-target set-terrain-selection-target
  :clear-terrain-selection-target clear-terrain-selection-target
  :get-terrain-selection-target get-terrain-selection-target
  :remove-terrain remove-terrain
+ :remove-light remove-light
  :remove-scene-panel remove-scene-panel
  :remove-hud-panel remove-hud-panel}

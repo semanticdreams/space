@@ -6,6 +6,7 @@
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
 (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+(local {:LightsNode LightsNode} (require :graph/nodes/lights))
 (local WorldData (require :graph/world-data))
 
 (local M {})
@@ -34,7 +35,8 @@
     (local categories
       [{:key "scene-panels" :label "scene panels" :kind ScenePanelsNode}
        {:key "hud-panels" :label "hud panels" :kind HudPanelsNode}
-       {:key "terrains" :label "terrains" :kind TerrainsNode}])
+       {:key "terrains" :label "terrains" :kind TerrainsNode}
+       {:key "lights" :label "lights" :kind LightsNode}])
     (when self.categories-changed
       (self.categories-changed:emit categories))
     categories)

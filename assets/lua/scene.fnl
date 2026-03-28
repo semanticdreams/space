@@ -19,7 +19,6 @@
 (local logging (require :logging))
 (local TerrainQuery (require :terrain-query))
 (local TerrainLayoutRecord (require :terrain-layout-record))
-
 (local default-position (glm.vec3 0 0 0))
 (local default-rotation (glm.quat 1 0 0 0))
 (local default-depth-scale 0)
@@ -1349,6 +1348,9 @@
     (local panels [])
     (local terrains
       (SceneWorldState.capture-terrains self.scene-terrains))
+    (assert (and app app.lights app.lights.get-state)
+            "Scene.capture-state requires app.lights.get-state")
+    (local lights (app.lights:get-state))
     (each [_ metadata (ipairs (or self.scene-children []))]
       (local persistence (and metadata metadata.persistence))
       (assert persistence
@@ -1377,7 +1379,19 @@
         (set record.size (or layout-state.size record.size))
         (table.insert panels record)))
     {:panels panels
-     :terrains terrains})
+     :terrains terrains
+     :lights lights})
+
+  (fn set-light-state [self state]
+    (assert (and app app.lights app.lights.set-state)
+            "Scene.set-light-state requires app.lights.set-state")
+    (assert state "Scene.set-light-state requires light state")
+    (app.lights:set-state state))
+
+  (fn get-light-state [self]
+    (assert (and app app.lights app.lights.get-state)
+            "Scene.get-light-state requires app.lights.get-state")
+    (app.lights:get-state))
 
   (fn resolve-panel-restorer-strategy [self panel]
     (local kind panel.kind)
@@ -1469,6 +1483,8 @@
                                   :rotation (array->quat panel.rotation)})
           (do
             (restore-panel-with-fallback self panel panel-idx))))
+    (assert payload.lights "Scene.restore-state requires :lights")
+    (self:set-light-state payload.lights)
     true)
 
 (set self.unregister-entity unregister-entity)
@@ -1507,6 +1523,8 @@
 (set self.on-viewport-changed on-viewport-changed)
 (set self.capture-state capture-state)
 (set self.restore-state restore-state)
+(set self.set-light-state set-light-state)
+(set self.get-light-state get-light-state)
 (set self.capture-panel-element-state capture-panel-element-state)
 (set self.register-panel-restorer register-panel-restorer)
 (set self.unregister-panel-restorer unregister-panel-restorer)

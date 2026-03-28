@@ -17,6 +17,7 @@
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local TerrainQuery (require :terrain-query))
 (local HeightfieldTerrainSpace (require :heightfield-terrain-space))
+(local LightSystemModule (require :light-system))
 (local {: Layout} (require :layout))
 (local bt (require :bt))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
@@ -1745,6 +1746,196 @@
           "Scene.capture-state should report missing restore strategy")
   true)
 
+(fn scene-capture-state-requires-light-state-provider []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-lights app.lights)
+  (set app.lights nil)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:capture-state))))
+  (set app.lights original-lights)
+  (cleanup)
+  (assert (not ok) "Scene.capture-state should fail when app.lights is missing")
+  (assert (string.find (tostring err) "app.lights")
+          "Scene.capture-state should report missing light state provider")
+  true)
+
+(fn sample-full-light-state []
+  (LightSystemModule.normalize-state
+    {:ambient {:id "ambient" :color [0.0 0.0 1.0] :enabled? true}
+     :directional [{:id "directional-1"
+                    :direction [0.0 -1.0 0.0]
+                    :ambient [0.1 0.2 0.3]
+                    :diffuse [0.9 0.8 0.7]
+                    :specular [1.0 0.75 0.5]
+                    :specular-power 16
+                    :enabled? true}]
+     :point [{:id "point-1"
+              :position [1.0 2.0 3.0]
+              :ambient [0.1 0.1 0.1]
+              :diffuse [0.9 0.8 0.7]
+              :specular [1.0 1.0 0.9]
+              :specular-power 18
+              :constant 1.2
+              :linear 0.3
+              :quadratic 0.07
+              :enabled? true}]
+     :spot [{:id "spot-1"
+             :position [4.0 5.0 6.0]
+             :direction [0.0 -1.0 0.0]
+             :ambient [0.2 0.1 0.0]
+             :diffuse [0.8 0.7 0.6]
+             :specular [1.0 0.9 0.8]
+             :specular-power 22
+             :cutoff 0.9
+             :outer-cutoff 0.8
+             :constant 1.1
+             :linear 0.2
+             :quadratic 0.03
+             :enabled? true}]}))
+
+(fn scene-set-light-state-updates-app-lights []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local target-state
+    (LightSystemModule.normalize-state
+      {:ambient {:id "ambient" :color [0.0 0.0 1.0] :enabled? true}
+       :directional []
+       :point []
+       :spot []}))
+  (scene:set-light-state target-state)
+  (local current (app.lights:get-state))
+  (cleanup)
+  (assert (= (. (. current.ambient.color) 1) 0.0)
+          "Scene.set-light-state should update ambient x")
+  (assert (= (. (. current.ambient.color) 2) 0.0)
+          "Scene.set-light-state should update ambient y")
+  (assert (= (. (. current.ambient.color) 3) 1.0)
+          "Scene.set-light-state should update ambient z")
+  (assert (= (length current.directional) 0)
+          "Scene.set-light-state should update directional light state")
+  true)
+
+(fn scene-set-light-state-updates-non-ambient-lights []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local target-state (sample-full-light-state))
+  (scene:set-light-state target-state)
+  (local current (app.lights:get-state))
+  (cleanup)
+  (assert (= (length current.directional) 1)
+          "Scene.set-light-state should update directional light records")
+  (assert (approx (. (. (. current :directional) 1) :ambient 2) 0.2)
+          "Scene.set-light-state should update directional ambient")
+  (assert (= (length current.point) 1)
+          "Scene.set-light-state should update point light records")
+  (assert (approx (. (. (. current :point) 1) :linear) 0.3)
+          "Scene.set-light-state should update point attenuation")
+  (assert (= (length current.spot) 1)
+          "Scene.set-light-state should update spot light records")
+  (assert (approx (. (. (. current :spot) 1) :outer-cutoff) 0.8)
+          "Scene.set-light-state should update spot cutoff state")
+  true)
+
+(fn scene-set-light-state-requires-complete-light-state []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:set-light-state {:ambient {:id "ambient" :color [0.0 0.0 1.0] :enabled? true}
+                                :directional []
+                                :spot []}))))
+  (cleanup)
+  (assert (not ok) "Scene.set-light-state should fail loudly for incomplete light state")
+  (assert (string.find (tostring err) "requires :point table")
+          "Scene.set-light-state should report the missing light list")
+  true)
+
+(fn light-system-clear-restores-canonical-default-state []
+  (local {:LightSystem LightSystem} (require :light-system))
+  (local lights (LightSystem {}))
+  (local expected (LightSystemModule.default-state))
+  (lights:set-state (sample-full-light-state))
+  (lights:clear)
+  (local current (lights:get-state))
+  (assert (= (length current.directional) (length expected.directional))
+          "LightSystem.clear should restore the default directional light count")
+  (assert (= (length current.point) 0)
+          "LightSystem.clear should clear point lights back to defaults")
+  (assert (= (length current.spot) 0)
+          "LightSystem.clear should clear spot lights back to defaults")
+  (assert (approx (. (. current.ambient.color) 3) (. (. expected.ambient.color) 3))
+          "LightSystem.clear should restore the default ambient color")
+  (assert (approx (. (. (. current :directional) 1) :ambient 1)
+                  (. (. (. expected :directional) 1) :ambient 1))
+          "LightSystem.clear should restore the canonical default directional light")
+  true)
+
+(fn scene-capture-state-preserves-updated-ambient-light []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local target-state
+    (LightSystemModule.normalize-state
+      {:ambient {:id "ambient" :color [0.0 0.0 1.0] :enabled? true}
+       :directional []
+       :point []
+       :spot []}))
+  (scene:set-light-state target-state)
+  (local captured (scene:capture-state))
+  (cleanup)
+  (assert (= (. (. captured.lights.ambient.color) 1) 0.0)
+          "Scene.capture-state should preserve ambient x after runtime updates")
+  (assert (= (. (. captured.lights.ambient.color) 2) 0.0)
+          "Scene.capture-state should preserve ambient y after runtime updates")
+  (assert (= (. (. captured.lights.ambient.color) 3) 1.0)
+          "Scene.capture-state should preserve ambient z after runtime updates")
+  true)
+
+(fn scene-capture-state-preserves-updated-non-ambient-lights []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local target-state (sample-full-light-state))
+  (scene:set-light-state target-state)
+  (local captured (scene:capture-state))
+  (cleanup)
+  (assert (= (length captured.lights.directional) 1)
+          "Scene.capture-state should preserve directional light count")
+  (assert (approx (. (. (. captured.lights :directional) 1) :specular-power) 16)
+          "Scene.capture-state should preserve directional values")
+  (assert (= (length captured.lights.point) 1)
+          "Scene.capture-state should preserve point light count")
+  (assert (approx (. (. (. captured.lights :point) 1) :position 3) 3.0)
+          "Scene.capture-state should preserve point position")
+  (assert (= (length captured.lights.spot) 1)
+          "Scene.capture-state should preserve spot light count")
+  (assert (approx (. (. (. captured.lights :spot) 1) :quadratic) 0.03)
+          "Scene.capture-state should preserve spot attenuation")
+  true)
+
+(fn scene-restore-state-requires-lights []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels []
+                              :terrains []}))))
+  (cleanup)
+  (assert (not ok) "Scene.restore-state should fail when lights are missing")
+  (assert (string.find (tostring err) "requires :lights")
+          "Scene.restore-state should report missing lights")
+  true)
+
 (fn added-dialog-appears-in-front-of-camera []
   (local camera (Camera {:position (glm.vec3 2 3 4)}))
   (camera:yaw (math.rad 45))
@@ -2801,7 +2992,8 @@
                                         :label "restore target"
                                         :size [4 4 4]
                                         :position [0 16 0]
-                                        :rotation [1 0 0 0]}]}))))
+                                        :rotation [1 0 0 0]}]
+                              :lights (LightSystemModule.default-state)}))))
   (local final-count (length (or scene.entity.children [])))
   (set app.graph original-graph)
   (graph:drop)
@@ -2834,7 +3026,8 @@
                                         :label "poisoned restore target"
                                         :size [4 4 4]
                                         :position [1001000 0 0]
-                                        :rotation [1 0 0 0]}]}))))
+                                        :rotation [1 0 0 0]}]
+                              :lights (LightSystemModule.default-state)}))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
@@ -2873,7 +3066,8 @@
                                         :label "poisoned size restore target"
                                         :size [1001000 4 4]
                                         :position [0 0 0]
-                                        :rotation [1 0 0 0]}]}))))
+                                        :rotation [1 0 0 0]}]
+                              :lights (LightSystemModule.default-state)}))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
@@ -2916,7 +3110,8 @@
                                         :label "legacy skip target"
                                         :position [4 5 6]
                                         :rotation [1 0 0 0]
-                                        :size [4 4 4]}]}))))
+                                        :size [4 4 4]}]
+                              :lights (LightSystemModule.default-state)}))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (set app.graph original-graph)
@@ -2946,7 +3141,8 @@
   (local (ok err)
     (pcall
       (fn []
-        (scene:restore-state {:panels [{:kind kind}]}))))
+        (scene:restore-state {:panels [{:kind kind}]
+                              :lights (LightSystemModule.default-state)}))))
   (scene:unregister-panel-restorer kind owner)
   (cleanup)
   (assert (not ok)
@@ -3008,6 +3204,22 @@
                      :fn scene-capture-state-requires-panel-persistence})
 (table.insert tests {:name "Scene capture-state requires restore strategy"
                      :fn scene-capture-state-requires-restore-strategy})
+(table.insert tests {:name "Scene capture-state requires light state provider"
+                     :fn scene-capture-state-requires-light-state-provider})
+(table.insert tests {:name "Scene set-light-state updates app lights"
+                     :fn scene-set-light-state-updates-app-lights})
+(table.insert tests {:name "Scene set-light-state updates non-ambient lights"
+                     :fn scene-set-light-state-updates-non-ambient-lights})
+(table.insert tests {:name "Scene set-light-state requires complete light state"
+                     :fn scene-set-light-state-requires-complete-light-state})
+(table.insert tests {:name "LightSystem clear restores canonical default state"
+                     :fn light-system-clear-restores-canonical-default-state})
+(table.insert tests {:name "Scene capture-state preserves updated ambient light"
+                     :fn scene-capture-state-preserves-updated-ambient-light})
+(table.insert tests {:name "Scene capture-state preserves updated non-ambient lights"
+                     :fn scene-capture-state-preserves-updated-non-ambient-lights})
+(table.insert tests {:name "Scene restore-state requires lights"
+                     :fn scene-restore-state-requires-lights})
 (table.insert tests {:name "Scene additions appear in front of the camera" :fn added-dialog-appears-in-front-of-camera})
 (table.insert tests {:name "Scene runtime physics body falls" :fn scene-add-physics-body-falls})
 (table.insert tests {:name "Scene ball appears in front of camera and restores"
