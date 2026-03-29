@@ -3,6 +3,7 @@
 (local gl (require :gl))
 (local shaders (require :shaders))
 (local textures (require :textures))
+(local SkyboxState (require :skybox-state))
 
 (local unit-cube
   [-1.0 1.0 -1.0   -1.0 -1.0 -1.0    1.0 -1.0 -1.0
@@ -78,33 +79,49 @@
   (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE (* 3 4) 0)
 
   (var cubemap nil)
-  (var active false)
-  (var brightness (or options.brightness 1.0))
-  (fn set-skybox [self path]
+  (var state (SkyboxState.default-state))
+  (fn set-skybox-path [path]
     (when cubemap
       (cubemap:drop)
       (set cubemap nil))
     (if (not path)
-        (set active false)
-        (let [folder (ensure-directory path)]
+        nil
+        (do
+          (local folder (ensure-directory path))
           (assert folder (.. "Skybox path not found: " (or path "<nil>")))
           (assert (and textures (or textures.load-cubemap textures.load-cubemap-async))
                   "Cubemap textures are unavailable")
           (local files (collect-face-files folder))
           (local loader (or textures.load-cubemap-async textures.load-cubemap))
-          (set cubemap (loader files))
-          (set active true))))
+          (set cubemap (loader files)))))
 
-  (fn set-brightness [self value]
-    (assert (= (type value) "number") "Skybox brightness requires a numeric value")
-    (set brightness value))
+  (fn set-state [self next-state]
+    (local normalized
+      (SkyboxState.normalize-complete-state next-state "SkyboxRenderer.set-state"))
+    (local path-changed?
+      (or (not (= normalized.enabled? state.enabled?))
+          (not (= normalized.name state.name))))
+    (set state normalized)
+    (when path-changed?
+      (if normalized.enabled?
+          (set-skybox-path (SkyboxState.asset-path normalized))
+          (set-skybox-path nil)))
+    normalized)
+
+  (fn get-state [_self]
+    (SkyboxState.clone-state state))
 
   (fn render [self target]
-    (when (and active cubemap (or (not cubemap.ready) cubemap.ready) target target.projection target.get-view-matrix)
+    (when (and state.enabled?
+               cubemap
+               (or (not cubemap.ready) cubemap.ready)
+               target
+               target.projection
+               target.get-view-matrix)
       (gl.glDepthMask gl.GL_FALSE)
       (gl.glBindVertexArray vao)
       (shader:use)
-      (shader:setFloat "brightness" brightness)
+      (shader:setFloat "brightness" state.brightness)
       (shader:setMatrix4 "projection" target.projection)
       (local view (target:get-view-matrix))
       (local view-rotation (glm.strip-translation view))
@@ -121,11 +138,10 @@
 
   (local api {:shader shader})
   (set api.render render)
-  (set api.set-skybox set-skybox)
-  (set api.set-brightness set-brightness)
+  (set api.set-state set-state)
+  (set api.get-state get-state)
   (set api.drop drop)
-  (local default-path (or options.path "skyboxes/lake"))
-  (api:set-skybox default-path)
+  (api:set-state (or options.state (SkyboxState.default-state)))
   api)
 
 SkyboxRenderer

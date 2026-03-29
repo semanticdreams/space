@@ -6,6 +6,8 @@
 (local HomeWorld (require :home-world))
 (local PhysicsContainment (require :physics-containment))
 (local LightSystemModule (require :light-system))
+(local SkyboxState (require :skybox-state))
+(local BackgroundState (require :background-state))
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "world-manager-test-tmp"))
@@ -28,6 +30,20 @@
 (fn write-world-json! [world-dir state]
   (fs.write-file (fs.join-path world-dir "world.json")
                  (json.dumps state)))
+
+(fn make-skybox-state [opts]
+  (local options (or opts {}))
+  (SkyboxState.normalize-complete-state
+    {:enabled? (if (= options.enabled? nil) true options.enabled?)
+     :name (or options.name "lake")
+     :brightness (or options.brightness 0.1)}
+    "test-world-manager skybox state"))
+
+(fn make-background-state [opts]
+  (local options (or opts {}))
+  (BackgroundState.normalize-complete-state
+    {:color (or options.color [0.0 0.0 0.0])}
+    "test-world-manager background state"))
 
 (fn make-fake-world-factory [stats]
   (fn [opts]
@@ -264,7 +280,9 @@
                                   :views {:open-node-keys []}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -294,7 +312,8 @@
                                   :views {:open-node-keys []}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -321,7 +340,8 @@
                                   :views {:open-node-keys []}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -351,7 +371,8 @@
                                   :views {:open-node-keys []}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -448,13 +469,73 @@
       (assert (= (length lights.spot) 0) "Expected no default spot lights")
       true)))
 
+(fn home-world-new-state-seeds-default-skybox []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local skybox (and world.state world.state.scene world.state.scene.skybox))
+      (assert (= (type skybox) :table) "Expected world scene skybox table")
+      (assert (= skybox.enabled? true) "Expected default skybox to start enabled")
+      (assert (= skybox.name "lake") "Expected default skybox name")
+      (assert (= skybox.brightness 0.1) "Expected default skybox brightness")
+      true)))
+
+(fn home-world-new-state-seeds-default-background []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local background (and world.state world.state.scene world.state.scene.background))
+      (assert (= (type background) :table) "Expected world scene background table")
+      (assert (= (length background.color) 3) "Expected default background to have rgb color")
+      (assert (= (. background.color 1) 0.0) "Expected default background red")
+      (assert (= (. background.color 2) 0.0) "Expected default background green")
+      (assert (= (. background.color 3) 0.0) "Expected default background blue")
+      true)))
+
 (fn home-world-loads-persisted-lights []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
       (fs.create-dirs world-dir)
-      (fs.write-file (fs.join-path world-dir "world.json")
-                     "{\"camera\":{\"position\":[0,0,30],\"rotation\":[1,0,0,0]},\"graph\":{\"graph\":{\"nodes\":[],\"edges\":[]},\"views\":{\"open-node-keys\":[]}},\"scene\":{\"panels\":[],\"terrains\":[],\"lights\":{\"ambient\":{\"id\":\"ambient\",\"color\":[0.1,0.2,0.3],\"enabled?\":true},\"directional\":[],\"point\":[{\"id\":\"point-1\",\"position\":[1,2,3],\"ambient\":[0,0,0],\"diffuse\":[1,1,1],\"specular\":[1,1,1],\"specular-power\":8,\"constant\":1,\"linear\":0.2,\"quadratic\":0.05,\"enabled?\":true}],\"spot\":[]}},\"hud\":{\"panels\":[]}}")
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights {:ambient {:id "ambient"
+                                                     :color [0.1 0.2 0.3]
+                                                     :enabled? true}
+                                           :directional []
+                                           :point [{:id "point-1"
+                                                    :position [1 2 3]
+                                                    :ambient [0 0 0]
+                                                    :diffuse [1 1 1]
+                                                    :specular [1 1 1]
+                                                    :specular-power 8
+                                                    :constant 1
+                                                    :linear 0.2
+                                                    :quadratic 0.05
+                                                    :enabled? true}]
+                                           :spot []}
+                                  :skybox (make-skybox-state {:enabled? false
+                                                              :name "lake"
+                                                              :brightness 0.25})}
+                          :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
@@ -464,6 +545,64 @@
       (assert (= (. (. lights.ambient.color) 2) 0.2) "Expected persisted ambient light to load")
       (assert (= (length lights.point) 1) "Expected persisted point light to load")
       (assert (= (. (. lights.point 1) :linear) 0.2) "Expected persisted point attenuation to load")
+      true)))
+
+(fn home-world-loads-persisted-skybox []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state {:enabled? false
+                                                              :name "lake"
+                                                              :brightness 0.25})
+                                  :background (make-background-state {:color [0.1 0.2 0.3]})}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local skybox (and world.state world.state.scene world.state.scene.skybox))
+      (assert (= skybox.enabled? false) "Expected persisted skybox enabled flag to load")
+      (assert (= skybox.name "lake") "Expected persisted skybox name to load")
+      (assert (= skybox.brightness 0.25) "Expected persisted skybox brightness to load")
+      true)))
+
+(fn home-world-loads-persisted-background []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state {:color [0.1 0.2 0.3]})}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local background (and world.state world.state.scene world.state.scene.background))
+      (assert (= (. background.color 1) 0.1) "Expected persisted background red to load")
+      (assert (= (. background.color 2) 0.2) "Expected persisted background green to load")
+      (assert (= (. background.color 3) 0.3) "Expected persisted background blue to load")
       true)))
 
 (fn home-world-fails-loudly-when-persisted-lights-are-missing []
@@ -483,6 +622,70 @@
       (assert (not ok) "HomeWorld should fail loudly when persisted scene lights are missing")
       (assert (string.find (tostring err) "scene.lights" 1 true)
               "HomeWorld should report missing persisted scene lights")
+      true)))
+
+(fn home-world-repairs-missing-persisted-skybox-with-default []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :background (make-background-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local skybox (and world.state world.state.scene world.state.scene.skybox))
+      (assert skybox "HomeWorld should seed missing persisted scene skybox")
+      (assert (= skybox.enabled? true) "HomeWorld should repair missing skybox with default enabled flag")
+      (assert (= skybox.name "lake") "HomeWorld should repair missing skybox with default name")
+      (assert (= skybox.brightness 0.1) "HomeWorld should repair missing skybox with default brightness")
+      (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
+      (local persisted-skybox (and persisted.scene persisted.scene.skybox))
+      (assert persisted-skybox "HomeWorld should immediately persist repaired skybox during load")
+      (assert (= persisted-skybox.name "lake") "Persisted repaired skybox should use default name")
+      true)))
+
+(fn home-world-repairs-missing-persisted-background-with-default []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local background (and world.state world.state.scene world.state.scene.background))
+      (assert background "HomeWorld should seed missing persisted scene background")
+      (assert (= (. background.color 1) 0.0) "HomeWorld should repair missing background with default red")
+      (assert (= (. background.color 2) 0.0) "HomeWorld should repair missing background with default green")
+      (assert (= (. background.color 3) 0.0) "HomeWorld should repair missing background with default blue")
+      (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
+      (local persisted-background (and persisted.scene persisted.scene.background))
+      (assert persisted-background "HomeWorld should immediately persist repaired background during load")
+      (assert (= (. persisted-background.color 1) 0.0) "Persisted repaired background should use default red")
       true)))
 
 (fn home-world-persists-updated-ambient-light-across-reload []
@@ -610,6 +813,98 @@
       (assert (= (. (. applied.point 1) :linear) 0.3) "Applied point light should match world state")
       true)))
 
+(fn home-world-activate-reapplies-runtime-skybox-state []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.state.scene.skybox
+           (make-skybox-state {:enabled? false
+                               :name "lake"
+                               :brightness 0.25}))
+      (var applied nil)
+      (set world.runtime {:scene {:set-skybox-state (fn [_self skybox]
+                                                      (set applied skybox)
+                                                      true)}})
+      (world:activate {})
+      (assert applied "World activation should reapply persisted skybox state to runtime scene")
+      (assert (= applied.enabled? false) "Applied skybox enabled flag should match world state")
+      (assert (= applied.name "lake") "Applied skybox name should match world state")
+      (assert (= applied.brightness 0.25) "Applied skybox brightness should match world state")
+      true)))
+
+(fn home-world-activate-reapplies-runtime-background-state []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.state.scene.background
+           (make-background-state {:color [0.1 0.2 0.3]}))
+      (var applied nil)
+      (set world.runtime {:scene {:set-background-state (fn [_self background]
+                                                          (set applied background)
+                                                          true)}})
+      (world:activate {})
+      (assert applied "World activation should reapply persisted background state to runtime scene")
+      (assert (= (. applied.color 1) 0.1) "Applied background red should match world state")
+      (assert (= (. applied.color 2) 0.2) "Applied background green should match world state")
+      (assert (= (. applied.color 3) 0.3) "Applied background blue should match world state")
+      true)))
+
+(fn home-world-resume-reapplies-runtime-light-and-skybox-state []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.state.scene.lights
+           (LightSystemModule.normalize-state
+             {:ambient {:id "ambient" :color [0.25 0.5 0.75] :enabled? true}
+              :directional []
+              :point []
+              :spot []}))
+      (set world.state.scene.skybox
+           (make-skybox-state {:enabled? false
+                               :name "lake"
+                               :brightness 0.25}))
+      (set world.state.scene.background
+           (make-background-state {:color [0.1 0.2 0.3]}))
+      (var applied-lights nil)
+      (var applied-skybox nil)
+      (var applied-background nil)
+      (set world.runtime {:scene {:set-light-state (fn [_self lights]
+                                                     (set applied-lights lights)
+                                                     true)
+                                  :set-skybox-state (fn [_self skybox]
+                                                      (set applied-skybox skybox)
+                                                      true)
+                                  :set-background-state (fn [_self background]
+                                                         (set applied-background background)
+                                                      true)}})
+      (world:resume {})
+      (assert applied-lights "World resume should reapply persisted light state to runtime scene")
+      (assert applied-skybox "World resume should reapply persisted skybox state to runtime scene")
+      (assert applied-background "World resume should reapply persisted background state to runtime scene")
+      (assert (= (. (. applied-lights.ambient.color) 2) 0.5) "Resumed ambient light should match world state")
+      (assert (= applied-skybox.enabled? false) "Resumed skybox enabled flag should match world state")
+      (assert (= applied-skybox.brightness 0.25) "Resumed skybox brightness should match world state")
+      (assert (= (. applied-background.color 2) 0.2) "Resumed background should match world state")
+      true)))
+
 (fn home-world-deactivate-requires-scene-lights []
   (with-temp-dir
     (fn [root]
@@ -632,6 +927,54 @@
               "Expected missing lights failure during world capture")
       true)))
 
+(fn home-world-deactivate-requires-scene-skybox []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:scene {:capture-state (fn [_self]
+                                     {:panels []
+                                      :terrains []
+                                      :lights (LightSystemModule.default-state)
+                                      :background (make-background-state)})}})
+      (local (ok err)
+        (pcall (fn []
+                 (world:deactivate {} "switch"))))
+      (assert (not ok) "World deactivate should fail when scene capture omits skybox")
+      (assert (string.find (tostring err) "requires scene skybox" 1 true)
+              "Expected missing skybox failure during world capture")
+      true)))
+
+(fn home-world-deactivate-requires-scene-background []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:scene {:capture-state (fn [_self]
+                                     {:panels []
+                                      :terrains []
+                                      :lights (LightSystemModule.default-state)
+                                      :skybox (make-skybox-state)})}})
+      (local (ok err)
+        (pcall (fn []
+                 (world:deactivate {} "switch"))))
+      (assert (not ok) "World deactivate should fail when scene capture omits background")
+      (assert (string.find (tostring err) "requires scene background" 1 true)
+              "Expected missing background failure during world capture")
+      true)))
+
 (fn home-world-preserves-explicit-empty-terrain-list []
   (with-temp-dir
     (fn [root]
@@ -645,7 +988,8 @@
                                   :views {:open-node-keys []}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -672,7 +1016,8 @@
                                   :terrains [{:id "t-1"
                                               :kind "voxel-terrain"
                                               :options {:chunk-size 32}}]
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -702,7 +1047,9 @@
                                   :terrains [{:id "t-1"
                                               :kind "legacy-terrain"
                                               :options {:width 64}}]
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -713,7 +1060,9 @@
            {:scene {:capture-state (fn [_self]
                                      {:panels []
                                       :terrains []
-                                      :lights (LightSystemModule.default-state)})}})
+                                      :lights (LightSystemModule.default-state)
+                                      :skybox (make-skybox-state)
+                                      :background (make-background-state)})}})
       (world:deactivate {} "switch")
       (local terrains (and world.state world.state.scene world.state.scene.terrains))
       (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
@@ -740,7 +1089,8 @@
                                   :views {:open-node-keys []}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -787,7 +1137,8 @@
                                   :views {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"}]}}
                           :scene {:panels []
                                   :terrains []
-                                  :lights (LightSystemModule.default-state)}
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
                           :hud {:panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
@@ -843,18 +1194,40 @@
                      :fn home-world-new-state-seeds-default-terrain})
 (table.insert tests {:name "HomeWorld new state seeds default lights"
                      :fn home-world-new-state-seeds-default-lights})
+(table.insert tests {:name "HomeWorld new state seeds default skybox"
+                     :fn home-world-new-state-seeds-default-skybox})
+(table.insert tests {:name "HomeWorld new state seeds default background"
+                     :fn home-world-new-state-seeds-default-background})
 (table.insert tests {:name "HomeWorld loads persisted lights"
                      :fn home-world-loads-persisted-lights})
+(table.insert tests {:name "HomeWorld loads persisted skybox"
+                     :fn home-world-loads-persisted-skybox})
+(table.insert tests {:name "HomeWorld loads persisted background"
+                     :fn home-world-loads-persisted-background})
 (table.insert tests {:name "HomeWorld fails loudly when persisted lights are missing"
                      :fn home-world-fails-loudly-when-persisted-lights-are-missing})
+(table.insert tests {:name "HomeWorld repairs missing persisted skybox with default"
+                     :fn home-world-repairs-missing-persisted-skybox-with-default})
+(table.insert tests {:name "HomeWorld repairs missing persisted background with default"
+                     :fn home-world-repairs-missing-persisted-background-with-default})
 (table.insert tests {:name "HomeWorld persists updated ambient light across reload"
                      :fn home-world-persists-updated-ambient-light-across-reload})
 (table.insert tests {:name "HomeWorld persists updated non-ambient lights across reload"
                      :fn home-world-persists-updated-non-ambient-lights-across-reload})
 (table.insert tests {:name "HomeWorld activate reapplies runtime light state"
                      :fn home-world-activate-reapplies-runtime-light-state})
+(table.insert tests {:name "HomeWorld activate reapplies runtime skybox state"
+                     :fn home-world-activate-reapplies-runtime-skybox-state})
+(table.insert tests {:name "HomeWorld activate reapplies runtime background state"
+                     :fn home-world-activate-reapplies-runtime-background-state})
+(table.insert tests {:name "HomeWorld resume reapplies runtime light and skybox state"
+                     :fn home-world-resume-reapplies-runtime-light-and-skybox-state})
 (table.insert tests {:name "HomeWorld deactivate requires scene lights"
                      :fn home-world-deactivate-requires-scene-lights})
+(table.insert tests {:name "HomeWorld deactivate requires scene skybox"
+                     :fn home-world-deactivate-requires-scene-skybox})
+(table.insert tests {:name "HomeWorld deactivate requires scene background"
+                     :fn home-world-deactivate-requires-scene-background})
 (table.insert tests {:name "HomeWorld preserves explicit empty terrain list"
                      :fn home-world-preserves-explicit-empty-terrain-list})
 (table.insert tests {:name "HomeWorld preserves unknown terrain kind state"

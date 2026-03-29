@@ -20,6 +20,8 @@
 (local TerrainQuery (require :terrain-query))
 (local TerrainLayoutRecord (require :terrain-layout-record))
 (local LightingViewState (require :lighting-view-state))
+(local SkyboxState (require :skybox-state))
+(local BackgroundState (require :background-state))
 (local default-position (glm.vec3 0 0 0))
 (local default-rotation (glm.quat 1 0 0 0))
 (local default-depth-scale 0)
@@ -1370,6 +1372,8 @@
     (assert (and app app.lights app.lights.get-state)
             "Scene.capture-state requires app.lights.get-state")
     (local lights (app.lights:get-state))
+    (local skybox (self:get-skybox-state))
+    (local background (self:get-background-state))
     (each [_ metadata (ipairs (or self.scene-children []))]
       (local persistence (and metadata metadata.persistence))
       (assert persistence
@@ -1399,7 +1403,9 @@
         (table.insert panels record)))
     {:panels panels
      :terrains terrains
-     :lights lights})
+     :lights lights
+     :skybox skybox
+     :background background})
 
   (fn set-light-state [self state]
     (assert (and app app.lights app.lights.set-state)
@@ -1411,6 +1417,30 @@
     (assert (and app app.lights app.lights.get-state)
             "Scene.get-light-state requires app.lights.get-state")
     (app.lights:get-state))
+
+  (fn set-skybox-state [self state]
+    (assert (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+            "Scene.set-skybox-state requires app.renderers.skybox.set-state")
+    (app.renderers.skybox:set-state state))
+
+  (fn get-skybox-state [self]
+    (assert (and app app.renderers app.renderers.skybox app.renderers.skybox.get-state)
+            "Scene.get-skybox-state requires app.renderers.skybox.get-state")
+    (SkyboxState.normalize-complete-state
+      (app.renderers.skybox:get-state)
+      "Scene.get-skybox-state"))
+
+  (fn set-background-state [self state]
+    (assert (and app app.renderers app.renderers.set-background-state)
+            "Scene.set-background-state requires app.renderers.set-background-state")
+    (app.renderers:set-background-state state))
+
+  (fn get-background-state [self]
+    (assert (and app app.renderers app.renderers.get-background-state)
+            "Scene.get-background-state requires app.renderers.get-background-state")
+    (BackgroundState.normalize-complete-state
+      (app.renderers:get-background-state)
+      "Scene.get-background-state"))
 
   (fn resolve-panel-restorer-strategy [self panel]
     (local kind panel.kind)
@@ -1503,7 +1533,11 @@
           (do
             (restore-panel-with-fallback self panel panel-idx))))
     (assert payload.lights "Scene.restore-state requires :lights")
+    (assert payload.skybox "Scene.restore-state requires :skybox")
+    (assert payload.background "Scene.restore-state requires :background")
     (self:set-light-state payload.lights)
+    (self:set-skybox-state payload.skybox)
+    (self:set-background-state payload.background)
     true)
 
 (set self.unregister-entity unregister-entity)
@@ -1546,6 +1580,10 @@
 (set self.restore-state restore-state)
 (set self.set-light-state set-light-state)
 (set self.get-light-state get-light-state)
+(set self.set-skybox-state set-skybox-state)
+(set self.get-skybox-state get-skybox-state)
+(set self.set-background-state set-background-state)
+(set self.get-background-state get-background-state)
 (set self.capture-panel-element-state capture-panel-element-state)
 (set self.register-panel-restorer register-panel-restorer)
 (set self.unregister-panel-restorer unregister-panel-restorer)

@@ -7,6 +7,8 @@
 (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
 (local {:LightsNode LightsNode} (require :graph/nodes/lights))
+(local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
+(local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
 (local WorldData (require :graph/world-data))
 
 (local M {})
@@ -15,6 +17,7 @@
   (local options (or opts {}))
   (local world-id (assert options.world-id "WorldNode requires :world-id"))
   (local world-manager (assert options.world-manager "WorldNode requires :world-manager"))
+  (local asset-path-resolver options.asset-path-resolver)
   (local world-entry (or options.world-entry
                           (WorldData.resolve-world-entry world-manager world-id)))
   (assert world-entry (.. "WorldNode could not resolve world: " world-id))
@@ -28,6 +31,7 @@
                           :view WorldNodeView}))
   (set node.world-id world-id)
   (set node.world-manager world-manager)
+  (set node.asset-path-resolver asset-path-resolver)
   (set node.world-entry world-entry)
   (set node.changed (Signal))
   (set node.categories-changed (Signal))
@@ -36,6 +40,8 @@
       [{:key "scene-panels" :label "scene panels" :kind ScenePanelsNode}
        {:key "hud-panels" :label "hud panels" :kind HudPanelsNode}
        {:key "terrains" :label "terrains" :kind TerrainsNode}
+       {:key "skybox" :label "skybox" :kind SkyboxNode}
+       {:key "background" :label "background" :kind BackgroundNode}
        {:key "lights" :label "lights" :kind LightsNode}])
     (when self.categories-changed
       (self.categories-changed:emit categories))
@@ -46,7 +52,8 @@
          (local graph self.graph)
          (when (and graph category category.kind)
            (local category-node (category.kind {:world-id self.world-id
-                                               :world-manager self.world-manager}))
+                                               :world-manager self.world-manager
+                                               :asset-path-resolver self.asset-path-resolver}))
            (graph:add-edge (GraphEdge {:source self :target category-node})))))
   (set node.activate
        (fn [self]

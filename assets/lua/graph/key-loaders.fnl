@@ -36,6 +36,8 @@
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
 (local {:HudPanelsNode HudPanelsNode} (require :graph/nodes/hud-panels))
 (local {:TerrainsNode TerrainsNode} (require :graph/nodes/terrains))
+(local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
+(local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
 (local {:LightsNode LightsNode} (require :graph/nodes/lights))
 (local {:LightTypeNode LightTypeNode} (require :graph/nodes/light-type))
 (local {:LightNode LightNode} (require :graph/nodes/light))
@@ -113,6 +115,7 @@
   (local llm-store (or options.llm-store options.llm_store (LlmStore.get-default)))
   (local kernels (or options.kernels (Kernels.get-default)))
   (local world-manager (or options.world-manager (and app app.world-manager)))
+  (local asset-path-resolver options.asset-path-resolver)
   (local hackernews-ensure-client (or options.hackernews-ensure-client options.hackernews_ensure_client))
 
   (register-string-entity-loader graph {:store string-store})
@@ -273,7 +276,8 @@
     (exact-key-loader "worlds"
       (fn []
         (when world-manager
-          (WorldsNode {:world-manager world-manager})))))
+          (WorldsNode {:world-manager world-manager
+                       :asset-path-resolver asset-path-resolver})))))
 
   (graph:register-key-loader "world"
     (prefix-loader "world:"
@@ -281,6 +285,7 @@
         (when world-manager
           (WorldNode {:world-id world-id
                       :world-manager world-manager
+                      :asset-path-resolver asset-path-resolver
                       :key key})))))
 
   (graph:register-key-loader "scene-panels"
@@ -306,6 +311,23 @@
           (TerrainsNode {:world-id world-id
                          :world-manager world-manager
                          :key key})))))
+
+  (graph:register-key-loader "skybox"
+    (prefix-loader "skybox:"
+      (fn [world-id key]
+        (when world-manager
+          (SkyboxNode {:world-id world-id
+                       :world-manager world-manager
+                       :asset-path-resolver asset-path-resolver
+                       :key key})))))
+
+  (graph:register-key-loader "background"
+    (prefix-loader "background:"
+      (fn [world-id key]
+        (when world-manager
+          (BackgroundNode {:world-id world-id
+                           :world-manager world-manager
+                           :key key})))))
 
   (graph:register-key-loader "lights"
     (prefix-loader "lights:"

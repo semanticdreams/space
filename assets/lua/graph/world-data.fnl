@@ -1,5 +1,7 @@
 (local TerrainRecords (require :scene-terrain-records))
 (local LightSystemModule (require :light-system))
+(local SkyboxState (require :skybox-state))
+(local BackgroundState (require :background-state))
 
 (local M {})
 
@@ -76,6 +78,32 @@
 (fn terrain-state-records [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (or (and world world.state world.state.scene world.state.scene.terrains) []))
+
+(fn scene-state-skybox [world-manager world-id]
+  (local world (resolve-world world-manager world-id))
+  (if (not world)
+      nil
+      (do
+        (assert world.state (.. "WorldData[" world-id "] requires world.state"))
+        (assert world.state.scene (.. "WorldData[" world-id "] requires world.state.scene"))
+        (local scene-state world.state.scene)
+        (SkyboxState.normalize-complete-state
+          (assert scene-state.skybox
+                  (.. "WorldData[" world-id "] requires scene.skybox"))
+          (.. "WorldData[" world-id "] scene.skybox")))))
+
+(fn scene-state-background [world-manager world-id]
+  (local world (resolve-world world-manager world-id))
+  (if (not world)
+      nil
+      (do
+        (assert world.state (.. "WorldData[" world-id "] requires world.state"))
+        (assert world.state.scene (.. "WorldData[" world-id "] requires world.state.scene"))
+        (local scene-state world.state.scene)
+        (BackgroundState.normalize-complete-state
+          (assert scene-state.background
+                  (.. "WorldData[" world-id "] requires scene.background"))
+          (.. "WorldData[" world-id "] scene.background")))))
 
 (fn resolve-default-light-state []
   (LightSystemModule.default-state))
@@ -162,6 +190,20 @@
   (when scene
     (require-active-scene-light-method scene :set-light-state)
     (scene:set-light-state lights)))
+
+(fn sync-active-skybox-state [world-manager world-id skybox]
+  (local scene (resolve-scene world-manager world-id))
+  (when scene
+    (assert scene.set-skybox-state
+            "Active scene is missing set-skybox-state for world skybox sync")
+    (scene:set-skybox-state skybox)))
+
+(fn sync-active-background-state [world-manager world-id background]
+  (local scene (resolve-scene world-manager world-id))
+  (when scene
+    (assert scene.set-background-state
+            "Active scene is missing set-background-state for world background sync")
+    (scene:set-background-state background)))
 
 (fn list-light-types [world-manager world-id]
   (local lights (scene-state-lights world-manager world-id))
@@ -470,6 +512,38 @@
         (emit-world-change world-manager world-id "light-removed")
         true)))
 
+(fn get-skybox [world-manager world-id]
+  (scene-state-skybox world-manager world-id))
+
+(fn get-background [world-manager world-id]
+  (scene-state-background world-manager world-id))
+
+(fn update-skybox [world-manager world-id skybox]
+  (local world (resolve-world world-manager world-id))
+  (assert world (.. "Cannot update skybox in missing world " world-id))
+  (local scene-state (require-scene-state world (.. "WorldData.update-skybox[" world-id "]")))
+  (local normalized
+    (SkyboxState.normalize-complete-state skybox
+                                          (.. "WorldData.update-skybox[" world-id "]")))
+  (set scene-state.skybox normalized)
+  (sync-active-skybox-state world-manager world-id normalized)
+  (persist-world world-manager world-id)
+  (emit-world-change world-manager world-id "skybox-updated")
+  normalized)
+
+(fn update-background [world-manager world-id background]
+  (local world (resolve-world world-manager world-id))
+  (assert world (.. "Cannot update background in missing world " world-id))
+  (local scene-state (require-scene-state world (.. "WorldData.update-background[" world-id "]")))
+  (local normalized
+    (BackgroundState.normalize-complete-state background
+                                              (.. "WorldData.update-background[" world-id "]")))
+  (set scene-state.background normalized)
+  (sync-active-background-state world-manager world-id normalized)
+  (persist-world world-manager world-id)
+  (emit-world-change world-manager world-id "background-updated")
+  normalized)
+
 (fn remove-scene-panel [world-manager world-id panel-index]
   (local scene (resolve-scene world-manager world-id))
   (if (and scene scene.scene-children scene.remove-panel-child)
@@ -607,6 +681,8 @@
  :list-scene-panels list-scene-panels
  :list-hud-panels list-hud-panels
  :list-terrains list-terrains
+ :get-skybox get-skybox
+ :get-background get-background
  :list-light-types list-light-types
  :list-lights list-lights
  :find-scene-panel find-scene-panel
@@ -615,6 +691,8 @@
  :find-light find-light
  :add-terrain add-terrain
  :add-light add-light
+ :update-skybox update-skybox
+ :update-background update-background
  :update-terrain-record update-terrain-record
  :update-light-record update-light-record
  :set-terrain-selection-target set-terrain-selection-target

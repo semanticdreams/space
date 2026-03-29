@@ -15,6 +15,8 @@
 (local PhysicsContainment (require :physics-containment))
 (local TerrainRecords (require :scene-terrain-records))
 (local LightSystemModule (require :light-system))
+(local SkyboxState (require :skybox-state))
+(local BackgroundState (require :background-state))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -60,7 +62,9 @@
                    :edges []}
            :views {:open-node-keys []}}
    :scene {:panels []
-           :terrains []}
+           :terrains []
+           :skybox (SkyboxState.default-state)
+           :background (BackgroundState.default-state)}
    :hud {:panels []}})
 
 (fn default-state []
@@ -186,6 +190,8 @@
                :name name
                :type type-name
                :dir dir
+               :graph-world-manager options.graph-world-manager
+               :asset-path-resolver options.asset-path-resolver
                :state-path state-path
                :state (default-state)
                :active? false
@@ -197,18 +203,43 @@
     (when (not ok)
       (error (string.format "HomeWorld failed to create %s: %s" dir err))))
 
+  (fn persist-loaded-state! [world]
+    (ensure-world-dir)
+    (local (ok err) (pcall (fn [] (JsonUtils.write-json! world.state-path world.state))))
+    (when (not ok)
+      (error (string.format "HomeWorld failed to write %s during load: %s" world.state-path err))))
+
   (fn load-state [world]
     (local persisted (read-world-state world.state-path))
+    (var repaired-persisted-state? false)
     (if persisted
         (do
           (set world.state (merge-state-defaults (base-default-state) persisted))
           (local persisted-lights (and persisted.scene persisted.scene.lights))
+          (local persisted-skybox (and persisted.scene persisted.scene.skybox))
+          (local persisted-background (and persisted.scene persisted.scene.background))
           (assert persisted-lights
                   (string.format "HomeWorld %s persisted state requires scene.lights" world.id))
           (set world.state.scene.lights
                (LightSystemModule.normalize-complete-state persisted-lights
                                                           (string.format "HomeWorld.load-state %s"
-                                                                         world.id))))
+                                                                         world.id)))
+          (if persisted-skybox
+              (set world.state.scene.skybox
+                   (SkyboxState.normalize-complete-state persisted-skybox
+                                                        (string.format "HomeWorld.load-state %s"
+                                                                       world.id)))
+              (do
+                (set world.state.scene.skybox (SkyboxState.default-state))
+                (set repaired-persisted-state? true)))
+          (if persisted-background
+              (set world.state.scene.background
+                   (BackgroundState.normalize-complete-state persisted-background
+                                                            (string.format "HomeWorld.load-state %s"
+                                                                           world.id)))
+              (do
+                (set world.state.scene.background (BackgroundState.default-state))
+                (set repaired-persisted-state? true))))
         (do
           (set world.state (default-state))
           (set world.state.scene.terrains (TerrainRecords.default-records))))
@@ -249,7 +280,9 @@
          (PhysicsContainment.serialize-config
            (PhysicsContainment.normalize-config containment)))
     (set physics-state.floor-y nil)
-    (set world.state.physics physics-state))
+    (set world.state.physics physics-state)
+    (when repaired-persisted-state?
+      (persist-loaded-state! world)))
 
   (fn save-state [world]
     (ensure-world-dir)
@@ -301,6 +334,28 @@
     (when (and scene scene.set-light-state)
       (scene:set-light-state (and scene-state scene-state.lights))))
 
+  (fn apply-runtime-skybox-state! [world]
+    (local runtime world.runtime)
+    (local scene (and runtime runtime.scene))
+    (local scene-state (and world.state world.state.scene))
+    (when (and scene scene.set-skybox-state)
+      (scene:set-skybox-state
+        (SkyboxState.normalize-complete-state
+          (assert (and scene-state scene-state.skybox)
+                  (string.format "HomeWorld %s requires scene.skybox" world.id))
+          (string.format "HomeWorld.apply-runtime-skybox-state %s" world.id)))))
+
+  (fn apply-runtime-background-state! [world]
+    (local runtime world.runtime)
+    (local scene (and runtime runtime.scene))
+    (local scene-state (and world.state world.state.scene))
+    (when (and scene scene.set-background-state)
+      (scene:set-background-state
+        (BackgroundState.normalize-complete-state
+          (assert (and scene-state scene-state.background)
+                  (string.format "HomeWorld %s requires scene.background" world.id))
+          (string.format "HomeWorld.apply-runtime-background-state %s" world.id)))))
+
   (fn capture-runtime-state [world ctx]
     (local runtime world.runtime)
     (local camera (and runtime runtime.camera))
@@ -331,6 +386,8 @@
              existing-scene.terrains
              captured-scene.terrains))
       (assert captured-scene.lights "HomeWorld.capture-runtime-state requires scene lights")
+      (assert captured-scene.skybox "HomeWorld.capture-runtime-state requires scene skybox")
+      (assert captured-scene.background "HomeWorld.capture-runtime-state requires scene background")
       (set world.state.scene captured-scene))
     (when (and hud hud.capture-state)
       (set world.state.hud (hud:capture-state)))
@@ -367,7 +424,10 @@
 
     (local controls (FirstPersonControls {:camera camera}))
     (local graph (Graph {}))
-    (GraphKeyLoaders.register graph)
+    (GraphKeyLoaders.register graph {:world-manager (assert world.graph-world-manager
+                                                         (.. "HomeWorld " world.id " requires :graph-world-manager"))
+                                     :asset-path-resolver (assert world.asset-path-resolver
+                                                                  (.. "HomeWorld " world.id " requires :asset-path-resolver"))})
     (local scene-scope (ctx.focus-manager:create-scope {:name (.. "scene:" world.id)
                                                         :directional-traversal-boundary? true}))
     (ctx.focus-manager:attach scene-scope ctx.focus-root)
@@ -468,11 +528,16 @@
 
   (fn activate [world ctx]
     (world:init ctx)
+    (var created-runtime? false)
     (when (not world.runtime)
-      (set world.runtime (create-runtime world ctx)))
+      (set world.runtime (create-runtime world ctx))
+      (set created-runtime? true))
     (apply-runtime-physics-policy!)
     (apply-runtime-containment! world)
-    (apply-runtime-light-state! world)
+    (when (not created-runtime?)
+      (apply-runtime-light-state! world)
+      (apply-runtime-skybox-state! world))
+    (apply-runtime-background-state! world)
     (set world.active? true))
 
   (fn deactivate [world ctx reason]
@@ -487,10 +552,16 @@
     (clear-runtime world ctx "suspend"))
 
   (fn resume [world ctx]
+    (var created-runtime? false)
     (when (not world.runtime)
-      (set world.runtime (create-runtime world ctx)))
+      (set world.runtime (create-runtime world ctx))
+      (set created-runtime? true))
     (apply-runtime-physics-policy!)
     (apply-runtime-containment! world)
+    (when (not created-runtime?)
+      (apply-runtime-light-state! world)
+      (apply-runtime-skybox-state! world))
+    (apply-runtime-background-state! world)
     (set world.active? true))
 
   (fn drop [world ctx reason]

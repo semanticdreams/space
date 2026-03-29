@@ -501,6 +501,24 @@
           (assert err)
           (assert (string.find (tostring err) "lighting")))))))
 
+(fn renderers-update-uses-background-clear-color []
+  (with-open-gl
+    (fn [mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          (local previous-app app)
+          (global app {})
+          (renderers:set-background-state {:color [0.1 0.2 0.3]})
+          (renderers:update)
+          (local clear-call (only (mock:get-gl-calls "glClearColor")))
+          (assert (= clear-call.args.r 0.1))
+          (assert (= clear-call.args.g 0.2))
+          (assert (= clear-call.args.b 0.3))
+          (assert (= clear-call.args.a 1.0))
+          (global app previous-app))))))
+
 (fn instanced-color-mesh-batch-drop-requires-removed-instances []
   (local InstancedColorMeshBatch (reload "instanced-color-mesh-batch"))
   (local batches [])
@@ -646,6 +664,8 @@
                      :fn renderers-draw-target-skips-lighting-state-for-empty-lit-geometry})
 (table.insert tests {:name "Renderers draw-target requires lighting state for lit geometry"
                      :fn renderers-draw-target-requires-lighting-state-for-lit-geometry})
+(table.insert tests {:name "Renderers update uses background clear color"
+                     :fn renderers-update-uses-background-clear-color})
 
 (local main
   (fn []

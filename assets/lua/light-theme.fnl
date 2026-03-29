@@ -33,7 +33,6 @@
            :selection-border-color (glm.vec4 0.18 0.5 0.9 0.9)}
    :terrain-selection {:fill (glm.vec4 0.18 0.5 0.9 0.18)
                        :border (glm.vec4 0.16 0.47 0.88 0.95)}
-   :skybox {:brightness 0.3}
    :flat-terrain {:dark (glm.vec4 0.86 0.88 0.9 1.0)
                   :light (glm.vec4 0.94 0.95 0.97 1.0)}
    :card {:background (glm.vec4 0.96 0.97 0.98 1)

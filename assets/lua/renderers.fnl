@@ -10,6 +10,7 @@
 (local Fxaa (require :fxaa))
 (local LightingViewState (require :lighting-view-state))
 (local RenderBatchPredicates (require :render-batch-predicates))
+(local BackgroundState (require :background-state))
 
 (local gl (require :gl))
 
@@ -30,9 +31,10 @@
   (local instanced-color-mesh-renderer (InstancedColorMeshRenderer))
   (local quad-renderer (QuadRenderer))
   (local text-ssbo-renderer (TextSsboRenderer))
-  (local skybox-renderer (SkyboxRenderer {:brightness 0.1}))
+  (local skybox-renderer (SkyboxRenderer {}))
   (local fxaa (Fxaa))
   (var sub-apps [])
+  (var background-state (BackgroundState.default-state))
 
   (var final-fbo nil)
   (var final-rbo nil)
@@ -184,10 +186,6 @@
          (> final-height 0)))
 
   (fn update [self]
-    (local active-theme (and app.themes app.themes.get-active-theme
-                             (app.themes.get-active-theme)))
-    (when (and active-theme active-theme.skybox active-theme.skybox.brightness)
-      (skybox-renderer:set-brightness active-theme.skybox.brightness))
     (self:prerender-sub-apps)
     (local viewport app.viewport)
     (when (and viewport viewport.width viewport.height)
@@ -196,7 +194,8 @@
     (gl.glDisable gl.GL_CULL_FACE)
     (gl.glEnable gl.GL_DEPTH_TEST)
     (gl.glDepthFunc gl.GL_LESS)
-    (gl.glClearColor 0.0 0.0 0.0 1.0)
+    (local clear-color (BackgroundState.clear-components background-state))
+    (gl.glClearColor (. clear-color 1) (. clear-color 2) (. clear-color 3) (. clear-color 4))
     (gl.glBindFramebuffer gl.GL_FRAMEBUFFER (if use-fxaa (fxaa:get-fbo) 0))
     (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
     (when app.scene
@@ -241,9 +240,15 @@
       (fxaa:drop)))
 
   {:update update
-   :apply-theme (fn [_self theme]
-                  (when (and theme theme.skybox theme.skybox.brightness)
-                    (skybox-renderer:set-brightness theme.skybox.brightness)))
+   :apply-theme (fn [_self _theme]
+                  nil)
+   :set-background-state (fn [_self next-state]
+                           (set background-state
+                                (BackgroundState.normalize-complete-state next-state
+                                                                          "Renderers.set-background-state"))
+                           background-state)
+   :get-background-state (fn [_self]
+                           (BackgroundState.clone-state background-state))
    :draw-target draw-target
    :prerender-sub-apps prerender-sub-apps
    :draw-sub-apps draw-sub-apps

@@ -51,6 +51,7 @@
   (var worlds [])
   (var active-index nil)
   (var id-seq 0)
+  (var manager-api nil)
 
   (fn world-dir [id]
     (fs.join-path root-dir id))
@@ -142,7 +143,9 @@
       (set entry.world (create-world {:id entry.id
                                       :name entry.name
                                       :type entry.type
-                                      :dir (world-dir entry.id)}))
+                                      :dir (world-dir entry.id)
+                                      :graph-world-manager manager-api
+                                      :asset-path-resolver options.asset-path-resolver}))
       (entry.world:init (runtime-context))))
 
   (fn apply-active-runtime [entry]
@@ -320,21 +323,23 @@
 
   (ensure-initial-worlds)
 
-  {:activate-first (fn [_self] (activate-first))
-   :activate-index (fn [_self idx] (activate-index idx))
-   :activate-next (fn [_self] (activate-next))
-   :activate-previous (fn [_self] (activate-previous))
-   :activate-by-tab-number (fn [_self tab-number] (activate-by-tab-number tab-number))
-   :create-home-world (fn [_self opts] (create-home-world opts))
-   :close-world-index (fn [_self idx] (close-world-index idx))
-   :close-active-world (fn [_self] (close-active-world))
-   :update (fn [_self delta] (update delta))
-   :drop (fn [_self] (drop))
-   :list-tabs (fn [_self] (list-tabs))
-    :get-world-entry (fn [_self world-id] (get-world-entry world-id))
-   :count (fn [_self] (count))
-   :active-world (fn [_self] (active-world))
-   :active-world-id (fn [_self] (active-world-id))
-   :changed changed})
+  (set manager-api
+       {:activate-first (fn [_self] (activate-first))
+        :activate-index (fn [_self idx] (activate-index idx))
+        :activate-next (fn [_self] (activate-next))
+        :activate-previous (fn [_self] (activate-previous))
+        :activate-by-tab-number (fn [_self tab-number] (activate-by-tab-number tab-number))
+        :create-home-world (fn [_self opts] (create-home-world opts))
+        :close-world-index (fn [_self idx] (close-world-index idx))
+        :close-active-world (fn [_self] (close-active-world))
+        :update (fn [_self delta] (update delta))
+        :drop (fn [_self] (drop))
+        :list-tabs (fn [_self] (list-tabs))
+        :get-world-entry (fn [_self world-id] (get-world-entry world-id))
+        :count (fn [_self] (count))
+        :active-world (fn [_self] (active-world))
+        :active-world-id (fn [_self] (active-world-id))
+        :changed changed})
+  manager-api)
 
 WorldManager

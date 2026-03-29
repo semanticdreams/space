@@ -734,6 +734,7 @@
   (assert app.worlds-dir "init-world-manager requires app.worlds-dir")
   (set app.world-manager
        (WorldManager {:root-dir app.worlds-dir
+                      :asset-path-resolver (and app.engine app.engine.get-asset-path)
                       :context-fn world-runtime-context
                       :on-active-runtime bind-active-world-runtime
                       :on-empty (fn []

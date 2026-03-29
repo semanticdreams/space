@@ -4,6 +4,8 @@
 (local Graph (require :graph/init))
 (local GraphKeyLoaders (require :graph/key-loaders))
 (local LightSystemModule (require :light-system))
+(local SkyboxState (require :skybox-state))
+(local BackgroundState (require :background-state))
 (local TestSupport (require :tests/test-support))
 
 (local tests [])
@@ -24,10 +26,28 @@
   (fs.remove-all dir)
   (if ok result (error result)))
 
+(fn make-skybox-state [opts]
+  (local options (or opts {}))
+  (SkyboxState.normalize-complete-state
+    {:enabled? (if (= options.enabled? nil) true options.enabled?)
+     :name (or options.name "lake")
+     :brightness (or options.brightness 0.1)}
+    "test-world-nodes skybox state"))
+
+(fn make-background-state [opts]
+  (local options (or opts {}))
+  (BackgroundState.normalize-complete-state
+    {:color (or options.color [0.0 0.0 0.0])}
+    "test-world-nodes background state"))
+
 (fn make-world-entry [opts]
   (local options (or opts {}))
   (local runtime (or options.runtime nil))
-  (local state (or options.state {:scene {:panels [] :terrains [] :lights (LightSystemModule.default-state)}
+  (local state (or options.state {:scene {:panels []
+                                          :terrains []
+                                          :lights (LightSystemModule.default-state)
+                                          :skybox (make-skybox-state)
+                                          :background (make-background-state)}
                                   :hud {:panels []}}))
   {:id (or options.id "test-world")
    :name (or options.name "Test World")
@@ -117,10 +137,14 @@
 (fn make-scene-runtime [opts]
   (local options (or opts {}))
   (var lights (or options.lights (LightSystemModule.default-state)))
+  (var skybox (or options.skybox (make-skybox-state)))
+  (var background (or options.background (make-background-state)))
   (local scene {:capture-state (fn [_self]
                                  {:panels (or options.panels [])
                                   :terrains (or options.terrains [])
-                                  :lights lights})
+                                  :lights lights
+                                  :skybox skybox
+                                  :background background})
                 :build-default (fn [_self payload]
                                  (when options.on-build-default
                                    (options.on-build-default payload))
@@ -128,7 +152,13 @@
                  :restore-state (fn [_self payload]
                                   (assert (and payload payload.lights)
                                           "test scene runtime restore-state requires lights")
+                                  (assert (and payload payload.skybox)
+                                          "test scene runtime restore-state requires skybox")
                                   (set lights payload.lights)
+                                  (set skybox payload.skybox)
+                                  (assert (and payload payload.background)
+                                          "test scene runtime restore-state requires background")
+                                  (set background payload.background)
                                   (when options.on-restore-state
                                     (options.on-restore-state payload))
                                   true)
@@ -139,6 +169,20 @@
                                    true)
                 :get-light-state (fn [_self]
                                    lights)
+                :set-skybox-state (fn [_self value]
+                                    (set skybox value)
+                                    (when options.on-set-skybox-state
+                                      (options.on-set-skybox-state value))
+                                    true)
+                :get-skybox-state (fn [_self]
+                                    skybox)
+                :set-background-state (fn [_self value]
+                                        (set background value)
+                                        (when options.on-set-background-state
+                                          (options.on-set-background-state value))
+                                        true)
+                :get-background-state (fn [_self]
+                                        background)
                 :replace-terrain-record (fn [_self terrain-id record]
                                           (when options.on-replace-terrain-record
                                             (options.on-replace-terrain-record terrain-id record))
@@ -474,15 +518,19 @@
   (local node (WorldNode {:world-id "test-world-123" :world-manager mock-manager}))
   (assert node.emit-categories "WorldNode should have emit-categories method")
   (local categories (node:emit-categories))
-  (assert (= (length categories) 4) "WorldNode should have 4 categories")
+  (assert (= (length categories) 6) "WorldNode should have 6 categories")
   (local cat1 (. categories 1))
   (local cat2 (. categories 2))
   (local cat3 (. categories 3))
   (local cat4 (. categories 4))
+  (local cat5 (. categories 5))
+  (local cat6 (. categories 6))
   (assert (= cat1.key "scene-panels") "first category should be scene-panels")
   (assert (= cat2.key "hud-panels") "second category should be hud-panels")
   (assert (= cat3.key "terrains") "third category should be terrains")
-  (assert (= cat4.key "lights") "fourth category should be lights")
+  (assert (= cat4.key "skybox") "fourth category should be skybox")
+  (assert (= cat5.key "background") "fifth category should be background")
+  (assert (= cat6.key "lights") "sixth category should be lights")
   (node:drop))
 
 (fn test-world-node-add-category-node []
@@ -2622,9 +2670,11 @@
   (view:set-categories [{:key "scene-panels" :label "scene panels"}
                        {:key "hud-panels" :label "hud panels"}
                        {:key "terrains" :label "terrains"}
+                       {:key "skybox" :label "skybox"}
+                       {:key "background" :label "background"}
                        {:key "lights" :label "lights"}])
   (assert view.search "WorldNodeView should have search after set-categories")
-  (assert (= (length (or view.search.items [])) 4) "search should have 4 items")
+  (assert (= (length (or view.search.items [])) 6) "search should have 6 items")
   (view:drop))
 
 (fn test-world-node-view-refresh-categories []

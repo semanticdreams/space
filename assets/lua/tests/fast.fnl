@@ -128,7 +128,6 @@
     :tests.test-runtime-performance
     :tests.test-world-manager
     :tests.test-world-tabs-widget
-    :tests.test-skybox-settings
     :tests.test-flat-terrain-theme
     :tests.test-heightfield-terrain
     :tests.test-perlin-terrain
@@ -171,8 +170,10 @@
     :tests.test-notebooks
     :tests.test-morphs
    :tests.test-link-entity-crash
-   :tests.test-graph-loaders
-   :tests.test-world-nodes]})
+    :tests.test-graph-loaders
+    :tests.test-world-nodes
+    :tests.test-world-skybox-node
+    :tests.test-world-background-node]})
 
 (local main
   (fn []

@@ -47,12 +47,6 @@
   (when (and app.renderers options.viewport)
     (app.renderers:on-viewport-changed options.viewport))
 
-  ; Apply persisted UI settings that affect renderers.
-  (when (and app.settings app.settings.get-value app.renderers app.renderers.skybox)
-    (local skybox-name (app.settings.get-value "ui.skybox" nil))
-    (when (and skybox-name (= (type skybox-name) :string) (> (# skybox-name) 0))
-      (app.renderers.skybox:set-skybox (.. "skyboxes/" skybox-name))))
-
   app.renderers)
 
 (fn init-icons []

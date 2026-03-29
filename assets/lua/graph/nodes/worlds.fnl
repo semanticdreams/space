@@ -11,6 +11,7 @@
 (fn M.WorldsNode [opts]
   (local options (or opts {}))
   (local world-manager (assert options.world-manager "WorldsNode requires :world-manager"))
+  (local asset-path-resolver options.asset-path-resolver)
   (local key (or options.key "worlds"))
   (local node (GraphNode {:key key
                            :label "worlds"
@@ -19,6 +20,7 @@
                            :size 9.0
                            :view WorldsNodeView}))
   (set node.world-manager world-manager)
+  (set node.asset-path-resolver asset-path-resolver)
   (set node.items-changed (Signal))
   (fn collect-items [self]
     (local tabs (self.world-manager:list-tabs))
@@ -39,6 +41,7 @@
          (when (and graph tab tab.id)
            (local world-node (WorldNode {:world-id tab.id
                                          :world-manager self.world-manager
+                                         :asset-path-resolver self.asset-path-resolver
                                          :world-entry (or (WorldData.resolve-world-entry self.world-manager tab.id)
                                                           tab)}))
            (graph:add-edge (GraphEdge {:source self
