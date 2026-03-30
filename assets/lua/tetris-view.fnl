@@ -7,7 +7,7 @@
 (local Padding (require :padding))
 (local Rectangle (require :rectangle))
 (local Text (require :text))
-(local WidgetCuboid (require :widget-cuboid))
+(local {: WidgetCuboid} (require :widget-cuboid))
 (local TetrisGame (require :tetris-game))
 (local TetrisStateRouter (require :tetris-state-router))
 (local DeepDialog (require :deep-dialog))

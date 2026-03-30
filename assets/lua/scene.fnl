@@ -7,7 +7,7 @@
 (local DemoPoints (require :demo-points))
 (local DemoAudio (require :demo-audio))
 (local Container (require :container))
-(local WidgetCuboid (require :widget-cuboid))
+(local {: WidgetCuboid} (require :widget-cuboid))
 (local GraphNodeCube (require :graph-node-cube))
 (local Sized (require :sized))
 (local SceneWorldState (require :scene-world-state))
@@ -24,7 +24,13 @@
 (local BackgroundState (require :background-state))
 (local default-position (glm.vec3 0 0 0))
 (local default-rotation (glm.quat 1 0 0 0))
-(local default-depth-scale 0)
+(local default-depth-scale 0.35)
+(local default-height-depth-scale 0.2)
+(local default-panel-body-options {:friction 0.95
+                                   :rolling-friction 0.2
+                                   :spinning-friction 0.35
+                                   :linear-damping 0.04
+                                   :angular-damping 0.35})
 (local default-camera-distance 100.0)
 
 (local vec3->array (. MathUtils :vec3->array))
@@ -89,15 +95,25 @@
   (when (and ctx ctx.set-theme)
     (ctx:set-theme (resolve-active-theme))))
 
+(fn merge-panel-body-options [opts]
+  (local merged {})
+  (each [key value (pairs default-panel-body-options)]
+    (set (. merged key) value))
+  (each [key value (pairs (or (and opts opts.body-options) {}))]
+    (set (. merged key) value))
+  merged)
+
 (fn add-widget-as-cuboid [_self widget-builder opts]
   (assert widget-builder "Scene.add-widget-as-cuboid requires a widget builder")
   (local options (or opts {}))
   (local depth-scale (or options.depth-scale default-depth-scale))
+  (local height-depth-scale (or options.height-depth-scale default-height-depth-scale))
 
   (fn cuboid-builder [ctx runtime-opts]
     (local wc-opts {:child widget-builder
                     :min-depth 10
-                    :depth-scale depth-scale})
+                    :depth-scale depth-scale
+                    :height-depth-scale height-depth-scale})
     (when options.side-color
       (set wc-opts.side-color options.side-color))
     ((WidgetCuboid wc-opts)
@@ -811,7 +827,8 @@
                  (not (and opts opts.skip-physics)))
         (local body-entry
           (LayoutPhysicsBodies.add-runtime-layout-body self.entity {:element element
-                                                                    :metadata metadata}))
+                                                                    :metadata metadata
+                                                                    :body-options (merge-panel-body-options opts)}))
         (var body-movable nil)
         (each [_ movable (ipairs (LayoutPhysicsBodies.collect-movables self.entity))]
           (when (and (not body-movable)

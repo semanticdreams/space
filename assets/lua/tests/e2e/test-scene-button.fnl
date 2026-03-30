@@ -1,6 +1,6 @@
 (local Harness (require :tests.e2e.harness))
 (local glm (require :glm))
-(local WidgetCuboid (require :widget-cuboid))
+(local {: WidgetCuboid} (require :widget-cuboid))
 (local Camera (require :camera))
 (local LightingViewState (require :lighting-view-state))
 

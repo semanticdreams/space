@@ -245,6 +245,38 @@
     (when (not ok)
       (error err))))
 
+(fn physical-panel-applies-stability-body-tuning []
+  (assert bt "Panel body tuning test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 12 4)})
+  (local builder (make-probe-panel-builder size-ref))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local panel (scene:add-panel-child {:builder builder
+                                             :skip-cuboid true
+                                             :position (glm.vec3 0 20 0)}))
+        (assert panel "Expected panel")
+        (local entry (find-physics-entry-for-element scene panel))
+        (assert (and entry entry.body) "Expected runtime physics body")
+        (assert (approx (entry.body:getFriction) 0.95)
+                "Panel body should use elevated friction")
+        (assert (approx (entry.body:getRollingFriction) 0.2)
+                "Panel body should use rolling friction")
+        (assert (approx (entry.body:getSpinningFriction) 0.35)
+                "Panel body should use spinning friction")
+        (assert (approx (entry.body:getLinearDamping) 0.04)
+                "Panel body should use light linear damping")
+        (assert (approx (entry.body:getAngularDamping) 0.35)
+                "Panel body should use stronger angular damping"))))
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn physical-panel-stops-at-global-containment-floor []
   (assert bt "Global containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -390,6 +422,8 @@
                      :fn physical-panel-collides-with-perlin-terrain})
 (table.insert tests {:name "Physical panel rebuilds shape on resize"
                      :fn physical-panel-rebuilds-body-on-resize})
+(table.insert tests {:name "Physical panel applies stability body tuning"
+                     :fn physical-panel-applies-stability-body-tuning})
 (table.insert tests {:name "Physical panel stops at global containment floor"
                      :fn physical-panel-stops-at-global-containment-floor})
 (table.insert tests {:name "Physical panel respects configured containment floor height"

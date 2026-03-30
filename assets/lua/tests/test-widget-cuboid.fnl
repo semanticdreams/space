@@ -1,7 +1,9 @@
 (local glm (require :glm))
-(local WidgetCuboid (require :widget-cuboid))
+(local widget-cuboid-module (require :widget-cuboid))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
+
+(local WidgetCuboid widget-cuboid-module.WidgetCuboid)
 
 (local tests [])
 
@@ -43,7 +45,7 @@
 (fn make-test-ctx []
   {:triangle-vector (make-vector-buffer)})
 
-(fn widget-cuboid-scales-depth-from-width []
+(fn widget-cuboid-scales-depth-from-width-and-height []
   (local probe (make-probe-widget (glm.vec3 4 2 0)))
   (local builder (WidgetCuboid {:child probe.builder}))
   (local wrapped (builder (make-test-ctx)))
@@ -55,6 +57,19 @@
 
   (wrapped:drop)
   (assert (= probe.state.drop-count 1)))
+
+(fn widget-cuboid-height-can-dominate-depth []
+  (local probe (make-probe-widget (glm.vec3 2 10 0)))
+  (local builder (WidgetCuboid {:child probe.builder
+                                :depth-scale 0.2
+                                :height-depth-scale 0.5}))
+  (local wrapped (builder (make-test-ctx)))
+
+  (wrapped.layout:measurer)
+
+  (assert (vec-approx= wrapped.layout.measure (glm.vec3 2 10 5)))
+
+  (wrapped:drop))
 
 (fn widget-cuboid-honors-min-depth []
   (local probe (make-probe-widget (glm.vec3 1 1 0)))
@@ -69,7 +84,8 @@
 
   (wrapped:drop))
 
-(table.insert tests {:name "WidgetCuboid scales depth from width" :fn widget-cuboid-scales-depth-from-width})
+(table.insert tests {:name "WidgetCuboid scales depth from width and height" :fn widget-cuboid-scales-depth-from-width-and-height})
+(table.insert tests {:name "WidgetCuboid height can dominate depth" :fn widget-cuboid-height-can-dominate-depth})
 (table.insert tests {:name "WidgetCuboid honors min depth" :fn widget-cuboid-honors-min-depth})
 
 (local main

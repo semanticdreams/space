@@ -6,12 +6,21 @@
 (local Sized (require :sized))
 
 (local colors (require :colors))
+(fn resolve-widget-depth [options front]
+  (local width-depth-scale (or options.depth-scale 0.5))
+  (local height-depth-scale
+    (or options.height-depth-scale (* width-depth-scale 0.5)))
+  (local min-depth (or options.min-depth 0))
+  (local width (or (and front.layout front.layout.measure (. front.layout.measure 1)) 0))
+  (local height (or (and front.layout front.layout.measure (. front.layout.measure 2)) 0))
+  (math.max min-depth
+            (* width width-depth-scale)
+            (* height height-depth-scale)))
+
 (fn WidgetCuboid [opts]
   (local options (or opts {}))
   (assert options.child "WidgetCuboid requires :child builder")
   (local default-side-color (glm.vec4 0.16 0.16 0.16 1))
-  (local depth-scale (or options.depth-scale 0.5))
-  (local min-depth (or options.min-depth 0))
 
   (fn resolve-side-color [ctx]
     (if options.side-color
@@ -40,8 +49,7 @@
     (local cuboid (cuboid-builder ctx))
 
     (fn update-depth []
-      (local width (or (and front.layout front.layout.measure (. front.layout.measure 1)) 0))
-      (local depth (math.max min-depth (* width depth-scale)))
+      (local depth (resolve-widget-depth options front))
       (set x-side-size.x depth)
       (set x-side-size.y 0)
       (set x-side-size.z 0)
@@ -84,4 +92,5 @@
 
   build)
 
-WidgetCuboid
+{:resolve-widget-depth resolve-widget-depth
+ :WidgetCuboid WidgetCuboid}

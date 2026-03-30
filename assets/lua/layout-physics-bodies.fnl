@@ -49,7 +49,19 @@
 
 (var attach-movables nil)
 
-(fn create-rigid-box [size position rotation]
+(fn apply-body-options! [body options]
+  (local resolved (or options {}))
+  (when resolved.friction
+    (body:setFriction resolved.friction))
+  (when resolved.rolling-friction
+    (body:setRollingFriction resolved.rolling-friction))
+  (when resolved.spinning-friction
+    (body:setSpinningFriction resolved.spinning-friction))
+  (when (or resolved.linear-damping resolved.angular-damping)
+    (body:setDamping (or resolved.linear-damping 0)
+                     (or resolved.angular-damping 0))))
+
+(fn create-rigid-box [size position rotation options]
   (when (and size position (physics-available?))
     (local half-extents (bt.Vector3 (* 0.5 size.x)
                                     (* 0.5 size.y)
@@ -65,6 +77,7 @@
     (shape:calculateLocalInertia 1.0 inertia)
     (local info (bt.RigidBodyConstructionInfo 1.0 motion-state shape inertia))
     (local body (bt.RigidBody info))
+    (apply-body-options! body options)
     (app.engine.physics:addRigidBody body)
     {:shape shape
      :motion-state motion-state
@@ -217,7 +230,7 @@
     (set entry.body-active? false))
   (set entry.size size)
   (when (physics-available?)
-    (local rigid (create-rigid-box size world-state.position world-state.rotation))
+    (local rigid (create-rigid-box size world-state.position world-state.rotation entry.body-options))
     (when rigid
       (set entry.body rigid.body)
       (set entry.rigid rigid)
@@ -362,7 +375,10 @@
         (when (and (not entry.body) (physics-available?))
           (local center (+ entry.spawn (half-size entry)))
           (local world-center (+ base-position (base-rotation:rotate center)))
-          (local rigid (create-rigid-box entry.size world-center entry.positioned.layout.rotation))
+          (local rigid (create-rigid-box entry.size
+                                         world-center
+                                         entry.positioned.layout.rotation
+                                         entry.body-options))
           (when rigid
             (set entry.body rigid.body)
             (set entry.body-active? true)
@@ -416,6 +432,7 @@
   (local entry {:spawn (glm.vec3 0 0 0)
                 :size size
                 :offset metadata-position
+                :body-options (or options.body-options {})
                 :positioned element
                 :metadata metadata
                 :body nil
