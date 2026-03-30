@@ -218,12 +218,14 @@
           (local persisted-lights (and persisted.scene persisted.scene.lights))
           (local persisted-skybox (and persisted.scene persisted.scene.skybox))
           (local persisted-background (and persisted.scene persisted.scene.background))
-          (assert persisted-lights
-                  (string.format "HomeWorld %s persisted state requires scene.lights" world.id))
-          (set world.state.scene.lights
-               (LightSystemModule.normalize-complete-state persisted-lights
-                                                          (string.format "HomeWorld.load-state %s"
-                                                                         world.id)))
+          (if persisted-lights
+              (set world.state.scene.lights
+                   (LightSystemModule.normalize-complete-state persisted-lights
+                                                              (string.format "HomeWorld.load-state %s"
+                                                                             world.id)))
+              (do
+                (set world.state.scene.lights (LightSystemModule.default-state))
+                (set repaired-persisted-state? true)))
           (if persisted-skybox
               (set world.state.scene.skybox
                    (SkyboxState.normalize-complete-state persisted-skybox

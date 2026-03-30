@@ -605,7 +605,7 @@
       (assert (= (. background.color 3) 0.3) "Expected persisted background blue to load")
       true)))
 
-(fn home-world-fails-loudly-when-persisted-lights-are-missing []
+(fn home-world-repairs-missing-persisted-lights-with-default []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -616,12 +616,18 @@
                                :name "home"
                                :type "home"
                                :dir world-dir}))
-      (local (ok err)
-        (pcall (fn []
-                 (world:init {}))))
-      (assert (not ok) "HomeWorld should fail loudly when persisted scene lights are missing")
-      (assert (string.find (tostring err) "scene.lights" 1 true)
-              "HomeWorld should report missing persisted scene lights")
+      (world:init {})
+      (local lights (and world.state world.state.scene world.state.scene.lights))
+      (local expected-defaults (LightSystemModule.default-state))
+      (assert lights "HomeWorld should seed missing persisted scene lights")
+      (assert lights.ambient "HomeWorld should repair missing ambient light with default state")
+      (assert (= (json.dumps lights) (json.dumps expected-defaults))
+              "HomeWorld should repair missing lights with the canonical default light state")
+      (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
+      (local persisted-lights (and persisted.scene persisted.scene.lights))
+      (assert persisted-lights "HomeWorld should immediately persist repaired lights during load")
+      (assert (= (json.dumps persisted-lights) (json.dumps expected-defaults))
+              "Persisted repaired lights should use the canonical default light state")
       true)))
 
 (fn home-world-repairs-missing-persisted-skybox-with-default []
@@ -1204,8 +1210,8 @@
                      :fn home-world-loads-persisted-skybox})
 (table.insert tests {:name "HomeWorld loads persisted background"
                      :fn home-world-loads-persisted-background})
-(table.insert tests {:name "HomeWorld fails loudly when persisted lights are missing"
-                     :fn home-world-fails-loudly-when-persisted-lights-are-missing})
+(table.insert tests {:name "HomeWorld repairs missing persisted lights with default"
+                     :fn home-world-repairs-missing-persisted-lights-with-default})
 (table.insert tests {:name "HomeWorld repairs missing persisted skybox with default"
                      :fn home-world-repairs-missing-persisted-skybox-with-default})
 (table.insert tests {:name "HomeWorld repairs missing persisted background with default"
