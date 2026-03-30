@@ -6,7 +6,14 @@
 
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "codex-sdk"))
-(local fake-codex-path (fs.absolute "scripts/fake-codex-cli.py"))
+(local assets-root
+  (assert (os.getenv "SPACE_ASSETS_PATH")
+          "test-codex-sdk requires SPACE_ASSETS_PATH"))
+(local repo-root
+  (assert (fs.parent assets-root)
+          "test-codex-sdk requires parent of SPACE_ASSETS_PATH"))
+(local fake-codex-path
+  (fs.join-path (fs.join-path repo-root "scripts") "fake-codex-cli.py"))
 
 (fn normalize-eol [s]
   (if s
