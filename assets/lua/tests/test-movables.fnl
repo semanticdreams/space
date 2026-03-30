@@ -157,7 +157,6 @@
   (local original-intersectables app.intersectables)
   (local original-movables app.movables)
   (local original-camera app.camera)
-  (local original-viewport app.viewport)
   (with-viewport {:x 0 :y 0 :width 640 :height 480}
     (fn []
       (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
@@ -191,6 +190,60 @@
       (set ray-origin (glm.vec3 1 0 5))
       (app.movables:on-mouse-motion {:x 1 :y 0})
       (assert (> layout.position.x -0.5))
+      (app.movables:on-mouse-button-up {:button 1})
+      (scene:drop)
+      (intersector:drop)
+      (movables:drop)
+      (set app.scene original-scene)
+      (set app.intersectables original-intersectables)
+      (set app.movables original-movables)
+      (set app.camera original-camera))))
+
+(fn scene-movables-use-own-scene-pointer-target-during-registration []
+  (local original-scene app.scene)
+  (local original-intersectables app.intersectables)
+  (local original-movables app.movables)
+  (local original-camera app.camera)
+  (local original-viewport app.viewport)
+  (with-viewport {:x 0 :y 0 :width 640 :height 480}
+    (fn []
+      (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
+      (local intersector (Intersectables))
+      (set app.intersectables intersector)
+      (local movables (Movables {:intersectables app.intersectables}))
+      (set app.movables movables)
+      (local previous-scene {:screen-pos-ray (fn [_self _pointer _opts]
+                                               {:origin (glm.vec3 99 0 5)
+                                                :direction (glm.vec3 0 0 -1)})})
+      (set app.scene previous-scene)
+      (local scene (Scene {:position (glm.vec3 0 0 0) :rotation (glm.quat 1 0 0 0)}))
+      (scene:build (fn [_ctx]
+                     (local layout
+                       (Layout {:name "simple"
+                                :measurer (fn [self]
+                                            (set self.measure (glm.vec3 1 1 1)))
+                                :layouter (fn [self]
+                                            (set self.size self.measure))}))
+                     {:layout layout
+                      :drop (fn [_] (layout:drop))}))
+      (scene:update)
+      (local entry (. app.movables.entries 1))
+      (assert entry "Scene should register a movable entry")
+      (assert (= entry.pointer-target scene)
+              "Scene movable registration should bind pointer-target to the new scene")
+      (var ray-origin (glm.vec3 0 0 5))
+      (set scene.screen-pos-ray
+           (fn [_self _pointer _opts]
+             {:origin ray-origin :direction (glm.vec3 0 0 -1)}))
+      (app.movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (app.movables:on-mouse-motion {:x 5 :y 0})
+      (assert (app.movables:drag-active?)
+              "Dragging should start using the newly built scene pointer target")
+      (set ray-origin (glm.vec3 1 0 5))
+      (local layout entry.target)
+      (app.movables:on-mouse-motion {:x 1 :y 0})
+      (assert (> layout.position.x -0.5)
+              "Dragging should update against the new scene ray, not the previous world scene")
       (app.movables:on-mouse-button-up {:button 1})
       (scene:drop)
       (intersector:drop)
@@ -375,6 +428,8 @@
 (table.insert tests {:name "Movables clear drag state on release" :fn movables-release-clears-drag})
 (table.insert tests {:name "Movables integrate with Intersectables" :fn movables-integrate-with-intersectables})
 (table.insert tests {:name "Scene registers simple entity with Movables" :fn scene-registers-simple-entity})
+(table.insert tests {:name "Scene movables bind pointer target to their own scene"
+                     :fn scene-movables-use-own-scene-pointer-target-during-registration})
 (table.insert tests {:name "Scene registers explicit movable targets" :fn scene-registers-custom-movable-targets})
 (table.insert tests {:name "Movables fire drag start/end hooks" :fn movables-fire-drag-hooks})
 (table.insert tests {:name "Movables shift drag uses camera up plane" :fn movables-shift-drag-uses-up-plane})

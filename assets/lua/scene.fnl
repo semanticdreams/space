@@ -489,9 +489,12 @@
       (var filtered [])
       (each [_ entry (ipairs entries)]
         (when entry
+          (when (not entry.pointer-target)
+            (set entry.pointer-target self))
           (table.insert filtered entry)))
       (when (= (length filtered) 0)
-        (table.insert filtered {:target entity.layout}))
+        (table.insert filtered {:target entity.layout
+                                :pointer-target self}))
       (register-movable-entries self entity filtered)))
 
   (fn normalize-resizable-entry [_self entry]
@@ -545,7 +548,12 @@
       (var filtered [])
       (each [_ entry (ipairs entries)]
         (when entry
+          (when (not entry.pointer-target)
+            (set entry.pointer-target self))
           (table.insert filtered entry)))
+      (when (= (length filtered) 0)
+        (table.insert filtered {:target entity.layout
+                                :pointer-target self}))
       (register-resizable-entries self entity filtered)))
 
   (fn unregister-entity-movables [self entity]

@@ -1,7 +1,10 @@
 (local glm (require :glm))
+(local _ (require :main))
 (local MathUtils (require :math-utils))
+(local AppProjection (require :app-projection))
 (local Intersectables (require :intersectables))
 (local Resizables (require :resizables))
+(local Scene (require :scene))
 (local State (require :state))
 (local Routes (require :state-routes))
 (local HoverHandlers (require :state-handlers/hover))
@@ -46,6 +49,23 @@
   (set layout.size size)
   (set layout.measure size)
   layout)
+
+(fn with-viewport [viewport body]
+  (local original-set app.set-viewport)
+  (local original-viewport app.viewport)
+  (local original-create app.create-default-projection)
+  (when (not original-set)
+    (set app.set-viewport (fn [value] (set app.viewport value))))
+  (when (not original-create)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (app.set-viewport viewport)
+  (let [(ok result) (pcall body)]
+    (set app.set-viewport original-set)
+    (set app.viewport original-viewport)
+    (set app.create-default-projection original-create)
+    (when (not ok)
+      (error result))
+    result))
 
 (fn resizable-waits-for-threshold []
   (local intersector (make-intersector))
@@ -116,6 +136,46 @@
   (assert (> layout.size.x 10) "Resize should update size with intersectables")
   (assert (> layout.size.y 10) "Resize should update size with intersectables"))
 
+(fn scene-resizables-use-own-scene-pointer-target-during-registration []
+  (local original-scene app.scene)
+  (local original-intersectables app.intersectables)
+  (local original-resizables app.resizables)
+  (local original-camera app.camera)
+  (with-viewport {:x 0 :y 0 :width 640 :height 480}
+    (fn []
+      (set app.camera {:get-view-matrix (fn [_] (glm.mat4 1))})
+      (local intersector (make-intersector))
+      (set app.intersectables intersector)
+      (local resizables (Resizables {:intersectables app.intersectables
+                                     :drag-threshold 0}))
+      (set app.resizables resizables)
+      (local previous-scene {:screen-pos-ray (fn [_self _pointer _opts]
+                                               {:origin (glm.vec3 99 99 5)
+                                                :direction (glm.vec3 0 0 -1)})})
+      (set app.scene previous-scene)
+      (local scene (Scene {:position (glm.vec3 0 0 0) :rotation (glm.quat 1 0 0 0)}))
+      (scene:build (fn [_ctx]
+                     (local root-layout (make-layout (glm.vec3 20 20 0)))
+                     (local child-layout (make-layout (glm.vec3 10 10 0)))
+                     (root-layout:add-child child-layout)
+                     (local child-element {:layout child-layout
+                                           :drop (fn [_] nil)})
+                     {:layout root-layout
+                      :children [{:element child-element}]
+                      :scene-children [{:element child-element}]
+                      :drop (fn [_] (root-layout:drop))}))
+      (scene:update)
+      (local entry (. app.resizables.entries 1))
+      (assert entry "Scene should register a resizable entry")
+      (assert (= entry.pointer-target scene)
+              "Scene resizable registration should bind pointer-target to the new scene")
+      (scene:drop)
+      (resizables:drop)
+      (set app.scene original-scene)
+      (set app.intersectables original-intersectables)
+      (set app.resizables original-resizables)
+      (set app.camera original-camera))))
+
 (fn default-state-dispatches-alt-resize []
   (local originals {:resizables app.resizables
                     :clickables app.clickables
@@ -153,6 +213,8 @@
 (table.insert tests {:name "Resizables clamp to min size" :fn resizable-respects-min-size})
 (table.insert tests {:name "Resizables fire hooks" :fn resizable-fires-hooks})
 (table.insert tests {:name "Resizables integrate with intersectables" :fn resizable-works-with-intersectables})
+(table.insert tests {:name "Scene resizables bind pointer target to their own scene"
+                     :fn scene-resizables-use-own-scene-pointer-target-during-registration})
 (table.insert tests {:name "Default state forwards alt resize" :fn default-state-dispatches-alt-resize})
 
 (local main
