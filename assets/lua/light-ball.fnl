@@ -256,6 +256,15 @@
    :linear 0.001
    :quadratic 0.00132})
 
+(local default-physics-config
+  {:mass 0.75
+   :friction 0.6
+   :restitution 0.82
+   :linear-damping 0.08
+   :angular-damping 0.16
+   :gravity (glm.vec3 0 -4.5 0)
+   :body-flags (and bt bt.BT_DISABLE_WORLD_GRAVITY)})
+
 (local LightBall {})
 
 (fn light-ball-physics-record [self]
@@ -756,7 +765,7 @@
   (local offset (resolve-glm-vec3 options.position (glm.vec3 0 0 0)))
   (local initial-velocity (resolve-bt-vec3 options.initial-velocity nil))
   (local initial-angular-velocity (resolve-bt-vec3 options.initial-angular-velocity nil))
-  (local gravity (resolve-bt-vec3 options.gravity nil))
+  (local gravity (resolve-bt-vec3 options.gravity default-physics-config.gravity))
   (local linear-factor (resolve-bt-vec3 options.linear-factor nil))
   (local angular-factor
     (if (= (type options.angular-factor) :number)
@@ -783,13 +792,13 @@
      :quadratic (or options.quadratic default-light-config.quadratic)})
   (local persistence-options
     {:radius radius
-     :mass (or options.mass 0.75)
-     :friction (or options.friction 0.6)
+     :mass (or options.mass default-physics-config.mass)
+     :friction (or options.friction default-physics-config.friction)
      :rolling-friction options.rolling-friction
      :spinning-friction options.spinning-friction
-     :restitution (or options.restitution 0.5)
-     :linear-damping options.linear-damping
-     :angular-damping options.angular-damping
+     :restitution (or options.restitution default-physics-config.restitution)
+     :linear-damping (or options.linear-damping default-physics-config.linear-damping)
+     :angular-damping (or options.angular-damping default-physics-config.angular-damping)
      :linear-sleeping-threshold options.linear-sleeping-threshold
      :angular-sleeping-threshold options.angular-sleeping-threshold
      :additional-damping options.additional-damping
@@ -804,7 +813,7 @@
      :ccd-motion-threshold options.ccd-motion-threshold
      :ccd-swept-sphere-radius options.ccd-swept-sphere-radius
      :collision-flags options.collision-flags
-     :body-flags options.body-flags
+     :body-flags (or options.body-flags default-physics-config.body-flags)
      :deactivation-time options.deactivation-time
      :activation-state (or options.activation-state default-activation-state)
      :color (resolve-glm-vec4 options.color (glm.vec4 1.0 0.85 0.3 1.0))

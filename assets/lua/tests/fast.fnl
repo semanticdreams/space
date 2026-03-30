@@ -87,6 +87,7 @@
     :tests.test-physics
     :tests.test-polyhedron-meshes
     :tests.test-ball
+    :tests.test-light-ball
     :tests.test-soccer-ball-visual
     :tests.test-renderers
     :tests.test-focus
