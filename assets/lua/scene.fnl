@@ -878,6 +878,17 @@
                              :flex (or entry.flex 0)
                              :persistence entry.persistence})))
 
+  (fn add-light-ball [self opts]
+    (local options (or opts {}))
+    (local light-ball-options (clone-table options))
+    (set light-ball-options.position nil)
+    (set light-ball-options.rotation nil)
+    (local LightBall (require :light-ball))
+    (self:add-object
+      (LightBall.make light-ball-options)
+      {:position options.position
+       :rotation options.rotation}))
+
   (fn add-physics-body [self opts]
     (local options (or opts {}))
     (local size (or options.size (glm.vec3 4 4 4)))
@@ -1372,8 +1383,14 @@
     (assert (and app app.lights app.lights.get-state)
             "Scene.capture-state requires app.lights.get-state")
     (local lights (app.lights:get-state))
-    (local skybox (self:get-skybox-state))
-    (local background (self:get-background-state))
+    (local skybox
+      (if (and app app.renderers app.renderers.skybox app.renderers.skybox.get-state)
+          (self:get-skybox-state)
+          nil))
+    (local background
+      (if (and app app.renderers app.renderers.get-background-state)
+          (self:get-background-state)
+          nil))
     (each [_ metadata (ipairs (or self.scene-children []))]
       (local persistence (and metadata metadata.persistence))
       (assert persistence
@@ -1396,16 +1413,22 @@
                   " (register restorer or set :restorer-module)"))
       (local layout-state (capture-panel-layout-state metadata))
       (when layout-state
-        (local record (clone-table persistence))
+        (local record
+          (if (and metadata.element metadata.element.capture-persistence)
+              (clone-table (metadata.element:capture-persistence))
+              (clone-table persistence)))
         (set record.position layout-state.position)
         (set record.rotation layout-state.rotation)
         (set record.size (or layout-state.size record.size))
         (table.insert panels record)))
-    {:panels panels
-     :terrains terrains
-     :lights lights
-     :skybox skybox
-     :background background})
+    (local captured {:panels panels
+                     :terrains terrains
+                     :lights lights})
+    (when skybox
+      (set captured.skybox skybox))
+    (when background
+      (set captured.background background))
+    captured)
 
   (fn set-light-state [self state]
     (assert (and app app.lights app.lights.set-state)
@@ -1492,6 +1515,12 @@
 
   (fn restore-state [self state]
     (local payload (or state {}))
+    (assert payload.lights "Scene.restore-state requires :lights")
+    (self:set-light-state payload.lights)
+    (when payload.skybox
+      (self:set-skybox-state payload.skybox))
+    (when payload.background
+      (self:set-background-state payload.background))
     (local panels (or payload.panels []))
     (assert (= (type panels) :table) "Scene.restore-state requires :panels table")
     (each [panel-idx panel (ipairs panels)]
@@ -1532,12 +1561,7 @@
                                   :rotation (array->quat panel.rotation)})
           (do
             (restore-panel-with-fallback self panel panel-idx))))
-    (assert payload.lights "Scene.restore-state requires :lights")
-    (assert payload.skybox "Scene.restore-state requires :skybox")
-    (assert payload.background "Scene.restore-state requires :background")
-    (self:set-light-state payload.lights)
-    (self:set-skybox-state payload.skybox)
-    (self:set-background-state payload.background)
+    (self:sync-scene-objects)
     true)
 
 (set self.unregister-entity unregister-entity)
@@ -1548,6 +1572,7 @@
 (set self.drop drop)
 (set self.sync-physics-bodies sync-physics-bodies)
 (set self.sync-scene-objects sync-scene-objects)
+(set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)
 (set self.remove-terrain remove-terrain)

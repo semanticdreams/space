@@ -212,6 +212,7 @@
                           "Point light linear attenuation")
    :quadratic (ensure-number (or base.quadratic fallback.quadratic)
                              "Point light quadratic attenuation")
+   :transient? (= base.transient? true)
    :enabled? (if (= base.enabled? nil)
                   (light-enabled? fallback)
                   (light-enabled? base))})
@@ -303,8 +304,11 @@
   out)
 
 (fn serialize-list [items serializer]
-  (icollect [_ item (ipairs (or items []))]
-    (serializer item)))
+  (accumulate [out [] _ item (ipairs (or items []))]
+              (do
+                (when (not (= item.transient? true))
+                  (table.insert out (serializer item)))
+                out)))
 
 (fn filter-enabled [items]
   (local out [])
@@ -488,6 +492,26 @@
     (set point (normalize-list items "point" normalize-point default-point))
     point)
 
+  (fn find-point-by-id [_self light-id]
+    (var resolved nil)
+    (each [_ light (ipairs point)]
+      (when (and (not resolved)
+                 (= light.id light-id))
+        (set resolved light)))
+    resolved)
+
+  (fn remove-point-by-id [_self light-id]
+    (var found-index nil)
+    (each [idx light (ipairs point)]
+      (when (and (not found-index)
+                 (= light.id light-id))
+        (set found-index idx)))
+    (if found-index
+        (do
+          (table.remove point found-index)
+          true)
+        false))
+
   (fn set-spot [_self items]
     (set spot (normalize-list items "spot" normalize-spot default-spot))
     spot)
@@ -525,12 +549,15 @@
    :set-ambient set-ambient
    :get-directional get-directional
    :get-point get-point
+   :get-point-count (fn [_self] (length point))
+   :find-point-by-id find-point-by-id
    :get-spot get-spot
    :set-directional set-directional
    :set-point set-point
    :set-spot set-spot
    :add-directional add-directional
    :add-point add-point
+   :remove-point-by-id remove-point-by-id
    :add-spot add-spot
    :get-state get-state
    :set-state set-state

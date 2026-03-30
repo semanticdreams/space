@@ -49,6 +49,14 @@
       (table.insert balls element)))
   balls)
 
+(fn runtime-light-balls [scene]
+  (local balls [])
+  (each [_ metadata (ipairs (or scene.scene-children []))]
+    (local element (and metadata metadata.element))
+    (when (and element element.is-light-ball)
+      (table.insert balls element)))
+  balls)
+
 (fn find-close-button [element]
   (local dialog (or element.front element.__front_widget element.child element))
   (local titlebar-meta (. dialog.children 1))
@@ -258,6 +266,9 @@
   (local original-hud app.hud)
   (local original-create-default-projection app.create-default-projection)
   (local original-containment-config app.physics-containment-config)
+  (local original-light-state
+    (and app.lights app.lights.get-state
+         (app.lights:get-state)))
   (var scene nil)
   (var movables nil)
   (var hud nil)
@@ -279,10 +290,14 @@
     (set app.hud original-hud)
     (set app.create-default-projection original-create-default-projection)
     (PhysicsContainment.clear)
-    (set app.physics-containment-config original-containment-config))
+    (set app.physics-containment-config original-containment-config)
+    (when (and app.lights app.lights.set-state original-light-state)
+      (app.lights:set-state original-light-state)))
 
   (let [(ok payload)
         (pcall (fn []
+                 (when (and app.lights app.lights.clear)
+                   (app.lights:clear))
                  (set movables (make-stub-movables))
                  (set camera
                       (or options.camera
@@ -2153,6 +2168,183 @@
     (when (not ok)
       (error err))))
 
+(fn scene-add-light-ball-appears-in-front-of-camera-and-restores []
+  (local camera (Camera {:position (glm.vec3 2 3 4)}))
+  (camera:yaw (math.rad 45))
+  (local setup (setup-scene {:camera camera}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (assert (= (length (app.lights:get-point)) 0)
+                    "Test should start without live point lights")
+            (local element (scene:add-light-ball {:radius 5
+                                                  :mass 0.5
+                                                  :ambient (glm.vec3 1 2 3)
+                                                  :diffuse (glm.vec3 4 5 6)
+                                                  :specular (glm.vec3 7 8 9)
+                                                  :linear 0.25}))
+            (assert element "Expected add-light-ball to return an element")
+            (assert (= (length (runtime-light-balls scene)) 1)
+                    "Scene should track runtime light balls")
+            (assert (= (length (app.lights:get-point)) 1)
+                    "Adding a light ball should create one live point light")
+            (local layout element.layout)
+            (local expected-center
+              (+ camera.position (* (camera:get-forward) (glm.vec3 100))))
+            (local half-size (* 0.5 layout.size))
+            (local center (+ layout.position (layout.rotation:rotate half-size)))
+            (assert (vec3-approx= center expected-center)
+                    "Light-ball center should be placed 100 units in front of the camera")
+
+            (local captured (scene:capture-state))
+            (local panels (or captured.panels []))
+            (assert (= (length panels) 1)
+                    "Expected one persisted scene panel for light ball")
+            (local panel (. panels 1))
+            (assert (= panel.kind "light-ball")
+                    "Light-ball persistence kind should be light-ball")
+            (assert (= panel.radius 5) "Light-ball persistence should preserve radius")
+            (assert (= panel.mass 0.5) "Light-ball persistence should preserve mass")
+            (assert (= (length (or captured.lights.point [])) 0)
+                    "Transient light-ball point lights should not persist into scene.lights")
+
+            (scene:remove-panel-child element)
+            (assert (= (length (runtime-light-balls scene)) 0)
+                    "Removing light ball should clear runtime tracking")
+            (assert (= (length (app.lights:get-point)) 0)
+                    "Removing light ball should remove the live point light")
+
+            (scene:restore-state captured)
+            (assert (= (length (runtime-light-balls scene)) 1)
+                    "Scene restore should recreate persisted light ball")
+            (assert (= (length (app.lights:get-point)) 1)
+                    "Scene restore should recreate the live point light")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn scene-light-ball-context-menu-removes-light-and-ball []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-clickables app.clickables)
+  (local original-menu-manager app.menu-manager)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local clickables (make-clickables-menu-stub))
+            (var opened nil)
+            (set app.clickables clickables)
+            (set app.menu-manager {:open (fn [_self opts]
+                                           (set opened opts))})
+
+            (local element (scene:add-light-ball {:radius 5}))
+            (assert element "Expected add-light-ball to return an element")
+            (assert (= (length (runtime-light-balls scene)) 1)
+                    "Scene should track runtime light balls before context-menu removal")
+            (assert (= (length (app.lights:get-point)) 1)
+                    "Light ball should own a live point light before removal")
+            (assert (= (length clickables.state.registered-right-click) 1)
+                    "Light ball should register one right-click target when added to the scene")
+
+            (local target (. clickables.state.registered-right-click 1))
+            (target:on-right-click {:point (glm.vec3 3 4 0)})
+
+            (assert opened "Light-ball right click should open a menu")
+            (assert (= (length opened.actions) 2)
+                    "Light-ball context menu should expose edit and remove actions")
+            (assert (= (. opened.actions 2 :name) "Remove")
+                    "Light-ball context menu should expose a Remove action")
+
+            ((. opened.actions 2 :fn) nil {})
+
+            (assert (= (length (runtime-light-balls scene)) 0)
+                    "Light-ball remove action should remove the runtime light ball from the scene")
+            (assert (= (length (app.lights:get-point)) 0)
+                    "Light-ball remove action should remove the live point light first")))]
+    (set app.clickables original-clickables)
+    (set app.menu-manager original-menu-manager)
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn scene-light-ball-over-capacity-stays-unlit-and-recovers []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local max-point-lights (or app.lights.max-point-lights 8))
+            (local created [])
+            (for [_ 1 (+ max-point-lights 1)]
+              (local element (scene:add-light-ball {:radius 5}))
+              (assert element "Expected add-light-ball to return an element")
+              (table.insert created element))
+
+            (assert (= (length (runtime-light-balls scene)) (+ max-point-lights 1))
+                    "Scene should keep all light balls even when point-light capacity is exhausted")
+            (assert (= (length (app.lights:get-point)) max-point-lights)
+                    "Live point lights should stay capped at runtime capacity")
+
+            (local over-capacity-ball (. created (+ max-point-lights 1)))
+            (assert (= over-capacity-ball.runtime-light nil)
+                    "The extra light ball should remain unlit when no point-light slots remain")
+
+            (local captured (scene:capture-state))
+            (assert (= (length (or captured.panels [])) (+ max-point-lights 1))
+                    "All light balls should persist even when some are currently unlit")
+            (assert (= (length (or captured.lights.point [])) 0)
+                    "Transient light-ball point lights should not persist into scene.lights")
+
+            (each [_ element (ipairs created)]
+              (scene:remove-panel-child element))
+
+            (assert (= (length (runtime-light-balls scene)) 0)
+                    "Scene should remove all runtime light balls before restore")
+            (assert (= (length (app.lights:get-point)) 0)
+                    "Scene should remove all live point lights before restore")
+
+            (scene:restore-state captured)
+
+            (local restored (runtime-light-balls scene))
+            (assert (= (length restored) (+ max-point-lights 1))
+                    "Scene restore should recreate all persisted light balls")
+            (assert (= (length (app.lights:get-point)) max-point-lights)
+                    "Scene restore should still respect live point-light capacity")
+
+            (var restored-unlit nil)
+            (var restored-lit nil)
+            (each [_ element (ipairs restored)]
+              (when (and (not restored-unlit) (not element.runtime-light))
+                (set restored-unlit element))
+              (when (and (not restored-lit) element.runtime-light)
+                (set restored-lit element)))
+
+            (assert restored-unlit
+                    "One restored light ball should remain unlit when the scene exceeds point-light capacity")
+            (assert restored-lit
+                    "At least one restored light ball should still own a live point light")
+
+            (scene:remove-panel-child restored-lit)
+            (assert (= (length (app.lights:get-point)) (- max-point-lights 1))
+                    "Removing a lit light ball should immediately free one live point-light slot")
+
+            (scene:sync-scene-objects)
+
+            (assert restored-unlit.runtime-light
+                    "An unlit light ball should claim a freed point-light slot on the next sync")
+            (assert (= (length (app.lights:get-point)) max-point-lights)
+                    "Scene sync should refill the freed live point-light slot")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (fn scene-ball-settles-on-configured-containment-floor []
   (assert bt "Scene ball configured containment floor test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -3241,6 +3433,12 @@
                      :fn scene-add-ball-appears-in-front-of-camera-and-restores})
 (table.insert tests {:name "Scene ball context menu removes ball"
                      :fn scene-ball-context-menu-removes-ball})
+(table.insert tests {:name "Scene light ball appears in front of camera and restores"
+                     :fn scene-add-light-ball-appears-in-front-of-camera-and-restores})
+(table.insert tests {:name "Scene light ball context menu removes light and ball"
+                     :fn scene-light-ball-context-menu-removes-light-and-ball})
+(table.insert tests {:name "Scene light ball over capacity stays unlit and recovers"
+                     :fn scene-light-ball-over-capacity-stays-unlit-and-recovers})
 (table.insert tests {:name "Scene ball settles on configured containment floor"
                      :fn scene-ball-settles-on-configured-containment-floor})
 (table.insert tests {:name "Scene physics body collides with flat terrain"

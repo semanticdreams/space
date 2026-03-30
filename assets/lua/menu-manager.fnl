@@ -123,6 +123,12 @@
                        (when (and scene scene.add-object)
                          (scene:add-object (Ball {}))))})
   (table.insert actions
+                {:name "Add light ball"
+                 :fn (fn [_button _event]
+                       (local scene app.scene)
+                       (when (and scene scene.add-light-ball)
+                         (scene:add-light-ball {})))})
+  (table.insert actions
                 {:name "Recover Terrain-Bound Objects"
                  :fn (fn [_button _event]
                        (local scene app.scene)

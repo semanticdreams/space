@@ -386,6 +386,40 @@
   (when (not ok)
     (error err)))
 
+(fn menu-manager-root-light-ball-invokes-scene []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local calls {:add-light-ball 0})
+  (local original-scene app.scene)
+  (set app.scene {:add-light-ball (fn [_self _opts]
+                                    (set calls.add-light-ball (+ calls.add-light-ball 1)))})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local cb clickables.state.right-void)
+        (assert cb "MenuManager should register a right-click void callback")
+        (cb {:screen {:x 10 :y 20}})
+        (local element (. (. hud.overlay-root.children 1) :element))
+        (local button (find-button-by-name element "Add light ball"))
+        (assert button "Root context menu should include 'Add light ball'")
+        (button:on-click {:button 1})
+        (assert (= calls.add-light-ball 1)
+                "Add light ball action should invoke scene:add-light-ball once"))))
+
+  (manager:drop)
+  (set app.scene original-scene)
+
+  (when (not ok)
+    (error err)))
+
 (fn menu-manager-root-recover-terrain-bound-objects-invokes-scene []
   (reset-engine-events)
   (local clickables (make-clickables-stub))
@@ -433,6 +467,8 @@
                      :fn menu-manager-root-add-cuboid-invokes-scene})
 (table.insert tests {:name "Menu root ball invokes scene"
                      :fn menu-manager-root-ball-invokes-scene})
+(table.insert tests {:name "Menu root light ball invokes scene"
+                     :fn menu-manager-root-light-ball-invokes-scene})
 (table.insert tests {:name "Menu root recover terrain-bound objects invokes scene"
                      :fn menu-manager-root-recover-terrain-bound-objects-invokes-scene})
 

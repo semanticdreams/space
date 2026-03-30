@@ -20,6 +20,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [Terrain Architecture](/dev/notes/terrain-architecture)
 - [Terrain Selection Notes](/dev/notes/terrain-selection)
 - [Terrain Physics Debugging Notes](/dev/notes/terrain-physics-debugging)
+- [Light Balls](/dev/notes/light-balls)
 - [Depth Precision For Long-Distance Rendering](/dev/notes/depth-precision-long-distance)
 - [Test Harness Cleanup Notes](/dev/notes/test-harness-cleanup)
 - [Composable Input States](/dev/notes/composable-states)
