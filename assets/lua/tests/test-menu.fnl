@@ -235,6 +235,18 @@
       (set found (. menu.buttons idx))))
   found)
 
+(fn with-package-loaded-overrides [overrides f]
+  (local originals {})
+  (each [name value (pairs overrides)]
+    (set (. originals name) (. package.loaded name))
+    (set (. package.loaded name) value))
+  (local (ok result) (pcall f))
+  (each [name _value (pairs overrides)]
+    (set (. package.loaded name) (. originals name)))
+  (if ok
+      result
+      (error result)))
+
 (fn menu-manager-root-show-link-entities-adds-related-nodes []
   (with-temp-dir
     (fn [root]
@@ -345,6 +357,99 @@
         (button:on-click {:button 1})
         (assert (= calls.add-cuboid 1)
                 "add cuboid action should invoke scene:add-physics-body once"))))
+
+  (manager:drop)
+  (set app.scene original-scene)
+
+  (when (not ok)
+    (error err)))
+
+(fn menu-manager-root-demo-video-player-opens-launchable []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local calls {:open-panel 0
+                :scene nil})
+  (local original-scene app.scene)
+  (set app.scene {:add-panel-child (fn [_self _opts] nil)})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local overrides {})
+  (set (. overrides "launchables/demo-video-cube")
+       {:open-panel (fn [opts]
+                      (set calls.open-panel (+ calls.open-panel 1))
+                      (set calls.scene (and opts opts.scene))
+                      nil)})
+
+  (local run-test
+    (fn []
+      (local cb clickables.state.right-void)
+      (assert cb "MenuManager should register a right-click void callback")
+      (cb {:screen {:x 10 :y 20}})
+      (local element (. (. hud.overlay-root.children 1) :element))
+      (local button (find-button-by-name element "Demo Video Player"))
+      (assert button "Root context menu should include 'Demo Video Player'")
+      (button:on-click {:button 1})
+      (assert (= calls.open-panel 1)
+              "Demo Video Player action should invoke the launchable once")
+      (assert (= calls.scene app.scene)
+              "Demo Video Player action should pass app.scene to the launchable")))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (with-package-loaded-overrides overrides run-test))))
+
+  (manager:drop)
+  (set app.scene original-scene)
+
+  (when (not ok)
+    (error err)))
+
+(fn menu-manager-root-demo-video-player-errors-loudly-when-unavailable []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local original-scene app.scene)
+  (set app.scene {:add-panel-child (fn [_self _opts] nil)})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local overrides {})
+  (set (. overrides "launchables/demo-video-cube") nil)
+  (set (. overrides "video")
+       {:available false
+        :missing-reason "video disabled for test"})
+
+  (local run-test
+    (fn []
+      (local cb clickables.state.right-void)
+      (assert cb "MenuManager should register a right-click void callback")
+      (cb {:screen {:x 10 :y 20}})
+      (local element (. (. hud.overlay-root.children 1) :element))
+      (local button (find-button-by-name element "Demo Video Player"))
+      (assert button "Root context menu should include 'Demo Video Player'")
+      (local (click-ok click-err)
+        (pcall (fn []
+                 (button:on-click {:button 1}))))
+      (assert (not click-ok)
+              "Demo Video Player should fail loudly when video support is unavailable")
+      (assert (string.find (tostring click-err) "video disabled for test" 1 true)
+              "Demo Video Player should surface the missing video reason")))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (with-package-loaded-overrides overrides run-test))))
 
   (manager:drop)
   (set app.scene original-scene)
@@ -465,6 +570,10 @@
                      :fn menu-manager-root-show-link-entities-adds-related-nodes})
 (table.insert tests {:name "Menu root add cuboid invokes scene"
                      :fn menu-manager-root-add-cuboid-invokes-scene})
+(table.insert tests {:name "Menu root demo video player opens launchable"
+                     :fn menu-manager-root-demo-video-player-opens-launchable})
+(table.insert tests {:name "Menu root demo video player errors loudly when unavailable"
+                     :fn menu-manager-root-demo-video-player-errors-loudly-when-unavailable})
 (table.insert tests {:name "Menu root ball invokes scene"
                      :fn menu-manager-root-ball-invokes-scene})
 (table.insert tests {:name "Menu root light ball invokes scene"
