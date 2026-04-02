@@ -4,6 +4,8 @@
   (set app.viewport (viewport->table data))
   (when app.scene
     (app.scene:on-viewport-changed app.viewport))
+  (when app.canvas
+    (app.canvas:on-viewport-changed app.viewport))
   (when app.hud
     (app.hud:on-viewport-changed app.viewport))
   (when app.renderers

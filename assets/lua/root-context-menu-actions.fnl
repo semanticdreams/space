@@ -40,7 +40,19 @@
                                            :store store}))))))
   nil)
 
-(fn default-root-actions []
+(fn append-actions [target source]
+  (each [_ action (ipairs (or source []))]
+    (table.insert target action))
+  target)
+
+(fn shared-root-actions []
+  [{:name "Quit"
+    :icon "exit_to_app"
+    :fn (fn [_button _event]
+          (when (and app.engine app.engine.quit)
+            (app.engine.quit)))}])
+
+(fn canvas-root-actions []
   (local actions [])
   (table.insert actions
                 {:name "Create String Entity"
@@ -67,7 +79,8 @@
                        (local opts {})
                        (when (= (length selected) 2)
                          (set opts.source-key (or (. selected 1 :key) ""))
-                         (set opts.target-key (or (. selected 2 :key) "")))
+                         (set opts.target-key (or (. selected 2 :key) ""))
+                         nil)
                        (local entity (store:create-entity opts))
                        (when (and app.graph entity)
                          (local {:LinkEntityNode LinkEntityNode} (require :graph/nodes/link-entity))
@@ -99,7 +112,16 @@
                          (local node (ListEntityNode {:entity-id entity.id
                                                       :store store}))
                          (app.graph:add-node node)))})
+  (table.insert actions
+                {:name "Graph Control"
+                 :icon "tune"
+                 :fn (fn [_button _event]
+                       (local launchable (require :launchables/graph-control))
+                       (launchable.open-panel {:target (or app.canvas app.hud)}))})
+  (append-actions actions (shared-root-actions)))
 
+(fn scene-root-actions []
+  (local actions [])
   (table.insert actions
                 {:name "Demo Browser"
                  :fn (fn [_button _event]
@@ -135,12 +157,17 @@
                        (local scene app.scene)
                        (when scene
                          (SceneTerrainRecovery.recover scene)))})
-  (table.insert actions
-                {:name "Quit"
-                 :icon "exit_to_app"
-                 :fn (fn [_button _event]
-                       (when (and app.engine app.engine.quit)
-                         (app.engine.quit)))})
-  actions)
+  (append-actions actions (shared-root-actions)))
 
-{:default-root-actions default-root-actions}
+(fn actions-for-surface [surface]
+  (if (= surface :canvas)
+      (canvas-root-actions)
+      (scene-root-actions)))
+
+(fn default-root-actions []
+  (actions-for-surface (or app.active-interaction-surface :scene)))
+
+{:default-root-actions default-root-actions
+ :actions-for-surface actions-for-surface
+ :scene-root-actions scene-root-actions
+ :canvas-root-actions canvas-root-actions}

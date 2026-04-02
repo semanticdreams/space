@@ -8,7 +8,14 @@
   (local options (or opts {}))
   (local clickables (or options.clickables app.clickables))
   (local hud (or options.hud app.hud))
-  (local root-actions (or options.root-actions (RootContextMenuActions.default-root-actions)))
+  (local static-root-actions (or options.root-actions nil))
+  (local root-actions-provider
+    (or options.root-actions-provider
+        (fn [_event]
+          (if static-root-actions
+              static-root-actions
+              (RootContextMenuActions.actions-for-surface
+                (or app.active-interaction-surface :scene))))))
 
   (assert clickables "MenuManager requires clickables")
   (assert hud "MenuManager requires hud")
@@ -69,7 +76,7 @@
   (fn open-root [self event]
     (local screen (and event event.screen))
     (local position (screen-pos->hud screen))
-    (open nil {:actions root-actions
+    (open nil {:actions (root-actions-provider event)
                :position position
                :ignore-button (or (and event event.button) 3)}))
 

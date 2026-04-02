@@ -26,6 +26,10 @@
   (assert app.clickables "state runtime requires app.clickables")
   app.clickables.active?)
 
+(fn active-controls []
+  (or app.active-pointer-controls
+      app.first-person-controls))
+
 (fn movables-active? []
   (and app.movables
        (if app.movables.drag-engaged?
@@ -53,9 +57,10 @@
        (not (clickables-active?))
        (not (movables-active?))
        (not (resizables-active?))
-       (or (not app.first-person-controls)
-           (let [drag? (and app.first-person-controls app.first-person-controls.drag-active?)]
-             (not (and drag? (drag? app.first-person-controls)))))))
+       (let [controls (active-controls)]
+         (or (not controls)
+             (let [drag? (and controls controls.drag-active?)]
+               (not (and drag? (drag? controls))))))))
 
 (fn handle-hover [payload]
   (when (hover-eligible?)
@@ -79,8 +84,9 @@
   (local handled (dispatch-hovered-mouse-wheel payload))
   (if handled
       true
-      (and app.first-person-controls
-           (app.first-person-controls:on-mouse-wheel payload))))
+      (let [controls (active-controls)]
+        (and controls
+             (controls:on-mouse-wheel payload)))))
 
 (fn handle-focus-tab [payload]
   (if (and app.focus
@@ -143,6 +149,7 @@
 {:shift-held? shift-held?
  :ctrl-held? ctrl-held?
  :alt-held? alt-held?
+ :active-controls active-controls
  :clickables-active? clickables-active?
  :movables-active? movables-active?
  :resizables-active? resizables-active?

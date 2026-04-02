@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local Utils (require :graph/view/utils))
 (local NodeBase (require :graph/node-base))
+(local GraphViewLod (require :graph/view/lod))
 
 (local ensure-glm-vec4 Utils.ensure-glm-vec4)
 (local truncate-with-ellipsis Utils.truncate-with-ellipsis)
@@ -14,10 +15,11 @@
     (local ctx options.ctx)
     (local label-color (ensure-glm-vec4 options.label-color (glm.vec4 0.6 0.6 0.6 1)))
     (local label-depth-offset (or options.label-depth-offset 1.0))
-    (local camera options.camera)
-    (var last-camera-position nil)
-    (var camera-dirty? false)
-    (var camera-handler nil)
+    (local lod (or options.lod
+                   (GraphViewLod {:camera options.camera
+                                  :surface options.surface
+                                  :surface-provider options.surface-provider})))
+    (var last-view-state nil)
     (local labels {})
     (local node-lod {})
 
@@ -29,34 +31,6 @@
             (= lod 2)
             {:text-length 20 :line-length nil :scale 8}
             nil))
-
-    (fn label-target [distance]
-        (if (< distance 250.0)
-            0
-            (< distance 500.0)
-            1
-            (< distance 800.0)
-            2
-            3))
-
-    (fn current-camera-position []
-        (and camera camera.position))
-
-    (fn camera-position-changed? [a b]
-        (if (or (not a) (not b))
-            true
-            (or (> (math.abs (- a.x b.x)) 1e-4)
-                (> (math.abs (- a.y b.y)) 1e-4)
-                (> (math.abs (- a.z b.z)) 1e-4))))
-
-    (when (and camera camera.debounced-changed)
-        (set camera-handler
-             (camera.debounced-changed:connect
-               (fn [payload]
-                   (local pos (and payload payload.position))
-                   (when pos
-                       (set last-camera-position pos)
-                       (set camera-dirty? true))))))
 
     (fn label-text [node settings]
         (local base (or node.label (node-id node)))
@@ -85,9 +59,8 @@
         (set (. labels node) nil)
         (set (. node-lod node) nil))
 
-    (fn update-node-label [node point camera-pos force?]
-        (local distance (glm.length (- point.position camera-pos)))
-        (local target (label-target distance))
+    (fn update-node-label [node point force?]
+        (local target (lod:target-for-point point.position))
         (local current (. node-lod node))
         (when (or force? (not (= target current)))
             (if (< target 3)
@@ -112,25 +85,20 @@
             (set (. node-lod node) target)))
 
     (fn update [_self points nodes opts]
-        (local camera-pos (current-camera-position))
-        (when camera-pos
-            (local force? (or (and opts opts.force?) false))
-            (var should-run force?)
-            (when (not should-run)
-                (set should-run (or camera-dirty?
-                                    (not last-camera-position)
-                                    (camera-position-changed? camera-pos last-camera-position))))
-            (when should-run
-                (set camera-dirty? false)
-                (local effective-pos camera-pos)
-                (if nodes
-                    (each [_ node (ipairs nodes)]
-                        (local point (. points node))
-                        (when point
-                            (update-node-label node point effective-pos force?)))
-                    (each [node point (pairs points)]
-                        (update-node-label node point effective-pos force?)))
-                (set last-camera-position camera-pos))))
+        (local force? (or (and opts opts.force?) false))
+        (local view-state (lod:capture-view-state))
+        (var should-run force?)
+        (when (not should-run)
+            (set should-run (lod:view-state-changed? last-view-state view-state)))
+        (when should-run
+            (if nodes
+                (each [_ node (ipairs nodes)]
+                    (local point (. points node))
+                    (when point
+                        (update-node-label node point force?)))
+                (each [node point (pairs points)]
+                    (update-node-label node point force?)))
+            (set last-view-state view-state)))
 
     (fn refresh-positions [_self points nodes]
         (local targets (or nodes []))
@@ -152,11 +120,9 @@
                 (span:drop))
             (set (. labels node) nil)
             (set (. node-lod node) nil))
-        (set last-camera-position nil)
-        (set camera-dirty? false)
-        (when (and camera camera-handler)
-            (camera.debounced-changed:disconnect camera-handler true)
-            (set camera-handler nil)))
+        (set last-view-state nil)
+        (when (and lod lod.drop)
+            (lod:drop)))
 
     (fn move-label [_self existing node]
         (when (. labels existing)
@@ -172,7 +138,8 @@
                  :drop-all drop-all
                  :move-label move-label
                  :labels labels
-                 :node-lod node-lod})
+                 :node-lod node-lod
+                 :lod lod})
     self)
 
 GraphViewLabels

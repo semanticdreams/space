@@ -24,6 +24,7 @@
                :codepoints {:note_add 4242
                             :link 4242
                             :playlist_add 4242
+                            :tune 4242
                             :exit_to_app 4242}})
   (set stub.get
        (fn [self name]
@@ -274,8 +275,10 @@
 
       (local original-graph app.graph)
       (local original-view app.graph-view)
+      (local original-surface app.active-interaction-surface)
       (set app.graph graph)
       (set app.graph-view {:selection {:selected-nodes [a]}})
+      (set app.active-interaction-surface :canvas)
 
       (local manager
         (MenuManager {:clickables clickables
@@ -325,6 +328,7 @@
       (graph:drop)
       (set app.graph original-graph)
       (set app.graph-view original-view)
+      (set app.active-interaction-surface original-surface)
       (set LinkEntityStore.get-default original-get-default)
 
       (when (not ok)

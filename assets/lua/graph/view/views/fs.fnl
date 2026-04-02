@@ -14,6 +14,8 @@
         (local build-ctx (or ctx options.ctx (and target target.graph target.graph.ctx)))
         (assert build-ctx "FsNodeView requires a build context")
         (local view {})
+        (local panel-target (or options.target
+                                (and build-ctx build-ctx.panel-target)))
         (local target-path (and target target.path))
         (local resolved-path (and target-path fs.absolute (fs.absolute target-path)))
         (local stat (and resolved-path fs.stat (fs.stat resolved-path)))
@@ -30,10 +32,10 @@
              build-ctx))
 
         (fn open-ripgrep-panel []
-          (assert (and app app.hud app.hud.add-panel-child)
-                  "FsNodeView ripgrep action requires app.hud:add-panel-child")
+          (assert (and panel-target panel-target.add-panel-child)
+                  "FsNodeView ripgrep action requires panel target:add-panel-child")
           (when resolved-path
-            (FsRipgrepDialog.open-panel {:hud app.hud
+            (FsRipgrepDialog.open-panel {:target panel-target
                                          :path resolved-path
                                          :label (or target.label resolved-path)})))
 

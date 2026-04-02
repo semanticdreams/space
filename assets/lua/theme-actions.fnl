@@ -1,3 +1,5 @@
+(local PanelUtils (require :target-panel-utils))
+
 (fn copy-list [items]
   (local result [])
   (when items
@@ -5,26 +7,70 @@
       (table.insert result item)))
   result)
 
-(fn rebuild-graph-view [selected]
+(fn capture-target-panel-state [target kind]
+  (local panels [])
+  (when (and target
+             target.capture-panel-element-state)
+    (each [_ record (ipairs (PanelUtils.persistent-panels target {:kind kind}))]
+      (local panel-state (target:capture-panel-element-state record.element))
+      (when panel-state
+        (local panel-record (PanelUtils.clone-table record.persistence))
+        (each [key value (pairs panel-state)]
+          (set (. panel-record key) value))
+        (table.insert panels panel-record))))
+  {:target target
+   :panels panels})
+
+(fn capture-graph-node-view-panel-states []
+  (local seen {})
+  (local captured [])
+  (each [_ target (ipairs [app.scene app.canvas app.hud])]
+    (when (and target (not (. seen target)))
+      (set (. seen target) true)
+      (table.insert captured
+                    (capture-target-panel-state target "graph-node-view"))))
+  captured)
+
+(fn restore-panel-state [snapshot]
+  (when (and snapshot
+             snapshot.target
+             snapshot.target.restore-state
+             (> (length (or snapshot.panels [])) 0))
+    (snapshot.target:restore-state {:panels snapshot.panels})))
+
+(fn rebuild-graph-view [selected panel-states]
   (when app.graph-view
     (app.graph-view:drop)
     (set app.graph-view nil))
-  (when (and app.graph app.scene app.hud)
+  (when (and app.graph (or app.canvas app.scene) app.hud)
     (local GraphView (require :graph/view))
+    (local ctx (or (and app.canvas app.canvas.build-context)
+                   (and app.scene app.scene.build-context)))
+    (local view-target (or app.canvas app.hud))
+    (local pointer-target (or app.canvas app.scene))
+    (local camera (or (and app.canvas app.canvas.camera) app.camera))
     (set app.graph-view (GraphView {:graph app.graph
-                                    :ctx (and app.scene app.scene.build-context)
+                                    :ctx ctx
                                     :movables app.movables
                                     :selector app.object-selector
-                                    :view-target app.hud
-                                    :camera app.camera
-                                    :pointer-target app.scene}))
+                                    :view-target view-target
+                                    :camera camera
+                                    :pointer-target pointer-target}))
+    (when (and app.active-world-entry
+               app.active-world-entry.world
+               app.active-world-entry.world.runtime)
+      (set (. app.active-world-entry.world.runtime :graph-view) app.graph-view))
     (when (and selected app.graph-view.selection)
-      (app.graph-view.selection:set-selection selected))))
+      (app.graph-view.selection:set-selection selected))
+    (each [_ snapshot (ipairs (or panel-states []))]
+      (restore-panel-state snapshot))))
 
 (fn apply-theme [theme-name]
   (local previous-selected
     (and app.graph-view app.graph-view.selection
          (copy-list app.graph-view.selection.selected-nodes)))
+  (local graph-node-view-panels
+    (capture-graph-node-view-panel-states))
   (local themes app.themes)
   (when (and themes themes.set-theme)
     (themes.set-theme theme-name))
@@ -39,7 +85,7 @@
     (app.hud:build-default))
   (when (and app.renderers app.renderers.apply-theme)
     (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
-  (rebuild-graph-view previous-selected))
+  (rebuild-graph-view previous-selected graph-node-view-panels))
 
 (fn toggle-theme []
   (local themes app.themes)
@@ -49,4 +95,3 @@
 
 {:apply-theme apply-theme
  :toggle-theme toggle-theme}
-

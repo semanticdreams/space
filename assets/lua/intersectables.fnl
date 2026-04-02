@@ -34,6 +34,11 @@
       (and obj obj.layout obj.layout.depth-offset-index)
       0))
 
+(fn pointer-target-enabled? [target]
+  (if (and app app.pointer-target-enabled?)
+      (app.pointer-target-enabled? target)
+      true))
+
 (fn closer-entry? [candidate current]
   (if (not candidate)
       false
@@ -102,25 +107,26 @@
     (each [_ obj (ipairs (or objects []))]
       (when (and obj obj.intersect)
         (local target obj.pointer-target)
-        (local ray (resolve-ray self pointer target))
-        (when ray
-          (let [(hit point distance) (obj:intersect ray)]
-            (when (and hit distance)
-              (local entry {:object obj
-                            :pointer-target target
-                            :distance distance
-                            :depth-offset-index (entry-depth-offset-index obj)})
-              (when (and opts opts.include-point)
-                (set entry.point point))
-              (local is-hud (and app.hud (= target app.hud)))
-              (local is-scene (or is-hud (and app.scene (= target app.scene)) (not target)))
-              (when is-hud
-                (set closest-hud (update-closest closest-hud entry))
-                (set closest-scene (update-closest closest-scene entry)))
-              (when (and is-scene (not is-hud))
-                (set closest-scene (update-closest closest-scene entry)))
-              (when (not (or is-hud is-scene))
-                (remember-other target entry)))))))
+        (when (pointer-target-enabled? target)
+          (local ray (resolve-ray self pointer target))
+          (when ray
+            (let [(hit point distance) (obj:intersect ray)]
+              (when (and hit distance)
+                (local entry {:object obj
+                              :pointer-target target
+                              :distance distance
+                              :depth-offset-index (entry-depth-offset-index obj)})
+                (when (and opts opts.include-point)
+                  (set entry.point point))
+                (local is-hud (and app.hud (= target app.hud)))
+                (local is-scene (or is-hud (and app.scene (= target app.scene)) (not target)))
+                (when is-hud
+                  (set closest-hud (update-closest closest-hud entry))
+                  (set closest-scene (update-closest closest-scene entry)))
+                (when (and is-scene (not is-hud))
+                  (set closest-scene (update-closest closest-scene entry)))
+                (when (not (or is-hud is-scene))
+                  (remember-other target entry))))))))
 
     (or closest-hud
         closest-scene

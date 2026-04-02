@@ -20,27 +20,30 @@
         (app.graph-view-factory)
         (do
           (assert app.graph "NormalState requires app.graph to create GraphView")
-          (local ctx (and app.scene app.scene.build-context))
-          (assert ctx "NormalState requires app.scene.build-context to create GraphView")
+          (local ctx (or (and app.canvas app.canvas.build-context)
+                         (and app.scene app.scene.build-context)))
+          (assert ctx "NormalState requires canvas or scene build-context to create GraphView")
           (GraphView {:graph app.graph
                       :ctx ctx
                       :movables app.movables
                       :selector app.object-selector
-                      :view-target app.hud
-                      :camera app.camera
-                      :pointer-target app.scene}))))
+                      :view-target (or app.canvas app.hud)
+                      :camera (or (and app.canvas app.canvas.camera) app.camera)
+                      :pointer-target (or app.canvas app.scene)}))))
 
   (fn toggle-graph-view []
-    (if app.graph-view
-        (do
-          (app.graph-view:drop)
-          (set app.graph-view nil)
-          true)
-        (do
-          (local view (create-graph-view))
-          (assert view "NormalState GraphView factory returned nil")
-          (set app.graph-view view)
-          true)))
+    (if (and app.canvas app.toggle-active-interaction-surface)
+        (app.toggle-active-interaction-surface)
+        (if app.graph-view
+            (do
+              (app.graph-view:drop)
+              (set app.graph-view nil)
+              true)
+            (do
+              (local view (create-graph-view))
+              (assert view "NormalState GraphView factory returned nil")
+              (set app.graph-view view)
+              true))))
 
   (fn remove-selected-nodes []
     (local graph-view app.graph-view)

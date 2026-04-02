@@ -107,11 +107,16 @@
     (local focus-layer-index 1)
     (local selection-layer-index 2)
     (local base-layer-index 3)
+    (local lod-surface-provider
+           (or options.lod-surface-provider
+               (fn []
+                   (or options.lod-surface
+                       (and ctx ctx.pointer-target)))))
     (local labels (GraphViewLabels {:ctx ctx
-                                :camera options.camera
-                                :label-color resolved-label-color
-                                :label-depth-offset (or options.label-depth-offset 1.0)
-                                :camera-debounce-distance (or options.camera-debounce-distance 10.0)}))
+                                    :camera options.camera
+                                    :surface-provider lod-surface-provider
+                                    :label-color resolved-label-color
+                                    :label-depth-offset (or options.label-depth-offset 1.0)}))
     (local views (GraphViewNodeViews {:graph graph
                                       :ctx ctx
                                       :view-target view-target
@@ -740,12 +745,7 @@
                  (if (and graph graph.capture-state)
                      (graph:capture-state)
                      {:nodes [] :edges []}))
-             (local views-state
-                 (if (and views views.capture-state)
-                     (views:capture-state)
-                     {:open-node-keys []}))
-             {:graph graph-state
-              :views views-state}))
+             {:graph graph-state}))
     (set view.restore-graph-state
          (fn [_self state]
              (when (and graph graph.restore-state state)

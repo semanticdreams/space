@@ -4,6 +4,8 @@
 (local BuildContext (require :build-context))
 (local ControlPanel (require :hud-control-panel))
 (local Icons (require :icons))
+(local PanelUtils (require :target-panel-utils))
+(local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
 
 (fn with-settings [value f]
@@ -86,8 +88,96 @@
   (set app.themes previous-themes)
   true)
 
+(fn apply-theme-restores-graph-node-view-panels-on-target []
+  (local original-graph-view app.graph-view)
+  (local original-graph app.graph)
+  (local original-canvas app.canvas)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-graph-view-module (. package.loaded "graph/view"))
+  (var drop-calls 0)
+  (local restored-states [])
+  (local rebuilt-selections [])
+  (local node {:key "node-a"})
+  (local panel-element {:layout {}})
+  (local panel-metadata {:element panel-element
+                         :persistence {:kind "graph-node-view"
+                                       :node-key node.key}})
+  (local canvas {:build-context {}
+                 :float {:children [panel-metadata]}
+                 :capture-panel-element-state
+                 (fn [_self element]
+                   (when (= element panel-element)
+                     {:layer "float"
+                      :position [1 2 3]
+                      :rotation [1 0 0 0]
+                      :size [7 8 9]}))
+                 :restore-state (fn [_self state]
+                                  (table.insert restored-states state)
+                                  true)})
+  (local themes {:set-theme (fn [_theme] true)
+                 :get-active-theme (fn [] {:name :light})})
+  (set app.graph {})
+  (set app.canvas canvas)
+  (set app.scene {:build-default (fn [_self] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                     :save (fn [] true)})
+  (set app.themes themes)
+  (set app.active-world-entry {:world {:runtime {}}})
+  (assert (= (length (PanelUtils.persistent-panels canvas {:kind "graph-node-view"})) 1)
+          "test setup should expose one persisted graph node view panel on the canvas")
+  (set app.graph-view
+       {:selection {:selected-nodes [node]}
+        :drop (fn [_self]
+                (set drop-calls (+ drop-calls 1))
+                (set canvas.float.children []))})
+  (set (. package.loaded "graph/view")
+       (fn [_opts]
+         {:selection {:set-selection (fn [_self selected]
+                                       (table.insert rebuilt-selections selected))}}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light)
+        (assert (= drop-calls 1)
+                "apply-theme should rebuild the graph view")
+        (assert (= (length restored-states) 1)
+                "apply-theme should restore graph node view panels through the target")
+        (local restored (. restored-states 1))
+        (assert (= (length (or restored.panels [])) 1)
+                "apply-theme should restore the captured graph node view panel")
+        (assert (= (and (. restored.panels 1) (. (. restored.panels 1) :node-key))
+                   node.key)
+                "apply-theme should restore the same node-key")
+        (assert (= (and (. restored.panels 1) (. (. restored.panels 1) :layer))
+                   "float")
+                "apply-theme should restore the captured panel placement")
+        (assert (= (length rebuilt-selections) 1)
+                "apply-theme should restore graph selection on the rebuilt view"))))
+  (set app.graph-view original-graph-view)
+  (set app.graph original-graph)
+  (set app.canvas original-canvas)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.active-world-entry original-active-world-entry)
+  (set (. package.loaded "graph/view") original-graph-view-module)
+  (when (not ok)
+    (error err))
+  true)
+
 (table.insert tests {:name "Init themes uses stored UI theme" :fn init-themes-reads-settings})
 (table.insert tests {:name "Control panel toggles theme" :fn control-panel-toggles-theme})
+(table.insert tests {:name "Apply theme restores graph node view panels on their target"
+                     :fn apply-theme-restores-graph-node-view-panels-on-target})
 
 (local main
   (fn []

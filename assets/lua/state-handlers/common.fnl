@@ -4,7 +4,8 @@
   (. ctx :app))
 
 (fn controls-from [ctx]
-  (. (app-from ctx) :first-person-controls))
+  (or (. (app-from ctx) :active-pointer-controls)
+      (. (app-from ctx) :first-person-controls)))
 
 (fn selector-from [_ctx]
   (Runtime.selection-handler))

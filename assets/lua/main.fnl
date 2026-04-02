@@ -495,8 +495,8 @@
   (fn [value fallback]
     (if (not (= value nil)) value fallback)))
 
-(set app.set-viewport AppViewport.set-viewport)
-(set app.create-default-projection AppProjection.create-default-projection)
+(set (. app :set-viewport) (. AppViewport :set-viewport))
+(set (. app :create-default-projection) (. AppProjection :create-default-projection))
 
 (fn current-pixel-viewport-size []
   (local pixel-width (or (and app.engine (. app.engine "pixel-width")) 0))
@@ -513,8 +513,27 @@
       (set app.projection (app.create-default-projection)))
   (when app.scene
     (set app.projection app.scene.projection))
+  (when app.canvas
+    (app.canvas:reset-projection))
   (when app.hud
     (app.hud:reset-projection)))
+
+(fn resolve-screen-ray-target [opts]
+  (local options (or opts {}))
+  (local explicit-target (or options.target options.pointer-target))
+  (if explicit-target
+      explicit-target
+      (do
+        (local explicit-surface options.surface)
+        (if (= explicit-surface :canvas)
+            app.canvas
+            (= explicit-surface :scene)
+            app.scene
+            (if (and (= app.active-interaction-surface :canvas)
+                     app.canvas
+                     (= app.canvas-visible? true))
+                app.canvas
+                app.scene)))))
 
 (fn app.screen-pos-ray [pos opts]
   (fn finite-number? [value]
@@ -528,16 +547,19 @@
               (not (finite-number? vec.y))
               (not (finite-number? vec.z)))
       (error (.. "app.screen-pos-ray produced non-finite " label))))
-  (if (and app.scene app.scene.screen-pos-ray)
+  (local preferred-target (resolve-screen-ray-target opts))
+  (if (and preferred-target preferred-target.screen-pos-ray)
       (let [options (if opts
                       (let [copy {}]
                         (each [k v (pairs opts)]
                           (set (. copy k) v))
                         copy)
                       {})]
-        (when (and (not options.projection) app.projection)
+        (when (and (= preferred-target app.scene)
+                   (not options.projection)
+                   app.projection)
           (set options.projection app.projection))
-        (app.scene:screen-pos-ray pos options))
+        (preferred-target:screen-pos-ray pos options))
       (let [options (or opts {})
             viewport (viewport->table (or options.viewport app.viewport))
             view (or options.view
@@ -566,12 +588,20 @@
 (set app.camera nil)
 (set app.projection nil)
 (set app.scene nil)
+(set app.canvas nil)
 (set app.hud nil)
 (set app.profiler nil)
 (set app.movables nil)
 (set app.focus nil)
 (set app.scene-focus-scope nil)
+(set app.canvas-focus-scope nil)
 (set app.hud-focus-scope nil)
+(set app.canvas-controls nil)
+(set app.active-pointer-controls nil)
+(set app.active-interaction-surface :scene)
+(set app.scene-interactive? true)
+(set app.canvas-interactive? false)
+(set app.canvas-visible? false)
 (set app.graph-view nil)
 (set app.tray-manager nil)
 (set app.menu-manager nil)
@@ -700,12 +730,77 @@
            (app.hud:add-overlay-child {:builder contrib.overlay})))
     (app.reset-projection)))
 
+(fn resolve-interaction-surface [surface]
+  (if (= surface :canvas)
+      (if app.canvas :canvas :scene)
+      :scene))
+
+(fn sync-interaction-surface-state []
+  (local surface (resolve-interaction-surface app.active-interaction-surface))
+  (local canvas-visible? (and app.canvas (= app.canvas-visible? true)))
+  (set app.active-interaction-surface surface)
+  (set app.canvas-visible? canvas-visible?)
+  (set app.scene-interactive? (= surface :scene))
+  (set app.canvas-interactive? (and canvas-visible?
+                                     (= surface :canvas)))
+  (if app.canvas-interactive?
+      (set app.active-pointer-controls app.canvas-controls)
+      (set app.active-pointer-controls app.first-person-controls))
+  surface)
+
+(fn app.set-canvas-visible [visible?]
+  (set app.canvas-visible? (and app.canvas
+                                (not (= visible? false))))
+  (sync-interaction-surface-state))
+
+(fn app.set-active-interaction-surface [surface opts]
+  (local options (or opts {}))
+  (set app.active-interaction-surface (resolve-interaction-surface surface))
+  (when (or (= options.sync-canvas-visibility nil)
+            options.sync-canvas-visibility)
+    (set app.canvas-visible? (and app.canvas
+                                  (= app.active-interaction-surface :canvas))))
+  (sync-interaction-surface-state))
+
+(fn app.toggle-active-interaction-surface []
+  (if (not app.canvas)
+      false
+      (if (= app.active-interaction-surface :canvas)
+          (app.set-active-interaction-surface :scene
+                                              {:sync-canvas-visibility true})
+          (app.set-active-interaction-surface :canvas
+                                              {:sync-canvas-visibility true}))))
+
+(fn pointer-target-surface [target]
+  (if (or (= target nil)
+          (= target app.scene)
+          (= (and target target.interaction-surface) :scene))
+      :scene
+      (if (or (= target app.canvas)
+              (= (and target target.interaction-surface) :canvas))
+          :canvas
+          (if (or (= target app.hud)
+                  (= (and target target.interaction-surface) :hud))
+              :hud
+              nil))))
+
+(fn app.pointer-target-enabled? [target]
+  (local surface (pointer-target-surface target))
+  (if (= surface :scene)
+      (= app.scene-interactive? true)
+      (if (= surface :canvas)
+          (= app.canvas-interactive? true)
+          true)))
+
 (fn bind-active-world-runtime [entry runtime]
   (set app.active-world-entry entry)
   (set app.camera (and runtime runtime.camera))
   (set app.first-person-controls (and runtime runtime.first-person-controls))
   (set app.scene-focus-scope (and runtime runtime.scene-scope))
+  (set app.canvas-focus-scope (and runtime runtime.canvas-scope))
   (set app.scene (and runtime runtime.scene))
+  (set app.canvas (and runtime runtime.canvas))
+  (set app.canvas-controls (and runtime runtime.canvas-controls))
   (set app.object-selector (and runtime runtime.object-selector))
   (set app.terrain-rect-pick-session nil)
   (set app.terrain-rect-pick-previous-state nil)
@@ -721,12 +816,16 @@
     (when app.hud.build-context
       (set app.hud.build-context.object-selector app.object-selector)
       (set app.hud.build-context.layout-root app.layout-root)))
+  (when (and app.canvas app.canvas.build-context)
+    (set app.canvas.build-context.object-selector app.object-selector))
   (when (and app.scene app.scene.build-context)
     (set app.scene.build-context.object-selector app.object-selector)
     (set app.scene.build-context.layout-root app.layout-root))
   (apply-active-world-hud-contrib)
-  (when (and runtime runtime.restore-hud-state app.hud)
-    (runtime:restore-hud-state app.hud)))
+  (when (and runtime runtime.restore-surface-state)
+    (runtime:restore-surface-state app.canvas app.hud))
+  (app.set-active-interaction-surface app.active-interaction-surface
+                                      {:sync-canvas-visibility false}))
 
 (fn init-world-manager []
   (when (and app.world-manager app.world-manager.drop)
@@ -959,6 +1058,7 @@
                                                 :directional-traversal-boundary? true}))
   (focus-manager:attach hud-scope (focus-manager:get-root-scope))
   (set app.scene-focus-scope nil)
+  (set app.canvas-focus-scope nil)
   (set app.hud-focus-scope hud-scope)
   (when app.clickables
     (when app.focus-void-callback
@@ -970,8 +1070,15 @@
                (app.focus:clear-focus))))
     (app.clickables:register-left-click-void-callback app.focus-void-callback))
   (set app.scene nil)
+  (set app.canvas nil)
   (set app.camera nil)
   (set app.first-person-controls nil)
+  (set app.canvas-controls nil)
+  (set app.active-pointer-controls nil)
+  (set app.active-interaction-surface :scene)
+  (set app.scene-interactive? true)
+  (set app.canvas-interactive? false)
+  (set app.canvas-visible? false)
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.object-selector nil)
@@ -1062,6 +1169,8 @@
       (app.engine.audio:setListenerOrientation forward up))
     (when app.scene
       (run-section "scene" (fn [] (app.scene:update))))
+    (when app.canvas
+      (run-section "canvas" (fn [] (app.canvas:update))))
     (when app.hud
       (run-section "hud" (fn [] (app.hud:update))))
     (when app.renderers
@@ -1123,6 +1232,8 @@
     (set app.world-manager nil))
   (set app.active-world-entry nil)
   (set app.first-person-controls nil)
+  (set app.canvas-controls nil)
+  (set app.active-pointer-controls nil)
   (set app.camera nil)
   (set app.graph nil)
   (set app.graph-view nil)
@@ -1132,6 +1243,11 @@
   (set app.terrain-paint-session nil)
   (set app.terrain-paint-previous-state nil)
   (set app.scene nil)
+  (set app.canvas nil)
+  (set app.active-interaction-surface :scene)
+  (set app.scene-interactive? true)
+  (set app.canvas-interactive? false)
+  (set app.canvas-visible? false)
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)
   (set app.active-world-hud-overlay nil)
@@ -1170,6 +1286,7 @@
     (app.focus:drop)
     (set app.focus nil))
   (set app.scene-focus-scope nil)
+  (set app.canvas-focus-scope nil)
   (set app.hud-focus-scope nil)
   (when app.profiler
     (app.profiler.set_enabled false)

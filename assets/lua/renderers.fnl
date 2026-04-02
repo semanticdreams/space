@@ -179,6 +179,11 @@
       (gl.glClear gl.GL_DEPTH_BUFFER_BIT)
       (self:draw-target app.hud)))
 
+  (fn draw-canvas [self]
+    (when (and app.canvas app.canvas-visible?)
+      (gl.glClear gl.GL_DEPTH_BUFFER_BIT)
+      (self:draw-target app.canvas)))
+
   (fn use-fxaa? []
     (and (fxaa:ready?)
          final-fbo final-rbo
@@ -212,6 +217,7 @@
           (when app.scene
             (self:draw-target app.scene {:geometry false})
             (self:draw-sub-apps app.scene))
+          (draw-canvas self)
           (draw-hud self)
           (gl.glBindFramebuffer gl.GL_READ_FRAMEBUFFER final-fbo)
           (gl.glBindFramebuffer gl.GL_DRAW_FRAMEBUFFER 0)
@@ -224,6 +230,7 @@
           (when app.scene
             (self:draw-target app.scene {:geometry false})
             (self:draw-sub-apps app.scene))
+          (draw-canvas self)
           (draw-hud self))))
 
   (fn on-viewport-changed [_self viewport]

@@ -772,11 +772,15 @@
         (assert (= (length hud.tiles.children) 1))
         (assert (= (length hud.float.children) 0))
 
-        (set intersector.selection-point (glm.vec3 0 0 0))
-        (set intersector.next-ray {:origin (glm.vec3 10 0 5)
-                                   :direction (glm.vec3 0 0 -1)})
-        (resizables:on-mouse-button-down {:button 3 :x 0 :y 0})
-        (resizables:on-mouse-motion {:x 10 :y 0})
+        (var resizable-entry nil)
+        (each [_ entry (ipairs resizables.entries)]
+          (when (and (not resizable-entry)
+                     (= entry.key element.__hud_wrapper))
+            (set resizable-entry entry)))
+        (assert resizable-entry "Expected resizables entry for HUD tile")
+        (assert resizable-entry.on-resize-start
+                "Expected HUD tiles to register a resize-start handler")
+        (resizable-entry.on-resize-start resizable-entry {})
 
         (assert (= (length hud.tiles.children) 0)
                 "Resizing should remove the dialog from tiles")

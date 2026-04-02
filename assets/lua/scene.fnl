@@ -381,6 +381,8 @@
   (local self {:layout-root layout-root
                :build-context ctx
                :projection nil
+               :projection-version 0
+               :viewport nil
                :entity nil
                :builder nil
                :graph options.graph
@@ -395,9 +397,12 @@
                :reference-point default-position
                :focus-manager focus-manager
                :focus-scope focus-scope
-               :camera options.camera})
+               :camera options.camera
+               :interaction-surface :scene
+               :default-panel-location "float"})
 
   (set ctx.pointer-target self)
+  (set ctx.panel-target self)
 
   (fn clone-vec3 [value]
     (and value
@@ -1219,7 +1224,8 @@
 (fn reset-projection [self]
   (assert (and app app.create-default-projection)
           "Scene.reset-projection requires app.create-default-projection")
-  (set self.projection (app.create-default-projection)))
+  (set self.projection (app.create-default-projection self.viewport))
+  (set self.projection-version (+ (or self.projection-version 0) 1)))
 
 (fn set-camera [self camera]
   (set self.camera camera))
@@ -1278,7 +1284,7 @@
 
 (fn screen-pos-ray [self pos opts]
   (local options (or opts {}))
-  (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
+  (local viewport (viewport-utils.to-table (or options.viewport self.viewport app.viewport)))
   (local view (or options.view (self:get-view-matrix)))
   (local projection (or options.projection self.projection))
   (fn finite-number? [value]
@@ -1310,7 +1316,8 @@
   (assert-finite-vec3 direction "direction")
   {:origin near :direction direction})
 
-(fn on-viewport-changed [_self _viewport]
+(fn on-viewport-changed [self viewport]
+  (set self.viewport (viewport-utils.to-table viewport))
   nil)
 
 (fn raycast-terrain [self ray]

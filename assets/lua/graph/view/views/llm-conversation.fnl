@@ -16,6 +16,7 @@
     (fn build [ctx]
         (local view {:node node
                      :handlers []})
+        (local panel-target (and ctx ctx.panel-target))
         (local provider (or (and node node.provider) "openai"))
 
         (fn model-items-for-provider [provider-name]
@@ -55,9 +56,9 @@
             (node:delete))
 
         (fn open-messages-view [_self]
-            (assert (and app app.hud app.hud.add-panel-child)
-                    "LlmConversationView requires app.hud:add-panel-child")
-            (LlmConversationMessagesDialog.open-panel {:hud app.hud
+            (assert (and panel-target panel-target.add-panel-child)
+                    "LlmConversationView requires panel target:add-panel-child")
+            (LlmConversationMessagesDialog.open-panel {:target panel-target
                                                        :graph (and node node.graph)
                                                        :node node
                                                        :node-key node.key}))

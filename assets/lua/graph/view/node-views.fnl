@@ -4,10 +4,7 @@
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local fs (require :fs))
 (local logging (require :logging))
-(local MathUtils (require :math-utils))
-
-(local array->vec3 (. MathUtils :array->vec3))
-(local array->quat (. MathUtils :array->quat))
+(local PanelUtils (require :target-panel-utils))
 
 (fn GraphViewNodeViews [opts]
     (local options (or opts {}))
@@ -22,17 +19,6 @@
     (local restorer-owner {})
 
     (var open-node-view nil)
-
-    (fn panel-placement-options [panel]
-        (local layer (or (and panel panel.layer) "tiles"))
-        (if (= layer "float")
-            {:location :float
-             :position (array->vec3 (and panel panel.position))
-             :rotation (array->quat (and panel panel.rotation))
-             :size (array->vec3 (and panel panel.size))}
-            {:location :tiles
-             :align-x (and panel panel.align-x)
-             :align-y (and panel panel.align-y)}))
 
     (fn build-persistence [node-key]
         {:kind persistence-kind
@@ -143,7 +129,7 @@
                 (local dialog-builder (and builder (wrap-node-view node builder)))
                 (when dialog-builder
                     (local panel (or local-opts.panel {}))
-                    (local placement (panel-placement-options panel))
+                    (local placement (PanelUtils.panel-placement-options target panel))
                     (local persistence (build-persistence node.key))
                     (if (and target target.add-panel-child)
                         (do
@@ -270,7 +256,7 @@
 
     (register-target-restorer view-target)
     (register-target-restorer app.hud)
-    (register-target-restorer app.scene)
+    (register-target-restorer app.canvas)
 
     {:node-views node-views
      :open open-node-view

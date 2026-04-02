@@ -1,6 +1,6 @@
 (local DefaultDialog (require :default-dialog))
 (local RipgrepView (require :ripgrep-view))
-(local Persistence (require :hud-panel-persistence))
+(local PanelUtils (require :target-panel-utils))
 
 (local kind "fs-ripgrep-dialog")
 (local restorer-module "graph/view/views/fs-ripgrep-dialog")
@@ -8,14 +8,14 @@
 (fn open-panel [opts]
   (local options (or opts {}))
   (local target (assert (or options.hud options.target)
-                        "Fs ripgrep dialog requires HUD target"))
+                        "Fs ripgrep dialog requires target"))
   (local panel (or options.panel {}))
   (local path
     (or options.path
-        (Persistence.assert-string-field panel :path
-                                         "fs-ripgrep-dialog requires string :path")))
+        (PanelUtils.assert-string-field panel :path
+                                        "fs-ripgrep-dialog requires string :path")))
   (local label (or options.label path))
-  (local placement (Persistence.panel-placement-options panel))
+  (local placement (PanelUtils.panel-placement-options target panel))
   (target:add-panel-child {:builder (DefaultDialog {:title (.. "Ripgrep: " label)
                                                     :child (RipgrepView {:path path})})
                            :location placement.location

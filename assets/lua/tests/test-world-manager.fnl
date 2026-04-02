@@ -409,7 +409,7 @@
               "World drop should capture runtime containment into persisted state")
       true)))
 
-(fn home-world-deactivate-queues-hud-and-graph-restore-state []
+(fn home-world-deactivate-queues-canvas-and-hud-restore-state []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -422,15 +422,17 @@
       (set world.runtime
            {:camera {:position [0 0 0]
                      :rotation [1 0 0 0]}
-            :graph-view {:capture-state (fn [_self]
-                                          {:graph {:nodes []
-                                                   :edges []}
-                                           :views {:open-node-keys ["node-a"]}})}})
+            :canvas {:capture-state (fn [_self]
+                                      {:panels [{:kind "graph-node-view"
+                                                 :node-key "node-a"}]})}})
       (world:deactivate {:hud {:capture-state (fn [_self]
-                                                {:panels [{:kind "dialog/demo"}]})}}
+                                                {:panels [{:kind "dialog/demo"}]})}
+                         :canvas {:capture-state (fn [_self]
+                                                   {:panels [{:kind "graph-node-view"
+                                                              :node-key "node-a"}]})}}
                         "switch")
-      (assert (= (length world.runtime.pending-graph-views-state.open-node-keys) 1)
-              "World deactivate should queue graph view state for restore")
+      (assert (= (. (. world.runtime.pending-canvas-state.panels 1) :node-key) "node-a")
+              "World deactivate should queue canvas panel state for restore")
       (assert (= (. (. world.runtime.pending-hud-state.panels 1) :kind) "dialog/demo")
               "World deactivate should queue hud panel state for restore")
       true)))
@@ -1108,9 +1110,9 @@
                           :views {:open-node-keys []}})
       (set world.runtime
            {:graph {:has-key-loader-for-key (fn [_self key]
-                                             (= key "start"))}
-            :graph-view {:capture-state (fn [_self]
-                                          graph-state)}})
+                                             (= key "start"))
+                    :capture-state (fn [_self]
+                                     (. graph-state :graph))}})
       (world:deactivate {} "switch")
       (local nodes (and world.state world.state.graph world.state.graph.graph world.state.graph.graph.nodes))
       (local edges (and world.state world.state.graph world.state.graph.graph world.state.graph.graph.edges))
@@ -1130,7 +1132,7 @@
               "Unsupported graph edge target should be preserved")
       true)))
 
-(fn home-world-preserves-unsupported-graph-views-on-deactivate []
+(fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -1139,35 +1141,47 @@
                          {:camera {:position [0 0 30]
                                    :rotation [1 0 0 0]}
                           :graph {:graph {:nodes []
-                                          :edges []}
-                                  :views {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"}]}}
+                                          :edges []}}
                           :scene {:panels []
                                   :terrains []
                                   :lights (LightSystemModule.default-state)
                                   :skybox (make-skybox-state)}
-                          :hud {:panels []}})
+                          :hud {:panels []}
+                          :canvas {:camera {:position [0 0 100]}
+                                   :scale_factor 1.0
+                                   :panels []}})
       (local world (HomeWorld {:id "world-a"
                                :name "home"
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local graph-state {:graph {:nodes ["start"]
-                                  :edges []}
-                          :views {:open-views [{:node-key "start"}]}})
       (set world.runtime
            {:graph {:has-key-loader-for-key (fn [_self key]
                                              (= key "start"))}
-            :graph-view {:capture-state (fn [_self]
-                                          graph-state)}})
-      (world:deactivate {} "switch")
-      (local open-views (and world.state world.state.graph world.state.graph.views world.state.graph.views.open-views))
-      (assert (= (type open-views) :table) "Expected graph open-views table after deactivate")
-      (assert (= (length open-views) 2)
-              "Unsupported graph view should remain alongside captured supported views")
-      (assert (= (. (. open-views 1) :node-key) "start")
-              "Captured supported graph view should be preserved")
-      (assert (= (. (. open-views 2) :node-key) "terrain-tool:world-1:apply-perlin")
-              "Unsupported graph view should be preserved after deactivate")
+            :canvas {:capture-state (fn [_self]
+                                      {:panels [{:kind "graph-node-view"
+                                                 :node-key "start"
+                                                 :layer "float"
+                                                 :position [1 2 3]
+                                                 :rotation [1 0 0 0]
+                                                 :size [7 8 9]}]})}})
+      (world:deactivate {:canvas {:capture-state (fn [_self]
+                                                   {:panels [{:kind "graph-node-view"
+                                                              :node-key "start"
+                                                              :layer "float"
+                                                              :position [1 2 3]
+                                                              :rotation [1 0 0 0]
+                                                              :size [7 8 9]}]})}}
+                        "switch")
+      (assert (= (and world.state.graph world.state.graph.views) nil)
+              "Graph node views should no longer persist through graph state")
+      (local panels (and world.state world.state.canvas world.state.canvas.panels))
+      (assert (= (type panels) :table)
+              "Canvas should capture graph node view panels")
+      (assert (= (length panels) 1)
+              "Canvas should persist the captured graph node view panel")
+      (assert (= (. (. panels 1) :node-key) "start")
+              "Canvas should persist graph node view placement by node key")
       true)))
 
 (table.insert tests {:name "WorldManager creates and activates default home world"
@@ -1194,8 +1208,8 @@
                      :fn home-world-activate-reapplies-runtime-containment})
 (table.insert tests {:name "HomeWorld captures runtime containment on drop"
                      :fn home-world-captures-runtime-containment-on-drop})
-(table.insert tests {:name "HomeWorld deactivate queues hud and graph restore state"
-                     :fn home-world-deactivate-queues-hud-and-graph-restore-state})
+(table.insert tests {:name "HomeWorld deactivate queues canvas and hud restore state"
+                     :fn home-world-deactivate-queues-canvas-and-hud-restore-state})
 (table.insert tests {:name "HomeWorld new state seeds default terrain"
                      :fn home-world-new-state-seeds-default-terrain})
 (table.insert tests {:name "HomeWorld new state seeds default lights"
@@ -1242,8 +1256,8 @@
                      :fn home-world-preserves-unsupported-terrain-on-deactivate})
 (table.insert tests {:name "HomeWorld preserves unsupported graph nodes on deactivate"
                      :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
-(table.insert tests {:name "HomeWorld preserves unsupported graph views on deactivate"
-                     :fn home-world-preserves-unsupported-graph-views-on-deactivate})
+(table.insert tests {:name "HomeWorld persists graph node views on targets instead of graph state"
+                     :fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state})
 
 (local main
   (fn []

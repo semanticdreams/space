@@ -68,6 +68,8 @@
   (local self {:layout-root layout-root
                :build-context ctx
                :projection nil
+               :projection-version 0
+               :viewport nil
                :entity nil
                :tiles nil
                :float nil
@@ -80,9 +82,12 @@
                :half-width 1
                :half-height 1
                :focus-manager focus-manager
-               :focus-scope focus-scope})
+               :focus-scope focus-scope
+               :interaction-surface :hud
+               :default-panel-location "tiles"})
 
   (set ctx.pointer-target self)
+  (set ctx.panel-target self)
   (apply-active-theme ctx)
 
   (fn normalize-movable-entry [_self entry]
@@ -709,7 +714,7 @@
 
   (fn screen-pos-ray [self pos opts]
     (local options (or opts {}))
-    (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
+    (local viewport (viewport-utils.to-table (or options.viewport self.viewport app.viewport)))
     (local projection (or options.projection self.projection))
     (fn finite-number? [value]
       (and (= (type value) :number)
@@ -739,7 +744,8 @@
     {:origin near :direction direction})
 
   (fn update-projection [self viewport]
-    (local vp (or viewport {:x 0 :y 0 :width 1 :height 1}))
+    (local vp (viewport-utils.to-table (or viewport self.viewport {:x 0 :y 0 :width 1 :height 1})))
+    (set self.viewport vp)
     (local adjusted-scale (* default-world-scale self.scale-factor))
     (set self.world-units-per-pixel adjusted-scale)
     (local safe-width (math.max vp.width 1))
@@ -749,6 +755,7 @@
     (if glm.ortho
         (set self.projection (glm.ortho (- self.half-width) self.half-width (- self.half-height) self.half-height -100.0 100.0))
         (set self.projection identity-view))
+    (set self.projection-version (+ (or self.projection-version 0) 1))
     (self:update-root-transform))
 
   (fn reset-projection [self]
