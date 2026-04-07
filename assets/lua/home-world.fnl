@@ -12,6 +12,10 @@
 (local GraphView (require :graph/view))
 (local GraphKeyLoaders (require :graph/key-loaders))
 (local ObjectSelector (require :object-selector))
+(local DrawingDocument (require :drawing/document))
+(local DrawingController (require :drawing/controller))
+(local {:DrawingRender DrawingRender} (require :drawing/render))
+(local DrawingSidebarView (require :drawing/sidebar-view))
 (local viewport-utils (require :viewport-utils))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
@@ -62,7 +66,9 @@
             :rotation [1 0 0 0]}
    :canvas {:camera {:position [0 0 100]}
             :scale_factor 1.0
+            :active_feature "graph"
             :panels []}
+   :drawing (DrawingDocument.default-state)
    :physics {:containment default-containment-config}
    :graph {:graph {:nodes []
                    :edges []}}
@@ -373,7 +379,15 @@
       (assert captured-scene.background "HomeWorld.capture-runtime-state requires scene background")
       (set world.state.scene captured-scene))
     (when (and canvas canvas.capture-state)
-      (set world.state.canvas (canvas:capture-state)))
+      (do
+        (set world.state.canvas (canvas:capture-state))
+        (set world.state.canvas.active_feature
+             (or (and runtime runtime.active-canvas-feature)
+                 (and world.state world.state.canvas world.state.canvas.active_feature)
+                 "graph"))))
+    (when (and runtime runtime.drawing-controller)
+      (set world.state.drawing
+           (runtime.drawing-controller:snapshot)))
     (when (and hud hud.capture-state)
       (set world.state.hud (hud:capture-state)))
     (local physics-state (or world.state.physics {}))
@@ -458,6 +472,11 @@
     (local canvas-controls
       (CanvasControls {:canvas canvas
                        :camera canvas-camera}))
+    (local graph-canvas-target
+      {:interaction-surface :canvas
+       :canvas-feature "graph"
+       :screen-pos-ray (fn [_self pos opts]
+                         (canvas:screen-pos-ray pos opts))})
     (local object-selector
       (ObjectSelector {:ctx (and canvas canvas.build-context)
                        :project (fn [position opts]
@@ -476,8 +495,18 @@
                   :selector object-selector
                   :view-target canvas
                   :camera canvas-camera
-                  :pointer-target canvas
+                  :pointer-target graph-canvas-target
                   :data-dir world.dir}))
+    (local drawing-state
+      (DrawingDocument.normalize-state
+        (or world.state.drawing
+            (DrawingDocument.default-state))))
+    (local drawing-controller
+      (DrawingController {:document drawing-state.document
+                          :ui drawing-state.ui}))
+    (local drawing-render
+      (DrawingRender {:ctx (and canvas canvas.build-context)
+                      :controller drawing-controller}))
     (local graph-state (resolve-graph-core-state world.state.graph))
     (scene:build-default {:terrains (and world.state world.state.scene world.state.scene.terrains)})
     (when (and graph graph.restore-state graph-state)
@@ -499,6 +528,9 @@
        :object-selector object-selector
        :graph graph
        :graph-view graph-view
+       :drawing-controller drawing-controller
+       :drawing-render drawing-render
+       :active-canvas-feature (or canvas-state.active_feature "graph")
        :pending-canvas-state (clone-table world.state.canvas)
        :pending-hud-state (clone-table world.state.hud)})
     (set runtime.restore-surface-state
@@ -525,6 +557,10 @@
       (when runtime.graph-view
         (runtime.graph-view:drop)
         (set runtime.graph-view nil))
+      (when runtime.drawing-render
+        (runtime.drawing-render:drop)
+        (set runtime.drawing-render nil))
+      (set runtime.drawing-controller nil)
       (when runtime.object-selector
         (runtime.object-selector:drop)
         (set runtime.object-selector nil))
@@ -598,14 +634,20 @@
     (clear-runtime world ctx (or reason "drop"))
     (save-state world))
 
-  (fn update [_world _delta _opts]
+  (fn update [world _delta _opts]
+    (local runtime world.runtime)
+    (when (and runtime runtime.drawing-render)
+      (runtime.drawing-render:update))
     nil)
 
   (fn get-runtime [world]
     world.runtime)
 
-  (fn get-hud-contrib [_world]
-    nil)
+  (fn get-hud-contrib [world]
+    (local runtime world.runtime)
+    (if (and runtime runtime.drawing-controller)
+        {:left_dock_builder (DrawingSidebarView {:controller runtime.drawing-controller})}
+        nil))
 
   (set self.init init)
   (set self.activate activate)

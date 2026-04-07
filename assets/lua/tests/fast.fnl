@@ -175,7 +175,9 @@
     :tests.test-graph-loaders
     :tests.test-world-nodes
     :tests.test-world-skybox-node
-    :tests.test-world-background-node]})
+    :tests.test-world-background-node
+    :tests.test-drawing-document
+    :tests.test-drawing-sidebar]})
 
 (local main
   (fn []

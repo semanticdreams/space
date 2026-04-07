@@ -599,6 +599,7 @@
 (set app.canvas-controls nil)
 (set app.active-pointer-controls nil)
 (set app.active-interaction-surface :scene)
+(set app.active-canvas-feature "graph")
 (set app.scene-interactive? true)
 (set app.canvas-interactive? false)
 (set app.canvas-visible? false)
@@ -723,6 +724,8 @@
     (local hud-opts {:control-panel-opts control-panel-opts})
     (when (or status-panel-opts.body-builder)
       (set hud-opts.status-panel-opts status-panel-opts))
+    (when contrib.left_dock_builder
+      (set hud-opts.left-dock-builder contrib.left_dock_builder))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)
     (when contrib.overlay
@@ -735,6 +738,20 @@
       (if app.canvas :canvas :scene)
       :scene))
 
+(fn resolve-canvas-feature [feature]
+  (local resolved (or feature "graph"))
+  (if (= resolved "drawing")
+      "drawing"
+      "graph"))
+
+(fn mark-active-world-hud-dirty []
+  (when (and app.hud app.hud.entity app.hud.entity.layout)
+    (app.hud.entity.layout:mark-measure-dirty)
+    (app.hud.entity.layout:mark-layout-dirty))
+  true)
+
+(set app.mark-active-world-hud-dirty mark-active-world-hud-dirty)
+
 (fn sync-interaction-surface-state []
   (local surface (resolve-interaction-surface app.active-interaction-surface))
   (local canvas-visible? (and app.canvas (= app.canvas-visible? true)))
@@ -746,6 +763,7 @@
   (if app.canvas-interactive?
       (set app.active-pointer-controls app.canvas-controls)
       (set app.active-pointer-controls app.first-person-controls))
+  (mark-active-world-hud-dirty)
   surface)
 
 (fn app.set-canvas-visible [visible?]
@@ -761,6 +779,16 @@
     (set app.canvas-visible? (and app.canvas
                                   (= app.active-interaction-surface :canvas))))
   (sync-interaction-surface-state))
+
+(fn app.set-active-canvas-feature [feature]
+  (local resolved (resolve-canvas-feature feature))
+  (set app.active-canvas-feature resolved)
+  (when app.active-world-runtime
+    (set app.active-world-runtime.active-canvas-feature resolved))
+  (when (and resolved (= resolved "drawing") app.drawing-controller)
+    (app.drawing-controller:emit-changed {:reason "feature"}))
+  (mark-active-world-hud-dirty)
+  resolved)
 
 (fn app.toggle-active-interaction-surface []
   (if (not app.canvas)
@@ -786,14 +814,21 @@
 
 (fn app.pointer-target-enabled? [target]
   (local surface (pointer-target-surface target))
+  (local canvas-feature (and target target.canvas-feature))
+  (local canvas-enabled?
+    (and (= app.canvas-interactive? true)
+         (if canvas-feature
+             (= (resolve-canvas-feature canvas-feature) app.active-canvas-feature)
+             true)))
   (if (= surface :scene)
       (= app.scene-interactive? true)
       (if (= surface :canvas)
-          (= app.canvas-interactive? true)
+          canvas-enabled?
           true)))
 
 (fn bind-active-world-runtime [entry runtime]
   (set app.active-world-entry entry)
+  (set app.active-world-runtime runtime)
   (set app.camera (and runtime runtime.camera))
   (set app.first-person-controls (and runtime runtime.first-person-controls))
   (set app.scene-focus-scope (and runtime runtime.scene-scope))
@@ -808,6 +843,8 @@
   (set app.terrain-paint-previous-state nil)
   (set app.graph (and runtime runtime.graph))
   (set app.graph-view (and runtime runtime.graph-view))
+  (set app.drawing-controller (and runtime runtime.drawing-controller))
+  (set app.drawing-render (and runtime runtime.drawing-render))
   (set app.layout-root (and app.scene app.scene.layout-root))
   (when (and app.scene app.scene.set-camera)
     (app.scene:set-camera app.camera))
@@ -824,6 +861,7 @@
   (apply-active-world-hud-contrib)
   (when (and runtime runtime.restore-surface-state)
     (runtime:restore-surface-state app.canvas app.hud))
+  (app.set-active-canvas-feature (and runtime runtime.active-canvas-feature))
   (app.set-active-interaction-surface app.active-interaction-surface
                                       {:sync-canvas-visibility false}))
 

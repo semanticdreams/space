@@ -4,6 +4,7 @@
 (local TextInputHandlers (require :state-handlers/text-input))
 (local FocusHandlers (require :state-handlers/focus))
 (local PointerHandlers (require :state-handlers/pointer))
+(local DrawingHandlers (require :drawing/input))
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local CameraHandlers (require :state-handlers/camera))
 (local GraphView (require :graph/view))
@@ -88,7 +89,8 @@
     {:name :normal
      :routes {:text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
               :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
-              :key-down (Routes.FirstHandlerWins [NormalCommands
+              :key-down (Routes.FirstHandlerWins [DrawingHandlers.DrawingKeyDown
+                                                 NormalCommands
                                                  FocusHandlers.InputKeyDownDispatch
                                                  FocusHandlers.FocusTabKeyDown
                                                  FocusHandlers.FocusDirectionKeyDown
@@ -98,12 +100,14 @@
               :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
                                                 PointerHandlers.ResizableMouseButtonDown
                                                 PointerHandlers.ClickableMouseButtonDown
+                                                DrawingHandlers.DrawingMouseButtonDown
                                                 PointerHandlers.MovableMouseButtonDown
                                                 PointerHandlers.SelectionMouseButtonDown
                                                 PointerHandlers.CameraMouseButtonDown])
               :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
                                               PointerHandlers.ResizableMouseButtonUp
                                               PointerHandlers.ClickableMouseButtonUp
+                                              DrawingHandlers.DrawingMouseButtonUp
                                               PointerHandlers.MovableMouseButtonUp
                                               PointerHandlers.SelectionMouseButtonUp
                                               PointerHandlers.CameraMouseButtonUp
@@ -111,6 +115,7 @@
               :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
                                            PointerHandlers.MovableMouseMotion
                                            PointerHandlers.ResizableMouseMotion
+                                           DrawingHandlers.DrawingMouseMotion
                                            PointerHandlers.CameraDragMouseMotion
                                            PointerHandlers.SelectionMouseMotion
                                            PointerHandlers.CameraMouseMotion

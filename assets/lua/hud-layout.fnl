@@ -130,6 +130,7 @@
                             :depth-layer-step tiles-depth-layer-step}))
   (local float-root (FloatLayer {:depth-layer-step panel-depth-layer-step}))
   (local overlay-root (make-overlay-root))
+  (local left-dock-builder options.left-dock-builder)
   (local control-wrapper (FullWidth {:name "control-panel-wrapper"
                                      :child control-builder}))
   (local status-wrapper (FullWidth {:name "status-panel-wrapper"
@@ -140,6 +141,7 @@
     (local tiles (tiles-root ctx))
     (local float (float-root ctx))
     (local overlay (overlay-root ctx))
+    (local left-dock (and left-dock-builder (left-dock-builder ctx)))
     (local hud (or ctx.pointer-target {}))
 
     (fn measurer [self]
@@ -148,13 +150,18 @@
       (tiles.layout:measurer)
       (float.layout:measurer)
       (overlay.layout:measurer)
+      (when left-dock
+        (left-dock.layout:measurer))
       (local width (hud-content-width hud))
       (local height (hud-content-height hud))
       (local depth (math.max (. control.layout.measure 3)
                              (. status.layout.measure 3)
                              (. tiles.layout.measure 3)
                              (. float.layout.measure 3)
-                             (. overlay.layout.measure 3)))
+                             (. overlay.layout.measure 3)
+                             (if left-dock
+                                 (. left-dock.layout.measure 3)
+                                 0)))
       (set self.measure (glm.vec3 width height depth)))
 
     (fn layouter [self]
@@ -192,6 +199,14 @@
       (set float.layout.clip-region self.clip-region)
       (set float.layout.depth-offset-index (+ self.depth-offset-index 16))
       (float.layout:layouter)
+      (when left-dock
+        (local dock-width (. left-dock.layout.measure 1))
+        (set left-dock.layout.size (glm.vec3 dock-width flex-height (. left-dock.layout.measure 3)))
+        (set left-dock.layout.position (glm.vec3 base-position.x flex-bottom base-position.z))
+        (set left-dock.layout.rotation self.rotation)
+        (set left-dock.layout.clip-region self.clip-region)
+        (set left-dock.layout.depth-offset-index (+ self.depth-offset-index 24))
+        (left-dock.layout:layouter))
       (set overlay.layout.size self.size)
       (set overlay.layout.position base-position)
       (set overlay.layout.rotation self.rotation)
@@ -203,7 +218,13 @@
       (Layout {:name "hud-panels"
                :measurer measurer
                :layouter layouter
-               :children [control.layout status.layout tiles.layout float.layout overlay.layout]}))
+               :children (icollect [_ child-layout (ipairs [control.layout
+                                                            status.layout
+                                                            tiles.layout
+                                                            float.layout
+                                                            (and left-dock left-dock.layout)
+                                                            overlay.layout])]
+                                   child-layout)}))
 
     (fn drop [self]
       (self.layout:drop)
@@ -211,11 +232,14 @@
       (status:drop)
       (tiles:drop)
       (float:drop)
+      (when left-dock
+        (left-dock:drop))
       (overlay:drop))
 
     {:layout layout
      :tiles-root tiles
      :float-root float
+     :left-dock-root left-dock
      :overlay-root overlay
      :drop drop}))
 
