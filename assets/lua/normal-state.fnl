@@ -16,6 +16,9 @@
 (local SDLK_F4 1073741885)
 
 (fn NormalState []
+  (fn graph-interaction-enabled? []
+    (not (= app.active-canvas-feature "drawing")))
+
   (fn create-graph-view []
     (if (and app.graph-view-factory (= (type app.graph-view-factory) :function))
         (app.graph-view-factory)
@@ -47,9 +50,21 @@
               true))))
 
   (fn remove-selected-nodes []
-    (local graph-view app.graph-view)
-    (when (and graph-view graph-view.remove-selected-nodes)
-        (> (graph-view:remove-selected-nodes) 0)))
+    (if (not (graph-interaction-enabled?))
+        false
+        (do
+          (local graph-view app.graph-view)
+          (when (and graph-view graph-view.remove-selected-nodes)
+            (> (graph-view:remove-selected-nodes) 0)))))
+
+  (fn maybe-open-focused-graph-node []
+    (if (not (graph-interaction-enabled?))
+        false
+        (do
+          (local graph-view app.graph-view)
+          (and graph-view
+               graph-view.open-focused-node
+               (graph-view:open-focused-node)))))
 
   (fn open-fennel-interpreter []
     (local launchable (require :launchables/fennel-interpreter))
@@ -68,15 +83,12 @@
              (set-state :leader)
              true)
            (= key SDLK_RETURN)
-           (let [focus-manager app.focus
-                 graph-view app.graph-view]
+           (let [focus-manager app.focus]
              (if (and focus-manager focus-manager.activate-focused-from-payload)
                  (if (focus-manager:activate-focused-from-payload payload)
                      true
-                     (and graph-view graph-view.open-focused-node
-                          (graph-view:open-focused-node)))
-                 (and graph-view graph-view.open-focused-node
-                      (graph-view:open-focused-node))))
+                     (maybe-open-focused-graph-node))
+                 (maybe-open-focused-graph-node)))
            (= key SDLK_DELETE)
            (remove-selected-nodes)
            (= key SDLK_F4)
@@ -89,9 +101,9 @@
     {:name :normal
      :routes {:text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
               :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
-              :key-down (Routes.FirstHandlerWins [DrawingHandlers.DrawingKeyDown
+              :key-down (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
+                                                 DrawingHandlers.DrawingKeyDown
                                                  NormalCommands
-                                                 FocusHandlers.InputKeyDownDispatch
                                                  FocusHandlers.FocusTabKeyDown
                                                  FocusHandlers.FocusDirectionKeyDown
                                                  FocusHandlers.ActiveInputKeyBlock])

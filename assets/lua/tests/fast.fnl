@@ -177,6 +177,7 @@
     :tests.test-world-skybox-node
     :tests.test-world-background-node
     :tests.test-drawing-document
+    :tests.test-drawing-input
     :tests.test-drawing-sidebar]})
 
 (local main

@@ -60,6 +60,18 @@
                                                       (glm.vec4 0.49 0.28 0.08 0.96)
                                                       (glm.vec4 0.16 0.18 0.24 0.98))}))
 
+(fn state-button [label active? on-click]
+  (action-button label {:on-click on-click
+                        :background-color (if active?
+                                              (glm.vec4 0.49 0.28 0.08 0.96)
+                                              (glm.vec4 0.2 0.22 0.28 0.95))
+                        :hover-background-color (if active?
+                                                    (glm.vec4 0.54 0.31 0.09 0.98)
+                                                    (glm.vec4 0.24 0.27 0.34 0.98))
+                        :pressed-background-color (if active?
+                                                      (glm.vec4 0.43 0.24 0.07 0.98)
+                                                      (glm.vec4 0.16 0.18 0.24 0.98))}))
+
 (fn DrawingSidebarView [opts]
   (local options (or opts {}))
   (local controller (assert options.controller "DrawingSidebarView requires :controller"))
@@ -74,6 +86,7 @@
     (var changed-handler nil)
     (var shell-key nil)
     (var rename-layer-id nil)
+    (var rename-layer-name nil)
     (var rename-buffer "")
 
     (fn drop-children []
@@ -91,20 +104,24 @@
     (fn sync-rename-buffer! []
       (local layer (controller:active-layer))
       (local layer-id (and layer layer.id))
-      (when (not (= rename-layer-id layer-id))
+      (local layer-name (or (and layer layer.name) ""))
+      (when (or (not (= rename-layer-id layer-id))
+                (not (= rename-layer-name layer-name)))
         (set rename-layer-id layer-id)
-        (set rename-buffer (or (and layer layer.name) "")))
+        (set rename-layer-name layer-name)
+        (set rename-buffer layer-name))
       layer)
 
     (fn apply-rename! []
       (local next-name (trim-name rename-buffer))
-      (if (= next-name "")
-          false
-          (if (controller:rename-active-layer next-name)
-              (do
-                (set rename-buffer next-name)
-                true)
-              false)))
+          (if (= next-name "")
+              false
+              (if (controller:rename-active-layer next-name)
+                  (do
+                    (set rename-layer-name next-name)
+                    (set rename-buffer next-name)
+                    true)
+                  false)))
 
     (fn build-layer-row [layer]
       (local active? (= layer.id controller.state.ui.active_layer_id))
@@ -241,10 +258,10 @@
                           0)
                         (FlexChild
                           (fn [inner-ctx]
-                            ((tool-button (if defaults.fill_enabled "Fill On" "Fill Off")
-                                          defaults.fill_enabled
-                                          (fn [_button _event]
-                                            (controller:set-defaults! {:fill_enabled (not defaults.fill_enabled)})))
+                            ((state-button (if defaults.fill_enabled "Fill On" "Fill Off")
+                                           defaults.fill_enabled
+                                           (fn [_button _event]
+                                             (controller:set-defaults! {:fill_enabled (not defaults.fill_enabled)})))
                              inner-ctx))
                           0)]}))
 

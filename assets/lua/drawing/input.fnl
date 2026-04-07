@@ -10,6 +10,10 @@
 (local KEY_Y_UPPER (string.byte "Y"))
 (local SDLK_ESCAPE 27)
 
+(fn active-input []
+  (and Runtime.active-input
+       (Runtime.active-input)))
+
 (fn active-controller []
   (and app.drawing-controller
        (= app.active-canvas-feature "drawing")
@@ -30,7 +34,8 @@
   {:key-down
    (fn [ctx payload]
      (local controller (active-controller))
-     (if (not controller)
+     (if (or (not controller)
+             (active-input))
          false
          (do
            (local key payload.key)
