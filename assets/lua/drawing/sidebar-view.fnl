@@ -84,7 +84,7 @@
     (var child-entities [])
     (var pending-rebuild? true)
     (var changed-handler nil)
-    (var shell-key nil)
+    (var shell-changed-handler nil)
     (var rename-layer-id nil)
     (var rename-layer-name nil)
     (var rename-buffer "")
@@ -401,11 +401,6 @@
 
     (fn rebuild-children! []
       (drop-children)
-      (set pending-rebuild? false)
-      (set shell-key (string.format "%s|%s|%s"
-                                    (tostring app.active-interaction-surface)
-                                    (tostring app.active-canvas-feature)
-                                    (tostring app.canvas-visible?)))
       (local show-dock?
         (and app.canvas
              (= app.active-interaction-surface :canvas)
@@ -421,21 +416,15 @@
             (set children.rail nil)
             (set children.panel nil))))
 
-    (fn queue-rebuild! []
+    (fn request-rebuild! []
       (set pending-rebuild? true)
-      (when root-layout
-        (root-layout:mark-measure-dirty)))
+      true)
+
+    (fn controller-change-rebuild? [payload]
+      (local reason (and payload payload.reason))
+      (not (= reason "gesture")))
 
     (fn measurer [self]
-      (local next-shell-key
-        (string.format "%s|%s|%s"
-                       (tostring app.active-interaction-surface)
-                       (tostring app.active-canvas-feature)
-                       (tostring app.canvas-visible?)))
-      (when (not (= shell-key next-shell-key))
-        (set pending-rebuild? true))
-      (when pending-rebuild?
-        (rebuild-children!))
       (var width 0)
       (var height 0)
       (if children.rail
@@ -480,13 +469,32 @@
     (set changed-handler
          (controller.changed:connect
            (fn [_payload]
-             (queue-rebuild!))))
+             (when (controller-change-rebuild? _payload)
+               (request-rebuild!)))))
+
+    (when app.canvas-shell-changed
+      (set shell-changed-handler
+           (app.canvas-shell-changed:connect
+             (fn [_payload]
+               (request-rebuild!)))))
+
+    (rebuild-children!)
+    (set pending-rebuild? false)
 
     {:layout root-layout
+     :update (fn [_self]
+               (when pending-rebuild?
+                 (set pending-rebuild? false)
+                 (rebuild-children!)
+                 (when root-layout
+                   (root-layout:mark-measure-dirty))))
      :drop (fn [_self]
              (when changed-handler
                (controller.changed:disconnect changed-handler true)
                (set changed-handler nil))
+             (when shell-changed-handler
+               (app.canvas-shell-changed:disconnect shell-changed-handler true)
+               (set shell-changed-handler nil))
              (drop-children)
              (root-layout:drop))})
 

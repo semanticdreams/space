@@ -226,6 +226,20 @@
                                                             overlay.layout])]
                                    child-layout)}))
 
+    (fn update [_self]
+      (when (and control control.update)
+        (control:update))
+      (when (and status status.update)
+        (status:update))
+      (when (and tiles tiles.update)
+        (tiles:update))
+      (when (and float float.update)
+        (float:update))
+      (when (and left-dock left-dock.update)
+        (left-dock:update))
+      (when (and overlay overlay.update)
+        (overlay:update)))
+
     (fn drop [self]
       (self.layout:drop)
       (control:drop)
@@ -237,6 +251,7 @@
       (overlay:drop))
 
     {:layout layout
+     :update update
      :tiles-root tiles
      :float-root float
      :left-dock-root left-dock

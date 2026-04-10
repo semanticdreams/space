@@ -11,7 +11,24 @@
   (assert (= (length state.document.layers) 1))
   (local layer (. state.document.layers 1))
   (assert (= layer.name "Layer 1"))
-  (assert (= state.ui.active_layer_id layer.id)))
+  (assert (= state.ui.active_layer_id layer.id))
+  (assert (= state.ui.defaults.fill_enabled true))
+  (assert (= (. state.ui.defaults.stroke_color 1) 0.33))
+  (assert (= (. state.ui.defaults.stroke_color 2) 0.6))
+  (assert (= (. state.ui.defaults.stroke_color 3) 0.96)))
+
+(fn normalize-state-upgrades-legacy-default-style []
+  (local state
+    (DrawingDocument.normalize-state
+      {:ui {:defaults {:stroke_color [0.96 0.96 0.98 1.0]
+                       :fill_color [0.33 0.6 0.96 0.22]
+                       :thickness 2.0
+                       :opacity 1.0
+                       :fill_enabled false}}}))
+  (assert (= state.ui.defaults.fill_enabled true))
+  (assert (= (. state.ui.defaults.stroke_color 1) 0.33))
+  (assert (= (. state.ui.defaults.stroke_color 2) 0.6))
+  (assert (= (. state.ui.defaults.stroke_color 3) 0.96)))
 
 (fn controller-creates-rectangle-and-supports-undo-redo []
   (local controller (DrawingController {}))
@@ -25,6 +42,10 @@
   (assert (= object.kind "rectangle"))
   (assert (= object.center.x 5))
   (assert (= object.center.y 2.5))
+  (assert (= object.style.fill_enabled true))
+  (assert (= (. object.style.stroke_color 1) 0.33))
+  (assert (= (. object.style.stroke_color 2) 0.6))
+  (assert (= (. object.style.stroke_color 3) 0.96))
   (assert (controller:on-undo))
   (assert (= (length layer.objects) 0))
   (assert (controller:on-redo))
@@ -75,6 +96,8 @@
 
 (table.insert tests {:name "Drawing document ensures a default layer"
                      :fn normalize-state-creates-default-layer})
+(table.insert tests {:name "Drawing document upgrades the legacy default style"
+                     :fn normalize-state-upgrades-legacy-default-style})
 (table.insert tests {:name "Drawing controller creates rectangle objects with undo/redo"
                      :fn controller-creates-rectangle-and-supports-undo-redo})
 (table.insert tests {:name "Drawing controller snapshots serialize vector data"

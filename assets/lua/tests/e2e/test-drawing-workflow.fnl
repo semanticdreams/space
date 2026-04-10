@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local glm (require :glm))
 (local viewport-utils (require :viewport-utils))
+(local Main (require :main))
 (local HomeWorld (require :home-world))
 (local Signal (require :signal))
 
@@ -86,135 +87,19 @@
 (fn canvas-screen-point [point]
   (project-to-screen point app.canvas))
 
-(fn resolve-canvas-feature [feature]
-  (if (= feature "drawing")
-      "drawing"
-      "graph"))
-
-(fn resolve-interaction-surface [surface]
-  (if (= surface :canvas)
-      (if app.canvas :canvas :scene)
-      :scene))
-
-(fn mark-active-world-hud-dirty []
-  (when (and app.hud app.hud.entity app.hud.entity.layout)
-    (app.hud.entity.layout:mark-measure-dirty)
-    (app.hud.entity.layout:mark-layout-dirty))
-  true)
-
-(fn sync-interaction-surface-state []
-  (local surface (resolve-interaction-surface app.active-interaction-surface))
-  (local canvas-visible? (and app.canvas (= app.canvas-visible? true)))
-  (set app.active-interaction-surface surface)
-  (set app.canvas-visible? canvas-visible?)
-  (set app.scene-interactive? (= surface :scene))
-  (set app.canvas-interactive? (and canvas-visible?
-                                     (= surface :canvas)))
-  (if app.canvas-interactive?
-      (set app.active-pointer-controls app.canvas-controls)
-      (set app.active-pointer-controls app.first-person-controls))
-  (mark-active-world-hud-dirty)
-  surface)
-
-(fn pointer-target-surface [target]
-  (if (or (= target nil)
-          (= target app.scene)
-          (= (and target target.interaction-surface) :scene))
-      :scene
-      (if (or (= target app.canvas)
-              (= (and target target.interaction-surface) :canvas))
-          :canvas
-          (if (or (= target app.hud)
-                  (= (and target target.interaction-surface) :hud))
-              :hud
-              nil))))
-
-(fn pointer-target-enabled? [target]
-  (local surface (pointer-target-surface target))
-  (local canvas-feature (and target target.canvas-feature))
-  (local canvas-enabled?
-    (and (= app.canvas-interactive? true)
-         (if canvas-feature
-             (= (resolve-canvas-feature canvas-feature) app.active-canvas-feature)
-             true)))
-  (if (= surface :scene)
-      (= app.scene-interactive? true)
-      (if (= surface :canvas)
-          canvas-enabled?
-          true)))
-
-(fn reset-projection [ctx]
-  (when app.scene
-    (app.scene:on-viewport-changed app.viewport)
-    (app.scene:reset-projection)
-    (set app.projection app.scene.projection))
-  (when app.canvas
-    (app.canvas:on-viewport-changed app.viewport)
-    (app.canvas:reset-projection))
-  (when app.hud
-    (app.hud:update-projection {:width ctx.width
-                                :height ctx.height})))
-
-(fn apply-runtime-to-app [ctx world runtime hud]
+(fn apply-runtime-to-app [world runtime hud]
+  (local entry {:id world.id
+                :world world})
   (set app.hud hud)
   (set app.focus hud.__e2e_focus_manager)
-  (set app.mark-active-world-hud-dirty mark-active-world-hud-dirty)
-  (set app.pointer-target-enabled? pointer-target-enabled?)
-  (set app.reset-projection (fn [] (reset-projection ctx)))
-  (set app.set-active-interaction-surface
-       (fn [surface]
-         (set app.active-interaction-surface (resolve-interaction-surface surface))
-         (set app.canvas-visible? (and app.canvas
-                                       (= app.active-interaction-surface :canvas)))
-         (sync-interaction-surface-state)))
-  (set app.set-active-canvas-feature
-       (fn [feature]
-         (local resolved (resolve-canvas-feature feature))
-         (set app.active-canvas-feature resolved)
-         (when app.active-world-runtime
-           (set app.active-world-runtime.active-canvas-feature resolved))
-         (when (and (= resolved "drawing") app.drawing-controller)
-           (app.drawing-controller:emit-changed {:reason "feature"}))
-         (mark-active-world-hud-dirty)
-         resolved))
-  (set app.active-world-entry {:id world.id
-                               :world world})
-  (set app.active-world-runtime runtime)
-  (set app.camera runtime.camera)
-  (set app.first-person-controls runtime.first-person-controls)
-  (set app.canvas-controls runtime.canvas-controls)
-  (set app.scene runtime.scene)
-  (set app.canvas runtime.canvas)
-  (set app.object-selector runtime.object-selector)
-  (set app.graph runtime.graph)
-  (set app.graph-view runtime.graph-view)
-  (set app.drawing-controller runtime.drawing-controller)
-  (set app.drawing-render runtime.drawing-render)
-  (set app.layout-root (and app.scene app.scene.layout-root))
-  (when (and app.scene app.scene.set-camera)
-    (app.scene:set-camera app.camera))
-  (when app.hud
-    (set app.hud.scene app.scene)
-    (when app.hud.build-context
-      (set app.hud.build-context.object-selector app.object-selector)
-      (set app.hud.build-context.layout-root app.layout-root)))
-  (when (and app.canvas app.canvas.build-context)
-    (set app.canvas.build-context.object-selector app.object-selector))
-  (when (and app.scene app.scene.build-context)
-    (set app.scene.build-context.object-selector app.object-selector)
-    (set app.scene.build-context.layout-root app.layout-root))
-  (local contrib (world:get-hud-contrib))
-  (local hud-opts {})
-  (when (and contrib contrib.left_dock_builder)
-    (set hud-opts.left-dock-builder contrib.left_dock_builder))
-  (app.hud:build-default hud-opts)
-  (app.reset-projection)
-  (when (and runtime runtime.restore-surface-state)
-    (runtime:restore-surface-state app.canvas app.hud))
-  (set app.active-canvas-feature "graph")
-  (set app.active-interaction-surface :canvas)
-  (set app.canvas-visible? true)
-  (app.set-active-canvas-feature (and runtime runtime.active-canvas-feature))
+  (assert (and Main Main.install-app-shell!)
+          "drawing workflow e2e requires Main.install-app-shell!")
+  (Main.install-app-shell!)
+  (assert app.bind-active-world-runtime
+          "drawing workflow e2e requires app.bind-active-world-runtime")
+  (app.bind-active-world-runtime entry runtime)
+  (assert app.set-active-interaction-surface
+          "drawing workflow e2e requires app.set-active-interaction-surface")
   (app.set-active-interaction-surface :canvas)
   (when app.hud
     (app.hud:update)))
@@ -298,13 +183,12 @@
   (local layer (active-layer))
   (length (or (and layer layer.objects) [])))
 
-(fn render-world [env ctx]
-  (refresh-world env)
-  (Harness.draw-targets ctx.width
-                        ctx.height
-                        [{:target app.scene}
-                         {:target app.canvas :clear-depth? true}
-                         {:target app.hud :clear-depth? true}]))
+(fn triangle-vector-length []
+  (local vector
+    (and app.canvas
+         app.canvas.build-context
+         (. app.canvas.build-context :triangle-vector)))
+  (and vector (vector:length)))
 
 (fn with-home-world [ctx run-fn]
   (with-temp-dir
@@ -312,6 +196,7 @@
       (local hud (Harness.make-hud-target {:width ctx.width
                                            :height ctx.height}))
       (local focus-manager hud.__e2e_focus_manager)
+      (var active-world-entry nil)
       (local runtime-context {:hud hud
                               :focus-manager focus-manager
                               :focus-root (focus-manager:get-root-scope)
@@ -319,6 +204,7 @@
                               :states app.states
                               :movables app.movables})
       (local world-manager-stub {:changed (Signal)
+                                 :active-world (fn [_self] active-world-entry)
                                  :list-tabs (fn [_self] [])})
       (local world (HomeWorld {:id "e2e-world"
                                :name "home"
@@ -344,10 +230,14 @@
                        :reset-projection app.reset-projection
                        :set-active-interaction-surface app.set-active-interaction-surface
                        :set-active-canvas-feature app.set-active-canvas-feature
+                       :bind-active-world-runtime app.bind-active-world-runtime
+                       :world-manager app.world-manager
                        :active-world-entry app.active-world-entry
                        :active-world-runtime app.active-world-runtime
+                       :preferred-interaction-surface app.preferred-interaction-surface
                        :active-interaction-surface app.active-interaction-surface
                        :active-canvas-feature app.active-canvas-feature
+                       :canvas-shell-changed app.canvas-shell-changed
                        :canvas-visible? app.canvas-visible?
                        :scene-interactive? app.scene-interactive?
                        :canvas-interactive? app.canvas-interactive?
@@ -363,10 +253,13 @@
           (fn []
             (set app.hud hud)
             (set app.focus focus-manager)
+            (set app.world-manager world-manager-stub)
             (world:activate runtime-context)
             (local runtime (assert (world:get-runtime)
                                    "drawing workflow e2e expected active runtime"))
-            (apply-runtime-to-app ctx world runtime hud)
+            (set active-world-entry {:id world.id
+                                     :world world})
+            (apply-runtime-to-app world runtime hud)
             (set click-timestamp 0)
             (set stage "run")
             (set result (run-fn {:world world
@@ -391,8 +284,6 @@
   (with-home-world
     ctx
     (fn [env]
-      (env.set-stage "initial render")
-      (render-world env ctx)
       (env.set-stage "assert start graph")
       (assert (= app.active-canvas-feature "graph")
               "drawing workflow e2e should start in graph mode")
@@ -413,6 +304,9 @@
       (env.set-stage "assert rectangle count")
       (assert (= (object-count) 1)
               "drawing workflow e2e should create one rectangle")
+      (env.set-stage "assert triangle vector")
+      (assert (> (or (triangle-vector-length) 0) 0)
+              "drawing workflow e2e should populate the canvas triangle vector")
       (env.set-stage "click graph")
       (click-button env "Graph")
       (env.set-stage "assert graph mode")

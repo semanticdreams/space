@@ -47,6 +47,7 @@
 (logging.set-level "window" "warn")
 (local audio (require :audio))
 (local _input-state-binding (require :input-state))
+(local Signal (require :signal))
 (local Settings (require :settings))
 (local RuntimePerformance (require :runtime-performance))
 (local VolumeControl (require :volume-control))
@@ -598,6 +599,7 @@
 (set app.hud-focus-scope nil)
 (set app.canvas-controls nil)
 (set app.active-pointer-controls nil)
+(set app.preferred-interaction-surface :scene)
 (set app.active-interaction-surface :scene)
 (set app.active-canvas-feature "graph")
 (set app.scene-interactive? true)
@@ -643,6 +645,7 @@
 (set app.world-tabs-builder nil)
 (set app.active-world-hud-contrib nil)
 (set app.active-world-hud-overlay nil)
+(set app.canvas-shell-changed (Signal))
 
 (fn app.next-frame [cb]
   (assert cb "app.next-frame requires callback")
@@ -653,6 +656,26 @@
   (set app.next-frame-pending [])
   (each [_ cb (ipairs pending)]
     (cb)))
+
+(fn canvas-shell-state []
+  {:interaction-surface app.active-interaction-surface
+   :canvas-feature app.active-canvas-feature
+   :canvas-visible? (= app.canvas-visible? true)})
+
+(fn canvas-shell-state= [a b]
+  (and a b
+       (= a.interaction-surface b.interaction-surface)
+       (= a.canvas-feature b.canvas-feature)
+       (= a.canvas-visible? b.canvas-visible?)))
+
+(fn emit-canvas-shell-changed [reason previous]
+  (local current (canvas-shell-state))
+  (when (and app.canvas-shell-changed
+             (not (canvas-shell-state= previous current)))
+    (app.canvas-shell-changed:emit {:reason reason
+                                    :previous previous
+                                    :current current}))
+  current)
 
 (fn collect-cli-args []
   (local args [])
@@ -738,6 +761,12 @@
       (if app.canvas :canvas :scene)
       :scene))
 
+(fn effective-interaction-surface [preferred-surface canvas-visible?]
+  (if (and (= preferred-surface :canvas)
+           canvas-visible?)
+      :canvas
+      :scene))
+
 (fn resolve-canvas-feature [feature]
   (local resolved (or feature "graph"))
   (if (= resolved "drawing")
@@ -752,9 +781,11 @@
 
 (set app.mark-active-world-hud-dirty mark-active-world-hud-dirty)
 
-(fn sync-interaction-surface-state []
-  (local surface (resolve-interaction-surface app.active-interaction-surface))
+(fn sync-interaction-surface-state [reason previous]
+  (local preferred-surface (resolve-interaction-surface app.preferred-interaction-surface))
   (local canvas-visible? (and app.canvas (= app.canvas-visible? true)))
+  (local surface (effective-interaction-surface preferred-surface canvas-visible?))
+  (set app.preferred-interaction-surface preferred-surface)
   (set app.active-interaction-surface surface)
   (set app.canvas-visible? canvas-visible?)
   (set app.scene-interactive? (= surface :scene))
@@ -763,30 +794,33 @@
   (if app.canvas-interactive?
       (set app.active-pointer-controls app.canvas-controls)
       (set app.active-pointer-controls app.first-person-controls))
+  (emit-canvas-shell-changed (or reason "interaction-surface") previous)
   (mark-active-world-hud-dirty)
   surface)
 
 (fn app.set-canvas-visible [visible?]
+  (local previous (canvas-shell-state))
   (set app.canvas-visible? (and app.canvas
                                 (not (= visible? false))))
-  (sync-interaction-surface-state))
+  (sync-interaction-surface-state "canvas-visibility" previous))
 
 (fn app.set-active-interaction-surface [surface opts]
   (local options (or opts {}))
-  (set app.active-interaction-surface (resolve-interaction-surface surface))
+  (local previous (canvas-shell-state))
+  (set app.preferred-interaction-surface (resolve-interaction-surface surface))
   (when (or (= options.sync-canvas-visibility nil)
             options.sync-canvas-visibility)
     (set app.canvas-visible? (and app.canvas
-                                  (= app.active-interaction-surface :canvas))))
-  (sync-interaction-surface-state))
+                                  (= app.preferred-interaction-surface :canvas))))
+  (sync-interaction-surface-state "interaction-surface" previous))
 
 (fn app.set-active-canvas-feature [feature]
+  (local previous (canvas-shell-state))
   (local resolved (resolve-canvas-feature feature))
   (set app.active-canvas-feature resolved)
   (when app.active-world-runtime
     (set app.active-world-runtime.active-canvas-feature resolved))
-  (when (and resolved (= resolved "drawing") app.drawing-controller)
-    (app.drawing-controller:emit-changed {:reason "feature"}))
+  (emit-canvas-shell-changed "canvas-feature" previous)
   (mark-active-world-hud-dirty)
   resolved)
 
@@ -862,8 +896,32 @@
   (when (and runtime runtime.restore-surface-state)
     (runtime:restore-surface-state app.canvas app.hud))
   (app.set-active-canvas-feature (and runtime runtime.active-canvas-feature))
-  (app.set-active-interaction-surface app.active-interaction-surface
+  (app.set-active-interaction-surface app.preferred-interaction-surface
                                       {:sync-canvas-visibility false}))
+
+(local installable-reset-projection app.reset-projection)
+(local installable-mark-active-world-hud-dirty app.mark-active-world-hud-dirty)
+(local installable-set-canvas-visible app.set-canvas-visible)
+(local installable-set-active-interaction-surface app.set-active-interaction-surface)
+(local installable-set-active-canvas-feature app.set-active-canvas-feature)
+(local installable-toggle-active-interaction-surface app.toggle-active-interaction-surface)
+(local installable-pointer-target-enabled? app.pointer-target-enabled?)
+(local installable-bind-active-world-runtime bind-active-world-runtime)
+
+(fn install-app-shell! []
+  (set app.canvas-shell-changed (or app.canvas-shell-changed (Signal)))
+  (set app.reset-projection installable-reset-projection)
+  (set app.mark-active-world-hud-dirty installable-mark-active-world-hud-dirty)
+  (set app.set-canvas-visible installable-set-canvas-visible)
+  (set app.set-active-interaction-surface installable-set-active-interaction-surface)
+  (set app.set-active-canvas-feature installable-set-active-canvas-feature)
+  (set app.toggle-active-interaction-surface installable-toggle-active-interaction-surface)
+  (set app.pointer-target-enabled? installable-pointer-target-enabled?)
+  (set app.bind-active-world-runtime installable-bind-active-world-runtime)
+  true)
+
+(set app.install-app-shell! install-app-shell!)
+(set app.bind-active-world-runtime bind-active-world-runtime)
 
 (fn init-world-manager []
   (when (and app.world-manager app.world-manager.drop)
@@ -1113,6 +1171,7 @@
   (set app.first-person-controls nil)
   (set app.canvas-controls nil)
   (set app.active-pointer-controls nil)
+  (set app.preferred-interaction-surface :scene)
   (set app.active-interaction-surface :scene)
   (set app.scene-interactive? true)
   (set app.canvas-interactive? false)
@@ -1282,6 +1341,7 @@
   (set app.terrain-paint-previous-state nil)
   (set app.scene nil)
   (set app.canvas nil)
+  (set app.preferred-interaction-surface :scene)
   (set app.active-interaction-surface :scene)
   (set app.scene-interactive? true)
   (set app.canvas-interactive? false)
@@ -1373,3 +1433,6 @@
   (app.engine:run)
   (app.drop)
   (app.engine:shutdown))
+
+{:install-app-shell! install-app-shell!
+ :bind-active-world-runtime installable-bind-active-world-runtime}

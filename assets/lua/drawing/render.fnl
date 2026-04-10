@@ -126,10 +126,10 @@
                           nil))
           (set handle-size size))))
 
-  (fn clear []
+  (fn clear [_self]
     (ensure-handle 0))
 
-  (fn update [vertices]
+  (fn update [_self vertices]
     (local count (length vertices))
     (local size (* count 8))
     (ensure-handle size)
@@ -142,7 +142,7 @@
       (when (and ctx ctx.track-triangle-handle)
         (ctx:track-triangle-handle handle nil))))
 
-  (fn drop []
+  (fn drop [_self]
     (when handle
       (when (and ctx ctx.untrack-triangle-handle)
         (ctx:untrack-triangle-handle handle))

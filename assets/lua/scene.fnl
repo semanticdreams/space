@@ -830,47 +830,14 @@
                  element
                  element.layout
                  (not (and opts opts.skip-physics)))
-        (local body-entry
-          (LayoutPhysicsBodies.add-runtime-layout-body self.entity {:element element
-                                                                    :metadata metadata
-                                                                    :body-options (merge-panel-body-options opts)}))
-        (var body-movable nil)
-        (each [_ movable (ipairs (LayoutPhysicsBodies.collect-movables self.entity))]
-          (when (and (not body-movable)
-                     (= movable.key body-entry))
-            (set body-movable movable)))
-        (when body-movable
-          (when (not entity.movables)
-            (set entity.movables []))
-          (table.insert entity.movables body-movable)
-          (register-movable-entries self entity
-                                    [(normalize-movable-entry self body-movable)])))
-      (when (and element element.layout)
-        (when (not entity.movables)
-          (set entity.movables []))
-        (when (not entity.resizables)
-          (set entity.resizables []))
-        (var has-physics-movable? false)
-        (each [_ entry (ipairs entity.movables)]
-          (when (and entry (= entry.owner element))
-            (set has-physics-movable? true)))
-        (when (not has-physics-movable?)
-          (local panel-movable
-            {:target element.layout
-             :handle element
-             :owner element})
-          (table.insert entity.movables panel-movable)
-          (register-movable-entries self entity
-                                    [(normalize-movable-entry self panel-movable)]))
-        (local panel-resizable
-          {:target element.layout
-           :handle element.layout
-           :key element
-           :min-size (resolve-min-size element.layout)
-           :owner element})
-        (table.insert entity.resizables panel-resizable)
-        (register-resizable-entries self entity
-                                    [(normalize-resizable-entry self panel-resizable)]))
+        (LayoutPhysicsBodies.add-runtime-layout-body self.entity {:element element
+                                                                  :metadata metadata
+                                                                  :body-options (merge-panel-body-options opts)}))
+      (when (and entity entity.layout element element.layout)
+        (entity.layout:mark-measure-dirty)
+        (entity.layout:mark-layout-dirty)
+        (set metadata.transform-applied? false))
+      (refresh-entity-bindings self entity)
       element))
 
   (fn add-object [self object opts]

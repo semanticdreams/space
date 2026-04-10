@@ -42,6 +42,13 @@
       fallback))
 
 (fn default-style []
+  {:stroke_color [0.33 0.6 0.96 1.0]
+   :fill_color [0.33 0.6 0.96 0.22]
+   :thickness 2.0
+   :opacity 1.0
+   :fill_enabled true})
+
+(fn legacy-default-style []
   {:stroke_color [0.96 0.96 0.98 1.0]
    :fill_color [0.33 0.6 0.96 0.22]
    :thickness 2.0
@@ -73,8 +80,24 @@
 (fn default-layer-name [n]
   (string.format "Layer %d" n))
 
+(fn color-array= [left right]
+  (and (= (. left 1) (. right 1))
+       (= (. left 2) (. right 2))
+       (= (. left 3) (. right 3))
+       (= (. left 4) (. right 4))))
+
+(fn style-equals? [left right]
+  (and (color-array= left.stroke_color right.stroke_color)
+       (color-array= left.fill_color right.fill_color)
+       (= left.thickness right.thickness)
+       (= left.opacity right.opacity)
+       (= left.fill_enabled right.fill_enabled)))
+
 (fn normalize-style [style]
-  (merge-defaults (default-style) style))
+  (local normalized (merge-defaults (default-style) style))
+  (if (style-equals? normalized (legacy-default-style))
+      (merge-defaults (default-style) {})
+      normalized))
 
 (fn normalize-object [object]
   (local normalized (clone-table object))

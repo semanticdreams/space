@@ -178,6 +178,7 @@
     :tests.test-world-background-node
     :tests.test-drawing-document
     :tests.test-drawing-input
+    :tests.test-drawing-render
     :tests.test-drawing-sidebar]})
 
 (local main

@@ -765,6 +765,8 @@
     (self:update-projection viewport))
 
   (fn update [self]
+    (when (and self.entity self.entity.update)
+      (self.entity:update))
     (self.layout-root:update)
     (self:update-root-transform {:skip-mark-dirty? true}))
 

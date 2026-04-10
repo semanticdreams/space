@@ -16,6 +16,7 @@
 
 (fn active-controller []
   (and app.drawing-controller
+       (= app.canvas-interactive? true)
        (= app.active-canvas-feature "drawing")
        app.drawing-controller))
 
@@ -70,9 +71,9 @@
              true)
            (do
              (controller:begin-gesture tool point)
-              (when (= tool "eraser")
-                (each [_ object-id (ipairs (HitTest.collect-hit-object-ids (active-layer) point (hit-tolerance)))]
-                  (controller:touch-erase-id! object-id)))
+             (when (= tool "eraser")
+               (each [_ object-id (ipairs (HitTest.collect-hit-object-ids (active-layer) point (hit-tolerance)))]
+                 (controller:touch-erase-id! object-id)))
              ((. ctx :mark-event-consumed!))
              true))))})
 
