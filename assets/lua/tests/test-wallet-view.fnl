@@ -3,6 +3,7 @@
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
 (local Intersectables (require :intersectables))
+(local RuntimeTimers (require :runtime-timers))
 (local TextUtils (require :text-utils))
 (local gl (require :gl))
 
@@ -278,6 +279,49 @@
     (dialog:drop))
 
 (table.insert tests {:name "WalletView receive QR" :fn wallet-view-receive-qr})
+
+(fn wallet-view-drop-preserves-injected-rpc-and-cancels-polling []
+    (RuntimeTimers.clear)
+    (local ctx (make-test-ctx))
+    (local target {:add-panel-child (fn [_self _opts] nil)})
+    (local manager {:store nil
+                    :get-active (fn [_self] nil)
+                    :set-active (fn [_self wallet] wallet)
+                    :load-active (fn [_self] nil)})
+    (local wallet {:id "w1"
+                   :name "Wallet"
+                   :coin "arbitrumnova"
+                   :address "0xabc"})
+    (var pending 1)
+    (var poll-count 0)
+    (var drop-count 0)
+    (local rpc {:fetch-balance (fn [_self _address]
+                                 {:on-complete (fn [_cb] nil)})
+                :poll (fn [_self _max]
+                        (set poll-count (+ poll-count 1)))
+                :pending-count (fn [_self]
+                                 pending)
+                :drop (fn [_self]
+                        (set drop-count (+ drop-count 1)))})
+    (local dialog
+        ((WalletView {:target target
+                      :manager manager
+                      :rpc rpc
+                      :current-wallet wallet})
+         ctx))
+    (app.engine.events.updated:emit 16)
+    (assert (= poll-count 1)
+            "WalletView should poll while mounted when RPC work is pending")
+    (dialog:drop)
+    (assert (= drop-count 0)
+            "WalletView must not drop an injected RPC client")
+    (app.engine.events.updated:emit 16)
+    (assert (= poll-count 1)
+            "WalletView drop should cancel RPC polling")
+    (RuntimeTimers.clear))
+
+(table.insert tests {:name "WalletView drop preserves injected RPC and cancels polling"
+                     :fn wallet-view-drop-preserves-injected-rpc-and-cancels-polling})
 
 (local main
     (fn []

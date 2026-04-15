@@ -9,6 +9,7 @@
 (local WalletCreateDialog (require :wallet-create-dialog))
 (local WalletLoadDialog (require :wallet-load-dialog))
 (local WalletManager (require :wallet-manager))
+(local RuntimeTimers (require :runtime-timers))
 (local WalletRpc (require :wallet-rpc))
 (local WalletSendDialog (require :wallet-send-dialog))
 (local WalletStore (require :wallet-store))
@@ -48,31 +49,35 @@
                      (WalletStore {})))
     (local manager (or options.manager (WalletManager {:store store})))
     (local rpc (or options.rpc (WalletRpc {})))
+    (local owns-rpc? (not options.rpc))
     (var dialog nil)
     (var name-text nil)
     (var coin-text nil)
     (var address-text nil)
     (var balance-text nil)
     (var qr-widget nil)
-    (var update-handler nil)
+    (var poll-timer nil)
     (var balance-wallet-id nil)
     (var current-wallet nil)
     (local target (resolve-target ctx options))
     (assert (and target target.add-panel-child)
             "WalletView requires a pointer target with add-panel-child")
 
-    (fn disconnect-updates []
-        (when (and app.engine app.engine.events app.engine.events.updated update-handler)
-            (app.engine.events.updated:disconnect update-handler true)
-            (set update-handler nil)))
+    (fn stop-polling []
+        (when poll-timer
+            (poll-timer:drop)
+            (set poll-timer nil)))
 
-    (fn connect-updates []
-        (when (and rpc app.engine app.engine.events app.engine.events.updated (not update-handler))
-            (set update-handler (app.engine.events.updated:connect
-                                 (fn [_delta]
-                                     (rpc:poll 0)
-                                     (when (= (rpc:pending-count) 0)
-                                         (disconnect-updates)))))))
+    (fn ensure-polling []
+        (when (and rpc (> (rpc:pending-count) 0) (not poll-timer))
+            (set poll-timer
+                 (RuntimeTimers.Interval
+                   {:interval-ms 16
+                    :callback (fn []
+                                (rpc:poll 0)
+                                (when (= (rpc:pending-count) 0)
+                                    (stop-polling)))}))
+            (poll-timer:start)))
 
     (fn update-current-text [name coin address]
         (when name-text
@@ -109,9 +114,11 @@
                 (set balance-wallet-id id)
                 (update-balance "loading...")
                 (local future (rpc:fetch-balance address))
-                (connect-updates)
+                (ensure-polling)
                 (future.on-complete
                  (fn [ok value err _source]
+                     (when (= (rpc:pending-count) 0)
+                         (stop-polling))
                      (if ok
                          (update-balance (format-balance value))
                          (update-balance (or err "error"))))))
@@ -266,8 +273,8 @@
     (when dialog
         (local base-drop dialog.drop)
         (set dialog.drop (fn [self]
-                           (disconnect-updates)
-                           (when rpc
+                           (stop-polling)
+                           (when (and rpc owns-rpc?)
                                (rpc:drop))
                            (when base-drop
                                (base-drop self)))))

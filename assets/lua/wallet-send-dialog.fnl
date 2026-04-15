@@ -4,6 +4,7 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Input (require :input))
 (local Padding (require :padding))
+(local RuntimeTimers (require :runtime-timers))
 (local Text (require :text))
 (local Wallet (require :wallet))
 (local WalletRpc (require :wallet-rpc))
@@ -44,20 +45,23 @@
     (var gas-price-text nil)
     (var gas-limit-text nil)
     (var tx-text nil)
-    (var update-handler nil)
+    (var poll-timer nil)
 
-    (fn disconnect-updates []
-        (when (and app.engine app.engine.events app.engine.events.updated update-handler)
-            (app.engine.events.updated:disconnect update-handler true)
-            (set update-handler nil)))
+    (fn stop-polling []
+        (when poll-timer
+            (poll-timer:drop)
+            (set poll-timer nil)))
 
-    (fn connect-updates []
-        (when (and rpc app.engine app.engine.events app.engine.events.updated (not update-handler))
-            (set update-handler (app.engine.events.updated:connect
-                                 (fn [_delta]
-                                     (rpc:poll 0)
-                                     (when (= (rpc:pending-count) 0)
-                                         (disconnect-updates)))))))
+    (fn ensure-polling []
+        (when (and rpc (> (rpc:pending-count) 0) (not poll-timer))
+            (set poll-timer
+                 (RuntimeTimers.Interval
+                   {:interval-ms 16
+                    :callback (fn []
+                                (rpc:poll 0)
+                                (when (= (rpc:pending-count) 0)
+                                    (stop-polling)))}))
+            (poll-timer:start)))
 
     (fn update-status []
         (local wallet (resolve-active-wallet options))
@@ -152,9 +156,11 @@
                         (set-status "Sending transaction...")
                         (local raw (ensure-hex-prefix signed))
                         (local future (rpc:send-raw-transaction raw))
-                        (connect-updates)
+                        (ensure-polling)
                         (future.on-complete
                           (fn [ok value err _source]
+                              (when (= (rpc:pending-count) 0)
+                                  (stop-polling))
                               (if ok
                                   (do
                                       (tset state :tx-hash value)
@@ -170,9 +176,11 @@
                                :to to-address
                                :value value-hex
                                :data data-text}))
-        (connect-updates)
+        (ensure-polling)
         (nonce-future.on-complete
           (fn [ok value err _source]
+              (when (= (rpc:pending-count) 0)
+                  (stop-polling))
               (if ok
                   (do
                       (set nonce value)
@@ -182,6 +190,8 @@
                   (fail err))))
         (gas-price-future.on-complete
           (fn [ok value err _source]
+              (when (= (rpc:pending-count) 0)
+                  (stop-polling))
               (if ok
                   (do
                       (set gas-price value)
@@ -191,6 +201,8 @@
                   (fail err))))
         (estimate-future.on-complete
           (fn [ok value err _source]
+              (when (= (rpc:pending-count) 0)
+                  (stop-polling))
               (if ok
                   (do
                       (set gas-limit value)
@@ -319,7 +331,7 @@
         (local base-drop dialog.drop)
         (set dialog.drop
              (fn [self]
-                 (disconnect-updates)
+                 (stop-polling)
                  (when (and rpc owns-rpc?)
                      (rpc:drop))
                  (when base-drop
