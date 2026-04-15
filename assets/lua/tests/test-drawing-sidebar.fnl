@@ -8,6 +8,9 @@
 (local {: LayoutRoot} (require :layout))
 (local DrawingController (require :drawing/controller))
 (local DrawingSidebarView (require :drawing/sidebar-view))
+(local Themes (require :themes))
+(local DarkTheme (require :dark-theme))
+(local LightTheme (require :light-theme))
 
 (local tests [])
 
@@ -40,6 +43,25 @@
       (set found true)))
   found)
 
+(fn color-array= [a b]
+  (and a b
+       (= (or (. a 1) a.x 0) (or (. b 1) b.x 0))
+       (= (or (. a 2) a.y 0) (or (. b 2) b.y 0))
+       (= (or (. a 3) a.z 0) (or (. b 3) b.z 0))
+       (= (or (. a 4) a.w 0) (or (. b 4) b.w 0))))
+
+(fn find-clickable-button [target]
+  (var resolved nil)
+  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+    (when (and (not resolved)
+               obj
+               obj.text
+               obj.text.get-codepoints)
+      (local text (codepoints->text (obj.text:get-codepoints)))
+      (when (= text target)
+        (set resolved obj))))
+  resolved)
+
 (fn find-text-input []
   (var resolved nil)
   (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
@@ -58,7 +80,8 @@
                    :preferred-interaction-surface app.preferred-interaction-surface
                    :active-interaction-surface app.active-interaction-surface
                    :active-canvas-feature app.active-canvas-feature
-                   :canvas-shell-changed app.canvas-shell-changed})
+                   :canvas-shell-changed app.canvas-shell-changed
+                   :themes app.themes})
   (set app.clickables (Clickables))
   (set app.hoverables (Hoverables))
   (set app.canvas-shell-changed (or app.canvas-shell-changed (Signal)))
@@ -302,6 +325,44 @@
               "drawing sidebar panel should fill the allocated dock height")
       (sidebar:drop))))
 
+(fn sidebar-adopts-light-theme-colors []
+  (with-sidebar-env
+    (fn []
+      (local themes (Themes))
+      (themes.add-theme :dark DarkTheme)
+      (themes.add-theme :light LightTheme)
+      (set app.themes themes)
+      (set app.active-canvas-feature "drawing")
+      (themes.set-theme :dark)
+      (local dark-sidebar ((DrawingSidebarView {:controller (DrawingController {})}) (make-ctx)))
+      (dark-sidebar.layout:measurer)
+      (local dark-draw (find-clickable-button "Draw"))
+      (local dark-select (find-clickable-button "Select"))
+      (local dark-primary-colors (themes.get-button-colors :primary))
+      (local dark-primary (. dark-primary-colors :background))
+      (assert dark-draw "drawing sidebar should expose a Draw button in dark theme")
+      (assert dark-select "drawing sidebar should expose a Select button in dark theme")
+      (assert (color-array= dark-draw.background-color dark-primary)
+              "drawing sidebar active rail button should use the dark theme primary color")
+      (assert (color-array= dark-select.background-color dark-primary)
+              "drawing sidebar active tool button should use the dark theme primary color")
+      (dark-sidebar:drop)
+
+      (themes.set-theme :light)
+      (local light-sidebar ((DrawingSidebarView {:controller (DrawingController {})}) (make-ctx)))
+      (light-sidebar.layout:measurer)
+      (local light-draw (find-clickable-button "Draw"))
+      (local light-select (find-clickable-button "Select"))
+      (local light-primary-colors (themes.get-button-colors :primary))
+      (local light-primary (. light-primary-colors :background))
+      (assert light-draw "drawing sidebar should expose a Draw button in light theme")
+      (assert light-select "drawing sidebar should expose a Select button in light theme")
+      (assert (color-array= light-draw.background-color light-primary)
+              "drawing sidebar active rail button should use the light theme primary color")
+      (assert (color-array= light-select.background-color light-primary)
+              "drawing sidebar active tool button should use the light theme primary color")
+      (light-sidebar:drop))))
+
 (table.insert tests {:name "Drawing sidebar expands in drawing feature mode"
                      :fn sidebar-width-reflects-active-canvas-feature})
 (table.insert tests {:name "Drawing sidebar width follows panel measure"
@@ -320,6 +381,8 @@
                      :fn sidebar-appears-when-switching-to-canvas-surface})
 (table.insert tests {:name "Drawing sidebar fills allocated dock height"
                      :fn sidebar-fills-allocated-dock-height})
+(table.insert tests {:name "Drawing sidebar adopts light theme colors"
+                     :fn sidebar-adopts-light-theme-colors})
 
 (local main
   (fn []

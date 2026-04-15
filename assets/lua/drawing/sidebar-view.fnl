@@ -8,6 +8,7 @@
 (local Button (require :button))
 (local Input (require :input))
 (local Text (require :text))
+(local {: adjust} (require :widget-theme-utils))
 
 (fn section-title [label]
   (Text {:text label}))
@@ -32,15 +33,22 @@
 
 (fn action-button [label opts]
   (local options (or opts {}))
-  (Button {:text label
-           :padding [0.4 0.25]
-           :focusable? false
-           :background-color (or options.background-color (glm.vec4 0.2 0.22 0.28 0.95))
-           :hover-background-color (or options.hover-background-color (glm.vec4 0.24 0.27 0.34 0.98))
-           :pressed-background-color (or options.pressed-background-color (glm.vec4 0.16 0.18 0.24 0.98))
-           :foreground-color (or options.foreground-color (glm.vec4 0.95 0.95 0.97 1.0))
-           :enabled? (if (= options.enabled? nil) true options.enabled?)
-           :on-click options.on-click}))
+  (local button-opts {:text label
+                      :padding [0.4 0.25]
+                      :focusable? false
+                      :enabled? (if (= options.enabled? nil) true options.enabled?)
+                      :on-click options.on-click})
+  (when (not (= options.variant nil))
+    (set button-opts.variant options.variant))
+  (when (not (= options.background-color nil))
+    (set button-opts.background-color options.background-color))
+  (when (not (= options.hover-background-color nil))
+    (set button-opts.hover-background-color options.hover-background-color))
+  (when (not (= options.pressed-background-color nil))
+    (set button-opts.pressed-background-color options.pressed-background-color))
+  (when (not (= options.foreground-color nil))
+    (set button-opts.foreground-color options.foreground-color))
+  (Button button-opts))
 
 (fn panel-shell [content-builder background-color]
   (Stack {:children [(fn [_ctx] ((Rectangle {:color background-color}) _ctx))
@@ -48,29 +56,24 @@
                                :child content-builder})]}))
 
 (fn tool-button [label active? on-click]
-  (action-button label {:on-click on-click
-                        :enabled? (not active?)
-                        :background-color (if active?
-                                              (glm.vec4 0.49 0.28 0.08 0.96)
-                                              (glm.vec4 0.2 0.22 0.28 0.95))
-                        :hover-background-color (if active?
-                                                    (glm.vec4 0.49 0.28 0.08 0.96)
-                                                    (glm.vec4 0.24 0.27 0.34 0.98))
-                        :pressed-background-color (if active?
-                                                      (glm.vec4 0.49 0.28 0.08 0.96)
-                                                      (glm.vec4 0.16 0.18 0.24 0.98))}))
+  (action-button label {:on-click (fn [button event]
+                                    (when (not active?)
+                                      (on-click button event)))
+                        :variant (if active? :primary :secondary)}))
 
 (fn state-button [label active? on-click]
   (action-button label {:on-click on-click
-                        :background-color (if active?
-                                              (glm.vec4 0.49 0.28 0.08 0.96)
-                                              (glm.vec4 0.2 0.22 0.28 0.95))
-                        :hover-background-color (if active?
-                                                    (glm.vec4 0.54 0.31 0.09 0.98)
-                                                    (glm.vec4 0.24 0.27 0.34 0.98))
-                        :pressed-background-color (if active?
-                                                      (glm.vec4 0.43 0.24 0.07 0.98)
-                                                      (glm.vec4 0.16 0.18 0.24 0.98))}))
+                        :variant (if active? :primary :secondary)}))
+
+(fn panel-background [theme kind]
+  (local card-theme (and theme theme.card))
+  (local base (or (and card-theme card-theme.background)
+                  (if (= kind :rail)
+                      (glm.vec4 0.08 0.1 0.14 0.96)
+                      (glm.vec4 0.12 0.14 0.18 0.96))))
+  (if (= kind :rail)
+      (adjust base (if (and theme (= theme.name :light)) -0.06 -0.04))
+      (adjust base (if (and theme (= theme.name :light)) -0.03 0.0))))
 
 (fn DrawingSidebarView [opts]
   (local options (or opts {}))
@@ -87,6 +90,7 @@
     (var rename-layer-id nil)
     (var rename-layer-name nil)
     (var rename-buffer "")
+    (local theme (and ctx ctx.theme))
 
     (fn drop-children []
       (each [_ entity (ipairs child-entities)]
@@ -141,7 +145,7 @@
                                                                        (controller:set-active-layer layer.id)
                                                                        (controller:move-active-layer -1))
                                                            :enabled? (> (or (DrawingDocument.layer-index controller.state.document layer.id) 1) 1)
-                                                           :background-color (glm.vec4 0.18 0.2 0.24 0.95)})
+                                                           :variant :secondary})
                                       child-ctx))
                                   0)
                         (FlexChild (fn [child-ctx]
@@ -150,7 +154,7 @@
                                                                        (controller:move-active-layer 1))
                                                            :enabled? (< (or (DrawingDocument.layer-index controller.state.document layer.id) 1)
                                                                         (length controller.state.document.layers))
-                                                           :background-color (glm.vec4 0.18 0.2 0.24 0.95)})
+                                                           :variant :secondary})
                                       child-ctx))
                                   0)
                         (FlexChild (fn [child-ctx]
@@ -158,28 +162,26 @@
                                                                       (controller:set-active-layer layer.id)
                                                                       (controller:delete-active-layer))
                                                           :enabled? (> (controller:layer-count) 1)
-                                                          :background-color (glm.vec4 0.34 0.16 0.16 0.95)
-                                                          :hover-background-color (glm.vec4 0.42 0.19 0.19 0.98)
-                                                          :pressed-background-color (glm.vec4 0.28 0.13 0.13 0.98)})
+                                                          :variant :danger})
                                       child-ctx))
                                   0)]}))
 
-    (fn build-color-button [label value key selected?]
-      (action-button label
-                     {:background-color (glm.vec4 (or (. value 1) 0.4)
-                                                  (or (. value 2) 0.4)
-                                                  (or (. value 3) 0.4)
-                                                  0.95)
-                      :hover-background-color (glm.vec4 (math.min 1.0 (+ (or (. value 1) 0.4) 0.08))
-                                                        (math.min 1.0 (+ (or (. value 2) 0.4) 0.08))
-                                                        (math.min 1.0 (+ (or (. value 3) 0.4) 0.08))
-                                                        0.98)
-                      :foreground-color (glm.vec4 0.08 0.08 0.1 1.0)
-                      :enabled? (not selected?)
-                      :on-click (fn [_button _event]
-                                  (local changes {})
-                                  (set (. changes key) value)
-                                  (controller:set-defaults! changes))}))
+(fn build-color-button [label value key selected?]
+  (action-button label
+                 {:background-color (glm.vec4 (or (. value 1) 0.4)
+                                              (or (. value 2) 0.4)
+                                              (or (. value 3) 0.4)
+                                              0.95)
+                  :hover-background-color (glm.vec4 (math.min 1.0 (+ (or (. value 1) 0.4) 0.08))
+                                                    (math.min 1.0 (+ (or (. value 2) 0.4) 0.08))
+                                                    (math.min 1.0 (+ (or (. value 3) 0.4) 0.08))
+                                                    0.98)
+                  :foreground-color (glm.vec4 0.08 0.08 0.1 1.0)
+                  :on-click (fn [_button _event]
+                              (when (not selected?)
+                                (local changes {})
+                                (set (. changes key) value)
+                                (controller:set-defaults! changes)))}))
 
     (fn build-defaults-section []
       (local defaults controller.state.ui.defaults)
@@ -286,9 +288,7 @@
                             ((action-button "Delete" {:on-click (fn [_button _event]
                                                                   (controller:on-delete-selection))
                                                       :enabled? (> (controller:selection-count) 0)
-                                                      :background-color (glm.vec4 0.34 0.16 0.16 0.95)
-                                                      :hover-background-color (glm.vec4 0.42 0.19 0.19 0.98)
-                                                      :pressed-background-color (glm.vec4 0.28 0.13 0.13 0.98)})
+                                                      :variant :danger})
                              inner-ctx))
                           0)]}))
 
@@ -312,7 +312,7 @@
                                                     :enabled? (and layer
                                                                    (> (# (trim-name rename-buffer)) 0)
                                                                    (not (= (trim-name rename-buffer) layer.name)))
-                                                    :background-color (glm.vec4 0.16 0.32 0.24 0.95)})
+                                                    :variant :success})
                              inner-ctx))
                           0)]}))
 
@@ -353,7 +353,7 @@
                                (fn [child-ctx]
                                  ((action-button "+ Layer" {:on-click (fn [_button _event]
                                                                         (controller:add-layer))
-                                                            :background-color (glm.vec4 0.16 0.32 0.24 0.95)})
+                                                            :variant :success})
                                   child-ctx))
                                0)
                              (FlexChild
@@ -370,7 +370,7 @@
                              (FlexChild (fn [child-ctx] ((build-tools-section) child-ctx)) 0)
                              (FlexChild (fn [child-ctx] ((build-defaults-section) child-ctx)) 0)]})
            inner-ctx))
-        (glm.vec4 0.12 0.14 0.18 0.96)))
+        (panel-background theme :panel)))
 
     (fn build-feature-rail []
       (panel-shell
@@ -388,8 +388,8 @@
                                   child-ctx))
                                0)
                              (FlexChild
-                               (fn [child-ctx]
-                                 ((tool-button "Draw"
+                              (fn [child-ctx]
+                                ((tool-button "Draw"
                                                (= app.active-canvas-feature "drawing")
                                                (fn [_button _event]
                                                  (when app.set-active-canvas-feature
@@ -397,7 +397,7 @@
                                   child-ctx))
                                0)]})
            inner-ctx))
-        (glm.vec4 0.08 0.1 0.14 0.96)))
+        (panel-background theme :rail)))
 
     (fn rebuild-children! []
       (drop-children)
