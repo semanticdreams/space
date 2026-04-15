@@ -16,6 +16,10 @@ Use this skill whenever you're about to create a commit (or when asked to "commi
 - Stage only what you intend to ship; prefer `git add -p` for mixed diffs.
 - Never commit secrets/credentials. When in doubt:
   - `git diff --staged | rg -n -i "api[_-]?key|secret|token|password|-----begin|private key"`
+- Never commit machine-specific private path data in files or commit messages. Before every commit, check staged content for absolute local paths and rewrite them to repo-relative paths or neutral placeholders:
+  - `git diff --staged | rg -n '(/home/|/Users/|file:///|fs:/home/|[A-Za-z]:\\\\)'`
+  - If the commit message includes commands or paths, scrub absolute workstation paths there too.
+- Treat user-specific paths as sensitive even when they only appear in docs, notes, fixtures, snapshots, logs, stack traces, or testing commands.
 - Avoid destructive history ops unless explicitly asked (`reset --hard`, `clean -fdx`, `rebase`, `--amend`, force-push).
 
 ## Commit subject line
@@ -29,6 +33,10 @@ Use this skill whenever you're about to create a commit (or when asked to "commi
 ## Body (required for non-trivial changes)
 
 Be explicit about **impact** (user-visible) vs **what** changed (code/data). Include **risk** when plausible.
+
+Do not include machine-specific private paths in the body. When documenting test commands:
+- prefer `$(pwd)/assets`, repo-relative paths, or neutral placeholders
+- do not paste `/home/<user>/...`, `/Users/<user>/...`, `file:///...`, or similar local workstation paths unless the user explicitly requires them and understands the privacy impact
 
 Template:
 
@@ -65,6 +73,7 @@ References:
 - Prefer running the full suite before committing:
   - `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`
 - For targeted runs, include the command and a short result summary (e.g., “passed” / “failed: <test name>”).
+- Rewrite any absolute local paths in copied commands before committing them to history.
 - Do not paste full test output into the commit message; keep it to a couple lines.
 
 ## Practical: avoid shell-quoting footguns
