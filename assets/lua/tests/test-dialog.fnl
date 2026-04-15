@@ -5,6 +5,7 @@
 (local Scene (require :scene))
 (local Hud (require :hud))
 (local Camera (require :camera))
+(local Canvas (require :canvas))
 (local AppProjection (require :app-projection))
 (local MathUtils (require :math-utils))
 (local {: Layout} (require :layout))
@@ -1134,6 +1135,51 @@
       (set app.create-default-projection originals.create-default-projection)
       true)))
 
+
+(fn canvas-float-panels-use-measured-size-when-size-unspecified []
+  (with-dialog-stubs
+    (fn [env]
+      (local originals {:clickables app.clickables
+                        :hoverables app.hoverables
+                        :system-cursors app.system-cursors
+                        :viewport app.viewport})
+      (local camera (make-default-camera))
+      (var canvas nil)
+      (fn cleanup []
+        (when canvas
+          (canvas:drop)
+          (set canvas nil))
+        (when camera
+          (camera:drop))
+        (set app.clickables originals.clickables)
+        (set app.hoverables originals.hoverables)
+        (set app.system-cursors originals.system-cursors)
+        (set app.viewport originals.viewport))
+      (local (ok result)
+        (pcall
+          (fn []
+            (set app.clickables env.clickables)
+            (set app.hoverables env.hoverables)
+            (set app.system-cursors env.cursors)
+            (set app.viewport {:x 0 :y 0 :width 100 :height 100})
+            (set canvas (Canvas {:camera camera
+                                 :icons env.icons}))
+            (local child (make-probe-widget "canvas-measured-size-child"))
+            (local dialog
+              (canvas:add-panel-child {:builder (Dialog {:title "Float Test"
+                                                         :child child.builder})}))
+            (canvas:update)
+            (local size dialog.layout.size)
+            (assert (> size.x 0)
+                    "Canvas float panels should use measured width when size is unspecified")
+            (assert (> size.y 0)
+                    "Canvas float panels should use measured height when size is unspecified")
+            true)))
+      (cleanup)
+      (if ok
+          result
+          (error result)))))
+
 (table.insert tests {:name "Dialog requires a title" :fn dialog-requires-title})
 (table.insert tests {:name "Dialog requires a child" :fn dialog-requires-child})
 (table.insert tests {:name "Dialog wraps titlebar and body in cards" :fn dialog-wraps-titlebar-and-body-in-cards})
@@ -1152,6 +1198,8 @@
 (table.insert tests {:name "Hud capture-state requires restore strategy" :fn hud-capture-state-requires-restore-strategy})
 (table.insert tests {:name "Hud restore-state uses restorer module" :fn hud-restore-state-uses-restorer-module})
 (table.insert tests {:name "Hud restore-state builds roots before float restore" :fn hud-restore-state-builds-roots-before-float-restore})
+(table.insert tests {:name "Canvas float panels use measured size when size is unspecified"
+                     :fn canvas-float-panels-use-measured-size-when-size-unspecified})
 
 (local main
   (fn []

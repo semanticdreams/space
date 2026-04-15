@@ -198,6 +198,27 @@
                   "capture-state should preserve unresolved node views from panel restore")
           (assert (= (and (. state.open-views 1) (. (. state.open-views 1) :node-key))
                      "terrain:world-1:node-a"))
+          (views:drop-all))}
+ {:name "graph view node-views default canvas placement uses camera center"
+  :fn (fn []
+          (local ctx (make-ctx))
+          (local target (make-view-target ctx))
+          (set target.interaction-surface :canvas)
+          (set target.default-panel-location "float")
+          (set target.camera {:position (glm.vec3 12 34 99)})
+          (local node {:key "canvas-node"
+                       :label "Canvas node"
+                       :view (fn [_node]
+                                 (fn [_builder-ctx _opts]
+                                     (make-simple-view)))})
+          (local views (GraphViewNodeViews {:ctx ctx
+                                            :view-target target}))
+          (views:open node)
+          (local position (and target.last-add-panel-opts target.last-add-panel-opts.position))
+          (assert position "expected canvas node view placement position")
+          (assert (= position.x 12) "canvas placement should use camera x")
+          (assert (= position.y 34) "canvas placement should use camera y")
+          (assert (= position.z 0) "canvas placement should use graph plane z")
           (views:drop-all))}])
 
 (local main

@@ -25,6 +25,12 @@
         (set found-idx idx))))
   (values found found-idx))
 
+(fn meaningful-size [size]
+  (and size
+       (or (> size.x 0)
+           (> size.y 0)
+           (> size.z 0))))
+
 (fn FloatLayer [opts]
   (fn build [ctx]
     (local options (or opts {}))
@@ -82,7 +88,11 @@
         (local options (or opts {}))
         (local position (or options.position element.layout.position (glm.vec3 0 0 0)))
         (local rotation (or options.rotation element.layout.rotation (glm.quat 1 0 0 0)))
-        (local size (or options.size element.layout.size element.layout.measure (glm.vec3 0 0 0)))
+        (local size (if (not (= options.size nil))
+                         options.size
+                         (if (meaningful-size element.layout.size)
+                             element.layout.size
+                             nil)))
         (local has-world-position (not (= options.position nil)))
         (local has-world-rotation (not (= options.rotation nil)))
         (local metadata {:element element

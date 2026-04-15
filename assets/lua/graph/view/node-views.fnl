@@ -1,3 +1,4 @@
+(local glm (require :glm))
 (local Dialog (require :dialog))
 (local {:GraphEdge GraphEdge} (require :graph/edge))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
@@ -44,6 +45,20 @@
             (local builder (view-fn node))
             (when (= (type builder) :function)
                 builder)))
+
+    (fn resolve-canvas-open-position [target]
+        (local camera (and target target.camera))
+        (local position (and camera camera.position))
+        (when position
+            (glm.vec3 position.x position.y 0)))
+
+    (fn resolve-panel-placement [target panel]
+        (local placement (PanelUtils.panel-placement-options target panel))
+        (when (and (= (and target target.interaction-surface) :canvas)
+                   (= placement.location :float)
+                   (= placement.position nil))
+            (set placement.position (resolve-canvas-open-position target)))
+        placement)
 
     (fn drop-node-view [node]
         (local record (. node-views node))
@@ -120,34 +135,32 @@
             dialog-instance))
 
     (fn ensure-node-view [node opts]
-        (if (or (not node) (. node-views node))
-            nil
-            (do
-                (local local-opts (or opts {}))
-                (local builder (resolve-node-view-builder node))
-                (local target (or local-opts.target view-target))
-                (local dialog-builder (and builder (wrap-node-view node builder)))
-                (when dialog-builder
-                    (local panel (or local-opts.panel {}))
-                    (local placement (PanelUtils.panel-placement-options target panel))
-                    (local persistence (build-persistence node.key))
-                    (if (and target target.add-panel-child)
-                        (do
-                            (local panel-opts {:builder dialog-builder
-                                               :location placement.location
-                                               :align-x placement.align-x
-                                               :align-y placement.align-y
-                                               :position placement.position
-                                               :rotation placement.rotation
-                                               :size placement.size
-                                               :persistence persistence})
-                            (local element (target:add-panel-child panel-opts))
-                            (set (. node-views node) {:target target
-                                                      :element element}))
-                        (when view-context
-                            (local dialog (dialog-builder view-context))
-                            (set (. node-views node) {:dialog dialog
-                                                      :target nil})))))))
+        (when (and node (not (. node-views node)))
+            (local local-opts (or opts {}))
+            (local builder (resolve-node-view-builder node))
+            (local target (or local-opts.target view-target))
+            (local dialog-builder (and builder (wrap-node-view node builder)))
+            (when dialog-builder
+                (local panel (or local-opts.panel {}))
+                (local placement (resolve-panel-placement target panel))
+                (local persistence (build-persistence node.key))
+                (if (and target target.add-panel-child)
+                    (do
+                        (local panel-opts {:builder dialog-builder
+                                           :location placement.location
+                                           :align-x placement.align-x
+                                           :align-y placement.align-y
+                                           :position placement.position
+                                           :rotation placement.rotation
+                                           :size placement.size
+                                           :persistence persistence})
+                        (local element (target:add-panel-child panel-opts))
+                        (set (. node-views node) {:target target
+                                                  :element element}))
+                    (when view-context
+                        (local dialog (dialog-builder view-context))
+                        (set (. node-views node) {:dialog dialog
+                                                  :target nil}))))))
 
     (set open-node-view
          (fn [_self node opts]
