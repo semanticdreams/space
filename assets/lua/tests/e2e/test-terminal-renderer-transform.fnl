@@ -24,7 +24,7 @@
 
 (local transcript-lines
   ["user@demo:~/space$ pwd"
-   "/repo/space"
+   "./space"
    "user@demo:~/space$ ls -1 | head -5"
    "assets"
    "build"

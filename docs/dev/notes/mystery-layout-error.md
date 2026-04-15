@@ -4,16 +4,16 @@
 invalid key to 'next'                                                                                                                                                                          
 stack traceback:                                                                                                                                                                               
         [C]: in function 'base.next'                                                                                                                                                           
-        /repo/space/build/../assets/lua/bucket-queue.fnl:36: in method 'iterate'                                                                                                        
-        /repo/space/build/../assets/lua/layout.fnl:423: in method 'update'                                                                                                              
-        /repo/space/build/../assets/lua/hud.fnl:347: in function </repo/space/build/../assets/lua/hud.fnl:347>                                                                   
+        assets/lua/bucket-queue.fnl:36: in method 'iterate'
+        assets/lua/layout.fnl:423: in method 'update'
+        assets/lua/hud.fnl:347: in function <assets/lua/hud.fnl:347>
         (...tail calls...)                                                                                                                                                                     
-        /repo/space/build/../assets/lua/frame-profiler.fnl:34: in function </repo/space/build/../assets/lua/frame-profiler.fnl:31>                                               
+        assets/lua/frame-profiler.fnl:34: in function <assets/lua/frame-profiler.fnl:31>
         (...tail calls...)                                                                                                                                                                     
-        /repo/space/build/../assets/lua/main.fnl:508: in local 'cb'                                                                                                                     
-        /repo/space/build/../assets/lua/signal.fnl:7: in function </repo/space/build/../assets/lua/signal.fnl:4>                                                                 
+        assets/lua/main.fnl:508: in local 'cb'
+        assets/lua/signal.fnl:7: in function <assets/lua/signal.fnl:4>
         [C]: in method 'run'                                                                                                                                                                   
-        /repo/space/build/../assets/lua/main.fnl:588: in main chunk                                                                                                                     
+        assets/lua/main.fnl:588: in main chunk
         (...tail calls...)                                                                                                                                                                     
         [C]: in function 'base.require'                                                                                                                                                        
         [string "require("main")"]:1: in main chunk                                                                                                                                            

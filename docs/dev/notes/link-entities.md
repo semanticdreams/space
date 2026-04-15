@@ -42,7 +42,7 @@ graph TD
 
 ### LinkEntityStore
 
-**File:** [link.fnl](file:///repo/space/assets/lua/entities/link.fnl)
+**File:** [link.fnl](../../../assets/lua/entities/link.fnl)
 
 The `LinkEntityStore` manages persistence of link entities to disk using JSON files.
 
@@ -92,7 +92,7 @@ The store emits signals for entity lifecycle events:
 
 ### LinkEntityNode
 
-**File:** [link-entity.fnl](file:///repo/space/assets/lua/graph/nodes/link-entity.fnl)
+**File:** [link-entity.fnl](../../../assets/lua/graph/nodes/link-entity.fnl)
 
 Represents a single link entity in the graph.
 
@@ -110,7 +110,7 @@ Represents a single link entity in the graph.
 
 ### LinkEntityListNode
 
-**File:** [link-entity-list.fnl](file:///repo/space/assets/lua/graph/nodes/link-entity-list.fnl)
+**File:** [link-entity-list.fnl](../../../assets/lua/graph/nodes/link-entity-list.fnl)
 
 Displays a paginated list of all link entities.
 
@@ -131,7 +131,7 @@ Displays a paginated list of all link entities.
 
 ### LinkEntityNodeView
 
-**File:** [link-entity.fnl](file:///repo/space/assets/lua/graph/view/views/link-entity.fnl)
+**File:** [link-entity.fnl](../../../assets/lua/graph/view/views/link-entity.fnl)
 
 Editor for a link entity with selection integration.
 
@@ -149,7 +149,7 @@ Editor for a link entity with selection integration.
 
 ### LinkEntityListNodeView
 
-**File:** [link-entity-list.fnl](file:///repo/space/assets/lua/graph/view/views/link-entity-list.fnl)
+**File:** [link-entity-list.fnl](../../../assets/lua/graph/view/views/link-entity-list.fnl)
 
 List view with create button and search.
 
@@ -161,7 +161,7 @@ List view with create button and search.
 
 ## Graph Core Integration
 
-**File:** [core.fnl](file:///repo/space/assets/lua/graph/core.fnl)
+**File:** [core.fnl](../../../assets/lua/graph/core.fnl)
 
 The graph core automatically manages edges based on link entities:
 
@@ -187,7 +187,7 @@ The graph maintains a `link-edge-map` that tracks which edges were created from 
 
 ## Menu Manager Integration
 
-**File:** [menu-manager.fnl](file:///repo/space/assets/lua/menu-manager.fnl)
+**File:** [menu-manager.fnl](../../../assets/lua/menu-manager.fnl)
 
 A "Create Link Entity" action is available in the root context menu:
 - If exactly 2 nodes are selected, source and target keys are pre-populated from the selection (first node → source, second node → target)
@@ -197,7 +197,7 @@ A "Create Link Entity" action is available in the root context menu:
 
 ## EntitiesNode Integration
 
-**File:** [entities.fnl](file:///repo/space/assets/lua/graph/nodes/entities.fnl)
+**File:** [entities.fnl](../../../assets/lua/graph/nodes/entities.fnl)
 
 The `EntitiesNode` includes "link" as an available entity type alongside "string".
 
@@ -207,7 +207,7 @@ The `EntitiesNode` includes "link" as an available entity type alongside "string
 
 ### Unit Tests
 
-**File:** [test-link-entities.fnl](file:///repo/space/assets/lua/tests/test-link-entities.fnl)
+**File:** [test-link-entities.fnl](../../../assets/lua/tests/test-link-entities.fnl)
 
 Covers:
 - Store CRUD operations
@@ -220,7 +220,7 @@ Covers:
 
 ### E2E Snapshot
 
-**File:** [test-link-entity-view.fnl](file:///repo/space/assets/lua/tests/e2e/test-link-entity-view.fnl)
+**File:** [test-link-entity-view.fnl](../../../assets/lua/tests/e2e/test-link-entity-view.fnl)
 
 Creates a snapshot of the `LinkEntityNodeView` rendered in a dialog with sample data.
 
@@ -230,13 +230,13 @@ Creates a snapshot of the `LinkEntityNodeView` rendered in a dialog with sample 
 
 | File | Purpose |
 |------|---------|
-| [entities/link.fnl](file:///repo/space/assets/lua/entities/link.fnl) | Storage layer (JSON) |
-| [graph/nodes/link-entity.fnl](file:///repo/space/assets/lua/graph/nodes/link-entity.fnl) | Single entity node |
-| [graph/nodes/link-entity-list.fnl](file:///repo/space/assets/lua/graph/nodes/link-entity-list.fnl) | Entity list node |
-| [graph/nodes/entities.fnl](file:///repo/space/assets/lua/graph/nodes/entities.fnl) | Updated to include link type |
-| [graph/view/views/link-entity.fnl](file:///repo/space/assets/lua/graph/view/views/link-entity.fnl) | Entity editor view |
-| [graph/view/views/link-entity-list.fnl](file:///repo/space/assets/lua/graph/view/views/link-entity-list.fnl) | List view |
-| [graph/core.fnl](file:///repo/space/assets/lua/graph/core.fnl) | Graph integration |
-| [menu-manager.fnl](file:///repo/space/assets/lua/menu-manager.fnl) | Context menu action |
-| [tests/test-link-entities.fnl](file:///repo/space/assets/lua/tests/test-link-entities.fnl) | Unit tests |
-| [tests/e2e/test-link-entity-view.fnl](file:///repo/space/assets/lua/tests/e2e/test-link-entity-view.fnl) | E2E snapshot test |
+| [entities/link.fnl](../../../assets/lua/entities/link.fnl) | Storage layer (JSON) |
+| [graph/nodes/link-entity.fnl](../../../assets/lua/graph/nodes/link-entity.fnl) | Single entity node |
+| [graph/nodes/link-entity-list.fnl](../../../assets/lua/graph/nodes/link-entity-list.fnl) | Entity list node |
+| [graph/nodes/entities.fnl](../../../assets/lua/graph/nodes/entities.fnl) | Updated to include link type |
+| [graph/view/views/link-entity.fnl](../../../assets/lua/graph/view/views/link-entity.fnl) | Entity editor view |
+| [graph/view/views/link-entity-list.fnl](../../../assets/lua/graph/view/views/link-entity-list.fnl) | List view |
+| [graph/core.fnl](../../../assets/lua/graph/core.fnl) | Graph integration |
+| [menu-manager.fnl](../../../assets/lua/menu-manager.fnl) | Context menu action |
+| [tests/test-link-entities.fnl](../../../assets/lua/tests/test-link-entities.fnl) | Unit tests |
+| [tests/e2e/test-link-entity-view.fnl](../../../assets/lua/tests/e2e/test-link-entity-view.fnl) | E2E snapshot test |
