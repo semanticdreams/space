@@ -40,6 +40,9 @@
                             :items items
                             :query ""
                             :submitted (Signal)})
+        (fn assert-live [action]
+            (assert (not search-view.__dropped)
+                    (.. "SearchView " action " after drop")))
         (local input
             ((Input {:text (or options.text "")
                      :placeholder (or options.placeholder "Search")})
@@ -71,19 +74,23 @@
              ctx))
 
         (fn set-items [self new-items]
+            (assert-live "set_items")
             (set self.items (normalize-items new-items))
             (self:update-list-view))
 
         (fn filter-items [self]
+            (assert-live "filter_items")
             (icollect [_ pair (ipairs self.items)]
                 (when (fuzzy-match self.query (tostring (. pair 2)))
                     pair)))
 
         (fn update-list-view [self]
+            (assert-live "update_list_view")
             (local filtered (self:filter-items))
             (self.list-view:set-items filtered))
 
         (fn on-input-changed [value]
+            (assert-live "on_input_changed")
             (set search-view.query (or value ""))
             (search-view:update-list-view))
 
@@ -92,14 +99,15 @@
         (set search-view.update-list-view update-list-view)
 
         (set search-view.layout flex.layout)
+        (set search-view.root flex)
         (set search-view.drop
             (fn [self]
+                (assert (not self.__dropped) "SearchView dropped twice")
+                (set self.__dropped true)
                 (when self.__input-listener
                     (self.input.model.changed:disconnect self.__input-listener true)
                     (set self.__input-listener nil))
-                (self.list-view:drop)
-                (self.input:drop)
-                (self.layout:drop)))
+                (self.root:drop)))
 
         (set search-view.__input-listener
             (input.model.changed:connect

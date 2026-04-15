@@ -4,6 +4,7 @@ This section contains internal architecture, implementation notes, and integrati
 
 - [Concepts](/dev/concepts)
 - [Lifecycle Invariants](/dev/lifecycle-invariants)
+- [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown)
 - [Runtime Performance Modes](/dev/runtime-performance)
 - [Video Playback (FFmpeg)](/dev/video-playback)
 - [SQL Builder (SQLite)](/dev/sql-builder)

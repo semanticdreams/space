@@ -750,6 +750,7 @@
 
     (set input.drop
          (fn [self]
+           (assert (not self.__dropped) "Input dropped twice")
            (set self.__dropped true)
            (disconnect-from-state self)
            (clickables:unregister self)

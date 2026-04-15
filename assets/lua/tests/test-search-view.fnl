@@ -44,8 +44,55 @@
             "Submitted payload should include the selected item")
     (view:drop))
 
+(fn search-view-double-drop-errors []
+    (local ctx (make-ui-context))
+    (local view ((SearchView {:items [[{:key "a"} "alpha"]]
+                              :name "double-drop-test"})
+                 ctx))
+    (view:drop)
+    (local (ok err)
+        (pcall (fn []
+                 (view:drop))))
+    (assert (not ok) "Dropping SearchView twice should error")
+    (assert (string.find (tostring err) "SearchView dropped twice" 1 true)))
+
+(fn search-view-drop-drops-owned-children []
+    (local ctx (make-ui-context))
+    (local view ((SearchView {:items [[{:key "a"} "alpha"]]
+                              :name "drop-children-test"})
+                 ctx))
+    (assert view.list-view.scroll-view "SearchView test expects ListView to build a scroll-view")
+    (view:drop)
+    (local (input-ok input-err)
+        (pcall (fn []
+                 (view.input:drop))))
+    (assert (not input-ok) "SearchView drop should already drop its input child")
+    (assert (string.find (tostring input-err) "Input dropped twice" 1 true))
+    (assert (= view.list-view.scroll-view nil) "SearchView drop should tear down ListView scroll-view")
+    (assert (= view.list-view.content-layout nil) "SearchView drop should tear down ListView content layout"))
+
+(fn search-view-public-api-errors-after-drop []
+    (local ctx (make-ui-context))
+    (local view ((SearchView {:items [[{:key "a"} "alpha"]]
+                              :name "post-drop-api-test"})
+                 ctx))
+    (view:drop)
+    (local (set-ok set-err)
+        (pcall (fn []
+                 (view:set-items [[{:key "b"} "beta"]]))))
+    (assert (not set-ok) "SearchView set-items should error after drop")
+    (assert (string.find (tostring set-err) "SearchView set_items after drop" 1 true))
+    (local (update-ok update-err)
+        (pcall (fn []
+                 (view:update-list-view))))
+    (assert (not update-ok) "SearchView update-list-view should error after drop")
+    (assert (string.find (tostring update-err) "SearchView update_list_view after drop" 1 true)))
+
 (table.insert tests {:name "SearchView filters items with query" :fn search-view-filters-items})
 (table.insert tests {:name "SearchView default builder emits submitted" :fn search-view-default-builder-emits-submitted})
+(table.insert tests {:name "SearchView double drop errors" :fn search-view-double-drop-errors})
+(table.insert tests {:name "SearchView drop drops owned children" :fn search-view-drop-drops-owned-children})
+(table.insert tests {:name "SearchView public API errors after drop" :fn search-view-public-api-errors-after-drop})
 
 (local main
   (fn []

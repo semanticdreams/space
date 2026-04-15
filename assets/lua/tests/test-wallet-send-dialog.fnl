@@ -243,6 +243,62 @@
         (table.insert tests {:name "WalletSendDialog drop preserves injected RPC and cancels polling"
                              :fn wallet-send-dialog-drop-preserves-injected-rpc-and-cancels-polling})
 
+        (fn wallet-send-dialog-late-callbacks-after-drop-are-ignored []
+            (RuntimeTimers.clear)
+            (local ctx (make-test-ctx))
+            (local wallet {:id "arbitrumnova:0x9858EfFD232B4033E47d90003D41EC34EcaEda94"
+                           :name "Primary"
+                           :coin "arbitrumnova"
+                           :address "0x9858EfFD232B4033E47d90003D41EC34EcaEda94"
+                           :mnemonic "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"})
+            (local manager {:get-active (fn [_self] wallet)})
+            (var pending-count-calls 0)
+            (var nonce-callback nil)
+            (var gas-price-callback nil)
+            (var estimate-callback nil)
+            (local rpc {:fetch-nonce (fn [_self _address]
+                                       {:on-complete (fn [cb]
+                                                       (set nonce-callback cb))})
+                        :fetch-gas-price (fn [_self]
+                                           {:on-complete (fn [cb]
+                                                           (set gas-price-callback cb))})
+                        :estimate-gas (fn [_self _opts]
+                                        {:on-complete (fn [cb]
+                                                        (set estimate-callback cb))})
+                        :send-raw-transaction (fn [_self _raw]
+                                                {:on-complete (fn [_cb] nil)})
+                        :poll (fn [_self _max] nil)
+                        :pending-count (fn [_self]
+                                         (set pending-count-calls (+ pending-count-calls 1))
+                                         0)
+                        :drop (fn [_self] nil)})
+            (local dialog
+                ((WalletSendDialog {:manager manager
+                                    :rpc rpc})
+                 ctx))
+            (local elements (find-send-elements dialog))
+            ((. elements :to-input):set-text "0x7d8bf18C7cE84b3E175b339c4Ca93aEd1dD166F1")
+            ((. elements :amount-input):set-text "1")
+            ((. elements :data-input):set-text "")
+            ((. elements :send-button):on-click {:button 1})
+            (assert nonce-callback "WalletSendDialog test requires a captured nonce callback")
+            (assert gas-price-callback "WalletSendDialog test requires a captured gas-price callback")
+            (assert estimate-callback "WalletSendDialog test requires a captured estimate callback")
+            (dialog:drop)
+            (local calls-before pending-count-calls)
+            (local (ok err)
+                (pcall (fn []
+                         (nonce-callback true "0x1" nil "mock")
+                         (gas-price-callback true "0x2a" nil "mock")
+                         (estimate-callback true "0x5208" nil "mock"))))
+            (assert ok (or err "WalletSendDialog late callbacks should be ignored after drop"))
+            (assert (= pending-count-calls calls-before)
+                    "WalletSendDialog late callbacks should not touch RPC state after drop")
+            (RuntimeTimers.clear))
+
+        (table.insert tests {:name "WalletSendDialog late callbacks after drop are ignored"
+                             :fn wallet-send-dialog-late-callbacks-after-drop-are-ignored})
+
         (local main
             (fn []
                 (local runner (require :tests/runner))

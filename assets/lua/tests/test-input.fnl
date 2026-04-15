@@ -327,6 +327,18 @@
           (input:drop)
           (assert (= (spy.disconnect-count) 1)))))))
 
+(fn input-double-drop-errors []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {}) ctx-info.ctx))
+      (input:drop)
+      (local (ok err)
+        (pcall (fn []
+                 (input:drop))))
+      (assert (not ok) "Dropping an input twice should error")
+      (assert (string.find (tostring err) "Input dropped twice" 1 true)))))
+
 (fn input-caret-switches-shape-with-mode []
       (with-pointer-stubs
         (fn [_stubs]
@@ -619,6 +631,7 @@
 (table.insert tests {:name "Input registers for double click" :fn input-registers-double-click})
 (table.insert tests {:name "Text and insert states edit input text" :fn input-text-and-insert-states-edit-text})
 (table.insert tests {:name "Focused input connects through input state" :fn input-focus-connects-to-input-state})
+(table.insert tests {:name "Input double drop errors" :fn input-double-drop-errors})
 (table.insert tests {:name "Input blur via click restores normal state" :fn input-blur-via-click-restores-normal-state})
 (table.insert tests {:name "Input blur returns to normal state" :fn input-blur-returns-to-normal-state})
 (table.insert tests {:name "Input caret switches between block and bar by mode" :fn input-caret-switches-shape-with-mode})

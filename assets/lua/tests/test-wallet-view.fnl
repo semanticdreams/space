@@ -224,6 +224,48 @@
 
 (table.insert tests {:name "WalletView balance formatting" :fn wallet-view-balance-formatting})
 
+(fn wallet-view-late-balance-callback-after-drop-is-ignored []
+    (RuntimeTimers.clear)
+    (local ctx (make-test-ctx))
+    (local target {:add-panel-child (fn [_self _opts] nil)})
+    (local manager {:store nil
+                    :get-active (fn [_self] nil)
+                    :set-active (fn [_self wallet] wallet)
+                    :load-active (fn [_self] nil)})
+    (local wallet {:id "w1"
+                   :name "Wallet"
+                   :coin "arbitrumnova"
+                   :address "0xabc"})
+    (var pending-count-calls 0)
+    (var future-callback nil)
+    (local rpc {:fetch-balance (fn [_self _address]
+                                 {:on-complete (fn [cb]
+                                                 (set future-callback cb))})
+                :poll (fn [_self _max] nil)
+                :pending-count (fn [_self]
+                                 (set pending-count-calls (+ pending-count-calls 1))
+                                 0)
+                :drop (fn [_self] nil)})
+    (local dialog
+        ((WalletView {:target target
+                      :manager manager
+                      :rpc rpc
+                      :current-wallet wallet})
+         ctx))
+    (assert future-callback "WalletView test requires a captured completion callback")
+    (dialog:drop)
+    (local calls-before pending-count-calls)
+    (local (ok err)
+        (pcall (fn []
+                 (future-callback true "0x2a" nil "mock"))))
+    (assert ok (or err "WalletView late balance callback should be ignored after drop"))
+    (assert (= pending-count-calls calls-before)
+            "WalletView late callback should not touch RPC state after drop")
+    (RuntimeTimers.clear))
+
+(table.insert tests {:name "WalletView late balance callback after drop is ignored"
+                     :fn wallet-view-late-balance-callback-after-drop-is-ignored})
+
 (fn wallet-view-copy-address []
     (local ctx (make-test-ctx))
     (local target {:add-panel-child (fn [_self _opts] nil)})

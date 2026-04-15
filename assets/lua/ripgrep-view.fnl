@@ -65,6 +65,9 @@
                  :last-total-results 0
                  :last-shown-results 0
                  :results-truncated false})
+    (fn assert-live [action]
+      (assert (not view.__dropped)
+              (.. "RipgrepView " action " after drop")))
 
     (set view.path (as-string (resolve-field runtime options :path ".") "."))
     (set view.query (as-string (resolve-field runtime options :query "") ""))
@@ -125,20 +128,24 @@
        ctx))
 
     (fn set-status [self text]
+      (assert-live "set_status")
       (status-text:set-text (as-string text ""))
       self)
 
     (fn set-path [self value]
+      (assert-live "set_path")
       (set self.path (as-string value ""))
       (path-input:set-text self.path)
       self)
 
     (fn set-query [self value]
+      (assert-live "set_query")
       (set self.query (as-string value ""))
       (query-input:set-text self.query)
       self)
 
     (fn set-results [self matches]
+      (assert-live "set_results")
       (local max-results
         (resolve-field runtime options :max-results default-max-results))
       (local max-label-chars
@@ -155,11 +162,13 @@
       self)
 
     (fn cancel-search [self opts]
+      (assert-live "cancel_search")
       (if (and self.search-token self.search-token.cancel)
           (self.search-token:cancel opts)
           false))
 
     (fn run-search [self opts]
+      (assert-live "run_search")
       (local run-options (or opts {}))
       (local query (as-string (or run-options.query self.query) ""))
       (local path (as-string (or run-options.path self.path) "."))
@@ -187,34 +196,35 @@
                     :hidden run-options.hidden
                     :follow run-options.follow
                     :word-regexp run-options.word-regexp
-                    :max-count (or run-options.max-count
+                   :max-count (or run-options.max-count
                                    (resolve-field runtime options :max-count default-max-count-per-file))
                     :max-filesize (or run-options.max-filesize
                                       (resolve-field runtime options :max-filesize default-max-filesize))}
                    (fn [result]
-                     (if result.cancelled
-                         (self:set-status "Search cancelled")
-                         (if result.timed-out
-                             (self:set-status "Search timed out")
-                             (if (not result.ok)
-                                 (self:set-status
-                                   (.. "Search failed"
-                                       (if (> (# (or result.stderr "")) 0)
-                                           (.. ": " (string.gsub result.stderr "\n$" ""))
-                                           "")))
-                                 (do
-                                   (self:set-results result.matches)
-                                   (if self.results-truncated
-                                       (self:set-status
-                                         (string.format "Found %d matches (showing first %d)"
-                                                        self.last-total-results
-                                                        self.last-shown-results))
-                                       (self:set-status
-                                         (string.format "Found %d matches" self.last-total-results)))))))
-                     (if (and result result.matches)
-                         (when (not (and result.ok (not result.cancelled) (not result.timed-out)))
-                           (self:set-results result.matches))
-                         (self:set-results [])))))
+                     (when (not self.__dropped)
+                       (if result.cancelled
+                           (self:set-status "Search cancelled")
+                           (if result.timed-out
+                               (self:set-status "Search timed out")
+                               (if (not result.ok)
+                                   (self:set-status
+                                     (.. "Search failed"
+                                         (if (> (# (or result.stderr "")) 0)
+                                             (.. ": " (string.gsub result.stderr "\n$" ""))
+                                             "")))
+                                   (do
+                                     (self:set-results result.matches)
+                                     (if self.results-truncated
+                                         (self:set-status
+                                           (string.format "Found %d matches (showing first %d)"
+                                                          self.last-total-results
+                                                          self.last-shown-results))
+                                         (self:set-status
+                                           (string.format "Found %d matches" self.last-total-results)))))))
+                       (if (and result result.matches)
+                           (when (not (and result.ok (not result.cancelled) (not result.timed-out)))
+                             (self:set-results result.matches))
+                           (self:set-results []))))))
             true)))
 
     (local path-listener
@@ -244,19 +254,16 @@
 
     (set view.drop
       (fn [self]
-        (self:cancel-search {:suppress-callback true})
+        (assert (not self.__dropped) "RipgrepView dropped twice")
+        (set self.__dropped true)
+        (when (and self.search-token self.search-token.cancel)
+          (self.search-token:cancel {:suppress-callback true}))
         (when self.__path-listener
           (path-input.model.changed:disconnect self.__path-listener true)
           (set self.__path-listener nil))
         (when self.__query-listener
           (query-input.model.changed:disconnect self.__query-listener true)
           (set self.__query-listener nil))
-        (results-list:drop)
-        (status-text:drop)
-        (query-row:drop)
-        (search-button:drop)
-        (query-input:drop)
-        (path-input:drop)
         (root:drop)))
 
     view))

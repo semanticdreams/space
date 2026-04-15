@@ -2,6 +2,8 @@
 
 This note documents the runtime ownership and lifecycle rules that prevent stale-callback, use-after-drop, and rebuild-state bugs.
 
+For widget subtree teardown specifically, see [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown).
+
 ## Why This Exists
 
 Runtime bugs in `space` often come from one of four failures:
@@ -36,9 +38,18 @@ Example:
 
 ### 2. `drop` is terminal
 
-After `drop`, public methods and callback entry points must assert immediately.
+After `drop`, public methods and owned callback entry points should usually assert immediately.
 
-Do not silently ignore post-drop calls. Silent behavior converts lifecycle bugs into corrupted state and delayed failures.
+Do not silently ignore post-drop calls in normal owned runtime flow. Silent behavior converts lifecycle bugs into corrupted state and delayed failures.
+
+The main exception is truly external late completion:
+
+- process callbacks
+- RPC futures
+- editor/file chooser completions
+- similar async work that may already be in flight and is not fully suppressible by construction
+
+Those paths should usually return quietly after confirming the target object is already dropped, unless the async source itself is supposed to be owned and cancelled strictly enough that a late callback would indicate a real bug.
 
 Good:
 
@@ -87,7 +98,7 @@ Use assertions at:
 
 - lifecycle boundaries: create, activate, deactivate, drop
 - public mutation entry points: reject use after drop
-- signal/callback entry points: reject callbacks into dropped objects
+- owned signal/callback entry points: reject callbacks into dropped objects
 - required build/update context boundaries: fail if critical dependencies are missing
 - restore/persistence boundaries: fail on structurally invalid state
 

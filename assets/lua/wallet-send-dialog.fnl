@@ -27,7 +27,7 @@
 
 (fn build-wallet-send-dialog [opts ctx runtime-opts]
     (local options (or opts {}))
-    (local rpc (or options.rpc (WalletRpc {})))
+    (var rpc (or options.rpc (WalletRpc {})))
     (local owns-rpc? (not options.rpc))
     (local state {:to ""
                   :amount ""
@@ -46,11 +46,27 @@
     (var gas-limit-text nil)
     (var tx-text nil)
     (var poll-timer nil)
+    (var dropped? false)
+    (var send-attempt-id 0)
+
+    (fn next-send-attempt-id []
+        (set send-attempt-id (+ send-attempt-id 1))
+        send-attempt-id)
+
+    (fn attempt-live? [attempt-id]
+        (and (not dropped?)
+             (= attempt-id send-attempt-id)))
 
     (fn stop-polling []
         (when poll-timer
             (poll-timer:drop)
             (set poll-timer nil)))
+
+    (fn stop-polling-if-idle [attempt-id]
+        (when (and (attempt-live? attempt-id)
+                   rpc
+                   (= (rpc:pending-count) 0))
+            (stop-polling)))
 
     (fn ensure-polling []
         (when (and rpc (> (rpc:pending-count) 0) (not poll-timer))
@@ -122,18 +138,19 @@
         (tset state :gas-limit nil)
         (tset state :tx-hash nil)
         (set-status "Estimating gas...")
+        (local attempt-id (next-send-attempt-id))
         (var done? false)
         (var nonce nil)
         (var gas-price nil)
         (var gas-limit nil)
 
         (fn fail [message]
-            (when (not done?)
+            (when (and (attempt-live? attempt-id) (not done?))
                 (set done? true)
                 (set-error (or message "Send failed"))))
 
         (fn maybe-send []
-            (when (and (not done?) nonce gas-price gas-limit)
+            (when (and (attempt-live? attempt-id) (not done?) nonce gas-price gas-limit)
                 (set done? true)
                 (set state.nonce nonce)
                 (tset state :gas-price gas-price)
@@ -159,15 +176,15 @@
                         (ensure-polling)
                         (future.on-complete
                           (fn [ok value err _source]
-                              (when (= (rpc:pending-count) 0)
-                                  (stop-polling))
-                              (if ok
-                                  (do
-                                      (tset state :tx-hash value)
-                                      (set-status "Transaction sent")
-                                      (when options.on-sent
-                                          (options.on-sent value)))
-                                  (fail err))))))))
+                              (stop-polling-if-idle attempt-id)
+                              (when (attempt-live? attempt-id)
+                                  (if ok
+                                      (do
+                                          (tset state :tx-hash value)
+                                          (set-status "Transaction sent")
+                                          (when options.on-sent
+                                              (options.on-sent value)))
+                                      (fail err)))))))))
 
         (local nonce-future (rpc:fetch-nonce wallet.address))
         (local gas-price-future (rpc:fetch-gas-price))
@@ -179,37 +196,37 @@
         (ensure-polling)
         (nonce-future.on-complete
           (fn [ok value err _source]
-              (when (= (rpc:pending-count) 0)
-                  (stop-polling))
-              (if ok
-                  (do
-                      (set nonce value)
-                      (set state.nonce value)
-                      (update-status)
-                      (maybe-send))
-                  (fail err))))
+              (stop-polling-if-idle attempt-id)
+              (when (attempt-live? attempt-id)
+                  (if ok
+                      (do
+                          (set nonce value)
+                          (set state.nonce value)
+                          (update-status)
+                          (maybe-send))
+                      (fail err)))))
         (gas-price-future.on-complete
           (fn [ok value err _source]
-              (when (= (rpc:pending-count) 0)
-                  (stop-polling))
-              (if ok
-                  (do
-                      (set gas-price value)
-                      (tset state :gas-price value)
-                      (update-status)
-                      (maybe-send))
-                  (fail err))))
+              (stop-polling-if-idle attempt-id)
+              (when (attempt-live? attempt-id)
+                  (if ok
+                      (do
+                          (set gas-price value)
+                          (tset state :gas-price value)
+                          (update-status)
+                          (maybe-send))
+                      (fail err)))))
         (estimate-future.on-complete
           (fn [ok value err _source]
-              (when (= (rpc:pending-count) 0)
-                  (stop-polling))
-              (if ok
-                  (do
-                      (set gas-limit value)
-                      (tset state :gas-limit value)
-                      (update-status)
-                      (maybe-send))
-                  (fail err)))))
+              (stop-polling-if-idle attempt-id)
+              (when (attempt-live? attempt-id)
+                  (if ok
+                      (do
+                          (set gas-limit value)
+                          (tset state :gas-limit value)
+                          (update-status)
+                          (maybe-send))
+                      (fail err))))))
 
     (fn from-row [child-ctx]
         (local builder (Text {:text "From: -"
@@ -331,9 +348,12 @@
         (local base-drop dialog.drop)
         (set dialog.drop
              (fn [self]
+                 (set dropped? true)
+                 (next-send-attempt-id)
                  (stop-polling)
                  (when (and rpc owns-rpc?)
-                     (rpc:drop))
+                     (rpc:drop)
+                     (set rpc nil))
                  (when base-drop
                      (base-drop self)))))
     dialog)

@@ -103,6 +103,31 @@
       (assert (> view.last-total-results 5) "view should track original total result count")
       (view:drop))))
 
+(fn ripgrep-view-double-drop-errors []
+  (local ctx (make-ctx))
+  (local view ((RipgrepView {:path "." :query ""}) ctx))
+  (view:drop)
+  (local (ok err)
+    (pcall (fn []
+             (view:drop))))
+  (assert (not ok) "Dropping RipgrepView twice should error")
+  (assert (string.find (tostring err) "RipgrepView dropped twice" 1 true)))
+
+(fn ripgrep-view-public-api-errors-after-drop []
+  (local ctx (make-ctx))
+  (local view ((RipgrepView {:path "." :query ""}) ctx))
+  (view:drop)
+  (local (status-ok status-err)
+    (pcall (fn []
+             (view:set-status "x"))))
+  (assert (not status-ok) "RipgrepView set-status should error after drop")
+  (assert (string.find (tostring status-err) "RipgrepView set_status after drop" 1 true))
+  (local (run-ok run-err)
+    (pcall (fn []
+             (view:run-search))))
+  (assert (not run-ok) "RipgrepView run-search should error after drop")
+  (assert (string.find (tostring run-err) "RipgrepView run_search after drop" 1 true)))
+
 (table.insert tests {:name "ripgrep view prefills runtime options"
                      :fn ripgrep-view-prefills-from-runtime-options})
 (table.insert tests {:name "ripgrep view search populates list results"
@@ -113,6 +138,10 @@
                      :fn ripgrep-view-cancels-previous-search-before-starting-next})
 (table.insert tests {:name "ripgrep view trims large result sets"
                      :fn ripgrep-view-trims-large-result-sets})
+(table.insert tests {:name "ripgrep view double drop errors"
+                     :fn ripgrep-view-double-drop-errors})
+(table.insert tests {:name "ripgrep view public API errors after drop"
+                     :fn ripgrep-view-public-api-errors-after-drop})
 
 (local main
   (fn []

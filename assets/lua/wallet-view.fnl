@@ -48,7 +48,7 @@
                      (and options.manager options.manager.store)
                      (WalletStore {})))
     (local manager (or options.manager (WalletManager {:store store})))
-    (local rpc (or options.rpc (WalletRpc {})))
+    (var rpc (or options.rpc (WalletRpc {})))
     (local owns-rpc? (not options.rpc))
     (var dialog nil)
     (var name-text nil)
@@ -59,14 +59,30 @@
     (var poll-timer nil)
     (var balance-wallet-id nil)
     (var current-wallet nil)
+    (var dropped? false)
+    (var balance-request-id 0)
     (local target (resolve-target ctx options))
     (assert (and target target.add-panel-child)
             "WalletView requires a pointer target with add-panel-child")
+
+    (fn next-balance-request-id []
+        (set balance-request-id (+ balance-request-id 1))
+        balance-request-id)
+
+    (fn request-live? [request-id]
+        (and (not dropped?)
+             (= request-id balance-request-id)))
 
     (fn stop-polling []
         (when poll-timer
             (poll-timer:drop)
             (set poll-timer nil)))
+
+    (fn stop-polling-if-idle [request-id]
+        (when (and (request-live? request-id)
+                   rpc
+                   (= (rpc:pending-count) 0))
+            (stop-polling)))
 
     (fn ensure-polling []
         (when (and rpc (> (rpc:pending-count) 0) (not poll-timer))
@@ -111,18 +127,20 @@
         (local address (and current current.address))
         (if (and id address rpc)
             (when (or force? (not (= id balance-wallet-id)))
+                (local request-id (next-balance-request-id))
                 (set balance-wallet-id id)
                 (update-balance "loading...")
                 (local future (rpc:fetch-balance address))
                 (ensure-polling)
                 (future.on-complete
                  (fn [ok value err _source]
-                     (when (= (rpc:pending-count) 0)
-                         (stop-polling))
-                     (if ok
-                         (update-balance (format-balance value))
-                         (update-balance (or err "error"))))))
+                     (stop-polling-if-idle request-id)
+                     (when (request-live? request-id)
+                         (if ok
+                             (update-balance (format-balance value))
+                             (update-balance (or err "error")))))))
             (do
+                (next-balance-request-id)
                 (set balance-wallet-id nil)
                 (update-balance "-"))))
 
@@ -273,9 +291,12 @@
     (when dialog
         (local base-drop dialog.drop)
         (set dialog.drop (fn [self]
+                           (set dropped? true)
+                           (next-balance-request-id)
                            (stop-polling)
                            (when (and rpc owns-rpc?)
-                               (rpc:drop))
+                               (rpc:drop)
+                               (set rpc nil))
                            (when base-drop
                                (base-drop self)))))
     dialog)
