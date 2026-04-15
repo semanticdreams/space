@@ -6,6 +6,7 @@
 (local Stack (require :stack))
 (local Padding (require :padding))
 (local Aligned (require :aligned))
+(local RuntimeTimers (require :runtime-timers))
 
 (local GraphViewUtils (require :graph/view/utils))
 (local truncate-with-ellipsis GraphViewUtils.truncate-with-ellipsis)
@@ -152,7 +153,7 @@
     (local labeled-faces [front back right left])
 
     (var current-lod nil)
-    (var update-handler nil)
+    (var lod-timer nil)
 
     (fn current-camera-position []
       (and app.camera app.camera.position))
@@ -214,11 +215,12 @@
 
     (clickables:register-right-click right-click-target)
 
-    (when (and app.engine app.engine.events app.engine.events.updated)
-      (set update-handler
-           (app.engine.events.updated:connect
-             (fn [_payload]
-               (sync-lod false)))))
+    (set lod-timer
+         (RuntimeTimers.Interval
+           {:interval-ms 16
+            :callback (fn []
+                        (sync-lod false))}))
+    (lod-timer:start)
     (sync-lod true)
 
     (set cuboid.node node)
@@ -230,9 +232,9 @@
     (set cuboid.drop
          (fn [self]
            (clickables:unregister-right-click right-click-target)
-           (when (and update-handler app.engine app.engine.events app.engine.events.updated)
-             (app.engine.events.updated:disconnect update-handler true)
-             (set update-handler nil))
+           (when lod-timer
+             (lod-timer:drop)
+             (set lod-timer nil))
            (original-drop self)))
     cuboid))
 

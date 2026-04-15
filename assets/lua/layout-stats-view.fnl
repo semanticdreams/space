@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local Chart (require :chart))
 (local BarSeries (require :bar-series))
+(local RuntimeTimers (require :runtime-timers))
 
 (local default-max-frames 10)
 
@@ -67,7 +68,7 @@
         (local layout-set (and bar-sets (. bar-sets 2)))
         (local measure-points (and measure-set measure-set.points))
         (local layout-points (and layout-set layout-set.points))
-        (var update-handler nil)
+        (var refresh-timer nil)
 
         (fn mutate-extent []
             (when (and bar-series bar-sets)
@@ -100,22 +101,26 @@
                     (chart.layout:layouter)))
             changed)
 
-        (fn connect-updates []
-            (when (and app.engine app.engine.events app.engine.events.updated (not update-handler))
-                (set update-handler (app.engine.events.updated:connect apply-records))))
+        (fn stop-refresh-timer []
+            (when refresh-timer
+                (refresh-timer:drop)
+                (set refresh-timer nil)))
 
-        (fn disconnect-updates []
-            (when (and app.engine app.engine.events app.engine.events.updated update-handler)
-                (app.engine.events.updated:disconnect update-handler true)
-                (set update-handler nil)))
+        (fn ensure-refresh-timer []
+            (when (not refresh-timer)
+                (set refresh-timer
+                     (RuntimeTimers.Interval
+                       {:interval-ms 16
+                        :callback apply-records}))
+                (refresh-timer:start)))
 
         (apply-records nil)
-        (connect-updates)
+        (ensure-refresh-timer)
 
         (local base-drop chart.drop)
         (set chart.refresh apply-records)
         (set chart.drop (fn [self]
-                          (disconnect-updates)
+                          (stop-refresh-timer)
                           (when base-drop
                               (base-drop self))
                           (set chart.series nil)

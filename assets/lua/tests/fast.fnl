@@ -11,6 +11,7 @@
     :tests.test-render-capture
     :tests.test-next-frame
     :tests.test-runtime-timers
+    :tests.test-layout-stats-view
     :tests.test-audio-input
     :tests.test-aubio
     :tests.test-aubio-helpers
@@ -35,6 +36,7 @@
     :tests.test-tetris-game
     :tests.test-tetris-state
     :tests.test-tetris-view
+    :tests.test-graph-node-cube
     :tests.test-menu
     :tests.test-sized
     :tests.test-container
