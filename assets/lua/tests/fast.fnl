@@ -22,6 +22,7 @@
     :tests.test-tab-view
     :tests.test-icons
     :tests.test-combo-box
+    :tests.test-font
     :tests.test-theme-widgets
     :tests.test-theme-switch
     :tests.test-text

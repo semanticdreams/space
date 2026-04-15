@@ -1512,6 +1512,44 @@
           (strategy.restore panel)
           true)))
 
+  (fn restore-panel-state [self panel panel-idx]
+    (assert (= (type panel) :table) "Scene.restore-panel-state panel must be table")
+    (local kind panel.kind)
+    (local (ok parsed-position) (pcall array->vec3 panel.position))
+    (local restored-position
+      (if (and ok (safe-vec3? parsed-position))
+          parsed-position
+          nil))
+    (local (ok-size parsed-size) (pcall array->vec3 panel.size))
+    (local restored-size
+      (if (and ok-size (safe-vec3? parsed-size))
+          parsed-size
+          (glm.vec3 4 4 4)))
+    (when (and panel.position (not restored-position))
+      (logging.warn (string.format
+                      "[scene] dropping invalid restored panel position at index %d (kind=%s)"
+                      panel-idx
+                      (tostring kind))))
+    (when (and panel.size (not (and ok-size (safe-vec3? parsed-size))))
+      (logging.warn (string.format
+                      "[scene] replacing invalid restored panel size at index %d (kind=%s)"
+                      panel-idx
+                      (tostring kind))))
+    (if (= kind "graph-node-cube")
+        (self:add-graph-node-cube {:node-key panel.node-key
+                                   :label panel.label
+                                   :size restored-size
+                                   :position restored-position
+                                   :rotation (array->quat panel.rotation)})
+        (= kind "physics-cuboid")
+        (self:add-physics-body {:size restored-size
+                                :position restored-position
+                                :rotation (array->quat panel.rotation)})
+        (= kind "demo-browser")
+        (self:add-demo-browser {:position restored-position
+                                :rotation (array->quat panel.rotation)})
+        (restore-panel-with-fallback self panel panel-idx)))
+
   (fn restore-state [self state]
     (local payload (or state {}))
     (assert payload.lights "Scene.restore-state requires :lights")
@@ -1524,42 +1562,7 @@
     (assert (= (type panels) :table) "Scene.restore-state requires :panels table")
     (each [panel-idx panel (ipairs panels)]
       (assert (= (type panel) :table) "Scene.restore-state panel entries must be tables")
-      (local kind panel.kind)
-      (local (ok parsed-position) (pcall array->vec3 panel.position))
-      (local restored-position
-        (if (and ok (safe-vec3? parsed-position))
-            parsed-position
-            nil))
-      (local (ok-size parsed-size) (pcall array->vec3 panel.size))
-      (local restored-size
-        (if (and ok-size (safe-vec3? parsed-size))
-            parsed-size
-            (glm.vec3 4 4 4)))
-      (when (and panel.position (not restored-position))
-        (logging.warn (string.format
-                        "[scene] dropping invalid restored panel position at index %d (kind=%s)"
-                        panel-idx
-                        (tostring kind))))
-      (when (and panel.size (not (and ok-size (safe-vec3? parsed-size))))
-        (logging.warn (string.format
-                        "[scene] replacing invalid restored panel size at index %d (kind=%s)"
-                        panel-idx
-                        (tostring kind))))
-      (if (= kind "graph-node-cube")
-          (self:add-graph-node-cube {:node-key panel.node-key
-                                     :label panel.label
-                                     :size restored-size
-                                     :position restored-position
-                                     :rotation (array->quat panel.rotation)})
-          (= kind "physics-cuboid")
-          (self:add-physics-body {:size restored-size
-                                  :position restored-position
-                                  :rotation (array->quat panel.rotation)})
-          (= kind "demo-browser")
-          (self:add-demo-browser {:position restored-position
-                                  :rotation (array->quat panel.rotation)})
-          (do
-            (restore-panel-with-fallback self panel panel-idx))))
+      (restore-panel-state self panel panel-idx))
     (self:sync-scene-objects)
     true)
 
@@ -1602,6 +1605,7 @@
 (set self.on-viewport-changed on-viewport-changed)
 (set self.capture-state capture-state)
 (set self.restore-state restore-state)
+(set self.restore-panel-state restore-panel-state)
 (set self.set-light-state set-light-state)
 (set self.get-light-state get-light-state)
 (set self.set-skybox-state set-skybox-state)

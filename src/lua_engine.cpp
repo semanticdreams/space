@@ -1,5 +1,6 @@
 #include "lua_engine.h"
 
+#include <chrono>
 #include <memory>
 
 #include "engine.h"
@@ -106,11 +107,14 @@ void lua_bind_engine(sol::state& lua)
         engine_table["events"] = events;
         engine_table["frame-id"] = static_cast<uint64_t>(0);
         engine_table.set_function("get-asset-path", &AssetManager::getAssetPath);
-
         EngineConfig config = parse_engine_config(options);
         auto handle = std::make_shared<EngineHandle>(lua, engine_table, config);
         active_engine = handle;
 
+        engine_table.set_function("now-ms", [](sol::object) {
+            const auto now = std::chrono::steady_clock::now().time_since_epoch();
+            return std::chrono::duration<double, std::milli>(now).count();
+        });
         engine_table.set_function("start", [handle](sol::object) { return handle->start(); });
         engine_table.set_function("run", [handle](sol::object) { handle->run(); });
         engine_table.set_function("shutdown", [handle](sol::object) { handle->shutdown_engine(); });

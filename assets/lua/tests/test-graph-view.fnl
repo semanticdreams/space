@@ -1856,6 +1856,46 @@
             (view2:drop)
             (graph2:drop))))
 
+(fn graph-view-batches-restore-graph-state []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (graph:register-key-loader
+                "test"
+                (fn [key]
+                    (local id (string.match key "^test:(.+)$"))
+                    (when id
+                        (Graph.GraphNode {:key key
+                                          :label id}))))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (local original-start view.graph-layout.start)
+            (local original-label-update view.labels.update)
+            (var start-count 0)
+            (var label-update-count 0)
+            (set view.graph-layout.start
+                 (fn [self]
+                     (set start-count (+ start-count 1))
+                     (original-start self)))
+            (set view.labels.update
+                 (fn [self points nodes opts]
+                     (set label-update-count (+ label-update-count 1))
+                     (original-label-update self points nodes opts)))
+            (view:restore-graph-state
+                {:nodes ["test:a" "test:b"]
+                 :edges [{:source "test:a"
+                          :target "test:b"}]})
+            (assert (= start-count 1)
+                    "GraphView restore should start layout once for the whole batch")
+            (assert (= label-update-count 1)
+                    "GraphView restore should refresh labels once for the whole batch")
+            (assert (= (graph:node-count) 2))
+            (assert (= (graph:edge-count) 1))
+            (assert (. view.points (graph:lookup "test:a")))
+            (assert (. view.points (graph:lookup "test:b")))
+            (view:drop)
+            (graph:drop))))
+
 (fn graph-view-updates-node-labels-without-lod-change []
     (with-temp-data-dir
         (fn [_root]
@@ -1941,6 +1981,7 @@
 (table.insert tests {:name "Graph restores saved node position" :fn graph-restores-saved-node-position})
 (table.insert tests {:name "GraphView saves positions after force layout stabilizes" :fn graph-saves-positions-after-stabilizing})
 (table.insert tests {:name "GraphView keeps saved positions when rebuilt" :fn graph-keeps-saved-positions-when-rebuilt})
+(table.insert tests {:name "GraphView batches restore graph state" :fn graph-view-batches-restore-graph-state})
 (table.insert tests {:name "GraphView updates node labels without LOD change" :fn graph-view-updates-node-labels-without-lod-change})
 
 (local main

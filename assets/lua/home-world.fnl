@@ -287,20 +287,27 @@
     (PhysicsContainment.serialize-config
       (PhysicsContainment.normalize-config (or runtime-config state-config default-containment-config))))
 
-  (fn apply-runtime-containment! [world opts]
-    (local options (or opts {}))
-    (local config (resolve-runtime-containment-config world))
-    (local scene (or options.scene
-                     (and world.runtime world.runtime.scene)))
-    (set app.physics-containment-config config)
-    (PhysicsContainment.ensure-installed {:scene scene
-                                          :config config})
+  (fn set-runtime-containment-config! [world config]
+    (local serialized
+      (PhysicsContainment.serialize-config
+        (PhysicsContainment.normalize-config (or config default-containment-config))))
+    (set app.physics-containment-config serialized)
     (when world.state
       (when (not world.state.physics)
         (set world.state.physics {}))
-      (set world.state.physics.containment config))
+      (set world.state.physics.containment serialized))
     (when world.runtime
-      (set world.runtime.physics-containment-config config))
+      (set world.runtime.physics-containment-config serialized))
+    serialized)
+
+  (fn apply-runtime-containment! [world opts]
+    (local options (or opts {}))
+    (local config
+      (set-runtime-containment-config! world (resolve-runtime-containment-config world)))
+    (local scene (or options.scene
+                     (and world.runtime world.runtime.scene)))
+    (PhysicsContainment.ensure-installed {:scene scene
+                                          :config config})
     config)
 
   (fn clear-active-runtime-containment! [world]
@@ -314,6 +321,17 @@
   (fn apply-runtime-physics-policy! []
     (when (and app.engine app.engine.physics)
       (app.engine.physics:setGravity 0 -25 0))
+    true)
+
+  (fn hydration-pending? [runtime]
+    (local hydration (and runtime runtime.hydration))
+    (and hydration (not hydration.completed?)))
+
+  (fn sync-startup-physics-pause! [world]
+    (when (and app app.set-startup-physics-paused)
+      (app.set-startup-physics-paused world.id
+                                      (and world.active?
+                                           (hydration-pending? world.runtime))))
     true)
 
   (fn apply-runtime-light-state! [world]
@@ -345,6 +363,90 @@
                   (string.format "HomeWorld %s requires scene.background" world.id))
           (string.format "HomeWorld.apply-runtime-background-state %s" world.id)))))
 
+  (fn hydration-now-ms []
+    (assert (and app app.engine app.engine.now-ms)
+            "HomeWorld hydration timing requires app.engine.now-ms")
+    (app.engine:now-ms))
+
+  (fn clone-array-slice [entries start-index]
+    (local out [])
+    (each [idx entry (ipairs (or entries []))]
+      (when (>= idx start-index)
+        (table.insert out (clone-table entry))))
+    out)
+
+  (fn merge-panel-state [restored pending]
+    (local panels [])
+    (each [_ panel (ipairs (or restored []))]
+      (table.insert panels panel))
+    (each [_ panel (ipairs (or pending []))]
+      (table.insert panels (clone-table panel)))
+    panels)
+
+  (fn remaining-hydration-panels [hydration]
+    (if hydration
+        (clone-array-slice hydration.scene-panels hydration.scene-panel-index)
+        []))
+
+  (fn mark-runtime-hydration-complete! [world runtime hydration]
+    (when (and hydration (not hydration.completed?))
+      (set hydration.completed? true)
+      (set hydration.phase "complete")
+      (set hydration.completed-at-ms (hydration-now-ms))
+      (sync-startup-physics-pause! world)
+      (logging.info
+        (string.format
+          "[world] %s hydration completed in %.2fms"
+          world.id
+          (- hydration.completed-at-ms (or hydration.started-at-ms hydration.completed-at-ms)))))
+    true)
+
+  (fn schedule-runtime-hydration-start! [world runtime]
+    (local hydration (and runtime runtime.hydration))
+    (when (and hydration
+               (not hydration.completed?)
+               (not hydration.start-scheduled?))
+      (assert (and app app.next-frame)
+              "HomeWorld hydration requires app.next-frame")
+      (set hydration.start-scheduled? true)
+      (app.next-frame
+        (fn []
+          (when (= world.runtime runtime)
+            (local active-hydration (and runtime runtime.hydration))
+            (when active-hydration
+              (set active-hydration.ready? true))))))
+    true)
+
+  (fn start-runtime-hydration! [world runtime hydration]
+    (when (and hydration (not hydration.started?))
+      (set hydration.started? true)
+      (set hydration.started-at-ms (hydration-now-ms))
+      (logging.info (string.format "[world] %s hydration started" world.id)))
+    true)
+
+  (fn restore-next-runtime-panel! [world runtime hydration]
+    (local panels (or hydration.scene-panels []))
+    (if (> hydration.scene-panel-index (length panels))
+        (mark-runtime-hydration-complete! world runtime hydration)
+        (do
+          (runtime.scene:restore-panel-state
+            (. panels hydration.scene-panel-index)
+            hydration.scene-panel-index)
+          (runtime.scene:sync-scene-objects)
+          (set hydration.scene-panel-index (+ hydration.scene-panel-index 1))
+          (when (> hydration.scene-panel-index (length panels))
+            (mark-runtime-hydration-complete! world runtime hydration)))))
+
+  (fn update-runtime-hydration! [world runtime]
+    (local hydration (and runtime runtime.hydration))
+    (when (and hydration
+               hydration.ready?
+               (not hydration.completed?))
+      (start-runtime-hydration! world runtime hydration)
+      (if (= hydration.phase "scene-panels")
+          (restore-next-runtime-panel! world runtime hydration)
+          (mark-runtime-hydration-complete! world runtime hydration))))
+
   (fn capture-runtime-state [world ctx]
     (local runtime world.runtime)
     (local camera (and runtime runtime.camera))
@@ -359,8 +461,8 @@
                         "[world] %s camera position out of bounds during capture; resetting to default"
                         world.id)))
       (set world.state.camera
-           {:position (vec3->array position)
-            :rotation (quat->array camera.rotation)}))
+            {:position (vec3->array position)
+             :rotation (quat->array camera.rotation)}))
     (when (and graph graph.capture-state)
       (set world.state.graph
            (merge-preserved-graph-state
@@ -370,6 +472,10 @@
     (when (and scene scene.capture-state)
       (local captured-scene (scene:capture-state))
       (local existing-scene (or world.state.scene {}))
+      (set captured-scene.panels
+           (merge-panel-state
+             captured-scene.panels
+             (remaining-hydration-panels (and runtime runtime.hydration))))
       (set captured-scene.terrains
            (TerrainRecords.merge-preserved-records
              existing-scene.terrains
@@ -405,13 +511,9 @@
   (fn create-runtime [world ctx]
     (local camera-state (or (and world.state world.state.camera) {}))
     (local (ok parsed-camera-position) (pcall array->vec3 camera-state.position))
-    (local loaded-camera-position
-      (if ok
-          parsed-camera-position
-          nil))
+    (local loaded-camera-position (if ok parsed-camera-position nil))
     (local camera-position
-      (sanitize-vec3 loaded-camera-position
-                     (glm.vec3 0 0 30)))
+      (sanitize-vec3 loaded-camera-position (glm.vec3 0 0 30)))
     (when (not (= camera-position loaded-camera-position))
       (logging.warn (string.format
                       "[world] %s invalid camera restore position; using default"
@@ -424,30 +526,35 @@
     (local controls (FirstPersonControls {:camera camera}))
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local canvas-camera-state (or canvas-state.camera {}))
-    (local (ok parsed-canvas-position) (pcall array->vec3 canvas-camera-state.position))
-    (local loaded-canvas-position
-      (if ok
-          parsed-canvas-position
-          nil))
+    (local (ok-canvas parsed-canvas-position) (pcall array->vec3 canvas-camera-state.position))
+    (local loaded-canvas-position (if ok-canvas parsed-canvas-position nil))
     (local canvas-camera-position
-      (sanitize-vec3 loaded-canvas-position
-                     (glm.vec3 0 0 100)))
+      (sanitize-vec3 loaded-canvas-position (glm.vec3 0 0 100)))
     (when (not (= canvas-camera-position loaded-canvas-position))
       (logging.warn (string.format
                       "[world] %s invalid canvas restore position; using default"
                       world.id)))
     (local canvas-camera (Camera {:position canvas-camera-position}))
     (local graph (Graph {}))
-    (GraphKeyLoaders.register graph {:world-manager (assert world.graph-world-manager
-                                                         (.. "HomeWorld " world.id " requires :graph-world-manager"))
-                                     :asset-path-resolver (assert world.asset-path-resolver
-                                                                  (.. "HomeWorld " world.id " requires :asset-path-resolver"))})
-    (local scene-scope (ctx.focus-manager:create-scope {:name (.. "scene:" world.id)
-                                                        :directional-traversal-boundary? true}))
-    (ctx.focus-manager:attach scene-scope ctx.focus-root)
-    (local canvas-scope (ctx.focus-manager:create-scope {:name (.. "canvas:" world.id)
-                                                         :directional-traversal-boundary? true}))
-    (ctx.focus-manager:attach canvas-scope ctx.focus-root)
+    (GraphKeyLoaders.register graph
+                              {:world-manager (assert world.graph-world-manager
+                                                      (.. "HomeWorld " world.id " requires :graph-world-manager"))
+                               :asset-path-resolver (assert world.asset-path-resolver
+                                                           (.. "HomeWorld " world.id " requires :asset-path-resolver"))})
+    (local scene-scope
+      (do
+        (local scope
+          (ctx.focus-manager:create-scope {:name (.. "scene:" world.id)
+                                           :directional-traversal-boundary? true}))
+        (ctx.focus-manager:attach scope ctx.focus-root)
+        scope))
+    (local canvas-scope
+      (do
+        (local scope
+          (ctx.focus-manager:create-scope {:name (.. "canvas:" world.id)
+                                           :directional-traversal-boundary? true}))
+        (ctx.focus-manager:attach scope ctx.focus-root)
+        scope))
     (local scene
       (Scene {:focus-manager ctx.focus-manager
               :focus-scope scene-scope
@@ -508,11 +615,10 @@
       (DrawingRender {:ctx (and canvas canvas.build-context)
                       :controller drawing-controller}))
     (local graph-state (resolve-graph-core-state world.state.graph))
-    (scene:build-default {:terrains (and world.state world.state.scene world.state.scene.terrains)})
-    (when (and graph graph.restore-state graph-state)
-      (graph:restore-state graph-state))
-    (when (and scene scene.restore-state world.state.scene)
-      (scene:restore-state world.state.scene))
+    (local scene-state (or world.state.scene {}))
+    (scene:build-default {:terrains scene-state.terrains})
+    (when graph-state
+      (graph-view:restore-graph-state graph-state))
     (local containment-config
       (apply-runtime-containment! world {:scene scene}))
     (local runtime
@@ -532,7 +638,14 @@
        :drawing-render drawing-render
        :active-canvas-feature (or canvas-state.active_feature "graph")
        :pending-canvas-state (clone-table world.state.canvas)
-       :pending-hud-state (clone-table world.state.hud)})
+       :pending-hud-state (clone-table world.state.hud)
+       :hydration {:phase "scene-panels"
+                   :ready? false
+                   :started? false
+                   :completed? false
+                   :start-scheduled? false
+                   :scene-panels (clone-table scene-state.panels)
+                   :scene-panel-index 1}})
     (set runtime.restore-surface-state
          (fn [rt canvas-target hud]
            (when (and canvas-target canvas-target.restore-state rt.pending-canvas-state)
@@ -545,6 +658,8 @@
 
   (fn clear-runtime [world ctx reason]
     (local runtime world.runtime)
+    (when (and app app.set-startup-physics-paused)
+      (app.set-startup-physics-paused world.id false))
     (when runtime
       (capture-runtime-state world ctx)
       (clear-active-runtime-containment! world)
@@ -598,18 +713,25 @@
       (set world.runtime (create-runtime world ctx))
       (set created-runtime? true))
     (apply-runtime-physics-policy!)
-    (apply-runtime-containment! world)
-    (when (not created-runtime?)
-      (apply-runtime-light-state! world)
-      (apply-runtime-skybox-state! world))
+    (set-runtime-containment-config! world (resolve-runtime-containment-config world))
+    (apply-runtime-light-state! world)
+    (apply-runtime-skybox-state! world)
     (apply-runtime-background-state! world)
-    (set world.active? true))
+    (when created-runtime?
+      (schedule-runtime-hydration-start! world world.runtime))
+    (when (not created-runtime?)
+      (apply-runtime-containment! world))
+    (set world.active? true)
+    (when (hydration-pending? world.runtime)
+      (schedule-runtime-hydration-start! world world.runtime))
+    (sync-startup-physics-pause! world))
 
   (fn deactivate [world ctx reason]
     (capture-runtime-state world ctx)
     (queue-runtime-restore-state world)
     (clear-active-runtime-containment! world)
     (set world.active? false)
+    (sync-startup-physics-pause! world)
     (when reason
       (logging.info (string.format "[world] %s deactivated (%s)" world.id reason))))
 
@@ -622,20 +744,30 @@
       (set world.runtime (create-runtime world ctx))
       (set created-runtime? true))
     (apply-runtime-physics-policy!)
-    (apply-runtime-containment! world)
-    (when (not created-runtime?)
-      (apply-runtime-light-state! world)
-      (apply-runtime-skybox-state! world))
+    (set-runtime-containment-config! world (resolve-runtime-containment-config world))
+    (apply-runtime-light-state! world)
+    (apply-runtime-skybox-state! world)
     (apply-runtime-background-state! world)
-    (set world.active? true))
+    (when created-runtime?
+      (schedule-runtime-hydration-start! world world.runtime))
+    (when (not created-runtime?)
+      (apply-runtime-containment! world))
+    (set world.active? true)
+    (when (hydration-pending? world.runtime)
+      (schedule-runtime-hydration-start! world world.runtime))
+    (sync-startup-physics-pause! world))
 
   (fn drop [world ctx reason]
     (set world.active? false)
+    (sync-startup-physics-pause! world)
     (clear-runtime world ctx (or reason "drop"))
     (save-state world))
 
-  (fn update [world _delta _opts]
+  (fn update [world _delta opts]
     (local runtime world.runtime)
+    (local options (or opts {}))
+    (when (and options.active? runtime runtime.hydration)
+      (update-runtime-hydration! world runtime))
     (when (and runtime runtime.drawing-render)
       (runtime.drawing-render:update))
     nil)

@@ -64,6 +64,7 @@
                  (= (string.lower flag) "off")))
         true)))
 
+
 (fn sanitize-cache-name [name]
   (string.gsub (or name "") "[^%w%._-]" "_"))
 
@@ -241,6 +242,18 @@
       (set app.runtime-performance-state (RuntimePerformance.create-state)))
   app.runtime-performance-state)
 
+(fn wall-now-ms []
+  (assert (and app.engine app.engine.now-ms)
+          "app.engine.now-ms missing")
+  (app.engine:now-ms))
+
+(fn sync-physics-paused-state []
+  (when (and app.engine app.engine.set-physics-paused)
+    (app.engine.set-physics-paused
+      (or (= app.runtime-performance-physics-paused true)
+          (not (= app.startup-physics-pause-owner nil)))))
+  true)
+
 (fn apply-runtime-performance-settings []
   (if (and app.settings app.engine)
       (do
@@ -263,6 +276,7 @@
           (set app.runtime-performance-ui-paused result.pause_ui)
           (set app.runtime-performance-source result.source)
           (set app.runtime-performance-active-override result.active_override)
+          (sync-physics-paused-state)
           (when (or (not (= prev-control result.control_mode))
                     (not (= prev-mode result.effective_mode))
                     (not (= prev-fps result.fps_cap))
@@ -290,6 +304,16 @@
                 (tostring prev-ui)
                 (tostring prev-source)
                 (tostring prev-override))))))))
+
+(fn app.set-startup-physics-paused [owner paused]
+  (assert (and (= (type owner) :string) (> (# owner) 0))
+          "set-startup-physics-paused requires non-empty string owner")
+  (if paused
+      (set app.startup-physics-pause-owner owner)
+      (when (= app.startup-physics-pause-owner owner)
+        (set app.startup-physics-pause-owner nil)))
+  (sync-physics-paused-state)
+  (= app.startup-physics-pause-owner owner))
 
 (fn app.set-runtime-performance-control-mode [control-mode]
   (assert (and app.settings app.settings.set-value) "settings must be initialized")
@@ -637,6 +661,7 @@
 (set app.runtime-performance-active-mode nil)
 (set app.runtime-performance-fps-cap nil)
 (set app.runtime-performance-physics-paused nil)
+(set app.startup-physics-pause-owner nil)
 (set app.runtime-performance-input-paused nil)
 (set app.runtime-performance-ui-paused nil)
 (set app.runtime-performance-source nil)
@@ -971,8 +996,12 @@
             false))))
 
 (fn app.init []
-  (local init-start (os.clock))
+  (local init-start-ms (wall-now-ms))
   (assert (and app.engine app.engine.events) "app.engine.events missing; load engine-events before app.init")
+  (set app.startup-physics-pause-owner nil)
+  (set app.next-frame-queue [])
+  (set app.next-frame-pending [])
+  (sync-physics-paused-state)
   (init-app-dirs)
   (init-settings)
   (app.reset-projection)
@@ -1165,6 +1194,8 @@
              (when app.focus
                (app.focus:clear-focus))))
     (app.clickables:register-left-click-void-callback app.focus-void-callback))
+  (local focus-manager app.focus)
+  (local hud-scope app.hud-focus-scope)
   (set app.scene nil)
   (set app.canvas nil)
   (set app.camera nil)
@@ -1226,14 +1257,14 @@
   (set app.wallet (WalletManager {}))
   (app.wallet:load-active)
 
-  (local init-end (os.clock))
-  (local elapsed-ms (* (- init-end init-start) 1000.0))
-  (logging.info (string.format "[space] init completed in %.2fms" elapsed-ms))
+  (local init-end-ms (wall-now-ms))
+  (logging.info
+    (string.format "[space] init completed in %.2fms"
+                   (- init-end-ms init-start-ms)))
 
   (app.update 0)
-  (local first-update-ms (* (- (os.clock) init-end) 1000.0))
   (logging.info (string.format "[space] first update completed in %.2fms"
-                               first-update-ms))
+                               (- (wall-now-ms) init-end-ms)))
   )
 
 (fn app.update [delta]
@@ -1417,10 +1448,12 @@
   (set app.runtime-performance-active-mode nil)
   (set app.runtime-performance-fps-cap nil)
   (set app.runtime-performance-physics-paused nil)
+  (set app.startup-physics-pause-owner nil)
   (set app.runtime-performance-input-paused nil)
   (set app.runtime-performance-ui-paused nil)
   (set app.runtime-performance-source nil)
   (set app.runtime-performance-active-override nil)
+  (sync-physics-paused-state)
   )
 
 (when (and app.engine AppConfig.run-main)

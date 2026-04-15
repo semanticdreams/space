@@ -553,8 +553,6 @@
   (local pause-ui (resolve-pause-ui settings resolution.effective_mode))
   (when (and engine engine.set-target-fps)
     (engine.set-target-fps fps-cap))
-  (when (and engine engine.set-physics-paused)
-    (engine.set-physics-paused pause-physics))
   (when (and engine engine.set-input-paused)
     (engine.set-input-paused pause-input))
   (when (and engine engine.set-ui-paused)

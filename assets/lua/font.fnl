@@ -3,9 +3,7 @@
 (local textures (require :textures))
 (local IoUtils (require :io-utils))
 
-(local loaded-fonts {})
-
-(fn load-msdf-font [metadata-path texture-path texture-name opts]
+(fn load-msdf-font [metadata-path texture-path texture-name font-owner]
   (when app.disable_font_textures
     (error "Font textures are disabled (app.disable_font_textures); enable textures to load fonts"))
   (assert app.engine.get-asset-path "Font requires app.engine.get-asset-path")
@@ -27,8 +25,28 @@
                :glyph-map glyph-map
                :advance advance})
   (each [_ glyph (pairs glyph-map)]
-    (set glyph.font font))
+    (set glyph.font (or font-owner font)))
   font) 
+
+(fn materialize-font! [font]
+  (when (not (rawget font "_materialized"))
+    (local loaded
+      (load-msdf-font (rawget font "metadata-path")
+                      (rawget font "texture-path")
+                      (rawget font "texture-name")
+                      font))
+    (each [key value (pairs loaded)]
+      (rawset font key value))
+    (rawset font "_materialized" true))
+  font)
+
+(fn font-index [font key]
+  (local value (rawget font key))
+  (if (not (= value nil))
+      value
+      (do
+        (materialize-font! font)
+        (rawget font key))))
 
 (fn Font [name-or-options]
   (local opts
@@ -37,4 +55,7 @@
         {:metadata-path (.. "ubuntu-font/msdf/" name-or-options ".json")
          :texture-path (.. "ubuntu-font/msdf/" name-or-options ".png")
          :texture-name (.. "font-" name-or-options)}))
-  (load-msdf-font opts.metadata-path opts.texture-path opts.texture-name opts))
+  (setmetatable {:metadata-path opts.metadata-path
+                 :texture-path opts.texture-path
+                 :texture-name opts.texture-name}
+                {:__index font-index}))

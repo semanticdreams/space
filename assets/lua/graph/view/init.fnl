@@ -328,6 +328,62 @@
                         :get-position get-position
                         :get-position-raw get-position-raw}))
 
+    (var batch-depth 0)
+    (var batched-layout-dirty? false)
+    (var batched-force-layout? false)
+    (local batched-label-nodes {})
+
+    (fn clear-batched-graph-updates! []
+        (set batched-layout-dirty? false)
+        (set batched-force-layout? false)
+        (each [node _ (pairs batched-label-nodes)]
+            (set (. batched-label-nodes node) nil)))
+
+    (fn queue-batched-label-refresh! [node]
+        (when node
+            (set (. batched-label-nodes node) true)))
+
+    (fn flush-batched-graph-updates! []
+        (when batched-layout-dirty?
+            (if batched-force-layout?
+                (graph-layout:start)
+                (graph-layout:update-lines)))
+        (local label-nodes
+            (icollect [node _ (pairs batched-label-nodes)]
+                node))
+        (when (> (length label-nodes) 0)
+            (update-labels label-nodes {:force? true}))
+        (clear-batched-graph-updates!))
+
+    (fn queue-graph-layout-refresh! [run-force?]
+        (if (> batch-depth 0)
+            (do
+                (set batched-layout-dirty? true)
+                (when run-force?
+                    (set batched-force-layout? true)))
+            (if run-force?
+                (graph-layout:start)
+                (graph-layout:update-lines))))
+
+    (fn queue-label-refresh! [node]
+        (if (> batch-depth 0)
+            (queue-batched-label-refresh! node)
+            (update-labels [node] {:force? true})))
+
+    (fn with-batched-graph-updates [cb]
+        (set batch-depth (+ batch-depth 1))
+        (local (ok result) (pcall cb))
+        (set batch-depth (- batch-depth 1))
+        (if ok
+            (do
+                (when (= batch-depth 0)
+                    (flush-batched-graph-updates!))
+                result)
+            (do
+                (when (= batch-depth 0)
+                    (clear-batched-graph-updates!))
+                (error result))))
+
     (set movables-handler
          (GraphViewMovables {:ctx ctx
                          :movables movables
@@ -388,8 +444,25 @@
         (labels:drop-node node)
         (views:drop-node node))
 
+    (var handle-edge-added nil)
+
+    (fn drain-pending-edges []
+        (local remaining-edges [])
+        (each [_ pending (ipairs pending-edges)]
+            (local edge pending.edge)
+            (local source-ready? (registry:lookup (node-id edge.source)))
+            (local target-ready? (registry:lookup (node-id edge.target)))
+            (if (and source-ready? target-ready?)
+                (handle-edge-added pending)
+                (table.insert remaining-edges pending)))
+        (for [i (length pending-edges) 1 -1]
+            (table.remove pending-edges i))
+        (each [_ pending (ipairs remaining-edges)]
+            (table.insert pending-edges pending)))
+
     ;; Forward declaration or reordering needed since handle-node-added calls handle-edge-added
-    (fn handle-edge-added [payload]
+    (set handle-edge-added
+         (fn [payload]
         (local edge (and payload payload.edge))
         (local edge-opts (and payload payload.opts))
         (when edge
@@ -406,13 +479,11 @@
                               (fn []
                                   (graph-layout:add-edge edge))))
                     (when added?
-                        (if run-force?
-                            (graph-layout:start)
-                            (graph-layout:update-lines))))
+                        (queue-graph-layout-refresh! run-force?)))
                 (do
                     ;; Queue pending edge
                     (table.insert pending-edges {:edge edge :opts edge-opts}))))
-        edge)
+        edge))
 
     (fn handle-node-added [payload]
         (local node (and payload payload.node))
@@ -519,28 +590,11 @@
                 (register-movable node point)
                 (when selector
                     (selector:add-selectables [point]))
-                (if run-force?
-                    (graph-layout:start)
-                    (graph-layout:update-lines))
+                (queue-graph-layout-refresh! run-force?)
                 (update-point-state node)
-                (update-labels [node] {:force? true})
+                (queue-label-refresh! node)
                 (attach-node-signals node)
-                
-                ;; Process pending edges
-                (local remaining-edges [])
-                (each [_ pending (ipairs pending-edges)]
-                    (local edge pending.edge)
-                    (local source-ready? (registry:lookup (node-id edge.source)))
-                    (local target-ready? (registry:lookup (node-id edge.target)))
-                    (if (and source-ready? target-ready?)
-                        (handle-edge-added pending)
-                        (table.insert remaining-edges pending)))
-                
-                ;; Clear and refill pending edges to remove processed ones
-                (for [i (length pending-edges) 1 -1]
-                    (table.remove pending-edges i))
-                (each [_ pending (ipairs remaining-edges)]
-                    (table.insert pending-edges pending)))))
+                (drain-pending-edges))))
 
     ;; Removed handle-edge-added from here as it was moved above
 
@@ -699,10 +753,12 @@
     (update-selection-set selected-nodes)
 
     (attach-graph)
-    (each [_ node (pairs graph.nodes)]
-        (handle-node-added {:node node}))
-    (each [_ edge (ipairs graph.edges)]
-        (handle-edge-added {:edge edge}))
+    (with-batched-graph-updates
+        (fn []
+            (each [_ node (pairs graph.nodes)]
+                (handle-node-added {:node node}))
+            (each [_ edge (ipairs graph.edges)]
+                (handle-edge-added {:edge edge}))))
     (connect-updates)
 
     (local view {:graph graph
@@ -739,6 +795,11 @@
     (set view.update update)
     (set view.get-position get-position)
     (set view.start-layout (fn [_self] (graph-layout:start)))
+    (set view.with-batched-updates
+         (fn [_self cb]
+             (assert (= (type cb) :function)
+                     "GraphView.with-batched-updates requires callback")
+             (with-batched-graph-updates cb)))
     (set view.capture-state
          (fn [_self]
              (local graph-state
@@ -747,9 +808,11 @@
                      {:nodes [] :edges []}))
              {:graph graph-state}))
     (set view.restore-graph-state
-         (fn [_self state]
+         (fn [self state]
              (when (and graph graph.restore-state state)
-                 (graph:restore-state state))
+                 (self:with-batched-updates
+                   (fn []
+                       (graph:restore-state state))))
              true))
     (set view.restore-views-state
          (fn [_self state]
@@ -820,6 +883,7 @@
              (set focused-node nil)
              (set drag-active? false)
              (set drag-node nil)
+             (clear-batched-graph-updates!)
              (set view.movable-targets (and movables-handler movables-handler.targets))
              (each [_ node (pairs nodes)]
                  (drop-node-artifacts node))
