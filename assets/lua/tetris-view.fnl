@@ -8,6 +8,7 @@
 (local Rectangle (require :rectangle))
 (local Text (require :text))
 (local {: WidgetCuboid} (require :widget-cuboid))
+(local RuntimeUpdates (require :runtime-updates))
 (local TetrisGame (require :tetris-game))
 (local TetrisStateRouter (require :tetris-state-router))
 (local DeepDialog (require :deep-dialog))
@@ -327,15 +328,16 @@
       (set board (board-builder child-ctx))
       board))
 
-  (var update-handler nil)
+  (var dropped? false)
+  (var update-subscription nil)
 
   (fn disconnect-updates []
     (clear-performance-lease)
-    (when (and update-handler app.engine app.engine.events app.engine.events.updated)
-      (app.engine.events.updated:disconnect update-handler true)
-      (set update-handler nil)))
+    (when update-subscription
+      (update-subscription:cancel)))
 
   (fn on-update [delta]
+    (assert (not dropped?) "TetrisDialog received update after drop")
     (when (game:update delta)
       (board:sync)
       (update-status)
@@ -343,19 +345,24 @@
         (disconnect-updates))))
 
   (fn connect-updates []
-    (when (and (not update-handler) app.engine app.engine.events app.engine.events.updated)
-      (set update-handler (app.engine.events.updated:connect on-update))
-      (activate-performance-lease)))
+    (assert (not dropped?) "TetrisDialog.start called after drop")
+    (update-subscription:start)
+    (activate-performance-lease))
+
+  (set update-subscription
+       (RuntimeUpdates.FrameSubscription {:callback on-update}))
 
   ;; Tetris dialog owns the update loop subscription: connect only while running.
   (local base-start game.start)
   (set game.start
        (fn [self]
+         (assert (not dropped?) "TetrisDialog.start called after drop")
          (base-start self)
          (connect-updates)))
   (local base-pause game.pause)
   (set game.pause
        (fn [self]
+         (assert (not dropped?) "TetrisDialog.pause called after drop")
          (base-pause self)
          (disconnect-updates)))
 
@@ -424,7 +431,8 @@
   (local base-drop content.drop)
   (set content.drop
        (fn [self]
-         (clear-performance-lease)
+         (assert (not dropped?) "TetrisDialog dropped twice")
+         (set dropped? true)
          (disconnect-updates)
          (base-drop self)))
   content)

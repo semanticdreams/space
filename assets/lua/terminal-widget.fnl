@@ -4,6 +4,7 @@
 (local {: resolve-style
         : fallback-glyph
         : line-height} (require :text-utils))
+(local RuntimeUpdates (require :runtime-updates))
 (local TerminalRenderer (require :terminal-renderer))
 (local terminal (require :terminal))
 (local Modifiers (require :input-modifiers))
@@ -67,7 +68,8 @@
       (set follow-tail? true))
     (when scrollback-lines
       (term:set-scrollback-limit scrollback-lines))
-    (var update-handler nil)
+    (var dropped? false)
+    (var update-subscription nil)
     (local pointer-target (and ctx ctx.pointer-target))
     (local clickables (assert ctx.clickables "TerminalWidget requires ctx.clickables"))
     (local focus-context (and ctx ctx.focus))
@@ -203,14 +205,21 @@
                       :follow-tail follow-tail?
                       :alt-screen? (alt-screen?)}))))
 
+    (local assert-live
+      (fn [action]
+        (assert (not dropped?)
+                (.. "TerminalWidget " action " after drop"))))
+
     (local set-scroll-offset
       (fn [self next-offset opts]
+        (assert-live "set_scroll_offset")
         (if (not pty-available?)
             false
-            (let [desired (math.max 0 (or next-offset 0))
-                  capped (if (alt-screen?)
-                             0
-                             (math.min desired (max-scroll-offset)))]
+            (do
+              (local desired (math.max 0 (or next-offset 0)))
+              (local capped (if (alt-screen?)
+                                0
+                                (math.min desired (max-scroll-offset))))
               (when (not (= capped scroll-offset))
                 (set scroll-offset capped)
                 (if (> scroll-offset 0)
@@ -224,6 +233,7 @@
 
     (local set-follow-tail
       (fn [_self desired]
+        (assert-live "set_follow_tail")
         (local next (not (not desired)))
         (when (not (= next follow-tail?))
           (set follow-tail? next)
@@ -231,6 +241,7 @@
 
     (local snap-to-tail-on-input
       (fn [self]
+        (assert-live "snap_to_tail_on_input")
         (when follow-tail?
           (self:set_scroll_offset 0))))
 
@@ -311,12 +322,14 @@
 
     (local adjust-scroll-offset
       (fn [self delta opts]
+        (assert-live "adjust_scroll_offset")
         (if (or (not pty-available?) (= delta 0))
             false
             (self:set_scroll_offset (+ scroll-offset delta) opts))))
 
     (local resolve-cell
       (fn [self payload]
+        (assert-live "resolve_cell")
         (local point (pointer-position payload))
         (local layout-self self.layout)
         (local position (or (and layout-self layout-self.position) (glm.vec3 0 0 0)))
@@ -335,6 +348,7 @@
 
     (local handle-mouse
       (fn [self payload button pressed?]
+        (assert-live "handle_mouse")
         (local cell (resolve-cell self payload))
         (local resolved-button (or button 0))
         (if (and cell self.term)
@@ -346,20 +360,18 @@
 
     (local disconnect-update
       (fn [_self]
-        (when (and update-handler app.engine app.engine.events app.engine.events.updated)
-          (app.engine.events.updated:disconnect update-handler true)
-          (set update-handler nil))))
+        (when update-subscription
+          (update-subscription:cancel))))
 
     (local connect-update
       (fn [self]
-        (when (and (not update-handler) app.engine app.engine.events app.engine.events.updated)
-          (set update-handler
-               (app.engine.events.updated:connect
-                 (fn [delta]
-                   (self:update delta)))))))
+        (assert-live "connect_update")
+        (update-subscription:start)))
 
     (local drop
       (fn [self]
+        (assert-live "drop")
+        (set dropped? true)
         (detach-focus-listener self)
         (disconnect-input self)
         (disconnect-update self)
@@ -375,6 +387,7 @@
 
     (local update
       (fn [self delta]
+        (assert-live "update")
         (when self.term
           (self.term:update)
           (local current-size (if (and term term.get-scrollback-size)
@@ -399,41 +412,61 @@
        :drop drop
        :update update
        :cell-size cell-size
-       :scroll_offset (fn [] scroll-offset)
+       :scroll_offset (fn []
+                        (assert-live "scroll_offset")
+                        scroll-offset)
        :set_scroll_offset set-scroll-offset
-       :follow_tail (fn [] follow-tail?)
+       :follow_tail (fn []
+                      (assert-live "follow_tail")
+                      follow-tail?)
        :set_follow_tail set-follow-tail
-       :enable_alt_screen (fn [] enable-alt-screen?)
+       :enable_alt_screen (fn []
+                            (assert-live "enable_alt_screen")
+                            enable-alt-screen?)
        :focus-node focus-node
        :__focus-listener nil
        :pointer-target pointer-target
-       :rows (fn [] rows)
-       :cols (fn [] cols)})
+       :rows (fn []
+               (assert-live "rows")
+               rows)
+       :cols (fn []
+               (assert-live "cols")
+               cols)})
+
+    (set update-subscription
+         (RuntimeUpdates.FrameSubscription {:callback (fn [delta]
+                                                        (widget:update delta))}))
 
     (set widget.on-state-connected
          (fn [_self _event]
+           (assert-live "on_state_connected")
            (set connected? true)))
 
     (set widget.on-state-disconnected
          (fn [_self _event]
+           (assert-live "on_state_disconnected")
            (set connected? false)))
 
     (set widget.request-focus
          (fn [self]
+           (assert-live "request_focus")
            (when self.focus-node
              (self.focus-node:request-focus))))
 
     (set widget.on-click
          (fn [self _event]
+           (assert-live "on_click")
            (self:request-focus)
            true))
 
     (set widget.intersect
          (fn [self ray]
+           (assert-live "intersect")
            (self.layout:intersect ray)))
 
     (set widget.on-text-input
          (fn [self payload]
+           (assert-live "on_text_input")
            (snap-to-tail-on-input self)
            (if (and self.term payload payload.text)
                (do
@@ -443,6 +476,7 @@
 
     (set widget.on-key-down
          (fn [self payload]
+           (assert-live "on_key_down")
            (local name (key-name payload))
            (local handled
              (and name
@@ -463,26 +497,32 @@
 
     (set widget.on-key-up
          (fn [_self _payload]
+           (assert-live "on_key_up")
            true))
 
     (set widget.on-mouse-button-down
          (fn [self payload]
+           (assert-live "on_mouse_button_down")
            (handle-mouse self payload payload.button true)))
 
     (set widget.on-mouse-button-up
          (fn [self payload]
+           (assert-live "on_mouse_button_up")
            (handle-mouse self payload payload.button false)))
 
     (set widget.on-mouse-motion
          (fn [self payload]
+           (assert-live "on_mouse_motion")
            (handle-mouse self payload (or (and payload payload.button) 0) (and payload payload.button))))
 
     (set widget.on-mouse-wheel
          (fn [self payload]
+           (assert-live "on_mouse_wheel")
            (local dy (and payload payload.y))
            (if (not dy)
                false
-               (let [delta (* (wheel-step payload) dy)]
+               (do
+                 (local delta (* (wheel-step payload) dy))
                  (if (adjust-scroll-offset self delta {:reactivate-follow? true})
                      true
                      (handle-mouse self payload (if (> dy 0) 4 5) true))))))

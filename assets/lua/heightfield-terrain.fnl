@@ -3,6 +3,7 @@
 (local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local HeightfieldTerrainSelectionOverlay (require :heightfield-terrain-selection-overlay))
 (local HeightfieldTerrainPhysics (require :heightfield-terrain-physics))
+(local RuntimeUpdates (require :runtime-updates))
 (local {: StaticTriangleBuffer} (require :static-triangle-buffer))
 
 (fn finite-number? [value]
@@ -177,7 +178,7 @@
   (fn build [ctx]
     (local renderable (RenderBuffer ctx mesh {:opacity opacity}))
     (local selection-overlay (HeightfieldTerrainSelectionOverlay ctx {:record terrain-record}))
-    (var updated-handler nil)
+    (var theme-refresh-subscription nil)
     (local physics
       (if enable-physics
           (HeightfieldTerrainPhysics.create-heightfield terrain-record)
@@ -208,22 +209,17 @@
     (layout:set-position layout-position)
     (layout:set-rotation rotation)
 
-    (set updated-handler
-         (and app.engine
-              app.engine.events
-              app.engine.events.updated
-              (app.engine.events.updated:connect
-                (fn [_delta]
-                  (when (selection-overlay:refresh-theme!)
-                    (layout:mark-layout-dirty))))))
+    (set theme-refresh-subscription
+         (RuntimeUpdates.FrameSubscription
+           {:callback (fn [_delta]
+                        (when (selection-overlay:refresh-theme!)
+                          (layout:mark-layout-dirty)))}))
+    (theme-refresh-subscription:start)
 
     (fn drop [_self]
-      (when (and app.engine
-                 app.engine.events
-                 app.engine.events.updated
-                 updated-handler)
-        (app.engine.events.updated:disconnect updated-handler true)
-        (set updated-handler nil))
+      (when theme-refresh-subscription
+        (theme-refresh-subscription:drop)
+        (set theme-refresh-subscription nil))
       (layout:drop)
       (renderable:drop)
       (selection-overlay:drop)

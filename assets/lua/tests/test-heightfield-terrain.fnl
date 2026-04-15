@@ -3,6 +3,7 @@
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (local {: LayoutRoot} (require :layout))
 (local Signal (require :signal))
+(local RuntimeUpdates (require :runtime-updates))
 (local Scene (require :scene))
 (local HeightfieldTerrain (require :heightfield-terrain))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
@@ -656,6 +657,8 @@
 (fn terrain-selection-overlay-reacts-to-theme-changes []
   (local original-themes app.themes)
   (local original-engine app.engine)
+  (RuntimeUpdates.clear)
+  (set app.__runtime_updates nil)
   (var current-fill (glm.vec4 0.2 0.5 0.9 0.2))
   (var current-border (glm.vec4 0.2 0.5 0.9 0.95))
   (set app.themes
@@ -707,6 +710,52 @@
   (assert (not (= (. first-color 1) (. changed-color 1)))
           "selection overlay fill should update when the active theme changes")
   (entity:drop)
+  (RuntimeUpdates.clear)
+  (set app.__runtime_updates nil)
+  (set app.engine original-engine)
+  (set app.themes original-themes))
+
+(fn terrain-selection-overlay-stops-refreshing-after-drop []
+  (local original-themes app.themes)
+  (local original-engine app.engine)
+  (RuntimeUpdates.clear)
+  (set app.__runtime_updates nil)
+  (var current-fill (glm.vec4 0.2 0.5 0.9 0.2))
+  (var current-border (glm.vec4 0.2 0.5 0.9 0.95))
+  (set app.themes
+       {:get-active-theme (fn []
+                            {:terrain-selection {:fill current-fill
+                                                 :border current-border}})})
+  (set app.engine {:events {:updated (Signal)}})
+  (local vector
+    {:allocate (fn [_self _size] {:id 1 :size 0})
+     :reallocate (fn [_self _handle _size] nil)
+     :delete (fn [_self _handle] nil)
+     :set-glm-vec3 (fn [_self _handle _offset _value] nil)
+     :set-float (fn [_self _handle _offset _value] nil)
+     :set-glm-vec4 (fn [_self _handle _offset _value] nil)})
+  (local entity
+    ((HeightfieldTerrain {:physics false
+                          :sample-spacing [2 2]
+                          :chunk-samples [5 5]
+                          :chunks [{:coord [0 0]
+                                    :size [5 5]
+                                    :heights (make-heights 5 5 (fn [_x _z] 0.0))}]})
+     {:triangle-vector vector}))
+  (entity:set-selection-target {:mode :rect
+                                :x0 1
+                                :z0 1
+                                :x1 2
+                                :z1 2})
+  (entity:drop)
+  (set current-fill (glm.vec4 0.85 0.25 0.18 0.33))
+  (set current-border (glm.vec4 0.9 0.3 0.2 0.98))
+  (local (ok err)
+    (pcall (fn []
+             (app.engine.events.updated:emit 0.016))))
+  (assert ok (.. "theme refresh after terrain drop should not error: " (tostring err)))
+  (RuntimeUpdates.clear)
+  (set app.__runtime_updates nil)
   (set app.engine original-engine)
   (set app.themes original-themes))
 
@@ -1110,6 +1159,8 @@
                      :fn terrain-selection-overlay-follows-selection-target})
 (table.insert tests {:name "Heightfield terrain selection overlay reacts to theme changes"
                      :fn terrain-selection-overlay-reacts-to-theme-changes})
+(table.insert tests {:name "Heightfield terrain selection overlay stops refreshing after drop"
+                     :fn terrain-selection-overlay-stops-refreshing-after-drop})
 (table.insert tests {:name "Heightfield terrain integrates with Bullet physics"
                      :fn heightfield-physics-catches-falling-body})
 

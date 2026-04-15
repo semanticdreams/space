@@ -298,6 +298,30 @@
       (assert (= (# calls.mouse) 1))
       (widget:drop))))
 
+(fn terminal-update-after-drop-errors []
+  (with-terminal-stub
+    (fn [_calls]
+      (reset-engine-events)
+      (local widget (make-widget {:rows 2 :cols 2 :cell-size {:x 1 :y 1}}))
+      (widget:drop)
+      (local (ok err)
+        (pcall (fn []
+                 (widget:update 16))))
+      (assert (not ok) "Updating a dropped terminal widget should error")
+      (assert (string.find (tostring err) "TerminalWidget update after drop" 1 true)))))
+
+(fn terminal-double-drop-errors []
+  (with-terminal-stub
+    (fn [_calls]
+      (reset-engine-events)
+      (local widget (make-widget {:rows 2 :cols 2 :cell-size {:x 1 :y 1}}))
+      (widget:drop)
+      (local (ok err)
+        (pcall (fn []
+                 (widget:drop))))
+      (assert (not ok) "Dropping a terminal widget twice should error")
+      (assert (string.find (tostring err) "TerminalWidget drop after drop" 1 true)))))
+
 (table.insert tests {:name "terminal widget measures by grid" :fn terminal-measure-uses-grid})
 (table.insert tests {:name "terminal widget layouter resizes terminal" :fn terminal-layouter-resizes-terminal})
 (table.insert tests {:name "terminal connects input on focus and routes events" :fn terminal-focus-connects-input})
@@ -309,6 +333,8 @@
 (table.insert tests {:name "terminal mouse wheel adjusts scroll offset" :fn terminal-wheel-scrolls-offset})
 (table.insert tests {:name "terminal page keys adjust scrollback offset" :fn terminal-page-keys-navigate-scrollback})
 (table.insert tests {:name "terminal wheel forwards to terminal in alt screen" :fn terminal-wheel-falls-through-in-alt-screen})
+(table.insert tests {:name "terminal update after drop errors" :fn terminal-update-after-drop-errors})
+(table.insert tests {:name "terminal double drop errors" :fn terminal-double-drop-errors})
 
 (local main
   (fn []

@@ -92,11 +92,49 @@
   (if (not ok)
       (error err)))
 
+(fn tetris-dialog-drop-stops-running-updates []
+  (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                            :hoverables (assert app.hoverables "test requires app.hoverables")
+                            :icons icons-stub
+                            :theme (app.themes.get-active-theme)}))
+  (local dialog ((TetrisView.TetrisDialog {}) ctx))
+  (var sync-calls 0)
+  (local original-sync dialog.board.sync)
+  (set dialog.board.sync
+       (fn [_self]
+         (set sync-calls (+ sync-calls 1))))
+  (dialog.game:start)
+  (app.engine.events.updated:emit 1000)
+  (assert (> sync-calls 0) "Running tetris dialog should sync before drop")
+  (local calls-before-drop sync-calls)
+  (dialog:drop)
+  (app.engine.events.updated:emit 1000)
+  (assert (= sync-calls calls-before-drop)
+          "Dropped tetris dialog should not receive more frame updates")
+  (set dialog.board.sync original-sync))
+
+(fn tetris-dialog-double-drop-errors []
+  (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                            :hoverables (assert app.hoverables "test requires app.hoverables")
+                            :icons icons-stub
+                            :theme (app.themes.get-active-theme)}))
+  (local dialog ((TetrisView.TetrisDialog {}) ctx))
+  (dialog:drop)
+  (local (ok err)
+    (pcall (fn []
+             (dialog:drop))))
+  (assert (not ok) "Dropping a tetris dialog twice should error")
+  (assert (string.find (tostring err) "TetrisDialog dropped twice" 1 true)))
+
 (table.insert tests {:name "Tetris view builds blocks" :fn tetris-view-builds-blocks})
 (table.insert tests {:name "Tetris view builds dialog" :fn tetris-view-builds-dialog})
 (table.insert tests {:name "Tetris dialog idle does not sync" :fn tetris-dialog-idle-does-not-sync})
 (table.insert tests {:name "Tetris dialog manages gameplay performance lease"
                      :fn tetris-dialog-manages-gameplay-performance-lease})
+(table.insert tests {:name "Tetris dialog drop stops running updates"
+                     :fn tetris-dialog-drop-stops-running-updates})
+(table.insert tests {:name "Tetris dialog double drop errors"
+                     :fn tetris-dialog-double-drop-errors})
 
 (local main
   (fn []
