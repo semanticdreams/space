@@ -202,6 +202,108 @@
             (view:drop)
             (graph:drop))))
 
+(fn graph-view-does-not-subscribe-to-raw-engine-updates []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local node (Graph.GraphNode {:key "a" :label "Alpha"}))
+            (local raw-updated-signal (and app.engine app.engine.events app.engine.events.updated))
+            (assert raw-updated-signal "GraphView test requires app.engine.events.updated")
+            (local original-connect raw-updated-signal.connect)
+            (var raw-update-connect-count 0)
+            (set raw-updated-signal.connect
+                 (fn [signal handler]
+                     (set raw-update-connect-count (+ raw-update-connect-count 1))
+                     (original-connect signal handler)))
+            (local view
+                (GraphView {:graph graph :ctx ctx}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (set raw-updated-signal.connect original-connect)
+            (assert (= raw-update-connect-count 0)
+                    "GraphView should not subscribe directly to app.engine.events.updated")
+            (assert (. view.labels.labels node)
+                    "GraphView should still create labels from graph changes")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-view-update-after-drop-errors []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (view:drop)
+            (local (ok err)
+                (pcall (fn []
+                         (view:update 0.016))))
+            (assert (not ok)
+                    "GraphView update after drop should fail fast")
+            (assert (string.find (tostring err) "GraphView update called after drop" 1 true))
+            (graph:drop))))
+
+(fn graph-view-double-drop-errors []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (view:drop)
+            (local (ok err)
+                (pcall (fn []
+                         (view:drop))))
+            (assert (not ok)
+                    "GraphView drop should fail fast on repeated calls")
+            (assert (string.find (tostring err) "GraphView drop called after drop" 1 true))
+            (graph:drop))))
+
+(fn graph-view-public-api-errors-after-drop []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local node (Graph.GraphNode {:key "a" :label "Alpha"}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (view:drop)
+            (local checks
+                [{:name "remove-nodes"
+                  :expected "GraphView remove-nodes called after drop"
+                  :call (fn [] (view:remove-nodes []))}
+                 {:name "remove-selected-nodes"
+                  :expected "GraphView remove-selected-nodes called after drop"
+                  :call (fn [] (view:remove-selected-nodes))}
+                 {:name "open-focused-node"
+                  :expected "GraphView open-focused-node called after drop"
+                  :call (fn [] (view:open-focused-node))}
+                 {:name "get-position"
+                  :expected "GraphView get-position called after drop"
+                  :call (fn [] (view:get-position node))}
+                 {:name "start-layout"
+                  :expected "GraphView start-layout called after drop"
+                  :call (fn [] (view:start-layout))}
+                 {:name "capture-state"
+                  :expected "GraphView capture-state called after drop"
+                  :call (fn [] (view:capture-state))}
+                 {:name "restore-graph-state"
+                  :expected "GraphView restore-graph-state called after drop"
+                  :call (fn [] (view:restore-graph-state {}))}
+                 {:name "restore-views-state"
+                  :expected "GraphView restore-views-state called after drop"
+                  :call (fn [] (view:restore-views-state {}))}
+                 {:name "restore-state"
+                  :expected "GraphView restore-state called after drop"
+                  :call (fn [] (view:restore-state {}))}])
+            (each [_ check (ipairs checks)]
+                (local (ok err)
+                    (pcall (fn []
+                             ((. check :call)))))
+                (assert (not ok)
+                        (.. "GraphView " check.name " should fail fast after drop"))
+                (assert (string.find (tostring err) check.expected 1 true)
+                        (.. "GraphView " check.name " should report a use-after-drop error")))
+            (graph:drop))))
+
 (fn start-node-view-adds-quit-node []
     (with-temp-data-dir
         (fn [_root]
@@ -1964,6 +2066,14 @@
 (table.insert tests {:name "Graph node view dialog table action adds table node"
                      :fn graph-node-view-dialog-table-action-adds-table-node})
 (table.insert tests {:name "GraphView emits selection changes" :fn graph-selection-emits-changed})
+(table.insert tests {:name "GraphView does not subscribe to raw engine updates"
+                     :fn graph-view-does-not-subscribe-to-raw-engine-updates})
+(table.insert tests {:name "GraphView update after drop errors"
+                     :fn graph-view-update-after-drop-errors})
+(table.insert tests {:name "GraphView double drop errors"
+                     :fn graph-view-double-drop-errors})
+(table.insert tests {:name "GraphView public API errors after drop"
+                     :fn graph-view-public-api-errors-after-drop})
 (table.insert tests {:name "GraphView updates selection and focus borders" :fn graph-view-updates-selection-and-focus-borders})
 (table.insert tests {:name "GraphView auto-focus updates focus ring" :fn graph-view-autofocus-updates-focus-ring})
 (table.insert tests {:name "Graph view rebuilds views from double click" :fn graph-view-rebuilds-from-double-click})

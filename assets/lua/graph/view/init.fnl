@@ -75,6 +75,7 @@
     (var expand-seq-timestamp 0)
     (var expand-seq-frontier [])
     (local expand-seq-timeout 800)
+    (var dropped? false)
     (assert points "GraphView requires ctx.points")
     (assert vector "GraphView requires ctx.triangle-vector")
     (assert focus "GraphView requires ctx.focus")
@@ -146,6 +147,10 @@
                           :pinned pinned}))
 
     (assert clickables "GraphView requires clickables for node view double click")
+
+    (fn assert-not-dropped [context]
+        (assert (not dropped?)
+                (string.format "GraphView %s called after drop" context)))
 
     (fn get-menu-manager []
         (or (and ctx ctx.menu-manager) app.menu-manager))
@@ -229,6 +234,7 @@
                 (update-point-state node))))
 
     (fn handle-focus-change [payload]
+        (assert-not-dropped "handle-focus-change")
         (local previous-focus (and payload payload.previous))
         (local current-focus (and payload payload.current))
         (local previous-node (and previous-focus (. node-by-focus previous-focus)))
@@ -280,11 +286,13 @@
         point)
 
     (fn get-position [_self node]
+        (assert-not-dropped "get-position")
         (local point (assert-point nil node "get-position"))
         (assert-valid-position point.position "GraphView.get-position" node point)
         (glm.vec3 point.position.x point.position.y point.position.z))
 
     (fn get-position-raw [_self node]
+        (assert-not-dropped "get-position-raw")
         (local point (assert-point nil node "get-position-raw"))
         (assert-valid-position point.position "GraphView.get-position-raw" node point)
         point.position)
@@ -423,6 +431,7 @@
                                                  :handler handler})))
 
     (fn update [_self _delta]
+        (assert-not-dropped "update")
         (local moved-nodes (graph-layout:update))
         (each [node point (pairs registry.points)]
             (when (and point point.position)
@@ -431,13 +440,6 @@
             (update-labels nil nil)
             (refresh-label-positions moved-nodes))
         (persistence:persist registry.points false))
-
-    (var update-handler nil)
-
-    (fn connect-updates []
-        (when (and app.engine app.engine.events app.engine.events.updated (not update-handler))
-            (set update-handler
-                 (app.engine.events.updated:connect update))))
 
     (fn drop-node-artifacts [node]
         (detach-node-signals node)
@@ -463,6 +465,7 @@
     ;; Forward declaration or reordering needed since handle-node-added calls handle-edge-added
     (set handle-edge-added
          (fn [payload]
+        (assert-not-dropped "handle-edge-added")
         (local edge (and payload payload.edge))
         (local edge-opts (and payload payload.opts))
         (when edge
@@ -486,6 +489,7 @@
         edge))
 
     (fn handle-node-added [payload]
+        (assert-not-dropped "handle-node-added")
         (local node (and payload payload.node))
         (local node-opts (and payload payload.opts))
         (when node
@@ -599,6 +603,7 @@
     ;; Removed handle-edge-added from here as it was moved above
 
     (fn handle-node-replaced [payload]
+        (assert-not-dropped "handle-node-replaced")
         (local existing (and payload payload.old))
         (local node (and payload payload.new))
         (when (and existing node)
@@ -649,6 +654,7 @@
             (selection:set-selection selected-nodes)))
 
     (fn handle-nodes-removed [payload]
+        (assert-not-dropped "handle-nodes-removed")
         (local removal-set (and payload payload.removal-set))
         (local nodes-to-remove (and payload payload.nodes))
         (when (and nodes-to-remove (> (length nodes-to-remove) 0))
@@ -690,6 +696,7 @@
                 (graph-layout:rebuild))))
 
     (fn handle-edge-removed [payload]
+        (assert-not-dropped "handle-edge-removed")
         (local edge (and payload payload.edge))
         (when edge
             (registry:remove-edges (fn [candidate] (= candidate edge)))
@@ -759,7 +766,6 @@
                 (handle-node-added {:node node}))
             (each [_ edge (ipairs graph.edges)]
                 (handle-edge-added {:edge edge}))))
-    (connect-updates)
 
     (local view {:graph graph
                  :ctx ctx
@@ -785,23 +791,30 @@
                  :graph-layout graph-layout})
 
     (set view.remove-nodes (fn [_self nodes-to-remove]
+                               (assert-not-dropped "remove-nodes")
                                (graph:remove-nodes nodes-to-remove)))
     (set view.remove-selected-nodes (fn [_self]
+                                        (assert-not-dropped "remove-selected-nodes")
                                         (graph:remove-nodes selected-nodes)))
     (set view.open-focused-node (fn [_self]
+                                   (assert-not-dropped "open-focused-node")
                                    (when focused-node
                                        (views:open focused-node)
                                        true)))
     (set view.update update)
     (set view.get-position get-position)
-    (set view.start-layout (fn [_self] (graph-layout:start)))
+    (set view.start-layout (fn [_self]
+                               (assert-not-dropped "start-layout")
+                               (graph-layout:start)))
     (set view.with-batched-updates
          (fn [_self cb]
+             (assert-not-dropped "with-batched-updates")
              (assert (= (type cb) :function)
                      "GraphView.with-batched-updates requires callback")
              (with-batched-graph-updates cb)))
     (set view.capture-state
          (fn [_self]
+             (assert-not-dropped "capture-state")
              (local graph-state
                  (if (and graph graph.capture-state)
                      (graph:capture-state)
@@ -809,6 +822,7 @@
              {:graph graph-state}))
     (set view.restore-graph-state
          (fn [self state]
+             (assert-not-dropped "restore-graph-state")
              (when (and graph graph.restore-state state)
                  (self:with-batched-updates
                    (fn []
@@ -816,11 +830,13 @@
              true))
     (set view.restore-views-state
          (fn [_self state]
+             (assert-not-dropped "restore-views-state")
              (when (and views views.restore-state state)
                  (views:restore-state state))
              true))
     (set view.restore-state
          (fn [self state]
+             (assert-not-dropped "restore-state")
              (local payload (or state {}))
              (if payload.graph
                  (self:restore-graph-state payload.graph)
@@ -831,6 +847,8 @@
              true))
     (set view.drop
          (fn [_self]
+             (assert-not-dropped "drop")
+             (set dropped? true)
              (detach-graph)
              (selection:drop)
              (when (and selected-nodes-changed selection-handler)
@@ -890,10 +908,7 @@
              (views:drop-all)
              (layout:clear)
              (each [node _ (pairs pinned)]
-                 (set (. pinned node) nil))
-             (when (and app.engine app.engine.events app.engine.events.updated update-handler)
-                 (app.engine.events.updated:disconnect update-handler true)
-                 (set update-handler nil))))
+                 (set (. pinned node) nil))))
     view)
 
 GraphView

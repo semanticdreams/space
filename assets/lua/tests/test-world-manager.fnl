@@ -355,6 +355,32 @@
               "Invalid containment should reset to default min-y")
       true)))
 
+(fn home-world-update-drives-active-graph-view []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (var graph-view-updates [])
+      (var drawing-render-updates 0)
+      (set world.runtime {:graph-view {:update (fn [_self delta]
+                                                 (table.insert graph-view-updates delta))}
+                          :drawing-render {:update (fn [_self]
+                                                     (set drawing-render-updates
+                                                          (+ drawing-render-updates 1)))}})
+      (world:update 0.25 {:active? false})
+      (world:update 0.5 {:active? true})
+      (assert (= (length graph-view-updates) 1)
+              "HomeWorld should only tick graph-view while active")
+      (assert (= (. graph-view-updates 1) 0.5)
+              "HomeWorld should pass the frame delta through to graph-view")
+      (assert (= drawing-render-updates 2)
+              "HomeWorld should continue updating drawing-render each world update")
+      true)))
+
 (fn home-world-activate-reapplies-runtime-containment []
   (with-temp-dir
     (fn [root]
@@ -1204,6 +1230,8 @@
                      :fn home-world-loads-persisted-physics-containment})
 (table.insert tests {:name "HomeWorld sanitizes invalid physics containment"
                      :fn home-world-sanitizes-invalid-physics-containment})
+(table.insert tests {:name "HomeWorld update drives active graph-view"
+                     :fn home-world-update-drives-active-graph-view})
 (table.insert tests {:name "HomeWorld activate reapplies runtime containment"
                      :fn home-world-activate-reapplies-runtime-containment})
 (table.insert tests {:name "HomeWorld captures runtime containment on drop"

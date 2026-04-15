@@ -113,6 +113,7 @@
   (local original-graph-view-module (. package.loaded "graph/view"))
   (var drop-calls 0)
   (var hud-rebuild-calls 0)
+  (var graph-view-theme nil)
   (local restored-states [])
   (local rebuilt-selections [])
   (local node {:key "node-a"})
@@ -120,7 +121,9 @@
   (local panel-metadata {:element panel-element
                          :persistence {:kind "graph-node-view"
                                        :node-key node.key}})
-  (local canvas {:build-context {}
+  (local canvas {:build-context {:theme {:name :dark}
+                                 :set-theme (fn [self theme]
+                                              (set self.theme theme))}
                  :float {:children [panel-metadata]}
                  :capture-panel-element-state
                  (fn [_self element]
@@ -156,6 +159,7 @@
                 (set canvas.float.children []))})
   (set (. package.loaded "graph/view")
        (fn [_opts]
+         (set graph-view-theme (and _opts.ctx _opts.ctx.theme _opts.ctx.theme.name))
          {:selection {:set-selection (fn [_self selected]
                                        (table.insert rebuilt-selections selected))}}))
   (local (ok err)
@@ -177,6 +181,8 @@
         (assert (= (and (. restored.panels 1) (. (. restored.panels 1) :layer))
                    "float")
                 "apply-theme should restore the captured panel placement")
+        (assert (= graph-view-theme :light)
+                "apply-theme should rebuild graph view with the active theme on the build context")
         (assert (= (length rebuilt-selections) 1)
                 "apply-theme should restore graph selection on the rebuilt view"))))
   (set app.graph-view original-graph-view)

@@ -6,6 +6,7 @@
     :tests.test-cli-args
     :tests.test-ray-box
     :tests.test-zmq
+    :tests.test-signal
     :tests.test-remote-control
     :tests.test-render-capture
     :tests.test-next-frame

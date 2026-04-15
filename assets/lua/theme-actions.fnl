@@ -46,6 +46,11 @@
     (local GraphView (require :graph/view))
     (local ctx (or (and app.canvas app.canvas.build-context)
                    (and app.scene app.scene.build-context)))
+    (local active-theme
+      (and app.themes app.themes.get-active-theme
+           (app.themes.get-active-theme)))
+    (when (and ctx ctx.set-theme active-theme)
+      (ctx:set-theme active-theme))
     (local view-target (or app.canvas app.hud))
     (local pointer-target (or app.canvas app.scene))
     (local camera (or (and app.canvas app.canvas.camera) app.camera))

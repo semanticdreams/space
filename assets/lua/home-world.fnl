@@ -763,11 +763,13 @@
     (clear-runtime world ctx (or reason "drop"))
     (save-state world))
 
-  (fn update [world _delta opts]
+  (fn update [world delta opts]
     (local runtime world.runtime)
-    (local options (or opts {}))
-    (when (and options.active? runtime runtime.hydration)
+    (local active? (and opts opts.active?))
+    (when (and active? runtime runtime.hydration)
       (update-runtime-hydration! world runtime))
+    (when (and active? runtime runtime.graph-view)
+      (runtime.graph-view:update delta))
     (when (and runtime runtime.drawing-render)
       (runtime.drawing-render:update))
     nil)
