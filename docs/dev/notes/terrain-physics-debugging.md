@@ -36,8 +36,8 @@ The correct model is:
 
 This is now implemented by:
 
-- [heightfield-terrain-physics.fnl](../../../assets/lua/heightfield-terrain-physics.fnl)
-- [heightfield-terrain.fnl](../../../assets/lua/heightfield-terrain.fnl)
+- [heightfield-terrain-physics.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/heightfield-terrain-physics.fnl)
+- [heightfield-terrain.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/heightfield-terrain.fnl)
 
 The important detail is:
 
@@ -327,8 +327,8 @@ Any test that claims “this is elevated support” must specify:
 
 Implemented by:
 
-- [heightfield-terrain-physics.fnl](../../../assets/lua/heightfield-terrain-physics.fnl)
-- [heightfield-terrain.fnl](../../../assets/lua/heightfield-terrain.fnl)
+- [heightfield-terrain-physics.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/heightfield-terrain-physics.fnl)
+- [heightfield-terrain.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/heightfield-terrain.fnl)
 
 Key behavior:
 
@@ -358,7 +358,7 @@ The demo-browser terrain support tests no longer reimplement terrain interpolati
 
 Instead they use:
 
-- [terrain-query.fnl](../../../assets/lua/terrain-query.fnl)
+- [terrain-query.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/terrain-query.fnl)
 - specifically `surface-info-at-local-point`
 
 This reduces drift risk between:
@@ -514,9 +514,9 @@ The current state after the cleanup is:
 
 Relevant files:
 
-- [heightfield-terrain-physics.fnl](../../../assets/lua/heightfield-terrain-physics.fnl)
-- [heightfield-terrain.fnl](../../../assets/lua/heightfield-terrain.fnl)
-- [terrain-query.fnl](../../../assets/lua/terrain-query.fnl)
-- [scene.fnl](../../../assets/lua/scene.fnl)
-- [test-demo-browser.fnl](../../../assets/lua/tests/test-demo-browser.fnl)
-- [test-heightfield-terrain.fnl](../../../assets/lua/tests/test-heightfield-terrain.fnl)
+- [heightfield-terrain-physics.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/heightfield-terrain-physics.fnl)
+- [heightfield-terrain.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/heightfield-terrain.fnl)
+- [terrain-query.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/terrain-query.fnl)
+- [scene.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/scene.fnl)
+- [test-demo-browser.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-demo-browser.fnl)
+- [test-heightfield-terrain.fnl](https://github.com/semanticdreams/space/blob/main/assets/lua/tests/test-heightfield-terrain.fnl)
