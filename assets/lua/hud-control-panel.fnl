@@ -47,7 +47,7 @@
                           :variant :primary
                           :padding [0.4 0.4]
                           :on-click (fn [_button _event]
-                                      (ThemeActions.toggle-theme))}))
+                                      (ThemeActions.request-toggle-theme))}))
       ]}))
 
 (fn ControlPanel [_opts]

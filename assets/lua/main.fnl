@@ -781,6 +781,21 @@
            (app.hud:add-overlay-child {:builder contrib.overlay})))
     (app.reset-projection)))
 
+(set app.apply-active-world-hud-contrib apply-active-world-hud-contrib)
+
+(fn app.request-theme-change [theme-name]
+  (assert theme-name "app.request-theme-change requires a theme name")
+  ;; Theme changes rebuild scene/HUD shell state. Do not run them directly from
+  ;; widget/input callbacks or route them through BucketQueue tolerance hacks.
+  ;; Defer to the next UI frame boundary so input dispatch and current layout work
+  ;; have fully unwound before the rebuild runs.
+  (assert app.next-frame "app.request-theme-change requires app.next-frame")
+  (app.next-frame
+    (fn []
+      (local ThemeActions (require :theme-actions))
+      (ThemeActions.apply-theme theme-name)))
+  theme-name)
+
 (fn resolve-interaction-surface [surface]
   (if (= surface :canvas)
       (if app.canvas :canvas :scene)

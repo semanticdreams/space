@@ -2,9 +2,9 @@
 
 (local tests [])
 
-(fn bucket-queue-iterate-allows-removal []
+(fn bucket-queue-rejects-removal-during-iteration []
   (local queue (BucketQueue))
-  (local nodes [1 2 3 4 5])
+  (local nodes [{:name "a"} {:name "b"} {:name "c"}])
   (each [_ node (ipairs nodes)]
     (queue:enqueue node 0))
   (local (ok err)
@@ -13,12 +13,13 @@
         (queue:iterate
           (fn [node _depth]
             (queue:remove node)
-            (queue:enqueue 99 0)))))) 
-  (assert ok (.. "bucket queue iterate failed: " (tostring err)))
-  (each [_ node (ipairs nodes)]
-    (assert (not (. queue.lookup node)) "bucket queue should remove nodes during iteration")))
+            (queue:enqueue {:name "new"} 0))))))
+  (assert (not ok) "bucket queue should reject active-bucket mutation during iteration")
+  (assert (string.find (tostring err) "do not harden BucketQueue")
+          "bucket queue should explain that callers must stop mutating the queue during iteration"))
 
-(table.insert tests {:name "BucketQueue iterate allows removal" :fn bucket-queue-iterate-allows-removal})
+(table.insert tests {:name "BucketQueue rejects active-bucket mutation during iteration"
+                     :fn bucket-queue-rejects-removal-during-iteration})
 
 (local main
   (fn []

@@ -81,11 +81,18 @@
     (app.settings.save))
   (when (and app.scene app.scene.build-default)
     (app.scene:build-default))
-  (when (and app.hud app.hud.build-default)
-    (app.hud:build-default))
+  (if app.apply-active-world-hud-contrib
+      (app.apply-active-world-hud-contrib)
+      (when (and app.hud app.hud.build-default)
+        (app.hud:build-default)))
   (when (and app.renderers app.renderers.apply-theme)
     (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
   (rebuild-graph-view previous-selected graph-node-view-panels))
+
+(fn request-theme [theme-name]
+  (if app.request-theme-change
+      (app.request-theme-change theme-name)
+      (apply-theme theme-name)))
 
 (fn toggle-theme []
   (local themes app.themes)
@@ -93,5 +100,13 @@
   (local next (if (= current :light) :dark :light))
   (apply-theme next))
 
+(fn request-toggle-theme []
+  (local themes app.themes)
+  (local current (and themes themes.get-active-theme-name (themes.get-active-theme-name)))
+  (local next (if (= current :light) :dark :light))
+  (request-theme next))
+
 {:apply-theme apply-theme
- :toggle-theme toggle-theme}
+ :request-theme request-theme
+ :toggle-theme toggle-theme
+ :request-toggle-theme request-toggle-theme}

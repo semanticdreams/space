@@ -2,8 +2,6 @@
   (local options (or opts {}))
   (local queue {:buckets {} :lookup {} :depths [] :depth-set {}
                 :label options.label})
-  (local DebugLog (require :layout-debug-log))
-
   (fn ensure-depth [self depth]
     (when (not (. self.depth-set depth))
       (set (. self.depth-set depth) true)
@@ -36,13 +34,14 @@
     (each [_ depth (ipairs self.depths)]
       (local bucket (. self.buckets depth))
       (when bucket
+        ;; Do not make BucketQueue tolerate active-bucket mutation here.
+        ;; Layout/measure callbacks must stop mutating the queue during iteration.
         (var key nil)
         (var keep-going true)
         (while keep-going
           (local (ok next-key _value) (pcall next bucket key))
           (when (not ok)
-            (DebugLog.log-next-error next-key bucket key depth self.depths self)
-            (error next-key))
+            (error "BucketQueue callback mutated the active bucket. Fix the caller; do not harden BucketQueue to mask layout/measure pass bugs."))
           (if (not next-key)
               (set keep-going false)
               (do

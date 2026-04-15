@@ -3,6 +3,7 @@
 (local BuildContext (require :build-context))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
+(local MathUtils (require :math-utils))
 (local Signal (require :signal))
 (local {: LayoutRoot} (require :layout))
 (local DrawingController (require :drawing/controller))
@@ -117,6 +118,54 @@
       (assert (> drawing-width graph-width))
       (sidebar:drop))))
 
+(fn sidebar-width-follows-panel-measure []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {}))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local rail-layout (. sidebar.layout.children 1))
+      (local panel-layout (. sidebar.layout.children 2))
+      (assert rail-layout "drawing sidebar should create its feature rail layout")
+      (assert panel-layout "drawing sidebar should create its drawing panel layout")
+      (assert (MathUtils.approx (. sidebar.layout.measure 1)
+                                (+ 6.4 (. panel-layout.measure 1)))
+              "drawing sidebar width should be derived from the panel measurement rather than a fixed width")
+      (sidebar:drop))))
+
+(fn sidebar-feature-buttons-fill-rail-width []
+  (with-sidebar-env
+    (fn []
+      (local controller (DrawingController {}))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (set sidebar.layout.position (glm.vec3 0 0 0))
+      (set sidebar.layout.size sidebar.layout.measure)
+      (set sidebar.layout.rotation (glm.quat 1 0 0 0))
+      (set sidebar.layout.clip-region nil)
+      (set sidebar.layout.depth-offset-index 0)
+      (sidebar.layout:layouter)
+      (local rail-layout (. sidebar.layout.children 1))
+      (assert rail-layout "drawing sidebar should create its feature rail layout")
+      (local rail-padding-layout (. rail-layout.children 2))
+      (assert rail-padding-layout "drawing sidebar feature rail should wrap controls in padding")
+      (local rail-flex-layout (. rail-padding-layout.children 1))
+      (assert rail-flex-layout "drawing sidebar feature rail should place controls inside a flex layout")
+      (local graph-button-layout (. rail-flex-layout.children 1))
+      (local draw-button-layout (. rail-flex-layout.children 2))
+      (assert graph-button-layout "drawing sidebar feature rail should create a graph button")
+      (assert draw-button-layout "drawing sidebar feature rail should create a draw button")
+      (assert (MathUtils.approx graph-button-layout.size.x rail-flex-layout.size.x)
+              "drawing sidebar graph button should fill the feature rail width")
+      (assert (MathUtils.approx draw-button-layout.size.x rail-flex-layout.size.x)
+              "drawing sidebar draw button should fill the feature rail width")
+      (sidebar:drop))))
+
 (fn sidebar-rename-input-syncs-after-history []
   (with-sidebar-env
     (fn []
@@ -220,8 +269,45 @@
               "drawing sidebar should appear after switching to canvas surface")
       (sidebar:drop))))
 
+(fn sidebar-fills-allocated-dock-height []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {}))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local measured sidebar.layout.measure)
+      (set sidebar.layout.position (glm.vec3 5 7 0))
+      (set sidebar.layout.size (glm.vec3 measured.x (+ measured.y 8) measured.z))
+      (set sidebar.layout.rotation (glm.quat 1 0 0 0))
+      (set sidebar.layout.clip-region nil)
+      (set sidebar.layout.depth-offset-index 0)
+      (sidebar.layout:layouter)
+      (local rail-layout (. sidebar.layout.children 1))
+      (local panel-layout (. sidebar.layout.children 2))
+      (assert rail-layout "drawing sidebar should create the feature rail layout in drawing mode")
+      (assert panel-layout "drawing sidebar should create the drawing panel layout in drawing mode")
+      (assert (= rail-layout.position.y 7)
+              "drawing sidebar feature rail should start at the top-left dock origin")
+      (assert (= panel-layout.position.y 7)
+              "drawing sidebar panel should start at the top-left dock origin")
+      (assert (MathUtils.approx panel-layout.position.x
+                                (+ rail-layout.position.x rail-layout.size.x))
+              "drawing sidebar panel should sit flush against the feature rail without a gap")
+      (assert (= rail-layout.size.y (+ measured.y 8))
+              "drawing sidebar feature rail should fill the allocated dock height")
+      (assert (= panel-layout.size.y (+ measured.y 8))
+              "drawing sidebar panel should fill the allocated dock height")
+      (sidebar:drop))))
+
 (table.insert tests {:name "Drawing sidebar expands in drawing feature mode"
                      :fn sidebar-width-reflects-active-canvas-feature})
+(table.insert tests {:name "Drawing sidebar width follows panel measure"
+                     :fn sidebar-width-follows-panel-measure})
+(table.insert tests {:name "Drawing sidebar feature buttons fill rail width"
+                     :fn sidebar-feature-buttons-fill-rail-width})
 (table.insert tests {:name "Drawing sidebar rename input follows controller history"
                      :fn sidebar-rename-input-syncs-after-history})
 (table.insert tests {:name "Drawing sidebar keeps fill toggle clickable"
@@ -232,6 +318,8 @@
                      :fn sidebar-reconciles-on-canvas-feature-changes})
 (table.insert tests {:name "Drawing sidebar appears when switching to canvas surface"
                      :fn sidebar-appears-when-switching-to-canvas-surface})
+(table.insert tests {:name "Drawing sidebar fills allocated dock height"
+                     :fn sidebar-fills-allocated-dock-height})
 
 (local main
   (fn []

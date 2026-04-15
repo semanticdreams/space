@@ -76,7 +76,6 @@
   (local options (or opts {}))
   (local controller (assert options.controller "DrawingSidebarView requires :controller"))
   (local rail-width (or options.rail-width 6.4))
-  (local panel-width (or options.panel-width 22.0))
 
   (fn build [ctx]
     (var root-layout nil)
@@ -274,14 +273,14 @@
                                                                 (controller:on-undo))
                                                     :enabled? (controller:can-undo?)})
                              inner-ctx))
-                          1)
+                          0)
                         (FlexChild
                           (fn [inner-ctx]
                             ((action-button "Redo" {:on-click (fn [_button _event]
                                                                 (controller:on-redo))
                                                     :enabled? (controller:can-redo?)})
                              inner-ctx))
-                          1)
+                          0)
                         (FlexChild
                           (fn [inner-ctx]
                             ((action-button "Delete" {:on-click (fn [_button _event]
@@ -291,7 +290,7 @@
                                                       :hover-background-color (glm.vec4 0.42 0.19 0.19 0.98)
                                                       :pressed-background-color (glm.vec4 0.28 0.13 0.13 0.98)})
                              inner-ctx))
-                          1)]}))
+                          0)]}))
 
     (fn build-layer-rename-section [layer]
       (Flex {:axis 2
@@ -377,6 +376,7 @@
       (panel-shell
         (fn [inner-ctx]
           ((Flex {:axis 2
+                  :xalign :stretch
                   :spacing 0.25
                   :children [(FlexChild
                                (fn [child-ctx]
@@ -424,6 +424,11 @@
       (local reason (and payload payload.reason))
       (not (= reason "gesture")))
 
+    (fn panel-measured-width []
+      (if children.panel
+          (. children.panel.layout.measure 1)
+          0))
+
     (fn measurer [self]
       (var width 0)
       (var height 0)
@@ -433,7 +438,7 @@
             (set width (+ width rail-width))
             (when children.panel
               (children.panel.layout:measurer)
-              (set width (+ width 0.35 panel-width)))
+              (set width (+ width (panel-measured-width))))
             (set height (math.max (. children.rail.layout.measure 2)
                                   (if children.panel
                                       (. children.panel.layout.measure 2)
@@ -442,9 +447,13 @@
       (set self.measure (glm.vec3 width height 0)))
 
     (fn layouter [self]
-      (set self.size self.measure)
+      (local allocated-size
+        (glm.vec3 (math.max self.measure.x (or self.size.x 0))
+                  (math.max self.measure.y (or self.size.y 0))
+                  (math.max self.measure.z (or self.size.z 0))))
+      (set self.size allocated-size)
+      (local height allocated-size.y)
       (local base-position self.position)
-      (local height self.size.y)
       (when children.rail
         (set children.rail.layout.position base-position)
         (set children.rail.layout.size (glm.vec3 rail-width height 0))
@@ -453,8 +462,8 @@
         (set children.rail.layout.depth-offset-index (+ self.depth-offset-index 32))
         (children.rail.layout:layouter))
       (when children.panel
-        (set children.panel.layout.position (+ base-position (glm.vec3 (+ rail-width 0.35) 0 0)))
-        (set children.panel.layout.size (glm.vec3 panel-width height 0))
+        (set children.panel.layout.position (+ base-position (glm.vec3 rail-width 0 0)))
+        (set children.panel.layout.size (glm.vec3 (panel-measured-width) height 0))
         (set children.panel.layout.rotation self.rotation)
         (set children.panel.layout.clip-region self.clip-region)
         (set children.panel.layout.depth-offset-index (+ self.depth-offset-index 33))

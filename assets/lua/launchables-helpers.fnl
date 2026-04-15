@@ -101,4 +101,4 @@
  :add-box-textured add-box-textured
  :make-sub-app-one-dialog make-sub-app-one-dialog
  :make-next-app-dialog make-next-app-dialog
- :toggle-theme ThemeActions.toggle-theme}
+ :toggle-theme ThemeActions.request-toggle-theme}

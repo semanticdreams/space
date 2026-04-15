@@ -29,6 +29,7 @@
     :tests.test-text-ssbo-batcher
     :tests.test-dialog
     :tests.test-hud-control-panel
+    :tests.test-hud-layout
     :tests.test-deep-dialog
     :tests.test-tetris-game
     :tests.test-tetris-state
