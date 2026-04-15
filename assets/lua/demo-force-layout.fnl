@@ -2,6 +2,7 @@
 (local DemoForceLayout {})
 
 (local {:ForceLayout ForceLayout :ForceLayoutSignal ForceLayoutSignal} (require :force-layout))
+(local RuntimeUpdates (require :runtime-updates))
 (fn DemoForceLayout.attach [ctx entity]
   (if (or (not ctx) (not ctx.points) (not ctx.lines) (not entity))
       entity
@@ -13,7 +14,7 @@
             created-points []
             created-lines []
             world-positions []]
-        (var update-handler nil)
+        (var update-subscription nil)
 
         (fn rand-range [range]
           (- (* (math.random) (* 2 range)) range))
@@ -73,16 +74,17 @@
             (layout:update 40))
           (apply-positions))
 
-        (set update-handler on-update)
-        (when (and app.engine app.engine.events app.engine.events.updated)
-          (app.engine.events.updated:connect on-update))
+        (set update-subscription
+             (RuntimeUpdates.FrameSubscription {:callback on-update}))
+        (update-subscription:start)
 
         (when (> node-count 0)
           (local original-drop entity.drop)
           (set entity.drop
                (fn [self]
-                 (when (and update-handler app.engine app.engine.events app.engine.events.updated)
-                   (app.engine.events.updated:disconnect update-handler true))
+                 (when update-subscription
+                   (update-subscription:drop)
+                   (set update-subscription nil))
                  (each [_ line (ipairs created-lines)]
                    (when line.drop
                      (line:drop)))
