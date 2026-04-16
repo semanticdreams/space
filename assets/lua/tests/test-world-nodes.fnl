@@ -30,8 +30,9 @@
   (local options (or opts {}))
   (SkyboxState.normalize-complete-state
     {:enabled? (if (= options.enabled? nil) true options.enabled?)
-     :name (or options.name "lake")
-     :brightness (or options.brightness 0.1)}
+     :default {:name (or options.name "lake")
+               :brightness (or options.brightness 0.1)}
+     :by-theme (or options.by-theme {})}
     "test-world-nodes skybox state"))
 
 (fn make-background-state [opts]

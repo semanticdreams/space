@@ -63,6 +63,13 @@
              app.hud)
     app.hud))
 
+(fn active-theme-key []
+  (if (and app app.themes app.themes.get-active-theme-name)
+      (SkyboxState.normalize-theme-key
+        (app.themes.get-active-theme-name)
+        "WorldData active theme")
+      nil))
+
 (fn world-name [world-manager world-id]
   (local entry (resolve-world-entry world-manager world-id))
   (or (and entry entry.name) world-id))
@@ -196,7 +203,8 @@
   (when scene
     (assert scene.set-skybox-state
             "Active scene is missing set-skybox-state for world skybox sync")
-    (scene:set-skybox-state skybox)))
+    (scene:set-skybox-state
+      (SkyboxState.resolve-for-theme skybox (active-theme-key)))))
 
 (fn sync-active-background-state [world-manager world-id background]
   (local scene (resolve-scene world-manager world-id))

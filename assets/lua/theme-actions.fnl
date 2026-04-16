@@ -1,4 +1,5 @@
 (local PanelUtils (require :target-panel-utils))
+(local SkyboxState (require :skybox-state))
 
 (fn copy-list [items]
   (local result [])
@@ -70,6 +71,19 @@
     (each [_ snapshot (ipairs (or panel-states []))]
       (restore-panel-state snapshot))))
 
+(fn reapply-active-world-skybox [theme-name]
+  (local entry (and app app.active-world-entry))
+  (local world (and entry entry.world))
+  (local runtime
+    (if (and world world.get-runtime)
+        (world:get-runtime)
+        (and world world.runtime)))
+  (local scene (and runtime runtime.scene))
+  (local skybox-policy (and world world.state world.state.scene world.state.scene.skybox))
+  (when (and scene scene.set-skybox-state skybox-policy)
+    (scene:set-skybox-state
+      (SkyboxState.resolve-for-theme skybox-policy theme-name))))
+
 (fn apply-theme [theme-name]
   (local previous-selected
     (and app.graph-view app.graph-view.selection
@@ -81,7 +95,7 @@
     (themes.set-theme theme-name))
   (when (and app.settings app.settings.set-value app.settings.save)
     (app.settings.set-value "ui.theme"
-                            (if (= theme-name :light) "light" "dark")
+                            (tostring theme-name)
                             {:save? false})
     (app.settings.save))
   (when (and app.scene app.scene.build-default)
@@ -92,6 +106,7 @@
         (app.hud:build-default)))
   (when (and app.renderers app.renderers.apply-theme)
     (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
+  (reapply-active-world-skybox theme-name)
   (rebuild-graph-view previous-selected graph-node-view-panels))
 
 (fn request-theme [theme-name]
@@ -102,13 +117,13 @@
 (fn toggle-theme []
   (local themes app.themes)
   (local current (and themes themes.get-active-theme-name (themes.get-active-theme-name)))
-  (local next (if (= current :light) :dark :light))
+  (local next (if (= (tostring current) "light") :dark :light))
   (apply-theme next))
 
 (fn request-toggle-theme []
   (local themes app.themes)
   (local current (and themes themes.get-active-theme-name (themes.get-active-theme-name)))
-  (local next (if (= current :light) :dark :light))
+  (local next (if (= (tostring current) "light") :dark :light))
   (request-theme next))
 
 {:apply-theme apply-theme

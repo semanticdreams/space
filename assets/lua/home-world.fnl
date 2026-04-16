@@ -345,12 +345,18 @@
     (local runtime world.runtime)
     (local scene (and runtime runtime.scene))
     (local scene-state (and world.state world.state.scene))
+    (local theme-key
+      (if (and app app.themes app.themes.get-active-theme-name)
+          (SkyboxState.normalize-theme-key
+            (app.themes.get-active-theme-name)
+            (string.format "HomeWorld.apply-runtime-skybox-state %s" world.id))
+          nil))
     (when (and scene scene.set-skybox-state)
       (scene:set-skybox-state
-        (SkyboxState.normalize-complete-state
+        (SkyboxState.resolve-for-theme
           (assert (and scene-state scene-state.skybox)
                   (string.format "HomeWorld %s requires scene.skybox" world.id))
-          (string.format "HomeWorld.apply-runtime-skybox-state %s" world.id)))))
+          theme-key))))
 
   (fn apply-runtime-background-state! [world]
     (local runtime world.runtime)
@@ -483,6 +489,11 @@
       (assert captured-scene.lights "HomeWorld.capture-runtime-state requires scene lights")
       (assert captured-scene.skybox "HomeWorld.capture-runtime-state requires scene skybox")
       (assert captured-scene.background "HomeWorld.capture-runtime-state requires scene background")
+      (set captured-scene.skybox
+           (SkyboxState.normalize-complete-state
+             (assert existing-scene.skybox
+                     "HomeWorld.capture-runtime-state requires persisted scene skybox policy")
+             "HomeWorld.capture-runtime-state persisted skybox"))
       (set world.state.scene captured-scene))
     (when (and canvas canvas.capture-state)
       (do

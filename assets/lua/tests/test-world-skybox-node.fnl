@@ -27,8 +27,9 @@
   (local options (or opts {}))
   (SkyboxState.normalize-complete-state
     {:enabled? (if (= options.enabled? nil) true options.enabled?)
-     :name (or options.name "lake")
-     :brightness (or options.brightness 0.1)}
+     :default {:name (or options.name "lake")
+               :brightness (or options.brightness 0.1)}
+     :by-theme (or options.by-theme {})}
     "test-world-skybox-node skybox state"))
 
 (fn make-world-entry [opts]
@@ -52,7 +53,10 @@
 (fn make-scene-runtime [opts]
   (local options (or opts {}))
   (var lights (or options.lights (LightSystemModule.default-state)))
-  (var skybox (or options.skybox (make-skybox-state)))
+  (var skybox
+       (SkyboxState.resolve-for-theme
+         (or options.skybox (make-skybox-state))
+         (or options.theme-key nil)))
   {:scene {:capture-state (fn [_self]
                             {:panels []
                              :terrains []
@@ -100,6 +104,7 @@
 (fn with-skybox-assets [cb]
   (local previous-app app)
   (local previous-engine (and app app.engine))
+  (local previous-themes (and app app.themes))
   (when (not app)
     (global app {}))
   (set app.engine {:get-asset-path (fn [path]
@@ -109,7 +114,9 @@
                                          path))})
   (local (ok result) (pcall cb))
   (if previous-app
-      (set app.engine previous-engine)
+      (do
+        (set app.engine previous-engine)
+        (set app.themes previous-themes))
       (global app nil))
   (if ok result (error result)))
 
@@ -136,11 +143,18 @@
   (local Intersectables (require :intersectables))
   (local Clickables (require :clickables))
   (local Hoverables (require :hoverables))
+  (local Themes (require :themes))
   (local intersectables (or app.intersectables (Intersectables)))
   (local clickables (or app.clickables (Clickables {:intersectables intersectables})))
   (local hoverables (or app.hoverables (Hoverables {:intersectables intersectables})))
+  (local themes (Themes))
+  (themes.add-theme :dark (require :dark-theme))
+  (themes.add-theme :light (require :light-theme))
+  (themes.set-theme :dark)
+  (set app.themes themes)
   (local ctx (BuildContext {:clickables clickables
-                            :hoverables hoverables}))
+                            :hoverables hoverables
+                            :theme (themes.get-active-theme)}))
   (set ctx.icons (make-icons-stub))
   (local state {:scene {:panels []
                         :terrains []
@@ -151,6 +165,7 @@
   (var synced-skybox nil)
   (local runtime (make-scene-runtime {:lights state.scene.lights
                                       :skybox state.scene.skybox
+                                      :theme-key :dark
                                       :on-set-skybox-state (fn [value]
                                                              (set synced-skybox value))}))
   (local entry (make-world-entry {:id "test-world"
@@ -230,8 +245,10 @@
       (assert harness.view.layout "SkyboxNodeView should have layout")
       (assert harness.view.fields "SkyboxNodeView should expose fields")
       (assert harness.view.apply-button "SkyboxNodeView should expose apply button")
-      (assert (= (harness.view.fields.name:get-value) "lake")
-              "SkyboxNodeView should default to the current skybox name")
+      (assert (= (harness.view.fields.default-name:get-value) "lake")
+              "SkyboxNodeView should default to the current default skybox name")
+      (assert harness.view.theme-overrides.dark
+              "SkyboxNodeView should expose a row for the dark theme")
       (harness:drop))))
 
 (fn skybox-node-view-applies-changes []
@@ -247,18 +264,30 @@
             (. (. skybox-items 2) 1)
             (. (. skybox-items 1) 1)))
       (harness.view.fields.enabled:set-value "false")
-      (harness.view.fields.name:set-value next-name)
-      (harness.view.fields.brightness:set-text "0.25")
+      (harness.view.fields.default-name:set-value next-name)
+      (harness.view.fields.default-brightness:set-text "0.25")
+      (harness.view.theme-overrides.dark.name:set-value "lake")
+      (harness.view.theme-overrides.dark.brightness:set-text "0.4")
       (harness.view.apply-button:on-click {})
       (assert (= harness.state.scene.skybox.enabled? false) "Skybox apply should persist enabled flag")
-      (assert (= harness.state.scene.skybox.name next-name) "Skybox apply should persist name")
-      (assert (= harness.state.scene.skybox.brightness 0.25) "Skybox apply should persist brightness")
+      (assert (= harness.state.scene.skybox.default.name next-name)
+              "Skybox apply should persist default name")
+      (assert (= harness.state.scene.skybox.default.brightness 0.25)
+              "Skybox apply should persist default brightness")
+      (assert (= (and harness.state.scene.skybox.by-theme.dark
+                      harness.state.scene.skybox.by-theme.dark.name)
+                 "lake")
+              "Skybox apply should persist dark-theme override")
       (local synced-skybox (harness:synced-skybox))
       (assert synced-skybox "Skybox apply should sync the active scene")
-      (assert (= synced-skybox.name next-name) "Synced skybox should include updated name")
+      (assert (= synced-skybox.name "lake")
+              "Synced skybox should resolve the active theme override")
+      (assert (= synced-skybox.brightness 0.4)
+              "Synced skybox should include resolved override brightness")
       (local saved-skybox (harness:saved-skybox))
       (assert saved-skybox "Skybox apply should persist world state")
-      (assert (= saved-skybox.brightness 0.25) "Saved skybox should include updated brightness")
+      (assert (= saved-skybox.default.brightness 0.25)
+              "Saved skybox should include updated default brightness")
       (harness:drop))))
 
 (table.insert tests {:name "skybox node module exports"

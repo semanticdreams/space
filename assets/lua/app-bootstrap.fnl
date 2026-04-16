@@ -1,3 +1,5 @@
+(local logging (require :logging))
+
 (fn init-themes []
   (local Themes (require :themes))
   (set app.themes (Themes))
@@ -6,13 +8,18 @@
   (local stored-theme
     (and app.settings app.settings.get-value
          (app.settings.get-value "ui.theme" nil)))
-  (local resolved-theme
-    (if (= stored-theme "light")
-        :light
-        (if (= stored-theme "dark")
-            :dark
-            nil)))
-  (app.themes.set-theme (or resolved-theme :dark))
+  (local fallback-theme :dark)
+  (local desired-theme (or stored-theme fallback-theme))
+  (local (ok _result-or-error)
+    (pcall app.themes.set-theme desired-theme))
+  (when (not ok)
+    (when stored-theme
+      (logging.warn
+        (string.format
+          "[space] stored ui.theme '%s' is unavailable; falling back to %s"
+          (tostring stored-theme)
+          (tostring fallback-theme))))
+    (app.themes.set-theme fallback-theme))
   app.themes)
 
 (fn init-lights []

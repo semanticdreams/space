@@ -3,10 +3,32 @@
     (error (.. label " must be a function")))
   value)
 
+(fn key-text [name]
+  (if (= name nil)
+      nil
+      (tostring name)))
+
 (fn Themes []
   (local builders {})
   (var current nil)
   (var current-name nil)
+
+  (fn resolve-builder [name]
+    (local direct (. builders name))
+    (if direct
+        (values name direct)
+        (let [wanted (key-text name)]
+          (if wanted
+              (do
+                (var resolved-name nil)
+                (var resolved-builder nil)
+                (each [candidate builder (pairs builders)]
+                  (when (and (not resolved-builder)
+                             (= (key-text candidate) wanted))
+                    (set resolved-name candidate)
+                    (set resolved-builder builder)))
+                (values resolved-name resolved-builder))
+              (values nil nil)))))
 
   (fn add-theme [name builder]
     (assert name "Themes.add-theme requires a name")
@@ -15,13 +37,13 @@
     (set (. builders name) builder))
 
   (fn set-theme [name]
-    (local builder (. builders name))
-    (assert builder (.. "Theme " name " is not registered"))
+    (local (resolved-name builder) (resolve-builder name))
+    (assert builder (.. "Theme " (tostring name) " is not registered"))
     (local instance (builder))
     (when (and current current.drop)
       (current:drop))
     (set current instance)
-    (set current-name name)
+    (set current-name resolved-name)
     instance)
 
   (fn get-active-theme []

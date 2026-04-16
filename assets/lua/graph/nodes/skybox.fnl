@@ -14,6 +14,20 @@
   (local asset-path-resolver
     (assert options.asset-path-resolver
             (.. "SkyboxNode[" world-id "] requires :asset-path-resolver")))
+  (local theme-items-provider
+    (or options.theme-items-provider
+        (fn []
+          (local items [])
+          (when (and app app.themes app.themes.list-themes)
+            (each [_ theme-key (ipairs (app.themes:list-themes))]
+              (local key (SkyboxState.normalize-theme-key
+                           theme-key
+                           (.. "SkyboxNode[" world-id "] theme key")))
+              (table.insert items [key key])))
+          (table.sort items
+                      (fn [left right]
+                        (< (. left 1) (. right 1))))
+          items)))
   (local skybox-record
     (SkyboxState.normalize-complete-state
       (or options.skybox-record
@@ -37,6 +51,9 @@
   (set node.available-items
        (fn [self]
          (SkyboxState.available-items self.asset-path-resolver)))
+  (set node.available-themes
+       (fn [_self]
+         (theme-items-provider)))
   (set node.apply-values
        (fn [self next-skybox]
          (local updated

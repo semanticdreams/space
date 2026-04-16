@@ -1448,7 +1448,7 @@
   (fn get-skybox-state [self]
     (assert (and app app.renderers app.renderers.skybox app.renderers.skybox.get-state)
             "Scene.get-skybox-state requires app.renderers.skybox.get-state")
-    (SkyboxState.normalize-complete-state
+    (SkyboxState.normalize-resolved-state
       (app.renderers.skybox:get-state)
       "Scene.get-skybox-state"))
 

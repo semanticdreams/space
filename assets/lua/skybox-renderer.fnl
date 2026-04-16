@@ -79,7 +79,10 @@
   (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE (* 3 4) 0)
 
   (var cubemap nil)
-  (var state (SkyboxState.default-state))
+  (var state
+       (SkyboxState.resolve-for-theme
+         (SkyboxState.default-state)
+         nil))
   (fn set-skybox-path [path]
     (when cubemap
       (cubemap:drop)
@@ -97,7 +100,7 @@
 
   (fn set-state [self next-state]
     (local normalized
-      (SkyboxState.normalize-complete-state next-state "SkyboxRenderer.set-state"))
+      (SkyboxState.normalize-resolved-state next-state "SkyboxRenderer.set-state"))
     (local path-changed?
       (or (not (= normalized.enabled? state.enabled?))
           (not (= normalized.name state.name))))

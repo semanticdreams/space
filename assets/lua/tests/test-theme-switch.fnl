@@ -30,6 +30,25 @@
       true))
   (set app.themes previous))
 
+(fn init-themes-falls-back-for-unknown-stored-theme []
+  (local previous app.themes)
+  (with-settings
+    "solarized"
+    (fn []
+      (set app.themes nil)
+      (local themes (AppBootstrap.init-themes))
+      (assert (= (themes.get-active-theme-name) :dark))
+      true))
+  (set app.themes previous))
+
+(fn themes-set-theme-resolves-string-key []
+  (local themes (Themes))
+  (themes.add-theme :dark (require :dark-theme))
+  (themes.add-theme :light (require :light-theme))
+  (themes.set-theme "light")
+  (assert (= (themes.get-active-theme-name) :light))
+  true)
+
 (fn find-entity [root predicate]
   (var found nil)
   (fn walk [entity]
@@ -200,10 +219,54 @@
     (error err))
   true)
 
+(fn apply-theme-saves-exact-theme-key []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (var saved-key nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  (set app.scene {:build-default (fn [_self] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key value _opts]
+                                  (set saved-key value)
+                                  true)
+                     :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                   :get-active-theme (fn [] {:name :custom})})
+  (ThemeActions.apply-theme :solarized)
+  (assert (= saved-key "solarized")
+          "apply-theme should persist the exact theme key string")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  true)
+
 (table.insert tests {:name "Init themes uses stored UI theme" :fn init-themes-reads-settings})
+(table.insert tests {:name "Init themes falls back for unknown stored UI theme"
+                     :fn init-themes-falls-back-for-unknown-stored-theme})
+(table.insert tests {:name "Themes set-theme resolves string key"
+                     :fn themes-set-theme-resolves-string-key})
 (table.insert tests {:name "Control panel toggles theme" :fn control-panel-toggles-theme})
 (table.insert tests {:name "Apply theme restores graph node view panels on their target"
                      :fn apply-theme-restores-graph-node-view-panels-on-target})
+(table.insert tests {:name "Apply theme saves exact theme key"
+                     :fn apply-theme-saves-exact-theme-key})
 
 (local main
   (fn []
