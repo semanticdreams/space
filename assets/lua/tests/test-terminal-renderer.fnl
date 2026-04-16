@@ -205,7 +205,8 @@
                      lighting-view-state
                      entry.batches
                      entry.clip-vector
-                     entry.clip-group-vector))
+                     entry.clip-group-vector
+                     entry.unlit))
       (draw-text-ssbo ctx {:projection true} {:view true})
       (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
       (assert (>= (# draw-calls) 3)))))
@@ -243,7 +244,8 @@
                      lighting-view-state
                      entry.batches
                      entry.clip-vector
-                     entry.clip-group-vector))
+                     entry.clip-group-vector
+                     entry.unlit))
       (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
       (assert (= (# draw-calls) 2)))))
 
@@ -354,7 +356,8 @@
                      lighting-view-state
                      entry.batches
                      entry.clip-vector
-                     entry.clip-group-vector))
+                     entry.clip-group-vector
+                     entry.unlit))
       (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
       (assert (= (# draw-calls) 1)))))
 

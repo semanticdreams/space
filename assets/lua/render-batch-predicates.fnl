@@ -36,6 +36,14 @@
        entry.clip-group-vector
        (vector-has-elements? entry.vector)))
 
+(fn lit-quad-draw-entry? [entry]
+  (and (renderable-quad-draw-entry? entry)
+       (not entry.unlit)))
+
+(fn quad-draw-list-require-lighting? [entries]
+  (accumulate [required? false _ entry (ipairs (or entries []))]
+    (or required? (lit-quad-draw-entry? entry))))
+
 {:vector-has-elements? vector-has-elements?
  :renderable-mesh-batch? renderable-mesh-batch?
  :lit-mesh-batch? lit-mesh-batch?
@@ -43,4 +51,6 @@
  :renderable-instanced-color-mesh-batch? renderable-instanced-color-mesh-batch?
  :lit-instanced-color-mesh-batch? lit-instanced-color-mesh-batch?
  :instanced-color-mesh-batches-require-lighting? instanced-color-mesh-batches-require-lighting?
- :renderable-quad-draw-entry? renderable-quad-draw-entry?}
+ :renderable-quad-draw-entry? renderable-quad-draw-entry?
+ :lit-quad-draw-entry? lit-quad-draw-entry?
+ :quad-draw-list-require-lighting? quad-draw-list-require-lighting?}

@@ -70,6 +70,7 @@
                                           :directional-traversal-boundary? true}))))
   (local ctx
     (BuildContext {:theme (resolve-active-theme)
+                   :quad-unlit? true
                    :clickables app.clickables
                    :hoverables app.hoverables
                    :system-cursors app.system-cursors

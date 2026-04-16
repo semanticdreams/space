@@ -226,19 +226,21 @@
       (gl.glBindBuffer gl.GL_ARRAY_BUFFER active-clip-group-buffer)
       (gl.glVertexAttribIPointer 7 1 gl.GL_UNSIGNED_INT 4 (* first 4))))
 
-  (fn draw-pass [self projection view lighting-view-state vector batches]
+  (fn draw-pass [self projection view lighting-view-state vector batches unlit?]
     (local draw-start-local (os.clock))
     (when gpu-query-supported?
       (gl.glBeginQuery gl.GL_TIME_ELAPSED (. draw-gpu-queries active-query-slot)))
     (shader:use)
-    (local lights (assert (and app app.lights)
-                          "QuadRenderer requires app.lights; call AppBootstrap.init-lights"))
-    (LightUtils.apply-lights shader lights)
     (shader:setMatrix4 "projection" projection)
     (shader:setMatrix4 "view" view)
-    (LightingViewState.apply-uniforms shader
-                                      (assert lighting-view-state
-                                              "QuadRenderer.draw-pass requires lighting-view-state"))
+    (shader:setInteger "unlit" (if unlit? 1 0))
+    (when (not unlit?)
+      (local lights (assert (and app app.lights)
+                            "QuadRenderer requires app.lights; call AppBootstrap.init-lights"))
+      (LightUtils.apply-lights shader lights)
+      (LightingViewState.apply-uniforms shader
+                                        (assert lighting-view-state
+                                                "QuadRenderer.draw-pass requires lighting-view-state for lit quads")))
     (each [_ bucket (ipairs (self:resolve-batches vector batches))]
       (shader:setMatrix4 "model" (or bucket.model (glm.mat4 1)))
       (each [i first (ipairs bucket.firsts)]
@@ -251,7 +253,7 @@
       (set (. draw-query-submitted active-query-slot) true))
     (- (os.clock) draw-start-local))
 
-  (fn render [self vector projection view lighting-view-state batches clip-vector clip-group-vector]
+  (fn render [self vector projection view lighting-view-state batches clip-vector clip-group-vector unlit?]
     (when (and vector (> (vector:length) 0))
       (self:rotate-query-slot)
       (self:update-gpu-query-result upload-gpu-queries
@@ -282,7 +284,8 @@
                                              view
                                              lighting-view-state
                                              vector
-                                             batches))))
+                                             batches
+                                             unlit?))))
 
   {:shader shader
    :instance-stride instance-stride

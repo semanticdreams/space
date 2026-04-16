@@ -132,6 +132,7 @@
                            (<= (# batches) 0))
                        []
                        [{:vector vector
+                         :unlit (= options.quad-unlit? true)
                          :clip-vector (rectangle-quad-batcher:get-clip-vector)
                          :clip-group-vector (rectangle-quad-batcher:get-clip-group-vector)
                          :batches batches}]))})

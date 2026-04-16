@@ -98,6 +98,12 @@
   (assert (= (. dir-call.args.value 2) direction.y))
   (assert (= (. dir-call.args.value 3) direction.z)))
 
+(fn assert-unlit-uniform-enabled [shader]
+  (local call
+    (only (collect-calls shader.calls "setInteger"
+                         (fn [args] (= args.uniform "unlit")))))
+  (assert (= call.args.value 1)))
+
 (fn triangle-resolve-batches-falls-back []
   (with-open-gl
     (fn [_mock]
@@ -307,11 +313,12 @@
                        [{:model model-a
                          :firsts [0 3]
                          :counts [2 1]}
-                        {:model nil
+                       {:model nil
                          :firsts [4]
                          :counts [4]}]
                        clip-vector
-                       clip-group-vector)
+                       clip-group-vector
+                       false)
       (local draw-calls (mock:get-gl-calls "glDrawArraysInstanced"))
       (assert (= (# draw-calls) 3))
       (assert (= (. (. draw-calls 1) :args :mode) gl.GL_TRIANGLE_STRIP))
@@ -358,8 +365,37 @@
                          :firsts [0]
                          :counts [2]}]
                        clip-vector
-                       clip-group-vector)
+                       clip-group-vector
+                       false)
       (assert-orthographic-lighting-uniforms renderer.shader direction))))
+
+(fn quad-renderer-skips-lighting-for-unlit-quads []
+  (with-open-gl
+    (fn [_mock]
+      (local QuadRenderer (reload "quad-renderer"))
+      (local renderer (QuadRenderer))
+      (local vector (fake-vector (* 21 2)))
+      (local clip-vector (fake-vector 16))
+      (local clip-group-vector (fake-vector 2))
+      (renderer:render vector
+                       {:projection true}
+                       {:view true}
+                       nil
+                       [{:model nil
+                         :firsts [0]
+                         :counts [2]}]
+                       clip-vector
+                       clip-group-vector
+                       true)
+      (assert-unlit-uniform-enabled renderer.shader)
+      (assert (= (# (collect-calls renderer.shader.calls "setVector3f"
+                                   (fn [args] (= args.uniform "ambientLight"))))
+                 0)
+              "unlit quad renderer path should skip light uniform uploads")
+      (assert (= (# (collect-calls renderer.shader.calls "setInteger"
+                                   (fn [args] (= args.uniform "lightingViewMode"))))
+                 0)
+              "unlit quad renderer path should skip lighting view uniforms"))))
 
 (fn quad-renderer-updates-dirty-instance-window []
   (with-open-gl
@@ -382,7 +418,8 @@
                        lighting-view-state
                        batches
                        clip-vector
-                       clip-group-vector)
+                       clip-group-vector
+                       false)
 
       (mock:reset)
       (vector:set-float handle 0 2.0)
@@ -392,7 +429,8 @@
                        lighting-view-state
                        batches
                        clip-vector
-                       clip-group-vector)
+                       clip-group-vector
+                       false)
 
       (local sub-updates
         (collect-calls (mock:get-gl-calls "bufferSubDataFromVectorBuffer")
@@ -482,7 +520,26 @@
              (fn [_self] [{:vector (fake-vector 0)
                            :batches []
                            :clip-vector (fake-vector 0)
-                           :clip-group-vector (fake-vector 0)}])}))))))
+                           :clip-group-vector (fake-vector 0)}])})))))) 
+
+(fn renderers-draw-target-skips-lighting-state-for-unlit-quads []
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          (renderers:draw-target
+            {:projection {:projection true}
+             :get-view-matrix (fn [_self] {:view true})
+             :get-quad-draw-list
+             (fn [_self] [{:vector (fake-vector 21)
+                           :unlit true
+                           :batches [{:model nil
+                                      :firsts [0]
+                                      :counts [1]}]
+                           :clip-vector (fake-vector 16)
+                           :clip-group-vector (fake-vector 1)}])}))))))
 
 (fn renderers-draw-target-requires-lighting-state-for-lit-geometry []
   (with-open-gl
@@ -693,6 +750,8 @@
                      :fn text-ssbo-renderer-uses-ssbo-groups-and-instanced-draws})
 (table.insert tests {:name "Renderers draw-target skips lighting state for empty lit geometry"
                      :fn renderers-draw-target-skips-lighting-state-for-empty-lit-geometry})
+(table.insert tests {:name "Renderers draw-target skips lighting state for unlit quads"
+                     :fn renderers-draw-target-skips-lighting-state-for-unlit-quads})
 (table.insert tests {:name "Renderers draw-target requires lighting state for lit geometry"
                      :fn renderers-draw-target-requires-lighting-state-for-lit-geometry})
 (table.insert tests {:name "Renderers update uses background clear color"

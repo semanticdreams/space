@@ -116,15 +116,20 @@
           (image-renderer:render image-batches projection view))
         (local quad-draw-list (and target.get-quad-draw-list (target:get-quad-draw-list)))
         (when quad-draw-list
+          (local quad-lighting-view-state
+            (if (RenderBatchPredicates.quad-draw-list-require-lighting? quad-draw-list)
+                (require-lighting-view-state)
+                nil))
           (each [_ entry (ipairs quad-draw-list)]
             (when (RenderBatchPredicates.renderable-quad-draw-entry? entry)
               (quad-renderer:render entry.vector
                                     projection
                                     view
-                                    (require-lighting-view-state)
+                                    quad-lighting-view-state
                                     entry.batches
                                     entry.clip-vector
-                                    entry.clip-group-vector))))
+                                    entry.clip-group-vector
+                                    entry.unlit))))
         (local line-vector (and target.get-line-vector (target:get-line-vector)))
         (when line-vector
           (line-renderer:render-lines line-vector projection view))

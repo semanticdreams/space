@@ -478,6 +478,7 @@
                         (<= (# batches) 0))
                     []
                     [{:vector vector
+                      :unlit true
                       :clip-vector (background-quad-batcher:get-clip-vector)
                       :clip-group-vector (background-quad-batcher:get-clip-group-vector)
                       :batches (with-model-batches batches)}]))))})
@@ -496,6 +497,7 @@
                         (<= (# batches) 0))
                     []
                     [{:vector vector
+                      :unlit true
                       :clip-vector (underline-quad-batcher:get-clip-vector)
                       :clip-group-vector (underline-quad-batcher:get-clip-group-vector)
                       :batches (with-model-batches batches)}]))))})
@@ -514,6 +516,7 @@
                         (<= (# batches) 0))
                     []
                     [{:vector vector
+                      :unlit true
                       :clip-vector (cursor-quad-batcher:get-clip-vector)
                       :clip-group-vector (cursor-quad-batcher:get-clip-group-vector)
                       :batches (with-model-batches batches)}]))))})

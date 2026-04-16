@@ -196,6 +196,7 @@
                               (focus-manager:create-scope
                                 {:name (or options.focus-scope-name "e2e-screen")}))))
   (local ctx (BuildContext {:theme (app.themes.get-active-theme)
+                            :quad-unlit? true
                             :clickables app.clickables
                             :hoverables app.hoverables
                             :system-cursors app.system-cursors

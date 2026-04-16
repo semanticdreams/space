@@ -14,6 +14,7 @@ out vec4 fragColor;
 uniform int lightingViewMode;
 uniform vec3 lightingViewPos;
 uniform vec3 lightingViewDir;
+uniform int unlit;
 uniform vec3 ambientLight;
 uniform int dirLightCount;
 uniform DirLight dirLights[MAX_DIR_LIGHTS];
@@ -41,12 +42,15 @@ void main()
                                           lightingViewPos,
                                           lightingViewDir,
                                           worldPos);
-    vec3 lightingViewDir = viewDir;
-    vec3 light = ambientLight;
-    light += CalcDirLights(dirLights, dirLightCount, normal, lightingViewDir);
-    light += CalcPointLights(pointLights, pointLightCount, normal, worldPos, lightingViewDir);
-    light += CalcSpotLights(spotLights, spotLightCount, normal, worldPos, lightingViewDir);
-
-    fragColor = vec4(light, 1.0f) * theColor;
+    if (unlit != 0) {
+        fragColor = theColor;
+    } else {
+        vec3 lightingViewDir = viewDir;
+        vec3 light = ambientLight;
+        light += CalcDirLights(dirLights, dirLightCount, normal, lightingViewDir);
+        light += CalcPointLights(pointLights, pointLightCount, normal, worldPos, lightingViewDir);
+        light += CalcSpotLights(spotLights, spotLightCount, normal, worldPos, lightingViewDir);
+        fragColor = vec4(light, 1.0f) * theColor;
+    }
     gl_FragDepth = applyDepthOffset(gl_FragCoord.z, depth_offset_index);
 }

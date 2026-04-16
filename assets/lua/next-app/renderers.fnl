@@ -663,7 +663,8 @@
                           lighting-view-state
                           (quad-batcher:get-batches)
                           (quad-batcher:get-clip-vector)
-                          (quad-batcher:get-clip-group-vector))
+                          (quad-batcher:get-clip-group-vector)
+                          true)
     (gl.glDisable gl.GL_DEPTH_TEST)
     (text-batcher:render text-renderer projection view)
     (gl.glEnable gl.GL_DEPTH_TEST)

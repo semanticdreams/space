@@ -36,7 +36,6 @@
 (fn resolve-panel-border-color [ctx]
   (local theme (and ctx ctx.theme))
   (or (and theme theme.panel-border)
-      (and theme theme.hud theme.hud.panel-border)
       (glm.vec4 0.72 0.75 0.79 0.85)))
 
 (fn make-empty-hud-slot-builder []
@@ -54,6 +53,7 @@
              (focus-manager:create-scope {:name (or options.focus-scope-name "hud")}))))
   (local ctx
     (BuildContext {:theme (resolve-active-theme)
+                       :quad-unlit? true
                        :clickables app.clickables
                        :hoverables app.hoverables
                        :system-cursors app.system-cursors
