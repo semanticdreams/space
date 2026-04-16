@@ -381,6 +381,7 @@
                        :focus-scope focus-scope}))
   (local self {:layout-root layout-root
                :build-context ctx
+               :debug-id (or options.debug-id "scene")
                :projection nil
                :projection-version 0
                :viewport nil
@@ -412,6 +413,58 @@
   (fn clone-quat [value]
     (and value
          (glm.quat value.w value.x value.y value.z)))
+
+  (fn count-label [items]
+    (if (= items nil)
+        "nil"
+        (tostring (length items))))
+
+  (fn terrain-entry-id [entry]
+    (or (and entry entry.record entry.record.id)
+        (and entry entry.id)
+        "?"))
+
+  (fn terrain-id-summary [items]
+    (if (= items nil)
+        "nil"
+        (do
+          (local ids [])
+          (local total (length items))
+          (each [idx entry (ipairs items)]
+            (when (<= idx 5)
+              (table.insert ids (terrain-entry-id entry))))
+          (local joined (table.concat ids ","))
+          (if (> total 5)
+              (.. joined ",...")
+              joined))))
+
+  (fn log-terrain-diagnostic [self level event extra]
+    (local entity self.entity)
+    (local entity-terrains (and entity entity.scene-terrains))
+    (local entity-children (and entity entity.children))
+    (local extra-text
+      (if extra
+          (.. " " extra)
+          ""))
+    (local message
+      (string.format
+        "[scene] terrain-diagnostic scene=%s event=%s builder=%s entity=%s scene-terrains=%s entity.scene-terrains=%s shared=%s scene-children=%s entity.children=%s runtime=%s ids=%s%s"
+        self.debug-id
+        event
+        (tostring (not (= self.builder nil)))
+        (tostring (not (= entity nil)))
+        (count-label self.scene-terrains)
+        (count-label entity-terrains)
+        (tostring (= self.scene-terrains entity-terrains))
+        (count-label self.scene-children)
+        (count-label entity-children)
+        (count-label self.__terrain-runtime-state)
+        (terrain-id-summary self.scene-terrains)
+        extra-text))
+    (if (= level :warn)
+        (TerrainIssueLog.warn message)
+        (TerrainIssueLog.info message))
+    (set self.__terrain-last-diagnostic event))
 
   (fn vec3-approx= [left right]
     (and left
@@ -451,6 +504,7 @@
 
   (fn notify-terrains-changed [self]
     (set self.__terrain-runtime-state (capture-terrain-runtime-state self))
+    (log-terrain-diagnostic self :info "notify-terrains-changed")
     (when self.on-terrains-changed
       (self.on-terrains-changed self)))
 
@@ -1131,6 +1185,10 @@
     true)
 
   (fn attach-entity [self entity]
+    (log-terrain-diagnostic self :info
+                            "attach-entity:begin"
+                            (string.format "incoming-entity=%s"
+                                           (tostring (not (= entity nil)))))
     (when self.entity
       (self:unregister-entity self.entity)
       (self.entity:drop))
@@ -1164,6 +1222,7 @@
       (register-entity-movables self entity)
       (register-entity-resizables self entity)
       (self:sync-physics-bodies))
+    (log-terrain-diagnostic self :info "attach-entity:end")
     (notify-terrains-changed self))
 
   (fn build [self builder]
@@ -1175,6 +1234,10 @@
       (self:attach-entity nil)))
 
 (fn build-default [self opts]
+  (log-terrain-diagnostic self :info
+                          "build-default"
+                          (string.format "requested-terrains=%s"
+                                         (count-label (and opts opts.terrains))))
   (self:build (make-default-builder opts)))
 
   (fn update [self]
@@ -1184,6 +1247,7 @@
     (sync-terrain-runtime-state self))
 
   (fn drop [self]
+  (log-terrain-diagnostic self :info "drop:begin")
   (when self.entity
     (self:unregister-entity self.entity)
     (self.entity:drop)
@@ -1193,7 +1257,8 @@
   (set self.demo-browser nil)
   (when (and self.focus-manager self.focus-scope)
     (self.focus-manager:detach self.focus-scope)
-    (set self.focus-scope nil)))
+    (set self.focus-scope nil))
+  (log-terrain-diagnostic self :info "drop:end"))
 
 (fn reset-projection [self]
   (assert (and app app.create-default-projection)
@@ -1384,8 +1449,12 @@
 
   (fn capture-state [self]
     (local panels [])
+    (when (= self.scene-terrains nil)
+      (log-terrain-diagnostic self :warn "capture-state:missing-scene-terrains"))
     (local terrains
-      (SceneWorldState.capture-terrains self.scene-terrains))
+      (if (= self.scene-terrains nil)
+          nil
+          (SceneWorldState.capture-terrains self.scene-terrains)))
     (assert (and app app.lights app.lights.get-state)
             "Scene.capture-state requires app.lights.get-state")
     (local lights (app.lights:get-state))

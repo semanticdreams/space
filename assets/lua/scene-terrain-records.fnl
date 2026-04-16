@@ -315,6 +315,9 @@
       (error (.. "Unsupported terrain kind for build: " normalized.kind))))
 
 (fn merge-preserved-records [existing-records captured-records]
+  (if (= captured-records nil)
+      (normalize-records existing-records)
+      (do
   (local existing (normalize-records existing-records))
   (local captured (normalize-records captured-records))
   (local captured-by-id {})
@@ -333,7 +336,7 @@
   (each [_ record (ipairs captured)]
     (when (not (. consumed record.id))
       (table.insert merged record)))
-  merged)
+  merged)))
 
 (fn capture-record [record layout]
   (local normalized (normalize-record record))

@@ -1144,6 +1144,56 @@
               "Expected unsupported terrain id to remain unchanged after deactivate")
       true)))
 
+(fn home-world-preserves-supported-terrain-when-runtime-capture-misses-terrains []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains [{:id "terrain-1"
+                                              :kind "heightfield-terrain"
+                                              :options {:position [-160 -100 -160]
+                                                        :rotation [1 0 0 0]
+                                                        :opacity 1.0
+                                                        :physics true
+                                                        :sample-spacing [20 20]
+                                                        :chunk-samples [17 17]
+                                                        :default-height 0.0}
+                                              :chunks [{:coord [0 0]}]}]
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:scene {:capture-state (fn [_self]
+                                     {:panels []
+                                      :terrains nil
+                                      :lights (LightSystemModule.default-state)
+                                      :skybox (make-skybox-state)
+                                      :background (make-background-state)})}})
+      (world:deactivate {} "switch")
+      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
+      (assert (= (length terrains) 1)
+              "Supported terrain should remain in world state when runtime capture omits terrains")
+      (local terrain (. terrains 1))
+      (assert (= terrain.kind "heightfield-terrain")
+              "Expected supported terrain kind to remain unchanged after missing runtime capture")
+      (assert (= terrain.id "terrain-1")
+              "Expected supported terrain id to remain unchanged after missing runtime capture")
+      true)))
+
 (fn home-world-preserves-unsupported-graph-nodes-on-deactivate []
   (with-temp-dir
     (fn [root]
@@ -1319,6 +1369,8 @@
                      :fn home-world-preserves-unknown-terrain-kind-state})
 (table.insert tests {:name "HomeWorld preserves unsupported terrain on deactivate"
                      :fn home-world-preserves-unsupported-terrain-on-deactivate})
+(table.insert tests {:name "HomeWorld preserves supported terrain when runtime capture misses terrains"
+                     :fn home-world-preserves-supported-terrain-when-runtime-capture-misses-terrains})
 (table.insert tests {:name "HomeWorld preserves unsupported graph nodes on deactivate"
                      :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
 (table.insert tests {:name "HomeWorld persists graph node views on targets instead of graph state"

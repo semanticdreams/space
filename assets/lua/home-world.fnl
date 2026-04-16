@@ -457,7 +457,9 @@
           (restore-next-runtime-panel! world runtime hydration)
           (mark-runtime-hydration-complete! world runtime hydration))))
 
-  (fn capture-runtime-state [world ctx]
+  (fn capture-runtime-state [world ctx opts]
+    (local options (or opts {}))
+    (local capture-reason (or options.reason "unknown"))
     (local runtime world.runtime)
     (local camera (and runtime runtime.camera))
     (local scene (and runtime runtime.scene))
@@ -486,6 +488,12 @@
            (merge-panel-state
              captured-scene.panels
              (remaining-hydration-panels (and runtime runtime.hydration))))
+      (when (= captured-scene.terrains nil)
+        (TerrainIssueLog.warn (string.format
+                                "[world] %s runtime terrain capture unavailable; preserving persisted terrains reason=%s scene=%s"
+                                world.id
+                                capture-reason
+                                (tostring (and scene scene.debug-id)))))
       (set captured-scene.terrains
            (TerrainRecords.merge-preserved-records
              existing-scene.terrains
@@ -572,6 +580,7 @@
         scope))
     (local scene
       (Scene {:focus-manager ctx.focus-manager
+              :debug-id (.. "scene:" world.id)
               :focus-scope scene-scope
               :camera camera
               :icons ctx.icons
@@ -676,7 +685,7 @@
     (when (and app app.set-startup-physics-paused)
       (app.set-startup-physics-paused world.id false))
     (when runtime
-      (capture-runtime-state world ctx)
+      (capture-runtime-state world ctx {:reason (or reason "clear-runtime")})
       (clear-active-runtime-containment! world)
       (when runtime.first-person-controls
         (runtime.first-person-controls:drop)
@@ -742,7 +751,7 @@
     (sync-startup-physics-pause! world))
 
   (fn deactivate [world ctx reason]
-    (capture-runtime-state world ctx)
+    (capture-runtime-state world ctx {:reason (or reason "deactivate")})
     (queue-runtime-restore-state world)
     (clear-active-runtime-containment! world)
     (set world.active? false)
