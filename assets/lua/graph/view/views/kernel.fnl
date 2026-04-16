@@ -137,14 +137,6 @@
          (fn [_self]
            (when changed-signal
              (changed-signal:disconnect changed-handler true))
-           (id-label:drop)
-           (name-input:drop)
-           (cmd-input:drop)
-           (cwd-input:drop)
-           (run-button:drop)
-           (delete-button:drop)
-           (actions-row:drop)
-           (list:drop)
            (flex:drop)))
 
     (view:refresh)

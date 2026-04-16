@@ -233,13 +233,6 @@
          (fn [_self]
            (when items-signal
              (items-signal:disconnect items-handler true))
-           (name-input:drop)
-           (items-label:drop)
-           (list:drop)
-           (add-selected-button:drop)
-           (add-string-entity-button:drop)
-           (delete-button:drop)
-           (actions-row:drop)
            (flex:drop)))
 
     (view:refresh-items)

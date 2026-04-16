@@ -99,9 +99,6 @@
                (when (and morphs morphs.morphed morph-handler)
                  (morphs.morphed:disconnect morph-handler true)
                  (set morph-handler nil))
-               (source-text:drop)
-               (status-text:drop)
-               (search:drop)
                (content:drop))})
 
     ((DefaultDialog {:title title

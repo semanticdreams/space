@@ -97,12 +97,6 @@
          (fn [_self]
            (when categories-signal
              (categories-signal:disconnect categories-handler true))
-           (header-label:drop)
-           (info-label:drop)
-           (activate-button:drop)
-           (close-button:drop)
-           (button-flex:drop)
-           (search:drop)
            (flex:drop)))
     (view:refresh-categories)
     view))

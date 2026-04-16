@@ -84,8 +84,6 @@
            (when items-signal
              (items-signal:disconnect items-handler true))
            (search.submitted:disconnect submitted-handler true)
-           (search:drop)
-           (create-button:drop)
            (flex:drop)))
 
     (view:refresh-items)

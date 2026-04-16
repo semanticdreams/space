@@ -90,10 +90,6 @@
          (fn [_self]
            (when items-signal
              (items-signal:disconnect items-handler true))
-           (kind-picker:drop)
-           (add-button:drop)
-           (actions-row:drop)
-           (search:drop)
            (flex:drop)))
     (search.submitted:connect
       (fn [item]

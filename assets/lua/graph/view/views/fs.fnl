@@ -101,11 +101,6 @@
         (set view.drop (fn [_self]
                             (when items-signal
                                 (items-signal:disconnect items-handler true))
-                            (when search
-                                (search:drop))
-                            (action-row:drop)
-                            (ripgrep-button:drop)
-                            (edit-button:drop)
                             (layout:drop)))
 
         (search.submitted:connect

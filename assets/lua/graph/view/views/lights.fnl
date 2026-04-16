@@ -60,8 +60,6 @@
          (fn [_self]
            (when items-signal
              (items-signal:disconnect items-handler true))
-           (info-label:drop)
-           (search:drop)
            (flex:drop)))
     (view:refresh-items)
     view))

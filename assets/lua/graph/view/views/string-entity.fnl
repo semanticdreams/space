@@ -96,11 +96,6 @@
            (when (and deleted-signal deleted-handler)
              (deleted-signal:disconnect deleted-handler true)
              (set deleted-handler nil))
-           (input:drop)
-           (copy-value-button:drop)
-           (copy-id-button:drop)
-           (delete-button:drop)
-           (action-row:drop)
            (flex:drop)))
 
     view))

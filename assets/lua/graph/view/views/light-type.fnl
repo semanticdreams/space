@@ -90,11 +90,6 @@
          (fn [_self]
            (when items-signal
              (items-signal:disconnect items-handler true))
-           (when add-button
-             (add-button:drop))
-           (when error-label
-             (error-label:drop))
-           (search:drop)
            (flex:drop)))
     (view:refresh-items)
     view))

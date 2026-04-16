@@ -74,8 +74,6 @@
              (fn [_self]
                  (when items-signal
                      (items-signal:disconnect items-handler true))
-                 (search:drop)
-                 (refresh-button:drop)
                  (flex:drop)))
 
         (search.submitted:connect

@@ -100,10 +100,6 @@
              (fn [_self]
                  (when items-signal
                      (items-signal:disconnect items-handler true))
-                 (search:drop)
-                 (action-row:drop)
-                 (edit-button:drop)
-                 (refresh-button:drop)
                  (flex:drop)))
 
         (search.submitted:connect
