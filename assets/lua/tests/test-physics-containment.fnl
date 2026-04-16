@@ -9,6 +9,12 @@
        (= left.y right.y)
        (= left.z right.z)))
 
+(fn vec4= [left right]
+  (and (= left.x right.x)
+       (= left.y right.y)
+       (= left.z right.z)
+       (= left.w right.w)))
+
 (fn flat-heightfield-record [opts]
   (local options (or opts {}))
   {:id (or options.id "terrain-a")
@@ -252,6 +258,102 @@
                 bounds.max.y
                 bounds.max.z)))))
 
+(fn serialization-drops-legacy-visualization-color []
+  (local normalized
+    (PhysicsContainment.normalize-config
+      {:mode "manual-bounds"
+       :bounds {:min [-10 -20 -30]
+                :max [10 20 30]}
+       :visualization {:enabled true
+                       :color [0.9 0.2 0.1 0.8]}}))
+  (local serialized (PhysicsContainment.serialize-config normalized))
+  (assert (= normalized.visualization.enabled true)
+          "Containment normalization should preserve visualization.enabled")
+  (assert (= serialized.visualization.enabled true)
+          "Containment serialization should preserve visualization.enabled")
+  (assert (= normalized.visualization.color nil)
+          "Containment normalization should strip legacy visualization.color")
+  (assert (= serialized.visualization.color nil)
+          "Containment serialization should not persist visualization.color"))
+
+(fn visualization-uses-theme-color []
+  (local original-themes app.themes)
+  (local (ok err)
+    (pcall
+      (fn []
+        (PhysicsContainment.clear)
+        (var captured-color nil)
+        (local expected-color (glm.vec4 0.31 0.62 0.93 0.24))
+        (set app.themes
+             {:get-active-theme
+              (fn []
+                {:physics-containment {:visualization {:color expected-color}}})})
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene {:update (fn [_self])
+                     :build-context {:lines {:create-line-batch
+                                             (fn [_self params]
+                                               (set captured-color params.color)
+                                               {:drop (fn [_batch])})}}}})
+          "Expected themed containment visualization install to succeed")
+        (assert (vec4= captured-color expected-color)
+                "Containment visualization should use the active theme color when config color is absent"))))
+  (PhysicsContainment.clear)
+  (set app.themes original-themes)
+  (when (not ok)
+    (error err)))
+
+(fn visualization-refreshes-on-theme-change []
+  (local original-themes app.themes)
+  (local original-scene app.physics-containment-scene)
+  (local original-config app.physics-containment-config)
+  (local (ok err)
+    (pcall
+      (fn []
+        (PhysicsContainment.clear)
+        (var create-colors [])
+        (var refreshed-colors [])
+        (var active-color (glm.vec4 0.45 0.72 0.95 0.28))
+        (set app.themes
+             {:get-active-theme
+              (fn []
+                {:physics-containment {:visualization {:color active-color}}})})
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene {:update (fn [_self])
+                     :build-context {:lines {:create-line-batch
+                                             (fn [_self params]
+                                               (table.insert create-colors params.color)
+                                               {:drop (fn [_batch])
+                                                :set-color (fn [_batch color]
+                                                             (table.insert refreshed-colors color))})}}}})
+          "Expected containment visualization install to succeed")
+        (set active-color (glm.vec4 0.14 0.31 0.58 0.42))
+        (assert (PhysicsContainment.refresh-visualization
+                  {:scene app.physics-containment-scene
+                   :config app.physics-containment-config})
+                "Expected containment visualization refresh to succeed")
+        (assert (= (length create-colors) 2)
+                "Containment visualization refresh should rebuild the line batch")
+        (assert (vec4= (. create-colors 1) (glm.vec4 0.45 0.72 0.95 0.28))
+                "Initial containment visualization should use the first theme color")
+        (assert (vec4= (. create-colors 2) (glm.vec4 0.14 0.31 0.58 0.42))
+                "Containment visualization refresh should use the new theme color")
+        (assert (= (length refreshed-colors) 0)
+                "Containment visualization refresh should rebuild instead of mutating the old batch"))))
+  (PhysicsContainment.clear)
+  (set app.themes original-themes)
+  (set app.physics-containment-scene original-scene)
+  (set app.physics-containment-config original-config)
+  (when (not ok)
+    (error err)))
+
 (table.insert tests {:name "PhysicsContainment installs default manual containment box"
                      :fn installs-default-manual-containment-box})
 (table.insert tests {:name "PhysicsContainment automatic terrain bounds respect scene transform and padding"
@@ -268,6 +370,12 @@
                      :fn manual-bounds-block-horizontal-escape-from-negative-side})
 (table.insert tests {:name "PhysicsContainment automatic bounds follow terrain record replacements"
                      :fn automatic-bounds-follow-terrain-record-replacements})
+(table.insert tests {:name "PhysicsContainment serialization drops legacy visualization color"
+                     :fn serialization-drops-legacy-visualization-color})
+(table.insert tests {:name "PhysicsContainment visualization uses theme color"
+                     :fn visualization-uses-theme-color})
+(table.insert tests {:name "PhysicsContainment visualization refreshes on theme change"
+                     :fn visualization-refreshes-on-theme-change})
 
 (local main
   (fn []

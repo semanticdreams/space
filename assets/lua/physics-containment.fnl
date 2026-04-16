@@ -13,8 +13,7 @@
                         :top 500.0})
 (local default-restitution 1.0)
 (local default-debounce-ms 1000.0)
-(local default-visualization {:enabled true
-                              :color (glm.vec4 0.45 0.72 0.95 0.28)})
+(local default-visualization {:enabled true})
 
 (fn finite-number? [value]
   (and (= (type value) :number)
@@ -56,37 +55,6 @@
            (finite-number? resolved.x)
            (finite-number? resolved.y)
            (finite-number? resolved.z))
-      resolved
-      fallback))
-
-(fn vec4->array [value]
-  [value.x value.y value.z value.w])
-
-(fn color-value [value fallback]
-  (local resolved
-    (if (= value nil)
-        nil
-        (if (= (type value) :userdata)
-            (if (= value.w nil)
-                (glm.vec4 value.x value.y value.z 1.0)
-                value)
-            (if (= (type value) :table)
-                (do
-                  (local x (. value 1))
-                  (local y (. value 2))
-                  (local z (. value 3))
-                  (local w (. value 4))
-                  (if (and (finite-number? x)
-                           (finite-number? y)
-                           (finite-number? z))
-                      (glm.vec4 x y z (if (finite-number? w) w 1.0))
-                      nil))
-                nil))))
-  (if (and resolved
-           (finite-number? resolved.x)
-           (finite-number? resolved.y)
-           (finite-number? resolved.z)
-           (finite-number? resolved.w))
       resolved
       fallback))
 
@@ -141,15 +109,12 @@
     (if (= visualization-source.enabled nil)
         default-visualization.enabled
         (not (not visualization-source.enabled))))
-  (local visualization-color
-    (color-value visualization-source.color default-visualization.color))
   {:mode mode
    :bounds (normalize-bounds source.bounds)
    :padding (normalize-padding source.padding)
    :restitution restitution
    :debounce-ms debounce-ms
-   :visualization {:enabled visualization-enabled
-                   :color visualization-color}})
+   :visualization {:enabled visualization-enabled}})
 
 (fn serialize-config [value]
   (local config (normalize-config value))
@@ -161,8 +126,7 @@
              :top config.padding.top}
    :restitution config.restitution
    :debounce-ms config.debounce-ms
-   :visualization {:enabled config.visualization.enabled
-                   :color (vec4->array config.visualization.color)}})
+   :visualization {:enabled config.visualization.enabled}})
 
 (fn default-config []
   (normalize-config {}))
@@ -275,6 +239,20 @@
    :g (glm.vec3 max.x max.y max.z)
    :h (glm.vec3 min.x max.y max.z)})
 
+(fn resolve-active-theme []
+  (and app.themes
+       app.themes.get-active-theme
+       (app.themes.get-active-theme)))
+
+(fn resolve-visualization-color []
+  (do
+    (local theme (resolve-active-theme))
+    (local containment-theme (and theme theme.physics-containment))
+    (local visualization-theme (and containment-theme containment-theme.visualization))
+    (local theme-color (and visualization-theme visualization-theme.color))
+    (or theme-color
+        (error "PhysicsContainment visualization requires theme physics-containment.visualization.color"))))
+
 (fn create-visualization [scene bounds config]
   (local lines (and scene scene.build-context scene.build-context.lines))
   (if (or (not lines)
@@ -282,7 +260,7 @@
       nil
       (do
         (local corners (containment-corners bounds))
-        (local edge-color config.visualization.color)
+        (local edge-color (resolve-visualization-color))
         (local edge-segments [])
 
         (fn add-segment [segments start end]
@@ -363,6 +341,21 @@
                     :visualization (create-visualization scene bounds config)})
               true)))))
 
+(fn refresh-visualization [opts]
+  (local existing app.__physics-global-containment)
+  (if (not existing)
+      false
+      (do
+        (local options (or opts {}))
+        (local config (normalize-config (or options.config app.physics-containment-config)))
+        (local scene (or options.scene app.physics-containment-scene))
+        (set app.physics-containment-config (serialize-config config))
+        (set app.physics-containment-scene scene)
+        (when (and existing.visualization existing.visualization.drop)
+          (existing.visualization:drop))
+        (set existing.visualization (create-visualization scene existing.bounds config))
+        true)))
+
 (fn ensure-refresh-debouncer []
   (if app.__physics_containment_refresh_debouncer
       app.__physics_containment_refresh_debouncer
@@ -418,5 +411,6 @@
  :automatic-terrain-bounds automatic-terrain-bounds
  :resolve-active-bounds resolve-active-bounds
  :ensure-installed ensure-installed
+ :refresh-visualization refresh-visualization
  :schedule-refresh schedule-refresh
  :clear clear}

@@ -1,5 +1,6 @@
 (local PanelUtils (require :target-panel-utils))
 (local SkyboxState (require :skybox-state))
+(local PhysicsContainment (require :physics-containment))
 
 (fn copy-list [items]
   (local result [])
@@ -106,6 +107,9 @@
         (app.hud:build-default)))
   (when (and app.renderers app.renderers.apply-theme)
     (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
+  (PhysicsContainment.refresh-visualization
+    {:scene app.physics-containment-scene
+     :config app.physics-containment-config})
   (reapply-active-world-skybox theme-name)
   (rebuild-graph-view previous-selected graph-node-view-panels))
 

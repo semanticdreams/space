@@ -5,6 +5,7 @@
 (local ControlPanel (require :hud-control-panel))
 (local Icons (require :icons))
 (local PanelUtils (require :target-panel-utils))
+(local PhysicsContainment (require :physics-containment))
 (local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
 
@@ -257,6 +258,59 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   true)
 
+(fn apply-theme-refreshes-physics-containment-visualization []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-containment-scene app.physics-containment-scene)
+  (local original-containment-config app.physics-containment-config)
+  (local original-refresh-visualization PhysicsContainment.refresh-visualization)
+  (var refresh-payload nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  (set app.scene {:build-default (fn [_self] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                     :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (set app.physics-containment-scene {:id "containment-scene"})
+  (set app.physics-containment-config {:mode "manual-bounds"
+                                       :bounds {:min [-1 -2 -3]
+                                                :max [1 2 3]}
+                                       :visualization {:enabled true}})
+  (set PhysicsContainment.refresh-visualization
+       (fn [opts]
+         (set refresh-payload opts)
+         true))
+  (ThemeActions.apply-theme :light)
+  (assert (= (and refresh-payload.scene refresh-payload.scene.id) "containment-scene")
+          "apply-theme should refresh the active containment visualization with the current scene")
+  (assert (= (and refresh-payload.config refresh-payload.config.mode) "manual-bounds")
+          "apply-theme should refresh the active containment visualization with the current config")
+  (set PhysicsContainment.refresh-visualization original-refresh-visualization)
+  (set app.physics-containment-scene original-containment-scene)
+  (set app.physics-containment-config original-containment-config)
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  true)
+
 (table.insert tests {:name "Init themes uses stored UI theme" :fn init-themes-reads-settings})
 (table.insert tests {:name "Init themes falls back for unknown stored UI theme"
                      :fn init-themes-falls-back-for-unknown-stored-theme})
@@ -267,6 +321,8 @@
                      :fn apply-theme-restores-graph-node-view-panels-on-target})
 (table.insert tests {:name "Apply theme saves exact theme key"
                      :fn apply-theme-saves-exact-theme-key})
+(table.insert tests {:name "Apply theme refreshes physics containment visualization"
+                     :fn apply-theme-refreshes-physics-containment-visualization})
 
 (local main
   (fn []

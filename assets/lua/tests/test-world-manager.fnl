@@ -327,6 +327,40 @@
               "Expected persisted containment min-y to load")
       true)))
 
+(fn home-world-strips-legacy-persisted-containment-color []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :physics {:containment {:mode "manual-bounds"
+                                                  :bounds {:min [-500 -1234 -500]
+                                                           :max [500 500 500]}
+                                                  :visualization {:enabled true
+                                                                  :color [0.9 0.2 0.1 0.8]}}}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local containment (and world.state world.state.physics world.state.physics.containment))
+      (assert (= containment.mode "manual-bounds") "Expected persisted containment mode to load")
+      (assert (= (and containment.visualization containment.visualization.enabled) true)
+              "Expected persisted containment visualization.enabled to load")
+      (assert (= (and containment.visualization containment.visualization.color) nil)
+              "Legacy persisted containment visualization.color should be stripped during load")
+      true)))
+
 (fn home-world-sanitizes-invalid-physics-containment []
   (with-temp-dir
     (fn [root]
@@ -1229,6 +1263,8 @@
                      :fn home-world-sanitizes-poisoned-camera-position})
 (table.insert tests {:name "HomeWorld loads persisted physics containment"
                      :fn home-world-loads-persisted-physics-containment})
+(table.insert tests {:name "HomeWorld strips legacy persisted containment color"
+                     :fn home-world-strips-legacy-persisted-containment-color})
 (table.insert tests {:name "HomeWorld sanitizes invalid physics containment"
                      :fn home-world-sanitizes-invalid-physics-containment})
 (table.insert tests {:name "HomeWorld update drives active graph-view"
