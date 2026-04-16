@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local {:GraphNode GraphNode} (require :graph/node-base))
+(local TerrainIssueLog (require :terrain-issue-log))
 (local Signal (require :signal))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainSpace (require :heightfield-terrain-space))
@@ -16,6 +17,20 @@
           (set (. out k) (clone-table v)))
         out)
       value))
+
+(fn chunk-summary [record]
+  (local chunks (or (and record record.chunks) []))
+  (if (= (length chunks) 0)
+      "count=0 coords=[]"
+      (do
+        (local coords
+          (icollect [_ chunk (ipairs chunks)]
+            (do
+              (local coord (or chunk.coord [0 0]))
+              (.. "[" (tostring (or (. coord 1) coord.x 0))
+                  "," (tostring (or (. coord 2) coord.y coord.z 0)) "]"))))
+        (.. "count=" (tostring (length chunks))
+            " coords=" (table.concat coords " ")))))
 
 (fn M.HeightfieldResizeToolNode [opts]
   (local options (or opts {}))
@@ -40,21 +55,64 @@
          (or (and resolved resolved.record) {})))
   (set node.apply-values
        (fn [self validated]
+         (TerrainIssueLog.info
+           (string.format
+             "[terrain-resize] apply terrain=%s world=%s requested-chunks=[%d,%d..%d,%d] fill-height=%s"
+             self.terrain-id
+             self.world-id
+             validated.min-chunk-x
+             validated.min-chunk-z
+             validated.max-chunk-x
+             validated.max-chunk-z
+             (tostring validated.fill-height)))
          (local updated
            (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
              (fn [record]
-               (HeightfieldTerrainData.resize-record! record validated))))
+               (TerrainIssueLog.info
+                 (string.format
+                   "[terrain-resize] before terrain=%s chunks=%s"
+                   self.terrain-id
+                   (chunk-summary record)))
+               (HeightfieldTerrainData.resize-record! record validated)
+               (TerrainIssueLog.info
+                 (string.format
+                   "[terrain-resize] after terrain=%s chunks=%s"
+                   self.terrain-id
+                   (chunk-summary record))))))
          (when updated
            (self.changed:emit (clone-table updated)))
          updated))
   (set node.apply-values-centered-on-origin
        (fn [self validated]
+         (TerrainIssueLog.info
+           (string.format
+             "[terrain-resize] apply-centered terrain=%s world=%s requested-chunks=[%d,%d..%d,%d] fill-height=%s"
+             self.terrain-id
+             self.world-id
+             validated.min-chunk-x
+             validated.min-chunk-z
+             validated.max-chunk-x
+             validated.max-chunk-z
+             (tostring validated.fill-height)))
          (local updated
            (WorldData.update-terrain-record self.world-manager self.world-id self.terrain-id
              (fn [record]
+               (TerrainIssueLog.info
+                 (string.format
+                   "[terrain-resize] before-centered terrain=%s chunks=%s"
+                   self.terrain-id
+                   (chunk-summary record)))
                (HeightfieldTerrainData.resize-record! record validated)
                (local centered-record (HeightfieldTerrainSpace.record-centered-on-origin-xz record))
-               (set record.options centered-record.options))))
+               (set record.options centered-record.options)
+               (TerrainIssueLog.info
+                 (string.format
+                   "[terrain-resize] after-centered terrain=%s chunks=%s position=[%s,%s,%s]"
+                   self.terrain-id
+                   (chunk-summary record)
+                   (tostring (. record.options.position 1))
+                   (tostring (. record.options.position 2))
+                   (tostring (. record.options.position 3)))))))
          (when updated
            (self.changed:emit (clone-table updated)))
          updated))

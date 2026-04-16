@@ -17,6 +17,7 @@
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
+(local TerrainIssueLog (require :terrain-issue-log))
 (local TerrainQuery (require :terrain-query))
 (local TerrainLayoutRecord (require :terrain-layout-record))
 (local LightingViewState (require :lighting-view-state))
@@ -1007,6 +1008,12 @@
     (local terrain-entry runtime-entry.terrain-entry)
     (local current-element runtime-entry.current-element)
     (local child-index runtime-entry.child-index)
+    (TerrainIssueLog.info
+      (string.format
+        "[scene] replace-terrain-record terrain=%s incoming-kind=%s incoming-id=%s"
+        terrain-id
+        (tostring (and record record.kind))
+        (tostring (and record record.id))))
     (local built-entry (SceneWorldState.build-terrain-entries [record]))
     (local terrain-spec (. built-entry 1))
     (assert terrain-spec (.. "Scene.replace-terrain-record could not build terrain " terrain-id))

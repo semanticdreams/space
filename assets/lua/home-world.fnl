@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local json (require :json))
 (local logging (require :logging))
+(local TerrainIssueLog (require :terrain-issue-log))
 (local JsonUtils (require :json-utils))
 (local Camera (require :camera))
 (local Scene (require :scene))
@@ -230,6 +231,9 @@
                 (set world.state.scene.background (BackgroundState.default-state))
                 (set repaired-persisted-state? true))))
         (do
+          (TerrainIssueLog.warn (string.format
+                                  "[world] %s persisted state missing/invalid; resetting world.state and seeding default terrain"
+                                  world.id))
           (set world.state (default-state))
           (set world.state.scene.terrains (TerrainRecords.default-records))))
     (local camera-state (or (and world.state world.state.camera) {}))

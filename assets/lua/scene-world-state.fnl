@@ -1,10 +1,13 @@
 (local TerrainRecords (require :scene-terrain-records))
 (local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local logging (require :logging))
+(local TerrainIssueLog (require :terrain-issue-log))
 
 (fn resolve-terrain-records [terrains]
   (if (= terrains nil)
-      (TerrainRecords.default-records)
+      (do
+        (TerrainIssueLog.warn "[scene-world-state] resolve-terrain-records received nil; using default terrains")
+        (TerrainRecords.default-records))
       (TerrainRecords.normalize-records terrains)))
 
 (fn build-terrain-entries [terrain-records]

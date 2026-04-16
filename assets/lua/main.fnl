@@ -34,6 +34,8 @@
 
 (local DebugLog (require :debug-log))
 (DebugLog.reset-log!)
+(local TerrainIssueLog (require :terrain-issue-log))
+(TerrainIssueLog.start-session! "space startup")
 (local fs (require :fs))
 (local appdirs (require :appdirs))
 (local log-dir

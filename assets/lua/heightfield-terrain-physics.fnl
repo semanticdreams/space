@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local bt (require :bt))
+(local TerrainIssueLog (require :terrain-issue-log))
 (local HeightfieldTerrainSpace (require :heightfield-terrain-space))
 (local HeightfieldTerrainData (require :heightfield-terrain-data))
 (local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
@@ -20,6 +21,20 @@
 (fn vec3->bt [value]
   (bt.Vector3 value.x value.y value.z))
 
+(fn chunk-summary [record]
+  (local chunks (or (and record record.chunks) []))
+  (if (= (length chunks) 0)
+      "count=0 coords=[]"
+      (do
+        (local coords
+          (icollect [_ chunk (ipairs chunks)]
+            (do
+              (local coord (or chunk.coord [0 0]))
+              (.. "[" (tostring (or (. coord 1) coord.x 0))
+                  "," (tostring (or (. coord 2) coord.y coord.z 0)) "]"))))
+        (.. "count=" (tostring (length chunks))
+            " coords=" (table.concat coords " ")))))
+
 (fn build-shape-data [record]
   (local bounds (HeightfieldTerrainData.sample-bounds record))
   (local sample-spacing (HeightfieldTerrainGrid.spacing record))
@@ -33,8 +48,19 @@
     (for [sample-x bounds.min-sample-x bounds.max-sample-x]
       (local height
         (HeightfieldTerrainGrid.sample-height-global record chunk-map sample-x sample-z))
-      (assert (not (= height nil))
-              "HeightfieldTerrain physics requires contiguous chunk coverage for btHeightfieldTerrainShape")
+      (when (= height nil)
+        (TerrainIssueLog.error
+          (string.format
+            "[terrain-physics] missing height terrain=%s sample=[%d,%d] bounds=samples[%d,%d..%d,%d] chunks=%s"
+            (tostring (and record record.id))
+            sample-x
+            sample-z
+            bounds.min-sample-x
+            bounds.min-sample-z
+            bounds.max-sample-x
+            bounds.max-sample-z
+            (chunk-summary record)))
+        (error "HeightfieldTerrain physics requires contiguous chunk coverage for btHeightfieldTerrainShape"))
       (table.insert heights height)
       (when (< height min-height)
         (set min-height height))
