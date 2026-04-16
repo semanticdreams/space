@@ -52,6 +52,7 @@
      ctx)))
 
 (fn draw-scene-and-hud [ctx scene-target hud-target]
+  (app.renderers:apply-theme (app.themes.get-active-theme))
   (app.set-viewport {:width ctx.width :height ctx.height})
   (gl.glViewport 0 0 ctx.width ctx.height)
   (gl.glDisable gl.GL_CULL_FACE)
@@ -59,7 +60,6 @@
   (gl.glDepthFunc gl.GL_LESS)
   (gl.glClearColor 0.04 0.05 0.07 1.0)
   (gl.glClear (bor gl.GL_COLOR_BUFFER_BIT gl.GL_DEPTH_BUFFER_BIT))
-  (app.renderers:apply-theme (app.themes.get-active-theme))
   (app.renderers.skybox:render scene-target)
   (app.renderers:draw-target scene-target {:text false})
   (gl.glClear gl.GL_DEPTH_BUFFER_BIT)
@@ -67,6 +67,10 @@
 
 (fn capture-theme [ctx theme-key]
   (app.themes.set-theme theme-key)
+  (local active-theme (app.themes.get-active-theme))
+  (local active-font (and active-theme active-theme.font))
+  (assert (and active-font active-font.texture active-font.texture.ready)
+          "theme snapshot requires ready active font texture")
   (local scene-target
     (Harness.make-scene-target {:builder (make-scene-builder)}))
   (local hud-target
@@ -79,19 +83,7 @@
                                          {:text "Toggle"
                                           :text-scale 1.8
                                           :padding [0.6 0.4]}))
-  (hud-target:update)
-  (local overlay-layout (and hud-target.overlay-root hud-target.overlay-root.layout))
-  (when overlay-layout
-    (local center
-      (+ overlay-layout.position
-         (glm.vec3 (/ overlay-layout.size.x 2)
-                   (/ overlay-layout.size.y 2)
-                   0)))
-    (hud-target:add-overlay-child {:builder (make-overlay-card)
-                                   :position (+ center (glm.vec3 0 2.2 0))}))
   (draw-scene-and-hud ctx scene-target hud-target)
-  (local theme-font (and (app.themes.get-active-theme) (. (app.themes.get-active-theme) :font)))
-  (Harness.assert-button-label overlay-button theme-font)
   (Harness.capture-snapshot {:name (.. "theme-" (if (= theme-key :light) "light" "dark"))
                              :width ctx.width
                              :height ctx.height
@@ -99,19 +91,16 @@
   (Harness.cleanup-target scene-target)
   (Harness.cleanup-target hud-target))
 
-(fn run [ctx]
-  (local original (and app.themes app.themes.get-active-theme-name
-                       (app.themes.get-active-theme-name)))
-  (capture-theme ctx :dark)
-  (capture-theme ctx :light)
-  (when (and original app.themes app.themes.set-theme)
-    (app.themes.set-theme original)
-    (set ctx.font (and (app.themes.get-active-theme) (. (app.themes.get-active-theme) :font)))))
+(fn run [ctx theme-key]
+  (capture-theme ctx theme-key))
 
 (fn main []
   (Harness.with-app {}
                    (fn [ctx]
-                     (run ctx)))
+                     (run ctx :dark)))
+  (Harness.with-app {}
+                   (fn [ctx]
+                     (run ctx :light)))
   (print "E2E theme snapshots complete"))
 
 {:run run

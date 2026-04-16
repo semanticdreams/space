@@ -37,15 +37,9 @@
       (Card {:title header-text
              :child content-flex-builder}))
     (local card (card-builder build-ctx))
-    (local info-label (info-label-builder build-ctx))
-    (local remove-button (remove-button-builder build-ctx))
-    (local content-flex (content-flex-builder build-ctx))
     (set view.layout card.layout)
     (set view.drop
          (fn [_self]
-           (info-label:drop)
-           (remove-button:drop)
-           (content-flex:drop)
            (card:drop)))
     view))
 ScenePanelNodeView

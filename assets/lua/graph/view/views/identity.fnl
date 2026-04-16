@@ -91,12 +91,6 @@
 
     (set view.drop
          (fn [_self]
-           (target-input:drop)
-           (use-selected-button:drop)
-           (open-target-button:drop)
-           (delete-button:drop)
-           (target-row:drop)
-           (button-row:drop)
            (flex:drop)))
     view))
 

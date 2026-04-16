@@ -60,9 +60,6 @@
          (fn [_self]
            (when changed-signal
              (changed-signal:disconnect changed-handler true))
-           (id-label:drop)
-           (status-label:drop)
-           (stop-button:drop)
            (flex:drop)))
 
     (view:refresh)

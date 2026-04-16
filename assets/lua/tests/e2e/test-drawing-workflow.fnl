@@ -110,6 +110,8 @@
   state)
 
 (fn refresh-world [env]
+  (when env.flush-next-frame
+    (env.flush-next-frame))
   (env.world:update 0 {})
   (when app.scene
     (app.scene:update))
@@ -190,6 +192,21 @@
          (. app.canvas.build-context :triangle-vector)))
   (and vector (vector:length)))
 
+(fn install-next-frame-stub []
+  (var pending [])
+  (set app.next-frame
+       (fn [callback]
+         (assert (= (type callback) :function)
+                 "drawing workflow e2e next-frame requires callback")
+         (table.insert pending callback)
+         callback))
+  (fn []
+    (when (> (length pending) 0)
+      (local callbacks pending)
+      (set pending [])
+      (each [_ callback (ipairs callbacks)]
+        (callback)))))
+
 (fn with-home-world [ctx run-fn]
   (with-temp-dir
     (fn [dir]
@@ -243,7 +260,8 @@
                        :canvas-interactive? app.canvas-interactive?
                        :active-pointer-controls app.active-pointer-controls
                        :object-selector app.object-selector
-                       :layout-root app.layout-root})
+                       :layout-root app.layout-root
+                       :next-frame app.next-frame})
       (var ok false)
       (var result nil)
       (var err nil)
@@ -251,6 +269,7 @@
       (local (run-ok run-result)
         (pcall
           (fn []
+            (local flush-next-frame (install-next-frame-stub))
             (set app.hud hud)
             (set app.focus focus-manager)
             (set app.world-manager world-manager-stub)
@@ -260,12 +279,14 @@
             (set active-world-entry {:id world.id
                                      :world world})
             (apply-runtime-to-app world runtime hud)
+            (flush-next-frame)
             (set click-timestamp 0)
             (set stage "run")
             (set result (run-fn {:world world
                                  :hud hud
                                  :runtime runtime
                                  :runtime-context runtime-context
+                                 :flush-next-frame flush-next-frame
                                  :set-stage (fn [value]
                                               (set stage value))}))
             (set ok true))))

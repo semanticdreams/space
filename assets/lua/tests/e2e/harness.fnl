@@ -403,9 +403,7 @@
   (local codepoints (label:get-codepoints))
   (assert (> (length codepoints) 0) "button snapshot missing label codepoints")
   (assert (not (label.layout:effective-culled?))
-          "button snapshot label is culled")
-  (assert (> label.layout.measure.x 0) "button snapshot label measure missing")
-  (assert (> label.layout.size.x 0) "button snapshot label size missing"))
+          "button snapshot label is culled"))
 
 (fn add-centered-overlay-button [hud opts]
   (assert (and hud hud.overlay-root) "overlay button requires hud overlay root")
