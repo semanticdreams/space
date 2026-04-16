@@ -588,6 +588,36 @@
       (local expected (math.floor (/ (fallback-vector:length) 10)))
       (assert (= (. default.counts 1) expected)))))
 
+(fn skybox-renderer-loads-initial-cubemap []
+  (with-open-gl
+    (fn [_mock]
+      (local textures (require :textures))
+      (local original-load-cubemap textures.load-cubemap)
+      (local original-load-cubemap-async textures.load-cubemap-async)
+      (local calls [])
+      (set textures.load-cubemap-async nil)
+      (set textures.load-cubemap
+           (fn [files]
+             (table.insert calls files)
+             {:id 99
+              :ready true
+              :drop (fn [_self] nil)}))
+      (let [(ok result)
+            (pcall
+              (fn []
+                (local SkyboxRenderer (reload "skybox-renderer"))
+                (local renderer (SkyboxRenderer {}))
+                (assert (= (# calls) 1)
+                        "SkyboxRenderer should load the initial cubemap during construction")
+                (local files (. calls 1))
+                (assert (= (# files) 6) "SkyboxRenderer cubemap should include all six faces")
+                (renderer:drop)))]
+        (set textures.load-cubemap original-load-cubemap)
+        (set textures.load-cubemap-async original-load-cubemap-async)
+        (if ok
+            result
+            (error result))))))
+
 (fn text-ssbo-renderer-uses-ssbo-groups-and-instanced-draws []
   (with-open-gl
     (fn [mock]
@@ -658,6 +688,7 @@
                      :fn instanced-color-mesh-batch-drop-requires-removed-instances})
 (table.insert tests {:name "Text renderer uploads font metadata and texture" :fn text-renderer-uploads-font-state})
 (table.insert tests {:name "Image renderer uses draw batcher and fallback draws" :fn image-renderer-respects-draw-batcher})
+(table.insert tests {:name "Skybox renderer loads initial cubemap" :fn skybox-renderer-loads-initial-cubemap})
 (table.insert tests {:name "Text SSBO renderer uses group SSBO and instanced draws"
                      :fn text-ssbo-renderer-uses-ssbo-groups-and-instanced-draws})
 (table.insert tests {:name "Renderers draw-target skips lighting state for empty lit geometry"

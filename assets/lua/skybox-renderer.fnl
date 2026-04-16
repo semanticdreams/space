@@ -103,7 +103,9 @@
       (SkyboxState.normalize-resolved-state next-state "SkyboxRenderer.set-state"))
     (local path-changed?
       (or (not (= normalized.enabled? state.enabled?))
-          (not (= normalized.name state.name))))
+          (not (= normalized.name state.name))
+          (and normalized.enabled?
+               (not cubemap))))
     (set state normalized)
     (when path-changed?
       (if normalized.enabled?
