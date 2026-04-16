@@ -2,6 +2,10 @@
 
 (local default-skybox-name "lake")
 (local default-brightness 0.1)
+(local default-tint-color [1.0 1.0 1.0])
+
+(fn clone-tint-color [value]
+  [(. value 1) (. value 2) (. value 3)])
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -27,13 +31,26 @@
   (assert (= (type state.name) :string) (.. label " requires string :name"))
   (assert (> (string.len state.name) 0) (.. label " requires non-empty :name"))
   (assert (= (type state.brightness) :number) (.. label " requires numeric :brightness"))
+  (local tint-color (or (. state :tint-color) default-tint-color))
+  (assert (= (type tint-color) :table) (.. label " requires table :tint-color"))
+  (assert (= (length tint-color) 3) (.. label " requires :tint-color with 3 numbers"))
+  (each [idx value (ipairs tint-color)]
+    (assert (= (type value) :number)
+            (.. label " requires numeric :tint-color[" (tostring idx) "]"))
+    (assert (and (>= value 0.0) (<= value 1.0))
+            (.. label
+                " requires :tint-color["
+                (tostring idx)
+                "] between 0 and 1")))
   {:name state.name
-   :brightness state.brightness})
+   :brightness state.brightness
+   :tint-color (clone-tint-color tint-color)})
 
 (fn default-state []
   {:enabled? true
    :default {:name default-skybox-name
-             :brightness default-brightness}
+             :brightness default-brightness
+             :tint-color (clone-tint-color default-tint-color)}
    :by-theme {}})
 
 (fn normalize-complete-state [state context]
@@ -69,7 +86,8 @@
   (local normalized-entry (normalize-entry entry label))
   {:enabled? state.enabled?
    :name normalized-entry.name
-   :brightness normalized-entry.brightness})
+   :brightness normalized-entry.brightness
+   :tint-color normalized-entry.tint-color})
 
 (fn resolve-for-theme [state theme-key]
   (local normalized
@@ -80,7 +98,8 @@
         normalized.default))
   {:enabled? normalized.enabled?
    :name entry.name
-   :brightness entry.brightness})
+   :brightness entry.brightness
+   :tint-color entry.tint-color})
 
 (fn asset-path [state]
   (local normalized

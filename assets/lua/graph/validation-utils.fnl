@@ -80,4 +80,26 @@
       (M.valid value)
       (M.invalid (.. label " must have exactly " (tostring count) " numbers"))))
 
+(fn M.validate-vector-range [text label count min-value max-value]
+  (local vector-result (M.validate-vector text label count))
+  (if (not vector-result.ok?)
+      vector-result
+      (do
+        (var out-of-range-index nil)
+        (each [idx value (ipairs vector-result.value)]
+          (when (or (< value min-value) (> value max-value))
+            (set out-of-range-index idx)))
+        (if out-of-range-index
+            (M.invalid (.. label
+                           " component "
+                           (tostring out-of-range-index)
+                           " must be between "
+                           (tostring min-value)
+                           " and "
+                           (tostring max-value)))
+            (M.valid vector-result.value)))))
+
+(fn M.validate-color [text label]
+  (M.validate-vector-range text label 3 0.0 1.0))
+
 M

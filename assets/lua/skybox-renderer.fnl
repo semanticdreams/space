@@ -125,6 +125,11 @@
       (gl.glBindVertexArray vao)
       (shader:use)
       (shader:setFloat "brightness" state.brightness)
+      (local tint-color (or (. state :tint-color) [1.0 1.0 1.0]))
+      (shader:setVector3f "tintColor"
+                          (. tint-color 1)
+                          (. tint-color 2)
+                          (. tint-color 3))
       (shader:setMatrix4 "projection" target.projection)
       (local view (target:get-view-matrix))
       (local view-rotation (glm.strip-translation view))

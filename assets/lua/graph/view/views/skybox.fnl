@@ -4,6 +4,7 @@
 (local Input (require :input))
 (local {: Flex : FlexChild} (require :flex))
 (local FormComboBox (require :graph/view/widgets/form-combo-box))
+(local ValidationUtils (require :graph/validation-utils))
 (local SkyboxState (require :skybox-state))
 
 (local bool-items
@@ -70,13 +71,14 @@
          :children [(FlexChild (Text {:text label-text}) 0)
                     (FlexChild field-builder 1)]}))
 
-(fn theme-row [entry name-builder brightness-builder clear-builder]
+(fn theme-row [entry name-builder brightness-builder tint-color-builder clear-builder]
   (Flex {:axis :x
          :xspacing 0.5
          :yalign :center
          :children [(FlexChild (Text {:text entry.label}) 0)
                     (FlexChild name-builder 1)
                     (FlexChild brightness-builder 0)
+                    (FlexChild tint-color-builder 0)
                     (FlexChild clear-builder 0)]}))
 
 (fn info-text [target]
@@ -127,6 +129,11 @@
                   :text (tostring active-record.default.brightness)
                   :placeholder "Brightness"})
           build-ctx))
+    (set fields.default-tint-color
+         ((Input {:name "skybox-default-tint-color"
+                  :text (ValidationUtils.join-values active-record.default.tint-color)
+                  :placeholder "r, g, b"})
+          build-ctx))
 
     (fn apply-record-to-fields [record]
       (set active-record
@@ -134,10 +141,14 @@
       (set-combo-value fields.enabled (bool-text active-record.enabled?))
       (set-combo-value fields.default-name active-record.default.name)
       (set-input-value fields.default-brightness (tostring active-record.default.brightness))
+      (set-input-value fields.default-tint-color
+                       (ValidationUtils.join-values active-record.default.tint-color))
       (each [theme-key row (pairs theme-overrides)]
         (local override (. active-record.by-theme theme-key))
         (set-combo-value row.name (and override override.name))
-        (set-input-value row.brightness (and override (tostring override.brightness))))
+        (set-input-value row.brightness (and override (tostring override.brightness)))
+        (set-input-value row.tint-color
+                         (and override (ValidationUtils.join-values override.tint-color))))
       (set-status "No pending changes"))
 
     (local theme-section-children [])
@@ -153,22 +164,30 @@
                  :text (and override (tostring override.brightness))
                  :placeholder "Brightness"})
          build-ctx))
+      (local tint-color-field
+        ((Input {:name (.. "skybox-theme-tint-color-" entry.key)
+                 :text (and override (ValidationUtils.join-values override.tint-color))
+                 :placeholder "r, g, b"})
+         build-ctx))
       (local clear-button
         ((Button {:text "Use Default"
                   :variant :secondary
                   :on-click (fn [_button _event]
                               (name-field:set-value nil)
                               (brightness-field:set-text "" {:mark-measure-dirty? false})
+                              (tint-color-field:set-text "" {:mark-measure-dirty? false})
                               (set-status (.. "Override cleared for " entry.key)))})
          build-ctx))
       (set (. theme-overrides entry.key) {:name name-field
                                           :brightness brightness-field
+                                          :tint-color tint-color-field
                                           :unknown? entry.unknown?})
       (set (. row-buttons entry.key) clear-button)
       (table.insert theme-section-children
                     (FlexChild (theme-row entry
                                           (fn [_ctx] name-field)
                                           (fn [_ctx] brightness-field)
+                                          (fn [_ctx] tint-color-field)
                                           (fn [_ctx] clear-button))
                                0)))
 
@@ -181,6 +200,7 @@
           (values nil "Enabled must be true or false")
           (let [default-name (fields.default-name:get-value)
                 default-brightness-text (fields.default-brightness:get-text)
+                default-tint-color-text (fields.default-tint-color:get-text)
                 latest-record
                 (SkyboxState.normalize-complete-state
                   ((assert target.get-record "SkyboxNodeView requires target.get-record") target)
@@ -189,18 +209,24 @@
                     (not (. allowed-skyboxes (tostring default-name))))
                 (values nil "Default skybox must be one of the discovered choices")
                 (let [(ok-default-brightness parsed-default-brightness)
-                      (pcall tonumber default-brightness-text)]
+                      (pcall tonumber default-brightness-text)
+                      default-tint-result
+                      (ValidationUtils.validate-color default-tint-color-text "Default tint color")]
                   (if (or (not ok-default-brightness)
                           (not (= (type parsed-default-brightness) :number)))
                       (values nil "Default brightness must be numeric")
+                      (if (not default-tint-result.ok?)
+                          (values nil default-tint-result.error)
                       (do
                         (local by-theme
                           (SkyboxState.clone-state latest-record.by-theme))
                         (each [theme-key row (pairs theme-overrides)]
                           (local override-name (row.name:get-value))
                           (local override-brightness-text (row.brightness:get-text))
+                          (local override-tint-color-text (row.tint-color:get-text))
                           (if (and (= override-name nil)
-                                   (= override-brightness-text ""))
+                                   (= override-brightness-text "")
+                                   (= override-tint-color-text ""))
                               (set (. by-theme theme-key) nil)
                               (if (or (= override-name nil)
                                       (not (. allowed-skyboxes (tostring override-name))))
@@ -215,18 +241,28 @@
                                                   (error (.. "Theme override brightness for "
                                                              theme-key
                                                              " must be numeric"))
-                                                  parsed-value)))]
+                                                  parsed-value)))
+                                        tint-result
+                                        (if (= override-tint-color-text "")
+                                            (ValidationUtils.valid default-tint-result.value)
+                                            (ValidationUtils.validate-color
+                                              override-tint-color-text
+                                              (.. "Theme override tint color for " theme-key)))]
+                                    (when (not tint-result.ok?)
+                                      (error tint-result.error))
                                     (set (. by-theme theme-key)
                                          {:name override-name
-                                          :brightness parsed-brightness})))))
+                                          :brightness parsed-brightness
+                                          :tint-color tint-result.value})))))
                         (values
                           (SkyboxState.normalize-complete-state
                             {:enabled? enabled
                              :default {:name default-name
-                                       :brightness parsed-default-brightness}
+                                       :brightness parsed-default-brightness
+                                       :tint-color default-tint-result.value}
                              :by-theme by-theme}
                             "SkyboxNodeView apply")
-                          nil))))))))
+                          nil)))))))))
 
     (set apply-button
          ((Button {:text "Apply"
@@ -260,6 +296,8 @@
                                           (fn [_ctx] fields.default-name)) 0)
                   (FlexChild (labeled-row "Default brightness"
                                           (fn [_ctx] fields.default-brightness)) 0)
+                  (FlexChild (labeled-row "Default tint"
+                                          (fn [_ctx] fields.default-tint-color)) 0)
                   (FlexChild (Text {:text "Theme overrides"}) 0)
                   (FlexChild (Flex {:axis :y
                                     :yspacing 0.35

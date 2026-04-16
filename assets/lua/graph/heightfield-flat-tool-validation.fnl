@@ -1,4 +1,4 @@
-(local ValidationUtils (require :graph/terrain-validation-utils))
+(local ValidationUtils (require :graph/validation-utils))
 (local TargetValidation (require :graph/heightfield-tool-target-validation))
 
 (local M {})

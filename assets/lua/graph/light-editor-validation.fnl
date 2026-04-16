@@ -1,4 +1,4 @@
-(local ValidationUtils (require :graph/terrain-validation-utils))
+(local ValidationUtils (require :graph/validation-utils))
 
 (local bool-items
   [["true" "Enabled"]

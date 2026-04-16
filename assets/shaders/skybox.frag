@@ -4,6 +4,7 @@ in vec3 TexCoords;
 
 uniform samplerCube skybox;
 uniform float brightness;
+uniform vec3 tintColor;
 
 out vec4 color;
 
@@ -17,5 +18,6 @@ void main()
     } else {
         base = mix(sampleColor.rgb, vec3(1.0), t);
     }
+    base *= tintColor;
     color = vec4(base, sampleColor.a);
 }

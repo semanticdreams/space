@@ -200,6 +200,27 @@
   (assert SkyboxNode "skybox module should export SkyboxNode")
   (assert (= (type SkyboxNode) "function") "SkyboxNode should be a function"))
 
+(fn skybox-state-default-tint-isolated []
+  (local first (SkyboxState.default-state))
+  (local second (SkyboxState.default-state))
+  (set (. first.default.tint-color 1) 0.25)
+  (assert (= (. second.default.tint-color 1) 1.0)
+          "SkyboxState.default-state should return a fresh tint-color table"))
+
+(fn skybox-state-rejects-out-of-range-tint []
+  (local (ok err)
+    (pcall
+      SkyboxState.normalize-complete-state
+      {:enabled? true
+       :default {:name "lake"
+                 :brightness 0.1
+                 :tint-color [1.2 0.5 0.5]}
+       :by-theme {}}
+      "test skybox invalid tint"))
+  (assert (not ok) "SkyboxState should reject tint colors outside [0, 1]")
+  (assert (string.find err "between 0 and 1" 1 true)
+          "SkyboxState invalid tint error should mention the allowed range"))
+
 (fn skybox-node-has-correct-key []
   (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
   (local node (SkyboxNode {:world-id "test-world-123"
@@ -247,6 +268,8 @@
       (assert harness.view.apply-button "SkyboxNodeView should expose apply button")
       (assert (= (harness.view.fields.default-name:get-value) "lake")
               "SkyboxNodeView should default to the current default skybox name")
+      (assert (= (harness.view.fields.default-tint-color:get-text) "1, 1, 1")
+              "SkyboxNodeView should default tint to white")
       (assert harness.view.theme-overrides.dark
               "SkyboxNodeView should expose a row for the dark theme")
       (harness:drop))))
@@ -266,28 +289,40 @@
       (harness.view.fields.enabled:set-value "false")
       (harness.view.fields.default-name:set-value next-name)
       (harness.view.fields.default-brightness:set-text "0.25")
+      (harness.view.fields.default-tint-color:set-text "0.8, 0.9, 1.0")
       (harness.view.theme-overrides.dark.name:set-value "lake")
       (harness.view.theme-overrides.dark.brightness:set-text "0.4")
+      (harness.view.theme-overrides.dark.tint-color:set-text "1.0, 0.8, 0.8")
       (harness.view.apply-button:on-click {})
       (assert (= harness.state.scene.skybox.enabled? false) "Skybox apply should persist enabled flag")
       (assert (= harness.state.scene.skybox.default.name next-name)
               "Skybox apply should persist default name")
       (assert (= harness.state.scene.skybox.default.brightness 0.25)
               "Skybox apply should persist default brightness")
+      (assert (= (. harness.state.scene.skybox.default.tint-color 2) 0.9)
+              "Skybox apply should persist default tint color")
       (assert (= (and harness.state.scene.skybox.by-theme.dark
                       harness.state.scene.skybox.by-theme.dark.name)
                  "lake")
               "Skybox apply should persist dark-theme override")
+      (assert (= (and harness.state.scene.skybox.by-theme.dark
+                      (. harness.state.scene.skybox.by-theme.dark.tint-color 2))
+                 0.8)
+              "Skybox apply should persist dark-theme tint override")
       (local synced-skybox (harness:synced-skybox))
       (assert synced-skybox "Skybox apply should sync the active scene")
       (assert (= synced-skybox.name "lake")
               "Synced skybox should resolve the active theme override")
       (assert (= synced-skybox.brightness 0.4)
               "Synced skybox should include resolved override brightness")
+      (assert (= (. synced-skybox.tint-color 2) 0.8)
+              "Synced skybox should include resolved override tint")
       (local saved-skybox (harness:saved-skybox))
       (assert saved-skybox "Skybox apply should persist world state")
       (assert (= saved-skybox.default.brightness 0.25)
               "Saved skybox should include updated default brightness")
+      (assert (= (. saved-skybox.default.tint-color 3) 1.0)
+              "Saved skybox should include updated default tint")
       (harness:drop))))
 
 (fn skybox-node-view-theme-override-inherits-default-brightness []
@@ -311,8 +346,33 @@
               "Resolved active skybox should inherit default brightness")
       (harness:drop))))
 
+(fn skybox-node-view-theme-override-inherits-default-tint []
+  (with-skybox-assets
+    (fn []
+      (local harness
+        (make-skybox-node-view-harness {:skybox (make-skybox-state {:enabled? true
+                                                                    :name "lake"
+                                                                    :brightness 0.1})}))
+      (harness.view.fields.default-tint-color:set-text "0.7, 0.8, 0.9")
+      (harness.view.theme-overrides.dark.name:set-value "lake")
+      (harness.view.theme-overrides.dark.tint-color:set-text "")
+      (harness.view.apply-button:on-click {})
+      (assert (= (and harness.state.scene.skybox.by-theme.dark
+                      (. harness.state.scene.skybox.by-theme.dark.tint-color 3))
+                 0.9)
+              "Theme override should inherit default tint when left blank")
+      (local synced-skybox (harness:synced-skybox))
+      (assert synced-skybox "Skybox apply should sync the active scene")
+      (assert (= (. synced-skybox.tint-color 1) 0.7)
+              "Resolved active skybox should inherit default tint")
+      (harness:drop))))
+
 (table.insert tests {:name "skybox node module exports"
                      :fn skybox-node-module-exports})
+(table.insert tests {:name "skybox state default tint isolated"
+                     :fn skybox-state-default-tint-isolated})
+(table.insert tests {:name "skybox state rejects out-of-range tint"
+                     :fn skybox-state-rejects-out-of-range-tint})
 (table.insert tests {:name "skybox node has correct key"
                      :fn skybox-node-has-correct-key})
 (table.insert tests {:name "graph key loaders load skybox node"
@@ -325,6 +385,8 @@
                      :fn skybox-node-view-applies-changes})
 (table.insert tests {:name "skybox node view theme override inherits default brightness"
                      :fn skybox-node-view-theme-override-inherits-default-brightness})
+(table.insert tests {:name "skybox node view theme override inherits default tint"
+                     :fn skybox-node-view-theme-override-inherits-default-tint})
 
 (local main
   (fn []
