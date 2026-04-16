@@ -290,6 +290,27 @@
               "Saved skybox should include updated default brightness")
       (harness:drop))))
 
+(fn skybox-node-view-theme-override-inherits-default-brightness []
+  (with-skybox-assets
+    (fn []
+      (local harness
+        (make-skybox-node-view-harness {:skybox (make-skybox-state {:enabled? true
+                                                                    :name "lake"
+                                                                    :brightness 0.1})}))
+      (harness.view.fields.default-brightness:set-text "0.35")
+      (harness.view.theme-overrides.dark.name:set-value "lake")
+      (harness.view.theme-overrides.dark.brightness:set-text "")
+      (harness.view.apply-button:on-click {})
+      (assert (= (and harness.state.scene.skybox.by-theme.dark
+                      harness.state.scene.skybox.by-theme.dark.brightness)
+                 0.35)
+              "Theme override should inherit default brightness when left blank")
+      (local synced-skybox (harness:synced-skybox))
+      (assert synced-skybox "Skybox apply should sync the active scene")
+      (assert (= synced-skybox.brightness 0.35)
+              "Resolved active skybox should inherit default brightness")
+      (harness:drop))))
+
 (table.insert tests {:name "skybox node module exports"
                      :fn skybox-node-module-exports})
 (table.insert tests {:name "skybox node has correct key"
@@ -302,6 +323,8 @@
                      :fn skybox-node-view-builds})
 (table.insert tests {:name "skybox node view applies changes"
                      :fn skybox-node-view-applies-changes})
+(table.insert tests {:name "skybox node view theme override inherits default brightness"
+                     :fn skybox-node-view-theme-override-inherits-default-brightness})
 
 (local main
   (fn []

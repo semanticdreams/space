@@ -206,15 +206,19 @@
                                       (not (. allowed-skyboxes (tostring override-name))))
                                   (error (.. "Theme override for " theme-key
                                              " must use one of the discovered skyboxes"))
-                                  (let [(ok parsed-brightness) (pcall tonumber override-brightness-text)]
-                                    (if (or (not ok)
-                                            (not (= (type parsed-brightness) :number)))
-                                        (error (.. "Theme override brightness for "
-                                                   theme-key
-                                                   " must be numeric"))
-                                        (set (. by-theme theme-key)
-                                             {:name override-name
-                                              :brightness parsed-brightness}))))))
+                                  (let [parsed-brightness
+                                        (if (= override-brightness-text "")
+                                            parsed-default-brightness
+                                            (let [(ok parsed-value) (pcall tonumber override-brightness-text)]
+                                              (if (or (not ok)
+                                                      (not (= (type parsed-value) :number)))
+                                                  (error (.. "Theme override brightness for "
+                                                             theme-key
+                                                             " must be numeric"))
+                                                  parsed-value)))]
+                                    (set (. by-theme theme-key)
+                                         {:name override-name
+                                          :brightness parsed-brightness})))))
                         (values
                           (SkyboxState.normalize-complete-state
                             {:enabled? enabled
