@@ -170,8 +170,10 @@
         (on-multitouch-end ctx (current-gesture) session {:canceled? canceled?}))
       (set multitouch-active? false)))
 
-  (fn reset-router! []
+  (fn reset-router! [payload]
     (stop-multitouch! nil true)
+    (when primary-key
+      (cancel-single! payload))
     (clear-single!)
     (set blocked-multitouch? false)
     (session:clear)
@@ -209,7 +211,7 @@
         (if (not (allow-touch? payload))
             (do
               (when (> (session:count) 0)
-                (reset-router!))
+                (reset-router! payload))
               false)
             (do
               (session:on-touch-down payload)
@@ -256,7 +258,7 @@
         (if (not (allow-touch? payload))
             (do
               (when (> (session:count) 0)
-                (reset-router!))
+                (reset-router! payload))
               false)
             (do
               (session:on-touch-motion payload)
@@ -306,7 +308,7 @@
         (if (not (allow-touch? payload))
             (do
               (when (> (session:count) 0)
-                (reset-router!))
+                (reset-router! payload))
               false)
             (do
               (local key (session:key-from-payload payload))
@@ -323,7 +325,7 @@
     (on-touch-finished ctx payload true))
 
   (fn reset [_self]
-    (reset-router!))
+    (reset-router! nil))
 
   {:on-touch-down on-touch-down
    :on-touch-motion on-touch-motion

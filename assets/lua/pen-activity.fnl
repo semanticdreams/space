@@ -3,115 +3,154 @@
   (local suppress-touch-when (or options.suppress-touch-when :down))
   (local suppression-timeout-ms (or options.suppression-timeout-ms 150))
   (local allow-touch-during-hover? (not (= options.allow-touch-during-hover? false)))
-  (var pen-in-range? false)
-  (var pen-down? false)
-  (var last-event-timestamp nil)
-  (var last-active-timestamp nil)
+  (local pen-states {})
+
+  (fn pen-id-from-payload [payload]
+    (and payload payload.pen-id))
 
   (fn payload-timestamp [payload]
     (and payload payload.timestamp))
 
-  (fn set-last-event! [payload]
+  (fn ensure-pen-state [payload]
+    (local pen-id (pen-id-from-payload payload))
+    (assert pen-id "PenActivity requires payload.pen-id")
+    (if (. pen-states pen-id)
+        (. pen-states pen-id)
+        (do
+          (local state {:in-range? false
+                        :down? false
+                        :last-event-timestamp nil
+                        :last-active-timestamp nil})
+          (set (. pen-states pen-id) state)
+          state)))
+
+  (fn set-last-event! [state payload]
     (local timestamp (payload-timestamp payload))
     (when timestamp
-      (set last-event-timestamp timestamp))
+      (set state.last-event-timestamp timestamp))
     timestamp)
 
-  (fn mark-active! [payload]
-    (local timestamp (set-last-event! payload))
+  (fn mark-active! [state payload]
+    (local timestamp (set-last-event! state payload))
     (when timestamp
-      (set last-active-timestamp timestamp))
+      (set state.last-active-timestamp timestamp))
+    timestamp)
+
+  (fn any-pen-matches? [predicate]
+    (var matched? false)
+    (each [_ state (pairs pen-states)]
+      (when (predicate state)
+        (set matched? true)))
+    matched?)
+
+  (fn most-recent-timestamp []
+    (var timestamp nil)
+    (each [_ state (pairs pen-states)]
+      (when (and state.last-event-timestamp
+                 (or (= timestamp nil)
+                     (> state.last-event-timestamp timestamp)))
+        (set timestamp state.last-event-timestamp))
+      (when (and state.last-active-timestamp
+                 (or (= timestamp nil)
+                     (> state.last-active-timestamp timestamp)))
+        (set timestamp state.last-active-timestamp)))
     timestamp)
 
   (fn suppression-active? [timestamp]
     (if (= suppress-touch-when :proximity)
-        (if pen-in-range?
+        (if (any-pen-matches? (fn [state] state.in-range?))
             true
-            (if (and last-active-timestamp
+            (any-pen-matches?
+              (fn [state]
+                (and state.last-active-timestamp
                      timestamp
-                     (> suppression-timeout-ms 0))
-                (<= (- timestamp last-active-timestamp) suppression-timeout-ms)
-                false))
-        (if pen-down?
+                     (> suppression-timeout-ms 0)
+                     (<= (- timestamp state.last-active-timestamp) suppression-timeout-ms)))))
+        (if (any-pen-matches? (fn [state] state.down?))
             true
-            (if (and last-active-timestamp
+            (any-pen-matches?
+              (fn [state]
+                (and state.last-active-timestamp
                      timestamp
-                     (> suppression-timeout-ms 0))
-                (<= (- timestamp last-active-timestamp) suppression-timeout-ms)
-                false))))
+                     (> suppression-timeout-ms 0)
+                     (<= (- timestamp state.last-active-timestamp) suppression-timeout-ms)))))))
 
   (fn on-pen-proximity-in [_self payload]
-    (set pen-in-range? true)
-    (set-last-event! payload)
+    (local state (ensure-pen-state payload))
+    (set state.in-range? true)
+    (set-last-event! state payload)
     (when (= suppress-touch-when :proximity)
-      (mark-active! payload))
+      (mark-active! state payload))
     true)
 
   (fn on-pen-proximity-out [_self payload]
-    (set pen-in-range? false)
-    (set pen-down? false)
-    (set-last-event! payload)
+    (local state (ensure-pen-state payload))
+    (set state.in-range? false)
+    (set state.down? false)
+    (set-last-event! state payload)
     (when (= suppress-touch-when :proximity)
-      (mark-active! payload))
+      (mark-active! state payload))
     true)
 
   (fn on-pen-motion [_self payload]
-    (set pen-in-range? (not (= (and payload payload.in-range) false)))
-    (set pen-down? (not (not (and payload payload.down))))
-    (set-last-event! payload)
-    (when (or (= suppress-touch-when :proximity) pen-down?)
-      (mark-active! payload))
+    (local state (ensure-pen-state payload))
+    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.down? (not (not (and payload payload.down))))
+    (set-last-event! state payload)
+    (when (or (= suppress-touch-when :proximity) state.down?)
+      (mark-active! state payload))
     true)
 
   (fn on-pen-down [_self payload]
-    (set pen-in-range? true)
-    (set pen-down? true)
-    (mark-active! payload)
+    (local state (ensure-pen-state payload))
+    (set state.in-range? true)
+    (set state.down? true)
+    (mark-active! state payload)
     true)
 
   (fn on-pen-up [_self payload]
-    (set pen-in-range? (not (= (and payload payload.in-range) false)))
-    (set pen-down? false)
-    (mark-active! payload)
+    (local state (ensure-pen-state payload))
+    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.down? false)
+    (mark-active! state payload)
     true)
 
   (fn on-pen-button [_self payload]
-    (set pen-in-range? (not (= (and payload payload.in-range) false)))
-    (set pen-down? (not (not (and payload payload.down))))
-    (set-last-event! payload)
-    (when (or (= suppress-touch-when :proximity) pen-down?)
-      (mark-active! payload))
+    (local state (ensure-pen-state payload))
+    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.down? (not (not (and payload payload.down))))
+    (set-last-event! state payload)
+    (when (or (= suppress-touch-when :proximity) state.down?)
+      (mark-active! state payload))
     true)
 
   (fn on-pen-axis [_self payload]
-    (set pen-in-range? (not (= (and payload payload.in-range) false)))
-    (set pen-down? (not (not (and payload payload.down))))
-    (set-last-event! payload)
-    (when (or (= suppress-touch-when :proximity) pen-down?)
-      (mark-active! payload))
+    (local state (ensure-pen-state payload))
+    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.down? (not (not (and payload payload.down))))
+    (set-last-event! state payload)
+    (when (or (= suppress-touch-when :proximity) state.down?)
+      (mark-active! state payload))
     true)
 
   (fn pen-active? [_self timestamp]
-    (suppression-active? (or timestamp last-event-timestamp last-active-timestamp)))
+    (suppression-active? (or timestamp (most-recent-timestamp))))
 
   (fn touch-allowed? [self payload]
     (local timestamp
       (or (payload-timestamp payload)
-          last-event-timestamp
-          last-active-timestamp))
+          (most-recent-timestamp)))
     (if (not (self:pen-active? timestamp))
         true
         (if (and allow-touch-during-hover?
                  (= suppress-touch-when :down)
-                 (not pen-down?))
+                 (not (any-pen-matches? (fn [state] state.down?))))
             true
             false)))
 
   (fn reset [_self]
-    (set pen-in-range? false)
-    (set pen-down? false)
-    (set last-event-timestamp nil)
-    (set last-active-timestamp nil)
+    (each [pen-id _ (pairs pen-states)]
+      (set (. pen-states pen-id) nil))
     true)
 
   {:on-pen-proximity-in on-pen-proximity-in

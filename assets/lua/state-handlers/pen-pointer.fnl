@@ -70,6 +70,12 @@
     (when (= (and app.pointer-input-override app.pointer-input-override.source) :pen)
       (set app.pointer-input-override nil)))
 
+  (fn clear-pointer-override-for-pen! [payload]
+    (when (and (= (and app.pointer-input-override app.pointer-input-override.source) :pen)
+               (= (and app.pointer-input-override app.pointer-input-override.pen-id)
+                  (and payload payload.pen-id)))
+      (set app.pointer-input-override nil)))
+
   (fn clear-hover! []
     (when (and clear-hover-on-proximity-out? app.hoverables app.hoverables.clear-active)
       (app.hoverables:clear-active)))
@@ -86,7 +92,7 @@
     {:pen-proximity-out
      (fn [_ctx payload]
        (activity:on-pen-proximity-out payload)
-       (clear-pointer-override!)
+       (clear-pointer-override-for-pen! payload)
        (clear-hover!)
        false)})
 

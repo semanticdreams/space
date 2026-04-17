@@ -967,6 +967,162 @@
   (set app.states original-states)
   (TestSupport.resume-active-state suspended-state))
 
+(fn terrain-paint-state-cancels-active-touch-when-pen-takes-over []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-touch-targets app.touch-gesture-targets)
+  (var suspended-state nil)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-paint (TerrainPaintState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
+  (set app.states states)
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self]
+                         (set active? false))
+     :begin-stroke (fn [_self payload]
+                     (table.insert forwarded [:button true payload.x payload.y])
+                     true)
+     :update-stroke (fn [_self payload]
+                      (table.insert forwarded [:motion payload.x payload.y])
+                      true)
+     :end-stroke (fn [_self payload]
+                   (table.insert forwarded [:button false payload.x payload.y])
+                   (set active? false)
+                   true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainPaintManager.begin session)
+  (local state (states.get-state :terrain-paint))
+  (assert state "terrain paint state should be active")
+  (state:on-touch-down {:touch-id 1
+                        :finger-id 11
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :pressure 0.5
+                        :timestamp 1})
+  (assert active? "touch stroke should begin")
+  (state:on-pen-down {:pen-id 77
+                      :x 30
+                      :y 40
+                      :xrel 0
+                      :yrel 0
+                      :timestamp 2
+                      :in-range true})
+  (state:on-touch-motion {:touch-id 1
+                          :finger-id 11
+                          :x 15
+                          :y 25
+                          :xrel 5
+                          :yrel 5
+                          :pressure 0.5
+                          :timestamp 3})
+  (assert (>= (# forwarded) 2))
+  (assert (= (. (. forwarded 1) 1) :button))
+  (local last-entry (. forwarded (# forwarded)))
+  (assert (= (. last-entry 1) :button))
+  (assert (= (. last-entry 2) false))
+  (assert (not active?)
+          "suppressed touch should end the active touch-driven stroke cleanly")
+  (set app.touch-gesture-targets original-touch-targets)
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
+
+(fn normal-state-keeps-eraser-override-while-another-pen-is-still-eraser []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-movables app.movables)
+  (local original-resizables app.resizables)
+  (local original-touch-targets app.touch-gesture-targets)
+  (local original-controls app.first-person-controls)
+  (local original-controller app.drawing-controller)
+  (local original-canvas-interactive app.canvas-interactive?)
+  (local original-feature app.active-canvas-feature)
+  (local tool-log [])
+  (set app.hoverables {:on-enter (fn [])
+                       :on-leave (fn [])
+                       :on-mouse-motion (fn [_self _payload])
+                       :clear-active (fn [_self] nil)})
+  (set app.clickables {:on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])
+                       :active? false})
+  (set app.movables {:drag-active? (fn [_self] false)
+                     :on-mouse-motion (fn [_self _payload])
+                     :on-mouse-button-down (fn [_self _payload])
+                     :on-mouse-button-up (fn [_self _payload])})
+  (set app.resizables {:drag-active? (fn [_self] false)
+                       :on-mouse-motion (fn [_self _payload])
+                       :on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])})
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (set app.first-person-controls controls)
+  (set app.canvas-interactive? true)
+  (set app.active-canvas-feature "drawing")
+  (set app.drawing-controller
+       {:state {:ui {:active_tool "brush"}}
+        :set-active-tool (fn [self tool]
+                           (table.insert tool-log tool)
+                           (set self.state.ui.active_tool tool))})
+  (local state (NormalState))
+  (state:on-enter)
+  (state:on-pen-down {:pen-id 77
+                      :x 10
+                      :y 20
+                      :xrel 0
+                      :yrel 0
+                      :timestamp 1
+                      :in-range true
+                      :eraser true})
+  (state:on-pen-down {:pen-id 88
+                      :x 12
+                      :y 22
+                      :xrel 0
+                      :yrel 0
+                      :timestamp 2
+                      :in-range true
+                      :eraser true})
+  (state:on-pen-up {:pen-id 88
+                    :x 12
+                    :y 22
+                    :xrel 0
+                    :yrel 0
+                    :timestamp 3
+                    :in-range true
+                    :eraser false})
+  (assert (= app.drawing-controller.state.ui.active_tool "eraser")
+          "releasing one eraser pen should not restore brush while another eraser pen is still active")
+  (state:on-pen-up {:pen-id 77
+                    :x 10
+                    :y 20
+                    :xrel 0
+                    :yrel 0
+                    :timestamp 4
+                    :in-range true
+                    :eraser false})
+  (assert (= app.drawing-controller.state.ui.active_tool "brush"))
+  (assert (= (# tool-log) 2))
+  (assert (= (. tool-log 1) "eraser"))
+  (assert (= (. tool-log 2) "brush"))
+  (state:on-leave)
+  (set app.hoverables original-hoverables)
+  (set app.clickables original-clickables)
+  (set app.movables original-movables)
+  (set app.resizables original-resizables)
+  (set app.touch-gesture-targets original-touch-targets)
+  (set app.first-person-controls original-controls)
+  (set app.drawing-controller original-controller)
+  (set app.canvas-interactive? original-canvas-interactive)
+  (set app.active-canvas-feature original-feature))
+
 (fn terrain-paint-state-coalesces-motion-until-update []
   (reset-engine-events)
   (local original-states app.states)
@@ -1294,6 +1450,8 @@
 (table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
 (table.insert tests {:name "Normal state injects pen as mouse and restores drawing tool"
                      :fn normal-state-injects-pen-as-mouse-and-restores-drawing-tool})
+(table.insert tests {:name "Normal state keeps eraser override while another pen is still eraser"
+                     :fn normal-state-keeps-eraser-override-while-another-pen-is-still-eraser})
 (table.insert tests {:name "Normal state Tab cycles focus" :fn normal-state-tab-cycles-focus})
 (table.insert tests {:name "Normal state swallows keys when input is active" :fn normal-state-swallows-keys-when-input-active})
 (table.insert tests {:name "Terrain rect pick state routes and restores" :fn terrain-rect-pick-state-routes-and-restores})
@@ -1309,6 +1467,8 @@
                      :fn terrain-paint-state-routes-touch-and-restores})
 (table.insert tests {:name "Terrain paint state suppresses touch while pen active"
                      :fn terrain-paint-state-suppresses-touch-while-pen-active})
+(table.insert tests {:name "Terrain paint state cancels active touch when pen takes over"
+                     :fn terrain-paint-state-cancels-active-touch-when-pen-takes-over})
 (table.insert tests {:name "Terrain paint state coalesces motion until update"
                      :fn terrain-paint-state-coalesces-motion-until-update})
 (table.insert tests {:name "Terrain paint state forwards mouse wheel"

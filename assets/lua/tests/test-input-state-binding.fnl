@@ -267,6 +267,23 @@
   (app.engine.input:begin-frame)
   (assert (= (app.engine.input:pen-count) 0)))
 
+(fn pen-state-binding-clears-stale-position-and-axes-on-reentry []
+  (local PenAxis input-state.PenAxis)
+  (reset-pen-state)
+  (app.engine.input:on-pen-proximity-in 77 10)
+  (local pen (app.engine.input:pen-by-id 77))
+  (assert pen "pen 77 should exist")
+  (app.engine.input:on-pen-motion 77 10 20 0 11)
+  (app.engine.input:on-pen-axis 77 10 20 PenAxis.pressure 0.6 0 12)
+  (assert (approx= pen.pressure 0.6))
+  (app.engine.input:on-pen-proximity-out 77 13)
+  (app.engine.input:on-pen-proximity-in 77 14)
+  (app.engine.input:on-pen-motion 77 100 200 0 15)
+  (assert (approx= pen.xrel 0))
+  (assert (approx= pen.yrel 0))
+  (assert (not (pen:has-axis PenAxis.pressure)))
+  (assert (approx= pen.pressure 0)))
+
 (table.insert tests {:name "Input binding exposes app.engine.input.keyboard" :fn engine-input-available})
 (table.insert tests {:name "KeyStatus enum exported with expected values" :fn key-status-enum-exposed})
 (table.insert tests {:name "KeyboardState transitions can be mocked in Fennel" :fn mock-keyboard-state-transitions})
@@ -281,6 +298,8 @@
                      :fn pen-state-binding-exposes-primary-pen-axes-and-history})
 (table.insert tests {:name "Pen binding distinguishes pens"
                      :fn pen-state-binding-distinguishes-pens})
+(table.insert tests {:name "Pen binding clears stale position and axes on reentry"
+                     :fn pen-state-binding-clears-stale-position-and-axes-on-reentry})
 
 (local main
   (fn []

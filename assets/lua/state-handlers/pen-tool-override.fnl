@@ -7,39 +7,51 @@
                           "PenToolOverrideHandlers requires :set-tool"))
   (local override-tool (or options.override-tool "eraser"))
   (var saved-tool nil)
-  (var override-active? false)
+  (local eraser-pens {})
 
   (fn eraser-active? [payload]
     (not (not (and payload payload.eraser))))
 
-  (fn apply-payload! [payload]
+  (fn pen-id [payload]
+    (and payload payload.pen-id))
+
+  (fn any-eraser-pen-active? []
+    (var active? false)
+    (each [_ pen-active? (pairs eraser-pens)]
+      (when pen-active?
+        (set active? true)))
+    active?)
+
+  (fn override-active? []
+    (not (= saved-tool nil)))
+
+  (fn reset-override! []
+    (when (override-active?)
+      (when saved-tool
+        (set-tool saved-tool))
+      (set saved-tool nil))
+    (each [current-pen-id _ (pairs eraser-pens)]
+      (set (. eraser-pens current-pen-id) nil))
+    true)
+
+  (fn sync-override! []
     (if (not (active?))
-        false
-        (if (eraser-active? payload)
-            (if override-active?
+        (reset-override!)
+        (if (any-eraser-pen-active?)
+            (if (override-active?)
                 true
                 (do
                   (set saved-tool (get-tool))
                   (when (not (= saved-tool override-tool))
                     (set-tool override-tool))
-                  (set override-active? true)
                   true))
-            (if override-active?
-                (do
-                  (when saved-tool
-                    (set-tool saved-tool))
-                  (set saved-tool nil)
-                  (set override-active? false)
-                  true)
-                false))))
+            (reset-override!))))
 
-  (fn reset-override! []
-    (when override-active?
-      (when saved-tool
-        (set-tool saved-tool))
-      (set saved-tool nil)
-      (set override-active? false))
-    true)
+  (fn apply-payload! [payload]
+    (local current-pen-id (pen-id payload))
+    (when current-pen-id
+      (set (. eraser-pens current-pen-id) (eraser-active? payload)))
+    (sync-override!))
 
   (local PenToolOverride
     {:pen-proximity-in (fn [_ctx payload]

@@ -24,7 +24,7 @@
          (or (and opts opts.intersectables)
              app.intersectables
              (Intersectables)))
-  (local objects [])
+  (var objects [])
 
   (fn register [_self object]
     (add-unique! objects object)

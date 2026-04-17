@@ -173,12 +173,18 @@ void InputState::PenState::set_proximity(bool inRange, Uint64 timestamp)
     updateTimestamp = timestamp;
     currentInRange = inRange;
     if (inRange) {
+        hasPosition = false;
         inputState = 0;
+        seenAxesMask = 0;
+        axes.fill(0.0F);
     }
     currentDown = false;
     if (!inRange) {
         inputState = 0;
         eraser = false;
+        hasPosition = false;
+        seenAxesMask = 0;
+        axes.fill(0.0F);
         clear_pen_buttons(*this);
     }
 }
