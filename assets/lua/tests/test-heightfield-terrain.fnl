@@ -161,6 +161,21 @@
   (assert (= (. (. (. record.chunks 1) :coord) 1) -1))
   (assert (= (. (. (. record.chunks 2) :coord) 2) -2)))
 
+(fn sample-bounds-follow-single-off-origin-chunk []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:chunk-samples [5 5]}
+                                      :chunks [{:coord [-3 3]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local bounds (HeightfieldTerrainData.sample-bounds record))
+  (assert (= bounds.min-sample-x -12) "sample bounds should start from the actual off-origin chunk")
+  (assert (= bounds.max-sample-x -8) "sample bounds should end at the off-origin chunk edge")
+  (assert (= bounds.min-sample-z 12) "sample bounds should not include a fake origin band on Z")
+  (assert (= bounds.max-sample-z 16) "sample bounds should end at the off-origin chunk edge on Z")
+  (assert (= bounds.width 5) "sample bounds width should match one chunk footprint")
+  (assert (= bounds.length 5) "sample bounds length should match one chunk footprint"))
+
 (fn perlin-application-supports-negative-chunk-coordinates []
   (local record
     (TerrainRecords.normalize-record {:kind "heightfield-terrain"
@@ -874,6 +889,23 @@
   (when (not ok)
     (error err)))
 
+(fn heightfield-physics-builds-single-off-origin-chunk []
+  (assert bt "Off-origin heightfield terrain physics test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+
+  (local vector (VectorBuffer 0))
+  (local ctx {:triangle-vector vector})
+  (local terrain-builder
+    (HeightfieldTerrain {:position (glm.vec3 0 0 0)
+                         :physics true
+                         :sample-spacing [20 20]
+                         :chunk-samples [5 5]
+                         :chunks [{:coord [-3 3]
+                                   :size [5 5]
+                                   :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local terrain (terrain-builder ctx))
+  (terrain:drop))
+
 (fn heightfield-physics-searches-live-3x3-support-mismatch []
   (assert bt "Live 3x3 search test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
@@ -1123,6 +1155,8 @@
                      :fn record-defaults-normalize-heightfield-data})
 (table.insert tests {:name "Heightfield terrain record accepts negative chunk coordinates"
                      :fn record-normalizes-negative-chunk-coordinates})
+(table.insert tests {:name "Heightfield terrain sample bounds follow a single off-origin chunk"
+                     :fn sample-bounds-follow-single-off-origin-chunk})
 (table.insert tests {:name "Heightfield terrain perlin supports negative chunk coordinates"
                      :fn perlin-application-supports-negative-chunk-coordinates})
 (table.insert tests {:name "Heightfield terrain flat fill supports rectangular targets"
@@ -1149,6 +1183,8 @@
                      :fn terrain-checker-pattern-alternates-across-chunk-seams})
 (table.insert tests {:name "Heightfield terrain physics catches falling body on raised area"
                      :fn heightfield-physics-catches-falling-body-on-raised-area})
+(table.insert tests {:name "Heightfield terrain physics builds a single off-origin chunk"
+                     :fn heightfield-physics-builds-single-off-origin-chunk})
 (table.insert tests {:name "Heightfield terrain searches live 3x3 support mismatch"
                      :fn heightfield-physics-searches-live-3x3-support-mismatch})
 (table.insert tests {:name "Heightfield terrain first home world elevated support mismatch"

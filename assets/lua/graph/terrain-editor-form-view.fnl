@@ -61,6 +61,7 @@
   (local refresh-on-change? (if (= options.refresh-on-change? nil) true (not (not options.refresh-on-change?))))
   (local apply-when-valid? (if (= options.apply-when-valid? nil) false (not (not options.apply-when-valid?))))
   (local on-draft-changed (or options.on-draft-changed (fn [_draft _validation-result] nil)))
+  (local on-apply-attempt (or options.on-apply-attempt (fn [_payload] nil)))
 
   (fn clone-table [value]
     (if (= (type value) :table)
@@ -189,6 +190,26 @@
         (when field
           (set-field-text field (. draft key)))))
 
+    (fn visible-field-values []
+      (local field-values {})
+      (each [_ spec (ipairs validation.field-specs)]
+        (local field (. fields spec.key))
+        (set (. field-values spec.key)
+             (if (and field field.get-text)
+                 (field:get-text)
+                 (. draft spec.key))))
+      field-values)
+
+    (fn apply-attempt-payload []
+      (local draft-snapshot (clone-table draft))
+      (local visible-values (visible-field-values))
+      (local validation-result (validation.validate-draft draft-snapshot))
+      {:draft draft-snapshot
+       :visible-fields visible-values
+       :validation-result validation-result
+       :target target
+       :view view})
+
     (fn sync-validation-state []
       (if apply-when-valid?
           (sync-errors! validation draft errors error-labels set-error-label)
@@ -218,7 +239,9 @@
       ((Button {:text "Apply"
                 :enabled? false
                 :on-click (fn [_button _event]
-                            (local result (validation.validate-draft draft))
+                            (local payload (apply-attempt-payload))
+                            (local result payload.validation-result)
+                            (on-apply-attempt payload)
                             (set applied? false)
                             (set apply-failed? false)
                             (each [_ spec (ipairs validation.field-specs)]
@@ -252,8 +275,11 @@
           (view:set-draft-values next-values)))
       (local handle-action-click
         (fn [_button _event]
+          (local payload (apply-attempt-payload))
           (action.on-click {:view view
-                            :draft (clone-table draft)
+                            :draft payload.draft
+                            :visible-fields payload.visible-fields
+                            :validation-result payload.validation-result
                             :set-draft-values set-draft-values})))
       (local button-options
         {:text action.text

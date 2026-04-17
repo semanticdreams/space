@@ -9,7 +9,7 @@
    {:key :max-chunk-z :label "Max Chunk Z" :placeholder "Frontmost chunk"}
    {:key :fill-height :label "New Chunk Height" :placeholder "Height for added chunks"}])
 
-(fn chunk-bounds [record]
+(fn M.chunk-bounds [record]
   (var min-chunk-x 0)
   (var max-chunk-x 0)
   (var min-chunk-z 0)
@@ -37,7 +37,7 @@
    :max-chunk-z max-chunk-z})
 
 (fn M.draft-from-record [record]
-  (local bounds (chunk-bounds record))
+  (local bounds (M.chunk-bounds record))
   (local options (ValidationUtils.record-options record))
   {:min-chunk-x (tostring bounds.min-chunk-x)
    :min-chunk-z (tostring bounds.min-chunk-z)
@@ -84,6 +84,7 @@
    :error-count error-count})
 
 {:field-specs field-specs
+ :chunk-bounds M.chunk-bounds
  :draft-from-record M.draft-from-record
  :draft-equals? M.draft-equals?
  :validate-field M.validate-field
