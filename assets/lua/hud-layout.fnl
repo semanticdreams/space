@@ -184,11 +184,17 @@
       (local flex-bottom (+ status-bottom status-height))
       (local flex-height (math.max 0 (- control-bottom flex-bottom)))
       (local flex-size (glm.vec3 self.size.x flex-height (. tiles.layout.measure 3)))
+      (local dock-width (if left-dock
+                            (. left-dock.layout.measure 1)
+                            0))
+      (local tiles-width (math.max 0.001 (- self.size.x dock-width)))
+      (local tiles-position-x (+ base-position.x dock-width))
+      (local tiles-size (glm.vec3 tiles-width flex-height (. tiles.layout.measure 3)))
 
       (position-child control control-bottom (+ self.depth-offset-index 1))
       (position-child status status-bottom self.depth-offset-index)
-      (set tiles.layout.size flex-size)
-      (set tiles.layout.position (glm.vec3 base-position.x flex-bottom base-position.z))
+      (set tiles.layout.size tiles-size)
+      (set tiles.layout.position (glm.vec3 tiles-position-x flex-bottom base-position.z))
       (set tiles.layout.rotation self.rotation)
       (set tiles.layout.clip-region self.clip-region)
       (set tiles.layout.depth-offset-index (+ self.depth-offset-index 1))
@@ -200,7 +206,6 @@
       (set float.layout.depth-offset-index (+ self.depth-offset-index 16))
       (float.layout:layouter)
       (when left-dock
-        (local dock-width (. left-dock.layout.measure 1))
         (set left-dock.layout.size (glm.vec3 dock-width flex-height (. left-dock.layout.measure 3)))
         (set left-dock.layout.position (glm.vec3 base-position.x flex-bottom base-position.z))
         (set left-dock.layout.rotation self.rotation)
