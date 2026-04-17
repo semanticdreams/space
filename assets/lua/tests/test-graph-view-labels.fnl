@@ -7,6 +7,11 @@
 
 (local tests [])
 
+(fn assert-close [actual expected message]
+    (assert (< (math.abs (- actual expected)) 1e-6)
+            (or message
+                (string.format "Expected %s to equal %s" actual expected))))
+
 (fn make-ctx []
     (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
                    :hoverables (assert app.hoverables "test requires app.hoverables")}))
@@ -90,16 +95,46 @@
     (labels:update points [node] {:force? true})
     (local span (. labels.labels node))
     (assert span "Label should appear at the default orthographic canvas scale")
-    (assert (= span.style.scale 5)
-            (string.format "Default orthographic LOD should use scale 5 (got %s)" span.style.scale))
+    (assert-close span.style.scale 10.0
+                  (string.format "Orthographic labels should target a 10px height (got %s)"
+                                 span.style.scale))
     (set surface.world-units-per-pixel 0.1)
     (labels:update points [node] nil)
-    (assert (= span.style.scale 3)
-            (string.format "Zoomed-in orthographic LOD should use scale 3 (got %s)" span.style.scale))
+    (assert-close span.style.scale 3.0
+                  (string.format "Zoomed-in orthographic LOD should clamp to scale 3 (got %s)"
+                                 span.style.scale))
     (set surface.world-units-per-pixel 4.0)
     (labels:update points [node] nil)
     (assert (not (. labels.labels node))
             "Label should hide when orthographic zoom is far enough out")
+    (labels:drop-all))
+
+(fn labels-scale-continuously-within-the-same-lod []
+    (local ctx (make-ctx))
+    (local surface {:world-units-per-pixel 1.0})
+    (local labels (GraphViewLabels {:ctx ctx :surface surface}))
+    (local node (GraphNode {:key "continuous-scale" :label "Continuous Scale"}))
+    (local point {:position (glm.vec3 0 0 0) :size 4})
+    (local points {node point})
+    (labels:update points [node] {:force? true})
+    (local span (. labels.labels node))
+    (assert span "Label should be visible for continuous scaling checks")
+    (local initial-scale span.style.scale)
+    (local initial-lod (. labels.node-lod node))
+    (assert (= initial-lod 1)
+            (string.format "Expected initial LOD1 for orthographic scale 1.0 (got %s)"
+                           initial-lod))
+    (set surface.world-units-per-pixel 1.25)
+    (labels:update points [node] nil)
+    (assert (= (. labels.node-lod node) 1)
+            "Changing projected size within the same band should keep the same LOD")
+    (assert (> span.style.scale initial-scale)
+            (string.format "Lower projected density should increase label scale (%s -> %s)"
+                           initial-scale
+                           span.style.scale))
+    (assert-close span.style.scale 12.5
+                  (string.format "Scale should target a 10px height within the same LOD band (got %s)"
+                                 span.style.scale))
     (labels:drop-all))
 
 (fn labels-update-when-perspective-surface-camera-moves-small-distance []
@@ -113,12 +148,18 @@
     (labels:update points [node] {:force? true})
     (local span (. labels.labels node))
     (assert span "Label should be visible just outside the highest-detail threshold")
-    (assert (= span.style.scale 5)
-            (string.format "Initial perspective LOD should use scale 5 (got %s)" span.style.scale))
+    (assert (= (. labels.node-lod node) 1)
+            (string.format "Expected initial LOD1 just outside the closest perspective band (got %s)"
+                           (. labels.node-lod node)))
+    (local initial-scale span.style.scale)
     (camera:set-position (glm.vec3 0 0 79.5))
     (labels:update points [node] nil)
-    (assert (= span.style.scale 3)
-            (string.format "Small perspective camera move should promote to scale 3 (got %s)"
+    (assert (= (. labels.node-lod node) 0)
+            (string.format "Small perspective camera move should promote to LOD0 (got %s)"
+                           (. labels.node-lod node)))
+    (assert (< span.style.scale initial-scale)
+            (string.format "Moving closer should shrink projected-size scale (%s -> %s)"
+                           initial-scale
                            span.style.scale))
     (labels:drop-all)
     (surface:drop)
@@ -135,13 +176,19 @@
     (labels:update points [node] {:force? true})
     (local span (. labels.labels node))
     (assert span "Label should be visible at the default perspective projection")
-    (assert (= span.style.scale 8)
-            (string.format "Default perspective LOD should use scale 8 (got %s)" span.style.scale))
+    (assert (= (. labels.node-lod node) 2)
+            (string.format "Expected initial perspective LOD2 (got %s)"
+                           (. labels.node-lod node)))
+    (local initial-scale span.style.scale)
     (set surface.projection (glm.perspective (/ math.pi 6) 1.0 1.0 10000.0))
     (set surface.projection-version (+ (or surface.projection-version 0) 1))
     (labels:update points [node] nil)
-    (assert (= span.style.scale 5)
-            (string.format "Projection change should promote perspective LOD to scale 5 (got %s)"
+    (assert (= (. labels.node-lod node) 1)
+            (string.format "Projection change should promote perspective LOD to 1 (got %s)"
+                           (. labels.node-lod node)))
+    (assert (< span.style.scale initial-scale)
+            (string.format "Zooming the camera projection should shrink projected-size scale (%s -> %s)"
+                           initial-scale
                            span.style.scale))
     (labels:drop-all)
     (surface:drop)
@@ -153,6 +200,8 @@
                      :fn labels-update-when-camera-moves-without-debounced-signal})
 (table.insert tests {:name "GraphView labels update when orthographic surface scale changes"
                      :fn labels-update-when-orthographic-surface-scale-changes})
+(table.insert tests {:name "GraphView labels scale continuously within the same LOD"
+                     :fn labels-scale-continuously-within-the-same-lod})
 (table.insert tests {:name "GraphView labels update when perspective surface camera moves a small distance"
                      :fn labels-update-when-perspective-surface-camera-moves-small-distance})
 (table.insert tests {:name "GraphView labels update when perspective projection changes"

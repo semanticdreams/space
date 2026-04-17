@@ -97,6 +97,8 @@
     (local focus-scope (focus-manager:create-scope {:name "test-graph-view"}))
     (local theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)
                           :label-color (glm.vec4 1 1 1 1)
+                          :label-target-pixels 13.0
+                          :label-min-scale 4.0
                           :edge-color (glm.vec4 0.6 0.6 0.6 1)}
                   :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})
     (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")

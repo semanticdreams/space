@@ -145,21 +145,29 @@
     (local dy (screen-distance center along-y))
     (math.max (or dx 0) (or dy 0)))
 
-  (fn target-for-point [_self position]
+  (fn pixels-per-world-unit-for-point [_self position]
     (local units (world-units-per-pixel))
     (if units
-        (projection-threshold->lod (/ 1.0 units))
+        (/ 1.0 units)
         (do
           (local pixels-per-world-unit (projected-pixels-per-world-unit position))
           (if (> pixels-per-world-unit 0)
-              (projection-threshold->lod pixels-per-world-unit)
-              (if (and camera camera.position)
-                  (distance-threshold->lod
-                    (glm.length (- position camera.position)))
-                  0)))))
+              pixels-per-world-unit
+              nil))))
+
+  (fn target-for-point [_self position]
+    (local pixels-per-world-unit
+      (pixels-per-world-unit-for-point nil position))
+    (if pixels-per-world-unit
+        (projection-threshold->lod pixels-per-world-unit)
+        (if (and camera camera.position)
+            (distance-threshold->lod
+              (glm.length (- position camera.position)))
+            0)))
 
   {:capture-view-state capture-view-state
    :view-state-changed? view-state-changed?
+   :pixels-per-world-unit-for-point pixels-per-world-unit-for-point
    :target-for-point target-for-point
    :drop (fn [_self] nil)})
 

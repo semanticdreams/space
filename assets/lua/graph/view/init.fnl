@@ -89,6 +89,10 @@
     (local theme (and ctx ctx.theme))
     (local graph-theme (and theme theme.graph))
     (local resolved-label-color (or options.label-color (and graph-theme graph-theme.label-color)))
+    (local resolved-label-target-pixels (or options.label-target-pixels
+                                           (and graph-theme graph-theme.label-target-pixels)))
+    (local resolved-label-min-scale (or options.label-min-scale
+                                        (and graph-theme graph-theme.label-min-scale)))
     (local resolved-edge-color (or options.edge-color (and graph-theme graph-theme.edge-color)))
     (local resolved-edge-thickness (or options.edge-thickness
                                       (and graph-theme graph-theme.edge-thickness)
@@ -117,6 +121,8 @@
                                     :camera options.camera
                                     :surface-provider lod-surface-provider
                                     :label-color resolved-label-color
+                                    :label-target-pixels resolved-label-target-pixels
+                                    :label-min-scale resolved-label-min-scale
                                     :label-depth-offset (or options.label-depth-offset 1.0)}))
     (local views (GraphViewNodeViews {:graph graph
                                       :ctx ctx

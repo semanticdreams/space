@@ -30,6 +30,8 @@
    :graph {:edge-color (glm.vec4 0.36 0.45 0.68 0.9)
            :edge-thickness 4.0
            :label-color text-color
+           :label-target-pixels 13.0
+           :label-min-scale 4.0
            :selection-border-color (glm.vec4 0.2 0.55 0.95 0.95)}
    :terrain-selection {:fill (glm.vec4 0.24 0.58 0.98 0.22)
                        :border (glm.vec4 0.34 0.68 1.0 0.98)}
