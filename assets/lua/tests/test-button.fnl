@@ -270,6 +270,17 @@
       (assert (= button.icon :star))
       (button:drop))))
 
+(fn button-icon-style-scale-scales-font-icon []
+  (with-icons-stub
+    (fn [icons]
+      (local ctx (make-test-ctx {:icons icons}))
+      (local button ((Button {:icon :star
+                              :icon-style {:scale 3.2}}) ctx))
+      (assert (= button.text.child.style.font icons.font))
+      (assert (= button.text.child.style.scale 3.2)
+              "Button icon-style.scale should scale font-backed icons")
+      (button:drop))))
+
 (fn button-custom-child-is-used-directly []
   (with-hoverables-stub
     (fn [hover]
@@ -432,6 +443,7 @@
 (table.insert tests {:name "Button background color changes on hover" :fn button-hovered-updates-color})
 (table.insert tests {:name "Button hover toggles system cursor" :fn button-hovered-updates-system-cursor})
 (table.insert tests {:name "Button uses icon font when icon option provided" :fn button-icon-option-uses-icons-font})
+(table.insert tests {:name "Button icon-style scale scales font icon" :fn button-icon-style-scale-scales-font-icon})
 (table.insert tests {:name "Button uses supplied child without padding" :fn button-custom-child-is-used-directly})
 (table.insert tests {:name "Button centers padding when taller than content" :fn button-centers-padding-when-taller})
 (table.insert tests {:name "Button defaults to theme variant colors" :fn button-uses-theme-variant-default})

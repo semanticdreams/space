@@ -16,15 +16,17 @@
           icon-ref))
     
     (local color (or options.color (glm.vec4 1 1 1 1)))
-    (local size (or options.size 24)) ;; Default pixel size assumption, though space units might be smaller
-    
+    (local size (or options.size 24)) ;; Image icons use explicit size; font icons use TextStyle scale.
+    (local scale options.scale)
+
     (local child-widget
       (if (not resolved)
           (Text {:text "?" :style (TextStyle {:color (glm.vec4 1 0 0 1)})})
           (= resolved.type :font)
           (Text {:codepoints [resolved.codepoint]
                  :style (TextStyle {:color color
-                                    :font resolved.font})})
+                                    :font resolved.font
+                                    :scale scale})})
           (= resolved.type :image)
           (Image {:path resolved.path
                   :tint color

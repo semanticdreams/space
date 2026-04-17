@@ -62,7 +62,7 @@
 
        (Icon {:icon icon-name
               :color icon-color
-              ;; Pass through other style properties if needed, or assume Icon handles defaults
+              :scale (and options.icon-style options.icon-style.scale)
               :size (and options.icon-style options.icon-style.size)}))
 
     (local icon-builder (and options.icon (make-icon-span)))

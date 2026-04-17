@@ -50,10 +50,17 @@
     (set button-opts.foreground-color options.foreground-color))
   (Button button-opts))
 
-(fn panel-shell [content-builder background-color]
+(fn panel-shell [content-builder background-color opts]
+  (local options (or opts {}))
+  (local body-padding
+    (if (= options.padding false)
+        nil
+        (or options.padding [0.45 0.45])))
   (Stack {:children [(fn [_ctx] ((Rectangle {:color background-color}) _ctx))
-                     (Padding {:edge-insets [0.45 0.45]
-                               :child content-builder})]}))
+                     (if body-padding
+                         (Padding {:edge-insets body-padding
+                                   :child content-builder})
+                         content-builder)]}))
 
 (fn tool-button [label active? on-click]
   (assert on-click "tool-button requires on-click")
@@ -71,6 +78,7 @@
   (Button {:padding [0.4 0.25]
            :focusable? false
            :icon icon
+           :icon-style {:scale 3.2}
            :name name
            :focus-name label
            :on-click (fn [button event]
@@ -95,12 +103,10 @@
 (fn DrawingSidebarView [opts]
   (local options (or opts {}))
   (local controller (assert options.controller "DrawingSidebarView requires :controller"))
-  (local rail-width (or options.rail-width 6.4))
 
   (fn build [ctx]
     (var root-layout nil)
-    (local children {})
-    (var child-entities [])
+    (var content-entity nil)
     (var pending-rebuild? true)
     (var changed-handler nil)
     (var shell-changed-handler nil)
@@ -109,17 +115,12 @@
     (var rename-buffer "")
     (local theme (and ctx ctx.theme))
 
-    (fn drop-children []
-      (each [_ entity (ipairs child-entities)]
-        (when (and entity entity.drop)
-          (entity:drop)))
-      (set child-entities [])
+    (fn drop-content! []
+      (when (and content-entity content-entity.drop)
+        (content-entity:drop))
+      (set content-entity nil)
       (when root-layout
         (root-layout:clear-children)))
-
-    (fn remember-child [entity]
-      (table.insert child-entities entity)
-      entity)
 
     (fn sync-rename-buffer! []
       (local layer (controller:active-layer))
@@ -394,7 +395,7 @@
         (fn [inner-ctx]
           ((Flex {:axis 2
                   :xalign :stretch
-                  :spacing 0.25
+                  :spacing 0
                   :children [(FlexChild
                                (fn [child-ctx]
                                  ((feature-button "account_tree"
@@ -418,24 +419,30 @@
                                   child-ctx))
                                0)]})
            inner-ctx))
-        (panel-background theme :rail)))
+        (panel-background theme :rail)
+        {:padding false}))
 
-    (fn rebuild-children! []
-      (drop-children)
+    (fn build-content []
       (local show-dock?
         (and app.canvas
              (= app.active-interaction-surface :canvas)
              (= app.canvas-visible? true)))
       (if show-dock?
-          (do
-            (set children.rail (remember-child ((build-feature-rail) ctx)))
-            (root-layout:add-child children.rail.layout)
+          (let [builders [(FlexChild (build-feature-rail) 0)]]
             (when (= app.active-canvas-feature "drawing")
-              (set children.panel (remember-child ((build-drawing-panel) ctx)))
-              (root-layout:add-child children.panel.layout)))
-          (do
-            (set children.rail nil)
-            (set children.panel nil))))
+              (table.insert builders (FlexChild (build-drawing-panel) 0)))
+            ((Flex {:axis 1
+                    :spacing 0
+                    :yalign :stretch
+                    :children builders})
+             ctx))
+          nil))
+
+    (fn rebuild-children! []
+      (drop-content!)
+      (set content-entity (build-content))
+      (when content-entity
+        (root-layout:add-child content-entity.layout)))
 
     (fn request-rebuild! []
       (set pending-rebuild? true)
@@ -445,27 +452,12 @@
       (local reason (and payload payload.reason))
       (not (= reason "gesture")))
 
-    (fn panel-measured-width []
-      (if children.panel
-          (. children.panel.layout.measure 1)
-          0))
-
     (fn measurer [self]
-      (var width 0)
-      (var height 0)
-      (if children.rail
+      (if content-entity
           (do
-            (children.rail.layout:measurer)
-            (set width (+ width rail-width))
-            (when children.panel
-              (children.panel.layout:measurer)
-              (set width (+ width (panel-measured-width))))
-            (set height (math.max (. children.rail.layout.measure 2)
-                                  (if children.panel
-                                      (. children.panel.layout.measure 2)
-                                      0))))
-          (set height 0))
-      (set self.measure (glm.vec3 width height 0)))
+            (content-entity.layout:measurer)
+            (set self.measure content-entity.layout.measure))
+          (set self.measure (glm.vec3 0 0 0))))
 
     (fn layouter [self]
       (local allocated-size
@@ -473,22 +465,13 @@
                   (math.max self.measure.y (or self.size.y 0))
                   (math.max self.measure.z (or self.size.z 0))))
       (set self.size allocated-size)
-      (local height allocated-size.y)
-      (local base-position self.position)
-      (when children.rail
-        (set children.rail.layout.position base-position)
-        (set children.rail.layout.size (glm.vec3 rail-width height 0))
-        (set children.rail.layout.rotation self.rotation)
-        (set children.rail.layout.clip-region self.clip-region)
-        (set children.rail.layout.depth-offset-index (+ self.depth-offset-index 32))
-        (children.rail.layout:layouter))
-      (when children.panel
-        (set children.panel.layout.position (+ base-position (glm.vec3 rail-width 0 0)))
-        (set children.panel.layout.size (glm.vec3 (panel-measured-width) height 0))
-        (set children.panel.layout.rotation self.rotation)
-        (set children.panel.layout.clip-region self.clip-region)
-        (set children.panel.layout.depth-offset-index (+ self.depth-offset-index 33))
-        (children.panel.layout:layouter)))
+      (when content-entity
+        (set content-entity.layout.position self.position)
+        (set content-entity.layout.size allocated-size)
+        (set content-entity.layout.rotation self.rotation)
+        (set content-entity.layout.clip-region self.clip-region)
+        (set content-entity.layout.depth-offset-index self.depth-offset-index)
+        (content-entity.layout:layouter)))
 
     (set root-layout
          (Layout {:name "drawing-sidebar"
@@ -525,7 +508,7 @@
              (when shell-changed-handler
                (app.canvas-shell-changed:disconnect shell-changed-handler true)
                (set shell-changed-handler nil))
-             (drop-children)
+             (drop-content!)
              (root-layout:drop))})
 
   build)
