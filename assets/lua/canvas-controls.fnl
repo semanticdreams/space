@@ -23,6 +23,7 @@
   (local wheel-pan-step (or options.wheel-pan-step 48.0))
   (var drag-start nil)
   (var mouse-pos nil)
+  (var touch-transform-active? false)
 
   (fn set-pan-origin [payload]
     (set mouse-pos {:x (or payload.x 0)
@@ -51,15 +52,17 @@
               {:x (+ viewport.x (/ viewport.width 2))
                :y (+ viewport.y (/ viewport.height 2))}))))
 
-  (fn plane-hit [projection]
-    (when (and canvas canvas.screen-pos-ray)
-      (local pointer (pointer-position))
+  (fn plane-hit-at [pointer projection]
+    (when (and canvas canvas.screen-pos-ray pointer)
       (local ray (canvas:screen-pos-ray pointer {:projection projection}))
       (when (and ray ray.origin ray.direction)
         (local dz (or ray.direction.z 0))
         (when (not (= dz 0))
           (local t (/ (- 0 ray.origin.z) dz))
           (+ ray.origin (* ray.direction t))))))
+
+  (fn plane-hit [projection]
+    (plane-hit-at (pointer-position) projection))
 
   (fn on-mouse-button-down [_self payload]
     (when (and payload (= payload.button SDL_BUTTON_RIGHT))
@@ -121,8 +124,55 @@
                          (- anchor-before.y anchor-after.y)
                          0)))))))
 
+  (fn clamp-scale [value]
+    (clamp value min-scale max-scale))
+
+  (fn valid-touch-gesture? [gesture]
+    (and gesture
+         gesture.centroid
+         gesture.previous-centroid
+         (= (or gesture.count 0) 2)))
+
+  (fn on-touch-transform-start [_self gesture]
+    (if (valid-touch-gesture? gesture)
+        (do
+          (set touch-transform-active? true)
+          true)
+        false))
+
+  (fn on-touch-transform [_self gesture]
+    (if (not (valid-touch-gesture? gesture))
+        false
+        (do
+          (set touch-transform-active? true)
+          (local previous-projection canvas.projection)
+          (local anchor-before
+            (plane-hit-at gesture.previous-centroid previous-projection))
+          (local previous-span (or gesture.previous-span 0))
+          (local span (or gesture.span 0))
+          (when (and (> previous-span 1e-5)
+                     (> span 1e-5)
+                     canvas.set-scale-factor
+                     (finite-number? canvas.scale-factor))
+            (canvas:set-scale-factor
+              (clamp-scale (* canvas.scale-factor (/ previous-span span)))))
+          (local anchor-after
+            (plane-hit-at gesture.centroid canvas.projection))
+          (when (and anchor-before anchor-after)
+            (camera:set-position
+              (+ camera.position
+                 (glm.vec3 (- anchor-before.x anchor-after.x)
+                           (- anchor-before.y anchor-after.y)
+                           0))))
+          true)))
+
+  (fn on-touch-transform-end [_self _payload]
+    (set touch-transform-active? false)
+    true)
+
   (fn drag-active? [_self]
-    (not (= drag-start nil)))
+    (or (not (= drag-start nil))
+        touch-transform-active?))
 
   (fn drag-engaged? [self]
     (self:drag-active?))
@@ -132,6 +182,7 @@
 
   (fn drop [_self]
     (clear-pan-origin)
+    (set touch-transform-active? false)
     (set mouse-pos nil))
 
   {:on-key-down (fn [_self _payload] nil)
@@ -140,6 +191,9 @@
    :on-mouse-button-up on-mouse-button-up
    :on-mouse-motion on-mouse-motion
    :on-mouse-wheel on-mouse-wheel
+   :on-touch-transform-start on-touch-transform-start
+   :on-touch-transform on-touch-transform
+   :on-touch-transform-end on-touch-transform-end
    :on-gamepad-button-down (fn [_self _payload] nil)
    :on-gamepad-axis-motion (fn [_self _payload] nil)
    :on-gamepad-removed (fn [_self _payload] nil)

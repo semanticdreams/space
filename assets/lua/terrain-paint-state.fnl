@@ -1,6 +1,7 @@
 (local State (require :state))
 (local Routes (require :state-routes))
 (local PointerHandlers (require :state-handlers/pointer))
+(local TouchHandlers (require :state-handlers/touch-pointer))
 (local CameraHandlers (require :state-handlers/camera))
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
 
@@ -71,7 +72,11 @@
 
   (State
     {:name :terrain-paint
-     :routes {:key-down (Routes.FirstHandlerWins [TerrainPaint])
+     :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
+              :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
+              :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
+              :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+              :key-down (Routes.FirstHandlerWins [TerrainPaint])
               :mouse-button-down (Routes.FirstHandlerWins [TerrainPaint])
               :mouse-button-up (Routes.FirstHandlerWins [TerrainPaint])
               :mouse-motion (Routes.FirstHandlerWins [TerrainPaint])
@@ -80,7 +85,9 @@
                                                     PointerHandlers.CameraMouseWheel])
               :updated (Routes.Chain [TerrainPaint
                                       CameraHandlers.CameraUpdated])}
-     :enter [TerrainPaint]
-     :leave [TerrainPaint]}))
+     :enter [TouchHandlers.TouchLifecycle
+             TerrainPaint]
+     :leave [TouchHandlers.TouchLifecycle
+             TerrainPaint]}))
 
 TerrainPaintState

@@ -370,6 +370,7 @@
     (BuildContext {:theme (resolve-active-theme)
                        :clickables app.clickables
                        :hoverables app.hoverables
+                       :touch-gesture-targets app.touch-gesture-targets
                        :system-cursors app.system-cursors
                        :icons options.icons
                        :states options.states

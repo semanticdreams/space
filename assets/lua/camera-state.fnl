@@ -4,6 +4,7 @@
 (local TextInputHandlers (require :state-handlers/text-input))
 (local FocusHandlers (require :state-handlers/focus))
 (local PointerHandlers (require :state-handlers/pointer))
+(local TouchHandlers (require :state-handlers/touch-camera))
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local CameraHandlers (require :state-handlers/camera))
 (local glm (require :glm))
@@ -36,6 +37,10 @@
     {:name :camera
      :routes {:text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
               :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
+              :touch-down (Routes.FirstHandlerWins [TouchHandlers.CameraTouchDown])
+              :touch-motion (Routes.FirstHandlerWins [TouchHandlers.CameraTouchMotion])
+              :touch-up (Routes.FirstHandlerWins [TouchHandlers.CameraTouchUp])
+              :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.CameraTouchCanceled])
               :key-down (Routes.FirstHandlerWins [CameraCommands
                                                  FocusHandlers.InputKeyDownDispatch
                                                  FocusHandlers.FocusTabKeyDown
@@ -71,7 +76,9 @@
               :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
               :updated (Routes.Chain [CameraHandlers.CameraUpdated
                                       HoverHandlers.HoverUpdated])}
-     :enter [HoverHandlers.HoverLifecycle]
-     :leave [HoverHandlers.HoverLifecycle]}))
+     :enter [TouchHandlers.TouchLifecycle
+             HoverHandlers.HoverLifecycle]
+     :leave [TouchHandlers.TouchLifecycle
+             HoverHandlers.HoverLifecycle]}))
 
 CameraState

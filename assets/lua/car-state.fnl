@@ -3,6 +3,7 @@
 (local HoverHandlers (require :state-handlers/hover))
 (local TextInputHandlers (require :state-handlers/text-input))
 (local PointerHandlers (require :state-handlers/pointer))
+(local TouchHandlers (require :state-handlers/touch-pointer))
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local Routes (require :state-routes))
 (local bt (require :bt))
@@ -325,7 +326,11 @@
   (local result
     (State
       {:name :car
-       :routes {:text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
+       :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
+                :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
+                :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
+                :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+                :text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
                 :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
                 :key-down (Routes.FirstHandlerWins [CarControls])
                 :key-up (Routes.FirstHandlerWins [CarControls])
@@ -357,8 +362,12 @@
                 :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
                 :updated (Routes.Chain [CarControls
                                         HoverHandlers.HoverUpdated])}
-       :enter [HoverHandlers.HoverLifecycle CarLifecycle]
-       :leave [HoverHandlers.HoverLifecycle CarLifecycle]}))
+       :enter [TouchHandlers.TouchLifecycle
+               HoverHandlers.HoverLifecycle
+               CarLifecycle]
+       :leave [TouchHandlers.TouchLifecycle
+               HoverHandlers.HoverLifecycle
+               CarLifecycle]}))
   (set result.__car_state state)
   result)
 

@@ -37,6 +37,7 @@
      :instanced-color-mesh-batches instanced-color-mesh-batches
      :line-strips line-strips
      :pointer-target options.pointer-target
+     :touch-gesture-targets options.touch-gesture-targets
      :clickables options.clickables
      :hoverables options.hoverables
      :system-cursors options.system-cursors

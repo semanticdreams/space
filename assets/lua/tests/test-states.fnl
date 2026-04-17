@@ -50,7 +50,11 @@
 
 (fn fresh-engine-events []
   (local Signal (require :signal))
-  {:text-input (Signal)
+  {:touch-down (Signal)
+   :touch-motion (Signal)
+   :touch-up (Signal)
+   :touch-canceled (Signal)
+   :text-input (Signal)
    :text-editing (Signal)
    :key-down (Signal)
    :key-up (Signal)
@@ -162,9 +166,14 @@
   found)
 
 (fn reset-engine-events []
+  (Runtime.reset)
   (local events (and app.engine app.engine.events))
   (when events
-    (each [_ signal (ipairs [events.text-input
+    (each [_ signal (ipairs [events.touch-down
+                             events.touch-motion
+                             events.touch-up
+                             events.touch-canceled
+                             events.text-input
                              events.text-editing
                              events.key-down
                              events.key-up
@@ -269,6 +278,112 @@
   (assert (= controls.record.key_down nil))
   (set app.first-person-controls nil)
   (set app.hoverables original-hoverables))
+
+(fn normal-state-injects-single-touch-as-mouse []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (local original-active-controls app.active-pointer-controls)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-movables app.movables)
+  (local original-resizables app.resizables)
+  (local original-touch-targets app.touch-gesture-targets)
+  (set app.active-pointer-controls nil)
+  (set app.hoverables {:on-enter (fn [])
+                       :on-leave (fn [])
+                       :on-mouse-motion (fn [_self _payload])})
+  (set app.clickables {:on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])
+                       :active? false})
+  (set app.movables {:drag-active? (fn [_self] false)
+                     :on-mouse-motion (fn [_self _payload])
+                     :on-mouse-button-down (fn [_self _payload])
+                     :on-mouse-button-up (fn [_self _payload])})
+  (set app.resizables {:drag-active? (fn [_self] false)
+                       :on-mouse-motion (fn [_self _payload])
+                       :on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])})
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (set app.first-person-controls controls)
+  (local state (NormalState))
+  (state.on-enter)
+  (state:on-touch-down {:touch-id 1
+                        :finger-id 11
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :pressure 0.5
+                        :timestamp 1})
+  (state:on-touch-motion {:touch-id 1
+                          :finger-id 11
+                          :x 18
+                          :y 24
+                          :xrel 8
+                          :yrel 4
+                          :pressure 0.5
+                          :timestamp 2})
+  (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 3)
+  (state:on-touch-up {:touch-id 1
+                      :finger-id 11
+                      :x 22
+                      :y 28
+                      :xrel 4
+                      :yrel 4
+                      :pressure 0.5
+                      :timestamp 3})
+  (assert (= controls.record.mouse_button_down 1))
+  (assert controls.record.mouse_motion)
+  (assert (= controls.record.mouse_button_up 1))
+  (state:on-leave)
+  (set app.active-pointer-controls original-active-controls)
+  (set app.hoverables original-hoverables)
+  (set app.clickables original-clickables)
+  (set app.movables original-movables)
+  (set app.resizables original-resizables)
+  (set app.first-person-controls nil)
+  (set app.touch-gesture-targets original-touch-targets))
+
+(fn fpc-state-injects-single-touch-as-mouse []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (local original-controls app.first-person-controls)
+  (local original-touch-targets app.touch-gesture-targets)
+  (set app.first-person-controls controls)
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (local state (FpcState))
+  (state:on-enter)
+  (state:on-touch-down {:touch-id 1
+                        :finger-id 11
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :pressure 0.5
+                        :timestamp 1})
+  (state:on-touch-motion {:touch-id 1
+                          :finger-id 11
+                          :x 18
+                          :y 24
+                          :xrel 8
+                          :yrel 4
+                          :pressure 0.5
+                          :timestamp 2})
+  (state:on-touch-up {:touch-id 1
+                      :finger-id 11
+                      :x 22
+                      :y 28
+                      :xrel 4
+                      :yrel 4
+                      :pressure 0.5
+                      :timestamp 3})
+  (assert (= controls.record.mouse_button_down 1))
+  (assert (= controls.record.mouse_button_up 1))
+  (assert controls.record.mouse_motion
+          "touch motion should reach first-person controls")
+  (state:on-leave)
+  (set app.first-person-controls original-controls)
+  (set app.touch-gesture-targets original-touch-targets))
 
 (fn normal-state-tab-cycles-focus []
   (reset-engine-events)
@@ -580,6 +695,70 @@
   (assert (= (. (. forwarded 3) 1) :button))
   (assert (= (states.active-name) :normal)
           "terrain paint state should restore the previous state when the session completes")
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
+
+(fn terrain-paint-state-routes-touch-and-restores []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-touch-targets app.touch-gesture-targets)
+  (var suspended-state nil)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-paint (TerrainPaintState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
+  (set app.states states)
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-stroke (fn [_self payload]
+                     (table.insert forwarded [:button true payload.x payload.y])
+                     true)
+     :update-stroke (fn [_self payload]
+                      (table.insert forwarded [:motion payload.x payload.y])
+                      true)
+     :end-stroke (fn [_self payload]
+                   (table.insert forwarded [:button false payload.x payload.y])
+                   (set active? false)
+                   true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainPaintManager.begin session)
+  (assert (= (states.active-name) :terrain-paint))
+  (app.engine.events.touch-down:emit {:touch-id 1
+                                      :finger-id 11
+                                      :x 10
+                                      :y 20
+                                      :xrel 0
+                                      :yrel 0
+                                      :timestamp 1})
+  (app.engine.events.touch-motion:emit {:touch-id 1
+                                        :finger-id 11
+                                        :x 30
+                                        :y 40
+                                        :xrel 20
+                                        :yrel 20
+                                        :timestamp 2})
+  (assert (= (# forwarded) 1))
+  (app.engine.events.updated:emit 0.016)
+  (app.engine.events.touch-up:emit {:touch-id 1
+                                    :finger-id 11
+                                    :x 30
+                                    :y 40
+                                    :xrel 0
+                                    :yrel 0
+                                    :timestamp 3})
+  (assert (= (# forwarded) 3))
+  (assert (= (. (. forwarded 1) 1) :button))
+  (assert (= (. (. forwarded 2) 1) :motion))
+  (assert (= (. (. forwarded 3) 1) :button))
+  (assert (= (states.active-name) :normal)
+          "terrain paint touch should restore the previous state when the session completes")
+  (set app.touch-gesture-targets original-touch-targets)
   (set app.states original-states)
   (TestSupport.resume-active-state suspended-state))
 
@@ -907,6 +1086,7 @@
 (table.insert tests {:name "Setting the same state twice is a no-op" :fn reselecting-active-state-noops})
 (table.insert tests {:name "State history records recent transitions" :fn state-history-tracks-transitions})
 (table.insert tests {:name "Normal state forwards events to controls" :fn normal-state-forwards-events})
+(table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
 (table.insert tests {:name "Normal state Tab cycles focus" :fn normal-state-tab-cycles-focus})
 (table.insert tests {:name "Normal state swallows keys when input is active" :fn normal-state-swallows-keys-when-input-active})
 (table.insert tests {:name "Terrain rect pick state routes and restores" :fn terrain-rect-pick-state-routes-and-restores})
@@ -918,6 +1098,8 @@
                      :fn terrain-rect-pick-state-forwards-camera-wheel-and-updates})
 (table.insert tests {:name "Terrain paint state routes and restores"
                      :fn terrain-paint-state-routes-and-restores})
+(table.insert tests {:name "Terrain paint state routes touch and restores"
+                     :fn terrain-paint-state-routes-touch-and-restores})
 (table.insert tests {:name "Terrain paint state coalesces motion until update"
                      :fn terrain-paint-state-coalesces-motion-until-update})
 (table.insert tests {:name "Terrain paint state forwards mouse wheel"
@@ -1384,6 +1566,7 @@
 (table.insert tests {:name "Camera state 0 resets camera transform" :fn camera-state-zero-resets-camera})
 (table.insert tests {:name "Fpc state escape exits to normal" :fn fpc-state-escape-exits-to-normal})
 (table.insert tests {:name "Fpc state routes input only to controls" :fn fpc-state-routes-input-only-to-controls})
+(table.insert tests {:name "Fpc state injects single touch as mouse" :fn fpc-state-injects-single-touch-as-mouse})
 (table.insert tests {:name "Leader state routes to quit or normal" :fn leader-state-q-and-escape-transitions})
 (table.insert tests {:name "Quit state quits and escapes to normal" :fn quit-state-quits-and-escapes})
 (table.insert tests {:name "Text state handles navigation commands" :fn text-state-handles-navigation})

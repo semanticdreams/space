@@ -212,6 +212,31 @@
   (assert (approx view.state.scroll-offset 0))
   (view:drop))
 
+(fn scroll-view-touch-drag-scrolls-content []
+  (local child (make-test-child (glm.vec3 3 10 0)))
+  (local view ((ScrollView {:child child.builder
+                            :padding false}) (make-context)))
+  (view.layout:measurer)
+  (set view.layout.size (glm.vec3 4 4 0))
+  (view.layout:layouter)
+  (view:set-scroll-offset 4)
+  (view.layout:layouter)
+  (assert (view:on-touch-drag-start {:touch-id 1
+                                     :finger-id 2
+                                     :x 1
+                                     :y 10}))
+  (assert (view:on-touch-drag {:touch-id 1
+                               :finger-id 2
+                               :x 1
+                               :y 12}))
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset 2))
+  (assert (view:on-touch-drag-end {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12}))
+  (view:drop))
+
 (fn scroll-view-defaults-to-max-offset-before-layout []
   (local child (make-test-child (glm.vec3 3 12 0)))
   (local view ((ScrollView {:child child.builder
@@ -341,6 +366,7 @@
 (table.insert tests {:name "ScrollView updates scrollbar value" :fn scroll-view-updates-scrollbar-value})
 (table.insert tests {:name "ScrollView mouse wheel scrolls when hovered" :fn scroll-view-mouse-wheel-scrolls-when-hovered})
 (table.insert tests {:name "ScrollView wheel clamps at top" :fn scroll-view-wheel-clamps-top})
+(table.insert tests {:name "ScrollView touch drag scrolls content" :fn scroll-view-touch-drag-scrolls-content})
 (table.insert tests {:name "ScrollView defaults to max offset before layout"
                      :fn scroll-view-defaults-to-max-offset-before-layout})
 (table.insert tests {:name "ScrollView scrollbar policy as-needed" :fn scroll-view-scrollbar-policy-as-needed})

@@ -1,5 +1,6 @@
 (local State (require :state))
 (local Routes (require :state-routes))
+(local TouchHandlers (require :state-handlers/touch-pointer))
 
 (local KEY_ESCAPE 27)
 
@@ -35,7 +36,11 @@
 
   (State
     {:name :fpc
-     :routes {:text-input (Routes.FirstHandlerWins [ControlsOnly])
+     :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
+              :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
+              :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
+              :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+              :text-input (Routes.FirstHandlerWins [ControlsOnly])
               :key-down (Routes.FirstHandlerWins [ControlsOnly])
               :key-up (Routes.FirstHandlerWins [ControlsOnly])
               :mouse-button-up (Routes.FirstHandlerWins [ControlsOnly])
@@ -45,6 +50,8 @@
               :gamepad-button-down (Routes.FirstHandlerWins [ControlsOnly])
               :gamepad-axis-motion (Routes.FirstHandlerWins [ControlsOnly])
               :gamepad-removed (Routes.FirstHandlerWins [ControlsOnly])
-              :updated (Routes.FirstHandlerWins [ControlsOnly])}}))
+              :updated (Routes.FirstHandlerWins [ControlsOnly])}
+     :enter [TouchHandlers.TouchLifecycle]
+     :leave [TouchHandlers.TouchLifecycle]}))
 
 FpcState

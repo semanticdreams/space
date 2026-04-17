@@ -1,7 +1,11 @@
 (local Runtime (require :state-runtime))
 
 (local engine-event-order
-  [[:text-input :text-input :on-text-input]
+  [[:touch-down :touch-down :on-touch-down]
+   [:touch-motion :touch-motion :on-touch-motion]
+   [:touch-up :touch-up :on-touch-up]
+   [:touch-canceled :touch-canceled :on-touch-canceled]
+   [:text-input :text-input :on-text-input]
    [:text-editing :text-editing :on-text-editing]
    [:key-down :key-down :on-key-down]
    [:key-up :key-up :on-key-up]

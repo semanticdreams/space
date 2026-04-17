@@ -369,7 +369,11 @@
     (apply-runtime-performance-settings)))
 
 (local runtime-performance-input-signal-names
-  ["key-down"
+  ["touch-down"
+   "touch-motion"
+   "touch-up"
+   "touch-canceled"
+   "key-down"
    "key-up"
    "mouse-motion"
    "mouse-button-down"

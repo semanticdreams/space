@@ -97,6 +97,50 @@
   (canvas:drop)
   (camera:drop))
 
+(fn touch-transform-pans-canvas-camera []
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local canvas (make-real-canvas camera))
+  (local controls (CanvasControls {:canvas canvas
+                                   :camera camera}))
+  (assert (controls:on-touch-transform-start {:count 2
+                                              :centroid {:x 50 :y 50}
+                                              :previous-centroid {:x 50 :y 50}
+                                              :span 20
+                                              :previous-span 20}))
+  (controls:on-touch-transform {:count 2
+                                :centroid {:x 60 :y 50}
+                                :previous-centroid {:x 50 :y 50}
+                                :span 20
+                                :previous-span 20})
+  (assert (< camera.position.x 0)
+          "Two-finger touch pan should move the camera opposite the screen drag")
+  (controls:on-touch-transform-end {:gesture {:count 1}})
+  (assert (not (controls:drag-active?)))
+  (controls:drop)
+  (canvas:drop)
+  (camera:drop))
+
+(fn pinch-touch-zooms-canvas-in []
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local canvas (make-real-canvas camera))
+  (local controls (CanvasControls {:canvas canvas
+                                   :camera camera}))
+  (controls:on-touch-transform-start {:count 2
+                                      :centroid {:x 50 :y 50}
+                                      :previous-centroid {:x 50 :y 50}
+                                      :span 20
+                                      :previous-span 20})
+  (controls:on-touch-transform {:count 2
+                                :centroid {:x 50 :y 50}
+                                :previous-centroid {:x 50 :y 50}
+                                :span 40
+                                :previous-span 20})
+  (assert (< canvas.scale-factor 1.0)
+          "Moving fingers apart should zoom the canvas in")
+  (controls:drop)
+  (canvas:drop)
+  (camera:drop))
+
 (table.insert tests {:name "Canvas controls zoom in on mouse wheel"
                      :fn scroll-wheel-zooms-canvas-in})
 (table.insert tests {:name "Canvas controls allow deeper zoom before clamping"
@@ -107,6 +151,10 @@
                      :fn zoom-in-follows-mouse-pointer-direction})
 (table.insert tests {:name "Canvas controls zoom out without pointer recentering"
                      :fn zoom-out-does-not-follow-mouse-pointer-direction})
+(table.insert tests {:name "Canvas controls pan with touch transform"
+                     :fn touch-transform-pans-canvas-camera})
+(table.insert tests {:name "Canvas controls zoom with pinch touch transform"
+                     :fn pinch-touch-zooms-canvas-in})
 
 (local main
   (fn []

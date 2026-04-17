@@ -1,5 +1,7 @@
 #include <sol/sol.hpp>
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 #include "input_state.h"
@@ -60,6 +62,31 @@ sol::table create_input_state_table(sol::state_view lua)
         "is-just-released", &GamepadState::isJustReleased,
         "button-state", &GamepadState::getButtonState);
 
+    input_state_table.new_usertype<InputState::TouchContactId>(
+        "TouchContactId",
+        sol::no_constructor,
+        "touch-id", &InputState::TouchContactId::touchId,
+        "finger-id", &InputState::TouchContactId::fingerId);
+
+    input_state_table.new_usertype<InputState::TouchPointState>(
+        "TouchPointState",
+        sol::no_constructor,
+        "touch-id", &InputState::TouchPointState::touchId,
+        "finger-id", &InputState::TouchPointState::fingerId,
+        "x", &InputState::TouchPointState::x,
+        "y", &InputState::TouchPointState::y,
+        "dx", &InputState::TouchPointState::dx,
+        "dy", &InputState::TouchPointState::dy,
+        "pressure", &InputState::TouchPointState::pressure,
+        "update-timestamp", &InputState::TouchPointState::updateTimestamp,
+        "is-up", &InputState::TouchPointState::isUp,
+        "is-free", &InputState::TouchPointState::isFree,
+        "is-just-pressed", &InputState::TouchPointState::isJustPressed,
+        "is-down", &InputState::TouchPointState::isDown,
+        "is-held", &InputState::TouchPointState::isHeld,
+        "is-just-released", &InputState::TouchPointState::isJustReleased,
+        "touch-state", &InputState::TouchPointState::getTouchState);
+
     sol::usertype<InputState> input_state_type = input_state_table.new_usertype<InputState>(
         "InputState",
         sol::no_constructor);
@@ -69,16 +96,34 @@ sol::table create_input_state_table(sol::state_view lua)
     input_state_type["mouse-state"] = &InputState::mouseState;
     input_state_type["gamepad-count"] = &InputState::gamepad_count;
     input_state_type["primary-gamepad-id"] = &InputState::primary_gamepad_id;
+    input_state_type["touch-count"] = &InputState::touch_count;
     input_state_type["begin-frame"] = &InputState::begin_frame;
     input_state_type["on-gamepad-connected"] = &InputState::on_gamepad_connected;
     input_state_type["on-gamepad-disconnected"] = &InputState::on_gamepad_disconnected;
     input_state_type["on-gamepad-button"] = &InputState::on_gamepad_button;
     input_state_type["on-gamepad-axis"] = &InputState::on_gamepad_axis;
+    input_state_type["on-touch-down"] = &InputState::on_touch_down;
+    input_state_type["on-touch-motion"] = &InputState::on_touch_motion;
+    input_state_type["on-touch-up"] = &InputState::on_touch_up;
     input_state_type["gamepad"] = sol::property([](InputState& input) {
         return input.primary_gamepad();
     });
     input_state_type["gamepad-state"] = sol::property([](InputState& input) {
         return input.primary_gamepad();
+    });
+    input_state_type["touch"] = sol::property([](InputState& input) {
+        return input.primary_touch();
+    });
+    input_state_type["touch-state"] = sol::property([](InputState& input) {
+        return input.primary_touch();
+    });
+    input_state_type.set_function("primary-touch-id", [](InputState& input, sol::this_state state) {
+        sol::state_view lua(state);
+        const std::optional<InputState::TouchContactId> id = input.primary_touch_id();
+        if (!id) {
+            return sol::make_object(lua, sol::nil);
+        }
+        return sol::make_object(lua, *id);
     });
     input_state_type.set_function("gamepad-by-id", [](InputState& input, int instance_id) {
         return input.gamepad_by_id(static_cast<SDL_JoystickID>(instance_id));
@@ -100,6 +145,29 @@ sol::table create_input_state_table(sol::state_view lua)
             gamepads[instance_id] = input.gamepad_by_id(instance_id);
         }
         return gamepads;
+    });
+    input_state_type.set_function("touch-by-id", [](InputState& input, std::int64_t touch_id, std::int64_t finger_id) {
+        return input.touch_by_id(static_cast<SDL_TouchID>(touch_id), static_cast<SDL_FingerID>(finger_id));
+    });
+    input_state_type.set_function("touch-ids", [](InputState& input, sol::this_state state) {
+        sol::state_view lua(state);
+        sol::table ids = lua.create_table();
+        int index = 1;
+        for (const InputState::TouchContactId& id : input.touch_ids()) {
+            ids[index] = id;
+            ++index;
+        }
+        return ids;
+    });
+    input_state_type.set_function("touches", [](InputState& input, sol::this_state state) {
+        sol::state_view lua(state);
+        sol::table touches = lua.create_table();
+        int index = 1;
+        for (const InputState::TouchContactId& id : input.touch_ids()) {
+            touches[index] = input.touch_by_id(id.touchId, id.fingerId);
+            ++index;
+        }
+        return touches;
     });
     input_state_table.set_function("InputState", []() {
         return InputState();

@@ -62,6 +62,9 @@
     (local scrollbar-policy (normalize-scrollbar-policy options.scrollbar-policy))
     (local pointer-target (or options.pointer-target
                               (and ctx ctx.pointer-target)))
+    (local touch-gesture-targets
+      (or (and ctx ctx.touch-gesture-targets)
+          app.touch-gesture-targets))
     (local state {:scroll scroll
                   :scrollbar nil
                   :scrollbar-width scrollbar-width
@@ -73,6 +76,7 @@
                   :scroll-enabled? false
                   :viewport-size (glm.vec3 0 0 0)
                   :viewport-height (sanitize-height options.viewport-height)
+                  :touch-drag nil
                   :initialized? false
                   :pending-reset? false
                   :user-set-offset? (not (= options.scroll-offset nil))})
@@ -205,6 +209,49 @@
                   (set-scroll-offset-value (+ state.scroll-offset (* delta-y step)))
                   true)))))
 
+    (fn active-touch-drag-matches? [payload]
+      (and state.touch-drag
+           payload
+           (= state.touch-drag.touch-id payload.touch-id)
+           (= state.touch-drag.finger-id payload.finger-id)))
+
+    (fn clear-touch-drag! []
+      (set state.touch-drag nil))
+
+    (fn on-touch-drag-start [_self payload]
+      (if (not state.scroll-enabled?)
+          false
+          (do
+            (set state.touch-drag {:touch-id (and payload payload.touch-id)
+                                   :finger-id (and payload payload.finger-id)
+                                   :last-y (or (and payload payload.y) 0)})
+            true)))
+
+    (fn on-touch-drag [_self payload]
+      (if (not (active-touch-drag-matches? payload))
+          false
+          (do
+            (set state.user-set-offset? true)
+            (local current-y (or (and payload payload.y) state.touch-drag.last-y 0))
+            (local dy (- current-y (or state.touch-drag.last-y current-y)))
+            (set state.touch-drag.last-y current-y)
+            (set-scroll-offset-value (- state.scroll-offset dy))
+            true)))
+
+    (fn on-touch-drag-end [_self payload]
+      (if (active-touch-drag-matches? payload)
+          (do
+            (clear-touch-drag!)
+            true)
+          false))
+
+    (fn on-touch-drag-cancel [_self payload]
+      (if (active-touch-drag-matches? payload)
+          (do
+            (clear-touch-drag!)
+            true)
+          false))
+
     (local scrollbar
       ((ScrollBar {:width scrollbar-width
                    :on-value-changed (fn [_bar value]
@@ -271,6 +318,19 @@
                :layouter layouter}))
 
     (set view.layout layout)
+    (local touch-target
+      {:pointer-target pointer-target
+       :layout scroll.layout
+       :intersect (fn [_self ray]
+                    (scroll.layout:intersect ray))
+       :on-touch-drag-start (fn [_self payload]
+                              (view:on-touch-drag-start payload))
+       :on-touch-drag (fn [_self payload]
+                        (view:on-touch-drag payload))
+       :on-touch-drag-end (fn [_self payload]
+                            (view:on-touch-drag-end payload))
+       :on-touch-drag-cancel (fn [_self payload]
+                               (view:on-touch-drag-cancel payload))})
     (set view.intersect
          (fn [_self ray]
            (local bar-layout scrollbar.layout)
@@ -284,6 +344,14 @@
     (fn unregister-hoverables []
       (hoverables:unregister view))
 
+    (fn register-touch-target []
+      (when touch-gesture-targets
+        (touch-gesture-targets:register touch-target)))
+
+    (fn unregister-touch-target []
+      (when touch-gesture-targets
+        (touch-gesture-targets:unregister touch-target)))
+
     (when focus-manager
       (set view.__focus-listener
            (focus-manager.focus-focus.connect
@@ -294,6 +362,7 @@
 
     (fn drop [_self]
       (unregister-hoverables)
+      (unregister-touch-target)
       (when view.__focus-listener
         (when (and focus-manager focus-manager.focus-focus)
           (focus-manager.focus-focus.disconnect view.__focus-listener true))
@@ -335,8 +404,13 @@
     (set view.reset-scroll-position reset-scroll-position)
     (set view.set-viewport-height set-viewport-height)
     (set view.on-mouse-wheel on-mouse-wheel)
+    (set view.on-touch-drag-start on-touch-drag-start)
+    (set view.on-touch-drag on-touch-drag)
+    (set view.on-touch-drag-end on-touch-drag-end)
+    (set view.on-touch-drag-cancel on-touch-drag-cancel)
     (set view.scrollbar scrollbar)
     (register-hoverables)
+    (register-touch-target)
     view))
 
 ScrollView

@@ -1,6 +1,7 @@
 (local State (require :state))
 (local Routes (require :state-routes))
 (local PointerHandlers (require :state-handlers/pointer))
+(local TouchHandlers (require :state-handlers/touch-pointer))
 (local CameraHandlers (require :state-handlers/camera))
 (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
 
@@ -73,7 +74,11 @@
 
   (State
     {:name :terrain-rect-pick
-     :routes {:key-down (Routes.FirstHandlerWins [TerrainRectPick])
+     :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
+              :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
+              :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
+              :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+              :key-down (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-button-down (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-button-up (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-motion (Routes.FirstHandlerWins [TerrainRectPick])
@@ -82,7 +87,9 @@
                                                     PointerHandlers.CameraMouseWheel])
               :updated (Routes.Chain [TerrainRectPick
                                       CameraHandlers.CameraUpdated])}
-     :enter [TerrainRectPick]
-     :leave [TerrainRectPick]}))
+     :enter [TouchHandlers.TouchLifecycle
+             TerrainRectPick]
+     :leave [TouchHandlers.TouchLifecycle
+             TerrainRectPick]}))
 
 TerrainRectPickState

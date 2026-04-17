@@ -630,6 +630,18 @@ set_tests_properties(test_input_dial_type PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_input_touch_state
+    tests/test_input_touch_state.cpp
+    src/input_state.cpp
+    src/input_gamepad_state.cpp
+)
+target_include_directories(test_input_touch_state PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(test_input_touch_state SDL3::SDL3)
+add_test(NAME test_input_touch_state COMMAND test_input_touch_state)
+set_tests_properties(test_input_touch_state PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_dotenv
     tests/test_dotenv.cpp
     src/dotenv.cpp

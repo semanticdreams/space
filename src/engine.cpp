@@ -15,6 +15,7 @@
 
 #include <optional>
 #include <cinttypes>
+#include <utility>
 #include <vector>
 
 //namespace py = pybind11;
@@ -70,6 +71,24 @@ bool is_on_battery(SDL_PowerState state)
     return state == SDL_POWERSTATE_ON_BATTERY;
 }
 
+std::pair<float, float> touch_pixels(sol::table engine_table, WindowSdl* window, float normalized_x, float normalized_y)
+{
+    int pixel_width = 0;
+    int pixel_height = 0;
+    if (window) {
+        window->getWindowSizeInPixels(pixel_width, pixel_height);
+    }
+    if (pixel_width <= 0) {
+        sol::optional<int> engine_width = engine_table["pixel-width"];
+        pixel_width = engine_width.value_or(0);
+    }
+    if (pixel_height <= 0) {
+        sol::optional<int> engine_height = engine_table["pixel-height"];
+        pixel_height = engine_height.value_or(0);
+    }
+    return { normalized_x * static_cast<float>(pixel_width), normalized_y * static_cast<float>(pixel_height) };
+}
+
 } // namespace
 
 Engine::Engine() {
@@ -77,6 +96,8 @@ Engine::Engine() {
 
 bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig& config) {
     log_set_frame_id_provider(&frame_id);
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     if (!config.headless) {
         window = WindowSdl::create();
         int target_width = config.width > 0 ? config.width : screenWidth;
@@ -700,6 +721,123 @@ void Engine::run() {
                 payload["mod"] = static_cast<int>(SDL_GetModState());
                 payload["timestamp"] = ns_to_ms(event.common.timestamp);
                 emit_engine_event("mouse-wheel", payload);
+                break;
+            }
+
+            case SDL_EVENT_FINGER_DOWN: {
+                inputState.on_touch_down(event.tfinger.touchID,
+                                         event.tfinger.fingerID,
+                                         event.tfinger.x,
+                                         event.tfinger.y,
+                                         event.tfinger.dx,
+                                         event.tfinger.dy,
+                                         event.tfinger.pressure,
+                                         ns_to_ms(event.common.timestamp));
+                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                sol::table payload = lua_state->create_table();
+                payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
+                payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
+                payload["x"] = pixel_x;
+                payload["y"] = pixel_y;
+                payload["xrel"] = pixel_dx;
+                payload["yrel"] = pixel_dy;
+                payload["normalized-x"] = event.tfinger.x;
+                payload["normalized-y"] = event.tfinger.y;
+                payload["dx"] = event.tfinger.dx;
+                payload["dy"] = event.tfinger.dy;
+                payload["pressure"] = event.tfinger.pressure;
+                payload["window-id"] = static_cast<int>(event.tfinger.windowID);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("touch-down", payload);
+                break;
+            }
+
+            case SDL_EVENT_FINGER_MOTION: {
+                inputState.on_touch_motion(event.tfinger.touchID,
+                                           event.tfinger.fingerID,
+                                           event.tfinger.x,
+                                           event.tfinger.y,
+                                           event.tfinger.dx,
+                                           event.tfinger.dy,
+                                           event.tfinger.pressure,
+                                           ns_to_ms(event.common.timestamp));
+                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                sol::table payload = lua_state->create_table();
+                payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
+                payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
+                payload["x"] = pixel_x;
+                payload["y"] = pixel_y;
+                payload["xrel"] = pixel_dx;
+                payload["yrel"] = pixel_dy;
+                payload["normalized-x"] = event.tfinger.x;
+                payload["normalized-y"] = event.tfinger.y;
+                payload["dx"] = event.tfinger.dx;
+                payload["dy"] = event.tfinger.dy;
+                payload["pressure"] = event.tfinger.pressure;
+                payload["window-id"] = static_cast<int>(event.tfinger.windowID);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("touch-motion", payload);
+                break;
+            }
+
+            case SDL_EVENT_FINGER_UP: {
+                inputState.on_touch_up(event.tfinger.touchID,
+                                       event.tfinger.fingerID,
+                                       event.tfinger.x,
+                                       event.tfinger.y,
+                                       event.tfinger.dx,
+                                       event.tfinger.dy,
+                                       event.tfinger.pressure,
+                                       ns_to_ms(event.common.timestamp));
+                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                sol::table payload = lua_state->create_table();
+                payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
+                payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
+                payload["x"] = pixel_x;
+                payload["y"] = pixel_y;
+                payload["xrel"] = pixel_dx;
+                payload["yrel"] = pixel_dy;
+                payload["normalized-x"] = event.tfinger.x;
+                payload["normalized-y"] = event.tfinger.y;
+                payload["dx"] = event.tfinger.dx;
+                payload["dy"] = event.tfinger.dy;
+                payload["pressure"] = event.tfinger.pressure;
+                payload["window-id"] = static_cast<int>(event.tfinger.windowID);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                emit_engine_event("touch-up", payload);
+                break;
+            }
+
+            case SDL_EVENT_FINGER_CANCELED: {
+                inputState.on_touch_up(event.tfinger.touchID,
+                                       event.tfinger.fingerID,
+                                       event.tfinger.x,
+                                       event.tfinger.y,
+                                       event.tfinger.dx,
+                                       event.tfinger.dy,
+                                       event.tfinger.pressure,
+                                       ns_to_ms(event.common.timestamp));
+                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                sol::table payload = lua_state->create_table();
+                payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
+                payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
+                payload["x"] = pixel_x;
+                payload["y"] = pixel_y;
+                payload["xrel"] = pixel_dx;
+                payload["yrel"] = pixel_dy;
+                payload["normalized-x"] = event.tfinger.x;
+                payload["normalized-y"] = event.tfinger.y;
+                payload["dx"] = event.tfinger.dx;
+                payload["dy"] = event.tfinger.dy;
+                payload["pressure"] = event.tfinger.pressure;
+                payload["window-id"] = static_cast<int>(event.tfinger.windowID);
+                payload["timestamp"] = ns_to_ms(event.common.timestamp);
+                payload["canceled"] = true;
+                emit_engine_event("touch-canceled", payload);
                 break;
             }
 

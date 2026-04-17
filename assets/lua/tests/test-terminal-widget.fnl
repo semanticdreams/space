@@ -16,7 +16,11 @@
       (_G.reset-engine-events))))
 
 (fn fresh-engine-events []
-  {:text-input (Signal)
+  {:touch-down (Signal)
+   :touch-motion (Signal)
+   :touch-up (Signal)
+   :touch-canceled (Signal)
+   :text-input (Signal)
    :text-editing (Signal)
    :key-down (Signal)
    :key-up (Signal)

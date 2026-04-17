@@ -110,12 +110,92 @@
   (assert (= (app.engine.input:primary-gamepad-id) 0))
   (assert (= app.engine.input.gamepad nil)))
 
+(fn reset-touch-state []
+  (local ids (app.engine.input:touch-ids))
+  (each [_ id (ipairs ids)]
+    (app.engine.input:on-touch-up id.touch-id id.finger-id 0 0 0 0 0 0))
+  (app.engine.input:begin-frame)
+  (app.engine.input:begin-frame))
+
+(fn approx= [a b]
+  (< (math.abs (- a b)) 1e-6))
+
+(fn touch-state-binding-exposes-primary-touch []
+  (local KeyStatus input-state.KeyStatus)
+  (reset-touch-state)
+  (assert (= (app.engine.input:touch-count) 0))
+  (assert (= (app.engine.input:primary-touch-id) nil))
+  (assert (= app.engine.input.touch nil))
+
+  (app.engine.input:on-touch-down 7 301 0.25 0.5 0 0 0.8 10)
+  (assert (= (app.engine.input:touch-count) 1))
+  (local primary-id (app.engine.input:primary-touch-id))
+  (assert primary-id "primary touch id should exist")
+  (assert (= primary-id.touch-id 7))
+  (assert (= primary-id.finger-id 301))
+  (local touch (app.engine.input:touch-by-id 7 301))
+  (assert touch "touch 301 should exist")
+  (assert (= touch.touch-id 7))
+  (assert (= touch.finger-id 301))
+  (assert (approx= touch.x 0.25))
+  (assert (approx= touch.y 0.5))
+  (assert (approx= touch.pressure 0.8))
+  (assert (= (touch:touch-state) KeyStatus.just-pressed))
+  (assert (= (app.engine.input.touch:touch-state) KeyStatus.just-pressed))
+
+  (app.engine.input:begin-frame)
+  (assert (= (touch:touch-state) KeyStatus.held))
+
+  (app.engine.input:on-touch-motion 7 301 0.5 0.75 0.25 0.25 0.9 11)
+  (assert (approx= touch.dx 0.25))
+  (assert (approx= touch.dy 0.25))
+  (assert (approx= touch.x 0.5))
+  (assert (approx= touch.y 0.75))
+  (assert (approx= touch.pressure 0.9))
+  (assert (= (app.engine.input:touch-count) 1))
+
+  (local touches (app.engine.input:touches))
+  (assert (= (type touches) :table))
+  (assert (= (# touches) 1))
+  (assert (= (. touches 1) touch) "touches table should contain active touch objects")
+
+  (app.engine.input:on-touch-up 7 301 0.5 0.75 0 0 0.4 12)
+  (assert (= (touch:touch-state) KeyStatus.just-released))
+  (assert (= (app.engine.input:touch-count) 0))
+  (app.engine.input:begin-frame)
+  (app.engine.input:begin-frame)
+  (assert (= (app.engine.input:touch-by-id 7 301) nil))
+  (assert (= (app.engine.input:primary-touch-id) nil)))
+
+(fn touch-state-binding-distinguishes-touch-devices []
+  (reset-touch-state)
+  (app.engine.input:on-touch-down 7 301 0.1 0.2 0 0 0.5 10)
+  (app.engine.input:on-touch-down 8 301 0.7 0.8 0 0 0.9 11)
+  (assert (= (app.engine.input:touch-count) 2))
+  (local touch-a (app.engine.input:touch-by-id 7 301))
+  (local touch-b (app.engine.input:touch-by-id 8 301))
+  (assert touch-a "touch on device 7 should exist")
+  (assert touch-b "touch on device 8 should exist")
+  (assert (not (= touch-a touch-b)) "touches on different devices should not alias")
+  (local ids (app.engine.input:touch-ids))
+  (assert (= (# ids) 2))
+  (app.engine.input:on-touch-up 7 301 0.1 0.2 0 0 0 12)
+  (app.engine.input:on-touch-up 8 301 0.7 0.8 0 0 0 13)
+  (app.engine.input:begin-frame)
+  (app.engine.input:begin-frame)
+  (assert (= (app.engine.input:touch-by-id 7 301) nil))
+  (assert (= (app.engine.input:touch-by-id 8 301) nil)))
+
 (table.insert tests {:name "Input binding exposes app.engine.input.keyboard" :fn engine-input-available})
 (table.insert tests {:name "KeyStatus enum exported with expected values" :fn key-status-enum-exposed})
 (table.insert tests {:name "KeyboardState transitions can be mocked in Fennel" :fn mock-keyboard-state-transitions})
 (table.insert tests {:name "app.engine.input keyboard is exported" :fn engine-input-can-be-inspected})
 (table.insert tests {:name "Gamepad binding supports multi-gamepad state and primary selection"
                      :fn gamepad-multi-state-and-primary})
+(table.insert tests {:name "Touch binding supports primary touch and state transitions"
+                     :fn touch-state-binding-exposes-primary-touch})
+(table.insert tests {:name "Touch binding distinguishes touch devices"
+                     :fn touch-state-binding-distinguishes-touch-devices})
 
 (local main
   (fn []
