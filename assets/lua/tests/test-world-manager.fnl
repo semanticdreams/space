@@ -1202,8 +1202,8 @@
       (write-world-json! world-dir
                          {:camera {:position [0 0 30]
                                    :rotation [1 0 0 0]}
-                          :graph {:graph {:nodes ["terrain-editor:world-1:node-a"]
-                                          :edges [{:source "terrain-editor:world-1:node-a"
+                          :graph {:graph {:nodes ["mystery-node:world-1:node-a"]
+                                          :edges [{:source "mystery-node:world-1:node-a"
                                                    :target "start"}]}
                                   :views {:open-node-keys []}}
                           :scene {:panels []
@@ -1232,15 +1232,121 @@
               "Unsupported graph node should remain alongside captured supported nodes")
       (assert (= (. nodes 1) "start")
               "Captured supported graph node should be preserved")
-      (assert (= (. nodes 2) "terrain-editor:world-1:node-a")
+      (assert (= (. nodes 2) "mystery-node:world-1:node-a")
               "Unsupported graph node should be preserved after deactivate")
       (assert (= (length edges) 1)
               "Unsupported graph edge should be preserved after deactivate")
       (local edge (. edges 1))
-      (assert (= edge.source "terrain-editor:world-1:node-a")
+      (assert (= edge.source "mystery-node:world-1:node-a")
               "Unsupported graph edge source should be preserved")
       (assert (= edge.target "start")
               "Unsupported graph edge target should be preserved")
+      true)))
+
+(fn home-world-load-state-errors-on-stale-terrain-persistence-refs []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes ["start"
+                                                  "legacy:keep"
+                                                  "terrain:world-a:terrain-stale"
+                                                  "terrain-editor:world-a:terrain-stale"
+                                                  "terrain-tool:world-a:terrain-stale:resize-terrain"]
+                                          :edges [{:source "legacy:keep"
+                                                   :target "start"}
+                                                  {:source "terrain:world-a:terrain-stale"
+                                                   :target "terrain-tool:world-a:terrain-stale:resize-terrain"}
+                                                  {:source "terrain:world-a:terrain-stale"
+                                                   :target "terrain-editor:world-a:terrain-stale"}]}
+                                  :views {:open-node-keys ["legacy:keep"
+                                                           "terrain-tool:world-a:terrain-stale:resize-terrain"]}}
+                          :canvas {:camera {:position [0 0 100]}
+                                   :scale_factor 1.0
+                                   :panels [{:kind "graph-node-view"
+                                             :node-key "terrain-tool:world-a:terrain-canvas:resize-terrain"}]}
+                          :scene {:panels [{:kind "graph-node-cube"
+                                            :node-key "terrain:world-a:terrain-scene"}]
+                                  :terrains [{:id "terrain-live"
+                                              :kind "heightfield-terrain"
+                                              :options {:position [-160 -100 -160]
+                                                        :rotation [1 0 0 0]
+                                                        :opacity 1.0
+                                                        :physics true
+                                                        :sample-spacing [20 20]
+                                                        :chunk-samples [17 17]
+                                                        :default-height 0.0}
+                                              :chunks [{:coord [0 0]}]}]
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state)}
+                          :hud {:panels [{:kind "graph-node-view"
+                                          :node-key "terrain-editor:world-a:terrain-hud"}]}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (local (ok err) (pcall (fn [] (world:init {}))))
+      (local err-text (tostring err))
+      (assert (not ok)
+              "Expected load-state to fail fast on stale terrain persistence refs")
+      (assert (string.find err-text "HomeWorld.load%-state world%-a found stale terrain graph refs")
+              (.. "Expected load-state stale terrain persistence error prefix, got: " err-text))
+      (assert (string.find err-text "terrain:world%-a:terrain%-stale")
+              (.. "Expected load-state stale terrain graph error to include terrain node key, got: "
+                  err-text))
+      (assert (string.find err-text "terrain%-editor:world%-a:terrain%-stale")
+              "Expected load-state stale terrain graph error to include terrain editor key")
+      (assert (string.find err-text "terrain%-tool:world%-a:terrain%-stale:resize%-terrain")
+              "Expected load-state stale terrain graph error to include terrain tool key")
+      (assert (string.find err-text "terrain%-tool:world%-a:terrain%-canvas:resize%-terrain")
+              "Expected load-state stale terrain graph error to include canvas graph-node-view key")
+      (assert (string.find err-text "terrain%-editor:world%-a:terrain%-hud")
+              "Expected load-state stale terrain graph error to include hud graph-node-view key")
+      (assert (string.find err-text "terrain:world%-a:terrain%-scene")
+              "Expected load-state stale terrain graph error to include scene graph-node-cube key")
+      true)))
+
+(fn home-world-load-state-errors-on-cross-world-terrain-refs []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes ["terrain:world-b:terrain-live"]
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains [{:id "terrain-live"
+                                              :kind "heightfield-terrain"
+                                              :options {:position [-160 -100 -160]
+                                                        :rotation [1 0 0 0]
+                                                        :opacity 1.0
+                                                        :physics true
+                                                        :sample-spacing [20 20]
+                                                        :chunk-samples [17 17]
+                                                        :default-height 0.0}
+                                              :chunks [{:coord [0 0]}]}]
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (local (ok err) (pcall (fn [] (world:init {}))))
+      (local err-text (tostring err))
+      (assert (not ok)
+              "Expected load-state to fail fast on cross-world terrain refs")
+      (assert (string.find err-text "terrain:world%-b:terrain%-live")
+              (.. "Expected load-state cross-world terrain ref error to include offending key, got: "
+                  err-text))
       true)))
 
 (fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state []
@@ -1373,6 +1479,10 @@
                      :fn home-world-preserves-supported-terrain-when-runtime-capture-misses-terrains})
 (table.insert tests {:name "HomeWorld preserves unsupported graph nodes on deactivate"
                      :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
+(table.insert tests {:name "HomeWorld load-state errors on stale terrain persistence refs"
+                     :fn home-world-load-state-errors-on-stale-terrain-persistence-refs})
+(table.insert tests {:name "HomeWorld load-state errors on cross-world terrain refs"
+                     :fn home-world-load-state-errors-on-cross-world-terrain-refs})
 (table.insert tests {:name "HomeWorld persists graph node views on targets instead of graph state"
                      :fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state})
 

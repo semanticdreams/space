@@ -130,6 +130,70 @@
   {:graph {:nodes merged-nodes
            :edges merged-edges}})
 
+(fn parse-terrain-persistence-key [key]
+  (if (= (type key) :string)
+      (do
+        (local (terrain-world terrain-id) (string.match key "^terrain:([^:]+):([^:]+)$"))
+        (if terrain-world
+            {:key key
+             :world-id terrain-world
+             :terrain-id terrain-id}
+            (do
+              (local (editor-world editor-terrain-id) (string.match key "^terrain%-editor:([^:]+):([^:]+)$"))
+              (if editor-world
+                  {:key key
+                   :world-id editor-world
+                   :terrain-id editor-terrain-id}
+                  (do
+                    (local (tool-world tool-terrain-id _tool-id)
+                      (string.match key "^terrain%-tool:([^:]+):([^:]+):([^:]+)$"))
+                    (if tool-world
+                        {:key key
+                         :world-id tool-world
+                         :terrain-id tool-terrain-id}
+                        nil))))))
+      nil))
+
+(fn invalid-terrain-persistence-keys [world state]
+  (local payload (or state {}))
+  (local graph-state (or payload.graph {}))
+  (local graph-core (resolve-graph-core-state graph-state))
+  (local valid-terrain-ids {})
+  (var invalid-keys [])
+  (local seen-invalid {})
+  (each [_ record (ipairs (or (and payload.scene payload.scene.terrains) []))]
+    (local terrain-id (and record record.id))
+    (when terrain-id
+      (set (. valid-terrain-ids terrain-id) true)))
+  (fn record-invalid! [key]
+    (when (and (= (type key) :string)
+               (not (. seen-invalid key)))
+      (set (. seen-invalid key) true)
+      (table.insert invalid-keys key)))
+  (fn validate-key! [key]
+    (local parsed (parse-terrain-persistence-key key))
+    (when (and parsed
+               (or (not (= parsed.world-id world.id))
+                   (not (. valid-terrain-ids parsed.terrain-id))))
+      (record-invalid! key)))
+  (fn validate-panel-node-key! [panel expected-kind]
+    (when (= (and panel panel.kind) expected-kind)
+      (validate-key! (and panel panel.node-key))))
+  (each [_ key (ipairs (or graph-core.nodes []))]
+    (validate-key! key))
+  (each [_ edge (ipairs (or graph-core.edges []))]
+    (validate-key! edge.source)
+    (validate-key! edge.target))
+  (each [_ key (ipairs (or (and graph-state.views graph-state.views.open-node-keys) []))]
+    (validate-key! key))
+  (each [_ panel (ipairs (or (and payload.canvas payload.canvas.panels) []))]
+    (validate-panel-node-key! panel "graph-node-view"))
+  (each [_ panel (ipairs (or (and payload.hud payload.hud.panels) []))]
+    (validate-panel-node-key! panel "graph-node-view"))
+  (each [_ panel (ipairs (or (and payload.scene payload.scene.panels) []))]
+    (validate-panel-node-key! panel "graph-node-cube"))
+  invalid-keys)
+
 (fn read-world-state [path]
   (if (not (fs.exists path))
       nil
@@ -229,7 +293,15 @@
                                                                            world.id)))
               (do
                 (set world.state.scene.background (BackgroundState.default-state))
-                (set repaired-persisted-state? true))))
+                (set repaired-persisted-state? true)))
+          (local stale-terrain-graph-keys
+            (invalid-terrain-persistence-keys world world.state))
+          (when (> (length stale-terrain-graph-keys) 0)
+            (error
+              (string.format
+                "HomeWorld.load-state %s found stale terrain graph refs: %s"
+                world.id
+                (table.concat stale-terrain-graph-keys ", ")))))
         (do
           (TerrainIssueLog.warn (string.format
                                   "[world] %s persisted state missing/invalid; resetting world.state and seeding default terrain"
