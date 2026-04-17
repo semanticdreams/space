@@ -75,9 +75,13 @@
       (apply-pointer self self.mouse-pos)))
 
   (fn update-from-input [self]
-    (local mouse (and app.engine app.engine.input app.engine.input.mouse))
-    (when mouse
-      (apply-pointer self (pointer-pos {:x mouse.x :y mouse.y}))))
+    (local override (and app app.pointer-input-override))
+    (if override
+        (apply-pointer self (pointer-pos override))
+        (do
+          (local mouse (and app.engine app.engine.input app.engine.input.mouse))
+          (when mouse
+            (apply-pointer self (pointer-pos {:x mouse.x :y mouse.y}))))))
 
   (fn on-leave [self]
     (clear-active self))
@@ -99,6 +103,7 @@
   (set self.on-mouse-motion on-mouse-motion)
   (set self.on-enter on-enter)
   (set self.on-leave on-leave)
+  (set self.clear-active clear-active)
   (set self.update-from-input update-from-input)
   (set self.get-active-entry get-active-entry)
   (set self.get-active-object get-active-object)

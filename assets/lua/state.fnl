@@ -1,7 +1,15 @@
 (local Runtime (require :state-runtime))
 
 (local engine-event-order
-  [[:touch-down :touch-down :on-touch-down]
+  [[:pen-proximity-in :pen-proximity-in :on-pen-proximity-in]
+   [:pen-proximity-out :pen-proximity-out :on-pen-proximity-out]
+   [:pen-motion :pen-motion :on-pen-motion]
+   [:pen-down :pen-down :on-pen-down]
+   [:pen-up :pen-up :on-pen-up]
+   [:pen-button-down :pen-button-down :on-pen-button-down]
+   [:pen-button-up :pen-button-up :on-pen-button-up]
+   [:pen-axis :pen-axis :on-pen-axis]
+   [:touch-down :touch-down :on-touch-down]
    [:touch-motion :touch-motion :on-touch-motion]
    [:touch-up :touch-up :on-touch-up]
    [:touch-canceled :touch-canceled :on-touch-canceled]

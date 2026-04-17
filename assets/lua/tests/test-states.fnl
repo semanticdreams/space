@@ -50,7 +50,15 @@
 
 (fn fresh-engine-events []
   (local Signal (require :signal))
-  {:touch-down (Signal)
+  {:pen-proximity-in (Signal)
+   :pen-proximity-out (Signal)
+   :pen-motion (Signal)
+   :pen-down (Signal)
+   :pen-up (Signal)
+   :pen-button-down (Signal)
+   :pen-button-up (Signal)
+   :pen-axis (Signal)
+   :touch-down (Signal)
    :touch-motion (Signal)
    :touch-up (Signal)
    :touch-canceled (Signal)
@@ -169,7 +177,15 @@
   (Runtime.reset)
   (local events (and app.engine app.engine.events))
   (when events
-    (each [_ signal (ipairs [events.touch-down
+    (each [_ signal (ipairs [events.pen-proximity-in
+                             events.pen-proximity-out
+                             events.pen-motion
+                             events.pen-down
+                             events.pen-up
+                             events.pen-button-down
+                             events.pen-button-up
+                             events.pen-axis
+                             events.touch-down
                              events.touch-motion
                              events.touch-up
                              events.touch-canceled
@@ -384,6 +400,135 @@
   (state:on-leave)
   (set app.first-person-controls original-controls)
   (set app.touch-gesture-targets original-touch-targets))
+
+(fn normal-state-injects-pen-as-mouse-and-restores-drawing-tool []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-movables app.movables)
+  (local original-resizables app.resizables)
+  (local original-touch-targets app.touch-gesture-targets)
+  (local original-controls app.first-person-controls)
+  (local original-controller app.drawing-controller)
+  (local original-canvas-interactive app.canvas-interactive?)
+  (local original-feature app.active-canvas-feature)
+  (local tool-log [])
+  (set app.hoverables {:on-enter (fn [])
+                       :on-leave (fn [])
+                       :on-mouse-motion (fn [_self _payload])
+                       :clear-active (fn [_self] nil)})
+  (set app.clickables {:on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])
+                       :active? false})
+  (set app.movables {:drag-active? (fn [_self] false)
+                     :on-mouse-motion (fn [_self _payload])
+                     :on-mouse-button-down (fn [_self _payload])
+                     :on-mouse-button-up (fn [_self _payload])})
+  (set app.resizables {:drag-active? (fn [_self] false)
+                       :on-mouse-motion (fn [_self _payload])
+                       :on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])})
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (set app.first-person-controls controls)
+  (set app.canvas-interactive? true)
+  (set app.active-canvas-feature "drawing")
+  (set app.drawing-controller
+       {:state {:ui {:active_tool "brush"}}
+        :set-active-tool (fn [self tool]
+                           (table.insert tool-log tool)
+                           (set self.state.ui.active_tool tool))})
+  (local state (NormalState))
+  (state:on-enter)
+  (state:on-pen-proximity-in {:pen-id 77
+                              :x 10
+                              :y 20
+                              :xrel 0
+                              :yrel 0
+                              :timestamp 1
+                              :in-range true})
+  (state:on-pen-down {:pen-id 77
+                      :x 10
+                      :y 20
+                      :xrel 0
+                      :yrel 0
+                      :timestamp 2
+                      :in-range true
+                      :eraser true})
+  (state:on-touch-down {:touch-id 1
+                        :finger-id 11
+                        :x 14
+                        :y 24
+                        :xrel 0
+                        :yrel 0
+                        :pressure 0.5
+                        :timestamp 3})
+  (state:on-pen-up {:pen-id 77
+                    :x 10
+                    :y 20
+                    :xrel 0
+                    :yrel 0
+                    :timestamp 4
+                    :in-range true
+                    :eraser false})
+  (assert (= controls.record.mouse_button_down 1))
+  (assert (= controls.record.mouse_button_up 1))
+  (assert (= (# tool-log) 2))
+  (assert (= (. tool-log 1) "eraser"))
+  (assert (= (. tool-log 2) "brush"))
+  (assert (= app.drawing-controller.state.ui.active_tool "brush"))
+  (state:on-leave)
+  (set app.hoverables original-hoverables)
+  (set app.clickables original-clickables)
+  (set app.movables original-movables)
+  (set app.resizables original-resizables)
+  (set app.touch-gesture-targets original-touch-targets)
+  (set app.first-person-controls original-controls)
+  (set app.drawing-controller original-controller)
+  (set app.canvas-interactive? original-canvas-interactive)
+  (set app.active-canvas-feature original-feature))
+
+(fn fpc-state-injects-pen-as-mouse []
+  (reset-engine-events)
+  (local controls (create-controls-stub))
+  (local original-controls app.first-person-controls)
+  (set app.first-person-controls controls)
+  (local state (FpcState))
+  (state:on-enter)
+  (state:on-pen-proximity-in {:pen-id 77
+                              :x 10
+                              :y 20
+                              :xrel 0
+                              :yrel 0
+                              :timestamp 1
+                              :in-range true})
+  (state:on-pen-down {:pen-id 77
+                      :x 10
+                      :y 20
+                      :xrel 0
+                      :yrel 0
+                      :timestamp 2
+                      :in-range true})
+  (state:on-pen-motion {:pen-id 77
+                        :x 18
+                        :y 24
+                        :xrel 8
+                        :yrel 4
+                        :timestamp 3
+                        :in-range true})
+  (state:on-pen-up {:pen-id 77
+                    :x 18
+                    :y 24
+                    :xrel 0
+                    :yrel 0
+                    :timestamp 4
+                    :in-range true})
+  (assert (= controls.record.mouse_button_down 1))
+  (assert (= controls.record.mouse_button_up 1))
+  (assert controls.record.mouse_motion
+          "pen motion should reach first-person controls")
+  (state:on-leave)
+  (set app.first-person-controls original-controls))
 
 (fn normal-state-tab-cycles-focus []
   (reset-engine-events)
@@ -762,6 +907,66 @@
   (set app.states original-states)
   (TestSupport.resume-active-state suspended-state))
 
+(fn terrain-paint-state-suppresses-touch-while-pen-active []
+  (reset-engine-events)
+  (local original-states app.states)
+  (local original-touch-targets app.touch-gesture-targets)
+  (var suspended-state nil)
+  (local states (States))
+  (states.add-state :normal {})
+  (states.add-state :terrain-paint (TerrainPaintState))
+  (set suspended-state (TestSupport.suspend-active-state original-states))
+  (set app.states states)
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (states.set-state :normal)
+  (local forwarded [])
+  (var active? false)
+  (local session
+    {:active? (fn [_self] active?)
+     :begin (fn [_self] (set active? true))
+     :cancel-selection (fn [_self] (set active? false))
+     :begin-stroke (fn [_self payload]
+                     (table.insert forwarded [:button true payload.x payload.y])
+                     true)
+     :update-stroke (fn [_self payload]
+                      (table.insert forwarded [:motion payload.x payload.y])
+                      true)
+     :end-stroke (fn [_self payload]
+                   (table.insert forwarded [:button false payload.x payload.y])
+                   (set active? false)
+                   true)
+     :on-key-down (fn [_self _payload] nil)})
+  (TerrainPaintManager.begin session)
+  (local state (states.get-state :terrain-paint))
+  (assert state "terrain paint state should be active")
+  (state:on-pen-down {:pen-id 77
+                      :x 10
+                      :y 20
+                      :xrel 0
+                      :yrel 0
+                      :timestamp 1
+                      :in-range true})
+  (state:on-touch-down {:touch-id 1
+                        :finger-id 11
+                        :x 30
+                        :y 40
+                        :xrel 0
+                        :yrel 0
+                        :pressure 0.5
+                        :timestamp 2})
+  (assert (= (# forwarded) 1)
+          "touch should be suppressed while a pen stroke is active")
+  (state:on-pen-up {:pen-id 77
+                    :x 10
+                    :y 20
+                    :xrel 0
+                    :yrel 0
+                    :timestamp 3
+                    :in-range true})
+  (set app.touch-gesture-targets original-touch-targets)
+  (set app.states original-states)
+  (TestSupport.resume-active-state suspended-state))
+
 (fn terrain-paint-state-coalesces-motion-until-update []
   (reset-engine-events)
   (local original-states app.states)
@@ -1087,6 +1292,8 @@
 (table.insert tests {:name "State history records recent transitions" :fn state-history-tracks-transitions})
 (table.insert tests {:name "Normal state forwards events to controls" :fn normal-state-forwards-events})
 (table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
+(table.insert tests {:name "Normal state injects pen as mouse and restores drawing tool"
+                     :fn normal-state-injects-pen-as-mouse-and-restores-drawing-tool})
 (table.insert tests {:name "Normal state Tab cycles focus" :fn normal-state-tab-cycles-focus})
 (table.insert tests {:name "Normal state swallows keys when input is active" :fn normal-state-swallows-keys-when-input-active})
 (table.insert tests {:name "Terrain rect pick state routes and restores" :fn terrain-rect-pick-state-routes-and-restores})
@@ -1100,6 +1307,8 @@
                      :fn terrain-paint-state-routes-and-restores})
 (table.insert tests {:name "Terrain paint state routes touch and restores"
                      :fn terrain-paint-state-routes-touch-and-restores})
+(table.insert tests {:name "Terrain paint state suppresses touch while pen active"
+                     :fn terrain-paint-state-suppresses-touch-while-pen-active})
 (table.insert tests {:name "Terrain paint state coalesces motion until update"
                      :fn terrain-paint-state-coalesces-motion-until-update})
 (table.insert tests {:name "Terrain paint state forwards mouse wheel"
@@ -1567,6 +1776,7 @@
 (table.insert tests {:name "Fpc state escape exits to normal" :fn fpc-state-escape-exits-to-normal})
 (table.insert tests {:name "Fpc state routes input only to controls" :fn fpc-state-routes-input-only-to-controls})
 (table.insert tests {:name "Fpc state injects single touch as mouse" :fn fpc-state-injects-single-touch-as-mouse})
+(table.insert tests {:name "Fpc state injects pen as mouse" :fn fpc-state-injects-pen-as-mouse})
 (table.insert tests {:name "Leader state routes to quit or normal" :fn leader-state-q-and-escape-transitions})
 (table.insert tests {:name "Quit state quits and escapes to normal" :fn quit-state-quits-and-escapes})
 (table.insert tests {:name "Text state handles navigation commands" :fn text-state-handles-navigation})

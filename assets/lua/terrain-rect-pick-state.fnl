@@ -1,7 +1,8 @@
 (local State (require :state))
 (local Routes (require :state-routes))
 (local PointerHandlers (require :state-handlers/pointer))
-(local TouchHandlers (require :state-handlers/touch-pointer))
+(local TouchPointer (require :state-handlers/touch-pointer))
+(local PenPointer (require :state-handlers/pen-pointer))
 (local CameraHandlers (require :state-handlers/camera))
 (local TerrainRectPickManager (require :graph/view/terrain-rect-pick-manager))
 
@@ -14,6 +15,15 @@
 
 (fn TerrainRectPickState []
   (var pending-motion nil)
+  (local PenHandlers
+    (PenPointer.PenPointerHandlers
+      {:touch-policy {:suppress-touch-when :down
+                      :suppression-timeout-ms 150
+                      :allow-touch-during-hover? true}}))
+  (local TouchHandlers
+    (TouchPointer.TouchPointerHandlers
+      {:allow-touch? (fn [payload]
+                       (PenHandlers:touch-allowed? payload))}))
 
   (fn flush-pending-motion [session]
     (when (and session pending-motion)
@@ -78,6 +88,14 @@
               :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
               :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
               :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+              :pen-proximity-in (Routes.Chain [PenHandlers.PenProximityIn])
+              :pen-proximity-out (Routes.Chain [PenHandlers.PenProximityOut])
+              :pen-motion (Routes.Chain [PenHandlers.PenMotion])
+              :pen-down (Routes.Chain [PenHandlers.PenDown])
+              :pen-up (Routes.Chain [PenHandlers.PenUp])
+              :pen-button-down (Routes.Chain [PenHandlers.PenButtonDown])
+              :pen-button-up (Routes.Chain [PenHandlers.PenButtonUp])
+              :pen-axis (Routes.Chain [PenHandlers.PenAxis])
               :key-down (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-button-down (Routes.FirstHandlerWins [TerrainRectPick])
               :mouse-button-up (Routes.FirstHandlerWins [TerrainRectPick])
@@ -87,9 +105,11 @@
                                                     PointerHandlers.CameraMouseWheel])
               :updated (Routes.Chain [TerrainRectPick
                                       CameraHandlers.CameraUpdated])}
-     :enter [TouchHandlers.TouchLifecycle
+     :enter [PenHandlers.PenLifecycle
+             TouchHandlers.TouchLifecycle
              TerrainRectPick]
-     :leave [TouchHandlers.TouchLifecycle
+     :leave [PenHandlers.PenLifecycle
+             TouchHandlers.TouchLifecycle
              TerrainRectPick]}))
 
 TerrainRectPickState

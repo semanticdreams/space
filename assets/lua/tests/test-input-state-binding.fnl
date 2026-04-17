@@ -117,6 +117,13 @@
   (app.engine.input:begin-frame)
   (app.engine.input:begin-frame))
 
+(fn reset-pen-state []
+  (local ids (app.engine.input:pen-ids))
+  (each [_ pen-id (ipairs ids)]
+    (app.engine.input:on-pen-proximity-out pen-id 0))
+  (app.engine.input:begin-frame)
+  (app.engine.input:begin-frame))
+
 (fn approx= [a b]
   (< (math.abs (- a b)) 1e-6))
 
@@ -186,6 +193,80 @@
   (assert (= (app.engine.input:touch-by-id 7 301) nil))
   (assert (= (app.engine.input:touch-by-id 8 301) nil)))
 
+(fn pen-state-binding-exposes-primary-pen-axes-and-history []
+  (local KeyStatus input-state.KeyStatus)
+  (local PenAxis input-state.PenAxis)
+  (local PenInputFlags input-state.PenInputFlags)
+  (reset-pen-state)
+  (assert (= (app.engine.input:pen-count) 0))
+  (assert (= (app.engine.input:primary-pen-id) 0))
+  (assert (= app.engine.input.pen nil))
+
+  (app.engine.input:on-pen-proximity-in 77 10)
+  (local pen (app.engine.input:pen-by-id 77))
+  (assert pen "pen 77 should exist")
+  (assert (= (app.engine.input:primary-pen-id) 77))
+  (assert (= pen.pen-id 77))
+  (assert (= (pen:proximity-state) KeyStatus.just-pressed))
+  (assert (pen:is-in-range))
+  (assert (pen:is-hovering))
+
+  (app.engine.input:on-pen-axis 77 10 20 PenAxis.pressure 0.6 0 11)
+  (app.engine.input:on-pen-axis 77 10 20 PenAxis.x-tilt 0.25 0 12)
+  (assert (pen:has-axis PenAxis.pressure))
+  (assert (approx= pen.pressure 0.6))
+  (assert (approx= (pen:axis PenAxis.x-tilt) 0.25))
+
+  (app.engine.input:on-pen-down 77 10 20 false PenInputFlags.down 13)
+  (assert (= (pen:tip-state) KeyStatus.just-pressed))
+  (assert (pen:is-down))
+
+  (app.engine.input:on-pen-button 77 10 20 1 true (+ PenInputFlags.down PenInputFlags.button-1) 14)
+  (assert (= (pen:button-state 1) KeyStatus.just-pressed))
+  (assert (pen:is-button-down 1))
+
+  (local axes (app.engine.input:pen-axis-values 77))
+  (assert (approx= axes.pressure 0.6))
+  (assert (approx= (. axes :x-tilt) 0.25))
+
+  (local events (app.engine.input:pen-events 77))
+  (assert (= (# events) 5))
+  (assert (= (. (. events 1) :type) "proximity-in"))
+  (assert (= (. (. events 5) :type) "button-down"))
+  (assert (= (. (. events 5) :button) 1))
+
+  (local pens (app.engine.input:pens))
+  (assert (= (# pens) 1))
+  (assert (= (. pens 1) pen))
+
+  (app.engine.input:begin-frame)
+  (app.engine.input:on-pen-up 77 10 20 true PenInputFlags.eraser-tip 15)
+  (assert pen.eraser)
+  (assert (= (pen:tip-state) KeyStatus.just-released))
+
+  (app.engine.input:on-pen-proximity-out 77 16)
+  (app.engine.input:begin-frame)
+  (app.engine.input:begin-frame)
+  (assert (= (app.engine.input:pen-by-id 77) nil))
+  (assert (= (app.engine.input:primary-pen-id) 0)))
+
+(fn pen-state-binding-distinguishes-pens []
+  (reset-pen-state)
+  (app.engine.input:on-pen-proximity-in 77 10)
+  (app.engine.input:on-pen-proximity-in 88 11)
+  (assert (= (app.engine.input:pen-count) 2))
+  (assert (app.engine.input:pen-by-id 77))
+  (assert (app.engine.input:pen-by-id 88))
+  (assert (= (app.engine.input:primary-pen-id) 88))
+  (local ids (app.engine.input:pen-ids))
+  (assert (= (# ids) 2))
+  (app.engine.input:on-pen-proximity-out 88 12)
+  (assert (= (app.engine.input:primary-pen-id) 77))
+  (app.engine.input:on-pen-proximity-out 77 13)
+  (app.engine.input:begin-frame)
+  (app.engine.input:begin-frame)
+  (assert (= (app.engine.input:pen-count) 0)))
+
 (table.insert tests {:name "Input binding exposes app.engine.input.keyboard" :fn engine-input-available})
 (table.insert tests {:name "KeyStatus enum exported with expected values" :fn key-status-enum-exposed})
 (table.insert tests {:name "KeyboardState transitions can be mocked in Fennel" :fn mock-keyboard-state-transitions})
@@ -196,6 +277,10 @@
                      :fn touch-state-binding-exposes-primary-touch})
 (table.insert tests {:name "Touch binding distinguishes touch devices"
                      :fn touch-state-binding-distinguishes-touch-devices})
+(table.insert tests {:name "Pen binding exposes primary pen axes and history"
+                     :fn pen-state-binding-exposes-primary-pen-axes-and-history})
+(table.insert tests {:name "Pen binding distinguishes pens"
+                     :fn pen-state-binding-distinguishes-pens})
 
 (local main
   (fn []

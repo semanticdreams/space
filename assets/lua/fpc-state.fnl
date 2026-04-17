@@ -1,6 +1,7 @@
 (local State (require :state))
 (local Routes (require :state-routes))
 (local TouchHandlers (require :state-handlers/touch-pointer))
+(local PenPointer (require :state-handlers/pen-pointer))
 
 (local KEY_ESCAPE 27)
 
@@ -9,6 +10,8 @@
     (handler app.first-person-controls payload)))
 
 (fn FpcState []
+  (local PenHandlers (PenPointer.PenPointerHandlers {}))
+
   (local ControlsOnly
     {:text-input (fn [_ctx _payload] false)
      :key-down (fn [ctx payload]
@@ -40,6 +43,14 @@
               :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
               :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
               :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+              :pen-proximity-in (Routes.Chain [PenHandlers.PenProximityIn])
+              :pen-proximity-out (Routes.Chain [PenHandlers.PenProximityOut])
+              :pen-motion (Routes.Chain [PenHandlers.PenMotion])
+              :pen-down (Routes.Chain [PenHandlers.PenDown])
+              :pen-up (Routes.Chain [PenHandlers.PenUp])
+              :pen-button-down (Routes.Chain [PenHandlers.PenButtonDown])
+              :pen-button-up (Routes.Chain [PenHandlers.PenButtonUp])
+              :pen-axis (Routes.Chain [PenHandlers.PenAxis])
               :text-input (Routes.FirstHandlerWins [ControlsOnly])
               :key-down (Routes.FirstHandlerWins [ControlsOnly])
               :key-up (Routes.FirstHandlerWins [ControlsOnly])
@@ -51,7 +62,9 @@
               :gamepad-axis-motion (Routes.FirstHandlerWins [ControlsOnly])
               :gamepad-removed (Routes.FirstHandlerWins [ControlsOnly])
               :updated (Routes.FirstHandlerWins [ControlsOnly])}
-     :enter [TouchHandlers.TouchLifecycle]
-     :leave [TouchHandlers.TouchLifecycle]}))
+     :enter [PenHandlers.PenLifecycle
+             TouchHandlers.TouchLifecycle]
+     :leave [PenHandlers.PenLifecycle
+             TouchHandlers.TouchLifecycle]}))
 
 FpcState

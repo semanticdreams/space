@@ -369,7 +369,15 @@
     (apply-runtime-performance-settings)))
 
 (local runtime-performance-input-signal-names
-  ["touch-down"
+  ["pen-proximity-in"
+   "pen-proximity-out"
+   "pen-motion"
+   "pen-down"
+   "pen-up"
+   "pen-button-down"
+   "pen-button-up"
+   "pen-axis"
+   "touch-down"
    "touch-motion"
    "touch-up"
    "touch-canceled"

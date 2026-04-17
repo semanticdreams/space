@@ -69,6 +69,7 @@
   (local drag-threshold (or options.drag-threshold default-drag-threshold))
   (local defer-mouse-when-drag-candidate? (not (= options.defer-mouse-when-drag-candidate? false)))
   (local select-drag-candidate (or options.select-drag-candidate default-drag-candidate))
+  (local allow-touch? (or options.allow-touch? (fn [_payload] true)))
   (local on-multitouch-start options.on-multitouch-start)
   (local on-multitouch-motion options.on-multitouch-motion)
   (local on-multitouch-end options.on-multitouch-end)
@@ -169,6 +170,13 @@
         (on-multitouch-end ctx (current-gesture) session {:canceled? canceled?}))
       (set multitouch-active? false)))
 
+  (fn reset-router! []
+    (stop-multitouch! nil true)
+    (clear-single!)
+    (set blocked-multitouch? false)
+    (session:clear)
+    true)
+
   (fn handle-active-multitouch-down [ctx]
     (if (> (session:count) 2)
         (do
@@ -198,12 +206,17 @@
   (fn on-touch-down [ctx payload]
     (if (not payload)
         false
-        (do
-          (session:on-touch-down payload)
-          (reset-blocked-if-idle)
-          (if multitouch-active?
-              (handle-active-multitouch-down ctx)
-              (handle-single-touch-down ctx payload)))))
+        (if (not (allow-touch? payload))
+            (do
+              (when (> (session:count) 0)
+                (reset-router!))
+              false)
+            (do
+              (session:on-touch-down payload)
+              (reset-blocked-if-idle)
+              (if multitouch-active?
+                  (handle-active-multitouch-down ctx)
+                  (handle-single-touch-down ctx payload))))))
 
   (fn handle-active-multitouch-motion [ctx]
     (if (> (session:count) 2)
@@ -240,11 +253,16 @@
   (fn on-touch-motion [ctx payload]
     (if (not payload)
         false
-        (do
-          (session:on-touch-motion payload)
-          (if multitouch-active?
-              (handle-active-multitouch-motion ctx)
-              (handle-single-touch-motion payload)))))
+        (if (not (allow-touch? payload))
+            (do
+              (when (> (session:count) 0)
+                (reset-router!))
+              false)
+            (do
+              (session:on-touch-motion payload)
+              (if multitouch-active?
+                  (handle-active-multitouch-motion ctx)
+                  (handle-single-touch-motion payload))))))
 
   (fn complete-single! [payload canceled?]
     (if captured-target
@@ -285,13 +303,18 @@
   (fn on-touch-finished [ctx payload canceled?]
     (if (not payload)
         false
-        (do
-          (local key (session:key-from-payload payload))
-          (local primary? (= key primary-key))
-          (session:on-touch-up payload)
-          (if multitouch-active?
-              (handle-active-multitouch-finished ctx canceled?)
-              (handle-single-touch-finished payload canceled? primary?)))))
+        (if (not (allow-touch? payload))
+            (do
+              (when (> (session:count) 0)
+                (reset-router!))
+              false)
+            (do
+              (local key (session:key-from-payload payload))
+              (local primary? (= key primary-key))
+              (session:on-touch-up payload)
+              (if multitouch-active?
+                  (handle-active-multitouch-finished ctx canceled?)
+                  (handle-single-touch-finished payload canceled? primary?))))))
 
   (fn on-touch-up [ctx payload]
     (on-touch-finished ctx payload false))
@@ -300,11 +323,7 @@
     (on-touch-finished ctx payload true))
 
   (fn reset [_self]
-    (stop-multitouch! nil true)
-    (clear-single!)
-    (set blocked-multitouch? false)
-    (session:clear)
-    true)
+    (reset-router!))
 
   {:on-touch-down on-touch-down
    :on-touch-motion on-touch-motion

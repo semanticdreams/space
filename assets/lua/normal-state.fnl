@@ -4,7 +4,9 @@
 (local TextInputHandlers (require :state-handlers/text-input))
 (local FocusHandlers (require :state-handlers/focus))
 (local PointerHandlers (require :state-handlers/pointer))
-(local TouchHandlers (require :state-handlers/touch-pointer))
+(local TouchPointer (require :state-handlers/touch-pointer))
+(local PenPointer (require :state-handlers/pen-pointer))
+(local PenToolOverride (require :state-handlers/pen-tool-override))
 (local DrawingHandlers (require :drawing/input))
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local CameraHandlers (require :state-handlers/camera))
@@ -17,6 +19,37 @@
 (local SDLK_F4 1073741885)
 
 (fn NormalState []
+  (local PenHandlers
+    (PenPointer.PenPointerHandlers
+      {:touch-policy {:suppress-touch-when :down
+                      :suppression-timeout-ms 150
+                      :allow-touch-during-hover? true}}))
+
+  (fn touch-allowed? [payload]
+    (if (= app.active-canvas-feature "drawing")
+        (PenHandlers:touch-allowed? payload)
+        true))
+
+  (local TouchHandlers
+    (TouchPointer.TouchPointerHandlers
+      {:allow-touch? touch-allowed?}))
+
+  (local DrawingPenOverride
+    ((. PenToolOverride :PenToolOverrideHandlers)
+      {:active? (fn []
+                  (and app.drawing-controller
+                       (= app.canvas-interactive? true)
+                       (= app.active-canvas-feature "drawing")))
+       :get-tool (fn []
+                   (and app.drawing-controller
+                        app.drawing-controller.state
+                        app.drawing-controller.state.ui
+                        app.drawing-controller.state.ui.active_tool))
+       :set-tool (fn [tool]
+                   (assert (and app.drawing-controller app.drawing-controller.set-active-tool)
+                           "NormalState drawing pen override requires drawing-controller:set-active-tool")
+                   (app.drawing-controller:set-active-tool tool))}))
+
   (fn graph-interaction-enabled? []
     (not (= app.active-canvas-feature "drawing")))
 
@@ -104,6 +137,22 @@
               :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
               :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
               :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+              :pen-proximity-in (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                               PenHandlers.PenProximityIn])
+              :pen-proximity-out (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                                PenHandlers.PenProximityOut])
+              :pen-motion (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                         PenHandlers.PenMotion])
+              :pen-down (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                       PenHandlers.PenDown])
+              :pen-up (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                     PenHandlers.PenUp])
+              :pen-button-down (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                              PenHandlers.PenButtonDown])
+              :pen-button-up (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                            PenHandlers.PenButtonUp])
+              :pen-axis (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                       PenHandlers.PenAxis])
               :text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
               :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
               :key-down (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
@@ -145,9 +194,13 @@
               :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
               :updated (Routes.Chain [CameraHandlers.CameraUpdated
                                       HoverHandlers.HoverUpdated])}
-     :enter [TouchHandlers.TouchLifecycle
+     :enter [PenHandlers.PenLifecycle
+             DrawingPenOverride.PenToolOverride
+             TouchHandlers.TouchLifecycle
              HoverHandlers.HoverLifecycle]
-     :leave [TouchHandlers.TouchLifecycle
+     :leave [DrawingPenOverride.PenToolOverride
+             PenHandlers.PenLifecycle
+             TouchHandlers.TouchLifecycle
              HoverHandlers.HoverLifecycle]}))
 
 NormalState

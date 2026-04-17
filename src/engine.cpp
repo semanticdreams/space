@@ -89,6 +89,41 @@ std::pair<float, float> touch_pixels(sol::table engine_table, WindowSdl* window,
     return { normalized_x * static_cast<float>(pixel_width), normalized_y * static_cast<float>(pixel_height) };
 }
 
+void set_pen_axes(sol::table& payload, const InputState::PenState* pen)
+{
+    payload["pressure"] = pen ? pen->axis(SDL_PEN_AXIS_PRESSURE) : 0.0F;
+    payload["x-tilt"] = pen ? pen->axis(SDL_PEN_AXIS_XTILT) : 0.0F;
+    payload["y-tilt"] = pen ? pen->axis(SDL_PEN_AXIS_YTILT) : 0.0F;
+    payload["distance"] = pen ? pen->axis(SDL_PEN_AXIS_DISTANCE) : 0.0F;
+    payload["rotation"] = pen ? pen->axis(SDL_PEN_AXIS_ROTATION) : 0.0F;
+    payload["slider"] = pen ? pen->axis(SDL_PEN_AXIS_SLIDER) : 0.0F;
+    payload["tangential-pressure"] = pen ? pen->axis(SDL_PEN_AXIS_TANGENTIAL_PRESSURE) : 0.0F;
+}
+
+sol::table make_pen_payload(sol::state& lua,
+                            const InputState::PenState* pen,
+                            SDL_PenID pen_id,
+                            SDL_PenInputFlags pen_state,
+                            float x,
+                            float y,
+                            Uint64 timestamp)
+{
+    sol::table payload = lua.create_table();
+    payload["pen-id"] = static_cast<lua_Integer>(pen_id);
+    payload["x"] = x;
+    payload["y"] = y;
+    payload["xrel"] = pen ? pen->xrel : 0.0F;
+    payload["yrel"] = pen ? pen->yrel : 0.0F;
+    payload["pen-state"] = pen_state;
+    payload["down"] = pen ? pen->currentDown : ((pen_state & SDL_PEN_INPUT_DOWN) != 0);
+    payload["in-range"] = pen ? pen->currentInRange : true;
+    payload["eraser"] = pen ? pen->eraser : ((pen_state & SDL_PEN_INPUT_ERASER_TIP) != 0);
+    payload["mod"] = static_cast<int>(SDL_GetModState());
+    payload["timestamp"] = timestamp;
+    set_pen_axes(payload, pen);
+    return payload;
+}
+
 } // namespace
 
 Engine::Engine() {
@@ -98,6 +133,8 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     log_set_frame_id_provider(&frame_id);
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_PEN_TOUCH_EVENTS, "0");
     if (!config.headless) {
         window = WindowSdl::create();
         int target_width = config.width > 0 ? config.width : screenWidth;
@@ -656,6 +693,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_MOUSE_MOTION: {
+                if (event.motion.which == SDL_PEN_MOUSEID) {
+                    break;
+                }
                 inputState.mouseState.set_motion(
                     event.motion.x,
                     event.motion.y,
@@ -674,6 +714,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+                if (event.button.which == SDL_PEN_MOUSEID) {
+                    break;
+                }
                 inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
                 inputState.mouseState.set_button(event.button.button, true);
                 sol::table payload = lua_state->create_table();
@@ -690,6 +733,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_MOUSE_BUTTON_UP: {
+                if (event.button.which == SDL_PEN_MOUSEID) {
+                    break;
+                }
                 inputState.mouseState.set_motion(event.button.x, event.button.y, 0.0F, 0.0F);
                 inputState.mouseState.set_button(event.button.button, false);
                 sol::table payload = lua_state->create_table();
@@ -706,6 +752,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_MOUSE_WHEEL: {
+                if (event.wheel.which == SDL_PEN_MOUSEID) {
+                    break;
+                }
                 float wheel_x = event.wheel.x;
                 float wheel_y = event.wheel.y;
                 if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
@@ -725,6 +774,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_DOWN: {
+                if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    break;
+                }
                 inputState.on_touch_down(event.tfinger.touchID,
                                          event.tfinger.fingerID,
                                          event.tfinger.x,
@@ -754,6 +806,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_MOTION: {
+                if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    break;
+                }
                 inputState.on_touch_motion(event.tfinger.touchID,
                                            event.tfinger.fingerID,
                                            event.tfinger.x,
@@ -783,6 +838,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_UP: {
+                if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    break;
+                }
                 inputState.on_touch_up(event.tfinger.touchID,
                                        event.tfinger.fingerID,
                                        event.tfinger.x,
@@ -812,6 +870,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_CANCELED: {
+                if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    break;
+                }
                 inputState.on_touch_up(event.tfinger.touchID,
                                        event.tfinger.fingerID,
                                        event.tfinger.x,
@@ -838,6 +899,168 @@ void Engine::run() {
                 payload["timestamp"] = ns_to_ms(event.common.timestamp);
                 payload["canceled"] = true;
                 emit_engine_event("touch-canceled", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_PROXIMITY_IN: {
+                inputState.on_pen_proximity_in(event.pproximity.which,
+                                               ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.pproximity.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.pproximity.which,
+                                                      pen ? pen->inputState : 0,
+                                                      pen ? pen->x : 0.0F,
+                                                      pen ? pen->y : 0.0F,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.pproximity.windowID);
+                emit_engine_event("pen-proximity-in", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_PROXIMITY_OUT: {
+                inputState.on_pen_proximity_out(event.pproximity.which,
+                                                ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.pproximity.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.pproximity.which,
+                                                      pen ? pen->inputState : 0,
+                                                      pen ? pen->x : 0.0F,
+                                                      pen ? pen->y : 0.0F,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.pproximity.windowID);
+                emit_engine_event("pen-proximity-out", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_MOTION: {
+                inputState.on_pen_motion(event.pmotion.which,
+                                         event.pmotion.x,
+                                         event.pmotion.y,
+                                         event.pmotion.pen_state,
+                                         ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.pmotion.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.pmotion.which,
+                                                      event.pmotion.pen_state,
+                                                      event.pmotion.x,
+                                                      event.pmotion.y,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.pmotion.windowID);
+                emit_engine_event("pen-motion", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_DOWN: {
+                inputState.on_pen_down(event.ptouch.which,
+                                       event.ptouch.x,
+                                       event.ptouch.y,
+                                       event.ptouch.eraser,
+                                       event.ptouch.pen_state,
+                                       ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.ptouch.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.ptouch.which,
+                                                      event.ptouch.pen_state,
+                                                      event.ptouch.x,
+                                                      event.ptouch.y,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.ptouch.windowID);
+                payload["eraser"] = event.ptouch.eraser;
+                emit_engine_event("pen-down", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_UP: {
+                inputState.on_pen_up(event.ptouch.which,
+                                     event.ptouch.x,
+                                     event.ptouch.y,
+                                     event.ptouch.eraser,
+                                     event.ptouch.pen_state,
+                                     ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.ptouch.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.ptouch.which,
+                                                      event.ptouch.pen_state,
+                                                      event.ptouch.x,
+                                                      event.ptouch.y,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.ptouch.windowID);
+                payload["eraser"] = event.ptouch.eraser;
+                emit_engine_event("pen-up", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_BUTTON_DOWN: {
+                inputState.on_pen_button(event.pbutton.which,
+                                         event.pbutton.x,
+                                         event.pbutton.y,
+                                         event.pbutton.button,
+                                         true,
+                                         event.pbutton.pen_state,
+                                         ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.pbutton.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.pbutton.which,
+                                                      event.pbutton.pen_state,
+                                                      event.pbutton.x,
+                                                      event.pbutton.y,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.pbutton.windowID);
+                payload["button"] = static_cast<int>(event.pbutton.button);
+                payload["state"] = true;
+                emit_engine_event("pen-button-down", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_BUTTON_UP: {
+                inputState.on_pen_button(event.pbutton.which,
+                                         event.pbutton.x,
+                                         event.pbutton.y,
+                                         event.pbutton.button,
+                                         false,
+                                         event.pbutton.pen_state,
+                                         ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.pbutton.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.pbutton.which,
+                                                      event.pbutton.pen_state,
+                                                      event.pbutton.x,
+                                                      event.pbutton.y,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.pbutton.windowID);
+                payload["button"] = static_cast<int>(event.pbutton.button);
+                payload["state"] = false;
+                emit_engine_event("pen-button-up", payload);
+                break;
+            }
+
+            case SDL_EVENT_PEN_AXIS: {
+                inputState.on_pen_axis(event.paxis.which,
+                                       event.paxis.x,
+                                       event.paxis.y,
+                                       event.paxis.axis,
+                                       event.paxis.value,
+                                       event.paxis.pen_state,
+                                       ns_to_ms(event.common.timestamp));
+                const InputState::PenState* pen = inputState.pen_by_id(event.paxis.which);
+                sol::table payload = make_pen_payload(*lua_state,
+                                                      pen,
+                                                      event.paxis.which,
+                                                      event.paxis.pen_state,
+                                                      event.paxis.x,
+                                                      event.paxis.y,
+                                                      ns_to_ms(event.common.timestamp));
+                payload["window-id"] = static_cast<int>(event.paxis.windowID);
+                payload["axis"] = static_cast<int>(event.paxis.axis);
+                payload["value"] = event.paxis.value;
+                emit_engine_event("pen-axis", payload);
                 break;
             }
 

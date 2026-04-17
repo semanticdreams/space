@@ -1,36 +1,47 @@
 (local TouchRouter (require :touch-router))
 
-(local router (TouchRouter {}))
+(fn TouchPointerHandlers [opts]
+  (local router (TouchRouter (or opts {})))
 
-(local PrimaryTouchMouseDown
-  {:touch-down
-   (fn [ctx payload]
-     (router:on-touch-down ctx payload))})
+  (local PrimaryTouchMouseDown
+    {:touch-down
+     (fn [ctx payload]
+       (router:on-touch-down ctx payload))})
 
-(local PrimaryTouchMouseMotion
-  {:touch-motion
-   (fn [ctx payload]
-     (router:on-touch-motion ctx payload))})
+  (local PrimaryTouchMouseMotion
+    {:touch-motion
+     (fn [ctx payload]
+       (router:on-touch-motion ctx payload))})
 
-(local PrimaryTouchMouseUp
-  {:touch-up
-   (fn [ctx payload]
-     (router:on-touch-up ctx payload))})
+  (local PrimaryTouchMouseUp
+    {:touch-up
+     (fn [ctx payload]
+       (router:on-touch-up ctx payload))})
 
-(local PrimaryTouchMouseCanceled
-  {:touch-canceled
-   (fn [ctx payload]
-     (router:on-touch-canceled ctx payload))})
+  (local PrimaryTouchMouseCanceled
+    {:touch-canceled
+     (fn [ctx payload]
+       (router:on-touch-canceled ctx payload))})
 
-(local TouchLifecycle
-  {:enter (fn [_ctx]
-            (router:reset))
-   :leave (fn [_ctx]
-            (router:reset))})
+  (local TouchLifecycle
+    {:enter (fn [_ctx]
+              (router:reset))
+     :leave (fn [_ctx]
+              (router:reset))})
 
-{:PrimaryTouchMouseDown PrimaryTouchMouseDown
- :PrimaryTouchMouseMotion PrimaryTouchMouseMotion
- :PrimaryTouchMouseUp PrimaryTouchMouseUp
- :PrimaryTouchMouseCanceled PrimaryTouchMouseCanceled
- :TouchLifecycle TouchLifecycle
- :reset (fn [] (router:reset))}
+  {:PrimaryTouchMouseDown PrimaryTouchMouseDown
+   :PrimaryTouchMouseMotion PrimaryTouchMouseMotion
+   :PrimaryTouchMouseUp PrimaryTouchMouseUp
+   :PrimaryTouchMouseCanceled PrimaryTouchMouseCanceled
+   :TouchLifecycle TouchLifecycle
+   :reset (fn [] (router:reset))})
+
+(local default-handlers (TouchPointerHandlers {}))
+
+{:TouchPointerHandlers TouchPointerHandlers
+ :PrimaryTouchMouseDown default-handlers.PrimaryTouchMouseDown
+ :PrimaryTouchMouseMotion default-handlers.PrimaryTouchMouseMotion
+ :PrimaryTouchMouseUp default-handlers.PrimaryTouchMouseUp
+ :PrimaryTouchMouseCanceled default-handlers.PrimaryTouchMouseCanceled
+ :TouchLifecycle default-handlers.TouchLifecycle
+ :reset default-handlers.reset}

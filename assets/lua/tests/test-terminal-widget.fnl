@@ -16,7 +16,15 @@
       (_G.reset-engine-events))))
 
 (fn fresh-engine-events []
-  {:touch-down (Signal)
+  {:pen-proximity-in (Signal)
+   :pen-proximity-out (Signal)
+   :pen-motion (Signal)
+   :pen-down (Signal)
+   :pen-up (Signal)
+   :pen-button-down (Signal)
+   :pen-button-up (Signal)
+   :pen-axis (Signal)
+   :touch-down (Signal)
    :touch-motion (Signal)
    :touch-up (Signal)
    :touch-canceled (Signal)
