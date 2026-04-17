@@ -169,7 +169,8 @@
   (set app.settings {:set-value (fn [_key _value _opts] true)
                      :save (fn [] true)})
   (set app.themes themes)
-  (set app.active-world-entry {:world {:runtime {}}})
+  (set app.active-world-entry {:world {:runtime {}
+                                       :state {:scene {:terrains []}}}})
   (assert (= (length (PanelUtils.persistent-panels canvas {:kind "graph-node-view"})) 1)
           "test setup should expose one persisted graph node view panel on the canvas")
   (set app.graph-view
@@ -311,6 +312,111 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   true)
 
+(fn apply-theme-preserves-active-world-terrains []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (var scene-payload nil)
+  (local terrain-record {:id "terrain-a"
+                         :kind "heightfield-terrain"
+                         :options {:position [1 2 3]
+                                   :rotation [1 0 0 0]
+                                   :chunk-samples [17 17]
+                                   :chunk-size [16 16]
+                                   :default-height 0.0}
+                         :chunks [{:coord [0 0]
+                                   :size [17 17]
+                                   :heights [0]}]})
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  (set app.scene {:build-default (fn [_self payload]
+                                   (set scene-payload payload)
+                                   true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                     :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (set app.active-world-entry {:world {:state {:scene {:terrains [terrain-record]}}}})
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light)
+        (assert scene-payload "apply-theme should pass a scene payload to build-default when an active world exists")
+        (assert (= (length (or scene-payload.terrains [])) 1)
+                "apply-theme should preserve the active world terrain list during scene rebuild")
+        (assert (= (and (. scene-payload.terrains 1) (. (. scene-payload.terrains 1) :id))
+                   "terrain-a")
+                "apply-theme should rebuild the scene with the persisted terrain id")
+        (assert (not (= (. scene-payload.terrains 1) terrain-record))
+                "apply-theme should clone persisted terrain records before handing them to the scene rebuild"))))
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (when (not ok)
+    (error err))
+  true)
+
+(fn apply-theme-requires-active-world-terrain-state []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  (set app.scene {:build-default (fn [_self _payload] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                     :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (set app.active-world-entry {:world {:state {:scene {}}}})
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light))))
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (assert (not ok)
+          "apply-theme should fail loudly when active world terrain state is missing")
+  (assert (and err (string.find err "ThemeActions.apply-theme requires active world scene terrains" 1 true))
+          "apply-theme should report that active world scene terrains are required")
+  true)
+
 (table.insert tests {:name "Init themes uses stored UI theme" :fn init-themes-reads-settings})
 (table.insert tests {:name "Init themes falls back for unknown stored UI theme"
                      :fn init-themes-falls-back-for-unknown-stored-theme})
@@ -323,6 +429,10 @@
                      :fn apply-theme-saves-exact-theme-key})
 (table.insert tests {:name "Apply theme refreshes physics containment visualization"
                      :fn apply-theme-refreshes-physics-containment-visualization})
+(table.insert tests {:name "Apply theme preserves active world terrains"
+                     :fn apply-theme-preserves-active-world-terrains})
+(table.insert tests {:name "Apply theme requires active world terrain state"
+                     :fn apply-theme-requires-active-world-terrain-state})
 
 (local main
   (fn []

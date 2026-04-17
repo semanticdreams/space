@@ -85,6 +85,24 @@
     (scene:set-skybox-state
       (SkyboxState.resolve-for-theme skybox-policy theme-name))))
 
+(fn require-active-world-scene-state []
+  (local entry (and app app.active-world-entry))
+  (if (= entry nil)
+      nil
+      (do
+        (assert entry.world "ThemeActions.apply-theme requires active-world-entry.world")
+        (assert entry.world.state "ThemeActions.apply-theme requires active world state")
+        (assert entry.world.state.scene "ThemeActions.apply-theme requires active world scene state")
+        (assert (= (type entry.world.state.scene.terrains) :table)
+                "ThemeActions.apply-theme requires active world scene terrains")
+        entry.world.state.scene)))
+
+(fn active-world-scene-build-payload []
+  (local scene-state (require-active-world-scene-state))
+  (if (= scene-state nil)
+      nil
+      {:terrains (PanelUtils.clone-table scene-state.terrains)}))
+
 (fn apply-theme [theme-name]
   (local previous-selected
     (and app.graph-view app.graph-view.selection
@@ -100,7 +118,7 @@
                             {:save? false})
     (app.settings.save))
   (when (and app.scene app.scene.build-default)
-    (app.scene:build-default))
+    (app.scene:build-default (active-world-scene-build-payload)))
   (if app.apply-active-world-hud-contrib
       (app.apply-active-world-hud-contrib)
       (when (and app.hud app.hud.build-default)
