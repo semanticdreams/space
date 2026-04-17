@@ -14,12 +14,34 @@
 
 (local tests [])
 
+(fn make-icons-stub []
+  (local glyph {:advance 1})
+  (local font {:metadata {:metrics {:ascender 1 :descender -1}
+                          :atlas {:width 1 :height 1}}
+               :glyph-map {4242 glyph}})
+  (local stub {:font font
+               :codepoints {:account_tree 4242
+                            :draw 4242}})
+  (set stub.get
+       (fn [self name]
+         (local value (. self.codepoints name))
+         (assert value (.. "Missing icon " name))
+         value))
+  (set stub.resolve
+       (fn [self name]
+         (local code (self:get name))
+         {:type :font
+          :codepoint code
+          :font self.font}))
+  stub)
+
 (fn make-ctx []
-    (BuildContext {:theme (and app.themes app.themes.get-active-theme (app.themes.get-active-theme))
-                   :clickables app.clickables
-                   :hoverables app.hoverables
-                   :system-cursors app.system-cursors
-                   :states app.states}))
+  (BuildContext {:theme (and app.themes app.themes.get-active-theme (app.themes.get-active-theme))
+                 :clickables app.clickables
+                 :hoverables app.hoverables
+                 :system-cursors app.system-cursors
+                 :icons (make-icons-stub)
+                 :states app.states}))
 
 (fn codepoints->text [codepoints]
   (local parts [])
@@ -60,6 +82,15 @@
       (local text (codepoints->text (obj.text:get-codepoints)))
       (when (= text target)
         (set resolved obj))))
+  resolved)
+
+(fn find-clickable-button-by-icon [target]
+  (var resolved nil)
+  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+    (when (and (not resolved)
+               obj
+               (= obj.icon target))
+      (set resolved obj)))
   resolved)
 
 (fn find-text-input []
@@ -183,6 +214,10 @@
       (local draw-button-layout (. rail-flex-layout.children 2))
       (assert graph-button-layout "drawing sidebar feature rail should create a graph button")
       (assert draw-button-layout "drawing sidebar feature rail should create a draw button")
+      (assert (find-clickable-button-by-icon "account_tree")
+              "drawing sidebar feature rail should expose an account_tree graph button")
+      (assert (find-clickable-button-by-icon "draw")
+              "drawing sidebar feature rail should expose a draw icon button")
       (assert (MathUtils.approx graph-button-layout.size.x rail-flex-layout.size.x)
               "drawing sidebar graph button should fill the feature rail width")
       (assert (MathUtils.approx draw-button-layout.size.x rail-flex-layout.size.x)
@@ -336,7 +371,7 @@
       (themes.set-theme :dark)
       (local dark-sidebar ((DrawingSidebarView {:controller (DrawingController {})}) (make-ctx)))
       (dark-sidebar.layout:measurer)
-      (local dark-draw (find-clickable-button "Draw"))
+      (local dark-draw (find-clickable-button-by-icon "draw"))
       (local dark-select (find-clickable-button "Select"))
       (local dark-primary-colors (themes.get-button-colors :primary))
       (local dark-primary (. dark-primary-colors :background))
@@ -351,7 +386,7 @@
       (themes.set-theme :light)
       (local light-sidebar ((DrawingSidebarView {:controller (DrawingController {})}) (make-ctx)))
       (light-sidebar.layout:measurer)
-      (local light-draw (find-clickable-button "Draw"))
+      (local light-draw (find-clickable-button-by-icon "draw"))
       (local light-select (find-clickable-button "Select"))
       (local light-primary-colors (themes.get-button-colors :primary))
       (local light-primary (. light-primary-colors :background))

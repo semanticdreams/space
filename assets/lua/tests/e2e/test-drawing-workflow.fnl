@@ -49,6 +49,15 @@
       (set resolved obj)))
   resolved)
 
+(fn find-clickable-by-icon [icon]
+  (var resolved nil)
+  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
+    (when (and (not resolved)
+               obj
+               (= obj.icon icon))
+      (set resolved obj)))
+  resolved)
+
 (fn find-text-input []
   (var resolved nil)
   (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
@@ -137,6 +146,13 @@
   (refresh-world env)
   (local button (assert (find-clickable-by-label label)
                         (.. "drawing workflow e2e missing button: " label)))
+  (click-at env (layout-screen-point app.hud button.layout))
+  button)
+
+(fn click-button-icon [env icon]
+  (refresh-world env)
+  (local button (assert (find-clickable-by-icon icon)
+                        (.. "drawing workflow e2e missing button icon: " icon)))
   (click-at env (layout-screen-point app.hud button.layout))
   button)
 
@@ -309,7 +325,7 @@
       (assert (= app.active-canvas-feature "graph")
               "drawing workflow e2e should start in graph mode")
       (env.set-stage "click draw")
-      (click-button env "Draw")
+      (click-button-icon env "draw")
       (env.set-stage "assert drawing mode")
       (assert (= app.active-canvas-feature "drawing")
               "drawing workflow e2e should enter drawing mode")
@@ -329,12 +345,12 @@
       (assert (> (or (triangle-vector-length) 0) 0)
               "drawing workflow e2e should populate the canvas triangle vector")
       (env.set-stage "click graph")
-      (click-button env "Graph")
+      (click-button-icon env "account_tree")
       (env.set-stage "assert graph mode")
       (assert (= app.active-canvas-feature "graph")
               "drawing workflow e2e should switch back to graph mode")
       (env.set-stage "click draw again")
-      (click-button env "Draw")
+      (click-button-icon env "draw")
       (env.set-stage "assert drawing mode again")
       (assert (= app.active-canvas-feature "drawing")
               "drawing workflow e2e should switch back to drawing mode")

@@ -56,10 +56,27 @@
                                :child content-builder})]}))
 
 (fn tool-button [label active? on-click]
-  (action-button label {:on-click (fn [button event]
-                                    (when (not active?)
-                                      (on-click button event)))
-                        :variant (if active? :primary :secondary)}))
+  (assert on-click "tool-button requires on-click")
+  (local button-opts {:padding [0.4 0.25]
+                      :focusable? false
+                      :text label
+                      :on-click (fn [button event]
+                                  (when (not active?)
+                                    (on-click button event)))
+                      :variant (if active? :primary :secondary)})
+  (Button button-opts))
+
+(fn feature-button [icon name label active? on-click]
+  (assert on-click "feature-button requires on-click")
+  (Button {:padding [0.4 0.25]
+           :focusable? false
+           :icon icon
+           :name name
+           :focus-name label
+           :on-click (fn [button event]
+                       (when (not active?)
+                         (on-click button event)))
+           :variant (if active? :primary :secondary)}))
 
 (fn state-button [label active? on-click]
   (action-button label {:on-click on-click
@@ -380,20 +397,24 @@
                   :spacing 0.25
                   :children [(FlexChild
                                (fn [child-ctx]
-                                 ((tool-button "Graph"
-                                               (= app.active-canvas-feature "graph")
-                                               (fn [_button _event]
-                                                 (when app.set-active-canvas-feature
-                                                   (app.set-active-canvas-feature "graph"))))
+                                 ((feature-button "account_tree"
+                                                  "graph-canvas-feature"
+                                                  "Graph"
+                                                  (= app.active-canvas-feature "graph")
+                                                  (fn [_button _event]
+                                                    (when app.set-active-canvas-feature
+                                                      (app.set-active-canvas-feature "graph"))))
                                   child-ctx))
                                0)
                              (FlexChild
                               (fn [child-ctx]
-                                ((tool-button "Draw"
-                                               (= app.active-canvas-feature "drawing")
-                                               (fn [_button _event]
-                                                 (when app.set-active-canvas-feature
-                                                   (app.set-active-canvas-feature "drawing"))))
+                                ((feature-button "draw"
+                                                 "drawing-canvas-feature"
+                                                 "Draw"
+                                                 (= app.active-canvas-feature "drawing")
+                                                 (fn [_button _event]
+                                                   (when app.set-active-canvas-feature
+                                                     (app.set-active-canvas-feature "drawing"))))
                                   child-ctx))
                                0)]})
            inner-ctx))
