@@ -1,33 +1,10 @@
 (local glm (require :glm))
 (local Signal (require :signal))
 (local RawRectangle (require :raw-rectangle))
-(local viewport-utils (require :viewport-utils))
-
-(fn default-unproject [point depth opts]
-    (local options (or opts {}))
-    (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
-    (local view (or options.view
-                    (and app.scene app.scene.get-view-matrix
-                         (app.scene:get-view-matrix))
-                    (and app.camera app.camera.get-view-matrix
-                         (app.camera:get-view-matrix))))
-    (local projection (or options.projection app.projection))
-    (when (and glm glm.unproject view projection)
-        (local inverted-y (- (+ viewport.height viewport.y) point.y))
-        (local viewport-vec (viewport-utils.to-glm-vec4 viewport))
-        (glm.unproject (glm.vec3 point.x inverted-y depth) view projection viewport-vec)))
-
-(fn clamp-rectangle [a b]
-    (local min-x (math.min a.x b.x))
-    (local max-x (math.max a.x b.x))
-    (local min-y (math.min a.y b.y))
-    (local max-y (math.max a.y b.y))
-    [{:x min-x :y min-y} {:x max-x :y max-y}])
 
 (fn BoxSelector [opts]
     (local options (or opts {}))
     (local ctx options.ctx)
-    (local unproject (or options.unproject default-unproject))
     (local rectangle-builder
       (or options.rectangle-builder
           (and ctx
@@ -35,10 +12,6 @@
                               :position (glm.vec3 0 0 0)
                               :size (glm.vec2 0 0)}))))
     (local hud (or options.hud (and ctx ctx.pointer-target)))
-    (local rectangle-depth-offset-index
-      (if (not (= options.depth-offset-index nil))
-          options.depth-offset-index
-          1000))
     (local changed (Signal))
     (local exited (Signal))
     (var rectangle nil)
@@ -46,13 +19,39 @@
     (var start-pos nil)
     (var end-pos nil)
 
+    (fn resolve-pointer-target []
+        (local pointer-target (or hud (and ctx ctx.pointer-target)))
+        (assert pointer-target "BoxSelector requires a pointer target")
+        (assert pointer-target.screen-pos-ray
+                "BoxSelector requires pointer target with screen-pos-ray")
+        pointer-target)
+
+    (fn world-point-from-ray [point]
+        (local pointer-target (resolve-pointer-target))
+        (local ray-opts {})
+        (when options.viewport
+            (set ray-opts.viewport options.viewport))
+        (when options.view
+            (set ray-opts.view options.view))
+        (when options.projection
+            (set ray-opts.projection options.projection))
+        (local ray (pointer-target:screen-pos-ray point ray-opts))
+        (assert (and ray ray.origin ray.direction)
+                "BoxSelector pointer target returned invalid ray")
+        (local dz (or ray.direction.z 0))
+        (assert (not (= dz 0))
+                "BoxSelector pointer target ray is parallel to selection plane")
+        (let [plane-z (or options.plane-z 0)
+              t (/ (- plane-z ray.origin.z) dz)]
+            (+ ray.origin (* ray.direction t))))
+
     (fn create-rectangle []
         (when (and (not rectangle) rectangle-builder ctx)
             (set rectangle (if (= (type rectangle-builder) :function)
                                (rectangle-builder ctx)
                                rectangle-builder))
-            (when (not (= rectangle.depth-offset-index nil))
-                (set rectangle.depth-offset-index rectangle-depth-offset-index))
+            (when (not (= options.depth-offset-index nil))
+                (set rectangle.depth-offset-index options.depth-offset-index))
             (rectangle:set-visible false)))
 
     (fn drop-rectangle []
@@ -62,18 +61,8 @@
 
     (fn update-rectangle []
         (when (and rectangle start-pos end-pos)
-            (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
-            (local units (and hud hud.world-units-per-pixel))
-            (fn to-hud [point]
-              (if (and units viewport)
-                  (let [px (- (or point.x 0) viewport.x)
-                        py (- (or point.y 0) viewport.y)
-                        centered-x (- px (/ viewport.width 2))
-                        centered-y (- (/ viewport.height 2) py)]
-                    (glm.vec2 (* centered-x units) (* centered-y units)))
-                  (glm.vec2 (or point.x 0) (or point.y 0))))
-            (local a (to-hud start-pos))
-            (local b (to-hud end-pos))
+            (local a (world-point-from-ray start-pos))
+            (local b (world-point-from-ray end-pos))
             (let [min-x (math.min a.x b.x)
                   max-x (math.max a.x b.x)
                   min-y (math.min a.y b.y)
@@ -81,7 +70,7 @@
                   width (- max-x min-x)
                   height (- max-y min-y)]
                 (set rectangle.rotation (glm.quat 1 0 0 0))
-                (set rectangle.position (glm.vec3 min-x min-y 0))
+                (set rectangle.position (glm.vec3 min-x min-y (or a.z 0)))
                 (set rectangle.size (glm.vec2 width height)))
             (rectangle:set-visible true)
             (rectangle:update)))

@@ -70,8 +70,12 @@
     (local provided-box (or options.box_selector
                             (rawget options "box-selector")
                             (BoxSelector {:ctx options.ctx
-                                          :unproject options.unproject
-                                          :color options.color})))
+                                          :color options.color
+                                          :depth-offset-index options.depth-offset-index
+                                          :plane-z options.plane-z
+                                          :viewport options.viewport
+                                          :view options.view
+                                          :projection options.projection})))
     (local box (if (= (type provided-box) :function)
                    (provided-box)
                    provided-box))

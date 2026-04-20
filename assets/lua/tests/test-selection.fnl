@@ -160,13 +160,12 @@
     (assert (= fp-state.updates 1) "First-person controls should continue updating while selection is enabled"))
 
 (fn box-selector-renders-in-hud-space []
-    (local depth 0.5)
-    (local hud {:world-units-per-pixel 1
-                :half-width 5
-                :half-height 5})
+    (local hud {:screen-pos-ray (fn [_self point _opts]
+                                  {:origin (glm.vec3 (- (or point.x 0) 5)
+                                                     (- 5 (or point.y 0))
+                                                     10)
+                                   :direction (glm.vec3 0 0 -1)})})
     (local viewport {:x 0 :y 0 :width 10 :height 10})
-    (local camera {:position (glm.vec3 1 2 3)
-                   :rotation (glm.quat (/ math.pi 2) (glm.vec3 0 1 0))})
     (var captured-rectangle nil)
     (local rectangle-builder
       (fn [_ctx]
@@ -179,14 +178,8 @@
                                  :update (fn [_self] nil)
                                  :drop (fn [_self] nil)})
         captured-rectangle))
-    (local unproject
-      (fn [point _depth _opts]
-        (+ camera.position
-           (camera.rotation:rotate (glm.vec3 point.x point.y depth)))))
     (local selector
       (BoxSelector {:ctx (make-ui-context)
-                    :camera camera
-                    :unproject unproject
                     :hud hud
                     :viewport viewport
                     :rectangle-builder rectangle-builder}))
@@ -194,7 +187,6 @@
     (selector:on-mouse-button {:button 1 :state true :x 0 :y 0})
     (selector:on-mouse-motion {:x 2 :y 1})
     (assert captured-rectangle "Selection rectangle should be created")
-    (local epsilon 0.0001)
 (local approx (. MathUtils :approx))
     (assert (approx captured-rectangle.rotation.w 1.0)
             "Selection rectangle should not inherit camera rotation")
@@ -213,7 +205,7 @@
             "Selection rectangle height should match screen delta")
     (selector:drop))
 
-(fn selection-box-uses-high-depth-offset []
+(fn selection-box-respects-configured-depth-offset []
     (var captured-rectangle nil)
     (local rectangle-builder
       (fn [_ctx]
@@ -229,15 +221,110 @@
         captured-rectangle))
     (local selector
       (BoxSelector {:ctx (make-ui-context)
-                    :unproject (fn [point _depth _opts] (glm.vec3 point.x point.y 0))
+                    :depth-offset-index 1000
+                    :hud {:screen-pos-ray (fn [_self point _opts]
+                                            {:origin (glm.vec3 (or point.x 0)
+                                                               (or point.y 0)
+                                                               10)
+                                             :direction (glm.vec3 0 0 -1)})}
                     :rectangle-builder rectangle-builder}))
     (assert (= (type selector) :table) "BoxSelector should return a selector table")
     (selector:on-mouse-button {:button 1 :state true :x 0 :y 0})
     (selector:on-mouse-motion {:x 1 :y 1})
     (assert captured-rectangle "Selection rectangle should be created")
-    (assert (>= captured-rectangle.depth-offset-index 1000)
-            "Selection rectangle should render above HUD via depth offset")
+    (assert (= captured-rectangle.depth-offset-index 1000)
+            "Selection rectangle should honor configured depth offset")
     (selector:drop))
+
+(fn selection-box-preserves-builder-depth-offset-by-default []
+    (var captured-rectangle nil)
+    (local rectangle-builder
+      (fn [_ctx]
+        (set captured-rectangle {:position (glm.vec3 0 0 0)
+                                 :size (glm.vec2 0 0)
+                                 :rotation (glm.quat 1 0 0 0)
+                                 :depth-offset-index 7
+                                 :visible? true
+                                 :set-visible (fn [self visible?]
+                                                (set self.visible? (not (not visible?))))
+                                 :update (fn [_self] nil)
+                                 :drop (fn [_self] nil)})
+        captured-rectangle))
+    (local selector
+      (BoxSelector {:ctx (make-ui-context)
+                    :hud {:screen-pos-ray (fn [_self point _opts]
+                                            {:origin (glm.vec3 (or point.x 0)
+                                                               (or point.y 0)
+                                                               10)
+                                             :direction (glm.vec3 0 0 -1)})}
+                    :rectangle-builder rectangle-builder}))
+    (selector:on-mouse-button {:button 1 :state true :x 0 :y 0})
+    (selector:on-mouse-motion {:x 1 :y 1})
+    (assert captured-rectangle "Selection rectangle should be created")
+    (assert (= captured-rectangle.depth-offset-index 7)
+            "Selection rectangle should preserve builder-owned depth offset by default")
+    (selector:drop))
+
+(fn box-selector-follows-pointer-target-world-transform []
+    (var captured-rectangle nil)
+    (local rectangle-builder
+      (fn [_ctx]
+        (set captured-rectangle {:position (glm.vec3 0 0 0)
+                                 :size (glm.vec2 0 0)
+                                 :rotation (glm.quat 1 0 0 0)
+                                 :visible? true
+                                 :set-visible (fn [self visible?]
+                                                (set self.visible? (not (not visible?))))
+                                 :update (fn [_self] nil)
+                                 :drop (fn [_self] nil)})
+        captured-rectangle))
+    (local target
+      {:world-units-per-pixel 1
+       :screen-pos-ray (fn [_self point _opts]
+                         {:origin (glm.vec3 (+ 100 (or point.x 0))
+                                            (+ 200 (or point.y 0))
+                                            10)
+                          :direction (glm.vec3 0 0 -1)})})
+    (local selector
+      (BoxSelector {:ctx (make-ui-context)
+                    :hud target
+                    :rectangle-builder rectangle-builder}))
+    (selector:on-mouse-button {:button 1 :state true :x 2 :y 3})
+    (selector:on-mouse-motion {:x 5 :y 7})
+    (assert captured-rectangle "Selection rectangle should be created")
+    (assert (= captured-rectangle.position.x 102)
+            "Selection rectangle x should follow pointer-target world transform")
+    (assert (= captured-rectangle.position.y 203)
+            "Selection rectangle y should follow pointer-target world transform")
+    (assert (= captured-rectangle.position.z 0)
+            "Selection rectangle z should land on the overlay plane")
+    (assert (= captured-rectangle.size.x 3)
+            "Selection rectangle width should reflect world-space drag delta")
+    (assert (= captured-rectangle.size.y 4)
+            "Selection rectangle height should reflect world-space drag delta")
+    (selector:drop))
+
+(fn box-selector-asserts-without-ray-support []
+    (local (ok err)
+      (pcall
+        (fn []
+          (local selector
+            (BoxSelector {:ctx (make-ui-context)
+                          :hud {}
+                          :rectangle-builder (fn [_ctx]
+                                               {:position (glm.vec3 0 0 0)
+                                                :size (glm.vec2 0 0)
+                                                :rotation (glm.quat 1 0 0 0)
+                                                :visible? true
+                                                :set-visible (fn [self visible?]
+                                                               (set self.visible? (not (not visible?))))
+                                                :update (fn [_self] nil)
+                                                :drop (fn [_self] nil)})}))
+          (selector:on-mouse-button {:button 1 :state true :x 0 :y 0}))))
+    (assert (not ok) "BoxSelector should fail loudly without ray support")
+    (assert (and (= (type err) :string)
+                 (string.find err "screen-pos-ray" 1 true))
+            "BoxSelector should explain missing screen-pos-ray support"))
 
 (fn selection-can-span-scene-and-hud []
     (local selector
@@ -347,7 +434,14 @@
 (table.insert tests {:name "ObjectSelector projects to screen bounds" :fn object-selector-selects-by-projecting})
 (table.insert tests {:name "Selection only blocks conflicting first-person input" :fn selection-input-prefers-selection-only-for-primary-button})
 (table.insert tests {:name "Selection box renders in HUD space" :fn box-selector-renders-in-hud-space})
-(table.insert tests {:name "Selection box renders above HUD" :fn selection-box-uses-high-depth-offset})
+(table.insert tests {:name "Selection box respects configured depth offset"
+                     :fn selection-box-respects-configured-depth-offset})
+(table.insert tests {:name "Selection box preserves builder depth offset by default"
+                     :fn selection-box-preserves-builder-depth-offset-by-default})
+(table.insert tests {:name "Selection box follows pointer target world transform"
+                     :fn box-selector-follows-pointer-target-world-transform})
+(table.insert tests {:name "Selection box asserts without ray support"
+                     :fn box-selector-asserts-without-ray-support})
 (table.insert tests {:name "Selection can span scene and HUD objects" :fn selection-can-span-scene-and-hud})
 (table.insert tests {:name "GraphView selects start node when inside selection box" :fn graph-selects-start-node-inside-box})
 (table.insert tests {:name "GraphView ignores start node outside selection box" :fn graph-ignores-start-node-outside-box})
