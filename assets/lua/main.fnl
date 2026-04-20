@@ -866,6 +866,9 @@
             options.sync-canvas-visibility)
     (set app.canvas-visible? (and app.canvas
                                   (= app.preferred-interaction-surface :canvas))))
+  (when app.active-world-runtime
+    (set app.active-world-runtime.preferred-interaction-surface
+         app.preferred-interaction-surface))
   (sync-interaction-surface-state "interaction-surface" previous))
 
 (fn app.set-active-canvas-feature [feature]
@@ -950,8 +953,9 @@
   (when (and runtime runtime.restore-surface-state)
     (runtime:restore-surface-state app.canvas app.hud))
   (app.set-active-canvas-feature (and runtime runtime.active-canvas-feature))
-  (app.set-active-interaction-surface app.preferred-interaction-surface
-                                      {:sync-canvas-visibility false}))
+  (app.set-active-interaction-surface (or (and runtime runtime.preferred-interaction-surface)
+                                          app.preferred-interaction-surface)
+                                      {:sync-canvas-visibility true}))
 
 (local installable-reset-projection app.reset-projection)
 (local installable-mark-active-world-hud-dirty app.mark-active-world-hud-dirty)
@@ -1497,4 +1501,5 @@
   (app.engine:shutdown))
 
 {:install-app-shell! install-app-shell!
- :bind-active-world-runtime installable-bind-active-world-runtime}
+ :bind-active-world-runtime installable-bind-active-world-runtime
+ :drop-app! app.drop}

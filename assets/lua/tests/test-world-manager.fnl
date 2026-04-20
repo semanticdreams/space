@@ -507,6 +507,33 @@
               "World deactivate should queue hud panel state for restore")
       true)))
 
+(fn home-world-deactivate-persists-preferred-interaction-surface []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:camera {:position [0 0 0]
+                     :rotation [1 0 0 0]}
+            :preferred-interaction-surface :canvas
+            :active-canvas-feature "drawing"
+            :canvas {:capture-state (fn [_self]
+                                      {:panels []})}})
+      (world:deactivate {:canvas {:capture-state (fn [_self]
+                                                   {:panels []})}}
+                        "switch")
+      (local canvas-state (and world.state world.state.canvas))
+      (assert (= canvas-state.preferred_interaction_surface "canvas")
+              "World deactivate should persist preferred interaction surface")
+      (assert (= canvas-state.active_feature "drawing")
+              "World deactivate should keep active canvas feature alongside interaction surface")
+      true)))
+
 (fn home-world-new-state-seeds-default-terrain []
   (with-temp-dir
     (fn [root]
@@ -1440,6 +1467,8 @@
                      :fn home-world-captures-runtime-containment-on-drop})
 (table.insert tests {:name "HomeWorld deactivate queues canvas and hud restore state"
                      :fn home-world-deactivate-queues-canvas-and-hud-restore-state})
+(table.insert tests {:name "HomeWorld deactivate persists preferred interaction surface"
+                     :fn home-world-deactivate-persists-preferred-interaction-surface})
 (table.insert tests {:name "HomeWorld new state seeds default terrain"
                      :fn home-world-new-state-seeds-default-terrain})
 (table.insert tests {:name "HomeWorld new state seeds default lights"

@@ -62,12 +62,38 @@
             (set (. out k) (clone-table v))))
         out)))
 
+(fn resolve-runtime-interaction-surface [surface]
+  (if (or (= surface :canvas)
+          (= surface "canvas"))
+      :canvas
+      :scene))
+
+(fn encode-interaction-surface [surface]
+  (if (= (resolve-runtime-interaction-surface surface) :canvas)
+      "canvas"
+      "scene"))
+
+(fn capture-canvas-shell-state [world runtime canvas-state]
+  (local existing-canvas-state (or (and world.state world.state.canvas) {}))
+  (local captured (or canvas-state {}))
+  (set captured.active_feature
+       (or (and runtime runtime.active-canvas-feature)
+           existing-canvas-state.active_feature
+           "graph"))
+  (set captured.preferred_interaction_surface
+       (encode-interaction-surface
+         (or (and runtime runtime.preferred-interaction-surface)
+             existing-canvas-state.preferred_interaction_surface
+             "scene")))
+  captured)
+
 (fn base-default-state []
   {:camera {:position [0 0 30]
             :rotation [1 0 0 0]}
    :canvas {:camera {:position [0 0 100]}
             :scale_factor 1.0
             :active_feature "graph"
+            :preferred_interaction_surface "scene"
             :panels []}
    :drawing (DrawingDocument.default-state)
    :physics {:containment default-containment-config}
@@ -308,6 +334,10 @@
                                   world.id))
           (set world.state (default-state))
           (set world.state.scene.terrains (TerrainRecords.default-records))))
+    (local canvas-state (or (and world.state world.state.canvas) {}))
+    (set canvas-state.preferred_interaction_surface
+         (encode-interaction-surface canvas-state.preferred_interaction_surface))
+    (set world.state.canvas canvas-state)
     (local camera-state (or (and world.state world.state.camera) {}))
     (local raw-position camera-state.position)
     (local (ok parsed-position) (pcall array->vec3 raw-position))
@@ -579,13 +609,12 @@
                      "HomeWorld.capture-runtime-state requires persisted scene skybox policy")
              "HomeWorld.capture-runtime-state persisted skybox"))
       (set world.state.scene captured-scene))
-    (when (and canvas canvas.capture-state)
-      (do
-        (set world.state.canvas (canvas:capture-state))
-        (set world.state.canvas.active_feature
-             (or (and runtime runtime.active-canvas-feature)
-                 (and world.state world.state.canvas world.state.canvas.active_feature)
-                 "graph"))))
+    (local canvas-state
+      (if (and canvas canvas.capture-state)
+          (canvas:capture-state)
+          (and world.state world.state.canvas)))
+    (when canvas-state
+      (set world.state.canvas (capture-canvas-shell-state world runtime canvas-state)))
     (when (and runtime runtime.drawing-controller)
       (set world.state.drawing
            (runtime.drawing-controller:snapshot)))
@@ -735,6 +764,8 @@
        :drawing-controller drawing-controller
        :drawing-render drawing-render
        :active-canvas-feature (or canvas-state.active_feature "graph")
+       :preferred-interaction-surface
+       (resolve-runtime-interaction-surface canvas-state.preferred_interaction_surface)
        :pending-canvas-state (clone-table world.state.canvas)
        :pending-hud-state (clone-table world.state.hud)
        :hydration {:phase "scene-panels"
