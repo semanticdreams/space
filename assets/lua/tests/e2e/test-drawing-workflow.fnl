@@ -6,10 +6,6 @@
 (local HomeWorld (require :home-world))
 (local Signal (require :signal))
 
-(local CTRL-MOD 64)
-(local KEY_DELETE 127)
-(local KEY_Z_LOWER (string.byte "z"))
-
 (var temp-counter 0)
 (var click-timestamp 0)
 (local temp-root "/tmp/space/tests/e2e/drawing-workflow")
@@ -55,16 +51,6 @@
     (when (and (not resolved)
                obj
                (= obj.icon icon))
-      (set resolved obj)))
-  resolved)
-
-(fn find-text-input []
-  (var resolved nil)
-  (each [_ obj (ipairs (or (and app.clickables app.clickables.left-click-objects) []))]
-    (when (and (not resolved)
-               obj
-               obj.get-text
-               obj.set-text)
       (set resolved obj)))
   resolved)
 
@@ -156,27 +142,6 @@
   (click-at env (layout-screen-point app.hud button.layout))
   button)
 
-(fn focus-rename-input [env]
-  (refresh-world env)
-  (local input (assert (find-text-input)
-                       "drawing workflow e2e missing rename input"))
-  (click-at env (layout-screen-point app.hud input.layout))
-  (local focused-input (assert (find-text-input)
-                               "drawing workflow e2e lost rename input after focus"))
-  (assert focused-input.focused? "drawing workflow e2e expected focused rename input")
-  focused-input)
-
-(fn send-key-down [env key mod]
-  (local state (active-state))
-  (state.on-key-down {:key key
-                      :mod (or mod 0)})
-  (refresh-world env))
-
-(fn blur-input [env]
-  (when (and app.focus app.focus.clear-focus)
-    (app.focus:clear-focus))
-  (refresh-world env))
-
 (fn drag-on-canvas [env start finish]
   (local state (active-state))
   (local start-point (canvas-screen-point start))
@@ -207,6 +172,49 @@
          app.canvas.build-context
          (. app.canvas.build-context :triangle-vector)))
   (and vector (vector:length)))
+
+(fn raster-tile-count []
+  (local layer (active-layer))
+  (if (and layer (= layer.kind "raster"))
+      (do
+        (local raster-runtime (app.drawing-controller:ensure-raster-runtime layer))
+        (local runtime raster-runtime.runtime)
+        (var count 0)
+        (each [_ _tile (pairs runtime.tiles)]
+          (set count (+ count 1)))
+        count)
+      0))
+
+(fn image-batch-vertex-count []
+  (local batches
+    (and app.canvas
+         app.canvas.build-context
+         (. app.canvas.build-context :image-batches)))
+  (var count 0)
+  (each [_ batch (pairs (or batches {}))]
+    (when (and batch batch.vector batch.vector.length)
+      (set count (+ count (batch.vector:length)))))
+  count)
+
+(fn graph-node-sort-key [node]
+  (tostring (or (and node node.key)
+               (and node node.id)
+               "")))
+
+(fn stabilize-graph-view-for-snapshot []
+  (local graph-view app.graph-view)
+  (when (and graph-view graph-view.nodes graph-view.graph-layout)
+    (local nodes [])
+    (each [_key node (pairs graph-view.nodes)]
+      (table.insert nodes node))
+    (table.sort nodes
+                (fn [left right]
+                  (< (graph-node-sort-key left)
+                     (graph-node-sort-key right))))
+    (each [idx node (ipairs nodes)]
+      (graph-view.graph-layout:set-node-position
+        node
+        (glm.vec3 (+ -500 (* idx 10)) 500 0)))))
 
 (fn install-next-frame-stub []
   (var pending [])
@@ -332,7 +340,7 @@
       (env.set-stage "click rect")
       (click-button env "Rect")
       (env.set-stage "assert rect tool")
-      (assert (= app.drawing-controller.state.ui.active_tool "rectangle")
+      (assert (= (app.drawing-controller:active-tool) "rectangle")
               "drawing workflow e2e should switch to rectangle tool")
       (env.set-stage "drag rectangle")
       (drag-on-canvas env
@@ -357,27 +365,91 @@
       (env.set-stage "click select")
       (click-button env "Select")
       (env.set-stage "assert select tool")
-      (assert (= app.drawing-controller.state.ui.active_tool "select")
+      (assert (= (app.drawing-controller:active-tool) "select")
               "drawing workflow e2e should switch to select tool")
       (env.set-stage "select rectangle")
       (click-at env (canvas-screen-point (glm.vec3 0 0 0)))
       (env.set-stage "assert selection")
       (assert (= (app.drawing-controller:selection-count) 1)
               "drawing workflow e2e should select the drawn rectangle")
-      (env.set-stage "focus rename input")
-      (focus-rename-input env)
-      (env.set-stage "delete while input focused")
-      (send-key-down env KEY_DELETE)
-      (env.set-stage "ctrl-z while input focused")
-      (send-key-down env KEY_Z_LOWER CTRL-MOD)
-      (env.set-stage "assert object persistence")
-      (assert (= (object-count) 1)
-              "drawing workflow e2e should keep the rectangle while typing in rename input")
-      (env.set-stage "assert selection persistence")
+      (env.set-stage "add raster layer")
+      (click-button env "+ Raster")
+      (env.set-stage "assert raster layer active")
+      (assert (= (. (active-layer) :kind) "raster")
+              "drawing workflow e2e should activate the new raster layer")
+      (env.set-stage "assert raster tool memory")
+      (assert (= (app.drawing-controller:active-tool) "brush")
+              "drawing workflow e2e should auto-switch to the raster brush")
+      (env.set-stage "paint raster stroke")
+      (drag-on-canvas env
+                      (glm.vec3 14 12 0)
+                      (glm.vec3 22 4 0))
+      (env.set-stage "assert raster tiles")
+      (assert (> (raster-tile-count) 0)
+              "drawing workflow e2e should allocate raster tiles after painting")
+      (env.set-stage "assert raster image batch")
+      (assert (> (image-batch-vertex-count) 0)
+              "drawing workflow e2e should populate image batches for raster tiles")
+      (env.set-stage "disable shape fill")
+      (click-button env "Fill On")
+      (env.set-stage "assert fill disabled")
+      (assert (= (. (app.drawing-controller:current-defaults) :fill_enabled) false)
+              "drawing workflow e2e should disable raster shape fill")
+      (env.set-stage "draw raster outline rectangle")
+      (click-button env "Rect")
+      (drag-on-canvas env
+                      (glm.vec3 12 -14 0)
+                      (glm.vec3 28 2 0))
+      (env.set-stage "pick fill color")
+      (click-button env "Gold")
+      (env.set-stage "fill raster region")
+      (click-button env "Fill")
+      (click-at env (canvas-screen-point (glm.vec3 20 -6 0)))
+      (env.set-stage "sample fill color")
+      (click-button env "Dropper")
+      (click-at env (canvas-screen-point (glm.vec3 20 -6 0)))
+      (env.set-stage "assert eyedropper color")
+      (local sampled (. (app.drawing-controller:current-defaults) :stroke_color))
+      (assert (> (. sampled 4) 0.15)
+              (string.format "drawing workflow e2e eyedropper alpha too low: %.3f %.3f %.3f %.3f"
+                             (. sampled 1) (. sampled 2) (. sampled 3) (. sampled 4)))
+      (assert (> (. sampled 1) (. sampled 3))
+              (string.format "drawing workflow e2e eyedropper should sample a warm fill color: %.3f %.3f %.3f %.3f"
+                             (. sampled 1) (. sampled 2) (. sampled 3) (. sampled 4)))
+      (assert (> (. sampled 2) (. sampled 3))
+              (string.format "drawing workflow e2e eyedropper should keep green above blue for the filled region: %.3f %.3f %.3f %.3f"
+                             (. sampled 1) (. sampled 2) (. sampled 3) (. sampled 4)))
+      (env.set-stage "marquee raster selection")
+      (click-button env "Marquee")
+      (drag-on-canvas env
+                      (glm.vec3 10 -16 0)
+                      (glm.vec3 30 4 0))
+      (env.set-stage "assert raster selection")
       (assert (= (app.drawing-controller:selection-count) 1)
-              "drawing workflow e2e should keep selection while typing in rename input")
-      (env.set-stage "blur input")
-      (blur-input env)
+              "drawing workflow e2e should create a raster marquee selection")
+      (env.set-stage "move raster selection")
+      (click-button env "Move")
+      (drag-on-canvas env
+                      (glm.vec3 20 -6 0)
+                      (glm.vec3 30 4 0))
+      (env.set-stage "assert moved raster selection")
+      (assert (= (app.drawing-controller:selection-count) 1)
+              "drawing workflow e2e should keep the raster selection active after move")
+      (local moved-selection (app.drawing-controller:raster-selection))
+      (assert moved-selection
+              "drawing workflow e2e should retain raster selection metadata after move")
+      (assert (> moved-selection.bounds.left 10)
+              "drawing workflow e2e should move the raster selection to the right")
+      (env.set-stage "capture snapshot")
+      (stabilize-graph-view-for-snapshot)
+      (Harness.draw-targets ctx.width
+                            ctx.height
+                            [{:target app.canvas}
+                             {:target app.hud :clear-depth? true}])
+      (Harness.capture-snapshot {:name "drawing-workflow"
+                                 :width ctx.width
+                                 :height ctx.height
+                                 :tolerance 3})
       (env.set-stage "final update")
       (refresh-world env))))
 

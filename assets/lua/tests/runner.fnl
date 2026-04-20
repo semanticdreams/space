@@ -109,6 +109,19 @@
                   :ready true
                   :width 1
                   :height 1})
+      (set tex.allocate
+           (fn [_self width height _channels]
+             (set tex.width width)
+             (set tex.height height)
+             (set tex.ready true)))
+      (set tex.update-full
+           (fn [_self _bytes]
+             (set tex.ready true)))
+      (tset tex "update-full" tex.update-full)
+      (set tex.update-sub-rect
+           (fn [_self _x _y _width _height _bytes]
+             (set tex.ready true)))
+      (tset tex "update-sub-rect" tex.update-sub-rect)
       (set (. loaded name) tex)
       tex))
   (set textures.load-texture stub)
@@ -123,6 +136,12 @@
          (set tex.width width)
          (set tex.height height)
          tex))
+  (set textures.allocate-texture
+       (fn [name width height channels]
+         (local tex (stub name "<allocated>"))
+         (tex:allocate width height channels)
+         tex))
+  (tset textures "allocate-texture" textures.allocate-texture)
   (set textures.get-texture
        (fn [name]
          (or (. loaded name)
@@ -134,6 +153,7 @@
                (set (. loaded name) nil)
                true)
              false)))
+  (tset textures "drop-texture" textures.drop-texture)
   (when (not textures.load-cubemap)
     (local cube-stub (fn [_files] {:id 1 :ready true}))
     (set textures.load-cubemap cube-stub)
@@ -174,6 +194,12 @@
            (set tex.width width)
            (set tex.height height)
            tex))
+    (set textures.allocate-texture
+         (fn [name width height channels]
+           (local tex (stub name "<allocated>"))
+           (tex:allocate width height channels)
+           tex))
+    (tset textures "allocate-texture" textures.allocate-texture)
     (set textures.get-texture
          (fn [name]
            (or (. loaded name)
@@ -185,6 +211,7 @@
                  (set (. loaded name) nil)
                  true)
                false)))
+    (tset textures "drop-texture" textures.drop-texture)
     (when (not textures.load-cubemap)
       (set textures.load-cubemap (fn [_files] {:id 1}))
       (set textures.load-cubemap-async textures.load-cubemap)))

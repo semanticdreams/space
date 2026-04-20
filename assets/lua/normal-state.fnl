@@ -41,10 +41,10 @@
                        (= app.canvas-interactive? true)
                        (= app.active-canvas-feature "drawing")))
        :get-tool (fn []
-                   (and app.drawing-controller
-                        app.drawing-controller.state
-                        app.drawing-controller.state.ui
-                        app.drawing-controller.state.ui.active_tool))
+                   (assert (and app.drawing-controller
+                                app.drawing-controller.persistent-tool)
+                           "NormalState drawing pen override requires drawing-controller:persistent-tool")
+                   (app.drawing-controller:persistent-tool))
        :set-tool (fn [tool]
                    (assert (and app.drawing-controller app.drawing-controller.set-active-tool)
                            "NormalState drawing pen override requires drawing-controller:set-active-tool")
@@ -117,7 +117,8 @@
              (set-state :leader)
              true)
            (= key SDLK_RETURN)
-           (let [focus-manager app.focus]
+           (do
+             (local focus-manager app.focus)
              (if (and focus-manager focus-manager.activate-focused-from-payload)
                  (if (focus-manager:activate-focused-from-payload payload)
                      true

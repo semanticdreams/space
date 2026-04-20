@@ -434,10 +434,12 @@
   (set app.canvas-interactive? true)
   (set app.active-canvas-feature "drawing")
   (set app.drawing-controller
-       {:state {:ui {:active_tool "brush"}}
+       {:active-tool (fn [self] self.tool)
+        :persistent-tool (fn [self] self.tool)
+        :tool "brush"
         :set-active-tool (fn [self tool]
                            (table.insert tool-log tool)
-                           (set self.state.ui.active_tool tool))})
+                           (set self.tool tool))})
   (local state (NormalState))
   (state:on-enter)
   (state:on-pen-proximity-in {:pen-id 77
@@ -476,7 +478,7 @@
   (assert (= (# tool-log) 2))
   (assert (= (. tool-log 1) "eraser"))
   (assert (= (. tool-log 2) "brush"))
-  (assert (= app.drawing-controller.state.ui.active_tool "brush"))
+  (assert (= (app.drawing-controller:active-tool) "brush"))
   (state:on-leave)
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
@@ -1068,10 +1070,12 @@
   (set app.canvas-interactive? true)
   (set app.active-canvas-feature "drawing")
   (set app.drawing-controller
-       {:state {:ui {:active_tool "brush"}}
+       {:active-tool (fn [self] self.tool)
+        :persistent-tool (fn [self] self.tool)
+        :tool "brush"
         :set-active-tool (fn [self tool]
                            (table.insert tool-log tool)
-                           (set self.state.ui.active_tool tool))})
+                           (set self.tool tool))})
   (local state (NormalState))
   (state:on-enter)
   (state:on-pen-down {:pen-id 77
@@ -1098,7 +1102,7 @@
                     :timestamp 3
                     :in-range true
                     :eraser false})
-  (assert (= app.drawing-controller.state.ui.active_tool "eraser")
+  (assert (= (app.drawing-controller:active-tool) "eraser")
           "releasing one eraser pen should not restore brush while another eraser pen is still active")
   (state:on-pen-up {:pen-id 77
                     :x 10
@@ -1108,7 +1112,7 @@
                     :timestamp 4
                     :in-range true
                     :eraser false})
-  (assert (= app.drawing-controller.state.ui.active_tool "brush"))
+  (assert (= (app.drawing-controller:active-tool) "brush"))
   (assert (= (# tool-log) 2))
   (assert (= (. tool-log 1) "eraser"))
   (assert (= (. tool-log 2) "brush"))
@@ -1499,11 +1503,11 @@
   (set app.states {:set-state (fn [name]
                                   (table.insert transitions name))
                      :active-name (fn [] :text)})
-  (let [(ok result) (pcall (fn [] (body transitions)))]
-    (set app.states original)
-    (when (not ok)
-      (error result))
-    result))
+  (local (ok result) (pcall (fn [] (body transitions))))
+  (set app.states original)
+  (when (not ok)
+    (error result))
+  result)
 
 (fn normal-state-leader-enters-leader-state []
   (with-state-recorder
@@ -1655,20 +1659,20 @@
   (local original-quit app.engine.quit)
   (var quit-calls 0)
   (set app.engine.quit (fn [] (set quit-calls (+ quit-calls 1))))
-  (let [(ok err)
-        (pcall
-          (fn []
-            (with-state-recorder
-              (fn [transitions]
-                (local state (QuitState))
-                (state.on-key-down {:key KEY_Q})
-                (state.on-key-down {:key KEY_ESCAPE})
-                (assert (= quit-calls 1) "Quit state should invoke app.engine.quit on q")
-                (assert (= (# transitions) 1))
-                (assert (= (. transitions 1) :normal))))))]
-    (set app.engine.quit original-quit)
-    (when (not ok)
-      (error err))))
+  (local (ok err)
+         (pcall
+           (fn []
+             (with-state-recorder
+               (fn [transitions]
+                 (local state (QuitState))
+                 (state.on-key-down {:key KEY_Q})
+                 (state.on-key-down {:key KEY_ESCAPE})
+                 (assert (= quit-calls 1) "Quit state should invoke app.engine.quit on q")
+                 (assert (= (# transitions) 1))
+                 (assert (= (. transitions 1) :normal)))))))
+  (set app.engine.quit original-quit)
+  (when (not ok)
+    (error err)))
 
 (fn make-input-stub [opts]
   (local options (or opts {}))

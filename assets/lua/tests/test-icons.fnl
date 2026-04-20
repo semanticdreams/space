@@ -7,14 +7,15 @@
                                              :text {:scale 1.0}})
                  :get-color (fn [] [1 1 1 1])})
 
-;; Mock textures to avoid Engine/JobSystem dependency
-(tset package.loaded :textures 
+;; Mock textures while loading icon widgets, then restore the runner's binding.
+(local original-textures (. package.loaded :textures))
+(tset package.loaded :textures
       {:load-texture (fn [_name _path] {:width 512 :height 512 :id 1})
        :load-texture-async (fn [_name _path] {:width 512 :height 512 :id 1})})
-
 (local Icons (require :icons))
 (local Icon (require :icon-widget))
 (local Button (require :button))
+(tset package.loaded :textures original-textures)
 
 (fn test-icons-resolve []
   (local icons (Icons {:theme "Adwaita"}))

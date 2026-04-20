@@ -2,6 +2,8 @@
 
 This note defines the first clean drawing system for `space`.
 
+Raster follow-up work is documented separately in [Raster Drawing Implementation](/dev/notes/drawing-raster-implementation).
+
 Internally the system is called `drawing`. The user-facing canvas feature label can be `Draw`.
 
 ## Summary

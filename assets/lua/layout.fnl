@@ -62,11 +62,12 @@
 (fn point-within-bounds? [point bounds]
   (if (not bounds)
       true
-      (let [position (or bounds.position (glm.vec3 0 0 0))
-            rotation (or bounds.rotation (glm.quat 1 0 0 0))
-            size (or bounds.size (glm.vec3 0 0 0))
-            inverse (rotation:inverse)
-            local-point (inverse:rotate (- point position))]
+      (do
+        (local position (or bounds.position (glm.vec3 0 0 0)))
+        (local rotation (or bounds.rotation (glm.quat 1 0 0 0)))
+        (local size (or bounds.size (glm.vec3 0 0 0)))
+        (local inverse (rotation:inverse))
+        (local local-point (inverse:rotate (- point position)))
         (and (within-range local-point.x size.x)
              (within-range local-point.y size.y)
              (within-range local-point.z size.z)))))
@@ -118,13 +119,14 @@
   (local bounds (and clip clip.bounds))
   (if (not bounds)
       :inside
-      (let [corners (layout-world-corners layout)
-            clip-position (or bounds.position (glm.vec3 0 0 0))
-            clip-rotation (or bounds.rotation (glm.quat 1 0 0 0))
-            clip-size (or bounds.size (glm.vec3 0 0 0))
-            inverse (clip-rotation:inverse)
-            min-corner (glm.vec3 500000 500000 500000)
-            max-corner (glm.vec3 -500000 -500000 -500000)]
+      (do
+        (local corners (layout-world-corners layout))
+        (local clip-position (or bounds.position (glm.vec3 0 0 0)))
+        (local clip-rotation (or bounds.rotation (glm.quat 1 0 0 0)))
+        (local clip-size (or bounds.size (glm.vec3 0 0 0)))
+        (local inverse (clip-rotation:inverse))
+        (local min-corner (glm.vec3 500000 500000 500000))
+        (local max-corner (glm.vec3 -500000 -500000 -500000))
         (fn finite-number? [value]
           (and (= (type value) :number)
                (= value value)
@@ -235,7 +237,7 @@
 
   (fn run-measurer [self skip-dirt-clear?]
     (local root self.root)
-    (when (and root root.measure-dirt (not skip-dirt-clear?))
+    (when (and root root.measure-dirt (not skip-dirt-clear?) (not root.in-pass))
       (root.measure-dirt:remove self))
     (base-measurer self))
 
@@ -350,13 +352,13 @@
       (self.root.layout-dirt:remove self)))
 
   (fn intersect [self ray]
-    (let [(hit point distance)
-          (ray-box-intersection ray {:position self.position
-                                     :rotation self.rotation
-                                     :size self.size})]
-      (if (and hit (clip-allows-point? self.clip-region point))
-          (values true point distance)
-          (values false nil nil))))
+    (local (hit point distance)
+           (ray-box-intersection ray {:position self.position
+                                      :rotation self.rotation
+                                      :size self.size}))
+    (if (and hit (clip-allows-point? self.clip-region point))
+        (values true point distance)
+        (values false nil nil)))
 
   (local o {:name opts.name :root opts.root :parent opts.parent :children []
             :position opts.position :rotation opts.rotation
@@ -401,8 +403,8 @@
   (assert appdirs "appdirs module is required for layout logging")
   (local log-dir (appdirs.user-log-dir "space"))
   (local log-path (if (and app.engine fs.join-path)
-	                      (fs.join-path log-dir "dirt.log")
-	                      (.. log-dir "/dirt.log")))
+                      (fs.join-path log-dir "dirt.log")
+                      (.. log-dir "/dirt.log")))
   (local stats {:records [] :max-records max-stats-frames})
   (local measure-timer (make-pass-timer))
   (local layout-timer (make-pass-timer))
@@ -457,6 +459,7 @@
 
   (fn update [self]
     (local frame-id (or (and app.engine app.engine.frame-id) 0))
+    (local measured-roots {})
     (set self.in-pass true)
     (log-dirt self frame-id)
     (measure-timer.begin)
@@ -465,9 +468,11 @@
        (var n node)
        (while n.parent
          (set n n.parent))
-       (n:measurer true)
-       (measure-timer.tick)
-       (self.layout-dirt:enqueue n n.depth)))
+       (when (not (. measured-roots n))
+         (set (. measured-roots n) true)
+         (n:measurer true)
+         (measure-timer.tick)
+         (self.layout-dirt:enqueue n n.depth))))
     (self.measure-dirt:clear)
     (local measure-pass (measure-timer.finish))
 

@@ -15,6 +15,33 @@
 
 namespace {
 
+constexpr float kVec3MagnitudeLimit = 1e6f;
+
+float validated_vec3_component(float value, const char* error_message)
+{
+    if (!std::isfinite(value)) {
+        throw sol::error(error_message);
+    }
+    return value;
+}
+
+glm::vec3 validated_vec3(const glm::vec3& value, const char* magnitude_error = "vec3 magnitude exceeds threshold")
+{
+    if (!std::isfinite(value.x) || !std::isfinite(value.y) || !std::isfinite(value.z)) {
+        throw sol::error("vec3 components must be finite");
+    }
+    double magnitude = glm::length(value);
+    if (!std::isfinite(magnitude) || magnitude > kVec3MagnitudeLimit) {
+        throw sol::error(magnitude_error);
+    }
+    return value;
+}
+
+glm::vec3 validated_vec3(float x, float y, float z)
+{
+    return validated_vec3(glm::vec3(x, y, z));
+}
+
 sol::table create_glm_table(sol::state_view lua)
 {
     sol::table glm_table = lua.create_table();
@@ -49,40 +76,25 @@ sol::table create_glm_table(sol::state_view lua)
         "x", sol::property(
             [](const glm::vec3& self) { return self.x; },
             [](glm::vec3& self, float value) {
-                if (!std::isfinite(value)) {
-                    throw sol::error("vec3.x must be finite");
-                }
-                self.x = value;
-                double magnitude = glm::length(self);
-                if (!std::isfinite(magnitude) || magnitude > 1e6) {
-                    throw sol::error("vec3 magnitude exceeds threshold after setting x");
-                }
+                glm::vec3 candidate = self;
+                candidate.x = validated_vec3_component(value, "vec3.x must be finite");
+                self = validated_vec3(candidate, "vec3 magnitude exceeds threshold after setting x");
             }
         ),
         "y", sol::property(
             [](const glm::vec3& self) { return self.y; },
             [](glm::vec3& self, float value) {
-                if (!std::isfinite(value)) {
-                    throw sol::error("vec3.y must be finite");
-                }
-                self.y = value;
-                double magnitude = glm::length(self);
-                if (!std::isfinite(magnitude) || magnitude > 1e6) {
-                    throw sol::error("vec3 magnitude exceeds threshold after setting y");
-                }
+                glm::vec3 candidate = self;
+                candidate.y = validated_vec3_component(value, "vec3.y must be finite");
+                self = validated_vec3(candidate, "vec3 magnitude exceeds threshold after setting y");
             }
         ),
         "z", sol::property(
             [](const glm::vec3& self) { return self.z; },
             [](glm::vec3& self, float value) {
-                if (!std::isfinite(value)) {
-                    throw sol::error("vec3.z must be finite");
-                }
-                self.z = value;
-                double magnitude = glm::length(self);
-                if (!std::isfinite(magnitude) || magnitude > 1e6) {
-                    throw sol::error("vec3 magnitude exceeds threshold after setting z");
-                }
+                glm::vec3 candidate = self;
+                candidate.z = validated_vec3_component(value, "vec3.z must be finite");
+                self = validated_vec3(candidate, "vec3 magnitude exceeds threshold after setting z");
             }
         ),
 
@@ -92,27 +104,38 @@ sol::table create_glm_table(sol::state_view lua)
         },
         sol::meta_function::new_index, [](glm::vec3& self, int i, float value) {
         if (i < 1 || i > 3) throw sol::error("vec3 index out of range");
-        if (!std::isfinite(value)) {
-            throw sol::error("vec3 component must be finite");
-        }
-        self[i - 1] = value;
-        double magnitude = glm::length(self);
-        if (!std::isfinite(magnitude) || magnitude > 1e6) {
-            throw sol::error("vec3 magnitude exceeds threshold after indexed set");
-        }
+        glm::vec3 candidate = self;
+        candidate[i - 1] = validated_vec3_component(value, "vec3 component must be finite");
+        self = validated_vec3(candidate, "vec3 magnitude exceeds threshold after indexed set");
         },
 
-        sol::meta_function::addition, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator+),
-        sol::meta_function::subtraction, sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator-),
+        sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) {
+            return validated_vec3(a + b, "vec3 magnitude exceeds threshold after addition");
+        },
+        sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) {
+            return validated_vec3(a - b, "vec3 magnitude exceeds threshold after subtraction");
+        },
         sol::meta_function::multiplication, sol::overload(
-            sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator*),
-            [](const glm::vec3& v, float s) { return v * s; },
-            [](float s, const glm::vec3& v) { return s * v; }
+            [](const glm::vec3& a, const glm::vec3& b) {
+                return validated_vec3(a * b, "vec3 magnitude exceeds threshold after multiplication");
+            },
+            [](const glm::vec3& v, float s) {
+                return validated_vec3(v * s, "vec3 magnitude exceeds threshold after scalar multiplication");
+            },
+            [](float s, const glm::vec3& v) {
+                return validated_vec3(s * v, "vec3 magnitude exceeds threshold after scalar multiplication");
+            }
         ),
         sol::meta_function::division, sol::overload(
-            sol::resolve<glm::vec3(const glm::vec3&, const glm::vec3&)>(&glm::operator/),
-            [](const glm::vec3& v, float s) { return v / s; },
-            [](float s, const glm::vec3& v) { return s / v; }
+            [](const glm::vec3& a, const glm::vec3& b) {
+                return validated_vec3(a / b, "vec3 magnitude exceeds threshold after division");
+            },
+            [](const glm::vec3& v, float s) {
+                return validated_vec3(v / s, "vec3 magnitude exceeds threshold after scalar division");
+            },
+            [](float s, const glm::vec3& v) {
+                return validated_vec3(s / v, "vec3 magnitude exceeds threshold after scalar division");
+            }
         ),
         sol::meta_function::to_string, [](const glm::vec3& v) {
         std::ostringstream ss;
@@ -121,10 +144,10 @@ sol::table create_glm_table(sol::state_view lua)
         }
     );
     glm_table.set_function("vec3", sol::overload(
-        []() { return glm::vec3(); },
-        [](float v) { return glm::vec3(v); },
-        [](float x, float y, float z) { return glm::vec3(x, y, z); },
-        [](const glm::vec2& v, float z) { return glm::vec3(v, z); }
+        []() { return validated_vec3(0.0f, 0.0f, 0.0f); },
+        [](float v) { return validated_vec3(v, v, v); },
+        [](float x, float y, float z) { return validated_vec3(x, y, z); },
+        [](const glm::vec2& v, float z) { return validated_vec3(v.x, v.y, z); }
     ));
 
     // vec4
@@ -365,6 +388,9 @@ sol::table create_glm_table(sol::state_view lua)
     glm_table.set_function("value-ptr-vec3", [](glm::vec3& v) { return static_cast<void*>(glm::value_ptr(v)); });
     glm_table.set_function("value-ptr-vec4", [](glm::vec4& v) { return static_cast<void*>(glm::value_ptr(v)); });
     glm_table.set_function("value-ptr-mat4", [](glm::mat4& m) { return static_cast<void*>(glm::value_ptr(m)); });
+    glm_table.set_function("is-vec3", [](const sol::object& obj) {
+        return obj.is<glm::vec3>();
+    });
     glm_table.set_function("is-mat4", [](const sol::object& obj) {
         return obj.is<glm::mat4>();
     });

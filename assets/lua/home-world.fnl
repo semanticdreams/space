@@ -706,10 +706,12 @@
             (DrawingDocument.default-state))))
     (local drawing-controller
       (DrawingController {:document drawing-state.document
-                          :ui drawing-state.ui}))
+                          :ui drawing-state.ui
+                          :data_dir world.dir}))
     (local drawing-render
       (DrawingRender {:ctx (and canvas canvas.build-context)
-                      :controller drawing-controller}))
+                      :controller drawing-controller
+                      :canvas canvas}))
     (local graph-state (resolve-graph-core-state world.state.graph))
     (local scene-state (or world.state.scene {}))
     (scene:build-default {:terrains scene-state.terrains})
@@ -861,12 +863,17 @@
 
   (fn update [world delta opts]
     (local runtime world.runtime)
-    (local active? (and opts opts.active?))
+    (local active? (if (and opts (not (= opts.active? nil)))
+                       opts.active?
+                       world.active?))
     (when (and active? runtime runtime.hydration)
       (update-runtime-hydration! world runtime))
     (when (and active? runtime runtime.graph-view)
       (runtime.graph-view:update delta))
-    (when (and runtime runtime.drawing-render)
+    (when (and active?
+               runtime
+               runtime.drawing-render
+               (= runtime.active-canvas-feature "drawing"))
       (runtime.drawing-render:update))
     nil)
 

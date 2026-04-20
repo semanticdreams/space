@@ -111,6 +111,36 @@ Texture2D& lua_get_texture(const std::string& name) {
     return ResourceManager::getTexture(name);
 }
 
+Texture2D& lua_allocate_texture(const std::string& name,
+                                int width,
+                                int height,
+                                int channels) {
+    if (width <= 0 || height <= 0 || channels <= 0) {
+        throw std::runtime_error("Texture allocation requires positive dimensions");
+    }
+    Texture2D& texture = ResourceManager::textures[name];
+    texture.allocate(width, height, channels);
+    return texture;
+}
+
+void lua_texture_update_full(Texture2D& texture, const std::string& bytes) {
+    texture.update_full(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size());
+}
+
+void lua_texture_update_sub_rect(Texture2D& texture,
+                                 int x,
+                                 int y,
+                                 int width,
+                                 int height,
+                                 const std::string& bytes) {
+    texture.update_sub_rect(x,
+                            y,
+                            width,
+                            height,
+                            reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                            bytes.size());
+}
+
 bool lua_drop_texture(const std::string& name) {
     auto it = ResourceManager::textures.find(name);
     if (it == ResourceManager::textures.end()) {
@@ -178,7 +208,10 @@ sol::table create_textures_table(sol::state_view lua)
         "filterMax", &Texture2D::filterMax,
 
         "load", &Texture2D::load,
+        "allocate", &Texture2D::allocate,
         "generate", &Texture2D::generate,
+        "update-full", &lua_texture_update_full,
+        "update-sub-rect", &lua_texture_update_sub_rect,
         "setActive", &Texture2D::setActive
     );
 
@@ -200,6 +233,7 @@ sol::table create_textures_table(sol::state_view lua)
         &lua_load_texture_from_bytes_async_cb,
         &lua_load_texture_from_bytes_async_flipped_cb));
     textures_table.set_function("load-texture-from-pixels", &lua_load_texture_from_pixels);
+    textures_table.set_function("allocate-texture", &lua_allocate_texture);
     textures_table.set_function("get-texture", &lua_get_texture);
     textures_table.set_function("drop-texture", &lua_drop_texture);
     textures_table.set_function("load-cubemap", &lua_load_cubemap);

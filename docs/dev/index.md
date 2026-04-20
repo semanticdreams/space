@@ -22,6 +22,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [Libtorrent Notes](/dev/notes/libtorrent)
 - [Terrain Architecture](/dev/notes/terrain-architecture)
 - [Drawing Architecture](/dev/notes/drawing-architecture)
+- [Raster Drawing Implementation](/dev/notes/drawing-raster-implementation)
 - [Terrain Selection Notes](/dev/notes/terrain-selection)
 - [Terrain Physics Debugging Notes](/dev/notes/terrain-physics-debugging)
 - [Light Balls](/dev/notes/light-balls)

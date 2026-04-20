@@ -25,12 +25,6 @@
        (= (or (. a 3) a.z 0) (or (. b 3) b.z 0))
        (= (or (. a 4) a.w 0) (or (. b 4) b.w 0))))
 
-(fn trim-name [value]
-  (if (not (= (type value) :string))
-      ""
-      (let [trimmed (string.match value "^%s*(.-)%s*$")]
-        (or trimmed ""))))
-
 (fn action-button [label opts]
   (local options (or opts {}))
   (local button-opts {:text label
@@ -62,13 +56,16 @@
                                    :child content-builder})
                          content-builder)]}))
 
-(fn tool-button [label active? on-click]
+(fn tool-button [label active? on-click opts]
   (assert on-click "tool-button requires on-click")
+  (local options (or opts {}))
   (local button-opts {:padding [0.4 0.25]
                       :focusable? false
                       :text label
+                      :enabled? (if (= options.enabled? nil) true options.enabled?)
                       :on-click (fn [button event]
-                                  (when (not active?)
+                                  (when (and (not active?)
+                                             (not (= button.enabled? false)))
                                     (on-click button event)))
                       :variant (if active? :primary :secondary)})
   (Button button-opts))
@@ -108,12 +105,71 @@
     (var root-layout nil)
     (var content-entity nil)
     (var pending-rebuild? true)
+    (var sidebar-state-token nil)
     (var changed-handler nil)
     (var shell-changed-handler nil)
     (var rename-layer-id nil)
     (var rename-layer-name nil)
     (var rename-buffer "")
     (local theme (and ctx ctx.theme))
+
+    (fn color-token [value]
+      (if value
+          (.. (tostring (or (. value 1) value.x 0))
+              ","
+              (tostring (or (. value 2) value.y 0))
+              ","
+              (tostring (or (. value 3) value.z 0))
+              ","
+              (tostring (or (. value 4) value.w 0)))
+          ""))
+
+    (fn bool-token [value]
+      (if value "1" "0"))
+
+    (fn layer-list-token []
+      (local parts [])
+      (each [_ layer (ipairs (or controller.state.document.layers []))]
+        (table.insert parts
+                      (.. layer.kind
+                          ":"
+                          layer.id
+                          ":"
+                          layer.name)))
+      (table.concat parts "|"))
+
+    (fn defaults-token [defaults]
+      (.. (color-token defaults.stroke_color)
+          "|"
+          (color-token defaults.fill_color)
+          "|"
+          (tostring defaults.thickness)
+          "|"
+          (tostring defaults.opacity)
+          "|"
+          (bool-token defaults.fill_enabled)))
+
+    (fn current-sidebar-state-token []
+      (local active-layer (controller:active-layer))
+      (local defaults (controller:current-defaults))
+      (local raster-layer? (= (and active-layer active-layer.kind) "raster"))
+      (local move-enabled?
+        (and raster-layer?
+             controller.can-activate-tool?
+             (controller:can-activate-tool? "move")))
+      (table.concat [(layer-list-token)
+                     (or (and active-layer active-layer.id) "")
+                     (or (and active-layer active-layer.kind) "")
+                     (or (and active-layer active-layer.name) "")
+                     (or (controller:active-tool) "")
+                     (defaults-token defaults)
+                     (bool-token (controller:can-undo?))
+                     (bool-token (controller:can-redo?))
+                     (bool-token (> (controller:selection-count) 0))
+                     (bool-token move-enabled?)
+                     (bool-token (and controller.can-add-raster-layer?
+                                      (controller:can-add-raster-layer?)))]
+                    "\31"))
 
     (fn drop-content! []
       (when (and content-entity content-entity.drop)
@@ -133,26 +189,41 @@
         (set rename-buffer layer-name))
       layer)
 
+    (fn validated-rename-buffer [layer]
+      (if (not layer)
+          nil
+          (do
+            (local (ok next-name) (pcall DrawingDocument.validate-layer-name
+                                         rename-buffer
+                                         "DrawingSidebarView rename-buffer"))
+            (if (and ok (not (= next-name layer.name)))
+                next-name
+                nil))))
+
     (fn apply-rename! []
-      (local next-name (trim-name rename-buffer))
-          (if (= next-name "")
-              false
-              (if (controller:rename-active-layer next-name)
-                  (do
-                    (set rename-layer-name next-name)
-                    (set rename-buffer next-name)
-                    true)
-                  false)))
+      (local layer (controller:active-layer))
+      (local next-name (validated-rename-buffer layer))
+      (if next-name
+          (if (controller:rename-active-layer next-name)
+              (do
+                (set rename-layer-name next-name)
+                (set rename-buffer next-name)
+                true)
+              false)
+          false))
 
     (fn build-layer-row [layer]
       (local active? (= layer.id controller.state.ui.active_layer_id))
+      (local layer-label
+        (.. (if (= layer.kind "raster") "[R] " "[V] ")
+            (if active?
+                (.. "* " layer.name)
+                layer.name)))
       (Flex {:axis 1
              :xspacing 0.25
              :yalign :center
              :children [(FlexChild (fn [child-ctx]
-                                     ((tool-button (if active?
-                                                       (.. "* " layer.name)
-                                                       layer.name)
+                                     ((tool-button layer-label
                                                    active?
                                                    (fn [_button _event]
                                                      (controller:set-active-layer layer.id)))
@@ -202,7 +273,7 @@
                                 (controller:set-defaults! changes)))}))
 
     (fn build-defaults-section []
-      (local defaults controller.state.ui.defaults)
+      (local defaults (controller:current-defaults))
       (local stroke-options [["W" [0.96 0.96 0.98 1.0]]
                              ["R" [0.9 0.28 0.24 1.0]]
                              ["Y" [0.95 0.8 0.24 1.0]]
@@ -222,10 +293,11 @@
                             ((Flex {:axis 1
                                     :xspacing 0.2
                                     :children (icollect [_ entry (ipairs stroke-options)]
-                                                        (let [label (. entry 1)
-                                                              color (. entry 2)
-                                                              current defaults.stroke_color
-                                                              selected? (color-array= color current)]
+                                                        (do
+                                                          (local label (. entry 1))
+                                                          (local color (. entry 2))
+                                                          (local current defaults.stroke_color)
+                                                          (local selected? (color-array= color current))
                                                           (FlexChild (fn [row-ctx] ((build-color-button label color :stroke_color selected?) row-ctx)) 1)))})
                              inner-ctx))
                           0)
@@ -234,10 +306,11 @@
                             ((Flex {:axis 1
                                     :xspacing 0.2
                                     :children (icollect [_ entry (ipairs fill-options)]
-                                                        (let [label (. entry 1)
-                                                              color (. entry 2)
-                                                              current defaults.fill_color
-                                                              selected? (color-array= color current)]
+                                                        (do
+                                                          (local label (. entry 1))
+                                                          (local color (. entry 2))
+                                                          (local current defaults.fill_color)
+                                                          (local selected? (color-array= color current))
                                                           (FlexChild (fn [row-ctx] ((build-color-button label color :fill_color selected?) row-ctx)) 1)))})
                              inner-ctx))
                           0)
@@ -246,8 +319,9 @@
                             ((Flex {:axis 1
                                     :xspacing 0.2
                                     :children (icollect [_ entry (ipairs thickness-options)]
-                                                        (let [label (. entry 1)
-                                                              thickness (. entry 2)]
+                                                        (do
+                                                          (local label (. entry 1))
+                                                          (local thickness (. entry 2))
                                                           (FlexChild
                                                             (fn [row-ctx]
                                                               ((tool-button label
@@ -263,8 +337,9 @@
                             ((Flex {:axis 1
                                     :xspacing 0.2
                                     :children (icollect [_ entry (ipairs opacity-options)]
-                                                        (let [label (. entry 1)
-                                                              opacity (. entry 2)]
+                                                        (do
+                                                          (local label (. entry 1))
+                                                          (local opacity (. entry 2))
                                                           (FlexChild
                                                             (fn [row-ctx]
                                                               ((tool-button label
@@ -311,56 +386,93 @@
                           0)]}))
 
     (fn build-layer-rename-section [layer]
-      (Flex {:axis 2
-             :spacing 0.25
-             :children [(title-child "Layer Name")
-                        (FlexChild
-                          (fn [inner-ctx]
-                            ((Input {:text rename-buffer
-                                     :placeholder "Layer name"
-                                     :min-width 12.0
-                                     :on-change (fn [_input text]
-                                                  (set rename-buffer text))})
-                             inner-ctx))
-                          0)
-                        (FlexChild
-                          (fn [inner-ctx]
-                            ((action-button "Save" {:on-click (fn [_button _event]
-                                                                (apply-rename!))
-                                                    :enabled? (and layer
-                                                                   (> (# (trim-name rename-buffer)) 0)
-                                                                   (not (= (trim-name rename-buffer) layer.name)))
-                                                    :variant :success})
-                             inner-ctx))
-                          0)]}))
+      (fn [section-ctx]
+        (var save-button nil)
+
+        (fn sync-save-button! []
+          (when save-button
+            (save-button:set-enabled (not (= (validated-rename-buffer layer) nil)))))
+
+        ((Flex {:axis 2
+                :spacing 0.25
+                :children [(title-child "Layer Name")
+                           (FlexChild
+                             (fn [inner-ctx]
+                               ((Input {:text rename-buffer
+                                        :placeholder "Layer name"
+                                        :min-width 12.0
+                                        :on-change (fn [_input text]
+                                                     (set rename-buffer text)
+                                                     (sync-save-button!))})
+                                inner-ctx))
+                             0)
+                           (FlexChild
+                             (fn [inner-ctx]
+                               (set save-button
+                                    ((action-button "Save" {:on-click (fn [_button _event]
+                                                                        (when (apply-rename!)
+                                                                          (sync-save-button!)))
+                                                            :enabled? (not (= (validated-rename-buffer layer) nil))
+                                                            :variant :success})
+                                     inner-ctx))
+                               save-button)
+                             0)]})
+         section-ctx)))
 
     (fn build-tools-section []
-      (local active-tool controller.state.ui.active_tool)
-      (local tools [["Select" "select"]
-                    ["Rect" "rectangle"]
-                    ["Ellipse" "ellipse"]
-                    ["Line" "line"]
-                    ["Pen" "pen"]
-                    ["Brush" "brush"]
-                    ["Marker" "marker"]
-                    ["Eraser" "eraser"]])
+      (local active-tool (controller:active-tool))
+      (local active-layer (controller:active-layer))
+      (local raster-layer? (= (and active-layer active-layer.kind) "raster"))
+      (local can-move?
+        (and raster-layer?
+             controller.can-activate-tool?
+             (controller:can-activate-tool? "move")))
+      (local tools
+        (if raster-layer?
+            [{:label "Marquee" :tool "marquee"}
+             {:label "Move" :tool "move" :enabled? can-move?}
+             {:label "Dropper" :tool "eyedropper"}
+             {:label "Fill" :tool "fill"}
+             {:label "Rect" :tool "rectangle"}
+             {:label "Ellipse" :tool "ellipse"}
+             {:label "Line" :tool "line"}
+             {:label "Pen" :tool "pen"}
+             {:label "Brush" :tool "brush"}
+             {:label "Marker" :tool "marker"}
+             {:label "Eraser" :tool "eraser"}]
+            [{:label "Select" :tool "select"}
+             {:label "Rect" :tool "rectangle"}
+             {:label "Ellipse" :tool "ellipse"}
+             {:label "Line" :tool "line"}
+             {:label "Pen" :tool "pen"}
+             {:label "Brush" :tool "brush"}
+             {:label "Marker" :tool "marker"}
+             {:label "Eraser" :tool "eraser"}]))
       (Flex {:axis 2
              :spacing 0.25
              :children (icollect [_ entry (ipairs tools)]
-                                 (let [label (. entry 1)
-                                       tool (. entry 2)]
+                                 (do
+                                   (local label entry.label)
+                                   (local tool entry.tool)
                                    (FlexChild
                                      (fn [inner-ctx]
                                        ((tool-button label
                                                      (= active-tool tool)
                                                      (fn [_button _event]
-                                                       (controller:set-active-tool tool)))
+                                                       (controller:set-active-tool tool))
+                                                     {:enabled? (if (= entry.enabled? nil)
+                                                                    true
+                                                                    entry.enabled?)})
                                         inner-ctx))
                                      0)))}))
 
     (fn build-drawing-panel []
       (local active-layer (sync-rename-buffer!))
       (local layers controller.state.document.layers)
+      (local can-add-raster?
+        (if controller.can-add-raster-layer?
+            (controller:can-add-raster-layer?)
+            false))
       (panel-shell
         (fn [inner-ctx]
           ((Flex {:axis 2
@@ -369,9 +481,25 @@
                              (FlexChild (fn [child-ctx] ((build-layer-rename-section active-layer) child-ctx)) 0)
                              (FlexChild
                                (fn [child-ctx]
-                                 ((action-button "+ Layer" {:on-click (fn [_button _event]
-                                                                        (controller:add-layer))
-                                                            :variant :success})
+                                 ((Flex {:axis 1
+                                         :xspacing 0.2
+                                         :children [(FlexChild
+                                                      (fn [row-ctx]
+                                                        ((action-button "+ Vector"
+                                                                        {:on-click (fn [_button _event]
+                                                                                      (controller:add-layer "vector"))
+                                                                         :variant :success})
+                                                         row-ctx))
+                                                      1)
+                                                    (FlexChild
+                                                      (fn [row-ctx]
+                                                        ((action-button "+ Raster"
+                                                                        {:on-click (fn [_button _event]
+                                                                                      (controller:add-layer "raster"))
+                                                                         :enabled? can-add-raster?
+                                                                         :variant :primary})
+                                                         row-ctx))
+                                                      1)]})
                                   child-ctx))
                                0)
                              (FlexChild
@@ -428,7 +556,8 @@
              (= app.active-interaction-surface :canvas)
              (= app.canvas-visible? true)))
       (if show-dock?
-          (let [builders [(FlexChild (build-feature-rail) 0)]]
+          (do
+            (local builders [(FlexChild (build-feature-rail) 0)])
             (when (= app.active-canvas-feature "drawing")
               (table.insert builders (FlexChild (build-drawing-panel) 0)))
             ((Flex {:axis 1
@@ -441,6 +570,7 @@
     (fn rebuild-children! []
       (drop-content!)
       (set content-entity (build-content))
+      (set sidebar-state-token (current-sidebar-state-token))
       (when content-entity
         (root-layout:add-child content-entity.layout)))
 
@@ -450,7 +580,15 @@
 
     (fn controller-change-rebuild? [payload]
       (local reason (and payload payload.reason))
-      (not (= reason "gesture")))
+      (if (= reason "gesture")
+          false
+          (do
+            (local next-token (current-sidebar-state-token))
+            (if (= next-token sidebar-state-token)
+                false
+                (do
+                  (set sidebar-state-token next-token)
+                  true)))))
 
     (fn measurer [self]
       (if content-entity

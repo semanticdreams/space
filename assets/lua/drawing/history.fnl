@@ -9,9 +9,12 @@
     (assert (and command command.apply command.revert)
             "DrawingHistory.perform requires command with :apply and :revert")
     (command:apply)
-    (table.insert undo-stack command)
-    (clear-redo!)
-    true)
+    (if command.noop?
+        false
+        (do
+          (table.insert undo-stack command)
+          (clear-redo!)
+          command)))
 
   (fn undo [_self]
     (local command (table.remove undo-stack))
@@ -19,7 +22,7 @@
         (do
           (command:revert)
           (table.insert redo-stack command)
-          true)
+          command)
         false))
 
   (fn redo [_self]
@@ -28,7 +31,7 @@
         (do
           (command:apply)
           (table.insert undo-stack command)
-          true)
+          command)
         false))
 
   (fn can-undo? [_self]

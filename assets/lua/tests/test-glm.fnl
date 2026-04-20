@@ -66,11 +66,27 @@
   (local cross (glm.cross (glm.vec3 1 0 0) (glm.vec3 0 1 0)))
   (assert (vec-close? cross (glm.vec3 0 0 1)) "glm.cross missing"))
 
+(fn vec3-arithmetic-validates-results []
+  (local (ok-add err-add)
+         (pcall (fn []
+                  (+ (glm.vec3 900000 0 0)
+                     (glm.vec3 200000 0 0)))))
+  (assert (not ok-add)
+          "glm.vec3 addition should reject oversized results")
+  (assert (and err-add (string.find err-add "threshold" 1 true))
+          "glm.vec3 arithmetic rejection should explain the magnitude contract")
+  (local (ok-div _err-div)
+         (pcall (fn []
+                  (/ (glm.vec3 1 2 3) 0))))
+  (assert (not ok-div)
+          "glm.vec3 division should reject non-finite results"))
+
 (table.insert tests {:name "glm glm.vec3 supports scalar mul/div both sides" :fn supports-scalar-mul-and-div})
 (table.insert tests {:name "glm glm.vec2/glm.vec4 scalar ops" :fn vec2-and-vec4-scalar-ops})
 (table.insert tests {:name "glm glm.mat4 multiplication overloads" :fn mat4-multiplication-overloads})
 (table.insert tests {:name "glm glm.quat rotate applies" :fn quat-rotation-applies})
 (table.insert tests {:name "glm core functions bound" :fn glm-functions-available})
+(table.insert tests {:name "glm vec3 arithmetic validates results" :fn vec3-arithmetic-validates-results})
 
 (local main
   (fn []

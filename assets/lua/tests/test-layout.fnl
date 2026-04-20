@@ -39,21 +39,21 @@
   (set layout.position (glm.vec3 0 0 0))
   (set layout.rotation (glm.quat 1 0 0 0))
   (local ray {:origin (glm.vec3 1 1 -5) :direction (glm.vec3 0 0 1)})
-  (let [(hit point distance) (layout:intersect ray)]
-    (assert hit)
-    (assert point)
-    (assert (approx distance 5))
-    (assert (approx point.x 1))
-    (assert (approx point.y 1))
-    (assert (approx point.z 0))))
+  (local (hit point distance) (layout:intersect ray))
+  (assert hit)
+  (assert point)
+  (assert (approx distance 5))
+  (assert (approx point.x 1))
+  (assert (approx point.y 1))
+  (assert (approx point.z 0)))
 
 (fn layout-intersect-miss []
   (local layout (Layout {:name "miss-test"}))
   (set layout.size (glm.vec3 1 1 1))
   (set layout.position (glm.vec3 10 0 0))
   (local ray {:origin (glm.vec3 0 0 -5) :direction (glm.vec3 0 0 1)})
-  (let [(hit _point _distance) (layout:intersect ray)]
-    (assert (not hit))))
+  (local (hit _point _distance) (layout:intersect ray))
+  (assert (not hit)))
 
 (fn layout-intersect-rotated []
   (local layout (Layout {:name "rotated-hit"}))
@@ -61,11 +61,11 @@
   (set layout.position (glm.vec3 0 0 0))
   (set layout.rotation (glm.quat (math.rad 90) (glm.vec3 0 1 0)))
   (local ray {:origin (glm.vec3 -5 0.5 -0.5) :direction (glm.vec3 1 0 0)})
-  (let [(hit point distance) (layout:intersect ray)]
-    (assert hit)
-    (assert point)
-    (assert (approx distance 5))
-    (assert (approx point.y 0.5))))
+  (local (hit point distance) (layout:intersect ray))
+  (assert hit)
+  (assert point)
+  (assert (approx distance 5))
+  (assert (approx point.y 0.5)))
 
 (fn layout-intersect-with-clip []
   (local layout (Layout {:name "clip-hit"}))
@@ -76,12 +76,12 @@
                         :size (glm.vec3 2 2 4)}})
   (set layout.clip-region clip)
   (local ray {:origin (glm.vec3 1 1 -5) :direction (glm.vec3 0 0 1)})
-  (let [(hit point distance) (layout:intersect ray)]
-    (assert hit)
-    (assert point)
-    (assert (approx distance 5))
-    (assert (approx point.x 1))
-    (assert (approx point.y 1))))
+  (local (hit point distance) (layout:intersect ray))
+  (assert hit)
+  (assert point)
+  (assert (approx distance 5))
+  (assert (approx point.x 1))
+  (assert (approx point.y 1)))
 
 (fn layout-intersect-rejected-by-clip []
   (local layout (Layout {:name "clip-miss"}))
@@ -92,8 +92,8 @@
                         :size (glm.vec3 1 4 4)}})
   (set layout.clip-region clip)
   (local ray {:origin (glm.vec3 3 0 -5) :direction (glm.vec3 0 0 1)})
-  (let [(hit _point _distance) (layout:intersect ray)]
-    (assert (not hit))))
+  (local (hit _point _distance) (layout:intersect ray))
+  (assert (not hit)))
 
 (table.insert tests {:name "layout intersect axis aligned" :fn layout-intersect-axis-aligned})
 (table.insert tests {:name "layout intersect misses" :fn layout-intersect-miss})
@@ -258,6 +258,35 @@
   (parent:drop)
   (child:drop))
 
+(fn layout-root-measures-dirty-sibling-subtrees-once []
+  (local root (LayoutRoot))
+  (local calls {:parent 0 :left 0 :right 0})
+  (local left (Layout {:name "left"
+                       :measurer (fn [_self]
+                                   (set calls.left (+ calls.left 1)))}))
+  (local right (Layout {:name "right"
+                        :measurer (fn [_self]
+                                    (set calls.right (+ calls.right 1)))}))
+  (local parent (Layout {:name "sibling-parent"
+                         :children [left right]
+                         :measurer (fn [self]
+                                     (set calls.parent (+ calls.parent 1))
+                                     (each [_ child (ipairs self.children)]
+                                       (child:measurer)))}))
+
+  (parent:set-root root)
+  (left:mark-measure-dirty)
+  (right:mark-measure-dirty)
+
+  (root:update)
+  (assert (= calls.parent 1))
+  (assert (= calls.left 1))
+  (assert (= calls.right 1))
+
+  (parent:drop)
+  (left:drop)
+  (right:drop))
+
 (fn layout-root-removals-dont-skip-other-dirt []
   (local root (LayoutRoot))
   (var parent-a-calls 0)
@@ -309,6 +338,7 @@
 (table.insert tests {:name "Rectangle hides renderer when culled" :fn layout-culling-hides-rectangle-widget})
 (table.insert tests {:name "LayoutRoot tracks stats with retention" :fn layout-root-records-stats})
 (table.insert tests {:name "LayoutRoot processes shallow measure dirt first" :fn layout-root-buckets-measure-dirt-by-depth})
+(table.insert tests {:name "LayoutRoot measures dirty sibling subtrees once" :fn layout-root-measures-dirty-sibling-subtrees-once})
 (table.insert tests {:name "LayoutRoot keeps processing other dirty nodes when removing" :fn layout-root-removals-dont-skip-other-dirt})
 
 (fn layout-tracks-depth-when-rooted []

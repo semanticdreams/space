@@ -285,6 +285,37 @@
               "drawing sidebar should keep the fill toggle clickable when fill is disabled")
       (sidebar:drop))))
 
+(fn sidebar-disables-raster-move-without-selection []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {:data_dir "/tmp"}))
+      (controller:add-layer "raster")
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local move-button (find-clickable-button "Move"))
+      (assert move-button "drawing sidebar should expose a Move button for raster layers")
+      (assert (= move-button.enabled? false)
+              "drawing sidebar should disable Move until a raster selection exists")
+      (sidebar:drop))))
+
+(fn sidebar-disables-raster-add-without-data-dir []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {}))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local raster-button (find-clickable-button "+ Raster"))
+      (assert raster-button "drawing sidebar should expose a + Raster button")
+      (assert (= raster-button.enabled? false)
+              "drawing sidebar should disable + Raster when raster support is unavailable")
+      (sidebar:drop))))
+
 (fn sidebar-ignores-gesture-only-controller-noise []
   (with-sidebar-env
     (fn []
@@ -303,6 +334,112 @@
       (local current-input (find-text-input))
       (assert (= current-input initial-input)
               "drawing sidebar should not rebuild on gesture-only controller changes")
+      (sidebar:drop))))
+
+(fn sidebar-ignores-raster-edit-noise-when-visible-state-stays-stable []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {:data_dir "/tmp"}))
+      (controller:add-layer "raster")
+      (controller:set-active-tool "brush")
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (controller:begin-gesture "brush" (glm.vec3 0 0 0) {:pressure 1.0})
+      (controller:update-gesture (glm.vec3 4 0 0) false {:pressure 1.0})
+      (assert (controller:commit-gesture))
+      (sidebar:update)
+      (sidebar.layout:measurer)
+      (local stable-input (find-text-input))
+      (assert stable-input "drawing sidebar should expose its rename input after the first raster edit rebuild")
+      (controller:begin-gesture "brush" (glm.vec3 8 0 0) {:pressure 1.0})
+      (controller:update-gesture (glm.vec3 12 0 0) false {:pressure 1.0})
+      (assert (controller:commit-gesture))
+      (sidebar:update)
+      (sidebar.layout:measurer)
+      (local current-input (find-text-input))
+      (assert (= current-input stable-input)
+              "drawing sidebar should not rebuild for raster edits that leave sidebar-visible state unchanged")
+      (sidebar:drop))))
+
+(fn sidebar-rejects-untrimmed-rename-input []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {}))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local input (find-text-input))
+      (local save-button (find-clickable-button "Save"))
+      (assert input "drawing sidebar should expose its layer rename input")
+      (assert save-button "drawing sidebar should expose a Save button for layer renames")
+      (assert (not save-button.enabled?)
+              "drawing sidebar should keep Save disabled before the rename buffer changes")
+      (input:set-text "  Sketch  ")
+      (assert (not save-button.enabled?)
+              "drawing sidebar should keep Save disabled for non-canonical rename input")
+      (local active-layer (controller:active-layer))
+      (assert (= active-layer.name "Layer 1")
+              "drawing sidebar should not silently trim and apply non-canonical rename input")
+      (sidebar:drop))))
+
+(fn sidebar-enables-save-for-valid-rename-input []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {}))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local input (find-text-input))
+      (local save-button (find-clickable-button "Save"))
+      (assert input "drawing sidebar should expose its layer rename input")
+      (assert save-button "drawing sidebar should expose a Save button for layer renames")
+      (assert (not save-button.enabled?)
+              "drawing sidebar should start with Save disabled when the rename buffer matches the layer name")
+      (input:set-text "Sketch")
+      (assert save-button.enabled?
+              "drawing sidebar should enable Save as soon as the rename buffer becomes valid")
+      (save-button:on-click {})
+      (sidebar:update)
+      (sidebar.layout:measurer)
+      (local active-layer (controller:active-layer))
+      (assert (= active-layer.name "Sketch")
+              "drawing sidebar should apply valid rename input through the real save button path")
+      (sidebar:drop))))
+
+(fn sidebar-ignores-selection-count-noise-when-delete-stays-enabled []
+  (with-sidebar-env
+    (fn []
+      (set app.active-canvas-feature "drawing")
+      (local controller (DrawingController {}))
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 10 8 0) false)
+      (assert (controller:commit-gesture))
+      (controller:begin-gesture "rectangle" (glm.vec3 20 0 0))
+      (controller:update-gesture (glm.vec3 30 8 0) false)
+      (assert (controller:commit-gesture))
+      (local layer (controller:active-layer))
+      (local object1 (. layer.objects 1))
+      (local object2 (. layer.objects 2))
+      (local ctx (make-ctx))
+      (local sidebar-builder (DrawingSidebarView {:controller controller}))
+      (local sidebar (sidebar-builder ctx))
+      (sidebar.layout:measurer)
+      (local stable-input (find-text-input))
+      (assert stable-input "drawing sidebar should expose its rename input after vector selection changes")
+      (controller:set-selection! [object1.id object2.id])
+      (sidebar:update)
+      (sidebar.layout:measurer)
+      (local current-input (find-text-input))
+      (assert (= current-input stable-input)
+              "drawing sidebar should not rebuild when selection count changes but Delete stays enabled")
       (sidebar:drop))))
 
 (fn sidebar-reconciles-on-canvas-feature-changes []
@@ -428,8 +565,20 @@
                      :fn sidebar-rename-input-syncs-after-history})
 (table.insert tests {:name "Drawing sidebar keeps fill toggle clickable"
                      :fn sidebar-keeps-fill-toggle-clickable})
+(table.insert tests {:name "Drawing sidebar disables raster move without selection"
+                     :fn sidebar-disables-raster-move-without-selection})
+(table.insert tests {:name "Drawing sidebar disables raster add without data dir"
+                     :fn sidebar-disables-raster-add-without-data-dir})
 (table.insert tests {:name "Drawing sidebar ignores gesture-only controller noise"
                      :fn sidebar-ignores-gesture-only-controller-noise})
+(table.insert tests {:name "Drawing sidebar ignores raster edit noise when visible state stays stable"
+                     :fn sidebar-ignores-raster-edit-noise-when-visible-state-stays-stable})
+(table.insert tests {:name "Drawing sidebar rejects untrimmed rename input"
+                     :fn sidebar-rejects-untrimmed-rename-input})
+(table.insert tests {:name "Drawing sidebar enables save for valid rename input"
+                     :fn sidebar-enables-save-for-valid-rename-input})
+(table.insert tests {:name "Drawing sidebar ignores selection count noise when delete stays enabled"
+                     :fn sidebar-ignores-selection-count-noise-when-delete-stays-enabled})
 (table.insert tests {:name "Drawing sidebar reconciles on canvas feature changes"
                      :fn sidebar-reconciles-on-canvas-feature-changes})
 (table.insert tests {:name "Drawing sidebar appears when switching to canvas surface"

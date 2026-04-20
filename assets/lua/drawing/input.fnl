@@ -61,31 +61,38 @@
                 point
                 (= payload.button SDL_BUTTON_LEFT)
                 (not ((. Common :pointer-blocked?))))
-       (local tool controller.state.ui.active_tool)
+       (local tool (controller:active-tool))
+       (local layer (active-layer))
        (if (= tool "select")
            (do
              (local object
-               (HitTest.select-object (active-layer) point (hit-tolerance)))
+               (if (= (and layer layer.kind) "vector")
+                   (HitTest.select-object layer point (hit-tolerance))
+                   nil))
              (controller:on-select object (Runtime.ctrl-held? payload))
              ((. ctx :mark-event-consumed!))
              true)
-           (do
-             (controller:begin-gesture tool point)
-             (when (= tool "eraser")
-               (each [_ object-id (ipairs (HitTest.collect-hit-object-ids (active-layer) point (hit-tolerance)))]
-                 (controller:touch-erase-id! object-id)))
-             ((. ctx :mark-event-consumed!))
-             true))))})
+           (if (controller:begin-gesture tool point {:pressure (or payload.pressure 1.0)})
+               (do
+                 (when (and (= tool "eraser")
+                            (= (and layer layer.kind) "vector"))
+                   (each [_ object-id (ipairs (HitTest.collect-hit-object-ids layer point (hit-tolerance)))]
+                     (controller:touch-erase-id! object-id)))
+                 ((. ctx :mark-event-consumed!))
+                 true)
+               false))))})
 
 (local DrawingMouseMotion
   {:mouse-motion
    (fn [_ctx payload]
      (local controller (active-controller))
      (local point (and controller (active-canvas-point payload)))
+     (local layer (active-layer))
      (when (and controller point (controller:gesture-active?))
-       (controller:update-gesture point (Runtime.shift-held? payload))
-       (when (= controller.state.ui.active_tool "eraser")
-         (each [_ object-id (ipairs (HitTest.collect-hit-object-ids (active-layer) point (hit-tolerance)))]
+       (controller:update-gesture point (Runtime.shift-held? payload) {:pressure (or payload.pressure 1.0)})
+       (when (and (= (controller:active-tool) "eraser")
+                  (= (and layer layer.kind) "vector"))
+         (each [_ object-id (ipairs (HitTest.collect-hit-object-ids layer point (hit-tolerance)))]
            (controller:touch-erase-id! object-id)))
        ((. _ctx :mark-event-consumed!))
        true))})
@@ -95,15 +102,17 @@
    (fn [ctx payload]
      (local controller (active-controller))
      (local point (and controller (active-canvas-point payload)))
+     (local layer (active-layer))
      (when (and controller point (= payload.button SDL_BUTTON_LEFT))
-       (local tool controller.state.ui.active_tool)
+       (local tool (controller:active-tool))
        (if (= tool "select")
            false
            (if (controller:gesture-active?)
                (do
-                 (controller:update-gesture point (Runtime.shift-held? payload))
-                 (when (= tool "eraser")
-                   (each [_ object-id (ipairs (HitTest.collect-hit-object-ids (active-layer) point (hit-tolerance)))]
+                 (controller:update-gesture point (Runtime.shift-held? payload) {:pressure (or payload.pressure 1.0)})
+                 (when (and (= tool "eraser")
+                            (= (and layer layer.kind) "vector"))
+                   (each [_ object-id (ipairs (HitTest.collect-hit-object-ids layer point (hit-tolerance)))]
                      (controller:touch-erase-id! object-id)))
                  (controller:commit-gesture)
                  ((. ctx :mark-event-consumed!))

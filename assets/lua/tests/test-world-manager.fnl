@@ -401,19 +401,28 @@
                                :dir world-dir}))
       (var graph-view-updates [])
       (var drawing-render-updates 0)
+      (set app.active-canvas-feature "graph")
       (set world.runtime {:graph-view {:update (fn [_self delta]
                                                  (table.insert graph-view-updates delta))}
                           :drawing-render {:update (fn [_self]
                                                      (set drawing-render-updates
-                                                          (+ drawing-render-updates 1)))}})
+                                                          (+ drawing-render-updates 1)))}
+                          :active-canvas-feature "graph"})
       (world:update 0.25 {:active? false})
       (world:update 0.5 {:active? true})
       (assert (= (length graph-view-updates) 1)
               "HomeWorld should only tick graph-view while active")
       (assert (= (. graph-view-updates 1) 0.5)
               "HomeWorld should pass the frame delta through to graph-view")
-      (assert (= drawing-render-updates 2)
-              "HomeWorld should continue updating drawing-render each world update")
+      (assert (= drawing-render-updates 0)
+              "HomeWorld should skip drawing-render updates while graph is the active canvas feature")
+      (set world.runtime.active-canvas-feature "drawing")
+      (world:update 0.6 {:active? false})
+      (assert (= drawing-render-updates 0)
+              "HomeWorld should skip drawing-render updates while inactive even if drawing was the last active canvas feature")
+      (world:update 0.75 {:active? true})
+      (assert (= drawing-render-updates 1)
+              "HomeWorld should resume drawing-render updates when drawing becomes active")
       true)))
 
 (fn home-world-activate-reapplies-runtime-containment []
@@ -511,8 +520,8 @@
       (local terrains (and world.state world.state.scene world.state.scene.terrains))
       (assert (= (type terrains) :table) "Expected world scene terrains table")
       (assert (= (length terrains) 1) "Expected exactly one default terrain for new world")
-	      (assert (= (. (. terrains 1) :kind) "heightfield-terrain") "Default terrain should be heightfield-terrain")
-	      true)))
+      (assert (= (. (. terrains 1) :kind) "heightfield-terrain") "Default terrain should be heightfield-terrain")
+      true)))
 
 (fn home-world-new-state-seeds-default-lights []
   (with-temp-dir

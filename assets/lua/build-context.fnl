@@ -141,14 +141,18 @@
        (fn [_self texture]
          (assert (and texture texture.id)
                  "Image batch requires a texture with an id")
-         (local id texture.id)
-	         (when (not (. image-batches id))
-	           (set (. image-batches id)
-	                {:texture texture
-	                 :vector (VectorBuffer)
-	                 :id id
-	                 :draw-batcher (DrawBatcher {:stride 10})}))
+        (local id texture.id)
+        (when (not (. image-batches id))
+          (set (. image-batches id)
+               {:texture texture
+                :vector (VectorBuffer)
+                :id id
+                :draw-batcher (DrawBatcher {:stride 10})}))
          (. image-batches id)))
+  (set ctx.unregister-image-batch
+       (fn [_self texture-id]
+         (set (. image-batches texture-id) nil)
+         nil))
   (set ctx.register-mesh-batch
        (fn [_self batch]
          (table.insert mesh-batches batch)

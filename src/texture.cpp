@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <cstddef>
+#include <stdexcept>
 
 #include "image_loader.h"
 #include "texture.h"
@@ -113,13 +114,13 @@ void Texture2D::allocate(int w, int h, int channels)
 void Texture2D::update_full(const std::uint8_t* pixels, std::size_t byte_count)
 {
     if (!pixels || width <= 0 || height <= 0 || n <= 0) {
-        return;
+        throw std::runtime_error("Texture2D::update_full requires an allocated texture and pixel data");
     }
     const std::size_t expected = static_cast<std::size_t>(width) *
                                  static_cast<std::size_t>(height) *
                                  static_cast<std::size_t>(n);
     if (byte_count < expected) {
-        return;
+        throw std::runtime_error("Texture2D::update_full pixel buffer is smaller than the texture size");
     }
 
     glActiveTexture(GL_TEXTURE0);
@@ -132,13 +133,16 @@ void Texture2D::update_full(const std::uint8_t* pixels, std::size_t byte_count)
 void Texture2D::update_sub_rect(int x, int y, int w, int h, const std::uint8_t* pixels, std::size_t byte_count)
 {
     if (!pixels || width <= 0 || height <= 0 || n <= 0 || w <= 0 || h <= 0) {
-        return;
+        throw std::runtime_error("Texture2D::update_sub_rect requires an allocated texture, positive bounds, and pixel data");
     }
     const std::size_t expected = static_cast<std::size_t>(w) *
                                  static_cast<std::size_t>(h) *
                                  static_cast<std::size_t>(n);
     if (byte_count < expected) {
-        return;
+        throw std::runtime_error("Texture2D::update_sub_rect pixel buffer is smaller than the requested rect");
+    }
+    if (x < 0 || y < 0 || (x + w) > width || (y + h) > height) {
+        throw std::runtime_error("Texture2D::update_sub_rect bounds exceed the allocated texture");
     }
 
     glActiveTexture(GL_TEXTURE0);

@@ -6,8 +6,17 @@
                 :active-key nil
                 :iterating? false})
 
-  (fn mutation-error []
-    (error "BucketQueue callback mutated the active bucket. Fix the caller; do not harden BucketQueue to mask layout/measure pass bugs."))
+  (fn node-label [node]
+    (or (and node node.name)
+        (tostring node)))
+
+  (fn mutation-error [self node depth]
+    (error (string.format
+             "BucketQueue %s callback mutated the active bucket at depth %s (active=%s requested=%s). Fix the caller; do not harden BucketQueue to mask layout/measure pass bugs."
+             (or self.label "<unlabeled>")
+             (tostring depth)
+             (node-label self.active-key)
+             (node-label node))))
 
   (fn assert-not-active-bucket-mutation [self node depth]
     (when (and self.iterating?
@@ -15,7 +24,7 @@
                (= depth self.active-depth))
       (if (= node self.active-key)
           false
-          (mutation-error))))
+          (mutation-error self node depth))))
 
   (fn ensure-depth [self depth]
     (when (not (. self.depth-set depth))
@@ -39,7 +48,7 @@
       (when (and (not (= self.active-depth nil))
                  (or (= target-depth self.active-depth)
                      (= current-depth self.active-depth)))
-        (mutation-error))
+        (mutation-error self node (or current-depth target-depth)))
       (self:remove node)
       (self:ensure-depth target-depth)
       (local bucket (. self.buckets target-depth))
