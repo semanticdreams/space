@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <btBulletDynamicsCommon.h>
 
 class Physics {

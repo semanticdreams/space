@@ -4,7 +4,7 @@
 
 void MouseState::begin_frame()
 {
-    std::copy(std::begin(currentButtons), std::end(currentButtons), std::begin(previousButtons));
+    std::copy_n(currentButtons, MAX_BUTTONS, previousButtons);
     xrel = 0.0F;
     yrel = 0.0F;
     wheelX = 0.0F;

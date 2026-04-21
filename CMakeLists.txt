@@ -181,8 +181,7 @@ add_subdirectory(external/libjpeg-turbo)
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/sol2)
 
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/cgltf)
-include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/cppzmq/include)
-
+include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/cppzmq)
 find_package(PkgConfig REQUIRED)
 set(SPACE_HAS_VTERM OFF)
 if(UNIX AND NOT APPLE)
