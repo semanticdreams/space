@@ -9,31 +9,52 @@
 
 (fn wallet-label [wallet]
     (local name (or wallet.name wallet.coin "Wallet"))
+    (local suffix (if (= wallet.status "needs-recovery")
+                      " (Needs recovery)"
+                      ""))
     (if wallet.address
-        (.. name " - " wallet.address)
-        name))
+        (.. name " - " wallet.address suffix)
+        (.. name suffix)))
 
 (fn build-wallet-load-dialog [options ctx runtime-opts]
     (local store (or options.store (WalletStore {})))
-    (local wallets (store:list-wallets))
+    (local wallets [])
     (var dialog nil)
     (var error-text nil)
+    (var recovery-count 0)
+
+    (each [_ wallet (ipairs (store:list-wallets))]
+        (local described (store:describe-wallet wallet.id))
+        (when (= described.status "needs-recovery")
+            (set recovery-count (+ recovery-count 1)))
+        (table.insert wallets described))
 
     (fn update-error [message]
         (when error-text
             (error-text:set-text (or message ""))))
 
-    (fn handle-load [wallet]
-        (local (ok result)
-               (pcall (fn [] (store:load-wallet wallet.id))))
-        (if ok
+    (fn handle-select [wallet]
+        (if (= wallet.status "needs-recovery")
             (do
                 (update-error nil)
-                (when options.on-load
-                    (options.on-load result))
-                (when dialog
-                    (dialog:drop)))
-            (update-error result)))
+                (if options.on-recover
+                    (do
+                        (options.on-recover wallet)
+                        (when dialog
+                            (dialog:drop)))
+                    (update-error (or wallet.recovery-message
+                                      "Wallet secret missing on this device"))))
+            (do
+                (local (ok result)
+                       (pcall (fn [] (store:load-wallet wallet.id))))
+                (if ok
+                    (do
+                        (update-error nil)
+                        (when options.on-load
+                            (options.on-load result))
+                        (when dialog
+                            (dialog:drop)))
+                    (update-error result)))))
 
     (fn error-row [child-ctx]
         (local builder (Text {:text ""
@@ -56,7 +77,7 @@
                                      :variant :ghost
                                      :padding [0.4 0.4]
                                      :on-click (fn [_button _event]
-                                                 (handle-load wallet))})
+                                                 (handle-select wallet))})
                             child-ctx))})))
 
     (local content
@@ -64,7 +85,9 @@
                :xalign :stretch
                :yspacing 0.5
                :children
-               [(FlexChild (Text {:text "Select a wallet to load."}))
+               [(FlexChild (Text {:text (if (> recovery-count 0)
+                                            "Select a wallet. Entries marked Needs recovery must be recovered on this device first."
+                                            "Select a wallet to load.")}))
                 (FlexChild list-body 1)
                 (FlexChild error-row)]}))
 

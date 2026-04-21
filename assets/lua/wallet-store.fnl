@@ -83,11 +83,29 @@
                 (set found idx)))
         found)
 
+    (fn require-wallet-record [id]
+        (local index (find-wallet-index id))
+        (when (not index)
+            (error (string.format "WalletStore wallet %s not found" id)))
+        (. metadata.wallets index))
+
     (fn list-wallets [_self]
         (local copy [])
         (each [_ wallet (ipairs metadata.wallets)]
             (table.insert copy (copy-table wallet)))
         copy)
+
+    (fn describe-wallet [_self id]
+        (assert id "WalletStore.describe-wallet requires id")
+        (local record (require-wallet-record id))
+        (local described (copy-table record))
+        (local mnemonic (get-password service id))
+        (if (and mnemonic (not (= mnemonic "")))
+            (set described.status "ready")
+            (do
+                (set described.status "needs-recovery")
+                (set described.recovery-message "Wallet secret missing on this device")))
+        described)
 
     (fn save-wallet [_self wallet]
         (assert wallet "WalletStore.save-wallet requires wallet data")
@@ -113,12 +131,9 @@
 
     (fn load-wallet [_self id]
         (assert id "WalletStore.load-wallet requires id")
-        (local index (find-wallet-index id))
-        (when (not index)
-            (error (string.format "WalletStore wallet %s not found" id)))
-        (local record (. metadata.wallets index))
+        (local record (require-wallet-record id))
         (local mnemonic (get-password service id))
-        (when (not mnemonic)
+        (when (or (not mnemonic) (= mnemonic ""))
             (error (string.format "WalletStore mnemonic missing for %s" id)))
         (local resolved (copy-table record))
         (set resolved.mnemonic mnemonic)
@@ -137,6 +152,7 @@
         true)
 
     (local self {:list-wallets list-wallets
+                 :describe-wallet describe-wallet
                  :save-wallet save-wallet
                  :load-wallet load-wallet
                  :delete-wallet delete-wallet

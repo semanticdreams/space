@@ -14,6 +14,7 @@
     (local wallet-dir (fs.join-path data-dir "wallets"))
     (local active-path (fs.join-path wallet-dir "active.json"))
     (var active nil)
+    (var recovery nil)
 
     (fn ensure-wallet-dir []
         (local (ok err) (pcall fs.create-dirs wallet-dir))
@@ -54,6 +55,9 @@
         (when (fs.exists active-path)
             (pcall (fn [] (fs.remove active-path)))))
 
+    (fn active-wallet-not-found? [err]
+        (and err (string.find err " not found" 1 true)))
+
     (fn resolve-wallet [wallet]
         (if (= (type wallet) :string)
             (store:load-wallet wallet)
@@ -65,19 +69,22 @@
         (when (and app (= (type app) :table))
             (when (not app.wallet)
                 (set app.wallet {}))
-            (set app.wallet.active active)))
+            (set app.wallet.active active)
+            (set app.wallet.recovery recovery)))
 
     (fn set-active [_self wallet]
         (assert wallet "WalletManager.set-active requires wallet or id")
         (local resolved (resolve-wallet wallet))
         (assert resolved.id "WalletManager.set-active requires wallet id")
         (set active resolved)
+        (set recovery nil)
         (persist-active-id resolved.id)
         (sync-app-wallet)
         resolved)
 
     (fn clear-active [_self]
         (set active nil)
+        (set recovery nil)
         (clear-active-file)
         (sync-app-wallet)
         true)
@@ -85,17 +92,52 @@
     (fn get-active [_self]
         active)
 
+    (fn get-recovery-wallet [_self]
+        recovery)
+
     (fn load-active [_self]
         (local (id _payload) (read-active-id))
         (if id
             (do
-                (set active (store:load-wallet id))
+                (local (describe-ok described-or-err)
+                       (pcall (fn [] (store:describe-wallet id))))
+                (if (not describe-ok)
+                    (if (active-wallet-not-found? described-or-err)
+                        (do
+                            (set active nil)
+                            (set recovery nil)
+                            (clear-active-file)
+                            (when logging
+                                (logging.warn (string.format "[wallet] active wallet %s missing from metadata; clearing active selection"
+                                                             id)))
+                            (sync-app-wallet)
+                            nil)
+                        (error described-or-err))
+                    (do
+                        (local described described-or-err)
+                        (if (= described.status "needs-recovery")
+                            (do
+                                (set active nil)
+                                (set recovery described)
+                                (when logging
+                                    (logging.warn (string.format "[wallet] active wallet %s missing secret on this device; recovery required"
+                                                                 id)))
+                                (sync-app-wallet)
+                                nil)
+                            (do
+                                (set active (store:load-wallet id))
+                                (set recovery nil)
+                                (sync-app-wallet)
+                                active)))))
+            (do
+                (set active nil)
+                (set recovery nil)
                 (sync-app-wallet)
-                active)
-            nil))
+                nil)))
 
     (local self {:store store
      :get-active get-active
+     :get-recovery-wallet get-recovery-wallet
      :set-active set-active
      :clear-active clear-active
      :load-active load-active

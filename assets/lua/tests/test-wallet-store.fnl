@@ -99,10 +99,30 @@
             (assert (not ok) "WalletStore should reject empty name")
             (assert err "WalletStore should return error for missing name"))))
 
+(fn wallet-store-describes-missing-secret []
+    (with-temp-dir
+        (fn [root]
+            (local keyring (make-keyring-stub))
+            (local store (WalletStore {:data-dir root
+                                       :keyring keyring
+                                       :service "space-wallet-test"}))
+            (local record
+                (store:save-wallet {:coin "arbitrumnova"
+                                    :address "0x789"
+                                    :mnemonic "recover mnemonic"
+                                    :name "Recoverable"}))
+            ((. keyring :delete-password) "space-wallet-test" record.id)
+            (local described (store:describe-wallet record.id))
+            (assert (= described.status "needs-recovery")
+                    "WalletStore should mark wallets without secrets as needing recovery")
+            (assert described.recovery-message
+                    "WalletStore should explain missing secret state"))))
+
 (table.insert tests {:name "WalletStore saves and lists" :fn wallet-store-saves-and-lists})
 (table.insert tests {:name "WalletStore loads mnemonic" :fn wallet-store-loads-mnemonic})
 (table.insert tests {:name "WalletStore reloads metadata" :fn wallet-store-reloads-metadata})
 (table.insert tests {:name "WalletStore requires name" :fn wallet-store-requires-name})
+(table.insert tests {:name "WalletStore describes missing secret" :fn wallet-store-describes-missing-secret})
 
 (local main
     (fn []

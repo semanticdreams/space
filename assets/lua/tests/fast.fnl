@@ -155,6 +155,7 @@
     :tests.test-wallet
     :tests.test-wallet-manager
     :tests.test-wallet-store
+    :tests.test-wallet-recover-dialog
     :tests.test-wallet-view
     :tests.test-wallet-send-dialog
     :tests.test-qr-code

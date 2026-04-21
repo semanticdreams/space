@@ -62,7 +62,61 @@
                     "clear-active should remove active metadata")
             (set app.wallet original-wallet))))
 
+(fn wallet-manager-missing-secret-needs-recovery []
+    (with-temp-dir
+        (fn [root]
+            (local keyring (make-keyring-stub))
+            (local original-wallet app.wallet)
+            (local store (WalletStore {:data-dir root
+                                       :keyring keyring
+                                       :service "space-wallet-test"}))
+            (local record
+                (store:save-wallet {:coin "arbitrumnova"
+                                    :address "0xdef"
+                                    :mnemonic "manager recovery mnemonic"
+                                    :name "Recoverable"}))
+            (local manager (WalletManager {:data-dir root
+                                           :store store}))
+            (manager:set-active record)
+            ((. keyring :delete-password) "space-wallet-test" record.id)
+            (local reloaded (WalletManager {:data-dir root
+                                            :store store}))
+            (local loaded (reloaded:load-active))
+            (local recovery (reloaded:get-recovery-wallet))
+            (assert (not loaded)
+                    "WalletManager should not load an active wallet when its secret is missing")
+            (assert (fs.exists reloaded.active-path)
+                    "WalletManager should keep the active selection persisted while recovery is required")
+            (assert recovery
+                    "WalletManager should expose the wallet that needs recovery")
+            (assert (= recovery.id record.id)
+                    "WalletManager recovery metadata should match the missing wallet")
+            (assert (= recovery.status "needs-recovery")
+                    "WalletManager recovery metadata should carry recovery status")
+            (local restarted (WalletManager {:data-dir root
+                                             :store store}))
+            (local restarted-loaded (restarted:load-active))
+            (local restarted-recovery (restarted:get-recovery-wallet))
+            (assert (not restarted-loaded)
+                    "WalletManager should still require recovery after restart")
+            (assert restarted-recovery
+                    "WalletManager should restore recovery state from persisted active metadata")
+            (assert (= restarted-recovery.id record.id)
+                    "WalletManager restart recovery metadata should match the missing wallet")
+            (assert app.wallet
+                    "WalletManager should maintain app.wallet state")
+            (assert (not app.wallet.active)
+                    "WalletManager should clear app.wallet.active when recovery is required")
+            (assert (= app.wallet.recovery.id record.id)
+                    "WalletManager should sync recovery metadata to app.wallet")
+            (restarted:clear-active)
+            (assert (not app.wallet.recovery)
+                    "WalletManager clear-active should clear recovery metadata")
+            (set app.wallet original-wallet))))
+
 (table.insert tests {:name "WalletManager persists active wallet" :fn wallet-manager-persists-active})
+(table.insert tests {:name "WalletManager missing secret needs recovery"
+                     :fn wallet-manager-missing-secret-needs-recovery})
 
 (local main
     (fn []

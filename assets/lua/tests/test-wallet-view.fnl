@@ -109,6 +109,14 @@
      :load load-meta.element
      :send send-meta.element})
 
+(fn find-wallet-status [dialog]
+    (local content (resolve-dialog-body dialog))
+    (local flex content)
+    (local action-section (. flex.children 1))
+    (local action-flex action-section.element)
+    (local status-meta (. action-flex.children 5))
+    (and status-meta status-meta.element))
+
 (fn find-address-row [dialog]
     (local content (resolve-dialog-body dialog))
     (local flex content)
@@ -146,18 +154,23 @@
 (fn wallet-view-buttons-open-callbacks []
     (local ctx (make-test-ctx))
     (local target {:add-panel-child (fn [_self _opts] nil)})
+    (local active-wallet {:id "active"
+                          :address "0xabc"})
     (local manager {:store nil
-                    :get-active (fn [_self] nil)
+                    :get-active (fn [_self] active-wallet)
                     :set-active (fn [_self wallet] wallet)
                     :load-active (fn [_self] nil)})
     (var create-count 0)
     (var load-count 0)
     (var send-count 0)
+    (var last-load-options nil)
     (local dialog-create
         ((WalletView {:target target
                       :manager manager
                       :on-open-create (fn [_store] (set create-count (+ create-count 1)))
-                      :on-open-load (fn [_store] (set load-count (+ load-count 1)))
+                      :on-open-load-flow (fn [load-options]
+                                             (set load-count (+ load-count 1))
+                                             (set last-load-options load-options))
                       :on-open-send (fn [_manager] (set send-count (+ send-count 1)))})
          ctx))
     (local create-buttons (find-wallet-buttons dialog-create))
@@ -170,7 +183,9 @@
         ((WalletView {:target target
                       :manager manager
                       :on-open-create (fn [_store] (set create-count (+ create-count 1)))
-                      :on-open-load (fn [_store] (set load-count (+ load-count 1)))
+                      :on-open-load-flow (fn [load-options]
+                                             (set load-count (+ load-count 1))
+                                             (set last-load-options load-options))
                       :on-open-send (fn [_manager] (set send-count (+ send-count 1)))})
          ctx))
     (local load-buttons (find-wallet-buttons dialog-load))
@@ -181,10 +196,68 @@
     (assert (= create-count 1) "WalletView should call create callback")
     (assert (= load-count 1) "WalletView should call load callback")
     (assert (= send-count 2) "WalletView should call send callback")
+    (assert last-load-options "WalletView should pass load options to custom loader")
+    (assert last-load-options.store "WalletView load options should include store")
+    (assert (= (type last-load-options.on-load) :function)
+            "WalletView load options should include the load callback")
+    (assert (= (type last-load-options.on-recover) :function)
+            "WalletView load options should include the recover callback")
     (dialog-create:drop)
     (dialog-load:drop))
 
 (table.insert tests {:name "WalletView buttons open callbacks" :fn wallet-view-buttons-open-callbacks})
+
+(fn wallet-view-shows-recovery-status []
+    (local ctx (make-test-ctx))
+    (local target {:add-panel-child (fn [_self _opts] nil)})
+    (local recovery {:id "w1"
+                     :name "Recoverable"
+                     :coin "arbitrumnova"
+                     :address "0xabc"
+                     :status "needs-recovery"})
+    (local manager {:store nil
+                    :get-active (fn [_self] nil)
+                    :get-recovery-wallet (fn [_self] recovery)
+                    :set-active (fn [_self wallet] wallet)
+                    :load-active (fn [_self] nil)})
+    (local dialog
+        ((WalletView {:target target
+                      :manager manager})
+         ctx))
+    (local status (find-wallet-status dialog))
+    (local expected "Wallet Recoverable needs recovery on this device. Use Load wallet to re-enter the recovery phrase.")
+    (assert status "WalletView should expose recovery status text")
+    (assert-codepoints-eq (status:get-codepoints)
+                          (TextUtils.codepoints-from-text expected)
+                          "WalletView should explain recovery state in the dialog")
+    (dialog:drop))
+
+(table.insert tests {:name "WalletView shows recovery status" :fn wallet-view-shows-recovery-status})
+
+(fn wallet-view-disables-send-during-recovery []
+    (local ctx (make-test-ctx))
+    (local target {:add-panel-child (fn [_self _opts] nil)})
+    (local recovery {:id "w1"
+                     :name "Recoverable"
+                     :coin "arbitrumnova"
+                     :address "0xabc"
+                     :status "needs-recovery"})
+    (local manager {:store nil
+                    :get-active (fn [_self] nil)
+                    :get-recovery-wallet (fn [_self] recovery)
+                    :set-active (fn [_self wallet] wallet)
+                    :load-active (fn [_self] nil)})
+    (local dialog
+        ((WalletView {:target target
+                      :manager manager})
+         ctx))
+    (local buttons (find-wallet-buttons dialog))
+    (assert (= buttons.send.enabled? false)
+            "WalletView should disable send while the wallet needs recovery")
+    (dialog:drop))
+
+(table.insert tests {:name "WalletView disables send during recovery"
+                     :fn wallet-view-disables-send-during-recovery})
 
 (fn wallet-view-balance-formatting []
     (local ctx (make-test-ctx))

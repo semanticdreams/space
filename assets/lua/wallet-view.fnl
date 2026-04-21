@@ -9,6 +9,7 @@
 (local WalletCreateDialog (require :wallet-create-dialog))
 (local WalletLoadDialog (require :wallet-load-dialog))
 (local WalletManager (require :wallet-manager))
+(local WalletRecoverDialog (require :wallet-recover-dialog))
 (local RuntimeTimers (require :runtime-timers))
 (local WalletRpc (require :wallet-rpc))
 (local WalletSendDialog (require :wallet-send-dialog))
@@ -25,23 +26,27 @@
 
 (fn make-dialog-content [opts]
     (local options (or opts {}))
+    (local children
+        [(FlexChild (Text {:text "Manage your wallet."}))
+         (FlexChild (Button {:text "Create wallet"
+                             :variant :primary
+                             :padding [0.5 0.5]
+                             :on-click options.on-create}))
+         (FlexChild (Button {:text "Load wallet"
+                             :variant :secondary
+                             :padding [0.5 0.5]
+                             :on-click options.on-load}))
+         (FlexChild (or options.send-builder
+                        (Button {:text "Send"
+                                 :variant :secondary
+                                 :padding [0.5 0.5]
+                                 :on-click options.on-send})))])
+    (when options.status-builder
+        (table.insert children (FlexChild options.status-builder)))
     (Flex {:axis 2
            :xalign :stretch
            :yspacing 0.5
-           :children
-           [(FlexChild (Text {:text "Manage your wallet."}))
-            (FlexChild (Button {:text "Create wallet"
-                                :variant :primary
-                                :padding [0.5 0.5]
-                                :on-click options.on-create}))
-            (FlexChild (Button {:text "Load wallet"
-                                :variant :secondary
-                                :padding [0.5 0.5]
-                                :on-click options.on-load}))
-            (FlexChild (Button {:text "Send"
-                                :variant :secondary
-                                :padding [0.5 0.5]
-                                :on-click options.on-send}))]}))
+           :children children}))
 
 (fn build-wallet-view [options ctx runtime-opts]
     (local store (or options.store
@@ -61,9 +66,20 @@
     (var current-wallet nil)
     (var dropped? false)
     (var balance-request-id 0)
+    (var recovery-text nil)
+    (var send-button nil)
     (local target (resolve-target ctx options))
     (assert (and target target.add-panel-child)
             "WalletView requires a pointer target with add-panel-child")
+
+    (fn get-recovery-wallet []
+        (and manager manager.get-recovery-wallet (manager:get-recovery-wallet)))
+
+    (fn get-active-wallet []
+        (and manager manager.get-active (manager:get-active)))
+
+    (fn send-enabled? []
+        (not (= (get-active-wallet) nil)))
 
     (fn next-balance-request-id []
         (set balance-request-id (+ balance-request-id 1))
@@ -120,6 +136,20 @@
         (when balance-text
             (balance-text:set-text (.. "Balance: " (or value "-")))))
 
+    (fn update-recovery-status []
+        (when recovery-text
+            (local recovery (get-recovery-wallet))
+            (if recovery
+                (recovery-text:set-text
+                    (.. "Wallet "
+                        (or recovery.name recovery.address recovery.id "wallet")
+                        " needs recovery on this device. Use Load wallet to re-enter the recovery phrase."))
+                (recovery-text:set-text ""))))
+
+    (fn update-send-state []
+        (when send-button
+            (send-button:set-enabled (send-enabled?))))
+
     (fn request-balance [wallet opts]
         (local force? (and opts opts.force?))
         (local current (or wallet current-wallet (and manager (manager:get-active))))
@@ -151,6 +181,7 @@
         (local resolved (if manager (manager:set-active wallet) wallet))
         (update-current resolved)
         (request-balance resolved)
+        (update-recovery-status)
         (when options.on-created
             (options.on-created resolved)))
 
@@ -158,8 +189,16 @@
         (local resolved (if manager (manager:set-active wallet) wallet))
         (update-current resolved)
         (request-balance resolved)
+        (update-recovery-status)
         (when options.on-load
             (options.on-load resolved)))
+
+    (fn handle-open-recover [wallet]
+        (if options.on-open-recover
+            (options.on-open-recover store wallet)
+            (open-dialog (WalletRecoverDialog {:store store
+                                               :wallet wallet
+                                               :on-recovered handle-loaded}))))
 
     (fn handle-open-create [_button _event]
         (if options.on-open-create
@@ -168,18 +207,37 @@
                                               :on-created handle-created}))))
 
     (fn handle-open-load [_button _event]
-        (if options.on-open-load
-            (options.on-open-load store)
+        (if options.on-open-load-flow
+            (options.on-open-load-flow {:store store
+                                        :on-load handle-loaded
+                                        :on-recover handle-open-recover})
             (open-dialog (WalletLoadDialog {:store store
-                                            :on-load handle-loaded}))))
+                                            :on-load handle-loaded
+                                            :on-recover handle-open-recover}))))
 
     (fn open-send-dialog []
         (open-dialog (WalletSendDialog {:manager manager})))
 
     (fn handle-open-send [_button _event]
-        (if options.on-open-send
-            (options.on-open-send manager)
-            (open-send-dialog)))
+        (local recovery (get-recovery-wallet))
+        (if recovery
+            (handle-open-recover recovery)
+            (when (send-enabled?)
+                (if options.on-open-send
+                    (options.on-open-send manager)
+                    (open-send-dialog)))))
+
+    (fn send-row [child-ctx]
+        (local builder
+            (Button {:text "Send"
+                     :variant :secondary
+                     :padding [0.5 0.5]
+                     :enabled? (send-enabled?)
+                     :on-click handle-open-send}))
+        (local element (builder child-ctx))
+        (set send-button element)
+        (update-send-state)
+        element)
 
     (fn name-row [child-ctx]
         (local builder (Text {:text "Name: -"
@@ -248,6 +306,16 @@
                            (FlexChild reload-builder 0)]})
          child-ctx))
 
+    (fn recovery-status-row [child-ctx]
+        (local builder
+            (Text {:text ""
+                   :name "wallet-recovery-status"
+                   :color (glm.vec4 1 0.75 0.3 1)}))
+        (local element (builder child-ctx))
+        (set recovery-text element)
+        (update-recovery-status)
+        element)
+
     (fn qr-row [child-ctx]
         (local builder
             (QrCodeWidget {:name "wallet-receive-qr"
@@ -268,7 +336,9 @@
                :children
                [(FlexChild (make-dialog-content {:on-create handle-open-create
                                                  :on-load handle-open-load
-                                                 :on-send handle-open-send}))
+                                                 :on-send handle-open-send
+                                                 :send-builder send-row
+                                                 :status-builder recovery-status-row}))
                 (FlexChild (Text {:text "Current wallet"}))
                 (FlexChild name-row)
                 (FlexChild coin-row)
@@ -287,6 +357,8 @@
     (when manager
         (manager:load-active)
         (update-current options.current-wallet))
+    (update-recovery-status)
+    (update-send-state)
     (request-balance options.current-wallet)
     (when dialog
         (local base-drop dialog.drop)
