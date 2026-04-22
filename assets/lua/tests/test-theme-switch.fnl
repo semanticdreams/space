@@ -221,6 +221,128 @@
     (error err))
   true)
 
+(fn apply-theme-drops-graph-view-before-target-rebuild []
+  (local original-graph-view app.graph-view)
+  (local original-graph app.graph)
+  (local original-canvas app.canvas)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-active-world-runtime app.active-world-runtime)
+  (local original-graph-view-module (. package.loaded "graph/view"))
+  (var panel-dropped? false)
+  (var graph-drop-calls 0)
+  (var hud-rebuild-calls 0)
+  (var old-graph-view nil)
+  (local node {:key "node-a"})
+  (local panel-element
+    {:layout {}
+     :drop (fn [_self]
+             (assert (not panel-dropped?) "graph node view panel dropped twice")
+             (set panel-dropped? true))})
+  (local panel-metadata {:element panel-element
+                         :persistence {:kind "graph-node-view"
+                                       :node-key node.key}})
+  (local ctx {:theme {:name :dark}
+              :set-theme (fn [self theme]
+                           (set self.theme theme))})
+  (local hud {:build-context ctx
+              :tiles {:children [panel-metadata]}
+              :capture-panel-element-state
+              (fn [_self element]
+                (when (= element panel-element)
+                  {:layer "tiles"
+                   :align-x :center
+                   :align-y :start}))
+              :remove-panel-child
+              (fn [self element]
+                (var removed false)
+                (local kept [])
+                (each [_ metadata (ipairs self.tiles.children)]
+                  (if (and (not removed) (= metadata.element element))
+                      (do
+                        (set removed true)
+                        (when (and element element.drop)
+                          (element:drop)))
+                      (table.insert kept metadata)))
+                (set self.tiles.children kept)
+                removed)
+              :build-default
+              (fn [self]
+                (set hud-rebuild-calls (+ hud-rebuild-calls 1))
+                (assert (not app.active-world-runtime.graph-view)
+                        "old graph view teardown should clear app.active-world-runtime.graph-view before HUD rebuild")
+                (assert (not app.active-world-entry.world.runtime.graph-view)
+                        "old graph view teardown should clear active world runtime graph-view before HUD rebuild")
+                (each [_ metadata (ipairs self.tiles.children)]
+                  (local element (and metadata metadata.element))
+                  (when (and element element.drop)
+                    (element:drop)))
+                true)
+              :restore-state
+              (fn [_self _state] true)})
+  (set app.graph {})
+  (set app.canvas nil)
+  (set app.scene {:build-context ctx
+                  :build-default (fn [_self _payload] true)})
+  (set app.hud hud)
+  (set app.apply-active-world-hud-contrib
+       (fn []
+         (hud:build-default)))
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                     :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_theme] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (set app.graph-view
+       {:selection {:selected-nodes [node]}
+        :drop (fn [_self]
+                (set graph-drop-calls (+ graph-drop-calls 1))
+                (app.hud:remove-panel-child panel-element))})
+  (set old-graph-view app.graph-view)
+  (local runtime {:graph-view old-graph-view})
+  (set app.active-world-runtime runtime)
+  (set app.active-world-entry {:world {:runtime runtime
+                                       :state {:scene {:terrains []}}}})
+  (set (. package.loaded "graph/view")
+       (fn [_opts]
+         {:selection {:set-selection (fn [_self _selected] true)}}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light)
+        (assert (= graph-drop-calls 1)
+                "apply-theme should drop the old graph view exactly once")
+        (assert (= hud-rebuild-calls 1)
+                "apply-theme should rebuild the HUD after graph view teardown")
+        (assert panel-dropped?
+                "graph view panel should be dropped during old graph view teardown")
+        (assert (= (length hud.tiles.children) 0)
+                "old graph view teardown should detach graph node view panels before HUD rebuild")
+        (assert app.active-world-runtime.graph-view
+                "apply-theme should install the rebuilt graph view on the active runtime")
+        (assert (not (= app.active-world-runtime.graph-view old-graph-view))
+                "apply-theme should not leave the dropped graph view on the active runtime"))))
+  (set app.graph-view original-graph-view)
+  (set app.graph original-graph)
+  (set app.canvas original-canvas)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.active-world-runtime original-active-world-runtime)
+  (set (. package.loaded "graph/view") original-graph-view-module)
+  (when (not ok)
+    (error err))
+  true)
+
 (fn apply-theme-saves-exact-theme-key []
   (local original-settings app.settings)
   (local original-themes app.themes)
@@ -425,6 +547,8 @@
 (table.insert tests {:name "Control panel toggles theme" :fn control-panel-toggles-theme})
 (table.insert tests {:name "Apply theme restores graph node view panels on their target"
                      :fn apply-theme-restores-graph-node-view-panels-on-target})
+(table.insert tests {:name "Apply theme drops graph view before target rebuild"
+                     :fn apply-theme-drops-graph-view-before-target-rebuild})
 (table.insert tests {:name "Apply theme saves exact theme key"
                      :fn apply-theme-saves-exact-theme-key})
 (table.insert tests {:name "Apply theme refreshes physics containment visualization"

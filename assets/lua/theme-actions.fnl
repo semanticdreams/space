@@ -40,10 +40,23 @@
              (> (length (or snapshot.panels [])) 0))
     (snapshot.target:restore-state {:panels snapshot.panels})))
 
+(fn drop-current-graph-view []
+  (local current app.graph-view)
+  (when current
+    (current:drop)
+    (when (= app.graph-view current)
+      (set app.graph-view nil))
+    (when (and app.active-world-runtime
+               (= app.active-world-runtime.graph-view current))
+      (set app.active-world-runtime.graph-view nil))
+    (local runtime (and app.active-world-entry
+                        app.active-world-entry.world
+                        app.active-world-entry.world.runtime))
+    (when (and runtime (= runtime.graph-view current))
+      (set runtime.graph-view nil))))
+
 (fn rebuild-graph-view [selected panel-states]
-  (when app.graph-view
-    (app.graph-view:drop)
-    (set app.graph-view nil))
+  (drop-current-graph-view)
   (when (and app.graph (or app.canvas app.scene) app.hud)
     (local GraphView (require :graph/view))
     (local ctx (or (and app.canvas app.canvas.build-context)
@@ -109,6 +122,7 @@
          (copy-list app.graph-view.selection.selected-nodes)))
   (local graph-node-view-panels
     (capture-graph-node-view-panel-states))
+  (drop-current-graph-view)
   (local themes app.themes)
   (when (and themes themes.set-theme)
     (themes.set-theme theme-name))
