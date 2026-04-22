@@ -7,6 +7,7 @@
     :tests.test-ray-box
     :tests.test-zmq
     :tests.test-signal
+    :tests.test-touch-session
     :tests.test-remote-control
     :tests.test-render-capture
     :tests.test-next-frame

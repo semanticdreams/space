@@ -1,41 +1,50 @@
 (local TouchSession (require :touch-session))
+(local logging (require :logging))
 
 (local SDL_BUTTON_LEFT 1)
 (local default-drag-threshold 12)
 
+(fn payload-touch-id [payload]
+  (and payload (rawget payload "touch-id")))
+
+(fn payload-finger-id [payload]
+  (and payload (rawget payload "finger-id")))
+
 (fn ensure-mouse-signal [name]
   (local events (and app.engine app.engine.events))
   (assert events "TouchRouter requires app.engine.events")
-  (local signal (. events name))
+  (local signal (rawget events name))
   (assert signal (.. "TouchRouter requires engine event signal " name))
   signal)
 
 (fn make-touch-mouse-payload [payload]
-  {:button SDL_BUTTON_LEFT
-   :state true
-   :clicks 1
-   :x (or (and payload payload.x) 0)
-   :y (or (and payload payload.y) 0)
-   :xrel (or (and payload payload.xrel) 0)
-   :yrel (or (and payload payload.yrel) 0)
-   :which -1
-   :mod 0
-   :timestamp (and payload payload.timestamp)
-   :pressure (and payload payload.pressure)
-   :touch-id (and payload payload.touch-id)
-   :finger-id (and payload payload.finger-id)
-   :synthetic? true
-   :source :touch})
+  (local out {:button SDL_BUTTON_LEFT
+              :state true
+              :clicks 1
+              :x (or (and payload payload.x) 0)
+              :y (or (and payload payload.y) 0)
+              :xrel (or (and payload payload.xrel) 0)
+              :yrel (or (and payload payload.yrel) 0)
+              :which -1
+              :mod 0
+              :timestamp (and payload payload.timestamp)
+              :pressure (and payload payload.pressure)
+              :synthetic? true
+              :source :touch})
+  (tset out "touch-id" (payload-touch-id payload))
+  (tset out "finger-id" (payload-finger-id payload))
+  out)
 
 (fn payload-from-contact [contact payload]
-  {:x (or (and contact contact.x) (and payload payload.x) 0)
-   :y (or (and contact contact.y) (and payload payload.y) 0)
-   :xrel (or (and contact contact.xrel) (and payload payload.xrel) 0)
-   :yrel (or (and contact contact.yrel) (and payload payload.yrel) 0)
-   :timestamp (or (and payload payload.timestamp) (and contact contact.timestamp))
-   :pressure (or (and contact contact.pressure) (and payload payload.pressure))
-   :touch-id (or (and contact contact.touch-id) (and payload payload.touch-id))
-   :finger-id (or (and contact contact.finger-id) (and payload payload.finger-id))})
+  (local out {:x (or (and contact contact.x) (and payload payload.x) 0)
+              :y (or (and contact contact.y) (and payload payload.y) 0)
+              :xrel (or (and contact contact.xrel) (and payload payload.xrel) 0)
+              :yrel (or (and contact contact.yrel) (and payload payload.yrel) 0)
+              :timestamp (or (and payload payload.timestamp) (and contact contact.timestamp))
+              :pressure (or (and contact contact.pressure) (and payload payload.pressure))})
+  (tset out "touch-id" (or (and contact (rawget contact "touch-id")) (payload-touch-id payload)))
+  (tset out "finger-id" (or (and contact (rawget contact "finger-id")) (payload-finger-id payload)))
+  out)
 
 (fn emit-mouse-button-down [payload]
   (local signal (ensure-mouse-signal "mouse-button-down"))
@@ -105,6 +114,24 @@
   (fn reset-blocked-if-idle []
     (when (<= (session:count) 0)
       (set blocked-multitouch? false)))
+
+  (fn trace [event payload fields]
+    (local base {:event event
+                 :touch-id (payload-touch-id payload)
+                 :finger-id (payload-finger-id payload)
+                 :session-count (session:count)
+                 :blocked-multitouch blocked-multitouch?
+                 :multitouch-active multitouch-active?
+                 :mouse-active mouse-active?
+                 :mouse-deferred mouse-deferred?
+                 :has-primary (not (= primary-key nil))
+                 :has-captured-target (not (not captured-target))
+                 :has-drag-candidate (not (not drag-candidate))
+                 :timestamp (and payload payload.timestamp)})
+    (when fields
+      (each [k v (pairs fields)]
+        (tset base k v)))
+    (logging.debug base "[touch-router] state"))
 
   (fn release-mouse! [payload]
     (when mouse-active?
@@ -205,17 +232,19 @@
                         (set blocked-multitouch? true)
                         true)))))))
 
-  (fn on-touch-down [ctx payload]
+  (fn on-touch-down [_self ctx payload]
     (if (not payload)
         false
         (if (not (allow-touch? payload))
             (do
+              (trace "touch-down-blocked" payload {:reason "allow-touch-false"})
               (when (> (session:count) 0)
                 (reset-router! payload))
               false)
             (do
               (session:on-touch-down payload)
               (reset-blocked-if-idle)
+              (trace "touch-down" payload nil)
               (if multitouch-active?
                   (handle-active-multitouch-down ctx)
                   (handle-single-touch-down ctx payload))))))
@@ -252,16 +281,18 @@
                           true)
                         false))))))
 
-  (fn on-touch-motion [ctx payload]
+  (fn on-touch-motion [_self ctx payload]
     (if (not payload)
         false
         (if (not (allow-touch? payload))
             (do
+              (trace "touch-motion-blocked" payload {:reason "allow-touch-false"})
               (when (> (session:count) 0)
                 (reset-router! payload))
               false)
             (do
               (session:on-touch-motion payload)
+              (trace "touch-motion" payload nil)
               (if multitouch-active?
                   (handle-active-multitouch-motion ctx)
                   (handle-single-touch-motion payload))))))
@@ -302,11 +333,14 @@
               true)
             false)))
 
-  (fn on-touch-finished [ctx payload canceled?]
+  (fn on-touch-finished [_self ctx payload canceled?]
     (if (not payload)
         false
         (if (not (allow-touch? payload))
             (do
+              (trace (if canceled? "touch-canceled-blocked" "touch-up-blocked")
+                     payload
+                     {:reason "allow-touch-false"})
               (when (> (session:count) 0)
                 (reset-router! payload))
               false)
@@ -314,15 +348,18 @@
               (local key (session:key-from-payload payload))
               (local primary? (= key primary-key))
               (session:on-touch-up payload)
+              (trace (if canceled? "touch-canceled" "touch-up")
+                     payload
+                     {:primary primary?})
               (if multitouch-active?
                   (handle-active-multitouch-finished ctx canceled?)
                   (handle-single-touch-finished payload canceled? primary?))))))
 
-  (fn on-touch-up [ctx payload]
-    (on-touch-finished ctx payload false))
+  (fn on-touch-up [self ctx payload]
+    (on-touch-finished self ctx payload false))
 
-  (fn on-touch-canceled [ctx payload]
-    (on-touch-finished ctx payload true))
+  (fn on-touch-canceled [self ctx payload]
+    (on-touch-finished self ctx payload true))
 
   (fn reset [_self]
     (reset-router! nil))

@@ -1,31 +1,10 @@
 (local TouchRouter (require :touch-router))
-(local Runtime (require :state-runtime))
-
-(fn active-controls []
-  (Runtime.active-controls))
-
-(fn handle-transform-start [_ctx gesture _session]
-  (local controls (active-controls))
-  (local handler (and controls controls.on-touch-transform-start))
-  (and handler (controls:on-touch-transform-start gesture)))
-
-(fn handle-transform-motion [_ctx gesture _session]
-  (local controls (active-controls))
-  (local handler (and controls controls.on-touch-transform))
-  (when handler
-    (controls:on-touch-transform gesture)))
-
-(fn handle-transform-end [_ctx gesture _session opts]
-  (local controls (active-controls))
-  (local handler (and controls controls.on-touch-transform-end))
-  (when handler
-    (controls:on-touch-transform-end {:gesture gesture
-                                      :canceled? (and opts opts.canceled?)})))
+(local TouchTransform (require :state-handlers/touch-transform))
 
 (local router
-  (TouchRouter {:on-multitouch-start handle-transform-start
-                :on-multitouch-motion handle-transform-motion
-                :on-multitouch-end handle-transform-end}))
+  (TouchRouter {:on-multitouch-start TouchTransform.handle-transform-start
+                :on-multitouch-motion TouchTransform.handle-transform-motion
+                :on-multitouch-end TouchTransform.handle-transform-end}))
 
 (local CameraTouchDown
   {:touch-down

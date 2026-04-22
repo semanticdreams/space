@@ -3,37 +3,56 @@
 (local SDL_BUTTON_LEFT 1)
 (local SDL_PEN_MOUSEID -2)
 
+(fn payload-pen-id [payload]
+  (and payload (rawget payload "pen-id")))
+
+(fn payload-pen-state [payload]
+  (and payload (rawget payload "pen-state")))
+
+(fn payload-in-range [payload]
+  (and payload (rawget payload "in-range")))
+
+(fn payload-x-tilt [payload]
+  (and payload (rawget payload "x-tilt")))
+
+(fn payload-y-tilt [payload]
+  (and payload (rawget payload "y-tilt")))
+
+(fn payload-tangential-pressure [payload]
+  (and payload (rawget payload "tangential-pressure")))
+
 (fn ensure-mouse-signal [name]
   (local events (and app.engine app.engine.events))
   (assert events "PenPointerHandlers requires app.engine.events")
-  (local signal (. events name))
+  (local signal (rawget events name))
   (assert signal (.. "PenPointerHandlers requires engine event signal " name))
   signal)
 
 (fn make-pen-mouse-payload [payload]
-  {:button SDL_BUTTON_LEFT
-   :state true
-   :clicks 1
-   :x (or (and payload payload.x) 0)
-   :y (or (and payload payload.y) 0)
-   :xrel (or (and payload payload.xrel) 0)
-   :yrel (or (and payload payload.yrel) 0)
-   :which SDL_PEN_MOUSEID
-   :mod (or (and payload payload.mod) 0)
-   :timestamp (and payload payload.timestamp)
-   :synthetic? true
-   :source :pen
-   :pen-id (and payload payload.pen-id)
-   :pen-state (and payload payload.pen-state)
-   :eraser (and payload payload.eraser)
-   :in-range (and payload payload.in-range)
-   :pressure (and payload payload.pressure)
-   :x-tilt (and payload payload.x-tilt)
-   :y-tilt (and payload payload.y-tilt)
-   :distance (and payload payload.distance)
-   :rotation (and payload payload.rotation)
-   :slider (and payload payload.slider)
-   :tangential-pressure (and payload payload.tangential-pressure)})
+  (local out {:button SDL_BUTTON_LEFT
+              :state true
+              :clicks 1
+              :x (or (and payload payload.x) 0)
+              :y (or (and payload payload.y) 0)
+              :xrel (or (and payload payload.xrel) 0)
+              :yrel (or (and payload payload.yrel) 0)
+              :which SDL_PEN_MOUSEID
+              :mod (or (and payload payload.mod) 0)
+              :timestamp (and payload payload.timestamp)
+              :synthetic? true
+              :source :pen
+              :eraser (and payload payload.eraser)
+              :pressure (and payload payload.pressure)
+              :distance (and payload payload.distance)
+              :rotation (and payload payload.rotation)
+              :slider (and payload payload.slider)})
+  (tset out "pen-id" (payload-pen-id payload))
+  (tset out "pen-state" (payload-pen-state payload))
+  (tset out "in-range" (payload-in-range payload))
+  (tset out "x-tilt" (payload-x-tilt payload))
+  (tset out "y-tilt" (payload-y-tilt payload))
+  (tset out "tangential-pressure" (payload-tangential-pressure payload))
+  out)
 
 (fn emit-mouse-motion [payload]
   (local signal (ensure-mouse-signal "mouse-motion"))
@@ -57,14 +76,14 @@
   (local activity (PenActivity (or options.touch-policy {})))
 
   (fn update-pointer-override! [payload]
-    (set app.pointer-input-override
-         {:x (or (and payload payload.x) 0)
-          :y (or (and payload payload.y) 0)
-          :xrel (or (and payload payload.xrel) 0)
-          :yrel (or (and payload payload.yrel) 0)
-          :source :pen
-          :pen-id (and payload payload.pen-id)
-          :timestamp (and payload payload.timestamp)}))
+    (local override {:x (or (and payload payload.x) 0)
+                     :y (or (and payload payload.y) 0)
+                     :xrel (or (and payload payload.xrel) 0)
+                     :yrel (or (and payload payload.yrel) 0)
+                     :source :pen
+                     :timestamp (and payload payload.timestamp)})
+    (tset override "pen-id" (payload-pen-id payload))
+    (set app.pointer-input-override override))
 
   (fn clear-pointer-override! []
     (when (= (and app.pointer-input-override app.pointer-input-override.source) :pen)
@@ -72,8 +91,8 @@
 
   (fn clear-pointer-override-for-pen! [payload]
     (when (and (= (and app.pointer-input-override app.pointer-input-override.source) :pen)
-               (= (and app.pointer-input-override app.pointer-input-override.pen-id)
-                  (and payload payload.pen-id)))
+               (= (and app.pointer-input-override (rawget app.pointer-input-override "pen-id"))
+                  (payload-pen-id payload)))
       (set app.pointer-input-override nil)))
 
   (fn clear-hover! []

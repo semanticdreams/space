@@ -825,9 +825,10 @@
                 (not (finite-number? vec.z)))
         (error (.. "Hud.screen-pos-ray produced non-finite " label))))
     (assert projection "Hud.screen-pos-ray requires a projection matrix")
-    (local sample-pos (or pos
-                          {:x (+ viewport.x (/ viewport.width 2))
-                           :y (+ viewport.y (/ viewport.height 2))}))
+    (local sample-pos
+      (or (viewport-utils.input-pos->viewport-pos pos viewport app.engine)
+          {:x (+ viewport.x (/ viewport.width 2))
+           :y (+ viewport.y (/ viewport.height 2))}))
     (local px (or sample-pos.x viewport.x))
     (local py (or sample-pos.y viewport.y))
     (local inverted-y (- (+ viewport.height viewport.y) py))

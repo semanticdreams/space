@@ -13,7 +13,7 @@
     (not (not (and payload payload.eraser))))
 
   (fn pen-id [payload]
-    (and payload payload.pen-id))
+    (and payload (rawget payload "pen-id")))
 
   (fn any-eraser-pen-active? []
     (var active? false)

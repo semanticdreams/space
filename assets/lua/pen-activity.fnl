@@ -6,7 +6,7 @@
   (local pen-states {})
 
   (fn pen-id-from-payload [payload]
-    (and payload payload.pen-id))
+    (and payload (rawget payload "pen-id")))
 
   (fn payload-timestamp [payload]
     (and payload payload.timestamp))
@@ -94,7 +94,7 @@
 
   (fn on-pen-motion [_self payload]
     (local state (ensure-pen-state payload))
-    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.in-range? (not (= (and payload (rawget payload "in-range")) false)))
     (set state.down? (not (not (and payload payload.down))))
     (set-last-event! state payload)
     (when (or (= suppress-touch-when :proximity) state.down?)
@@ -110,14 +110,14 @@
 
   (fn on-pen-up [_self payload]
     (local state (ensure-pen-state payload))
-    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.in-range? (not (= (and payload (rawget payload "in-range")) false)))
     (set state.down? false)
     (mark-active! state payload)
     true)
 
   (fn on-pen-button [_self payload]
     (local state (ensure-pen-state payload))
-    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.in-range? (not (= (and payload (rawget payload "in-range")) false)))
     (set state.down? (not (not (and payload payload.down))))
     (set-last-event! state payload)
     (when (or (= suppress-touch-when :proximity) state.down?)
@@ -126,7 +126,7 @@
 
   (fn on-pen-axis [_self payload]
     (local state (ensure-pen-state payload))
-    (set state.in-range? (not (= (and payload payload.in-range) false)))
+    (set state.in-range? (not (= (and payload (rawget payload "in-range")) false)))
     (set state.down? (not (not (and payload payload.down))))
     (set-last-event! state payload)
     (when (or (= suppress-touch-when :proximity) state.down?)

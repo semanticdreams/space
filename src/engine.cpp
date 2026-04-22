@@ -8,11 +8,13 @@
 #include "lua_jobs.h"
 #include "lua_keyring.h"
 #include "log.h"
+#include "input_coordinates.h"
 #include "input_mouse_state.h"
 #include "lua_video.h"
 #include "video_player.h"
 #include "cef_runtime.h"
 
+#include <cstdlib>
 #include <optional>
 #include <cinttypes>
 #include <utility>
@@ -71,22 +73,119 @@ bool is_on_battery(SDL_PowerState state)
     return state == SDL_POWERSTATE_ON_BATTERY;
 }
 
-std::pair<float, float> touch_pixels(sol::table engine_table, WindowSdl* window, float normalized_x, float normalized_y)
+bool compiled_with_wayland_backend()
 {
-    int pixel_width = 0;
-    int pixel_height = 0;
+#ifdef SDL_VIDEO_DRIVER_WAYLAND
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool compiled_with_x11_xinput2()
+{
+#ifdef SDL_VIDEO_DRIVER_X11_XINPUT2
+    return true;
+#else
+    return false;
+#endif
+}
+
+void log_input_backend_summary()
+{
+    const char* current_driver = SDL_GetCurrentVideoDriver();
+    const char* session_type = std::getenv("XDG_SESSION_TYPE");
+    int touch_count = 0;
+    SDL_TouchID* touch_ids = SDL_GetTouchDevices(&touch_count);
+    SDL_free(touch_ids);
+
+    LOG_NAMED("input", Info)
+        << log_kv("session_type", session_type ? session_type : "")
+        << log_kv("video_driver", current_driver ? current_driver : "")
+        << log_kv("compiled_wayland", compiled_with_wayland_backend())
+        << log_kv("compiled_x11_xinput2", compiled_with_x11_xinput2())
+        << log_kv("touch_devices", touch_count)
+        << "SDL input backend summary";
+
+    if (session_type
+        && std::string(session_type) == "wayland"
+        && current_driver
+        && std::string(current_driver) == "x11")
+    {
+        LOG_NAMED("input", Warning)
+            << log_kv("session_type", session_type)
+            << log_kv("video_driver", current_driver)
+            << log_kv("compiled_wayland", compiled_with_wayland_backend())
+            << log_kv("compiled_x11_xinput2", compiled_with_x11_xinput2())
+            << "Wayland session is running through SDL X11/Xwayland backend; native touch and pen events may be unavailable";
+    }
+}
+
+void log_touch_event(const SDL_Event& event, const char* stage)
+{
+    const char* event_name = "touch";
+    bool canceled = false;
+    switch (event.type) {
+        case SDL_EVENT_FINGER_DOWN:
+            event_name = "finger-down";
+            break;
+        case SDL_EVENT_FINGER_MOTION:
+            event_name = "finger-motion";
+            break;
+        case SDL_EVENT_FINGER_UP:
+            event_name = "finger-up";
+            break;
+        case SDL_EVENT_FINGER_CANCELED:
+            event_name = "finger-canceled";
+            canceled = true;
+            break;
+        default:
+            return;
+    }
+
+    LOG_NAMED("input", Debug)
+        << log_kv("stage", stage)
+        << log_kv("event", event_name)
+        << log_kv("touch_id", static_cast<long long>(event.tfinger.touchID))
+        << log_kv("finger_id", static_cast<long long>(event.tfinger.fingerID))
+        << log_kv("window_id", static_cast<int>(event.tfinger.windowID))
+        << log_kv("x", event.tfinger.x)
+        << log_kv("y", event.tfinger.y)
+        << log_kv("dx", event.tfinger.dx)
+        << log_kv("dy", event.tfinger.dy)
+        << log_kv("pressure", event.tfinger.pressure)
+        << log_kv("canceled", canceled)
+        << log_kv("timestamp_ms", ns_to_ms(event.common.timestamp))
+        << "Native SDL touch event";
+}
+
+std::pair<float, float> touch_window_coordinates(sol::table engine_table,
+                                                 WindowSdl* window,
+                                                 float normalized_x,
+                                                 float normalized_y)
+{
+    int window_width = 0;
+    int window_height = 0;
     if (window) {
-        window->getWindowSizeInPixels(pixel_width, pixel_height);
+        window->getWindowSize(window_width, window_height);
     }
-    if (pixel_width <= 0) {
+    if (window_width <= 0) {
+        sol::optional<int> engine_width = engine_table["width"];
+        window_width = engine_width.value_or(0);
+    }
+    if (window_height <= 0) {
+        sol::optional<int> engine_height = engine_table["height"];
+        window_height = engine_height.value_or(0);
+    }
+    if (window_width <= 0) {
         sol::optional<int> engine_width = engine_table["pixel-width"];
-        pixel_width = engine_width.value_or(0);
+        window_width = engine_width.value_or(0);
     }
-    if (pixel_height <= 0) {
+    if (window_height <= 0) {
         sol::optional<int> engine_height = engine_table["pixel-height"];
-        pixel_height = engine_height.value_or(0);
+        window_height = engine_height.value_or(0);
     }
-    return { normalized_x * static_cast<float>(pixel_width), normalized_y * static_cast<float>(pixel_height) };
+    return normalized_to_window_coordinates(normalized_x, normalized_y, window_width, window_height);
 }
 
 void set_pen_axes(sol::table& payload, const InputState::PenState* pen)
@@ -147,6 +246,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
 
         initSystemCursors();
         SDL_SetGamepadEventsEnabled(true);
+        log_input_backend_summary();
 
         inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
         // Clear previous state memory
@@ -774,7 +874,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_DOWN: {
+                log_touch_event(event, "received");
                 if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    log_touch_event(event, "ignored-pen-touch");
                     break;
                 }
                 inputState.on_touch_down(event.tfinger.touchID,
@@ -785,15 +887,17 @@ void Engine::run() {
                                          event.tfinger.dy,
                                          event.tfinger.pressure,
                                          ns_to_ms(event.common.timestamp));
-                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
-                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                const auto [window_x, window_y] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [window_dx, window_dy] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
                 sol::table payload = lua_state->create_table();
                 payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
                 payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
-                payload["x"] = pixel_x;
-                payload["y"] = pixel_y;
-                payload["xrel"] = pixel_dx;
-                payload["yrel"] = pixel_dy;
+                payload["x"] = window_x;
+                payload["y"] = window_y;
+                payload["xrel"] = window_dx;
+                payload["yrel"] = window_dy;
                 payload["normalized-x"] = event.tfinger.x;
                 payload["normalized-y"] = event.tfinger.y;
                 payload["dx"] = event.tfinger.dx;
@@ -806,7 +910,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_MOTION: {
+                log_touch_event(event, "received");
                 if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    log_touch_event(event, "ignored-pen-touch");
                     break;
                 }
                 inputState.on_touch_motion(event.tfinger.touchID,
@@ -817,15 +923,17 @@ void Engine::run() {
                                            event.tfinger.dy,
                                            event.tfinger.pressure,
                                            ns_to_ms(event.common.timestamp));
-                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
-                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                const auto [window_x, window_y] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [window_dx, window_dy] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
                 sol::table payload = lua_state->create_table();
                 payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
                 payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
-                payload["x"] = pixel_x;
-                payload["y"] = pixel_y;
-                payload["xrel"] = pixel_dx;
-                payload["yrel"] = pixel_dy;
+                payload["x"] = window_x;
+                payload["y"] = window_y;
+                payload["xrel"] = window_dx;
+                payload["yrel"] = window_dy;
                 payload["normalized-x"] = event.tfinger.x;
                 payload["normalized-y"] = event.tfinger.y;
                 payload["dx"] = event.tfinger.dx;
@@ -838,7 +946,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_UP: {
+                log_touch_event(event, "received");
                 if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    log_touch_event(event, "ignored-pen-touch");
                     break;
                 }
                 inputState.on_touch_up(event.tfinger.touchID,
@@ -849,15 +959,17 @@ void Engine::run() {
                                        event.tfinger.dy,
                                        event.tfinger.pressure,
                                        ns_to_ms(event.common.timestamp));
-                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
-                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                const auto [window_x, window_y] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [window_dx, window_dy] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
                 sol::table payload = lua_state->create_table();
                 payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
                 payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
-                payload["x"] = pixel_x;
-                payload["y"] = pixel_y;
-                payload["xrel"] = pixel_dx;
-                payload["yrel"] = pixel_dy;
+                payload["x"] = window_x;
+                payload["y"] = window_y;
+                payload["xrel"] = window_dx;
+                payload["yrel"] = window_dy;
                 payload["normalized-x"] = event.tfinger.x;
                 payload["normalized-y"] = event.tfinger.y;
                 payload["dx"] = event.tfinger.dx;
@@ -870,7 +982,9 @@ void Engine::run() {
             }
 
             case SDL_EVENT_FINGER_CANCELED: {
+                log_touch_event(event, "received");
                 if (event.tfinger.touchID == SDL_PEN_TOUCHID) {
+                    log_touch_event(event, "ignored-pen-touch");
                     break;
                 }
                 inputState.on_touch_up(event.tfinger.touchID,
@@ -881,15 +995,17 @@ void Engine::run() {
                                        event.tfinger.dy,
                                        event.tfinger.pressure,
                                        ns_to_ms(event.common.timestamp));
-                const auto [pixel_x, pixel_y] = touch_pixels(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
-                const auto [pixel_dx, pixel_dy] = touch_pixels(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
+                const auto [window_x, window_y] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.x, event.tfinger.y);
+                const auto [window_dx, window_dy] =
+                    touch_window_coordinates(lua_engine, window.get(), event.tfinger.dx, event.tfinger.dy);
                 sol::table payload = lua_state->create_table();
                 payload["touch-id"] = static_cast<lua_Integer>(event.tfinger.touchID);
                 payload["finger-id"] = static_cast<lua_Integer>(event.tfinger.fingerID);
-                payload["x"] = pixel_x;
-                payload["y"] = pixel_y;
-                payload["xrel"] = pixel_dx;
-                payload["yrel"] = pixel_dy;
+                payload["x"] = window_x;
+                payload["y"] = window_y;
+                payload["xrel"] = window_dx;
+                payload["yrel"] = window_dy;
                 payload["normalized-x"] = event.tfinger.x;
                 payload["normalized-y"] = event.tfinger.y;
                 payload["dx"] = event.tfinger.dx;

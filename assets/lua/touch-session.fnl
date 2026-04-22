@@ -1,4 +1,5 @@
 (local glm (require :glm))
+(local logging (require :logging))
 
 (fn contact-key-from-values [touch-id finger-id]
   (.. (tostring (or touch-id 0))
@@ -55,34 +56,47 @@
 
 (fn build-contact [payload sequence existing]
   (local prior (or existing payload {}))
+  (local touch-id (and payload (rawget payload "touch-id")))
+  (local finger-id (and payload (rawget payload "finger-id")))
   (local x (or (and payload payload.x) (and existing existing.x) 0))
   (local y (or (and payload payload.y) (and existing existing.y) 0))
-  {:key (contact-key-from-values (and payload payload.touch-id)
-                                 (and payload payload.finger-id))
-   :touch-id (and payload payload.touch-id)
-   :finger-id (and payload payload.finger-id)
-   :x x
-   :y y
-   :xrel (or (and payload payload.xrel) 0)
-   :yrel (or (and payload payload.yrel) 0)
-   :pressure (or (and payload payload.pressure) (and existing existing.pressure))
-   :timestamp (or (and payload payload.timestamp) (and existing existing.timestamp))
-   :start-x (or (and existing existing.start-x) x)
-   :start-y (or (and existing existing.start-y) y)
-   :prev-x (or (and existing existing.x) x)
-   :prev-y (or (and existing existing.y) y)
-   :sequence (or (and existing existing.sequence) sequence)
-   :source (copy-table payload)
-   :previous-source (copy-table prior)})
+  (local contact {:key (contact-key-from-values touch-id finger-id)
+                  :x x
+                  :y y
+                  :xrel (or (and payload payload.xrel) 0)
+                  :yrel (or (and payload payload.yrel) 0)
+                  :pressure (or (and payload payload.pressure) (and existing existing.pressure))
+                  :timestamp (or (and payload payload.timestamp) (and existing existing.timestamp))
+                  :start-x (or (and existing existing.start-x) x)
+                  :start-y (or (and existing existing.start-y) y)
+                  :prev-x (or (and existing existing.x) x)
+                  :prev-y (or (and existing existing.y) y)
+                  :sequence (or (and existing existing.sequence) sequence)
+                  :source (copy-table payload)
+                  :previous-source (copy-table prior)})
+  (tset contact "touch-id" touch-id)
+  (tset contact "finger-id" finger-id)
+  contact)
 
 (fn TouchSession []
   (var contacts-by-key {})
   (var contact-order [])
   (var sequence-counter 0)
 
+  (fn trace [event payload fields]
+    (local base {:event event
+                 :touch-id (and payload (rawget payload "touch-id"))
+                 :finger-id (and payload (rawget payload "finger-id"))
+                 :order-size (length contact-order)
+                 :order (table.concat contact-order ",")})
+    (when fields
+      (each [k v (pairs fields)]
+        (tset base k v)))
+    (logging.debug base "[touch-session] state"))
+
   (fn key-from-payload [_self payload]
-    (contact-key-from-values (and payload payload.touch-id)
-                             (and payload payload.finger-id)))
+    (contact-key-from-values (and payload (rawget payload "touch-id"))
+                             (and payload (rawget payload "finger-id"))))
 
   (fn count [_self]
     (length contact-order))
@@ -135,11 +149,15 @@
       (table.insert contact-order key))
     (local contact (build-contact payload sequence-counter existing))
     (rawset contacts-by-key key contact)
+    (trace "set-contact" payload {:key key
+                                  :existing (not (not existing))
+                                  :sequence sequence-counter})
     contact)
 
   (fn clear-key! [_self key]
     (rawset contacts-by-key key nil)
     (remove-first! contact-order key)
+    (trace "clear-key" {:touch-id nil :finger-id nil} {:key key})
     true)
 
   (fn on-touch-down [self payload]
@@ -162,6 +180,7 @@
     (while (> (length contact-order) 0)
       (table.remove contact-order))
     (set sequence-counter 0)
+    (trace "clear" nil nil)
     true)
 
   {:key-from-payload key-from-payload

@@ -1,11 +1,28 @@
 (local Runtime (require :state-runtime))
 (local Common (require :state-handlers/common))
+(local logging (require :logging))
 
 (local SDL_BUTTON_LEFT 1)
 (local SDL_BUTTON_RIGHT 3)
 
+(fn trace-pointer [event payload]
+  (logging.debug {:event event
+                  :button (and payload payload.button)
+                  :x (and payload payload.x)
+                  :y (and payload payload.y)
+                  :xrel (and payload payload.xrel)
+                  :yrel (and payload payload.yrel)
+                  :which (and payload payload.which)
+                  :source (and payload payload.source)
+                  :synthetic (and payload payload.synthetic?)
+                  :touch-id (and payload (rawget payload "touch-id"))
+                  :finger-id (and payload (rawget payload "finger-id"))
+                  :pressure (and payload payload.pressure)}
+                 "[pointer] dispatch"))
+
 (local InputMouseButtonDownDispatch
   {:mouse-button-down (fn [ctx payload]
+                        (trace-pointer "mouse-button-down" payload)
                         (when (Runtime.dispatch-input :on-mouse-button-down payload)
                           ((. ctx :mark-event-consumed!))))})
 
@@ -64,6 +81,7 @@
 
 (local InputMouseButtonUpDispatch
   {:mouse-button-up (fn [ctx payload]
+                      (trace-pointer "mouse-button-up" payload)
                       (when (Runtime.dispatch-input :on-mouse-button-up payload)
                         ((. ctx :mark-event-consumed!))))})
 
@@ -118,6 +136,7 @@
 
 (local InputMouseMotionDispatch
   {:mouse-motion (fn [ctx payload]
+                   (trace-pointer "mouse-motion" payload)
                    (when (Runtime.dispatch-input :on-mouse-motion payload)
                      ((. ctx :mark-event-consumed!))))})
 

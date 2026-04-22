@@ -173,6 +173,48 @@
       (set found true)))
   found)
 
+(fn engine-touch-payload [touch-id finger-id x y xrel yrel pressure timestamp]
+  (local payload {:x x
+                  :y y
+                  :xrel xrel
+                  :yrel yrel
+                  :pressure pressure
+                  :timestamp timestamp})
+  (tset payload "touch-id" touch-id)
+  (tset payload "finger-id" finger-id)
+  payload)
+
+(fn create-clickables-stub []
+  (local record {:mouse-button-down 0
+                 :mouse-button-up 0
+                 :last-down nil
+                 :last-up nil})
+  {:record record
+   :on-mouse-button-down (fn [_self payload]
+                           (set record.mouse-button-down (+ record.mouse-button-down 1))
+                           (set record.last-down payload))
+   :on-mouse-button-up (fn [_self payload]
+                         (set record.mouse-button-up (+ record.mouse-button-up 1))
+                         (set record.last-up payload))
+   :active? false})
+
+(fn create-touch-transform-controls-stub []
+  (local record {:start nil
+                 :motion nil
+                 :ended nil})
+  {:record record
+   :on-touch-transform-start (fn [_self gesture]
+                               (set record.start gesture)
+                               true)
+   :on-touch-transform (fn [_self gesture]
+                         (set record.motion gesture)
+                         true)
+   :on-touch-transform-end (fn [_self payload]
+                             (set record.ended payload)
+                             true)
+   :drag-active? (fn [_self] false)
+   :update (fn [_self _delta] nil)})
+
 (fn reset-engine-events []
   (Runtime.reset)
   (local events (and app.engine app.engine.events))
@@ -304,13 +346,12 @@
   (local original-movables app.movables)
   (local original-resizables app.resizables)
   (local original-touch-targets app.touch-gesture-targets)
+  (local clickables (create-clickables-stub))
   (set app.active-pointer-controls nil)
   (set app.hoverables {:on-enter (fn [])
                        :on-leave (fn [])
                        :on-mouse-motion (fn [_self _payload])})
-  (set app.clickables {:on-mouse-button-down (fn [_self _payload])
-                       :on-mouse-button-up (fn [_self _payload])
-                       :active? false})
+  (set app.clickables clickables)
   (set app.movables {:drag-active? (fn [_self] false)
                      :on-mouse-motion (fn [_self _payload])
                      :on-mouse-button-down (fn [_self _payload])
@@ -323,34 +364,21 @@
   (set app.first-person-controls controls)
   (local state (NormalState))
   (state.on-enter)
-  (state:on-touch-down {:touch-id 1
-                        :finger-id 11
-                        :x 10
-                        :y 20
-                        :xrel 0
-                        :yrel 0
-                        :pressure 0.5
-                        :timestamp 1})
-  (state:on-touch-motion {:touch-id 1
-                          :finger-id 11
-                          :x 18
-                          :y 24
-                          :xrel 8
-                          :yrel 4
-                          :pressure 0.5
-                          :timestamp 2})
+  (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
+  (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
   (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 3)
-  (state:on-touch-up {:touch-id 1
-                      :finger-id 11
-                      :x 22
-                      :y 28
-                      :xrel 4
-                      :yrel 4
-                      :pressure 0.5
-                      :timestamp 3})
+  (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
   (assert (= controls.record.mouse_button_down 1))
   (assert controls.record.mouse_motion)
   (assert (= controls.record.mouse_button_up 1))
+  (assert (= clickables.record.mouse-button-down 1)
+          "single-touch should press clickables through synthetic mouse events")
+  (assert (= clickables.record.mouse-button-up 1)
+          "single-touch should release clickables through synthetic mouse events")
+  (assert (= (rawget clickables.record.last-down "touch-id") 1)
+          "synthetic button-down payload should preserve the touch device id")
+  (assert (= (rawget clickables.record.last-up "finger-id") 11)
+          "synthetic button-up payload should preserve the finger id")
   (state:on-leave)
   (set app.active-pointer-controls original-active-controls)
   (set app.hoverables original-hoverables)
@@ -359,6 +387,66 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls nil)
   (set app.touch-gesture-targets original-touch-targets))
+
+(fn normal-state-routes-canvas-multitouch-to-active-controls []
+  (reset-engine-events)
+  (local controls (create-touch-transform-controls-stub))
+  (local original-active-controls app.active-pointer-controls)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-movables app.movables)
+  (local original-resizables app.resizables)
+  (local original-touch-targets app.touch-gesture-targets)
+  (local original-canvas-interactive app.canvas-interactive?)
+  (local original-feature app.active-canvas-feature)
+  (set app.active-pointer-controls controls)
+  (set app.hoverables {:on-enter (fn [])
+                       :on-leave (fn [])
+                       :on-mouse-motion (fn [_self _payload])})
+  (set app.clickables (create-clickables-stub))
+  (set app.movables {:drag-active? (fn [_self] false)
+                     :on-mouse-motion (fn [_self _payload])
+                     :on-mouse-button-down (fn [_self _payload])
+                     :on-mouse-button-up (fn [_self _payload])})
+  (set app.resizables {:drag-active? (fn [_self] false)
+                       :on-mouse-motion (fn [_self _payload])
+                       :on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])})
+  (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+  (set app.canvas-interactive? true)
+  (set app.active-canvas-feature "graph")
+  (local state (NormalState))
+  (state.on-enter)
+  (state:on-touch-down (engine-touch-payload 7 301 20 30 0 0 0.5 1))
+  (assert (= controls.record.start nil)
+          "single touch should not start a transform gesture")
+  (state:on-touch-down (engine-touch-payload 7 302 40 30 0 0 0.6 2))
+  (assert controls.record.start
+          "second touch in canvas mode should start a multitouch transform")
+  (assert (= controls.record.start.count 2)
+          "canvas multitouch transform should include both contacts")
+  (assert (= (rawget (. controls.record.start.contacts 1) "touch-id") 7)
+          "multitouch gesture should preserve touch device ids")
+  (state:on-touch-motion (engine-touch-payload 7 302 48 34 8 4 0.6 3))
+  (assert controls.record.motion
+          "active canvas multitouch gesture should forward motion to controls")
+  (assert (= controls.record.motion.count 2)
+          "canvas multitouch motion should still report two active contacts")
+  (state:on-touch-up (engine-touch-payload 7 302 48 34 0 0 0.6 4))
+  (assert controls.record.ended
+          "ending a canvas multitouch gesture should notify controls")
+  (assert (= (and controls.record.ended.gesture controls.record.ended.gesture.count) 1)
+          "gesture end payload should report the remaining active contact count")
+  (state:on-touch-up (engine-touch-payload 7 301 20 30 0 0 0.5 5))
+  (state:on-leave)
+  (set app.active-pointer-controls original-active-controls)
+  (set app.hoverables original-hoverables)
+  (set app.clickables original-clickables)
+  (set app.movables original-movables)
+  (set app.resizables original-resizables)
+  (set app.touch-gesture-targets original-touch-targets)
+  (set app.canvas-interactive? original-canvas-interactive)
+  (set app.active-canvas-feature original-feature))
 
 (fn fpc-state-injects-single-touch-as-mouse []
   (reset-engine-events)
@@ -369,30 +457,9 @@
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (local state (FpcState))
   (state:on-enter)
-  (state:on-touch-down {:touch-id 1
-                        :finger-id 11
-                        :x 10
-                        :y 20
-                        :xrel 0
-                        :yrel 0
-                        :pressure 0.5
-                        :timestamp 1})
-  (state:on-touch-motion {:touch-id 1
-                          :finger-id 11
-                          :x 18
-                          :y 24
-                          :xrel 8
-                          :yrel 4
-                          :pressure 0.5
-                          :timestamp 2})
-  (state:on-touch-up {:touch-id 1
-                      :finger-id 11
-                      :x 22
-                      :y 28
-                      :xrel 4
-                      :yrel 4
-                      :pressure 0.5
-                      :timestamp 3})
+  (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
+  (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
+  (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
   (assert (= controls.record.mouse_button_down 1))
   (assert (= controls.record.mouse_button_up 1))
   (assert controls.record.mouse_motion
@@ -1452,6 +1519,8 @@
 (table.insert tests {:name "State history records recent transitions" :fn state-history-tracks-transitions})
 (table.insert tests {:name "Normal state forwards events to controls" :fn normal-state-forwards-events})
 (table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
+(table.insert tests {:name "Normal state routes canvas multitouch to active controls"
+                     :fn normal-state-routes-canvas-multitouch-to-active-controls})
 (table.insert tests {:name "Normal state injects pen as mouse and restores drawing tool"
                      :fn normal-state-injects-pen-as-mouse-and-restores-drawing-tool})
 (table.insert tests {:name "Normal state keeps eraser override while another pen is still eraser"

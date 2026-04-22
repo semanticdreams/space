@@ -5,6 +5,7 @@
 (local FocusHandlers (require :state-handlers/focus))
 (local PointerHandlers (require :state-handlers/pointer))
 (local TouchPointer (require :state-handlers/touch-pointer))
+(local TouchTransform (require :state-handlers/touch-transform))
 (local PenPointer (require :state-handlers/pen-pointer))
 (local PenToolOverride (require :state-handlers/pen-tool-override))
 (local DrawingHandlers (require :drawing/input))
@@ -32,7 +33,10 @@
 
   (local TouchHandlers
     (TouchPointer.TouchPointerHandlers
-      {:allow-touch? touch-allowed?}))
+      {:allow-touch? touch-allowed?
+       :on-multitouch-start TouchTransform.handle-transform-start
+       :on-multitouch-motion TouchTransform.handle-transform-motion
+       :on-multitouch-end TouchTransform.handle-transform-end}))
 
   (local DrawingPenOverride
     ((. PenToolOverride :PenToolOverrideHandlers)

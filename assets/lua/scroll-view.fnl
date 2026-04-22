@@ -37,6 +37,12 @@
           false
           enabled?)))
 
+(fn payload-touch-id [payload]
+  (and payload (rawget payload "touch-id")))
+
+(fn payload-finger-id [payload]
+  (and payload (rawget payload "finger-id")))
+
 (fn ScrollView [opts]
   (local options (or opts {}))
   (assert options.child "ScrollView requires :child")
@@ -210,21 +216,23 @@
                   true)))))
 
     (fn active-touch-drag-matches? [payload]
-      (and state.touch-drag
+      (local touch-drag (. state "touch-drag"))
+      (and touch-drag
            payload
-           (= state.touch-drag.touch-id payload.touch-id)
-           (= state.touch-drag.finger-id payload.finger-id)))
+           (= (rawget touch-drag "touch-id") (payload-touch-id payload))
+           (= (rawget touch-drag "finger-id") (payload-finger-id payload))))
 
     (fn clear-touch-drag! []
-      (set state.touch-drag nil))
+      (set (. state "touch-drag") nil))
 
     (fn on-touch-drag-start [_self payload]
       (if (not state.scroll-enabled?)
           false
           (do
-            (set state.touch-drag {:touch-id (and payload payload.touch-id)
-                                   :finger-id (and payload payload.finger-id)
-                                   :last-y (or (and payload payload.y) 0)})
+            (local touch-drag {:last-y (or (and payload payload.y) 0)})
+            (tset touch-drag "touch-id" (payload-touch-id payload))
+            (tset touch-drag "finger-id" (payload-finger-id payload))
+            (set (. state "touch-drag") touch-drag)
             true)))
 
     (fn on-touch-drag [_self payload]
@@ -232,9 +240,10 @@
           false
           (do
             (set state.user-set-offset? true)
-            (local current-y (or (and payload payload.y) state.touch-drag.last-y 0))
-            (local dy (- current-y (or state.touch-drag.last-y current-y)))
-            (set state.touch-drag.last-y current-y)
+            (local touch-drag (. state "touch-drag"))
+            (local current-y (or (and payload payload.y) (. touch-drag :last-y) 0))
+            (local dy (- current-y (or (. touch-drag :last-y) current-y)))
+            (set (. touch-drag :last-y) current-y)
             (set-scroll-offset-value (- state.scroll-offset dy))
             true)))
 

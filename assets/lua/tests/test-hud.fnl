@@ -137,6 +137,27 @@
           "HUD float persistence should preserve relative size across resolutions")
   (restored-hud:drop))
 
+(fn hud-screen-pos-ray-converts-logical-input-to-viewport-space []
+  (local original-engine app.engine)
+  (local original-viewport app.viewport)
+  (var hud nil)
+  (set app.engine {:width 100 :height 50})
+  (set app.viewport {:x 0 :y 0 :width 200 :height 100})
+  (set hud (Hud {}))
+  (hud:update-projection app.viewport)
+  (local logical-ray (hud:screen-pos-ray {:x 50 :y 25}))
+  (assert (approx logical-ray.origin.x 0 1e-6)
+          "HUD logical input conversion should keep the viewport center on the HUD origin")
+  (assert (approx logical-ray.origin.y 0 1e-6)
+          "HUD logical input conversion should keep the viewport center on the HUD origin")
+  (assert (approx logical-ray.direction.x 0 1e-6)
+          "HUD logical input conversion should keep the center ray aligned on the Z axis")
+  (assert (approx logical-ray.direction.y 0 1e-6)
+          "HUD logical input conversion should keep the center ray aligned on the Z axis")
+  (hud:drop)
+  (set app.viewport original-viewport)
+  (set app.engine original-engine))
+
 (table.insert tests {:name "Hud adaptive scaling keeps reference scale at 1080p"
                      :fn adaptive-hud-keeps-reference-scale-at-1080p})
 (table.insert tests {:name "Hud adaptive scaling grows at 1200p"
@@ -147,6 +168,8 @@
                      :fn adaptive-hud-ignores-placeholder-viewport})
 (table.insert tests {:name "Hud float persistence stays resolution independent"
                      :fn hud-float-persistence-stays-resolution-independent})
+(table.insert tests {:name "Hud screen-pos-ray converts logical input to viewport space"
+                     :fn hud-screen-pos-ray-converts-logical-input-to-viewport-space})
 
 (local main
   (fn []

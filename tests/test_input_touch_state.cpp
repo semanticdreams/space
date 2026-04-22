@@ -1,4 +1,5 @@
 #include "input_state.h"
+#include "input_coordinates.h"
 
 #include <cassert>
 #include <cstdint>
@@ -93,12 +94,28 @@ void test_touch_contacts_do_not_alias_same_finger_on_different_touch_devices()
     assert(input_state.touch_by_id(touch_b, finger_id) == nullptr);
 }
 
+void test_normalized_coordinates_scale_to_window_size()
+{
+    const auto [x, y] = normalized_to_window_coordinates(0.25f, 0.75f, 1600, 900);
+    assert(x == 400.0f);
+    assert(y == 675.0f);
+}
+
+void test_negative_window_size_clamps_to_zero()
+{
+    const auto [x, y] = normalized_to_window_coordinates(0.5f, 0.5f, -1, -1);
+    assert(x == 0.0f);
+    assert(y == 0.0f);
+}
+
 } // namespace
 
 int main()
 {
     test_touch_lifecycle_tracks_primary_and_transitions();
     test_touch_contacts_do_not_alias_same_finger_on_different_touch_devices();
+    test_normalized_coordinates_scale_to_window_size();
+    test_negative_window_size_clamps_to_zero();
     std::cout << "test_input_touch_state: all tests passed\n";
     return 0;
 }
