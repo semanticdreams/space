@@ -501,7 +501,8 @@
   (set app.canvas-interactive? true)
   (set app.active-canvas-feature "drawing")
   (set app.drawing-controller
-       {:active-tool (fn [self] self.tool)
+       {:active-layer (fn [_self] {:id "layer-1" :kind "vector"})
+        :active-tool (fn [self] self.tool)
         :persistent-tool (fn [self] self.tool)
         :tool "brush"
         :set-active-tool (fn [self tool]
@@ -1137,7 +1138,8 @@
   (set app.canvas-interactive? true)
   (set app.active-canvas-feature "drawing")
   (set app.drawing-controller
-       {:active-tool (fn [self] self.tool)
+       {:active-layer (fn [_self] {:id "layer-1" :kind "vector"})
+        :active-tool (fn [self] self.tool)
         :persistent-tool (fn [self] self.tool)
         :tool "brush"
         :set-active-tool (fn [self tool]
@@ -1401,6 +1403,8 @@
   (reset-engine-events)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
+  (set app.active-canvas-feature "graph")
+  (set app.drawing-controller nil)
   (var removed 0)
   (set app.graph-view {:remove-selected-nodes (fn [_self]
                                                 (set removed (+ removed 1))
@@ -1418,6 +1422,8 @@
   (reset-engine-events)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
+  (set app.active-canvas-feature "graph")
+  (set app.drawing-controller nil)
   (var opened 0)
   (set app.graph-view {:open-focused-node (fn [_self]
                                             (set opened (+ opened 1))
@@ -1477,12 +1483,20 @@
   (reset-engine-events)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
+  (set app.active-canvas-feature "graph")
+  (set app.drawing-controller nil)
+  (set app.canvas nil)
+  (set app.toggle-active-interaction-surface nil)
   (var created 0)
   (var dropped 0)
-  (set app.graph-view-factory (fn []
-                                (set created (+ created 1))
-                                {:drop (fn [_self]
-                                         (set dropped (+ dropped 1)))}))
+  (set app.graph-view-factory
+       (fn []
+         (set created (+ created 1))
+         (local view {})
+         (set view.drop
+              (fn [_self]
+                (set dropped (+ dropped 1))))
+         view))
   (local state (NormalState))
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_F4})

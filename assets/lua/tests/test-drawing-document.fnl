@@ -22,18 +22,30 @@
     (error result))
   result)
 
-(fn normalize-state-creates-default-layer []
+(fn with-controller [f opts]
+  (with-temp-dir
+    (fn [dir]
+      (local controller-opts {:data_dir dir})
+      (each [k v (pairs (or opts {}))]
+        (set (. controller-opts k) v))
+      (f (DrawingController controller-opts) dir))))
+
+(fn with-vector-controller [f opts]
+  (with-controller
+    (fn [controller dir]
+      (controller:add-layer "vector")
+      (f controller dir))
+    opts))
+
+(fn normalize-state-stays-empty-without-layers []
   (local state (DrawingDocument.normalize-state {}))
-  (DrawingDocument.ensure-default-layer! state)
-  (assert (= (length state.document.layers) 1))
-  (local layer (. state.document.layers 1))
-  (local defaults (DrawingDocument.current-defaults state))
-  (assert (= layer.name "Layer 1"))
-  (assert (= state.ui.active_layer_id layer.id))
-  (assert (= defaults.fill_enabled true))
-  (assert (= (. defaults.stroke_color 1) 0.33))
-  (assert (= (. defaults.stroke_color 2) 0.6))
-  (assert (= (. defaults.stroke_color 3) 0.96)))
+  (DrawingDocument.ensure-active-layer-id! state)
+  (assert (= (length state.document.layers) 0))
+  (assert (= state.ui.active_layer_id nil))
+  (assert (= (DrawingDocument.active-layer state) nil))
+  (assert (= (DrawingDocument.active-kind state) nil))
+  (assert (= (DrawingDocument.active-tool state) nil))
+  (assert (= (DrawingDocument.current-defaults state) nil)))
 
 (fn normalize-state-upgrades-legacy-default-style []
   (local state
@@ -43,7 +55,7 @@
                        :thickness 2.0
                        :opacity 1.0
                        :fill_enabled false}}}))
-  (local defaults (DrawingDocument.current-defaults state))
+  (local defaults state.ui.defaults_by_kind.vector)
   (assert (= defaults.fill_enabled true))
   (assert (= (. defaults.stroke_color 1) 0.33))
   (assert (= (. defaults.stroke_color 2) 0.6))
@@ -888,131 +900,141 @@
           "runtime selection failure should identify vector-only selection state"))
 
 (fn controller-creates-rectangle-and-supports-undo-redo []
-  (local controller (DrawingController {}))
-  (controller:set-active-tool "rectangle")
-  (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
-  (controller:update-gesture (glm.vec3 10 5 0) false)
-  (assert (controller:commit-gesture))
-  (local layer (controller:active-layer))
-  (assert (= (length layer.objects) 1))
-  (local object (. layer.objects 1))
-  (assert (= object.kind "rectangle"))
-  (assert (= object.center.x 5))
-  (assert (= object.center.y 2.5))
-  (assert (= object.style.fill_enabled true))
-  (assert (= (. object.style.stroke_color 1) 0.33))
-  (assert (= (. object.style.stroke_color 2) 0.6))
-  (assert (= (. object.style.stroke_color 3) 0.96))
-  (assert (controller:on-undo))
-  (assert (= (length layer.objects) 0))
-  (assert (controller:on-redo))
-  (assert (= (length layer.objects) 1)))
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 10 5 0) false)
+      (assert (controller:commit-gesture))
+      (local layer (controller:active-layer))
+      (assert (= (length layer.objects) 1))
+      (local object (. layer.objects 1))
+      (assert (= object.kind "rectangle"))
+      (assert (= object.center.x 5))
+      (assert (= object.center.y 2.5))
+      (assert (= object.style.fill_enabled true))
+      (assert (= (. object.style.stroke_color 1) 0.33))
+      (assert (= (. object.style.stroke_color 2) 0.6))
+      (assert (= (. object.style.stroke_color 3) 0.96))
+      (assert (controller:on-undo))
+      (assert (= (length layer.objects) 0))
+      (assert (controller:on-redo))
+      (assert (= (length layer.objects) 1)))))
 
 (fn snapshot-serializes-glm-vectors []
-  (local controller (DrawingController {}))
-  (controller:set-active-tool "line")
-  (controller:begin-gesture "line" (glm.vec3 1 2 0))
-  (controller:update-gesture (glm.vec3 6 8 0) false)
-  (assert (controller:commit-gesture))
-  (local snapshot (controller:snapshot))
-  (local layer (. snapshot.document.layers 1))
-  (local object (. layer.objects 1))
-  (assert (= (type object.start) :table))
-  (assert (= (. object.start 1) 1))
-  (assert (= (. object.finish 2) 8)))
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "line")
+      (controller:begin-gesture "line" (glm.vec3 1 2 0))
+      (controller:update-gesture (glm.vec3 6 8 0) false)
+      (assert (controller:commit-gesture))
+      (local snapshot (controller:snapshot))
+      (local layer (. snapshot.document.layers 1))
+      (local object (. layer.objects 1))
+      (assert (= (type object.start) :table))
+      (assert (= (. object.start 1) 1))
+      (assert (= (. object.finish 2) 8)))))
 
 (fn controller-renames-layers-with-undo-redo []
-  (local controller (DrawingController {}))
-  (local layer (controller:active-layer))
-  (assert (= layer.name "Layer 1"))
-  (assert (controller:rename-active-layer "Sketch"))
-  (assert (= (. (controller:active-layer) :name) "Sketch"))
-  (assert (controller:on-undo))
-  (assert (= (. (controller:active-layer) :name) "Layer 1"))
-  (assert (controller:on-redo))
-  (assert (= (. (controller:active-layer) :name) "Sketch")))
+  (with-vector-controller
+    (fn [controller]
+      (local layer (controller:active-layer))
+      (assert (= layer.name "Layer 1"))
+      (assert (controller:rename-active-layer "Sketch"))
+      (assert (= (. (controller:active-layer) :name) "Sketch"))
+      (assert (controller:on-undo))
+      (assert (= (. (controller:active-layer) :name) "Layer 1"))
+      (assert (controller:on-redo))
+      (assert (= (. (controller:active-layer) :name) "Sketch")))))
 
 (fn controller-rejects-uncanonical-runtime-layer-name []
-  (local controller (DrawingController {}))
-  (local (ok err) (pcall controller.rename-active-layer controller "  Sketch  "))
-  (assert (not ok)
-          "runtime layer renames should reject non-canonical trimmed names")
-  (assert (string.find err "must already be trimmed")
-          "runtime layer rename rejection should explain the canonical trimmed-name contract")
-  (assert (= (. (controller:active-layer) :name) "Layer 1")
-          "rejected runtime renames should leave the layer name unchanged"))
+  (with-vector-controller
+    (fn [controller]
+      (local (ok err) (pcall controller.rename-active-layer controller "  Sketch  "))
+      (assert (not ok)
+              "runtime layer renames should reject non-canonical trimmed names")
+      (assert (string.find err "must already be trimmed")
+              "runtime layer rename rejection should explain the canonical trimmed-name contract")
+      (assert (= (. (controller:active-layer) :name) "Layer 1")
+              "rejected runtime renames should leave the layer name unchanged"))))
 
 (fn controller-layer-structure-edits-undo-cleanly []
-  (local controller (DrawingController {}))
-  (assert (= (controller:layer-count) 1))
-  (controller:add-layer)
-  (assert (= (controller:layer-count) 2))
-  (assert (= (. (controller:active-layer) :name) "Layer 2"))
-  (assert (controller:rename-active-layer "Foreground"))
-  (controller:move-active-layer -1)
-  (assert (= (. (. controller.state.document.layers 1) :name) "Foreground"))
-  (assert (controller:delete-active-layer))
-  (assert (= (controller:layer-count) 1))
-  (assert (controller:on-undo))
-  (assert (= (controller:layer-count) 2))
-  (assert (= (. (. controller.state.document.layers 1) :name) "Foreground"))
-  (assert (controller:on-undo))
-  (assert (= (. (. controller.state.document.layers 2) :name) "Foreground"))
-  (assert (controller:on-undo))
-  (assert (= (. (. controller.state.document.layers 2) :name) "Layer 2")))
+  (with-controller
+    (fn [controller]
+      (assert (= (controller:layer-count) 0))
+      (controller:add-layer)
+      (assert (= (controller:layer-count) 1))
+      (assert (= (. (controller:active-layer) :name) "Layer 1"))
+      (controller:add-layer)
+      (assert (= (controller:layer-count) 2))
+      (assert (= (. (controller:active-layer) :name) "Layer 2"))
+      (assert (controller:rename-active-layer "Foreground"))
+      (controller:move-active-layer -1)
+      (assert (= (. (. controller.state.document.layers 1) :name) "Foreground"))
+      (assert (controller:delete-active-layer))
+      (assert (= (controller:layer-count) 1))
+      (assert (controller:on-undo))
+      (assert (= (controller:layer-count) 2))
+      (assert (= (. (. controller.state.document.layers 1) :name) "Foreground"))
+      (assert (controller:on-undo))
+      (assert (= (. (. controller.state.document.layers 2) :name) "Foreground"))
+      (assert (controller:on-undo))
+      (assert (= (. (. controller.state.document.layers 2) :name) "Layer 2")))))
 
 (fn controller-object-history-replays-in-layer-context []
-  (local controller (DrawingController {}))
-  (controller:set-active-tool "rectangle")
-  (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
-  (controller:update-gesture (glm.vec3 10 10 0) false)
-  (assert (controller:commit-gesture))
-  (local layer1-id (. (. controller.state.document.layers 1) :id))
-  (controller:add-layer "vector")
-  (local layer2-id (. (. controller.state.document.layers 2) :id))
-  (controller:set-active-layer layer1-id)
-  (controller:set-active-tool "rectangle")
-  (controller:begin-gesture "rectangle" (glm.vec3 20 20 0))
-  (controller:update-gesture (glm.vec3 30 30 0) false)
-  (assert (controller:commit-gesture))
-  (local layer1 (. controller.state.document.layers 1))
-  (local added-id (. (. layer1.objects 2) :id))
-  (controller:set-active-layer layer2-id)
-  (assert (controller:on-undo))
-  (assert (= controller.state.ui.active_layer_id layer1-id)
-          "undo should replay object history on the layer that owns the objects")
-  (assert (= (length layer1.objects) 1)
-          "undo should remove the replayed object from its original layer")
-  (assert (= (length controller.state.ui.selection_ids) 0)
-          "undo should restore the pre-command selection on that layer")
-  (controller:set-active-layer layer2-id)
-  (assert (controller:on-redo))
-  (assert (= controller.state.ui.active_layer_id layer1-id)
-          "redo should reactivate the object layer before restoring selection")
-  (assert (= (length layer1.objects) 2)
-          "redo should restore the object on its original layer")
-  (assert (= (length controller.state.ui.selection_ids) 1)
-          "redo should restore the added object selection")
-  (assert (= (. controller.state.ui.selection_ids 1) added-id)
-          "redo should select the restored object id on its owning layer")
-  (assert (controller:on-delete-selection))
-  (assert (= (length layer1.objects) 1)
-          "delete should remove the selected object")
-  (controller:set-active-layer layer2-id)
-  (assert (controller:on-undo))
-  (assert (= controller.state.ui.active_layer_id layer1-id)
-          "undoing delete should reactivate the layer that owned the deleted objects")
-  (assert (= (length layer1.objects) 2)
-          "undoing delete should restore the removed object")
-  (assert (= (length controller.state.ui.selection_ids) 1)
-          "undoing delete should restore the deleted-object selection")
-  (assert (= (. controller.state.ui.selection_ids 1) added-id)
-          "undoing delete should restore selection for the restored object"))
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 10 10 0) false)
+      (assert (controller:commit-gesture))
+      (local layer1-id (. (. controller.state.document.layers 1) :id))
+      (controller:add-layer "vector")
+      (local layer2-id (. (. controller.state.document.layers 2) :id))
+      (controller:set-active-layer layer1-id)
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 20 20 0))
+      (controller:update-gesture (glm.vec3 30 30 0) false)
+      (assert (controller:commit-gesture))
+      (local layer1 (. controller.state.document.layers 1))
+      (local added-id (. (. layer1.objects 2) :id))
+      (controller:set-active-layer layer2-id)
+      (assert (controller:on-undo))
+      (assert (= controller.state.ui.active_layer_id layer1-id)
+              "undo should replay object history on the layer that owns the objects")
+      (assert (= (length layer1.objects) 1)
+              "undo should remove the replayed object from its original layer")
+      (assert (= (length controller.state.ui.selection_ids) 0)
+              "undo should restore the pre-command selection on that layer")
+      (controller:set-active-layer layer2-id)
+      (assert (controller:on-redo))
+      (assert (= controller.state.ui.active_layer_id layer1-id)
+              "redo should reactivate the object layer before restoring selection")
+      (assert (= (length layer1.objects) 2)
+              "redo should restore the object on its original layer")
+      (assert (= (length controller.state.ui.selection_ids) 1)
+              "redo should restore the added object selection")
+      (assert (= (. controller.state.ui.selection_ids 1) added-id)
+              "redo should select the restored object id on its owning layer")
+      (assert (controller:on-delete-selection))
+      (assert (= (length layer1.objects) 1)
+              "delete should remove the selected object")
+      (controller:set-active-layer layer2-id)
+      (assert (controller:on-undo))
+      (assert (= controller.state.ui.active_layer_id layer1-id)
+              "undoing delete should reactivate the layer that owned the deleted objects")
+      (assert (= (length layer1.objects) 2)
+              "undoing delete should restore the removed object")
+      (assert (= (length controller.state.ui.selection_ids) 1)
+              "undoing delete should restore the deleted-object selection")
+      (assert (= (. controller.state.ui.selection_ids 1) added-id)
+              "undoing delete should restore selection for the restored object"))))
 
 (fn controller-remembers-tools-by-layer-kind []
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:set-active-tool "rectangle")
       (controller:add-layer "raster")
       (assert (= (. (controller:active-layer) :kind) "raster"))
@@ -1042,43 +1064,45 @@
           "raster controllers should fail during construction without :data_dir")
   (assert (string.find err-initial ":data_dir")
           "raster controller construction should explain the missing data dir")
-  (local controller (DrawingController {}))
-  (local (ok-add err-add) (pcall controller.add-layer controller "raster"))
-  (assert (not ok-add)
-          "adding a raster layer should fail without :data_dir")
-  (assert (string.find err-add ":data_dir")
-          "adding a raster layer without a data dir should explain the failure"))
+  (local (ok-empty err-empty)
+    (pcall DrawingController {}))
+  (assert (not ok-empty)
+          "drawing controllers should fail during construction without :data_dir")
+  (assert (string.find err-empty ":data_dir")
+          "controller construction should explain the missing data dir"))
 
 (fn controller-rejects-invalid-runtime-tool-and-default-keys []
-  (local controller (DrawingController {}))
-  (local (ok-tool err-tool) (pcall controller.set-active-tool controller "banana"))
-  (assert (not ok-tool)
-          "runtime tool changes should reject invalid tool names")
-  (assert (string.find err-tool "invalid tool")
-          "runtime tool rejection should explain the invalid tool")
-  (local (ok-default err-default)
-    (pcall controller.set-defaults! controller {:banana 1}))
-  (assert (not ok-default)
-          "runtime default changes should reject unknown keys")
-  (assert (string.find err-default "invalid default key")
-          "runtime default rejection should explain the bad key")
-  (local (ok-thickness err-thickness)
-    (pcall controller.set-defaults! controller {:thickness "banana"}))
-  (assert (not ok-thickness)
-          "runtime defaults should reject invalid value types")
-  (assert (string.find err-thickness "thickness")
-          "runtime default value rejection should identify the bad field")
-  (local (ok-opacity err-opacity)
-    (pcall controller.set-defaults! controller {:opacity 2.0}))
-  (assert (not ok-opacity)
-          "runtime defaults should reject opacity outside the valid range")
-  (assert (string.find err-opacity "opacity")
-          "runtime default value rejection should explain the invalid opacity"))
+  (with-vector-controller
+    (fn [controller]
+      (local (ok-tool err-tool) (pcall controller.set-active-tool controller "banana"))
+      (assert (not ok-tool)
+              "runtime tool changes should reject invalid tool names")
+      (assert (string.find err-tool "invalid tool")
+              "runtime tool rejection should explain the invalid tool")
+      (local (ok-default err-default)
+        (pcall controller.set-defaults! controller {:banana 1}))
+      (assert (not ok-default)
+              "runtime default changes should reject unknown keys")
+      (assert (string.find err-default "invalid default key")
+              "runtime default rejection should explain the bad key")
+      (local (ok-thickness err-thickness)
+        (pcall controller.set-defaults! controller {:thickness "banana"}))
+      (assert (not ok-thickness)
+              "runtime defaults should reject invalid value types")
+      (assert (string.find err-thickness "thickness")
+              "runtime default value rejection should identify the bad field")
+      (local (ok-opacity err-opacity)
+        (pcall controller.set-defaults! controller {:opacity 2.0}))
+      (assert (not ok-opacity)
+              "runtime defaults should reject opacity outside the valid range")
+      (assert (string.find err-opacity "opacity")
+              "runtime default value rejection should explain the invalid opacity"))))
 
 (fn controller-rejects-invalid-gesture-tool-entry []
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (local (ok err)
         (pcall controller.begin-gesture controller "banana" (glm.vec3 2 2 0) {:pressure 1.0}))
@@ -1091,58 +1115,25 @@
 
 (fn controller-rejects-empty-raster-data-dir []
   (local (ok-initial err-initial)
-    (pcall DrawingController
-           {:document {:version 2
-                       :next_layer_id 2
-                       :next_object_id 1
-                       :layers [{:id "layer-1"
-                                 :name "Layer 1"
-                                 :kind "raster"
-                                 :objects []
-                                 :storage {:scheme "png-tile-v1"
-                                           :tile_size 128
-                                           :channels 4
-                                           :base_path "drawing/raster/layer-1"}}]}
-            :ui {:active_layer_id "layer-1"}
-            :data_dir ""}))
+    (pcall DrawingController {:data_dir ""}))
   (assert (not ok-initial)
-          "raster controllers should reject empty :data_dir during construction")
+          "drawing controllers should reject empty :data_dir during construction")
   (assert err-initial
-          "empty data dir rejection should return an error payload")
-  (local controller (DrawingController {:data_dir ""}))
-  (assert (= (controller:can-add-raster-layer?) false)
-          "empty data dir should not advertise raster support")
-  (local (ok-add err-add) (pcall controller.add-layer controller "raster"))
-  (assert (not ok-add)
-          "adding a raster layer should fail with an empty data dir")
-  (assert err-add
-          "empty data dir add-layer failure should return an error payload"))
+          "empty data dir rejection should return an error payload"))
 
 (fn snapshot-with-empty-data-dir-does-not-prune-relative-raster-root []
-  (local probe-root "drawing/raster")
-  (local probe-path
-    (fs.join-path probe-root (.. "empty-data-dir-probe-" (os.time) "-" temp-counter)))
-  (when (fs.exists probe-path)
-    (fs.remove-all probe-path))
-  (fs.create-dirs probe-path)
-  (local (ok result)
-    (pcall
-      (fn []
-        (local controller (DrawingController {:data_dir ""}))
-        (local snapshot (controller:snapshot))
-        (assert (fs.exists probe-path)
-                "vector-only snapshot with empty data dir should not prune relative drawing/raster content")
-        snapshot)))
-  (when (fs.exists probe-path)
-    (fs.remove-all probe-path))
-  (when (not ok)
-    (error result))
-  result)
+  (local (ok err)
+    (pcall DrawingController {:data_dir ""}))
+  (assert (not ok)
+          "snapshot scenarios should fail fast when controller data_dir is empty")
+  (assert err
+          "empty data dir construction failure should return an error payload"))
 
 (fn controller-keeps-raster-move-transient []
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (assert (not (controller:can-activate-tool? "move"))
               "move should be unavailable without a raster selection")
@@ -1172,6 +1163,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "fill")
       (controller:set-defaults! {:fill_color [0.9 0.4 0.2 1.0]})
@@ -1187,6 +1179,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 4 4 0) {:pressure 1.0})
@@ -1205,6 +1198,7 @@
   (with-temp-dir
     (fn [dir]
       (local writer (DrawingController {:data_dir dir}))
+      (writer:add-layer "vector")
       (writer:add-layer "raster")
       (writer:set-active-tool "brush")
       (writer:begin-gesture "brush" (glm.vec3 4 4 0) {:pressure 1.0})
@@ -1235,6 +1229,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 4 4 0) {:pressure 1.0})
@@ -1256,6 +1251,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 2 2 0) {:pressure 1.0})
@@ -1281,6 +1277,7 @@
   (with-temp-dir
     (fn [dir]
       (local writer (DrawingController {:data_dir dir}))
+      (writer:add-layer "vector")
       (writer:add-layer "raster")
       (writer:set-active-tool "brush")
       (writer:begin-gesture "brush" (glm.vec3 4 4 0) {:pressure 1.0})
@@ -1308,6 +1305,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 2 2 0) {:pressure 1.0})
@@ -1341,6 +1339,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 2 2 0) {:pressure 1.0})
@@ -1384,6 +1383,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 2 2 0) {:pressure 1.0})
@@ -1406,6 +1406,7 @@
   (with-temp-dir
     (fn [dir]
       (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")
       (controller:begin-gesture "brush" (glm.vec3 4 4 0) {:pressure 1.0})
@@ -1630,8 +1631,8 @@
       (assert (< (. sampled 3) 0.5)
               "eyedropper should not leave the obscured raster blue as the sampled color"))))
 
-(table.insert tests {:name "Drawing document ensures a default layer"
-                     :fn normalize-state-creates-default-layer})
+(table.insert tests {:name "Drawing document stays empty without layers"
+                     :fn normalize-state-stays-empty-without-layers})
 (table.insert tests {:name "Drawing document upgrades the legacy default style"
                      :fn normalize-state-upgrades-legacy-default-style})
 (table.insert tests {:name "Drawing document keeps legacy shared defaults out of raster defaults"

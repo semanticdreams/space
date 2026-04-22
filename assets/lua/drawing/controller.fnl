@@ -131,20 +131,22 @@
 
 (fn DrawingController [opts]
   (local options (or opts {}))
+  (local data-dir
+    (assert options.data_dir
+            "DrawingController requires non-empty :data_dir"))
+  (assert (= (type data-dir) :string)
+          "DrawingController requires non-empty :data_dir")
+  (assert (not (= data-dir ""))
+          "DrawingController requires non-empty :data_dir")
   (local initial-state
     (DrawingDocument.normalize-state
       {:document (or options.document (DrawingDocument.empty-document))
        :ui (or options.ui (DrawingDocument.default-ui))}))
-  (DrawingDocument.ensure-default-layer! initial-state)
   (local changed (Signal))
   (local history (DrawingHistory))
-  (local data-dir options.data_dir)
-  (local has-raster-data-dir?
-    (and (= (type data-dir) :string)
-         (not (= data-dir ""))))
   (each [_ layer (ipairs (or initial-state.document.layers []))]
     (when (= layer.kind "raster")
-      (assert has-raster-data-dir? "DrawingController raster documents require non-empty :data_dir")))
+      (assert data-dir "DrawingController raster documents require non-empty :data_dir")))
   (var gesture nil)
   (var raster-selection nil)
   (local raster-layers {})
@@ -168,7 +170,9 @@
   (fn selection-payload [kind]
     {:reason (if (= kind "raster")
                  "raster-selection"
-                 "vector-selection")})
+                 (= kind "vector")
+                 "vector-selection"
+                 "selection")})
 
   (fn command-payload [command fallback]
     (if (and command command.change-payload)
@@ -176,7 +180,6 @@
         (normalize-change-payload fallback "history")))
 
   (fn active-layer []
-    (DrawingDocument.ensure-default-layer! self.state)
     (DrawingDocument.active-layer self.state))
 
   (fn active-kind []
@@ -188,7 +191,6 @@
   (fn ensure-raster-runtime [layer]
     (assert layer "DrawingController ensure-raster-runtime requires layer")
     (assert (= layer.kind "raster") "DrawingController ensure-raster-runtime requires raster layer")
-    (assert has-raster-data-dir? "DrawingController raster layers require non-empty :data_dir")
     (when (= (. raster-layers layer.id) nil)
       (set (. raster-layers layer.id)
            (RasterLayerRuntime {:layer layer
@@ -215,22 +217,21 @@
     (set (. raster-layers layer-id) nil))
 
   (fn prune-stale-raster-storage! []
-    (when has-raster-data-dir?
-      (local raster-root (fs.join-path data-dir "drawing/raster"))
-      (when (fs.exists raster-root)
-        (local active-paths {})
-        (each [_ layer (ipairs (or self.state.document.layers []))]
-          (when (and (= layer.kind "raster")
-                     layer.storage
-                     layer.storage.base_path)
-            (set (. active-paths (fs.join-path data-dir layer.storage.base_path)) true)))
-        (each [_ entry (ipairs (fs.list-dir raster-root))]
-          (when (= entry.type "directory")
-            (local path (fs.join-path raster-root entry.name))
-            (when (not (. active-paths path))
-              (local (ok err) (pcall fs.remove-all path))
-              (when (not ok)
-                (error (.. "DrawingController failed to remove stale raster storage " path ": " err)))))))))
+    (local raster-root (fs.join-path data-dir "drawing/raster"))
+    (when (fs.exists raster-root)
+      (local active-paths {})
+      (each [_ layer (ipairs (or self.state.document.layers []))]
+        (when (and (= layer.kind "raster")
+                   layer.storage
+                   layer.storage.base_path)
+          (set (. active-paths (fs.join-path data-dir layer.storage.base_path)) true)))
+      (each [_ entry (ipairs (fs.list-dir raster-root))]
+        (when (= entry.type "directory")
+          (local path (fs.join-path raster-root entry.name))
+          (when (not (. active-paths path))
+            (local (ok err) (pcall fs.remove-all path))
+            (when (not ok)
+              (error (.. "DrawingController failed to remove stale raster storage " path ": " err))))))))
 
   (fn unpremultiply-rgba [rgba]
     (local alpha-byte (or (. rgba 4) 0))
@@ -253,15 +254,19 @@
         nil))
 
   (fn can-activate-tool? [tool]
-    (do
-      (DrawingDocument.validate-tool-for-kind (active-kind) tool)
-      (if (and (= (active-kind) "raster")
-               (= tool "move"))
-          (not (= (active-raster-selection) nil))
-          true)))
+    (local kind (active-kind))
+    (if (or (not kind)
+            (not (= (type tool) :string)))
+        false
+        (do
+          (DrawingDocument.validate-tool-for-kind kind tool)
+          (if (and (= kind "raster")
+                   (= tool "move"))
+              (not (= (active-raster-selection) nil))
+              true))))
 
   (fn can-add-raster-layer? []
-    has-raster-data-dir?)
+    true)
 
   (fn active-tool []
     (DrawingDocument.active-tool self.state))
@@ -318,7 +323,7 @@
                (when idx
                  (DrawingDocument.remove-layer-at! self.state.document idx))
                (drop-raster-runtime! layer.id)
-               (DrawingDocument.ensure-default-layer! self.state))})
+               (DrawingDocument.ensure-active-layer-id! self.state))})
 
   (fn delete-layer-command [layer index previous-active previous-selection previous-raster-selection]
     (var raster-bytes nil)
@@ -434,26 +439,21 @@
     (emit-changed {:reason "tool"}))
 
   (fn add-layer [kind]
-    (when (= kind "raster")
-      (assert has-raster-data-dir? "DrawingController raster layers require non-empty :data_dir"))
     (local layer (DrawingDocument.alloc-layer! self.state.document kind))
     (perform! (add-layer-command layer nil) "layer-structure"))
 
   (fn delete-active-layer []
     (local document self.state.document)
-    (if (<= (length document.layers) 1)
-        false
-        (do
-          (local layer (active-layer))
-          (local index (and layer (DrawingDocument.layer-index document layer.id)))
-          (if (and layer index)
-              (perform! (delete-layer-command (clone-table layer)
-                                             index
-                                             self.state.ui.active_layer_id
-                                             (clone-table self.state.ui.selection_ids)
-                                             (clone-raster-selection raster-selection))
-                        "layer-structure")
-              false))))
+    (local layer (active-layer))
+    (local index (and layer (DrawingDocument.layer-index document layer.id)))
+    (if (and layer index)
+        (perform! (delete-layer-command (clone-table layer)
+                                       index
+                                       self.state.ui.active_layer_id
+                                       (clone-table self.state.ui.selection_ids)
+                                       (clone-raster-selection raster-selection))
+                  "layer-structure")
+        false))
 
   (fn move-active-layer [delta]
     (local layer (active-layer))
@@ -513,10 +513,12 @@
   (fn begin-gesture [tool point opts]
     (local options (or opts {}))
     (local kind (active-kind))
-    (DrawingDocument.validate-tool-for-kind (active-kind) tool)
-    (if (not (can-activate-tool? tool))
+    (if (or (not kind)
+            (not (= (type tool) :string))
+            (not (can-activate-tool? tool)))
         false
         (do
+          (DrawingDocument.validate-tool-for-kind kind tool)
           (local base-gesture {:tool tool
                                :start point
                                :current point
@@ -546,36 +548,38 @@
           (local start gesture.start)
           (local current gesture.current)
           (local kind (active-kind))
-          (if (or (= tool "rectangle") (= tool "ellipse") (= tool "line"))
-              (make-shape-object self
-                                 tool
-                                 start
-                                 current
-                                 gesture.shift?
-                                 {:preview? true})
-              (if (or (= tool "pen") (= tool "brush") (= tool "marker"))
-                  {:id "__preview__"
-                   :kind "stroke"
-                   :points gesture.points
-                   :preset tool
-                   :style (if (= kind "raster")
-                              (raster-style-for-tool (current-defaults) tool)
-                              (stroke-style-for-tool (current-defaults) tool))}
-                  (= tool "marquee")
-                  (do
-                    (local bounds ((ensure-raster-runtime (active-layer)):normalize-bounds start current))
-                    {:id "__preview__"
-                     :kind "rectangle"
-                     :center (glm.vec3 (* (+ bounds.left bounds.right) 0.5)
-                                       (* (+ bounds.bottom bounds.top) 0.5)
-                                       0)
-                     :size (glm.vec3 bounds.width bounds.height 0)
-                     :style {:stroke_color [1.0 0.72 0.22 1.0]
-                             :fill_color [0 0 0 0]
-                             :thickness 1.5
-                             :opacity 1.0
-                             :fill_enabled false}})
-                  nil)))))
+          (if (not kind)
+              nil
+              (if (or (= tool "rectangle") (= tool "ellipse") (= tool "line"))
+                  (make-shape-object self
+                                     tool
+                                     start
+                                     current
+                                     gesture.shift?
+                                     {:preview? true})
+                  (if (or (= tool "pen") (= tool "brush") (= tool "marker"))
+                      {:id "__preview__"
+                       :kind "stroke"
+                       :points gesture.points
+                       :preset tool
+                       :style (if (= kind "raster")
+                                  (raster-style-for-tool (current-defaults) tool)
+                                  (stroke-style-for-tool (current-defaults) tool))}
+                      (= tool "marquee")
+                      (do
+                        (local bounds ((ensure-raster-runtime (active-layer)):normalize-bounds start current))
+                        {:id "__preview__"
+                         :kind "rectangle"
+                         :center (glm.vec3 (* (+ bounds.left bounds.right) 0.5)
+                                           (* (+ bounds.bottom bounds.top) 0.5)
+                                           0)
+                         :size (glm.vec3 bounds.width bounds.height 0)
+                         :style {:stroke_color [1.0 0.72 0.22 1.0]
+                                 :fill_color [0 0 0 0]
+                                 :thickness 1.5
+                                 :opacity 1.0
+                                 :fill_enabled false}})
+                      nil))))))
 
   (fn preview-active? []
     (and gesture
@@ -607,6 +611,8 @@
   (fn on-select [object ctrl?]
     (if (= (active-kind) "vector")
         (select-at-point (and object object.id) ctrl?)
+        (not (active-kind))
+        false
         (do
           (when (not ctrl?)
             (clear-raster-selection-state!)
@@ -614,24 +620,26 @@
           false)))
 
   (fn on-delete-selection []
-    (if (not (= (active-kind) "vector"))
-        (do
-          (local selection (active-raster-selection))
-          (if (not selection)
-              false
-              (perform! (raster-patch-command
-                          selection.layer_id
-                          (fn [runtime _layer]
-                            (local moved (runtime:clear-selection! selection))
-                            (clear-raster-selection-state!)
-                            moved))
-                        {:reason "raster-selection-content"})))
-        (do
-          (local ids (icollect [_ object-id (ipairs (selection-ids))]
-                               object-id))
-          (if (= (length ids) 0)
-              false
-              (perform! (delete-objects-command self.state.ui.active_layer_id ids) "objects")))))
+    (if (not (active-kind))
+        false
+        (if (not (= (active-kind) "vector"))
+            (do
+              (local selection (active-raster-selection))
+              (if (not selection)
+                  false
+                  (perform! (raster-patch-command
+                              selection.layer_id
+                              (fn [runtime _layer]
+                                (local moved (runtime:clear-selection! selection))
+                                (clear-raster-selection-state!)
+                                moved))
+                            {:reason "raster-selection-content"})))
+            (do
+              (local ids (icollect [_ object-id (ipairs (selection-ids))]
+                                   object-id))
+              (if (= (length ids) 0)
+                  false
+                  (perform! (delete-objects-command self.state.ui.active_layer_id ids) "objects"))))))
 
   (fn on-undo []
     (local command (history:undo))
@@ -804,15 +812,17 @@
           (local tool gesture.tool)
           (local layer (active-layer))
           (local result
-            (if (= layer.kind "raster")
-                (commit-raster-gesture layer)
-                (if (or (= tool "rectangle") (= tool "ellipse") (= tool "line"))
-                    (commit-shape-gesture layer)
-                    (if (or (= tool "pen") (= tool "brush") (= tool "marker"))
-                        (commit-stroke-gesture layer)
-                        (if (= tool "eraser")
-                            (commit-eraser-gesture layer)
-                            false)))))
+            (if (not layer)
+                false
+                (if (= layer.kind "raster")
+                    (commit-raster-gesture layer)
+                    (if (or (= tool "rectangle") (= tool "ellipse") (= tool "line"))
+                        (commit-shape-gesture layer)
+                        (if (or (= tool "pen") (= tool "brush") (= tool "marker"))
+                            (commit-stroke-gesture layer)
+                            (if (= tool "eraser")
+                                (commit-eraser-gesture layer)
+                                false))))))
           (set gesture nil)
           (emit-changed {:reason "gesture"})
           result)))
@@ -859,7 +869,10 @@
   (set self.can-redo? (fn [_self] (history:can-redo?)))
   (set self.selection-count
        (fn [_self]
-         (if (= (active-kind) "raster")
+         (local kind (active-kind))
+         (if (not kind)
+             0
+             (= kind "raster")
              (if (active-raster-selection) 1 0)
              (length (selection-ids)))))
   (set self.set-defaults! (fn [_self changes] (set-defaults! changes)))

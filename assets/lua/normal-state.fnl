@@ -43,7 +43,9 @@
       {:active? (fn []
                   (and app.drawing-controller
                        (= app.canvas-interactive? true)
-                       (= app.active-canvas-feature "drawing")))
+                       (= app.active-canvas-feature "drawing")
+                       app.drawing-controller.active-layer
+                       (app.drawing-controller:active-layer)))
        :get-tool (fn []
                    (assert (and app.drawing-controller
                                 app.drawing-controller.persistent-tool)

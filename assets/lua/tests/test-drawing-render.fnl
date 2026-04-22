@@ -152,44 +152,47 @@
   total)
 
 (fn drawing-render-populates-triangle-buffer []
-  (local track-log [])
-  (local vector (make-vector-buffer))
-  (local ctx {:triangle-vector vector
-              :track-triangle-handle (fn [_self handle clip]
-                                       (table.insert track-log {:handle handle
-                                                                :clip clip}))
-              :untrack-triangle-handle (fn [_self handle]
-                                         (table.insert track-log {:untracked handle}))})
-  (local controller (DrawingController {}))
-  (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
-  (controller:update-gesture (glm.vec3 24 12 0) false)
-  (assert (controller:commit-gesture)
-          "drawing render regression test expected rectangle commit to succeed")
-  (local render (DrawingRender {:ctx ctx
-                                :controller controller}))
+  (with-temp-dir
+    (fn [dir]
+      (local track-log [])
+      (local vector (make-vector-buffer))
+      (local ctx {:triangle-vector vector
+                  :track-triangle-handle (fn [_self handle clip]
+                                           (table.insert track-log {:handle handle
+                                                                    :clip clip}))
+                  :untrack-triangle-handle (fn [_self handle]
+                                             (table.insert track-log {:untracked handle}))})
+      (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 24 12 0) false)
+      (assert (controller:commit-gesture)
+              "drawing render regression test expected rectangle commit to succeed")
+      (local render (DrawingRender {:ctx ctx
+                                    :controller controller}))
 
-  (render:update)
+      (render:update)
 
-  (assert (> vector.state.last-size 0)
-          "drawing render should allocate triangle storage for committed objects")
-  (assert (> vector.state.vec3-writes 0)
-          "drawing render should write vertex positions into the triangle buffer")
-  (assert (= vector.state.vec3-writes vector.state.vec4-writes)
-          "drawing render should write one color per vertex")
-  (assert (= vector.state.vec3-writes vector.state.float-writes)
-          "drawing render should write one depth per vertex")
-  (assert (= (length track-log) 1)
-          "drawing render should register the uploaded triangle handle once")
-  (assert (= (. (. track-log 1) :handle) vector.state.last-handle)
-          "drawing render should track the same handle it uploads")
+      (assert (> vector.state.last-size 0)
+              "drawing render should allocate triangle storage for committed objects")
+      (assert (> vector.state.vec3-writes 0)
+              "drawing render should write vertex positions into the triangle buffer")
+      (assert (= vector.state.vec3-writes vector.state.vec4-writes)
+              "drawing render should write one color per vertex")
+      (assert (= vector.state.vec3-writes vector.state.float-writes)
+              "drawing render should write one depth per vertex")
+      (assert (= (length track-log) 1)
+              "drawing render should register the uploaded triangle handle once")
+      (assert (= (. (. track-log 1) :handle) vector.state.last-handle)
+              "drawing render should track the same handle it uploads")
 
-  (render:drop)
-  (assert (= vector.state.deletes 1)
-          "drawing render should release the triangle handle on drop")
-  (assert (= (length track-log) 2)
-          "drawing render should untrack the triangle handle on drop")
-  (assert (= (. (. track-log 2) :untracked) vector.state.last-handle)
-          "drawing render should untrack the uploaded handle"))
+      (render:drop)
+      (assert (= vector.state.deletes 1)
+              "drawing render should release the triangle handle on drop")
+      (assert (= (length track-log) 2)
+              "drawing render should untrack the triangle handle on drop")
+      (assert (= (. (. track-log 2) :untracked) vector.state.last-handle)
+              "drawing render should untrack the uploaded handle"))))
 
 (fn drawing-render-tracks-raster-image-quads []
   (with-temp-dir
@@ -198,7 +201,7 @@
       (local image-vector (make-image-buffer))
       (local tracked-images [])
       (local image-batches {})
-      (local ctx {:triangle-vector triangle-vector
+	          (local ctx {:triangle-vector triangle-vector
                   :track-triangle-handle (fn [_self _handle _clip] nil)
                   :untrack-triangle-handle (fn [_self _handle] nil)
                   :get-image-batch (fn [_self texture]
@@ -418,10 +421,11 @@
                                                 {:texture texture
                                                  :vector image-vector}))
                                          (. image-batches texture.id))
-                      :track-image-handle (fn [_self _batch _handle _clip] nil)
-                      :untrack-image-handle (fn [_self _batch _handle] nil)})
-          (local controller (DrawingController {:data_dir dir}))
-          (local vector-layer (. controller.state.document.layers 1))
+	                      :track-image-handle (fn [_self _batch _handle _clip] nil)
+	                      :untrack-image-handle (fn [_self _batch _handle] nil)})
+	          (local controller (DrawingController {:data_dir dir}))
+	          (controller:add-layer "vector")
+	          (local vector-layer (. controller.state.document.layers 1))
           (local vector-layer-id vector-layer.id)
           (controller:add-layer "raster")
           (controller:set-active-tool "brush")
@@ -462,10 +466,11 @@
                                                 {:texture texture
                                                  :vector image-vector}))
                                          (. image-batches texture.id))
-                      :track-image-handle (fn [_self _batch _handle _clip] nil)
-                      :untrack-image-handle (fn [_self _batch _handle] nil)})
-          (local controller (DrawingController {:data_dir dir}))
-          (local vector-layer (. controller.state.document.layers 1))
+	                      :track-image-handle (fn [_self _batch _handle _clip] nil)
+	                      :untrack-image-handle (fn [_self _batch _handle] nil)})
+	          (local controller (DrawingController {:data_dir dir}))
+	          (controller:add-layer "vector")
+	          (local vector-layer (. controller.state.document.layers 1))
           (local vector-layer-id vector-layer.id)
           (controller:add-layer "raster")
           (controller:set-active-tool "brush")
@@ -518,10 +523,11 @@
                                             {:texture texture
                                              :vector image-vector}))
                                      (. image-batches texture.id))
-                  :track-image-handle (fn [_self _batch _handle _clip] nil)
-                  :untrack-image-handle (fn [_self _batch _handle] nil)})
-      (local controller (DrawingController {:data_dir dir}))
-      (local vector-layer (. controller.state.document.layers 1))
+	                  :track-image-handle (fn [_self _batch _handle _clip] nil)
+	                  :untrack-image-handle (fn [_self _batch _handle] nil)})
+	      (local controller (DrawingController {:data_dir dir}))
+	      (controller:add-layer "vector")
+	      (local vector-layer (. controller.state.document.layers 1))
       (local vector-layer-id vector-layer.id)
       (controller:add-layer "raster")
       (controller:set-active-tool "brush")

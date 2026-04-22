@@ -139,15 +139,17 @@
       (table.concat parts "|"))
 
     (fn defaults-token [defaults]
-      (.. (color-token defaults.stroke_color)
-          "|"
-          (color-token defaults.fill_color)
-          "|"
-          (tostring defaults.thickness)
-          "|"
-          (tostring defaults.opacity)
-          "|"
-          (bool-token defaults.fill_enabled)))
+      (if defaults
+          (.. (color-token defaults.stroke_color)
+              "|"
+              (color-token defaults.fill_color)
+              "|"
+              (tostring defaults.thickness)
+              "|"
+              (tostring defaults.opacity)
+              "|"
+              (bool-token defaults.fill_enabled))
+          ""))
 
     (fn current-sidebar-state-token []
       (local active-layer (controller:active-layer))
@@ -385,6 +387,24 @@
                              inner-ctx))
                           0)]}))
 
+    (fn build-history-section []
+      (Flex {:axis 1
+             :xspacing 0.25
+             :children [(FlexChild
+                          (fn [inner-ctx]
+                            ((action-button "Undo" {:on-click (fn [_button _event]
+                                                                (controller:on-undo))
+                                                    :enabled? (controller:can-undo?)})
+                             inner-ctx))
+                          0)
+                        (FlexChild
+                          (fn [inner-ctx]
+                            ((action-button "Redo" {:on-click (fn [_button _event]
+                                                                (controller:on-redo))
+                                                    :enabled? (controller:can-redo?)})
+                             inner-ctx))
+                          0)]}))
+
     (fn build-layer-rename-section [layer]
       (fn [section-ctx]
         (var save-button nil)
@@ -459,12 +479,70 @@
                                        ((tool-button label
                                                      (= active-tool tool)
                                                      (fn [_button _event]
-                                                       (controller:set-active-tool tool))
+                                     (controller:set-active-tool tool))
                                                      {:enabled? (if (= entry.enabled? nil)
                                                                     true
                                                                     entry.enabled?)})
                                         inner-ctx))
                                      0)))}))
+
+    (fn build-layer-actions-section [can-add-raster?]
+      (Flex {:axis 1
+             :xspacing 0.2
+             :children [(FlexChild
+                          (fn [row-ctx]
+                            ((action-button "+ Vector"
+                                            {:on-click (fn [_button _event]
+                                                          (controller:add-layer "vector"))
+                                             :variant :success})
+                             row-ctx))
+                          1)
+                        (FlexChild
+                          (fn [row-ctx]
+                            ((action-button "+ Raster"
+                                            {:on-click (fn [_button _event]
+                                                          (controller:add-layer "raster"))
+                                             :enabled? can-add-raster?
+                                             :variant :primary})
+                             row-ctx))
+                          1)]}))
+
+    (fn build-empty-panel-children [can-add-raster? show-history?]
+      (local children
+        [(title-child "Layers")
+         (FlexChild
+           (fn [child-ctx]
+             ((build-layer-actions-section can-add-raster?) child-ctx))
+           0)])
+      (when show-history?
+        (table.insert children (title-child "Edit"))
+        (table.insert children
+                      (FlexChild
+                        (fn [child-ctx]
+                          ((build-history-section) child-ctx))
+                        0)))
+      children)
+
+    (fn build-active-panel-children [active-layer layers can-add-raster?]
+      [(title-child "Layers")
+       (FlexChild (fn [child-ctx] ((build-layer-rename-section active-layer) child-ctx)) 0)
+       (FlexChild
+         (fn [child-ctx]
+           ((build-layer-actions-section can-add-raster?) child-ctx))
+         0)
+       (FlexChild
+         (fn [child-ctx]
+           ((Flex {:axis 2
+                   :spacing 0.18
+                   :children (icollect [_ layer (ipairs layers)]
+                                       (FlexChild (fn [row-ctx] ((build-layer-row layer) row-ctx)) 0))})
+            child-ctx))
+         0)
+       (title-child "Edit")
+       (FlexChild (fn [child-ctx] ((build-edit-section) child-ctx)) 0)
+       (title-child "Tools")
+       (FlexChild (fn [child-ctx] ((build-tools-section) child-ctx)) 0)
+       (FlexChild (fn [child-ctx] ((build-defaults-section) child-ctx)) 0)])
 
     (fn build-drawing-panel []
       (local active-layer (sync-rename-buffer!))
@@ -473,48 +551,18 @@
         (if controller.can-add-raster-layer?
             (controller:can-add-raster-layer?)
             false))
+      (local empty?
+        (= (length layers) 0))
+      (local show-history?
+        (or (controller:can-undo?)
+            (controller:can-redo?)))
       (panel-shell
         (fn [inner-ctx]
           ((Flex {:axis 2
                   :spacing 0.4
-                  :children [(title-child "Layers")
-                             (FlexChild (fn [child-ctx] ((build-layer-rename-section active-layer) child-ctx)) 0)
-                             (FlexChild
-                               (fn [child-ctx]
-                                 ((Flex {:axis 1
-                                         :xspacing 0.2
-                                         :children [(FlexChild
-                                                      (fn [row-ctx]
-                                                        ((action-button "+ Vector"
-                                                                        {:on-click (fn [_button _event]
-                                                                                      (controller:add-layer "vector"))
-                                                                         :variant :success})
-                                                         row-ctx))
-                                                      1)
-                                                    (FlexChild
-                                                      (fn [row-ctx]
-                                                        ((action-button "+ Raster"
-                                                                        {:on-click (fn [_button _event]
-                                                                                      (controller:add-layer "raster"))
-                                                                         :enabled? can-add-raster?
-                                                                         :variant :primary})
-                                                         row-ctx))
-                                                      1)]})
-                                  child-ctx))
-                               0)
-                             (FlexChild
-                               (fn [child-ctx]
-                                 ((Flex {:axis 2
-                                         :spacing 0.18
-                                         :children (icollect [_ layer (ipairs layers)]
-                                                             (FlexChild (fn [row-ctx] ((build-layer-row layer) row-ctx)) 0))})
-                                  child-ctx))
-                               0)
-                             (title-child "Edit")
-                             (FlexChild (fn [child-ctx] ((build-edit-section) child-ctx)) 0)
-                             (title-child "Tools")
-                             (FlexChild (fn [child-ctx] ((build-tools-section) child-ctx)) 0)
-                             (FlexChild (fn [child-ctx] ((build-defaults-section) child-ctx)) 0)]})
+                  :children (if empty?
+                                (build-empty-panel-children can-add-raster? show-history?)
+                                (build-active-panel-children active-layer layers can-add-raster?))})
            inner-ctx))
         (panel-background theme :panel)))
 

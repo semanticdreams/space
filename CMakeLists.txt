@@ -290,6 +290,43 @@ set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "Disable spdlog tests" FORCE)
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Disable spdlog examples" FORCE)
 set(SPDLOG_INSTALL OFF CACHE BOOL "Disable spdlog install" FORCE)
 add_subdirectory(external/spdlog)
+
+option(SPACE_REQUIRE_NATIVE_LINUX_INPUT
+    "Require native Linux desktop input backends (Wayland + XInput2) for SDL builds"
+    ON)
+
+if(UNIX AND NOT APPLE)
+    pkg_check_modules(SPACE_WAYLAND wayland-client>=1.18 wayland-egl wayland-cursor egl xkbcommon>=0.5.0)
+    pkg_check_modules(SPACE_XI xi)
+    set(SPACE_HAS_NATIVE_WAYLAND_INPUT ${SPACE_WAYLAND_FOUND})
+    set(SPACE_HAS_NATIVE_X11_INPUT ${SPACE_XI_FOUND})
+    if(SPACE_REQUIRE_NATIVE_LINUX_INPUT)
+        if(NOT SPACE_HAS_NATIVE_WAYLAND_INPUT)
+            message(FATAL_ERROR
+                "Missing Linux native Wayland input development packages for SDL. "
+                "Install packages that provide pkg-config modules wayland-client>=1.18, wayland-egl, "
+                "wayland-cursor, egl, and xkbcommon>=0.5.0, or configure with "
+                "-DSPACE_REQUIRE_NATIVE_LINUX_INPUT=OFF to allow degraded input support.")
+        endif()
+        if(NOT SPACE_HAS_NATIVE_X11_INPUT)
+            message(FATAL_ERROR
+                "Missing Linux native X11 XInput2 development package for SDL. "
+                "Install the package that provides pkg-config module xi, or configure with "
+                "-DSPACE_REQUIRE_NATIVE_LINUX_INPUT=OFF to allow degraded input support.")
+        endif()
+    else()
+        if(NOT SPACE_HAS_NATIVE_WAYLAND_INPUT)
+            message(WARNING
+                "Wayland native input dependencies missing. SDL may fall back to X11/Xwayland "
+                "and native touch/stylus input may be unavailable.")
+        endif()
+        if(NOT SPACE_HAS_NATIVE_X11_INPUT)
+            message(WARNING
+                "X11 XInput2 dependency missing. Native X11 touch input may be unavailable.")
+        endif()
+    endif()
+endif()
+
 set(SDL_SHARED ON CACHE BOOL "Build SDL3 shared library" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "Disable SDL3 static library build" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "Disable SDL3 test helper library" FORCE)
@@ -297,6 +334,20 @@ set(SDL_TESTS OFF CACHE BOOL "Disable SDL3 tests" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "Disable SDL3 examples" FORCE)
 set(SDL_INSTALL OFF CACHE BOOL "Disable SDL3 install rules" FORCE)
 add_subdirectory(external/sdl)
+if(UNIX AND NOT APPLE AND SPACE_REQUIRE_NATIVE_LINUX_INPUT)
+    if(NOT SDL_WAYLAND)
+        message(FATAL_ERROR
+            "SDL configured without Wayland support even though SPACE_REQUIRE_NATIVE_LINUX_INPUT=ON. "
+            "Install the missing SDL Wayland dependencies reported above, or configure with "
+            "-DSPACE_REQUIRE_NATIVE_LINUX_INPUT=OFF to allow degraded input support.")
+    endif()
+    if(NOT SDL_X11_XINPUT)
+        message(FATAL_ERROR
+            "SDL configured without X11 XInput2 support even though SPACE_REQUIRE_NATIVE_LINUX_INPUT=ON. "
+            "Install the missing SDL XInput2 dependencies reported above, or configure with "
+            "-DSPACE_REQUIRE_NATIVE_LINUX_INPUT=OFF to allow degraded input support.")
+    endif()
+endif()
 if(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS)
     space_suppress_target_warnings(lua)
     space_suppress_target_warnings(lua-header)

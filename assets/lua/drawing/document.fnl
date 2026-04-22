@@ -595,7 +595,7 @@
 
 (fn resolved-active-kind [state]
   (local layer (resolved-active-layer state))
-  (or (and layer layer.kind) "vector"))
+  (and layer layer.kind))
 
 (fn infer-legacy-tool-kind [state tool]
   (if (. vector-exclusive-tools tool)
@@ -648,7 +648,8 @@
                  (next-object-sequence merged.document)))
   (var active-layer (resolved-active-layer merged))
   (var active-repaired? false)
-  (when (not active-layer)
+  (when (and (not active-layer)
+             (> (length merged.document.layers) 0))
     (set active-repaired? true)
     (set active-layer (. merged.document.layers 1))
     (set merged.ui.active_layer_id (and active-layer active-layer.id)))
@@ -670,7 +671,8 @@
                                      legacy-defaults))
         :raster (normalize-raster-style raster-defaults)})
   (set merged.ui.selection_ids
-       (if active-repaired?
+       (if (or active-repaired?
+               (not active-layer))
            []
            (filter-selection-ids-for-layer canonical-persisted-selection-ids
                                            active-layer)))
@@ -805,18 +807,6 @@
                            "remove-layer-at! idx"))
   (table.remove document.layers validated-idx))
 
-(fn ensure-default-layer! [state]
-  (local document state.document)
-  (local ui state.ui)
-  (if (> (length document.layers) 0)
-      (do
-        (ensure-active-layer-id! state))
-      (do
-        (local layer (alloc-layer! document))
-        (insert-layer! document layer 1)
-        (set ui.active_layer_id layer.id)
-        layer.id)))
-
 (fn set-active-layer! [state layer-id]
   (local idx (layer-index state.document layer-id))
   (assert idx (.. "DrawingDocument.set-active-layer! unknown layer id: " (tostring layer-id)))
@@ -827,20 +817,25 @@
 
 (fn active-kind [state]
   (local layer (active-layer state))
-  (or (and layer layer.kind) "vector"))
+  (and layer layer.kind))
 
 (fn active-tool [state]
   (local kind (active-kind state))
-  (normalize-tool-for-kind kind (. state.ui.active_tool_by_kind kind)))
+  (and kind
+       (normalize-tool-for-kind kind (. state.ui.active_tool_by_kind kind))))
 
 (fn current-defaults [state]
   (local kind (active-kind state))
   (if (= kind "raster")
       (normalize-raster-style (. state.ui.defaults_by_kind kind))
-      (normalize-style (. state.ui.defaults_by_kind kind))))
+      (= kind "vector")
+      (normalize-style (. state.ui.defaults_by_kind kind))
+      nil))
 
 (fn set-active-tool! [state tool]
   (local kind (active-kind state))
+  (assert kind
+          "DrawingDocument.set-active-tool! requires an active layer")
   (local validated-tool (validate-tool-for-kind kind tool))
   (set (. state.ui.active_tool_by_kind kind) validated-tool)
   validated-tool)
@@ -866,6 +861,8 @@
 
 (fn set-defaults! [state changes]
   (local kind (active-kind state))
+  (assert kind
+          "DrawingDocument.set-defaults! requires an active layer")
   (local target (. state.ui.defaults_by_kind kind))
   (each [k v (pairs changes)]
     (assert (defaults-key-allowed-for-kind? kind k)
@@ -1008,7 +1005,6 @@
  :alloc-object-id! alloc-object-id!
  :insert-layer! insert-layer!
  :remove-layer-at! remove-layer-at!
- :ensure-default-layer! ensure-default-layer!
  :set-active-layer! set-active-layer!
  :active-kind active-kind
  :active-tool active-tool
