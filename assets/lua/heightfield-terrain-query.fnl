@@ -426,8 +426,42 @@
             (raycast-zero-step record interval traversal local-ray-value)
             (raycast-grid-walk record interval traversal local-ray-value)))))
 
+(local vertical-domain-surface-hit
+  (fn [record local-ray-value interval]
+    (if (or (>= (math.abs local-ray-value.direction.x) ray-axis-epsilon)
+            (>= (math.abs local-ray-value.direction.z) ray-axis-epsilon)
+            (< (math.abs local-ray-value.direction.y) ray-axis-epsilon))
+        nil
+        (do
+          (local info
+            (surface-info-at-local-point record
+                                         local-ray-value.origin.x
+                                         local-ray-value.origin.z))
+          (if (not info)
+              nil
+              (do
+                (local t
+                  (/ (- info.local-surface-y local-ray-value.origin.y)
+                     local-ray-value.direction.y))
+                (if (or (< t (- interval.t0 1e-6))
+                        (> t (+ interval.t1 1e-6))
+                        (< t 0))
+                    nil
+                    {:distance t
+                     :world-point (local->world record info.local-point)
+                     :local-point info.local-point
+                     :sample (nearest-sample-coord record info.local-point)
+                     :target (sample-target record info.local-point)})))))))
+
 (fn M.raycast-record [record ray]
-  (raycast-record-fast record ray))
+  (local strict-hit (raycast-record-fast record ray))
+  (if strict-hit
+      strict-hit
+      (do
+        (local local-ray-value (local-ray record ray))
+        (local interval (xz-ray-interval record local-ray-value))
+        (and interval
+             (vertical-domain-surface-hit record local-ray-value interval)))))
 
 (fn M.domain-hit-record [record ray]
   (M.raycast-record record ray))

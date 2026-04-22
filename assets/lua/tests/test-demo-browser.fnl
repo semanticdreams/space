@@ -821,6 +821,55 @@
   (when (not ok)
     (error err)))
 
+(fn scene-screen-pos-terrain-hit-respects-scene-root-transform []
+  (local setup (setup-scene {:scene-position (glm.vec3 -5 0 0)
+                             :scene-rotation (glm.quat 1 0 0 0)}))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-viewport app.viewport)
+  (local original-projection app.projection)
+  (local (ok err)
+    (pcall
+      (fn []
+        (local viewport {:x 0 :y 0 :width 100 :height 100})
+        (local projection (glm.perspective (/ math.pi 3) 1.0 0.1 100.0))
+        (local view (glm.lookAt (glm.vec3 -3 10 2)
+                                (glm.vec3 -3 0 2)
+                                (glm.vec3 0 0 -1)))
+        (app.set-viewport viewport)
+        (set app.projection projection)
+        (scene:build-default {:terrains [{:id "terrain-a"
+                                          :kind "heightfield-terrain"
+                                          :options {:position [0 0 0]
+                                                    :rotation [1 0 0 0]
+                                                    :sample-spacing [1 1]
+                                                    :chunk-samples [5 5]
+                                                    :default-height 0.0}
+                                          :chunks [{:coord [0 0]
+                                                    :size [5 5]
+                                                    :heights [0 0 0 0 0
+                                                              0 0 0 0 0
+                                                              0 0 0 0 0
+                                                              0 0 0 0 0
+                                                              0 0 0 0 0]}]}]})
+        (scene.layout-root:update)
+        (local hit (scene:screen-pos-terrain-hit {:x 50 :y 50}
+                                                 {:view view
+                                                  :projection projection
+                                                  :viewport viewport}))
+        (assert hit "screen-pos terrain hit should resolve a translated scene-root terrain")
+        (assert (= hit.terrain-id "terrain-a")
+                "screen-pos terrain hit should report terrain id through scene-root transform")
+        (assert (= hit.sample.x 2)
+                "screen-pos terrain hit should preserve sample x under scene-root translation")
+        (assert (= hit.sample.z 2)
+                "screen-pos terrain hit should preserve sample z under scene-root translation"))))
+  (app.set-viewport original-viewport)
+  (set app.projection original-projection)
+  (cleanup)
+  (when (not ok)
+    (error err)))
+
 (fn scene-screen-rect-terrain-target-builds-sample-set []
   (local setup (setup-scene {:scene-position (glm.vec3 0 0 0)}))
   (local cleanup setup.cleanup)
@@ -3379,6 +3428,8 @@
                      :fn scene-screen-pos-terrain-domain-hit-respects-scene-root-transform})
 (table.insert tests {:name "Scene screen-pos terrain hit resolves default heightfield"
                      :fn scene-screen-pos-terrain-hit-resolves-default-heightfield})
+(table.insert tests {:name "Scene screen-pos terrain hit respects scene root transform"
+                     :fn scene-screen-pos-terrain-hit-respects-scene-root-transform})
 (table.insert tests {:name "Scene screen-rect terrain target builds sample set"
                      :fn scene-screen-rect-terrain-target-builds-sample-set})
 (table.insert tests {:name "Scene screen-rect terrain target respects scene root transform"

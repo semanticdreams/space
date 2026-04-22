@@ -259,6 +259,62 @@
   (assert ok "domain-hit-record should not error when the ray crosses a sparse chunk gap")
   (assert (= hit nil) "domain-hit-record should return nil when the ray lands in a gap"))
 
+(fn heightfield-domain-hit-record-supports-vertical-runtime-transform []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [1 1]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local runtime-record
+    (TerrainLayoutRecord.from-runtime-layout record
+                                            {:position (glm.vec3 -5 0 0)
+                                             :rotation (glm.quat 1 0 0 0)}))
+  (local hit
+    (HeightfieldTerrainQuery.domain-hit-record runtime-record
+                                               {:origin (glm.vec3 -3 10 2)
+                                                :direction (glm.vec3 0 -1 0)}))
+  (assert hit "domain-hit-record should resolve a vertical hit for translated runtime terrain")
+  (assert (= hit.sample.x 2)
+          "domain-hit-record should preserve sample x through runtime translation")
+  (assert (= hit.sample.z 2)
+          "domain-hit-record should preserve sample z through runtime translation")
+  (assert (approx hit.world-point.x -3 {:epsilon 1e-4})
+          "domain-hit-record should preserve translated world x")
+  (assert (approx hit.world-point.z 2 {:epsilon 1e-4})
+          "domain-hit-record should preserve translated world z"))
+
+(fn heightfield-raycast-record-supports-vertical-runtime-transform []
+  (local record
+    (TerrainRecords.normalize-record {:kind "heightfield-terrain"
+                                      :options {:position [0 0 0]
+                                                :rotation [1 0 0 0]
+                                                :sample-spacing [1 1]
+                                                :chunk-samples [5 5]}
+                                      :chunks [{:coord [0 0]
+                                                :size [5 5]
+                                                :heights (make-heights 5 5 (fn [_x _z] 0.0))}]}))
+  (local runtime-record
+    (TerrainLayoutRecord.from-runtime-layout record
+                                            {:position (glm.vec3 -5 0 0)
+                                             :rotation (glm.quat 1 0 0 0)}))
+  (local hit
+    (HeightfieldTerrainQuery.raycast-record runtime-record
+                                            {:origin (glm.vec3 -3 10 2)
+                                             :direction (glm.vec3 0 -1 0)}))
+  (assert hit "raycast-record should resolve a vertical hit for translated runtime terrain")
+  (assert (= hit.sample.x 2)
+          "raycast-record should preserve sample x through runtime translation")
+  (assert (= hit.sample.z 2)
+          "raycast-record should preserve sample z through runtime translation")
+  (assert (approx hit.world-point.x -3 {:epsilon 1e-4})
+          "raycast-record should preserve translated world x")
+  (assert (approx hit.world-point.z 2 {:epsilon 1e-4})
+          "raycast-record should preserve translated world z"))
+
 (fn project-world-point [point view projection viewport]
   (local viewport-vec (glm.vec4 viewport.x viewport.y viewport.width viewport.height))
   (local projected (glm.project point view projection viewport-vec))
@@ -403,6 +459,10 @@
                      :fn heightfield-domain-hit-record-handles-nonflat-multi-chunk-terrain})
 (table.insert tests {:name "heightfield terrain query domain-hit tolerates sparse chunk gaps"
                      :fn heightfield-domain-hit-record-tolerates-sparse-chunk-gaps})
+(table.insert tests {:name "heightfield terrain query raycast supports vertical runtime transform"
+                     :fn heightfield-raycast-record-supports-vertical-runtime-transform})
+(table.insert tests {:name "heightfield terrain query domain-hit supports vertical runtime transform"
+                     :fn heightfield-domain-hit-record-supports-vertical-runtime-transform})
 (table.insert tests {:name "heightfield terrain query screen-rect target selects samples in frustum"
                      :fn heightfield-screen-rect-target-selects-samples-in-frustum})
 (table.insert tests {:name "heightfield terrain query screen-rect target respects rebased runtime origin"
