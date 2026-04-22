@@ -320,6 +320,16 @@
 (fn erase-rgba []
   [0 0 0 0])
 
+(local min-pressure-size 0.55)
+(local min-pressure-opacity 0.65)
+
+(fn normalized-pressure [sample]
+  (clamp (or sample.pressure 1.0) 0.0 1.0))
+
+(fn pressure-factor [sample minimum]
+  (local pressure (normalized-pressure sample))
+  (+ minimum (* (- 1.0 minimum) (math.sqrt pressure))))
+
 (fn stamp-disk! [runtime cx cy radius rgba erase?]
   (local min-x (math.floor (- cx radius)))
   (local max-x (math.ceil (+ cx radius)))
@@ -343,11 +353,11 @@
       (local previous (and (> idx 1) (. samples (- idx 1))))
       (local pressure
         (if (and style.pressure_opacity (not erase?))
-            (or sample.pressure 1.0)
+            (pressure-factor sample min-pressure-opacity)
             1.0))
       (local radius-pressure
         (if style.pressure_size
-            (or sample.pressure 1.0)
+            (pressure-factor sample min-pressure-size)
             1.0))
       (local sample-radius (math.max 0.75 (* radius radius-pressure)))
       (local rgba

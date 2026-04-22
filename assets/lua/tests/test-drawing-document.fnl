@@ -1194,6 +1194,23 @@
       (assert (fs.exists (fs.join-path raster-dir "0_0.png"))
               "raster snapshot should persist at least one tile png"))))
 
+(fn raster-stylus-low-pressure-stays-visible []
+  (with-temp-dir
+    (fn [dir]
+      (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "raster")
+      (controller:set-active-tool "brush")
+      (controller:begin-gesture "brush" (glm.vec3 8 8 0) {:pressure 0.0})
+      (controller:update-gesture (glm.vec3 14 8 0) false {:pressure 0.0})
+      (assert (controller:commit-gesture))
+      (local runtime (controller:ensure-raster-runtime (controller:active-layer)))
+      (local center (runtime:get-pixel-rgba 10 8))
+      (local edge (runtime:get-pixel-rgba 10 10))
+      (assert (> (. center 4) 120)
+              "low-pressure stylus raster strokes should remain opaque enough to see after commit")
+      (assert (> (. edge 4) 0)
+              "low-pressure stylus raster strokes should keep usable width after commit"))))
+
 (fn reopened-raster-snapshot-preserves-unloaded-tiles []
   (with-temp-dir
     (fn [dir]
@@ -1709,6 +1726,8 @@
                      :fn snapshot-persists-canonical-ui-state-only})
 (table.insert tests {:name "Raster drawing persists tile sidecars on snapshot"
                      :fn raster-layer-persists-tile-sidecars})
+(table.insert tests {:name "Raster stylus low pressure remains visible"
+                     :fn raster-stylus-low-pressure-stays-visible})
 (table.insert tests {:name "Reopened raster snapshots preserve unloaded persisted tiles"
                      :fn reopened-raster-snapshot-preserves-unloaded-tiles})
 (table.insert tests {:name "Raster snapshot prunes deleted layer sidecar storage"
