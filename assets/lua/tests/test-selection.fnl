@@ -431,6 +431,34 @@
     (set app.camera original-camera)
     (set app.projection original-projection))
 
+(fn object-selector-normalizes-logical-box-input-to-viewport-space []
+    (local original-viewport app.viewport)
+    (local original-engine app.engine)
+    (var selector nil)
+    (local (ok err)
+      (pcall
+        (fn []
+          (set app.viewport {:x 0 :y 0 :width 200 :height 100})
+          (set app.engine {:width 100 :height 50})
+          (set selector
+               (ObjectSelector {:project (fn [position _opts] position)
+                                :enabled? true}))
+          (local inside {:position (glm.vec3 40 50 0)})
+          (local outside {:position (glm.vec3 70 50 0)})
+          (selector:set-selectables [inside outside])
+          (selector.box.changed:emit {:p1 {:x 15 :y 20}
+                                      :p2 {:x 25 :y 30}})
+          (assert (= (length selector.selected) 1)
+                  "Selector should compare box bounds in viewport space under logical input scaling")
+          (assert (= (. selector.selected 1) inside)
+                  "Selector should keep projected points aligned with the visible selection box"))))
+    (when selector
+        (selector:drop))
+    (set app.viewport original-viewport)
+    (set app.engine original-engine)
+    (when (not ok)
+        (error err)))
+
 (table.insert tests {:name "ObjectSelector projects to screen bounds" :fn object-selector-selects-by-projecting})
 (table.insert tests {:name "Selection only blocks conflicting first-person input" :fn selection-input-prefers-selection-only-for-primary-button})
 (table.insert tests {:name "Selection box renders in HUD space" :fn box-selector-renders-in-hud-space})
@@ -447,6 +475,8 @@
 (table.insert tests {:name "GraphView ignores start node outside selection box" :fn graph-ignores-start-node-outside-box})
 (table.insert tests {:name "GraphView registers selectables with selector" :fn graph-registers-selectables-with-selector})
 (table.insert tests {:name "GraphView selects nodes using default projection" :fn graph-selects-with-default-projection})
+(table.insert tests {:name "ObjectSelector normalizes logical box input to viewport space"
+                     :fn object-selector-normalizes-logical-box-input-to-viewport-space})
 
 (local main
   (fn []

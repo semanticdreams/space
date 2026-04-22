@@ -65,6 +65,11 @@
         (local max-y (math.max p1.y p2.y))
         {:min-x min-x :max-x max-x :min-y min-y :max-y max-y}))
 
+(fn default-box-point->screen [point opts]
+    (local options (or opts {}))
+    (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
+    (viewport-utils.input-pos->viewport-pos point viewport app.engine))
+
 (fn ObjectSelector [opts]
     (local options (or opts {}))
     (local provided-box (or options.box_selector
@@ -82,24 +87,10 @@
     (local project (or options.project default-project))
     (local changed (Signal))
     (local exited (Signal))
+    (local box-point->screen (or options.box-point->screen default-box-point->screen))
     (var selectables [])
     (local selected [])
     (var enabled? (not (= options.enabled? false)))
-(fn table-keys [item]
-    (local keys [])
-    (when (= (type item) :table)
-        (each [key _ (pairs item)]
-            (table.insert keys (tostring key))))
-    (table.sort keys)
-    keys)
-
-(fn format-glm-vec3 [v]
-    (if (not v)
-        "nil"
-        (let [x (or v.x (. v 1) 0)
-              y (or v.y (. v 2) 0)
-              z (or v.z (. v 3) 0)]
-            (string.format "(%.3f, %.3f, %.3f)" x y z))))
 
     (fn format-selectable [item]
         (or (and item item.label)
@@ -120,18 +111,22 @@
     (local on-box-changed
       (fn [box-bounds]
         (when enabled?
-          (local bounds (box->bounds box-bounds))
+          (local raw-p1 (and box-bounds (or box-bounds.p1 (. box-bounds 1))))
+          (local raw-p2 (and box-bounds (or box-bounds.p2 (. box-bounds 2))))
+          (local normalized-bounds
+            (box->bounds {:p1 (or (box-point->screen raw-p1 options) raw-p1)
+                          :p2 (or (box-point->screen raw-p2 options) raw-p2)}))
           (local projected [])
-          (when bounds
+          (when normalized-bounds
             (each [_ selectable (ipairs selectables)]
               (local position (resolve-position selectable))
               (when position
                 (local screen (project position options))
                 (when (and screen
-                           (>= screen.x bounds.min-x)
-                           (<= screen.x bounds.max-x)
-                           (>= screen.y bounds.min-y)
-                           (<= screen.y bounds.max-y))
+                           (>= screen.x normalized-bounds.min-x)
+                           (<= screen.x normalized-bounds.max-x)
+                           (>= screen.y normalized-bounds.min-y)
+                           (<= screen.y normalized-bounds.max-y))
                   (table.insert projected selectable)))))
           (replace-contents selected projected)
           (log-selection selected)
