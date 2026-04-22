@@ -31,11 +31,13 @@
 
 (fn reload [module-name]
   (set (. package.loaded module-name) nil)
+  (set (. package.loaded "vector-upload-cache") nil)
   (require module-name))
 
 (fn reload-renderers-module []
   (each [_ module-name (ipairs [:renderers
                                 :triangle-renderer
+                                :vector-upload-cache
                                 :line-renderer
                                 :point-renderer
                                 :image-renderer
@@ -186,6 +188,184 @@
       (assert (= sub.args.offset-bytes (* handle.index 4)))
       (assert (>= sub.args.size-bytes 4)))))
 
+(fn triangle-renderer-caches-uploads-per-vector []
+  (with-open-gl
+    (fn [mock]
+      (local TriangleRenderer (reload "triangle-renderer"))
+      (local renderer (TriangleRenderer))
+      (local projection {:type :projection})
+      (local view {:type :view})
+      (local camera-position (glm.vec3 1 2 3))
+      (local lighting-view-state (LightingViewState.perspective camera-position))
+      (local vector-a (VectorBuffer 0))
+      (local vector-b (VectorBuffer 0))
+      (local handle-a (vector-a:allocate 24))
+      (local handle-b (vector-b:allocate 24))
+      (vector-a:set-glm-vec3 handle-a 0 (glm.vec3 1 2 3))
+      (vector-a:set-glm-vec4 handle-a 3 (glm.vec4 0.1 0.2 0.3 0.4))
+      (vector-a:set-float handle-a 7 1.0)
+      (vector-b:set-glm-vec3 handle-b 0 (glm.vec3 4 5 6))
+      (vector-b:set-glm-vec4 handle-b 3 (glm.vec4 0.5 0.6 0.7 0.8))
+      (vector-b:set-float handle-b 7 2.0)
+
+      (mock:reset)
+      (renderer:render vector-a projection view lighting-view-state nil)
+      (renderer:render vector-b projection view lighting-view-state nil)
+      (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 2))
+      (assert (= (# (mock:get-gl-calls "bufferSubDataFromVectorBuffer")) 0))
+
+      (mock:reset)
+      (renderer:render vector-a projection view lighting-view-state nil)
+      (renderer:render vector-b projection view lighting-view-state nil)
+      (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 0))
+      (assert (= (# (mock:get-gl-calls "bufferSubDataFromVectorBuffer")) 0))
+
+      (vector-a:set-float handle-a 0 9.0)
+      (mock:reset)
+      (renderer:render vector-a projection view lighting-view-state nil)
+      (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 0))
+      (local sub (only (mock:get-gl-calls "bufferSubDataFromVectorBuffer")))
+      (assert (= sub.args.vector vector-a))
+      (assert (= sub.args.offset-bytes (* handle-a.index 4))))))
+
+(fn vector-upload-cache-evicts-oldest-entry []
+  (with-open-gl
+    (fn [mock]
+      (local VectorUploadCache (reload "vector-upload-cache"))
+      (local cache (VectorUploadCache {:usage gl.GL_STREAM_DRAW
+                                       :max-entries 1
+                                       :evict-per-upload 1}))
+      (local vector-a (VectorBuffer 0))
+      (local vector-b (VectorBuffer 0))
+      (local handle-a (vector-a:allocate 8))
+      (local handle-b (vector-b:allocate 8))
+      (vector-a:set-float handle-a 0 1.0)
+      (vector-b:set-float handle-b 0 2.0)
+
+      (cache:upload vector-a nil)
+      (local first-buffer (only (mock:get-gl-calls "glGenBuffers")))
+      (assert (= (. (cache:stats) :entries) 1))
+
+      (mock:reset)
+      (cache:upload vector-b nil)
+      (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 1))
+      (local deleted (only (mock:get-gl-calls "glDeleteBuffers")))
+      (assert (= deleted.args.buffer first-buffer.args.handle))
+      (assert (= (. (cache:stats) :entries) 1))
+
+      (mock:reset)
+      (cache:upload vector-a nil)
+      (assert (= (# (mock:get-gl-calls "glGenBuffers")) 1))
+      (assert (= (# (mock:get-gl-calls "bufferDataFromVectorBuffer")) 1))
+      (assert (= (# (mock:get-gl-calls "bufferSubDataFromVectorBuffer")) 0))
+      (assert (= (. (cache:stats) :entries) 1)))))
+
+(fn vector-upload-cache-drop-deletes-live-entries []
+  (with-open-gl
+    (fn [mock]
+      (local VectorUploadCache (reload "vector-upload-cache"))
+      (local cache (VectorUploadCache {:usage gl.GL_STREAM_DRAW
+                                       :max-entries 4
+                                       :evict-per-upload 1}))
+      (local vector-a (VectorBuffer 0))
+      (local vector-b (VectorBuffer 0))
+      (local handle-a (vector-a:allocate 8))
+      (local handle-b (vector-b:allocate 8))
+      (vector-a:set-float handle-a 0 1.0)
+      (vector-b:set-float handle-b 0 2.0)
+
+      (cache:upload vector-a nil)
+      (cache:upload vector-b nil)
+      (assert (= (. (cache:stats) :entries) 2))
+
+      (mock:reset)
+      (cache:drop)
+      (assert (= (# (mock:get-gl-calls "glDeleteBuffers")) 2))
+      (assert (= (. (cache:stats) :entries) 0)))))
+
+(fn vector-upload-cache-rejects-invalid-limits []
+  (with-open-gl
+    (fn [_mock]
+      (local VectorUploadCache (reload "vector-upload-cache"))
+      (local (ok-max err-max)
+        (pcall VectorUploadCache {:max-entries 0
+                                  :evict-per-upload 1}))
+      (assert (not ok-max))
+      (assert (string.find err-max "positive integer" 1 true))
+      (local (ok-evict err-evict)
+        (pcall VectorUploadCache {:max-entries 1
+                                  :evict-per-upload 0}))
+      (assert (not ok-evict))
+      (assert (string.find err-evict "positive integer" 1 true)))))
+
+(fn triangle-renderer-drop-releases-cache-and-vao []
+  (with-open-gl
+    (fn [mock]
+      (local TriangleRenderer (reload "triangle-renderer"))
+      (local renderer (TriangleRenderer))
+      (local vector (VectorBuffer 0))
+      (local handle (vector:allocate 8))
+      (local projection {:type :projection})
+      (local view {:type :view})
+      (local lighting-view-state (LightingViewState.perspective (glm.vec3 1 2 3)))
+      (vector:set-float handle 0 1.0)
+
+      (renderer:render vector projection view lighting-view-state nil)
+
+      (mock:reset)
+      (renderer:drop)
+      (assert (= (# (mock:get-gl-calls "glDeleteBuffers")) 1))
+      (assert (= (# (mock:get-gl-calls "glDeleteVertexArrays")) 1)))))
+
+(fn line-renderer-drop-releases-cache-and-vao []
+  (with-open-gl
+    (fn [mock]
+      (local LineRenderer (reload "line-renderer"))
+      (local renderer (LineRenderer))
+      (local vector (VectorBuffer 0))
+      (local handle (vector:allocate 14))
+      (vector:set-float handle 0 1.0)
+      (renderer:render-lines vector {:projection true} {:view true})
+
+      (mock:reset)
+      (renderer:drop)
+      (assert (= (# (mock:get-gl-calls "glDeleteBuffers")) 1))
+      (assert (= (# (mock:get-gl-calls "glDeleteVertexArrays")) 1)))))
+
+(fn point-renderer-drop-releases-both-buffers-and-vao []
+  (with-open-gl
+    (fn [mock]
+      (local PointRenderer (reload "point-renderer"))
+      (local renderer (PointRenderer))
+      (local vector (VectorBuffer 0))
+      (local handle (vector:allocate 9))
+      (vector:set-float handle 0 1.0)
+      (renderer:render vector {:projection true} {:view true})
+
+      (mock:reset)
+      (renderer:drop)
+      (assert (= (# (mock:get-gl-calls "glDeleteBuffers")) 2))
+      (assert (= (# (mock:get-gl-calls "glDeleteVertexArrays")) 1)))))
+
+(fn image-renderer-drop-releases-cache-and-vao []
+  (with-open-gl
+    (fn [mock]
+      (local ImageRenderer (reload "image-renderer"))
+      (local renderer (ImageRenderer))
+      (local vector (VectorBuffer 0))
+      (local handle (vector:allocate 10))
+      (vector:set-float handle 0 1.0)
+      (renderer:render-texture-batch {:vector vector
+                                      :texture {:id 7 :ready true}}
+                                     {:projection true}
+                                     {:view true}
+                                     nil)
+
+      (mock:reset)
+      (renderer:drop)
+      (assert (= (# (mock:get-gl-calls "glDeleteBuffers")) 1))
+      (assert (= (# (mock:get-gl-calls "glDeleteVertexArrays")) 1)))))
+
 (fn draw-batcher-batches-by-clip-and-model []
   (local DrawBatcher (reload "draw-batcher"))
   (local batcher (DrawBatcher {:stride 8}))
@@ -231,8 +411,14 @@
     (fn [mock]
       (local LineRenderer (reload "line-renderer"))
       (local renderer (LineRenderer))
+      (mock:reset)
+      (local vector (fake-vector 28))
+      (renderer:render-lines vector {:projection true} {:view true})
+      (local strip-a (fake-vector 21))
+      (local strip-b (fake-vector 14))
+      (renderer:render-line-strips [strip-a strip-b] {:projection true} {:view true})
       (local attrib-calls (mock:get-gl-calls "glVertexAttribPointer"))
-      (assert (= (# attrib-calls) 2))
+      (assert (= (# attrib-calls) 6))
       (local attrib-position (. attrib-calls 1))
       (local attrib-color (. attrib-calls 2))
       (assert (= attrib-position.args.index 0))
@@ -242,12 +428,6 @@
       (assert (= attrib-color.args.size 4))
       (assert (= attrib-color.args.stride (* 7 4)))
       (assert (= attrib-color.args.offset (* 4 3)))
-      (mock:reset)
-      (local vector (fake-vector 28))
-      (renderer:render-lines vector {:projection true} {:view true})
-      (local strip-a (fake-vector 21))
-      (local strip-b (fake-vector 14))
-      (renderer:render-line-strips [strip-a strip-b] {:projection true} {:view true})
       (local draw-calls (mock:get-gl-calls "glDrawArrays"))
       (assert (= (# draw-calls) 3))
       (assert (= (. (. draw-calls 1) :args :mode) gl.GL_LINES))
@@ -726,6 +906,22 @@
 (table.insert tests {:name "Triangle renderer falls back to default draw" :fn triangle-resolve-batches-falls-back})
 (table.insert tests {:name "Triangle renderer uploads draw batches" :fn triangle-renderer-uploads-all-draws})
 (table.insert tests {:name "Triangle renderer uploads dirty subdata" :fn triangle-renderer-uses-dirty-subdata})
+(table.insert tests {:name "Triangle renderer caches uploads per vector"
+                     :fn triangle-renderer-caches-uploads-per-vector})
+(table.insert tests {:name "Vector upload cache evicts oldest entry"
+                     :fn vector-upload-cache-evicts-oldest-entry})
+(table.insert tests {:name "Vector upload cache drop deletes live entries"
+                     :fn vector-upload-cache-drop-deletes-live-entries})
+(table.insert tests {:name "Vector upload cache rejects invalid limits"
+                     :fn vector-upload-cache-rejects-invalid-limits})
+(table.insert tests {:name "Triangle renderer drop releases cache and vao"
+                     :fn triangle-renderer-drop-releases-cache-and-vao})
+(table.insert tests {:name "Line renderer drop releases cache and vao"
+                     :fn line-renderer-drop-releases-cache-and-vao})
+(table.insert tests {:name "Point renderer drop releases both buffers and vao"
+                     :fn point-renderer-drop-releases-both-buffers-and-vao})
+(table.insert tests {:name "Image renderer drop releases cache and vao"
+                     :fn image-renderer-drop-releases-cache-and-vao})
 (table.insert tests {:name "DrawBatcher batches by clip and model" :fn draw-batcher-batches-by-clip-and-model})
 (table.insert tests {:name "DrawBatcher splits noncontiguous runs" :fn draw-batcher-splits-noncontiguous-runs})
 (table.insert tests {:name "Line renderer draws lines and strips" :fn line-renderer-draws-lines-and-strips})

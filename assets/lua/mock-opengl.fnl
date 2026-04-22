@@ -118,12 +118,12 @@
          handle))
 
   (set gl.glDeleteVertexArrays
-       (fn [count arrays]
-         (record-gl "glDeleteVertexArrays" {:count count :arrays arrays})))
+       (fn [array]
+         (record-gl "glDeleteVertexArrays" {:array array})))
 
   (set gl.glDeleteBuffers
-       (fn [count buffers]
-         (record-gl "glDeleteBuffers" {:count count :buffers buffers})))
+       (fn [buffer]
+         (record-gl "glDeleteBuffers" {:buffer buffer})))
 
   (set gl.glDeleteQueries
        (fn [count queries]

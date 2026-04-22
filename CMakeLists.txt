@@ -666,6 +666,15 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_executable(test_vector_buffer
+    tests/test_vector_buffer.cpp
+)
+target_include_directories(test_vector_buffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME test_vector_buffer COMMAND test_vector_buffer)
+set_tests_properties(test_vector_buffer PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_input_dial_type
     tests/test_input_dial_type.cpp
     src/dial_type.cpp

@@ -3,7 +3,7 @@
 
 (local gl (require :gl))
 (local shaders (require :shaders))
-(local {:VectorBuffer VectorBuffer :VectorHandle VectorHandle} (require :vector-buffer))
+(local VectorUploadCache (require :vector-upload-cache))
 (fn ImageRenderer []
   (local shader
     (shaders.load-shader-from-files
@@ -15,24 +15,24 @@
   (shader:setInteger "imageTexture" 0)
 
   (local vao (gl.glGenVertexArrays 1))
-  (local vbo (gl.glGenBuffers 1))
+  (local upload-cache (VectorUploadCache {:usage gl.GL_STREAM_DRAW
+                                          :max-entries 128
+                                          :evict-per-upload 1}))
 
   (gl.glBindVertexArray vao)
-  (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
 
   (local stride (* 10 4))
 
   (gl.glEnableVertexAttribArray 0)
-  (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE stride 0)
-
   (gl.glEnableVertexAttribArray 1)
-  (gl.glVertexAttribPointer 1 2 gl.GL_FLOAT gl.GL_FALSE stride (* 3 4))
-
   (gl.glEnableVertexAttribArray 2)
-  (gl.glVertexAttribPointer 2 4 gl.GL_FLOAT gl.GL_FALSE stride (* 5 4))
-
   (gl.glEnableVertexAttribArray 3)
-  (gl.glVertexAttribPointer 3 1 gl.GL_FLOAT gl.GL_FALSE stride (* 9 4))
+
+  (fn configure-attributes []
+    (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE stride 0)
+    (gl.glVertexAttribPointer 1 2 gl.GL_FLOAT gl.GL_FALSE stride (* 3 4))
+    (gl.glVertexAttribPointer 2 4 gl.GL_FLOAT gl.GL_FALSE stride (* 5 4))
+    (gl.glVertexAttribPointer 3 1 gl.GL_FLOAT gl.GL_FALSE stride (* 9 4)))
 
   (fn resolve-draw-batches [_self texture-batch overrides]
     (local batches (or overrides
@@ -47,42 +47,13 @@
               :counts [(math.floor (/ (texture-batch.vector:length) 10))]}]
             [])))
 
-  (var uploaded-vector nil)
-  (var uploaded-floats 0)
   (fn upload-vector [_self vector]
-    (local float-count (and vector (vector:length)))
-    (when (and float-count (> float-count 0))
-      (local needs-full?
-        (or (not (= vector uploaded-vector))
-            (not (= float-count uploaded-floats))))
-      (if needs-full?
-          (do
-            (gl.bufferDataFromVectorBuffer vector gl.GL_ARRAY_BUFFER gl.GL_STREAM_DRAW)
-            (set uploaded-vector vector)
-            (set uploaded-floats float-count)
-            (when (. vector :clear-dirty)
-              (vector:clear-dirty)))
-          (do
-            (var dirty-from nil)
-            (var dirty-to nil)
-            (when (. vector :dirty-range)
-              (local (from to) (vector:dirty-range))
-              (set dirty-from from)
-              (set dirty-to to))
-            (when (and dirty-from dirty-to (> dirty-to dirty-from))
-              (gl.bufferSubDataFromVectorBuffer
-                vector
-                gl.GL_ARRAY_BUFFER
-                (* dirty-from 4)
-                (* (- dirty-to dirty-from) 4))
-              (when (. vector :clear-dirty)
-                (vector:clear-dirty)))))))
+    (upload-cache:upload vector configure-attributes))
 
   (fn render-texture-batch [self texture-batch projection view overrides]
     (when (and texture-batch texture-batch.vector (> (texture-batch.vector:length) 0)
                texture-batch.texture texture-batch.texture.ready)
       (gl.glBindVertexArray vao)
-      (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
       (self:upload-vector texture-batch.vector)
       (shader:use)
       (shader:setMatrix4 "projection" projection)
@@ -101,8 +72,13 @@
       (each [_ batch (pairs batches)]
         (self:render-texture-batch batch projection view nil))))
 
+  (fn drop [_self]
+    (upload-cache:drop)
+    (gl.glDeleteVertexArrays vao))
+
   {:shader shader
    :resolve-draw-batches resolve-draw-batches
    :upload-vector upload-vector
    :render render
-   :render-texture-batch render-texture-batch})
+   :render-texture-batch render-texture-batch
+   :drop drop})

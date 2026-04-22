@@ -90,6 +90,7 @@
     :tests.test-codex-sdk
     :tests.test-sysinfo
     :tests.test-flamegraph
+    :tests.test-vector-buffer
     :tests.test-points
     :tests.test-layered-point
     :tests.test-force-layout

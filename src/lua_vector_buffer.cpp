@@ -25,6 +25,9 @@ sol::table create_vector_buffer_table(sol::state_view lua)
     vb_type.set_function("reallocate", &VectorBuffer::reallocate);
     vb_type.set_function("delete", &VectorBuffer::deleteHandle);
     vb_type.set_function("length", &VectorBuffer::length);
+    vb_type.set_function("capacity", &VectorBuffer::capacity);
+    vb_type.set_function("free-count", &VectorBuffer::free_count);
+    vb_type.set_function("free-size", &VectorBuffer::free_size);
     vb_type.set_function("print", &VectorBuffer::print);
     vb_type.set_function("clear-dirty", &VectorBuffer::clearDirty);
     vb_type.set_function("dirty-range", [](sol::this_state state, VectorBuffer& self) -> sol::variadic_results {
@@ -45,14 +48,10 @@ sol::table create_vector_buffer_table(sol::state_view lua)
         if (offset + count > handle.size) {
             throw std::runtime_error(std::string(label) + " out of bounds: offset exceeds handle size");
         }
-        if (handle.index + handle.size > self.length()) {
-            throw std::runtime_error(std::string(label) + " invalid handle: index exceeds buffer length");
-        }
+        self.validateHandle(handle, label);
     };
     auto validate_handle_in_used_range = [](VectorBuffer& self, const VectorHandle& handle, const char* label) {
-        if (handle.index + handle.size > self.length()) {
-            throw std::runtime_error(std::string(label) + " invalid handle: index exceeds buffer length");
-        }
+        self.validateHandle(handle, label);
     };
 
     // View: expose a table-like float array with set/get access
@@ -181,9 +180,7 @@ sol::table create_vector_buffer_table(sol::state_view lua)
         if (offset + float_count > handle.size) {
             throw std::runtime_error("VectorBuffer.set-floats-from-bytes exceeds handle size");
         }
-        if (handle.index + handle.size > self.length()) {
-            throw std::runtime_error("VectorBuffer.set-floats-from-bytes invalid handle: index exceeds buffer length");
-        }
+        self.validateHandle(handle, "VectorBuffer.set-floats-from-bytes");
         float* v = self.view(handle);
         std::memcpy(v + offset, bytes.data(), bytes.size());
         self.markDirty(handle.index + offset, float_count);

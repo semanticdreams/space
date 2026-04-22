@@ -248,6 +248,14 @@
       (when (and sub-app sub-app.drop)
         (sub-app:drop)))
     (set sub-apps [])
+    (when (and triangle-renderer triangle-renderer.drop)
+      (triangle-renderer:drop))
+    (when (and line-renderer line-renderer.drop)
+      (line-renderer:drop))
+    (when (and point-renderer point-renderer.drop)
+      (point-renderer:drop))
+    (when (and image-renderer image-renderer.drop)
+      (image-renderer:drop))
     (when fxaa
       (fxaa:drop)))
 

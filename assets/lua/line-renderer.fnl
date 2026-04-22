@@ -2,7 +2,7 @@
 
 (local gl (require :gl))
 (local shaders (require :shaders))
-(local {:VectorBuffer VectorBuffer :VectorHandle VectorHandle} (require :vector-buffer))
+(local VectorUploadCache (require :vector-upload-cache))
 (fn LineRenderer []
   (local shader
     (shaders.load-shader-from-files
@@ -11,21 +11,26 @@
       (app.engine.get-asset-path "shaders/line.frag")))
 
   (local vao (gl.glGenVertexArrays 1))
-  (local vbo (gl.glGenBuffers 1))
+  (local upload-cache (VectorUploadCache {:usage gl.GL_STREAM_DRAW
+                                          :max-entries 128
+                                          :evict-per-upload 1}))
 
   (gl.glBindVertexArray vao)
-  (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
   (gl.glEnableVertexAttribArray 0)
   (gl.glEnableVertexAttribArray 1)
   (local stride (* 7 4))
-  (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE stride 0)
-  (gl.glVertexAttribPointer 1 4 gl.GL_FLOAT gl.GL_FALSE stride (* 4 3))
 
-  (fn draw-buffer [_self vector mode projection view]
+  (fn configure-attributes []
+    (gl.glVertexAttribPointer 0 3 gl.GL_FLOAT gl.GL_FALSE stride 0)
+    (gl.glVertexAttribPointer 1 4 gl.GL_FLOAT gl.GL_FALSE stride (* 4 3)))
+
+  (fn upload-vector [_self vector]
+    (upload-cache:upload vector configure-attributes))
+
+  (fn draw-buffer [self vector mode projection view]
     (when (and vector (> (vector:length) 0))
       (gl.glBindVertexArray vao)
-      (gl.glBindBuffer gl.GL_ARRAY_BUFFER vbo)
-      (gl.bufferDataFromVectorBuffer vector gl.GL_ARRAY_BUFFER gl.GL_STREAM_DRAW)
+      (self:upload-vector vector)
       (shader:use)
       (shader:setMatrix4 "projection" projection)
       (shader:setMatrix4 "view" view)
@@ -40,9 +45,15 @@
       (each [_ vector (ipairs vectors)]
         (self:draw-buffer vector gl.GL_LINE_STRIP projection view))))
 
+  (fn drop [_self]
+    (upload-cache:drop)
+    (gl.glDeleteVertexArrays vao))
+
   {:shader shader
+   :upload-vector upload-vector
    :draw-buffer draw-buffer
    :render-lines render-lines
-   :render-line-strips render-line-strips})
+   :render-line-strips render-line-strips
+   :drop drop})
 
 LineRenderer
