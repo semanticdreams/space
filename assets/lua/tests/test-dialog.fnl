@@ -13,6 +13,7 @@
 (local FloatLayer (require :float-layer))
 (local Intersectables (require :intersectables))
 (local Resizables (require :resizables))
+(local PanelUtils (require :target-panel-utils))
 
 (local tests [])
 
@@ -1020,16 +1021,14 @@
       (hud:register-panel-restorer
         kind
         (fn [panel]
-          (local position (array->vec3 panel.position))
-          (local rotation (array->quat panel.rotation))
-          (local size (array->vec3 panel.size))
+          (local placement (PanelUtils.panel-placement-options hud panel))
           (hud:add-panel-child {:builder dialog-builder
-                                :location (if (= panel.layer "float") :float :tiles)
-                                :position position
-                                :rotation rotation
-                                :size size
-                                :align-x panel.align-x
-                                :align-y panel.align-y
+                                :location placement.location
+                                :position placement.position
+                                :rotation placement.rotation
+                                :size placement.size
+                                :align-x placement.align-x
+                                :align-y placement.align-y
                                 :persistence {:kind kind}})))
       (local element
         (hud:add-panel-child {:builder dialog-builder
@@ -1110,9 +1109,9 @@
       (set app.hud hud)
       (local captured {:panels [{:kind "launcher-view-dialog"
                                  :layer "float"
-                                 :position [1 2 0]
+                                 :relative-position [0.1 0.2 0]
                                  :rotation [1 0 0 0]
-                                 :size [12 8 0]
+                                 :relative-size [0.3 0.4 0]
                                  :restorer-module "launchables/launcher"}]})
       (hud:restore-state captured)
       (scene.layout-root:update)
@@ -1123,8 +1122,8 @@
       (assert panel "Hud.restore-state should produce restorable float panel")
       (assert (= panel.layer "float")
               "Hud.restore-state should preserve float panel layer")
-      (assert (= (type panel.position) :table)
-              "Hud.restore-state should preserve float panel position")
+      (assert (= (type panel.relative-position) :table)
+              "Hud.restore-state should preserve float panel relative position")
       (hud:drop)
       (scene:drop)
       (camera:drop)

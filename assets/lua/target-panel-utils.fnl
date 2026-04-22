@@ -19,19 +19,22 @@
 
 (fn panel-placement-options [target panel]
   (local entry (or panel {}))
-  (local layer (or entry.layer
-                   entry.location
-                   (default-panel-location target)))
-  (if (or (= layer :float) (= layer "float"))
-      {:location :float
-       :position (array->vec3 (and entry entry.position))
-       :rotation (array->quat (and entry entry.rotation))
-       :size (array->vec3 (and entry entry.size))}
-      (if (or (= layer :tiles) (= layer "tiles"))
-          {:location :tiles
-           :align-x (and entry entry.align-x)
-           :align-y (and entry entry.align-y)}
-          (error (.. "Unsupported panel layer: " (tostring layer))))))
+  (if (and target target.panel-placement-options)
+      (target:panel-placement-options entry)
+      (do
+        (local layer (or entry.layer
+                         entry.location
+                         (default-panel-location target)))
+        (if (or (= layer :float) (= layer "float"))
+            {:location :float
+             :position (array->vec3 (and entry entry.position))
+             :rotation (array->quat (and entry entry.rotation))
+             :size (array->vec3 (and entry entry.size))}
+            (if (or (= layer :tiles) (= layer "tiles"))
+                {:location :tiles
+                 :align-x (and entry entry.align-x)
+                 :align-y (and entry entry.align-y)}
+                (error (.. "Unsupported panel layer: " (tostring layer))))))))
 
 (fn assert-string-field [panel field label]
   (local value (. panel field))

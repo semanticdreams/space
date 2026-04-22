@@ -9,7 +9,7 @@
   (local target (assert (or options.hud options.target)
                         "Launcher requires HUD target"))
   (local panel (or options.panel {}))
-  (local placement (Persistence.panel-placement-options panel))
+  (local placement (Persistence.panel-placement-options panel target))
   (var element nil)
   (set element
        (target:add-panel-child

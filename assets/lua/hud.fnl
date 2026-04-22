@@ -11,10 +11,13 @@
 
 (local identity-view (glm.mat4 1))
 (local default-world-scale 0.05)
-(local default-size-scale 2.0) ; enlarge orthographic bounds so HUD renders smaller on screen
+(local default-size-scale (/ 5 3)) ; 20% larger than prior 1080p HUD baseline
+(local default-scale-reference-height 1080)
 (local panel-border-size 0.2)
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
+(local array->vec3 (. MathUtils :array->vec3))
+(local array->quat (. MathUtils :array->quat))
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -37,6 +40,20 @@
   (local theme (and ctx ctx.theme))
   (or (and theme theme.panel-border)
       (glm.vec4 0.72 0.75 0.79 0.85)))
+
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn adaptive-scale-ratio-for-viewport [viewport-height]
+  (if (and (finite-number? viewport-height)
+           (> viewport-height default-scale-reference-height))
+      (math.max 1.0
+                (/ viewport-height
+                   default-scale-reference-height))
+      1.0))
 
 (fn make-empty-hud-slot-builder []
   (fn [ctx]
@@ -79,6 +96,7 @@
                :scene options.scene
                :margin-px (or options.margin-px 0)
                :scale-factor (or options.scale-factor default-size-scale)
+               :effective-scale-factor (or options.scale-factor default-size-scale)
                :world-units-per-pixel default-world-scale
                :half-width 1
                :half-height 1
@@ -228,6 +246,83 @@
           {:position (vec3->array layout.position)
            :rotation (quat->array layout.rotation)
            :size (and size (vec3->array size))})))
+
+  (fn resolve-scale-viewport-height [_self viewport]
+    (local logical-height (and app.engine app.engine.height))
+    (if (and (finite-number? logical-height) (> logical-height 1))
+        logical-height
+        (math.max (or (and viewport viewport.height) 1) 1)))
+
+  (fn encode-float-relative-position [self position]
+    (local layout (and self.float self.float.layout))
+    (assert layout "Hud float panel placement requires float layout")
+    (local layout-size (or layout.size layout.measure))
+    (assert layout-size "Hud float panel placement requires float layout size")
+    (local frame-position (or layout.position (glm.vec3 0 0 0)))
+    (local frame-size (glm.vec3 (math.max 0.001 layout-size.x)
+                                (math.max 0.001 layout-size.y)
+                                (math.max 0.001 layout-size.z)))
+    (local offset (- position frame-position))
+    (vec3->array (glm.vec3 (/ offset.x frame-size.x)
+                           (/ offset.y frame-size.y)
+                           offset.z)))
+
+  (fn encode-float-relative-size [self size]
+    (local layout (and self.float self.float.layout))
+    (assert layout "Hud float panel placement requires float layout")
+    (local layout-size (or layout.size layout.measure))
+    (assert layout-size "Hud float panel placement requires float layout size")
+    (local frame-size (glm.vec3 (math.max 0.001 layout-size.x)
+                                (math.max 0.001 layout-size.y)
+                                (math.max 0.001 layout-size.z)))
+    (vec3->array (glm.vec3 (/ size.x frame-size.x)
+                           (/ size.y frame-size.y)
+                           size.z)))
+
+  (fn decode-float-relative-position [self value]
+    (local relative (array->vec3 value))
+    (local layout (and self.float self.float.layout))
+    (assert layout "Hud float panel placement requires float layout")
+    (local layout-size (or layout.size layout.measure))
+    (assert layout-size "Hud float panel placement requires float layout size")
+    (local frame-position (or layout.position (glm.vec3 0 0 0)))
+    (local frame-size (glm.vec3 (math.max 0.001 layout-size.x)
+                                (math.max 0.001 layout-size.y)
+                                (math.max 0.001 layout-size.z)))
+    (+ frame-position
+       (glm.vec3 (* relative.x frame-size.x)
+                 (* relative.y frame-size.y)
+                 relative.z)))
+
+  (fn decode-float-relative-size [self value]
+    (local relative (array->vec3 value))
+    (local layout (and self.float self.float.layout))
+    (assert layout "Hud float panel placement requires float layout")
+    (local layout-size (or layout.size layout.measure))
+    (assert layout-size "Hud float panel placement requires float layout size")
+    (local frame-size (glm.vec3 (math.max 0.001 layout-size.x)
+                                (math.max 0.001 layout-size.y)
+                                (math.max 0.001 layout-size.z)))
+    (glm.vec3 (* relative.x frame-size.x)
+              (* relative.y frame-size.y)
+              relative.z))
+
+  (fn capture-panel-placement-state [self layer metadata]
+    (if (= layer "tiles")
+        {:layer "tiles"
+         :align-x metadata.align-x
+         :align-y metadata.align-y}
+        (do
+          (local layout-state (capture-panel-layout-state metadata))
+          (if (not layout-state)
+              nil
+              {:layer "float"
+               :relative-position (encode-float-relative-position self
+                                                                 (array->vec3 layout-state.position))
+               :rotation layout-state.rotation
+               :relative-size (and layout-state.size
+                                   (encode-float-relative-size self
+                                                               (array->vec3 layout-state.size)))}))))
 
   (fn wrap-panel-element [self element]
     (local wrapper (resolve-panel-wrapper element))
@@ -537,20 +632,27 @@
     (local located (find-panel-metadata self wrapper))
     (local layer located.layer)
     (local metadata located.metadata)
-    (if (not metadata)
-        nil
-        (if (= layer "tiles")
-            {:layer "tiles"
-             :align-x metadata.align-x
-             :align-y metadata.align-y}
-            (do
-              (local layout-state (capture-panel-layout-state metadata))
-              (if (not layout-state)
-                  nil
-                  {:layer "float"
-                   :position layout-state.position
-                   :rotation layout-state.rotation
-                   :size layout-state.size})))))
+    (and metadata (capture-panel-placement-state self layer metadata)))
+
+  (fn panel-placement-options [self panel]
+    (local entry (or panel {}))
+    (local layer (or entry.layer
+                     entry.location
+                     self.default-panel-location))
+    (if (or (= layer :float) (= layer "float"))
+        {:location :float
+         :position (if entry.relative-position
+                       (decode-float-relative-position self entry.relative-position)
+                       (array->vec3 (and entry entry.position)))
+         :rotation (array->quat (and entry entry.rotation))
+         :size (if entry.relative-size
+                   (decode-float-relative-size self entry.relative-size)
+                   (array->vec3 (and entry entry.size)))}
+        (if (or (= layer :tiles) (= layer "tiles"))
+            {:location :tiles
+             :align-x (and entry entry.align-x)
+             :align-y (and entry entry.align-y)}
+            (error (.. "Unsupported panel layer: " (tostring layer))))))
 
   (fn register-panel-restorer [self kind restorer owner]
     (assert (= (type kind) :string) "Hud.register-panel-restorer requires string kind")
@@ -591,19 +693,11 @@
               (.. "Hud.capture-state panel kind has no restore strategy: "
                   kind
                   " (register restorer or set :restorer-module)"))
-      (if (= layer "tiles")
-          (do
-            (set record.layer "tiles")
-            (set record.align-x metadata.align-x)
-            (set record.align-y metadata.align-y))
-          (do
-            (set record.layer "float")
-            (local layout-state (capture-panel-layout-state metadata))
-            (assert layout-state
-                    (.. "Hud.capture-state missing layout for float panel kind: " kind))
-            (set record.position layout-state.position)
-            (set record.rotation layout-state.rotation)
-            (set record.size layout-state.size)))
+      (local placement (capture-panel-placement-state self layer metadata))
+      (assert placement
+              (.. "Hud.capture-state missing layout for panel kind: " kind))
+      (each [key value (pairs placement)]
+        (set (. record key) value))
       (table.insert panels record))
     (when self.tiles
       (each [_ metadata (ipairs (or self.tiles.children []))]
@@ -655,6 +749,8 @@
     (when (> (length panels) 0)
       (assert (and self.tiles self.float)
               "Hud.restore-state requires HUD roots (tiles and float)"))
+    (when (> (length panels) 0)
+      (self:update))
     (each [_ panel (ipairs panels)]
       (assert (= (type panel) :table) "Hud.restore-state panel entries must be tables")
       (local kind panel.kind)
@@ -747,10 +843,14 @@
   (fn update-projection [self viewport]
     (local vp (viewport-utils.to-table (or viewport self.viewport {:x 0 :y 0 :width 1 :height 1})))
     (set self.viewport vp)
-    (local adjusted-scale (* default-world-scale self.scale-factor))
-    (set self.world-units-per-pixel adjusted-scale)
     (local safe-width (math.max vp.width 1))
     (local safe-height (math.max vp.height 1))
+    (local adaptive-ratio (adaptive-scale-ratio-for-viewport
+                            (resolve-scale-viewport-height self vp)))
+    (local effective-scale-factor (/ self.scale-factor adaptive-ratio))
+    (set self.effective-scale-factor effective-scale-factor)
+    (local adjusted-scale (* default-world-scale effective-scale-factor))
+    (set self.world-units-per-pixel adjusted-scale)
     (set self.half-width (math.max 0.001 (* 0.5 safe-width adjusted-scale)))
     (set self.half-height (math.max 0.001 (* 0.5 safe-height adjusted-scale)))
     (if glm.ortho
@@ -802,6 +902,7 @@
   (set self.unregister-panel-restorer unregister-panel-restorer)
   (set self.capture-state capture-state)
   (set self.restore-state restore-state)
+  (set self.panel-placement-options panel-placement-options)
   (set self.refresh-panel-movables refresh-panel-movables)
   (set self.refresh-panel-resizables refresh-panel-resizables)
 

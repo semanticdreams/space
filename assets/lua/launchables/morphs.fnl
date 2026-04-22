@@ -8,7 +8,7 @@
   (local options (or opts {}))
   (local target (assert (or options.hud options.target)
                         "Morphs launchable requires HUD target"))
-  (local placement (Persistence.panel-placement-options options.panel))
+  (local placement (Persistence.panel-placement-options options.panel target))
   (target:add-panel-child {:builder (MorphView {})
                            :location placement.location
                            :align-x placement.align-x
