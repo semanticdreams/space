@@ -165,7 +165,10 @@
 
   (fn on-mouse-button-up [self payload]
     (local screen-pos (pointer-pos payload))
-    (when (and payload.button (near-pointer? self screen-pos self.mouse-down-pos))
+    (local suppressed? (and payload payload.suppress-click?))
+    (when (and payload.button
+               (not suppressed?)
+               (near-pointer? self screen-pos self.mouse-down-pos))
       (if (and self.active-entry (= payload.button self.active-entry.button))
           (dispatch-click self payload screen-pos screen-pos)
           (fire-void-callbacks self payload screen-pos screen-pos)))

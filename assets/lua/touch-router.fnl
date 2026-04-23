@@ -29,6 +29,8 @@
               :mod 0
               :timestamp (and payload payload.timestamp)
               :pressure (and payload payload.pressure)
+              :suppress-click? (and payload payload.suppress-click?)
+              :canceled? (and payload payload.canceled?)
               :synthetic? true
               :source :touch})
   (tset out "touch-id" (payload-touch-id payload))
@@ -133,9 +135,14 @@
         (tset base k v)))
     (logging.debug base "[touch-router] state"))
 
-  (fn release-mouse! [payload]
+  (fn release-mouse! [payload opts]
     (when mouse-active?
-      (emit-mouse-button-up (payload-from-contact (primary-contact) payload))
+      (local resolved (payload-from-contact (primary-contact) payload))
+      (when (and opts opts.suppress-click?)
+        (set resolved.suppress-click? true))
+      (when (and opts opts.canceled?)
+        (set resolved.canceled? true))
+      (emit-mouse-button-up resolved)
       (set mouse-active? false)))
 
   (fn dispatch-deferred-click! [payload]
@@ -154,7 +161,8 @@
 
   (fn cancel-single! [payload]
     (finish-captured! payload true)
-    (release-mouse! payload)
+    (release-mouse! payload {:suppress-click? true
+                             :canceled? true})
     (set mouse-deferred? false))
 
   (fn try-start-capture! [payload]
@@ -167,7 +175,7 @@
           (local resolved (payload-from-contact contact payload))
           (if (and handler (drag-candidate:on-touch-drag-start resolved))
               (do
-                (release-mouse! resolved)
+                (release-mouse! resolved {:suppress-click? true})
                 (set mouse-deferred? false)
                 (set captured-target drag-candidate)
                 (set drag-candidate nil)
@@ -302,7 +310,8 @@
         (finish-captured! payload canceled?)
         (if canceled?
             (do
-              (release-mouse! payload)
+              (release-mouse! payload {:suppress-click? true
+                                       :canceled? true})
               (set mouse-deferred? false))
             (if mouse-deferred?
                 (dispatch-deferred-click! payload)

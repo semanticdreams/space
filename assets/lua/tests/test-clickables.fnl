@@ -101,6 +101,23 @@
   (simulate-click clickables {:button 1 :x 0 :y 0 :timestamp 10})
   (assert called))
 
+(fn suppressed-release-does-not-fire-void-callback []
+  (local clickables (Clickables))
+  (var called false)
+  (clickables:register-left-click-void-callback
+    (fn [_event]
+      (set called true)))
+  (with-pointer-ray
+    (fn []
+      (clickables:on-mouse-button-down {:button 1 :x 0 :y 0 :timestamp 10})
+      (clickables:on-mouse-button-up {:button 1
+                                      :x 0
+                                      :y 0
+                                      :timestamp 11
+                                      :suppress-click? true})))
+  (assert (not called)
+          "suppressed releases should not dispatch background clicks"))
+
 (fn double-click-requires-registration []
   (local clickables (Clickables))
   (local stub (make-clickable))
@@ -125,6 +142,7 @@
 
 (table.insert tests {:name "Clickables send on-click to targets" :fn clickables-dispatches-on-click})
 (table.insert tests {:name "Clickables trigger void callback when nothing hit" :fn void-callback-fires-when-no-hit})
+(table.insert tests {:name "Clickables ignore suppressed releases" :fn suppressed-release-does-not-fire-void-callback})
 (table.insert tests {:name "Clickables detect double clicks for registered widgets" :fn double-click-requires-registration})
 (table.insert tests {:name "Clickables prioritize HUD intersections" :fn clickables-prefer-hud-intersection})
 
