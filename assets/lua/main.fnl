@@ -266,6 +266,7 @@
         (local prev-physics app.runtime-performance-physics-paused)
         (local prev-input app.runtime-performance-input-paused)
         (local prev-ui app.runtime-performance-ui-paused)
+        (local prev-screensaver app.runtime-performance-screensaver-inhibited)
         (local prev-source app.runtime-performance-source)
         (local prev-override app.runtime-performance-active-override)
         (local result (RuntimePerformance.apply-settings app.settings state app.engine))
@@ -276,6 +277,7 @@
           (set app.runtime-performance-physics-paused result.pause_physics)
           (set app.runtime-performance-input-paused result.pause_input)
           (set app.runtime-performance-ui-paused result.pause_ui)
+          (set app.runtime-performance-screensaver-inhibited result.screensaver_inhibited)
           (set app.runtime-performance-source result.source)
           (set app.runtime-performance-active-override result.active_override)
           (sync-physics-paused-state)
@@ -285,17 +287,19 @@
                     (not (= prev-physics result.pause_physics))
                     (not (= prev-input result.pause_input))
                     (not (= prev-ui result.pause_ui))
+                    (not (= prev-screensaver result.screensaver_inhibited))
                     (not (= prev-source result.source))
                     (not (= prev-override result.active_override)))
             (logging.info
               (string.format
-                "[space] runtime-performance control=%s mode=%s fps=%s physics-paused=%s input-paused=%s ui-paused=%s source=%s override=%s (prev control=%s mode=%s fps=%s physics-paused=%s input-paused=%s ui-paused=%s source=%s override=%s)"
+                "[space] runtime-performance control=%s mode=%s fps=%s physics-paused=%s input-paused=%s ui-paused=%s screensaver-inhibited=%s source=%s override=%s (prev control=%s mode=%s fps=%s physics-paused=%s input-paused=%s ui-paused=%s screensaver-inhibited=%s source=%s override=%s)"
                 (tostring result.control_mode)
                 (tostring result.effective_mode)
                 (tostring result.fps_cap)
                 (tostring result.pause_physics)
                 (tostring result.pause_input)
                 (tostring result.pause_ui)
+                (tostring result.screensaver_inhibited)
                 (tostring result.source)
                 (tostring result.active_override)
                 (tostring prev-control)
@@ -304,6 +308,7 @@
                 (tostring prev-physics)
                 (tostring prev-input)
                 (tostring prev-ui)
+                (tostring prev-screensaver)
                 (tostring prev-source)
                 (tostring prev-override))))))))
 
@@ -328,6 +333,13 @@
   (assert (and app.settings app.settings.set-value) "settings must be initialized")
   (local normalized (RuntimePerformance.normalize-mode mode))
   (app.settings.set-value "runtime_performance.manual_mode" normalized {:save? true})
+  (apply-runtime-performance-settings)
+  normalized)
+
+(fn app.set-runtime-performance-screensaver-inhibit-mode [mode]
+  (assert (and app.settings app.settings.set-value) "settings must be initialized")
+  (local normalized (RuntimePerformance.normalize-screensaver-inhibit-mode mode))
+  (app.settings.set-value "runtime_performance.screensaver.inhibit_mode" normalized {:save? true})
   (apply-runtime-performance-settings)
   normalized)
 
@@ -678,6 +690,7 @@
 (set app.startup-physics-pause-owner nil)
 (set app.runtime-performance-input-paused nil)
 (set app.runtime-performance-ui-paused nil)
+(set app.runtime-performance-screensaver-inhibited nil)
 (set app.runtime-performance-source nil)
 (set app.runtime-performance-active-override nil)
 (set app.world-manager nil)

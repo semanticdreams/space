@@ -2,6 +2,7 @@
   {:runtime_performance {:control_mode "auto"
                          :manual_mode "max"
                          :restore_manual_on_clear true
+                         :screensaver {:inhibit_mode "interesting_activity"}
                          :modes {:max {:fps_cap 60
                                        :pause_physics false
                                        :pause_input false
@@ -106,6 +107,13 @@
       "auto"
       "manual"))
 
+(fn normalize-screensaver-inhibit-mode [mode]
+  (if (= mode "always")
+      "always"
+      (= mode "never")
+      "never"
+      "interesting_activity"))
+
 (fn sanitize-fps-cap [value fallback]
   (if (finite-number? value)
       (math.max 0 (math.min 240 (math.floor value)))
@@ -123,6 +131,12 @@
 (fn resolve-control-mode [settings]
   (normalize-control-mode
     (get-setting settings "runtime_performance.control_mode" "auto")))
+
+(fn resolve-screensaver-inhibit-mode [settings]
+  (normalize-screensaver-inhibit-mode
+    (get-setting settings
+                 "runtime_performance.screensaver.inhibit_mode"
+                 "interesting_activity")))
 
 (fn auto-enabled? [settings]
   (sanitize-bool (get-setting settings "runtime_performance.auto.enabled" true) true))
@@ -199,6 +213,15 @@
 (fn has-interesting-activity? [state]
   (or state.system.video_playback
       (has-active-gameplay-lease? state)))
+
+(fn should-inhibit-screensaver [settings state]
+  (assert state "runtime-performance.should-inhibit-screensaver requires state")
+  (local mode (resolve-screensaver-inhibit-mode settings))
+  (if (= mode "always")
+      true
+      (= mode "never")
+      false
+      (has-interesting-activity? state)))
 
 (fn idle-unfocused-after-seconds [settings]
   (sanitize-priority
@@ -551,12 +574,17 @@
   (local pause-physics (resolve-pause-physics settings resolution.effective_mode))
   (local pause-input (resolve-pause-input settings resolution.effective_mode))
   (local pause-ui (resolve-pause-ui settings resolution.effective_mode))
+  (local screensaver-inhibited (should-inhibit-screensaver settings state))
   (when (and engine engine.set-target-fps)
     (engine.set-target-fps fps-cap))
   (when (and engine engine.set-input-paused)
     (engine.set-input-paused pause-input))
   (when (and engine engine.set-ui-paused)
     (engine.set-ui-paused pause-ui))
+  (when (and engine engine.set-screensaver-inhibited)
+    (local ok (engine.set-screensaver-inhibited screensaver-inhibited))
+    (when (= ok false)
+      (error "runtime-performance failed to apply screensaver inhibition")))
   (when (and engine engine.request-frame state.last (= state.last.fps_cap 0) (> fps-cap 0))
     (engine.request-frame))
   (set state.last {:manual_mode resolution.manual_mode
@@ -568,14 +596,17 @@
                    :fps_cap fps-cap
                    :pause_physics pause-physics
                    :pause_input pause-input
-                   :pause_ui pause-ui})
+                   :pause_ui pause-ui
+                   :screensaver_inhibited screensaver-inhibited})
   state.last)
 
 {:defaults default-settings
  :normalize-mode normalize-mode
  :normalize-control-mode normalize-control-mode
+ :normalize-screensaver-inhibit-mode normalize-screensaver-inhibit-mode
  :resolve-control-mode resolve-control-mode
  :resolve-manual-mode resolve-manual-mode
+ :resolve-screensaver-inhibit-mode resolve-screensaver-inhibit-mode
  :resolve-fps-cap resolve-fps-cap
  :resolve-pause-physics resolve-pause-physics
  :resolve-pause-input resolve-pause-input
@@ -589,6 +620,7 @@
  :set-screen-locked set-screen-locked
  :set-on-battery set-on-battery
  :set-video-playback set-video-playback
+ :should-inhibit-screensaver should-inhibit-screensaver
  :activate-lease activate-lease
  :clear-lease clear-lease
  :activate-gameplay-lease activate-gameplay-lease

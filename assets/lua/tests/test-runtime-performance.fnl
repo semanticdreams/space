@@ -325,23 +325,76 @@
     (assert (= cleared.effective_mode "balanced"))
     true)))
 
+(fn screensaver-inhibition-follows-interesting-activity []
+  (with-temp-dir (fn [root]
+    (local settings (Settings {:config-dir root :filename "settings.toml"}))
+    (RuntimePerformance.ensure-settings-defaults settings)
+    (local state (RuntimePerformance.create-state))
+    (assert (= (RuntimePerformance.resolve-screensaver-inhibit-mode settings)
+               "interesting_activity"))
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) false))
+
+    (RuntimePerformance.set-video-playback state true)
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) true))
+
+    (RuntimePerformance.set-video-playback state false)
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) false))
+
+    (RuntimePerformance.activate-gameplay-lease settings state "demo")
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) true))
+
+    (RuntimePerformance.clear-gameplay-lease state "demo")
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) false))
+    true)))
+
+(fn screensaver-inhibition-mode-is-configurable []
+  (with-temp-dir (fn [root]
+    (local settings (Settings {:config-dir root :filename "settings.toml"}))
+    (RuntimePerformance.ensure-settings-defaults settings)
+    (local state (RuntimePerformance.create-state))
+
+    (settings.set-value "runtime_performance.screensaver.inhibit_mode" "always" {:save? false})
+    (assert (= (RuntimePerformance.resolve-screensaver-inhibit-mode settings) "always"))
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) true))
+
+    (settings.set-value "runtime_performance.screensaver.inhibit_mode" "never" {:save? false})
+    (RuntimePerformance.set-video-playback state true)
+    (assert (= (RuntimePerformance.resolve-screensaver-inhibit-mode settings) "never"))
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) false))
+
+    (settings.set-value "runtime_performance.screensaver.inhibit_mode" "typo" {:save? false})
+    (assert (= (RuntimePerformance.resolve-screensaver-inhibit-mode settings)
+               "interesting_activity"))
+    (assert (= (RuntimePerformance.should-inhibit-screensaver settings state) true))
+    true)))
+
 (fn apply-settings-drives-engine-cap []
   (with-temp-dir (fn [root]
     (local settings (Settings {:config-dir root :filename "settings.toml"}))
     (RuntimePerformance.ensure-settings-defaults settings)
     (settings.set-value "runtime_performance.control_mode" "auto" {:save? false})
     (local state (RuntimePerformance.create-state))
-    (local captured {:fps nil :input nil :requests 0})
+    (local captured {:fps nil :input nil :screensaver nil :requests 0})
     (local engine {:set-target-fps (fn [fps] (set captured.fps fps))
                    :set-input-paused (fn [paused] (set captured.input paused))
+                   :set-screensaver-inhibited (fn [inhibited]
+                                                (set captured.screensaver inhibited)
+                                                true)
                    :request-frame (fn []
                                     (set captured.requests (+ captured.requests 1))
                                     true)})
     (local r1 (RuntimePerformance.apply-settings settings state engine))
     (assert (= captured.fps 60))
     (assert (= captured.input false))
+    (assert (= captured.screensaver false))
     (assert (= r1.pause_physics false))
     (assert (= r1.pause_ui false))
+    (assert (= r1.screensaver_inhibited false))
+    (RuntimePerformance.set-video-playback state true)
+    (local rv (RuntimePerformance.apply-settings settings state engine))
+    (assert (= captured.screensaver true))
+    (assert (= rv.screensaver_inhibited true))
+    (RuntimePerformance.set-video-playback state false)
     (RuntimePerformance.set-minimized state true)
     (local r2 (RuntimePerformance.apply-settings settings state engine))
     (assert (= captured.fps 0))
@@ -362,6 +415,20 @@
     (assert (= r4.pause_physics false))
     (assert (= r4.pause_ui false))
     (assert (= captured.requests 1))
+    true)))
+
+(fn screensaver-inhibition-fails-loudly []
+  (with-temp-dir (fn [root]
+    (local settings (Settings {:config-dir root :filename "settings.toml"}))
+    (RuntimePerformance.ensure-settings-defaults settings)
+    (settings.set-value "runtime_performance.screensaver.inhibit_mode" "always" {:save? false})
+    (local state (RuntimePerformance.create-state))
+    (local engine {:set-target-fps (fn [_fps] true)
+                   :set-screensaver-inhibited (fn [_inhibited] false)})
+    (local (ok err) (pcall RuntimePerformance.apply-settings settings state engine))
+    (assert (= ok false) "screensaver failure should fail loudly")
+    (assert (string.find (tostring err) "screensaver" 1 true)
+            "error should mention screensaver")
     true)))
 
 (table.insert tests {:name "manual mode defaults to max" :fn manual-mode-defaults-to-max})
@@ -386,7 +453,13 @@
 (table.insert tests {:name "lease override and clear" :fn lease-override-and-clear})
 (table.insert tests {:name "gameplay lease uses shared rule settings"
                      :fn gameplay-lease-uses-shared-rule-settings})
+(table.insert tests {:name "screensaver inhibition follows interesting activity"
+                     :fn screensaver-inhibition-follows-interesting-activity})
+(table.insert tests {:name "screensaver inhibition mode is configurable"
+                     :fn screensaver-inhibition-mode-is-configurable})
 (table.insert tests {:name "apply-settings drives engine fps cap" :fn apply-settings-drives-engine-cap})
+(table.insert tests {:name "screensaver inhibition fails loudly"
+                     :fn screensaver-inhibition-fails-loudly})
 
 (local main
   (fn []

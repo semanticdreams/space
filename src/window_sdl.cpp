@@ -43,6 +43,8 @@ bool WindowSdl::init(int width, int height, WindowStartupMode startup_mode) {
                             | SDL_WINDOW_HIDDEN;
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER, "1");
+    SDL_SetHint(SDL_HINT_SCREENSAVER_INHIBIT_ACTIVITY_NAME, "Space runtime performance policy");
 
     const SDL_InitFlags init_flags = SDL_INIT_VIDEO | SDL_INIT_EVENTS;
     if (!SDL_Init(init_flags)) {

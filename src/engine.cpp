@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <optional>
 #include <cinttypes>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -247,6 +248,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         initSystemCursors();
         SDL_SetGamepadEventsEnabled(true);
         log_input_backend_summary();
+        screensaver_inhibited_ = !SDL_ScreenSaverEnabled();
 
         inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
         // Clear previous state memory
@@ -358,6 +360,16 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_engine.set_function("get-ui-paused", [this]() {
         return ui_paused_;
     });
+    lua_engine.set_function("set-screensaver-inhibited", [this](bool inhibited) {
+        if (!setScreensaverInhibited(inhibited)) {
+            throw std::runtime_error(inhibited ? "failed to disable SDL screensaver"
+                                               : "failed to enable SDL screensaver");
+        }
+        return true;
+    });
+    lua_engine.set_function("screensaver-enabled", []() {
+        return SDL_ScreenSaverEnabled();
+    });
     request_frame_event_type = SDL_RegisterEvents(1);
     if (request_frame_event_type == static_cast<Uint32>(-1)) {
         LOG(Warning) << "Failed to allocate request-frame event type: " << SDL_GetError();
@@ -375,6 +387,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     lua_engine["physics-paused"] = physics_paused_;
     lua_engine["input-paused"] = input_paused_;
     lua_engine["ui-paused"] = ui_paused_;
+    lua_engine["screensaver-inhibited"] = screensaver_inhibited_;
     lua_bind_callbacks(*lua_state, lua_engine);
     lua_engine["physics"] = &physics;
     lua_engine["audio"] = &audio;
@@ -1472,6 +1485,7 @@ void Engine::shutdown() {
         jobs->shutdown();
     }
     shutdownSystemCursors();
+    setScreensaverInhibited(false);
     if (window) {
         window->clean();
     }
@@ -1565,4 +1579,31 @@ void Engine::setTextInputEnabled(bool enabled)
         return;
     }
     window->setTextInputEnabled(enabled);
+}
+
+bool Engine::setScreensaverInhibited(bool inhibited)
+{
+    if (!window) {
+        if (!inhibited) {
+            return true;
+        }
+        LOG(Warning) << "Cannot inhibit screensaver without an SDL window";
+        return false;
+    }
+    if (screensaver_inhibited_ == inhibited) {
+        return true;
+    }
+
+    bool ok = inhibited ? SDL_DisableScreenSaver() : SDL_EnableScreenSaver();
+    if (!ok) {
+        LOG(Warning) << "Failed to "
+                     << (inhibited ? "disable" : "enable")
+                     << " SDL screensaver: " << SDL_GetError();
+        SDL_ClearError();
+        return false;
+    }
+
+    screensaver_inhibited_ = inhibited;
+    lua_engine["screensaver-inhibited"] = screensaver_inhibited_;
+    return true;
 }

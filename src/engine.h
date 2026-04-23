@@ -100,6 +100,7 @@ private:
     void closeGamepad(SDL_JoystickID instanceId, Uint64 timestamp);
     void closeAllGamepads(Uint64 timestamp);
     void setTextInputEnabled(bool enabled);
+    bool setScreensaverInhibited(bool inhibited);
 
     std::unordered_map<std::string, SDL_Cursor*> systemCursors;
     std::unordered_map<SDL_JoystickID, SDL_Gamepad*> gamepads;
@@ -112,6 +113,7 @@ private:
     bool physics_paused_ { false };
     bool input_paused_ { false };
     bool ui_paused_ { false };
+    bool screensaver_inhibited_ { false };
 
     // python
     //std::unique_ptr<py::scoped_interpreter> python;
