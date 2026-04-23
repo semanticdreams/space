@@ -1,4 +1,4 @@
-.PHONY: build cmake debug run pack appimage install clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs devlog test-windows-wine
+.PHONY: build cmake debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs devlog test-windows-wine
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
@@ -30,8 +30,32 @@ appimage: build
 	./scripts/build-appimage.sh
 
 install:
-	dpkg -i ./build/space-*-Linux.deb
-	apt install -f
+	@echo "ambiguous install target; use 'make install-deb' or 'make install-rpm'" >&2
+	@exit 1
+
+install-deb:
+	@pkg=$$(find ./build -maxdepth 1 -type f \( -name 'space-linux-*.deb' -o -name 'space-*-Linux.deb' \) | head -n 1); \
+	if [ -z "$$pkg" ]; then \
+		echo "no DEB package artifact found in ./build"; \
+		exit 1; \
+	fi; \
+	if ! command -v dpkg >/dev/null 2>&1; then \
+		echo "dpkg not found"; \
+		exit 1; \
+	fi; \
+	dpkg -i "$$pkg" || apt install -f
+
+install-rpm:
+	@pkg=$$(find ./build -maxdepth 1 -type f \( -name 'space-linux-*.rpm' -o -name 'space-*-Linux.rpm' \) | head -n 1); \
+	if [ -z "$$pkg" ]; then \
+		echo "no RPM package artifact found in ./build"; \
+		exit 1; \
+	fi; \
+	if ! command -v dnf >/dev/null 2>&1; then \
+		echo "dnf not found"; \
+		exit 1; \
+	fi; \
+	dnf install "$$pkg"
 
 clean:
 	rm -rf build/*

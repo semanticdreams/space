@@ -207,7 +207,7 @@ if(UNIX AND NOT APPLE)
                 /usr/lib
         )
         if(NOT LIBGCCJIT_INCLUDE_DIR OR NOT LIBGCCJIT_LIBRARY)
-            message(FATAL_ERROR "libgccjit not found. Install libgccjit-11-dev (or equivalent).")
+            message(FATAL_ERROR "libgccjit not found. Install libgccjit-11-dev, libgccjit-devel, or equivalent.")
         endif()
         add_library(space_gccjit INTERFACE)
         target_include_directories(space_gccjit SYSTEM INTERFACE ${LIBGCCJIT_INCLUDE_DIR})

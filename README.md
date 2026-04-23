@@ -32,27 +32,78 @@ Install guidance:
 
 ### Build from source
 
-*Tested on: Pop!_OS 22.04 LTS*
+Linux package names differ by distro. Use the dependency set that matches your system.
+
+Ubuntu/Pop!_OS:
 
 <!-- CI_DEPS_START -->
-```
+```bash
 sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pil python3-zmq cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev
+```
+<!-- CI_DEPS_END -->
+
+Fedora:
+
+```bash
+sudo dnf install \
+  cmake \
+  bullet-devel \
+  glm-devel \
+  openal-soft-devel \
+  libepoxy-devel \
+  portaudio-devel \
+  libvterm-devel \
+  libnotify-devel \
+  libcurl-devel \
+  zeromq-devel \
+  python3 \
+  python3-pillow \
+  python3-zmq \
+  cargo \
+  aubio-devel \
+  boost-devel \
+  xapian-core-devel \
+  rb_libtorrent-devel \
+  ripgrep \
+  ffmpeg-free \
+  ffmpeg-free-devel \
+  libgccjit-devel \
+  libsecret \
+  libsecret-devel \
+  libdecor-devel \
+  wayland-devel \
+  libxkbcommon-devel \
+  libXi-devel
+```
+
+Build and run:
+
+```bash
 make build
 make run
 ```
-<!-- CI_DEPS_END -->
 
 To run the app directly, use `./build/space -m main`.
 By default, `./build/space` also starts the main app; use `./build/space --repl` for the embedded Fennel REPL.
 
 Optional packaging dependencies (only needed for `make pack`):
 
-```
+Ubuntu/Pop!_OS:
+
+```bash
 sudo apt install dpkg-dev rpm
 ```
 
+Fedora:
+
+```bash
+sudo dnf install dpkg-dev rpm-build
+```
+
 - `dpkg-dev` is needed for `.deb` dependency scanning (`dpkg-shlibdeps`).
-- `rpm` is needed for `.rpm` output (`rpmbuild`).
+- `rpm`/`rpm-build` is needed for `.rpm` output (`rpmbuild`).
+- Use `make install-deb` to install a built `.deb` locally.
+- Use `make install-rpm` to install a built `.rpm` locally.
 
 Build an AppImage (portable Linux bundle):
 
