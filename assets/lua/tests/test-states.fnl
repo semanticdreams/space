@@ -16,6 +16,13 @@
 (local InputState (require :input-state-router))
 (local State (require :state))
 (local Runtime (require :state-runtime))
+(local BuildContext (require :build-context))
+(local Graph (require :graph/init))
+(local GraphView (require :graph/view))
+(local Intersectables (require :intersectables))
+(local Clickables (require :clickables))
+(local Hoverables (require :hoverables))
+(local {:FocusManager FocusManager} (require :focus))
 (local HoverHandlers (require :state-handlers/hover))
 (local TextInputHandlers (require :state-handlers/text-input))
 (local FocusHandlers (require :state-handlers/focus))
@@ -25,6 +32,7 @@
 (local Routes (require :state-routes))
 (local InputModel (require :input-model))
 (local TestSupport (require :tests/test-support))
+(local viewport-utils (require :viewport-utils))
 
 (local tests [])
 
@@ -447,6 +455,97 @@
   (set app.touch-gesture-targets original-touch-targets)
   (set app.canvas-interactive? original-canvas-interactive)
   (set app.active-canvas-feature original-feature))
+
+(fn normal-state-touch-focuses-graph-node-under-logical-input-scaling []
+  (reset-engine-events)
+  (local original-active-controls app.active-pointer-controls)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-movables app.movables)
+  (local original-resizables app.resizables)
+  (local original-touch-targets app.touch-gesture-targets)
+  (local original-intersectables app.intersectables)
+  (local original-first-person app.first-person-controls)
+  (local original-object-selector app.object-selector)
+  (local original-engine-width (and app.engine app.engine.width))
+  (local original-engine-height (and app.engine app.engine.height))
+  (local original-viewport app.viewport)
+  (var view nil)
+  (var graph nil)
+  (local (ok err)
+    (pcall
+      (fn []
+        (set app.active-pointer-controls nil)
+        (set app.engine.width 100)
+        (set app.engine.height 50)
+        (set app.viewport {:x 0 :y 0 :width 200 :height 100})
+        (set app.intersectables (Intersectables))
+        (set app.clickables (Clickables {:intersectables app.intersectables}))
+        (set app.hoverables (Hoverables {:intersectables app.intersectables}))
+        (set app.movables {:drag-active? (fn [_self] false)
+                           :on-mouse-motion (fn [_self _payload])
+                           :on-mouse-button-down (fn [_self _payload])
+                           :on-mouse-button-up (fn [_self _payload])})
+        (set app.resizables {:drag-active? (fn [_self] false)
+                             :on-mouse-motion (fn [_self _payload])
+                             :on-mouse-button-down (fn [_self _payload])
+                             :on-mouse-button-up (fn [_self _payload])})
+        (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
+        (set app.object-selector nil)
+        (set app.first-person-controls (create-controls-stub))
+        (local focus-manager (FocusManager {:root-name "test-states-graph-focus"}))
+        (local focus-scope (focus-manager:create-scope {:name "test-states-graph-view"}))
+        (local ctx
+          (BuildContext {:clickables app.clickables
+                         :hoverables app.hoverables
+                         :theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)}
+                                 :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}}
+                         :focus-manager focus-manager
+                         :focus-scope focus-scope}))
+        (local pointer-target
+          {:screen-pos-ray (fn [_self pointer _opts]
+                             (local viewport (viewport-utils.to-table app.viewport))
+                             (local screen (viewport-utils.input-pos->viewport-pos pointer viewport app.engine))
+                             {:origin (glm.vec3 (or (and screen screen.x) 0)
+                                                (or (and screen screen.y) 0)
+                                                10)
+                              :direction (glm.vec3 0 0 -1)})})
+        (set graph (Graph {:with-start false}))
+        (set view (GraphView {:graph graph
+                              :ctx ctx
+                              :pointer-target pointer-target}))
+        (local node (Graph.GraphNode {:key "touch-focus-node"
+                                      :size 8}))
+        (graph:add-node node {:position (glm.vec3 40 50 0)
+                              :run-force? false})
+        (local focus-node (. view.focus-nodes node))
+        (assert focus-node "GraphView should create a focus node for the touch target")
+        (local state (NormalState))
+        (state.on-enter)
+        (state:on-touch-down (engine-touch-payload 1 11 20 25 0 0 0.5 1))
+        (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 2)
+        (state:on-touch-up (engine-touch-payload 1 11 20 25 0 0 0.5 2))
+        (state:on-leave)
+        (assert (= (focus-manager:get-focused-node) focus-node)
+                "NormalState touch should focus graph nodes after logical input is scaled into viewport space"))))
+  (when view
+    (view:drop))
+  (when graph
+    (graph:drop))
+  (set app.active-pointer-controls original-active-controls)
+  (set app.hoverables original-hoverables)
+  (set app.clickables original-clickables)
+  (set app.movables original-movables)
+  (set app.resizables original-resizables)
+  (set app.touch-gesture-targets original-touch-targets)
+  (set app.intersectables original-intersectables)
+  (set app.first-person-controls original-first-person)
+  (set app.object-selector original-object-selector)
+  (set app.engine.width original-engine-width)
+  (set app.engine.height original-engine-height)
+  (set app.viewport original-viewport)
+  (when (not ok)
+    (error err)))
 
 (fn fpc-state-injects-single-touch-as-mouse []
   (reset-engine-events)
@@ -1535,6 +1634,8 @@
 (table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
 (table.insert tests {:name "Normal state routes canvas multitouch to active controls"
                      :fn normal-state-routes-canvas-multitouch-to-active-controls})
+(table.insert tests {:name "Normal state touch focuses graph node under logical input scaling"
+                     :fn normal-state-touch-focuses-graph-node-under-logical-input-scaling})
 (table.insert tests {:name "Normal state injects pen as mouse and restores drawing tool"
                      :fn normal-state-injects-pen-as-mouse-and-restores-drawing-tool})
 (table.insert tests {:name "Normal state keeps eraser override while another pen is still eraser"

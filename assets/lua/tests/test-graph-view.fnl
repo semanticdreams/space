@@ -30,6 +30,7 @@
 (local appdirs (require :appdirs))
 (local MathUtils (require :math-utils))
 (local TextUtils (require :text-utils))
+(local viewport-utils (require :viewport-utils))
 
 (local {:ForceLayout ForceLayout :ForceLayoutSignal ForceLayoutSignal} (require :force-layout))
 (fn assert-codepoints-eq [actual expected message]
@@ -1746,6 +1747,68 @@
             (view:drop)
             (graph:drop))))
 
+(fn graph-view-click-focuses-node-under-logical-input-scaling []
+    (with-temp-data-dir
+        (fn [_root]
+            (local Clickables (require :clickables))
+            (local Hoverables (require :hoverables))
+            (local original-engine app.engine)
+            (local original-viewport app.viewport)
+            (local original-clickables app.clickables)
+            (local original-hoverables app.hoverables)
+            (local original-intersectables app.intersectables)
+            (var view nil)
+            (var graph nil)
+            (local (ok err)
+                (pcall
+                    (fn []
+                        (set app.engine {:width 100 :height 50})
+                        (set app.viewport {:x 0 :y 0 :width 200 :height 100})
+                        (set app.intersectables (Intersectables))
+                        (set app.clickables (Clickables {:intersectables app.intersectables}))
+                        (set app.hoverables (Hoverables {:intersectables app.intersectables}))
+                        (local pointer-target
+                            {:screen-pos-ray (fn [_self pointer _opts]
+                                                  (local viewport (viewport-utils.to-table app.viewport))
+                                                  (local screen (viewport-utils.input-pos->viewport-pos pointer viewport app.engine))
+                                                  {:origin (glm.vec3 (or (and screen screen.x) 0)
+                                                                     (or (and screen screen.y) 0)
+                                                                     10)
+                                                   :direction (glm.vec3 0 0 -1)})})
+                        (local ctx (make-ctx))
+                        (local focus-manager (. ctx.focus :manager))
+                        (set graph (Graph {:with-start false}))
+                        (set view (GraphView {:graph graph
+                                              :ctx ctx
+                                              :pointer-target pointer-target}))
+                        (local node (Graph.GraphNode {:key "logical-click-focus"
+                                                      :size 8}))
+                        (graph:add-node node {:position (glm.vec3 40 50 0)
+                                              :run-force? false})
+                        (local focus-node (. view.focus-nodes node))
+                        (assert focus-node "GraphView should create a focus node for the clickable point")
+                        (app.clickables:on-mouse-button-down {:button 1
+                                                              :x 20
+                                                              :y 25
+                                                              :timestamp 10})
+                        (app.clickables:on-mouse-button-up {:button 1
+                                                            :x 20
+                                                            :y 25
+                                                            :timestamp 10})
+                        (assert (= (focus-manager:get-focused-node) focus-node)
+                                "GraphView point click should request focus after logical input is scaled into viewport space"))))
+            (when view
+                (view:drop))
+            (when graph
+                (graph:drop))
+            (set app.engine original-engine)
+            (set app.viewport original-viewport)
+            (set app.clickables original-clickables)
+            (set app.hoverables original-hoverables)
+            (set app.intersectables original-intersectables)
+            (when (not ok)
+                (error err)))))
+
 (fn graph-movables-module-registers-and-cleans-up []
     (with-temp-data-dir
         (fn [_root]
@@ -2078,6 +2141,8 @@
                      :fn graph-view-public-api-errors-after-drop})
 (table.insert tests {:name "GraphView updates selection and focus borders" :fn graph-view-updates-selection-and-focus-borders})
 (table.insert tests {:name "GraphView auto-focus updates focus ring" :fn graph-view-autofocus-updates-focus-ring})
+(table.insert tests {:name "GraphView point click focuses node under logical input scaling"
+                     :fn graph-view-click-focuses-node-under-logical-input-scaling})
 (table.insert tests {:name "Graph view rebuilds views from double click" :fn graph-view-rebuilds-from-double-click})
 (table.insert tests {:name "GraphView node views host heightfield perlin tool dialog"
                      :fn graph-view-node-views-hosts-heightfield-perlin-tool-dialog})
