@@ -229,6 +229,7 @@ std::shared_ptr<spdlog::logger> log_get_logger(const std::string& name)
         spdlog::async_overflow_policy::block
     );
     logger->set_level(to_spd_level(LOG_CONFIG.reporting_level));
+    logger->flush_on(spdlog::level::warn);
     spdlog::register_logger(logger);
     return logger;
 }
@@ -267,7 +268,8 @@ void log_init(const LogConfig& config)
         "jobs",
         "http",
         "input",
-        "render"
+        "render",
+        "terminal"
     };
 
     for (const auto& name : default_loggers) {
@@ -326,8 +328,10 @@ void log_write_named_fields(const std::string& name, LogLevel level, const std::
 
 void log_flush()
 {
-    auto logger = log_get_logger("space");
-    logger->flush();
+    ensure_logger();
+    spdlog::apply_all([](std::shared_ptr<spdlog::logger> logger) {
+        logger->flush();
+    });
 }
 
 void log_set_frame_id_provider(const std::atomic<uint64_t>* provider)

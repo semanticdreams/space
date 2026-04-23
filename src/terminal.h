@@ -70,6 +70,7 @@ public:
     bool isAltScreen() const;
     bool isPtyAvailable() const;
     bool isScrollbackSupported() const;
+    uint64_t getId() const;
     int getScrollbackSize() const;
     std::vector<Cell> getScrollbackLine(int index) const;
 

@@ -1,10 +1,12 @@
 (local glm (require :glm))
 (local ClipUtils (require :clip-utils))
+(local logging (require :logging))
 (local {: fallback-glyph
         : line-height} (require :text-utils))
 (local underline (require :terminal-underline))
 (local QuadBatcher (require :next-app/quad-batcher))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
+(local terminal-log (logging.get "terminal"))
 
 (local glyph-stride 12)
 (local zero-clip-matrix (glm.mat4 0))
@@ -79,6 +81,9 @@
 (fn rgb-key [r g b]
   (+ (* r 65536) (* g 256) b))
 
+(fn current-frame-id []
+  (or (and app app.engine (. app.engine "frame-id")) -1))
+
 (fn resolve-font-state [fonts font-states cell]
   (local regular (. font-states fonts.regular))
   (local italic-state (and cell.italic (. font-states fonts.italic)))
@@ -143,6 +148,11 @@
   (var background-runs-by-row {})
   (var frame-size (glm.vec3 0 0 0))
   (var frame-offset (glm.vec3 0 0 0))
+
+  (fn current-terminal-id []
+    (if (and term term.get-id)
+        (term:get-id)
+        -1))
 
   (local fonts {:regular style.font
                 :italic (or style.italic-font style.font)
@@ -601,6 +611,18 @@
     (local next-alt (not (not (and state state.alt-screen?))))
     (when (or (not (= next-offset scroll-offset))
               (not (= next-alt alt-screen?)))
+      (when (or (> next-offset 0)
+                (> scroll-offset 0)
+                (not (= next-alt alt-screen?)))
+        (terminal-log.debug {:frame_id (current-frame-id)
+                             :terminal_id (current-terminal-id)
+                             :previous_offset scroll-offset
+                             :offset next-offset
+                             :previous_alt_screen alt-screen?
+                             :alt_screen next-alt
+                             :rows rows
+                             :cols cols}
+                            "[terminal-renderer] scroll state changed"))
       (set scroll-offset next-offset)
       (set alt-screen? next-alt)
       (set full-redraw? true)
@@ -750,6 +772,25 @@
             (if (< combined-index scrollback-size)
                 (or (. line-cache combined-index)
                     (do
+                      (local live-scrollback-size
+                        (if (and term term.get-scrollback-size)
+                            (math.max 0 (term:get-scrollback-size))
+                            0))
+                      (when (or (not (= live-scrollback-size scrollback-size))
+                                (< combined-index 0)
+                                (>= combined-index live-scrollback-size))
+                        (terminal-log.warn {:frame_id (current-frame-id)
+                                            :terminal_id (current-terminal-id)
+                                            :sampled_scrollback_size scrollback-size
+                                            :live_scrollback_size live-scrollback-size
+                                            :combined_index combined-index
+                                            :viewport_row viewport-row
+                                            :viewport_start viewport-start
+                                            :scroll_offset scroll-offset
+                                            :rows rows
+                                            :cols cols
+                                            :alt_screen alt-screen?}
+                                           "[terminal-renderer] scrollback read mismatch"))
                       (local line (term:get-scrollback-line combined-index))
                       (set (. line-cache combined-index) line)
                       line))

@@ -7,6 +7,7 @@
   (local size (term:get-size))
   (assert (= size.rows 4))
   (assert (= size.cols 8))
+  (assert (> (term:get-id) 0))
   (assert (= (term:get-title) nil))
   (local cell (term:get-cell 0 0))
   (assert (= cell.codepoint 32)))

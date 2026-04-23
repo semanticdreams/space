@@ -1,5 +1,7 @@
 #include "terminal.h"
 
+#include "log.h"
+
 #include <vterm.h>
 
 #if (VTERM_VERSION_MAJOR > 0) || (VTERM_VERSION_MINOR >= 3)
@@ -11,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cctype>
 #include <csignal>
@@ -31,6 +34,8 @@
 #include <limits>
 
 namespace {
+
+std::atomic<uint64_t> nextTerminalId { 1 };
 
 std::string trim_copy(const std::string& value)
 {
@@ -69,6 +74,7 @@ std::vector<std::string> split_command(const std::string& value)
 
 struct Terminal::Impl {
     Terminal& owner;
+    uint64_t id = nextTerminalId.fetch_add(1, std::memory_order_relaxed);
     VTerm* vt = nullptr;
     VTermScreen* screen = nullptr;
     VTermState* state = nullptr;
@@ -199,13 +205,36 @@ struct Terminal::Impl {
         return line.size() * sizeof(VTermScreenCell);
     }
 
+    void logScrollbackSizeChange(const char* event, LogLevel level, int beforeSize, size_t beforeBytes) const
+    {
+        int afterSize = static_cast<int>(scrollback.size());
+        if (beforeSize == afterSize && beforeBytes == scrollbackBytes) {
+            return;
+        }
+        LOG_NAMED("terminal", level)
+            << log_kv("event", event)
+            << log_kv("before_size", beforeSize)
+            << log_kv("after_size", afterSize)
+            << log_kv("before_bytes", beforeBytes)
+            << log_kv("after_bytes", scrollbackBytes)
+            << log_kv("terminal_id", id)
+            << log_kv("rows", size.rows)
+            << log_kv("cols", size.cols)
+            << log_kv("limit", scrollbackLineLimit)
+            << log_kv("alt_screen", inAltScreen ? 1 : 0)
+            << "[terminal] scrollback size changed";
+    }
+
     void trimScrollback()
     {
+        int beforeSize = static_cast<int>(scrollback.size());
+        size_t beforeBytes = scrollbackBytes;
         while (!scrollback.empty()
             && (static_cast<int>(scrollback.size()) > scrollbackLineLimit || scrollbackBytes > scrollbackByteLimit)) {
             scrollbackBytes -= lineByteCost(scrollback.front());
             scrollback.pop_front();
         }
+        logScrollbackSizeChange("trim", Debug, beforeSize, beforeBytes);
     }
 
     void pushScrollbackLine(int cols, const VTermScreenCell* cells)
@@ -228,6 +257,8 @@ struct Terminal::Impl {
         if (inAltScreen || cols <= 0 || cells == nullptr || scrollback.empty()) {
             return 0;
         }
+        int beforeSize = static_cast<int>(scrollback.size());
+        size_t beforeBytes = scrollbackBytes;
         std::vector<VTermScreenCell> line = std::move(scrollback.back());
         scrollback.pop_back();
         scrollbackBytes -= lineByteCost(line);
@@ -235,18 +266,35 @@ struct Terminal::Impl {
         for (int i = 0; i < copyCols; ++i) {
             cells[i] = line[static_cast<size_t>(i)];
         }
+        logScrollbackSizeChange("pop", Debug, beforeSize, beforeBytes);
         return 1;
     }
 
     void clearScrollback()
     {
+        int beforeSize = static_cast<int>(scrollback.size());
+        size_t beforeBytes = scrollbackBytes;
         scrollback.clear();
         scrollbackBytes = 0;
+        logScrollbackSizeChange("clear", Info, beforeSize, beforeBytes);
     }
 
     std::vector<Terminal::Cell> scrollbackLineToCells(int index) const
     {
-        if (index < 0 || index >= static_cast<int>(scrollback.size())) {
+        int scrollbackSize = static_cast<int>(scrollback.size());
+        if (index < 0 || index >= scrollbackSize) {
+            LOG_NAMED("terminal", Error)
+                << log_kv("event", "read-oob")
+                << log_kv("index", index)
+                << log_kv("size", scrollbackSize)
+                << log_kv("terminal_id", id)
+                << log_kv("rows", size.rows)
+                << log_kv("cols", size.cols)
+                << log_kv("limit", scrollbackLineLimit)
+                << log_kv("bytes", scrollbackBytes)
+                << log_kv("alt_screen", inAltScreen ? 1 : 0)
+                << "[terminal] scrollback read outside bounds";
+            log_flush();
             throw std::out_of_range("Scrollback index outside bounds");
         }
         const std::vector<VTermScreenCell>& line = scrollback[static_cast<size_t>(index)];
@@ -677,6 +725,11 @@ bool Terminal::isScrollbackSupported() const
     return SPACE_VTERM_HAS_SCROLLBACK != 0;
 }
 
+uint64_t Terminal::getId() const
+{
+    return impl->id;
+}
+
 int Terminal::getScrollbackSize() const
 {
     return static_cast<int>(impl->scrollback.size());
@@ -787,6 +840,10 @@ void Terminal::sendMouse(int row, int col, int button, bool pressed)
 
 void Terminal::resize(int rows, int cols)
 {
+    int beforeRows = impl->size.rows;
+    int beforeCols = impl->size.cols;
+    int beforeScrollbackSize = static_cast<int>(impl->scrollback.size());
+    size_t beforeScrollbackBytes = impl->scrollbackBytes;
     impl->size.rows = rows;
     impl->size.cols = cols;
     vterm_set_size(impl->vt, rows, cols);
@@ -798,6 +855,25 @@ void Terminal::resize(int rows, int cols)
         ioctl(impl->ptyMaster, TIOCSWINSZ, &ws);
     }
     impl->flushDamage();
+    int afterScrollbackSize = static_cast<int>(impl->scrollback.size());
+    bool scrollbackChanged = beforeScrollbackSize != afterScrollbackSize
+        || beforeScrollbackBytes != impl->scrollbackBytes;
+    if (beforeRows != rows || beforeCols != cols || beforeScrollbackSize != afterScrollbackSize
+        || beforeScrollbackBytes != impl->scrollbackBytes) {
+        LOG_NAMED("terminal", scrollbackChanged ? Info : Debug)
+            << log_kv("event", "resize")
+            << log_kv("terminal_id", impl->id)
+            << log_kv("before_rows", beforeRows)
+            << log_kv("before_cols", beforeCols)
+            << log_kv("rows", rows)
+            << log_kv("cols", cols)
+            << log_kv("before_scrollback_size", beforeScrollbackSize)
+            << log_kv("after_scrollback_size", afterScrollbackSize)
+            << log_kv("before_scrollback_bytes", beforeScrollbackBytes)
+            << log_kv("after_scrollback_bytes", impl->scrollbackBytes)
+            << log_kv("alt_screen", impl->inAltScreen ? 1 : 0)
+            << "[terminal] resize completed";
+    }
 }
 
 void Terminal::setScrollbackLimit(int lines)
