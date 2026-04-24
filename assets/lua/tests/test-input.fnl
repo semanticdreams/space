@@ -240,6 +240,31 @@
               (assert (= (gl.clipboard-get) "extra"))
               (input:drop))))))))
 
+(fn input-context-menu-resolves-late-menu-manager []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local original-menu-manager app.menu-manager)
+      (var input nil)
+      (var opened nil)
+      (set app.menu-manager nil)
+      (local (ok result)
+             (pcall
+               (fn []
+                 (set input ((Input {:text "alpha"}) ctx-info.ctx))
+                 (set app.menu-manager {:open (fn [_self opts]
+                                                (set opened opts))})
+                 (input:on-right-click {:point (glm.vec3 4 5 0)
+                                        :button 3})
+                 (assert opened
+                         "Input should resolve app.menu-manager at click time"))))
+      (when input
+        (input:drop))
+      (set app.menu-manager original-menu-manager)
+      (when (not ok)
+        (error result))
+      result)))
+
 (fn input-registers-double-click []
   (with-pointer-stubs
     (fn [_stubs]
@@ -628,6 +653,8 @@
 (table.insert tests {:name "Input context menu default actions" :fn input-context-menu-default-actions})
 (table.insert tests {:name "Input context menu custom actions" :fn input-context-menu-custom-actions})
 (table.insert tests {:name "Input context menu extend actions" :fn input-context-menu-extend-actions})
+(table.insert tests {:name "Input context menu resolves late menu manager"
+                     :fn input-context-menu-resolves-late-menu-manager})
 (table.insert tests {:name "Input registers for double click" :fn input-registers-double-click})
 (table.insert tests {:name "Text and insert states edit input text" :fn input-text-and-insert-states-edit-text})
 (table.insert tests {:name "Focused input connects through input state" :fn input-focus-connects-to-input-state})

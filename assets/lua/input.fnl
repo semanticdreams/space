@@ -117,7 +117,8 @@
     (local clickables (assert ctx.clickables "Input requires ctx.clickables"))
     (local hoverables (assert ctx.hoverables "Input requires ctx.hoverables"))
     (local system-cursors (and ctx ctx.system-cursors))
-    (local menu-manager (or (and ctx ctx.menu-manager) app.menu-manager))
+    (fn get-menu-manager []
+      (or (and ctx ctx.menu-manager) app.menu-manager))
     (local initial-visible-lines (or explicit-line-count resolved-min-lines))
   (local initial-visible-columns (or explicit-column-count resolved-min-columns))
   (var input nil)
@@ -656,6 +657,7 @@
 
     (set input.on-right-click
          (fn [self event]
+           (local menu-manager (get-menu-manager))
            (assert menu-manager "Input context menu requires a menu manager")
            (assert (and event event.point) "Input context menu requires event.point")
            (local actions (resolve-context-actions self event))
