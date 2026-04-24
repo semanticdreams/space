@@ -14,8 +14,7 @@
         (fn [_event]
           (if static-root-actions
               static-root-actions
-              (RootContextMenuActions.actions-for-surface
-                (or app.active-interaction-surface :scene))))))
+              (RootContextMenuActions.actions-for-event _event)))))
 
   (assert clickables "MenuManager requires clickables")
   (assert hud "MenuManager requires hud")

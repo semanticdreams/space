@@ -1,6 +1,16 @@
 (local glm (require :glm))
 
 (local SDL_BUTTON_RIGHT 3)
+(local default-pan-threshold 100)
+
+(fn square [value]
+  (* value value))
+
+(fn distance-squared [a b]
+  (if (and a b)
+      (+ (square (- a.x b.x))
+         (square (- a.y b.y)))
+      math.huge))
 
 (fn clamp [value min-value max-value]
   (math.max min-value (math.min max-value value)))
@@ -21,11 +31,13 @@
   (local min-scale (or options.min-scale 0.05))
   (local max-scale (or options.max-scale 6.0))
   (local wheel-pan-step (or options.wheel-pan-step 48.0))
+  (local pan-threshold (or options.pan-threshold default-pan-threshold))
   (var drag-start nil)
   (var mouse-pos nil)
   (var touch-transform-active? false)
+  (var pan-engaged? false)
 
-  (fn set-pan-origin [payload]
+  (fn set-pan-anchor [payload]
     (set mouse-pos {:x (or payload.x 0)
                     :y (or payload.y 0)})
     (set drag-start {:pointer {:x (or payload.x 0)
@@ -34,8 +46,13 @@
                                          camera.position.y
                                          camera.position.z)}))
 
+  (fn set-pan-origin [payload]
+    (set-pan-anchor payload)
+    (set pan-engaged? false))
+
   (fn clear-pan-origin []
-    (set drag-start nil))
+    (set drag-start nil)
+    (set pan-engaged? false))
 
   (fn update-mouse-pos [payload]
     (when payload
@@ -76,14 +93,22 @@
   (fn on-mouse-motion [_self payload]
     (update-mouse-pos payload)
     (when (and drag-start payload)
-      (local origin drag-start.pointer)
-      (local units (or (and canvas canvas.world-units-per-pixel) 1.0))
-      (local dx (- (or payload.x 0) origin.x))
-      (local dy (- (or payload.y 0) origin.y))
-      (camera:set-position
-        (glm.vec3 (- drag-start.position.x (* dx units))
-                  (+ drag-start.position.y (* dy units))
-                  drag-start.position.z))))
+      (local pointer {:x (or payload.x 0)
+                      :y (or payload.y 0)})
+      (fn apply-pan []
+        (local origin drag-start.pointer)
+        (local units (or (and canvas canvas.world-units-per-pixel) 1.0))
+        (local dx (- pointer.x origin.x))
+        (local dy (- pointer.y origin.y))
+        (camera:set-position
+          (glm.vec3 (- drag-start.position.x (* dx units))
+                    (+ drag-start.position.y (* dy units))
+                    drag-start.position.z)))
+      (if pan-engaged?
+          (apply-pan)
+          (when (>= (distance-squared pointer drag-start.pointer) pan-threshold)
+            (set pan-engaged? true)
+            (apply-pan)))))
 
   (fn pan-lateral [steps]
     (when (and (finite-number? steps)
@@ -171,11 +196,16 @@
     true)
 
   (fn drag-active? [_self]
-    (or (not (= drag-start nil))
+    (or pan-engaged?
         touch-transform-active?))
 
   (fn drag-engaged? [self]
     (self:drag-active?))
+
+  (fn should-suppress-click? [_self payload]
+    (and payload
+         (= payload.button SDL_BUTTON_RIGHT)
+         pan-engaged?))
 
   (fn update [_self _delta]
     nil)
@@ -199,6 +229,7 @@
    :on-gamepad-removed (fn [_self _payload] nil)
    :drag-active? drag-active?
    :drag-engaged? drag-engaged?
+   :should-suppress-click? should-suppress-click?
    :update update
    :drop drop})
 

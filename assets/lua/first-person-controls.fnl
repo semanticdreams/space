@@ -257,6 +257,9 @@
   (fn drag-active? [self]
     (or self.drag-look-start self.drag-move-start))
 
+  (fn should-suppress-click? [_self _payload]
+    false)
+
   (fn drop [self]
     (reset-gamepad self)
     (self:reset-scroll)
@@ -307,6 +310,7 @@
   (set self.update update)
   (set self.drop drop)
   (set self.drag-active? drag-active?)
+  (set self.should-suppress-click? should-suppress-click?)
   (set self.action-active? action-active?)
   (set self.on-key-down on-key-down)
   (set self.on-key-up on-key-up)

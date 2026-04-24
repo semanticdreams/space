@@ -141,6 +141,37 @@
   (canvas:drop)
   (camera:drop))
 
+(fn right-click-without-drag-does-not-suppress-click []
+  (local camera (Camera {:position (glm.vec3 0 0 0)}))
+  (local canvas (make-canvas 1.0))
+  (local controls (CanvasControls {:canvas canvas
+                                   :camera camera}))
+  (controls:on-mouse-button-down {:button 3 :x 10 :y 12})
+  (assert (not (controls:drag-active?))
+          "Canvas right click should not count as an active drag before the pan threshold")
+  (assert (not (controls:should-suppress-click? {:button 3}))
+          "Canvas right click should keep context click enabled before the pan threshold")
+  (controls:on-mouse-button-up {:button 3 :x 10 :y 12})
+  (controls:drop))
+
+(fn right-drag-suppresses-click-after-pan-threshold []
+  (local camera (Camera {:position (glm.vec3 0 0 0)}))
+  (local canvas (make-canvas 1.0))
+  (local controls (CanvasControls {:canvas canvas
+                                   :camera camera}))
+  (controls:on-mouse-button-down {:button 3 :x 10 :y 12})
+  (controls:on-mouse-motion {:x 30 :y 12})
+  (assert (controls:drag-active?)
+          "Canvas right drag should engage once motion crosses the pan threshold")
+  (assert (< camera.position.x 0)
+          "Canvas right drag should start panning immediately on the threshold-crossing motion")
+  (assert (controls:should-suppress-click? {:button 3})
+          "Canvas right drag should explicitly suppress context click dispatch")
+  (controls:on-mouse-button-up {:button 3 :x 30 :y 12})
+  (assert (not (controls:drag-active?))
+          "Canvas right drag should clear engagement on mouse up")
+  (controls:drop))
+
 (table.insert tests {:name "Canvas controls zoom in on mouse wheel"
                      :fn scroll-wheel-zooms-canvas-in})
 (table.insert tests {:name "Canvas controls allow deeper zoom before clamping"
@@ -155,6 +186,10 @@
                      :fn touch-transform-pans-canvas-camera})
 (table.insert tests {:name "Canvas controls zoom with pinch touch transform"
                      :fn pinch-touch-zooms-canvas-in})
+(table.insert tests {:name "Canvas controls keep context click enabled before right-drag threshold"
+                     :fn right-click-without-drag-does-not-suppress-click})
+(table.insert tests {:name "Canvas controls suppress context click after right-drag threshold"
+                     :fn right-drag-suppresses-click-after-pan-threshold})
 
 (local main
   (fn []

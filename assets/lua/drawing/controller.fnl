@@ -374,6 +374,70 @@
                (when layer
                  (set layer.name previous-name)))})
 
+  (fn duplicate-layer-name [base-name]
+    (local root
+      (if (and (= (type base-name) :string)
+               (> (string.len base-name) 0))
+          base-name
+          "Layer"))
+    (var suffix 1)
+    (var candidate (.. root " Copy"))
+    (var available? false)
+    (while (not available?)
+      (set available? true)
+      (each [_ layer (ipairs (or self.state.document.layers []))]
+        (when (= layer.name candidate)
+          (set available? false)))
+      (when (not available?)
+        (set suffix (+ suffix 1))
+        (set candidate (.. root " Copy " (tostring suffix)))))
+    candidate)
+
+  (fn duplicate-layer-copy [layer]
+    (assert layer "DrawingController duplicate-layer-copy requires layer")
+    (local allocated (DrawingDocument.alloc-layer! self.state.document layer.kind))
+    (local duplicate
+      (DrawingDocument.clone-table
+        {:id allocated.id
+         :name (duplicate-layer-name layer.name)
+         :kind layer.kind
+         :objects []
+         :storage allocated.storage}))
+    (if (= layer.kind "vector")
+        (do
+          (each [_ object (ipairs (or layer.objects []))]
+            (local object-copy (DrawingDocument.clone-table object))
+            (set object-copy.id (DrawingDocument.alloc-object-id! self.state.document))
+            (table.insert duplicate.objects object-copy))
+          duplicate)
+        (do
+          (local storage (DrawingDocument.clone-table (or layer.storage {})))
+          (set storage.base_path allocated.storage.base_path)
+          (set duplicate.storage storage)
+          duplicate)))
+
+  (fn duplicate-layer-command [original-layer duplicate-layer index previous-active previous-selection previous-raster-selection raster-bytes]
+    {:change-payload {:reason "layer-structure"}
+     :apply (fn [_cmd]
+              (DrawingDocument.insert-layer! self.state.document duplicate-layer index)
+              (when (= duplicate-layer.kind "raster")
+                (local runtime (ensure-raster-runtime duplicate-layer))
+                (runtime:apply-captured-bytes! raster-bytes))
+              (set self.state.ui.active_layer_id duplicate-layer.id)
+              (clear-raster-selection-state!)
+              (DrawingDocument.clear-selection! self.state))
+     :revert (fn [_cmd]
+               (local idx (DrawingDocument.layer-index self.state.document duplicate-layer.id))
+               (when idx
+                 (DrawingDocument.remove-layer-at! self.state.document idx))
+               (drop-raster-runtime! duplicate-layer.id)
+               (set self.state.ui.active_layer_id previous-active)
+               (set-raster-selection! previous-raster-selection false)
+               (if (and original-layer
+                        (= original-layer.kind "vector"))
+                   (DrawingDocument.set-selection! self.state previous-selection)
+                   (DrawingDocument.clear-selection! self.state)))})
+
   (fn add-objects-command [layer-id objects]
     (local object-copies
       (icollect [_ object (ipairs objects)]
@@ -453,6 +517,28 @@
                                        (clone-table self.state.ui.selection_ids)
                                        (clone-raster-selection raster-selection))
                   "layer-structure")
+        false))
+
+  (fn duplicate-active-layer []
+    (local document self.state.document)
+    (local layer (active-layer))
+    (local index (and layer (DrawingDocument.layer-index document layer.id)))
+    (if (and layer index)
+        (do
+          (local raster-bytes
+            (if (= layer.kind "raster")
+                (let [runtime (ensure-raster-runtime layer)]
+                  (runtime:tile-records))
+                nil))
+          (local duplicate-layer (duplicate-layer-copy layer))
+          (perform! (duplicate-layer-command (clone-table layer)
+                                             duplicate-layer
+                                             (+ index 1)
+                                             self.state.ui.active_layer_id
+                                             (clone-table self.state.ui.selection_ids)
+                                             (clone-raster-selection raster-selection)
+                                             raster-bytes)
+                    "layer-structure"))
         false))
 
   (fn move-active-layer [delta]
@@ -860,6 +946,7 @@
   (set self.clear-selection! (fn [_self] (clear-selection!)))
   (set self.set-active-tool (fn [_self tool] (set-active-tool tool)))
   (set self.add-layer (fn [_self kind] (add-layer kind)))
+  (set self.duplicate-active-layer (fn [_self] (duplicate-active-layer)))
   (set self.delete-active-layer (fn [_self] (delete-active-layer)))
   (set self.move-active-layer (fn [_self delta] (move-active-layer delta)))
   (set self.set-active-layer (fn [_self layer-id] (set-active-layer layer-id)))

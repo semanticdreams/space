@@ -981,6 +981,71 @@
       (assert (controller:on-undo))
       (assert (= (. (. controller.state.document.layers 2) :name) "Layer 2")))))
 
+(fn controller-duplicates-vector-layers-with-fresh-ids []
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 1 2 0))
+      (controller:update-gesture (glm.vec3 8 9 0) false)
+      (assert (controller:commit-gesture))
+      (local original-layer (. controller.state.document.layers 1))
+      (local original-object (. original-layer.objects 1))
+      (assert (controller:duplicate-active-layer))
+      (assert (= (controller:layer-count) 2))
+      (local duplicate-layer (. controller.state.document.layers 2))
+      (local duplicate-object (. duplicate-layer.objects 1))
+      (assert (= duplicate-layer.name "Layer 1 Copy")
+              "duplicated vector layers should receive a readable copy name")
+      (assert (not (= duplicate-layer.id original-layer.id))
+              "duplicated vector layers should allocate a fresh layer id")
+      (assert (= duplicate-layer.kind "vector"))
+      (assert (= (length duplicate-layer.objects) 1))
+      (assert (not (= duplicate-object.id original-object.id))
+              "duplicated vector objects should allocate fresh object ids")
+      (assert (= controller.state.ui.active_layer_id duplicate-layer.id)
+              "duplicating a layer should activate the duplicated layer")
+      (assert (controller:on-undo))
+      (assert (= (controller:layer-count) 1)
+              "undo should remove the duplicated vector layer")
+      (assert (controller:on-redo))
+      (assert (= (controller:layer-count) 2)
+              "redo should restore the duplicated vector layer"))))
+
+(fn controller-duplicates-raster-layers-with-copied-pixels []
+  (with-temp-dir
+    (fn [dir]
+      (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "raster")
+      (controller:set-active-tool "brush")
+      (controller:begin-gesture "brush" (glm.vec3 6 6 0) {:pressure 1.0})
+      (controller:update-gesture (glm.vec3 6 6 0) false {:pressure 1.0})
+      (assert (controller:commit-gesture))
+      (local original-layer (. controller.state.document.layers 1))
+      (local original-runtime (controller:ensure-raster-runtime original-layer))
+      (local original-pixel (original-runtime:get-pixel-rgba 6 6))
+      (assert (> (. original-pixel 4) 0)
+              "raster duplicate test should start with painted source pixels")
+      (assert (controller:duplicate-active-layer))
+      (assert (= (controller:layer-count) 2))
+      (local duplicate-layer (. controller.state.document.layers 2))
+      (assert (= duplicate-layer.name "Layer 1 Copy")
+              "duplicated raster layers should receive a readable copy name")
+      (assert (not (= duplicate-layer.storage.base_path original-layer.storage.base_path))
+              "duplicated raster layers should get their own storage path")
+      (local duplicate-runtime (controller:ensure-raster-runtime duplicate-layer))
+      (local duplicate-pixel (duplicate-runtime:get-pixel-rgba 6 6))
+      (assert (> (. duplicate-pixel 4) 0)
+              "duplicated raster layers should copy painted pixels")
+      (assert (controller:on-undo))
+      (assert (= (controller:layer-count) 1)
+              "undo should remove the duplicated raster layer")
+      (assert (controller:on-redo))
+      (local restored-layer (. controller.state.document.layers 2))
+      (local restored-runtime (controller:ensure-raster-runtime restored-layer))
+      (local restored-pixel (restored-runtime:get-pixel-rgba 6 6))
+      (assert (> (. restored-pixel 4) 0)
+              "redo should restore raster duplicate pixels"))))
+
 (fn controller-object-history-replays-in-layer-context []
   (with-vector-controller
     (fn [controller]
@@ -1706,6 +1771,10 @@
                      :fn controller-rejects-uncanonical-runtime-layer-name})
 (table.insert tests {:name "Drawing controller undoes layer structure edits cleanly"
                      :fn controller-layer-structure-edits-undo-cleanly})
+(table.insert tests {:name "Drawing controller duplicates vector layers with fresh ids"
+                     :fn controller-duplicates-vector-layers-with-fresh-ids})
+(table.insert tests {:name "Drawing controller duplicates raster layers with copied pixels"
+                     :fn controller-duplicates-raster-layers-with-copied-pixels})
 (table.insert tests {:name "Drawing controller replays object history in layer context"
                      :fn controller-object-history-replays-in-layer-context})
 (table.insert tests {:name "Drawing controller remembers tools by layer kind"

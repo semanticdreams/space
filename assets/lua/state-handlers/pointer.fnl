@@ -99,9 +99,14 @@
   {:mouse-button-up
    (fn [ctx payload]
      (local app ((. Common :app-from) ctx))
+     (local controls ((. Common :controls-from) ctx))
      (assert app.clickables "state handlers require app.clickables")
      (when (and (not ((. ctx :event-consumed?)))
                 (not ((. Common :resize-blocked?))))
+       (when (and controls
+                  controls.should-suppress-click?
+                  (controls:should-suppress-click? payload))
+         (set payload.suppress-click? true))
        (app.clickables:on-mouse-button-up payload)))})
 
 (local MovableMouseButtonUp

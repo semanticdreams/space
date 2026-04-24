@@ -2,6 +2,7 @@
 (local _ (require :main))
 (local Menu (require :menu))
 (local MenuManager (require :menu-manager))
+(local RootContextMenuActions (require :root-context-menu-actions))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local {: Layout} (require :layout))
 (local fs (require :fs))
@@ -22,6 +23,11 @@
                            4242 glyph}})
   (local stub {:font font
                :codepoints {:note_add 4242
+                            :add 4242
+                            :delete 4242
+                            :draw 4242
+                            :brush 4242
+                            :layers 4242
                             :link 4242
                             :playlist_add 4242
                             :tune 4242
@@ -567,6 +573,176 @@
   (when (not ok)
     (error err)))
 
+(fn menu-manager-root-drawing-actions-follow-canvas-feature []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local calls {:add-vector 0
+                :add-raster 0
+                :duplicate 0
+                :delete-layer 0})
+  (local original-surface app.active-interaction-surface)
+  (local original-feature app.active-canvas-feature)
+  (local original-controller app.drawing-controller)
+  (set app.active-interaction-surface :canvas)
+  (set app.active-canvas-feature "drawing")
+  (set app.drawing-controller
+       {:active-layer (fn [_self]
+                        {:id "layer-1"
+                         :name "Sketch"
+                         :kind "vector"})
+        :selection-count (fn [_self] 0)
+        :layer-count (fn [_self] 2)
+        :add-layer (fn [_self kind]
+                     (if (= kind "vector")
+                         (set calls.add-vector (+ calls.add-vector 1))
+                         (set calls.add-raster (+ calls.add-raster 1))))
+        :duplicate-active-layer (fn [_self]
+                                  (set calls.duplicate (+ calls.duplicate 1))
+                                  true)
+        :delete-active-layer (fn [_self]
+                               (set calls.delete-layer (+ calls.delete-layer 1))
+                               true)})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local cb clickables.state.right-void)
+        (assert cb "MenuManager should register a right-click void callback")
+        (cb {:screen {:x 5 :y 6}})
+        (local element (. (. hud.overlay-root.children 1) :element))
+        (assert (find-button-by-name element "Add Vector Layer")
+                "Drawing root context menu should include Add Vector Layer")
+        (assert (find-button-by-name element "Add Raster Layer")
+                "Drawing root context menu should include Add Raster Layer")
+        (local duplicate-button (find-button-by-name element "Duplicate Layer"))
+        (assert duplicate-button
+                "Drawing root context menu should include Duplicate Layer")
+        (local delete-layer-button (find-button-by-name element "Delete Active Layer"))
+        (assert delete-layer-button
+                "Drawing root context menu should include Delete Active Layer when more than one layer exists")
+        (assert (not (find-button-by-name element "Show link entities"))
+                "Drawing root context menu should not reuse graph-only root actions")
+        (duplicate-button:on-click {:button 1})
+        (assert (= calls.duplicate 1)
+                "Duplicate Layer should invoke drawing-controller:duplicate-active-layer")
+        (cb {:screen {:x 5 :y 6}})
+        (local reopened-element (. (. hud.overlay-root.children 1) :element))
+        (local reopened-delete-layer-button (find-button-by-name reopened-element "Delete Active Layer"))
+        (assert reopened-delete-layer-button
+                "Drawing root context menu should rebuild Delete Active Layer after reopening")
+        (reopened-delete-layer-button:on-click {:button 1})
+        (assert (= calls.delete-layer 1)
+                "Delete Active Layer should invoke drawing-controller:delete-active-layer"))))
+
+  (manager:drop)
+  (set app.active-interaction-surface original-surface)
+  (set app.active-canvas-feature original-feature)
+  (set app.drawing-controller original-controller)
+
+  (when (not ok)
+    (error err)))
+
+(fn menu-manager-root-drawing-selection-actions-follow-selection-state []
+  (reset-engine-events)
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local hud (make-hud-stub ctx))
+  (local calls {:delete-selection 0})
+  (local original-surface app.active-interaction-surface)
+  (local original-feature app.active-canvas-feature)
+  (local original-controller app.drawing-controller)
+  (set app.active-interaction-surface :canvas)
+  (set app.active-canvas-feature "drawing")
+  (set app.drawing-controller
+       {:active-layer (fn [_self]
+                        {:id "layer-1"
+                         :name "Sketch"
+                         :kind "vector"})
+        :selection-count (fn [_self] 2)
+        :layer-count (fn [_self] 1)
+        :add-layer (fn [_self _kind] nil)
+        :duplicate-active-layer (fn [_self] true)
+        :delete-active-layer (fn [_self] false)
+        :on-delete-selection (fn [_self]
+                               (set calls.delete-selection (+ calls.delete-selection 1))
+                               true)})
+
+  (local manager
+    (MenuManager {:clickables clickables
+                  :hud hud}))
+
+  (local (ok err)
+    (pcall
+      (fn []
+        (local cb clickables.state.right-void)
+        (assert cb "MenuManager should register a right-click void callback")
+        (cb {:screen {:x 9 :y 4}})
+        (local element (. (. hud.overlay-root.children 1) :element))
+        (local delete-selection-button (find-button-by-name element "Delete Selection"))
+        (assert delete-selection-button
+                "Drawing root context menu should include Delete Selection when something is selected")
+        (assert (not (find-button-by-name element "Delete Active Layer"))
+                "Drawing root context menu should omit Delete Active Layer when only one layer exists")
+        (delete-selection-button:on-click {:button 1})
+        (assert (= calls.delete-selection 1)
+                "Delete Selection should invoke drawing-controller:on-delete-selection"))))
+
+  (manager:drop)
+  (set app.active-interaction-surface original-surface)
+  (set app.active-canvas-feature original-feature)
+  (set app.drawing-controller original-controller)
+
+  (when (not ok)
+    (error err)))
+
+(fn root-context-menu-actions-normalize-partial-context []
+  (local original-surface app.active-interaction-surface)
+  (local original-feature app.active-canvas-feature)
+  (local original-controller app.drawing-controller)
+  (local original-engine app.engine)
+  (set app.active-interaction-surface :canvas)
+  (set app.active-canvas-feature "drawing")
+  (set app.engine {:quit (fn [] nil)})
+  (set app.drawing-controller
+       {:active-layer (fn [_self]
+                        {:id "layer-1"
+                         :name "Sketch"
+                         :kind "vector"})
+        :selection-count (fn [_self] 0)
+        :layer-count (fn [_self] 2)
+        :add-layer (fn [_self _kind] nil)
+        :duplicate-active-layer (fn [_self] true)
+        :delete-active-layer (fn [_self] true)})
+  (local (ok actions)
+    (pcall RootContextMenuActions.actions-for-context
+           {:surface :canvas
+            :canvas-feature "drawing"}))
+  (set app.active-interaction-surface original-surface)
+  (set app.active-canvas-feature original-feature)
+  (set app.drawing-controller original-controller)
+  (set app.engine original-engine)
+  (assert ok
+          "actions-for-context should normalize partial drawing contexts instead of crashing")
+  (local has-action?
+    (fn [name]
+      (var found false)
+      (each [_ action (ipairs actions)]
+        (when (= action.name name)
+          (set found true)))
+      found))
+  (assert (has-action? "Add Vector Layer")
+          "normalized partial drawing context should still include drawing root actions")
+  (assert (has-action? "Quit")
+          "normalized partial drawing context should still include shared actions"))
+
 (table.insert tests {:name "Menu actions and depth offset" :fn menu-actions-fire-and-increment-depth})
 (table.insert tests {:name "Menu grows downward from click" :fn menu-grows-downward-from-click})
 (table.insert tests {:name "Menu manager opens and closes menu" :fn menu-manager-opens-and-closes})
@@ -584,6 +760,12 @@
                      :fn menu-manager-root-light-ball-invokes-scene})
 (table.insert tests {:name "Menu root recover terrain-bound objects invokes scene"
                      :fn menu-manager-root-recover-terrain-bound-objects-invokes-scene})
+(table.insert tests {:name "Menu root drawing actions follow canvas feature"
+                     :fn menu-manager-root-drawing-actions-follow-canvas-feature})
+(table.insert tests {:name "Menu root drawing selection actions follow selection state"
+                     :fn menu-manager-root-drawing-selection-actions-follow-selection-state})
+(table.insert tests {:name "Root context menu actions normalize partial context"
+                     :fn root-context-menu-actions-normalize-partial-context})
 
 (local main
   (fn []

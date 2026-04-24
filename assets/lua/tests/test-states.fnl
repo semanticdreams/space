@@ -461,6 +461,45 @@
   (set app.canvas-interactive? original-canvas-interactive)
   (set app.active-canvas-feature original-feature))
 
+(fn normal-state-forwards-control-click-suppression-to-clickables []
+  (reset-engine-events)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-movables app.movables)
+  (local original-resizables app.resizables)
+  (local original-controls app.first-person-controls)
+  (set app.hoverables {:on-enter (fn [])
+                       :on-leave (fn [])
+                       :on-mouse-motion (fn [_self _payload])})
+  (local clickables (create-clickables-stub))
+  (set app.clickables clickables)
+  (set app.movables {:drag-active? (fn [_self] false)
+                     :on-mouse-motion (fn [_self _payload])
+                     :on-mouse-button-down (fn [_self _payload])
+                     :on-mouse-button-up (fn [_self _payload])})
+  (set app.resizables {:drag-active? (fn [_self] false)
+                       :on-mouse-motion (fn [_self _payload])
+                       :on-mouse-button-down (fn [_self _payload])
+                       :on-mouse-button-up (fn [_self _payload])})
+  (set app.first-person-controls
+       {:on-mouse-button-down (fn [_self _payload] nil)
+        :on-mouse-button-up (fn [_self _payload] nil)
+        :on-mouse-motion (fn [_self _payload] nil)
+        :drag-active? (fn [_self] false)
+        :should-suppress-click? (fn [_self payload]
+                                  (= payload.button 3))})
+  (local state (NormalState))
+  (state:on-mouse-button-up {:button 3 :x 12 :y 14})
+  (assert (= clickables.record.mouse-button-up 1)
+          "normal state should still forward releases to clickables")
+  (assert (= (and clickables.record.last-up clickables.record.last-up.suppress-click?) true)
+          "normal state should propagate pointer-control click suppression to clickables")
+  (set app.hoverables original-hoverables)
+  (set app.clickables original-clickables)
+  (set app.movables original-movables)
+  (set app.resizables original-resizables)
+  (set app.first-person-controls original-controls))
+
 (fn normal-state-touch-focuses-graph-node-under-logical-input-scaling []
   (reset-engine-events)
   (local original-active-controls app.active-pointer-controls)
@@ -1639,6 +1678,8 @@
 (table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
 (table.insert tests {:name "Normal state routes canvas multitouch to active controls"
                      :fn normal-state-routes-canvas-multitouch-to-active-controls})
+(table.insert tests {:name "Normal state forwards control click suppression to clickables"
+                     :fn normal-state-forwards-control-click-suppression-to-clickables})
 (table.insert tests {:name "Normal state touch focuses graph node under logical input scaling"
                      :fn normal-state-touch-focuses-graph-node-under-logical-input-scaling})
 (table.insert tests {:name "Normal state injects pen as mouse and restores drawing tool"
