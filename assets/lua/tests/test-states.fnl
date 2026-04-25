@@ -31,6 +31,7 @@
 (local CameraHandlers (require :state-handlers/camera))
 (local Routes (require :state-routes))
 (local InputModel (require :input-model))
+(local StateSystemBindings (require :state-system-bindings))
 (local TestSupport (require :tests/test-support))
 (local viewport-utils (require :viewport-utils))
 
@@ -55,6 +56,35 @@
 (local KEY_RIGHT 1073741903)
 (local KEY_DOWN 1073741905)
 (local KEY_UP 1073741906)
+
+(fn make-command-hints-stub []
+  {:handle-toggle-key (fn [_self _payload] true)
+   :close-on-handled-event (fn [_self _route-key _payload] false)})
+
+(fn make-command-hints-hud-stub []
+  {:command-hints (make-command-hints-stub)})
+
+(fn command-hints-hud-provider [_self]
+  (make-command-hints-hud-stub))
+
+(fn ensure-command-hints-hud! [states]
+  (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
+    (states:set-hud-provider command-hints-hud-provider))
+  states)
+
+(fn set-app-states! [states]
+  (ensure-command-hints-hud! states)
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  states)
+
+(fn own-test-state! [name state]
+  (local states
+    (States {:hud_provider command-hints-hud-provider
+             :focus_manager_provider (fn [_self]
+                                       app.focus)}))
+  (states:add-state name state)
+  states)
 
 (fn fresh-engine-events []
   (local Signal (require :signal))
@@ -98,12 +128,12 @@
   (local log [])
   (fn push [label]
     (table.insert log label))
-  (states.add-state :alpha {:on-enter (fn [] (push :alpha-enter))
+  (states:add-state :alpha {:on-enter (fn [] (push :alpha-enter))
                             :on-leave (fn [] (push :alpha-leave))})
-  (states.add-state :beta {:on-enter (fn [] (push :beta-enter))
+  (states:add-state :beta {:on-enter (fn [] (push :beta-enter))
                            :on-leave (fn [] (push :beta-leave))})
-  (states.set-state :alpha)
-  (states.set-state :beta)
+  (states:set-state :alpha)
+  (states:set-state :beta)
   (assert (= (# log) 3))
   (assert (= (. log 1) :alpha-enter))
   (assert (= (. log 2) :alpha-leave))
@@ -112,20 +142,20 @@
 (fn reselecting-active-state-noops []
   (local states (States))
   (var enters 0)
-  (states.add-state :solo {:on-enter (fn [] (set enters (+ enters 1)))})
-  (states.set-state :solo)
-  (states.set-state :solo)
+  (states:add-state :solo {:on-enter (fn [] (set enters (+ enters 1)))})
+  (states:set-state :solo)
+  (states:set-state :solo)
   (assert (= enters 1)))
 
 (fn state-history-tracks-transitions []
   (local states (States {:history-limit 2}))
-  (states.add-state :alpha {})
-  (states.add-state :beta {})
-  (states.add-state :gamma {})
-  (states.set-state :alpha)
-  (states.set-state :beta)
-  (states.set-state :gamma)
-  (local history (states.get-history))
+  (states:add-state :alpha {})
+  (states:add-state :beta {})
+  (states:add-state :gamma {})
+  (states:set-state :alpha)
+  (states:set-state :beta)
+  (states:set-state :gamma)
+  (local history (states:get-history))
   (local first (. history 1))
   (local second (. history 2))
   (assert (= (# history) 2))
@@ -133,8 +163,8 @@
   (assert (= first.current :beta))
   (assert (= second.previous :beta))
   (assert (= second.current :gamma))
-  (states.clear-history)
-  (assert (= (# (states.get-history)) 0)))
+  (states:clear-history)
+  (assert (= (# (states:get-history)) 0)))
 
 (fn create-controls-stub []
   (local record
@@ -314,6 +344,7 @@
   (set app.hoverables hoverables)
   (assert app.hoverables.on-mouse-motion "test hoverables stub missing on-mouse-motion")
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key 44})
   (app.engine.events.key-up.emit {:key 45})
@@ -371,6 +402,7 @@
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.first-person-controls controls)
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state.on-enter)
   (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
   (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
@@ -425,6 +457,7 @@
   (set app.canvas-interactive? true)
   (set app.active-canvas-feature "graph")
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state.on-enter)
   (state:on-touch-down (engine-touch-payload 7 301 20 30 0 0 0.5 1))
   (assert (= controls.record.start nil)
@@ -489,6 +522,7 @@
         :should-suppress-click? (fn [_self payload]
                                   (= payload.button 3))})
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state:on-mouse-button-up {:button 3 :x 12 :y 14})
   (assert (= clickables.record.mouse-button-up 1)
           "normal state should still forward releases to clickables")
@@ -565,6 +599,7 @@
         (local focus-node (. view.focus-nodes node))
         (assert focus-node "GraphView should create a focus node for the touch target")
         (local state (NormalState))
+        (own-test-state! :normal state)
         (state.on-enter)
         (state:on-touch-down (engine-touch-payload 1 11 20 25 0 0 0.5 1))
         (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 2)
@@ -652,6 +687,7 @@
                            (table.insert tool-log tool)
                            (set self.tool tool))})
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state:on-enter)
   (state:on-pen-proximity-in {:pen-id 77
                               :x 10
@@ -745,12 +781,18 @@
 
 (fn normal-state-tab-cycles-focus []
   (reset-engine-events)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (local calls [])
+  (local states
+    (States {:focus_manager_provider (fn [_self]
+                                       app.focus)}))
   (set app.focus {:focus-next (fn [_self opts]
                                   (table.insert calls opts))})
+  (set-app-states! states)
   (local state (NormalState))
+  (states:add-state :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key 9 :mod 0})
   (assert (= (# calls) 1) "Tab should invoke focus cycling")
@@ -760,21 +802,29 @@
   (assert (= (# calls) 2) "Shift+Tab should also invoke focus cycling")
   (assert (. (. calls 2) :backwards?) "Shift modifier should request backwards traversal")
   (state.on-leave)
+  (set-app-states! original-states)
   (set app.focus nil)
   (set app.first-person-controls nil))
 
 (fn normal-state-swallows-keys-when-input-active []
   (reset-engine-events)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (local input {:on-key-down (fn [_self _payload] false)})
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (states:add-state :normal {})
+  (states:set-state :normal)
+  (set-app-states! states)
   (InputState.connect-input input)
   (local state (NormalState))
+  (states:add-state :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key 87})
   (assert (= controls.record.key_down nil) "Input should block controls when connected")
   (state.on-leave)
   (InputState.disconnect-input input)
+  (set-app-states! original-states)
   (set app.first-person-controls nil))
 
 (fn terrain-rect-pick-state-routes-and-restores []
@@ -783,13 +833,13 @@
   (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -812,7 +862,7 @@
                     (when (= payload.key KEY_ESCAPE)
                       (set active? false)))})
   (TerrainRectPickManager.begin session)
-  (assert (= (states.active-name) :terrain-rect-pick))
+  (assert (= (states:active-name) :terrain-rect-pick))
   (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
   (app.engine.events.mouse-motion.emit {:x 30 :y 40})
   (assert (= (# forwarded) 1))
@@ -823,10 +873,10 @@
   (assert (= (. (. forwarded 1) 1) :button))
   (assert (= (. (. forwarded 2) 1) :motion))
   (assert (= (. (. forwarded 3) 1) :button))
-  (assert (= (states.active-name) :normal)
+  (assert (= (states:active-name) :normal)
           "terrain rect pick state should restore the previous state when the session completes")
   (set app.hud original-hud)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-coalesces-motion-until-update []
@@ -835,13 +885,13 @@
   (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -873,7 +923,7 @@
   (assert (= (. (. forwarded 2) 3) 60))
   (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
   (set app.hud original-hud)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-flushes-pending-motion-on-mouse-up []
@@ -882,13 +932,13 @@
   (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -918,7 +968,7 @@
   (assert (= (. (. forwarded 2) 3) 40))
   (assert (= (. (. forwarded 3) 1) :button))
   (set app.hud original-hud)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-forwards-pending-start-motion-before-drag-active []
@@ -927,13 +977,13 @@
   (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (var drag-active? false)
@@ -969,7 +1019,7 @@
   (app.engine.events.mouse-button-up.emit {:button 1 :x 30 :y 40})
   (assert (= (. (. forwarded 3) 1) :button))
   (set app.hud original-hud)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-rect-pick-state-forwards-camera-wheel-and-updates []
@@ -981,15 +1031,15 @@
   (local original-hoverables app.hoverables)
   (local states (States))
   (local controls (create-controls-stub))
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
   (set app.first-person-controls controls)
   (set app.hoverables (make-hoverables-stub))
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local session
     {:active? (fn [_self] true)
      :begin (fn [_self] true)
@@ -1007,7 +1057,7 @@
   (set app.hoverables original-hoverables)
   (set app.first-person-controls original-controls)
   (set app.hud original-hud)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-routes-and-restores []
@@ -1015,11 +1065,11 @@
   (local original-states app.states)
   (var suspended-state nil)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-paint (TerrainPaintState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-paint (TerrainPaintState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
-  (states.set-state :normal)
+  (set-app-states! states)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -1041,7 +1091,7 @@
                     (when (= payload.key KEY_ESCAPE)
                       (set active? false)))})
   (TerrainPaintManager.begin session)
-  (assert (= (states.active-name) :terrain-paint))
+  (assert (= (states:active-name) :terrain-paint))
   (app.engine.events.mouse-button-down.emit {:button 1 :x 10 :y 20})
   (app.engine.events.mouse-motion.emit {:x 30 :y 40})
   (assert (= (# forwarded) 1))
@@ -1051,9 +1101,9 @@
   (assert (= (. (. forwarded 1) 1) :button))
   (assert (= (. (. forwarded 2) 1) :motion))
   (assert (= (. (. forwarded 3) 1) :button))
-  (assert (= (states.active-name) :normal)
+  (assert (= (states:active-name) :normal)
           "terrain paint state should restore the previous state when the session completes")
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-routes-touch-and-restores []
@@ -1062,12 +1112,12 @@
   (local original-touch-targets app.touch-gesture-targets)
   (var suspended-state nil)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-paint (TerrainPaintState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-paint (TerrainPaintState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -1086,7 +1136,7 @@
                    true)
      :on-key-down (fn [_self _payload] nil)})
   (TerrainPaintManager.begin session)
-  (assert (= (states.active-name) :terrain-paint))
+  (assert (= (states:active-name) :terrain-paint))
   (app.engine.events.touch-down:emit {:touch-id 1
                                       :finger-id 11
                                       :x 10
@@ -1114,10 +1164,10 @@
   (assert (= (. (. forwarded 1) 1) :button))
   (assert (= (. (. forwarded 2) 1) :motion))
   (assert (= (. (. forwarded 3) 1) :button))
-  (assert (= (states.active-name) :normal)
+  (assert (= (states:active-name) :normal)
           "terrain paint touch should restore the previous state when the session completes")
   (set app.touch-gesture-targets original-touch-targets)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-suppresses-touch-while-pen-active []
@@ -1126,12 +1176,12 @@
   (local original-touch-targets app.touch-gesture-targets)
   (var suspended-state nil)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-paint (TerrainPaintState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-paint (TerrainPaintState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -1150,7 +1200,7 @@
                    true)
      :on-key-down (fn [_self _payload] nil)})
   (TerrainPaintManager.begin session)
-  (local state (states.get-state :terrain-paint))
+  (local state (states:get-state :terrain-paint))
   (assert state "terrain paint state should be active")
   (state:on-pen-down {:pen-id 77
                       :x 10
@@ -1177,7 +1227,7 @@
                     :timestamp 3
                     :in-range true})
   (set app.touch-gesture-targets original-touch-targets)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-cancels-active-touch-when-pen-takes-over []
@@ -1186,12 +1236,12 @@
   (local original-touch-targets app.touch-gesture-targets)
   (var suspended-state nil)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-paint (TerrainPaintState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-paint (TerrainPaintState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -1211,7 +1261,7 @@
                    true)
      :on-key-down (fn [_self _payload] nil)})
   (TerrainPaintManager.begin session)
-  (local state (states.get-state :terrain-paint))
+  (local state (states:get-state :terrain-paint))
   (assert state "terrain paint state should be active")
   (state:on-touch-down {:touch-id 1
                         :finger-id 11
@@ -1245,7 +1295,7 @@
   (assert (not active?)
           "suppressed touch should end the active touch-driven stroke cleanly")
   (set app.touch-gesture-targets original-touch-targets)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn normal-state-keeps-eraser-override-while-another-pen-is-still-eraser []
@@ -1289,6 +1339,7 @@
                            (table.insert tool-log tool)
                            (set self.tool tool))})
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state:on-enter)
   (state:on-pen-down {:pen-id 77
                       :x 10
@@ -1344,11 +1395,11 @@
   (local original-states app.states)
   (var suspended-state nil)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-paint (TerrainPaintState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-paint (TerrainPaintState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
-  (states.set-state :normal)
+  (set-app-states! states)
+  (states:set-state :normal)
   (local forwarded [])
   (var active? false)
   (local session
@@ -1377,22 +1428,27 @@
   (assert (= (. (. forwarded 2) 2) 50))
   (assert (= (. (. forwarded 2) 3) 60))
   (app.engine.events.mouse-button-up.emit {:button 1 :x 50 :y 60})
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-state-forwards-mouse-wheel []
   (reset-engine-events)
   (local original-controls app.first-person-controls)
   (local original-hoverables app.hoverables)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (local hoverables (make-hoverables-stub))
+  (local states (States))
   (set app.first-person-controls controls)
   (set app.hoverables hoverables)
+  (set-app-states! states)
   (local state (TerrainPaintState))
+  (states:add-state :terrain-paint state)
   (state:on-enter)
   (app.engine.events.mouse-wheel:emit {:x 0 :y 3})
   (state:on-leave)
   (assert (= controls.record.mouse_wheel 3))
+  (set-app-states! original-states)
   (set app.first-person-controls original-controls)
   (set app.hoverables original-hoverables))
 
@@ -1400,15 +1456,20 @@
   (reset-engine-events)
   (local original-controls app.first-person-controls)
   (local original-hoverables app.hoverables)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (local hoverables (make-hoverables-stub))
+  (local states (States))
   (set app.first-person-controls controls)
   (set app.hoverables hoverables)
+  (set-app-states! states)
   (local state (TerrainPaintState))
+  (states:add-state :terrain-paint state)
   (state:on-enter)
   (app.engine.events.updated.emit 0.125)
   (state:on-leave)
   (assert (= controls.record.updated 0.125))
+  (set-app-states! original-states)
   (set app.first-person-controls original-controls)
   (set app.hoverables original-hoverables))
 
@@ -1419,13 +1480,13 @@
   (var suspended-state nil)
   (local original-hud app.hud)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
+  (set-app-states! states)
   (set app.hud {:build-context {}
                 :world-units-per-pixel 1})
-  (states.set-state :normal)
+  (states:set-state :normal)
   (var active? false)
   (local session
     {:active? (fn [_self] active?)
@@ -1439,15 +1500,15 @@
                  true)
      :on-key-down (fn [_self _payload] nil)})
   (TerrainRectPickManager.begin session)
-  (assert (= (states.active-name) :terrain-rect-pick))
+  (assert (= (states:active-name) :terrain-rect-pick))
   (assert (= (TerrainRectPickManager.active-session) session))
   (assert (TerrainRectPickManager.cleanup-session session)
           "cleanup-session should clear an owned terrain rect pick session")
   (assert (= (TerrainRectPickManager.active-session) nil))
-  (assert (= (states.active-name) :normal)
+  (assert (= (states:active-name) :normal)
           "cleanup-session should restore the previous app state")
   (set app.hud original-hud)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn terrain-paint-manager-cleans-up-dropped-session []
@@ -1456,11 +1517,11 @@
   (local original-states app.states)
   (var suspended-state nil)
   (local states (States))
-  (states.add-state :normal {})
-  (states.add-state :terrain-paint (TerrainPaintState))
+  (states:add-state :normal {})
+  (states:add-state :terrain-paint (TerrainPaintState))
   (set suspended-state (TestSupport.suspend-active-state original-states))
-  (set app.states states)
-  (states.set-state :normal)
+  (set-app-states! states)
+  (states:set-state :normal)
   (var active? false)
   (local session
     {:active? (fn [_self] active?)
@@ -1473,14 +1534,14 @@
                    true)
      :on-key-down (fn [_self _payload] nil)})
   (TerrainPaintManager.begin session)
-  (assert (= (states.active-name) :terrain-paint))
+  (assert (= (states:active-name) :terrain-paint))
   (assert (= (TerrainPaintManager.active-session) session))
   (assert (TerrainPaintManager.cleanup-session session)
           "cleanup-session should clear an owned terrain paint session")
   (assert (= (TerrainPaintManager.active-session) nil))
-  (assert (= (states.active-name) :normal)
+  (assert (= (states:active-name) :normal)
           "cleanup-session should restore the previous app state")
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state))
 
 (fn state-switch-during-mouse-up-does-not-deliver-same-event-to-new-state []
@@ -1488,16 +1549,16 @@
   (local original-states app.states)
   (local states (States))
   (var next-state-mouse-up 0)
-  (states.add-state
+  (states:add-state
     :normal
     (State {:name :normal
             :routes (interactive-routes
                       {:mouse-button-up (fn [_event-name _ctx _payload]
-                                          (states.set-state :next)
+                                          (states:set-state :next)
                                           true)})
             :enter [HoverHandlers.HoverLifecycle]
             :leave [HoverHandlers.HoverLifecycle]}))
-  (states.add-state
+  (states:add-state
     :next
     (State {:name :next
             :routes (interactive-routes
@@ -1506,13 +1567,13 @@
                                           true)})
             :enter [HoverHandlers.HoverLifecycle]
             :leave [HoverHandlers.HoverLifecycle]}))
-  (set app.states states)
-  (states.set-state :normal)
+  (set-app-states! states)
+  (states:set-state :normal)
   (app.engine.events.mouse-button-up.emit {:button 1 :x 10 :y 20})
   (assert (= next-state-mouse-up 0)
           "switching states during mouse-up should not deliver the same mouse-up to the newly entered state")
-  (assert (= (states.active-name) :next))
-  (set app.states original-states))
+  (assert (= (states:active-name) :next))
+  (set-app-states! original-states))
 
 (fn state-enter-fails-fast-when-used-engine-signal-missing []
   (local original-events app.engine.events)
@@ -1542,6 +1603,31 @@
   (assert (= (. connect-log 1) :key-down))
   (assert (= (. connect-log 2) :updated)))
 
+(fn state-route-wrappers-fail-fast-on-malformed-config []
+  (local (ok-map err-map)
+    (pcall
+      (fn []
+        (State {:name :bad-map
+                :route-wrappers {:hint (fn [_route-key route _ctx _state] route)}
+                :routes {}}))))
+  (assert (not ok-map)
+          "route-wrappers should reject map-shaped tables")
+  (assert (and err-map
+               (string.find err-map "route%-wrappers must be a dense list"))
+          "route-wrappers should report map-shaped tables clearly")
+  (local (ok-hole err-hole)
+    (pcall
+      (fn []
+        (State {:name :bad-hole
+                :route-wrappers {1 (fn [_route-key route _ctx _state] route)
+                                 3 (fn [_route-key route _ctx _state] route)}
+                :routes {}}))))
+  (assert (not ok-hole)
+          "route-wrappers should reject lists with holes")
+  (assert (and err-hole
+               (string.find err-hole "route%-wrappers must not contain holes"))
+          "route-wrappers should report holes clearly"))
+
 (fn normal-state-delete-removes-graph-selection []
   (reset-engine-events)
   (local controls (create-controls-stub))
@@ -1553,6 +1639,7 @@
                                                 (set removed (+ removed 1))
                                                 1)})
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_DELETE})
   (assert (= removed 1) "Delete should trigger graph selection removal")
@@ -1563,33 +1650,46 @@
 
 (fn normal-state-enter-opens-focused-graph-node []
   (reset-engine-events)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (set app.active-canvas-feature "graph")
   (set app.drawing-controller nil)
   (var opened 0)
+  (local states
+    (States {:focus_manager_provider (fn [_self]
+                                       nil)}))
   (set app.graph-view {:open-focused-node (fn [_self]
                                             (set opened (+ opened 1))
                                             true)})
+  (set-app-states! states)
   (local state (NormalState))
+  (states:add-state :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_RETURN})
   (assert (= opened 1) "Enter should open focused graph node")
   (assert (= controls.record.key_down nil) "Handled enter should not reach controls")
   (state.on-leave)
+  (set-app-states! original-states)
   (set app.graph-view nil)
   (set app.first-person-controls nil))
 
 (fn normal-state-directional-focus-triggers []
   (reset-engine-events)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (local calls [])
   (local camera {:id :cam})
+  (local states
+    (States {:focus_manager_provider (fn [_self]
+                                       app.focus)}))
   (set app.camera camera)
   (set app.focus {:focus-direction (fn [_self opts]
                                      (table.insert calls opts))})
+  (set-app-states! states)
   (local state (NormalState))
+  (states:add-state :normal state)
   (state.on-enter)
   (local keys [KEY_LEFT KEY_RIGHT KEY_UP KEY_DOWN KEY_H KEY_L KEY_K KEY_J])
   (local expected [:left :right :up :down :left :right :up :down])
@@ -1600,36 +1700,47 @@
     (assert (= (. entry :direction) (. expected i)))
     (assert (= (. entry :camera) camera)))
   (state.on-leave)
+  (set-app-states! original-states)
   (set app.focus nil)
   (set app.camera nil)
   (set app.first-person-controls nil))
 
 (fn normal-state-directional-focus-skips-with-input []
   (reset-engine-events)
+  (local original-states app.states)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (local calls [])
+  (local states
+    (States {:focus_manager_provider (fn [_self]
+                                       app.focus)}))
   (set app.focus {:focus-direction (fn [_self opts]
                                      (table.insert calls opts))})
+  (set-app-states! states)
   (local input {:on-key-down (fn [_self _payload] false)})
   (InputState.connect-input input)
   (local state (NormalState))
+  (states:add-state :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_RIGHT})
   (assert (= (# calls) 0) "Directional focus should skip while input active")
   (state.on-leave)
   (InputState.disconnect-input input)
+  (set-app-states! original-states)
   (set app.focus nil)
   (set app.first-person-controls nil))
 
 (fn normal-state-f4-toggles-graph-view []
   (reset-engine-events)
+  (local original-graph-view app.graph-view)
+  (local original-graph-view-factory app.graph-view-factory)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
   (set app.active-canvas-feature "graph")
   (set app.drawing-controller nil)
   (set app.canvas nil)
   (set app.toggle-active-interaction-surface nil)
+  (set app.graph-view nil)
   (var created 0)
   (var dropped 0)
   (set app.graph-view-factory
@@ -1641,6 +1752,7 @@
                 (set dropped (+ dropped 1))))
          view))
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_F4})
   (assert (= created 1) "F4 should create a graph view when missing")
@@ -1650,7 +1762,8 @@
   (assert (= dropped 1) "F4 should drop an existing graph view")
   (assert (not app.graph-view) "F4 should clear app.graph-view after drop")
   (state.on-leave)
-  (set app.graph-view-factory nil)
+  (set app.graph-view original-graph-view)
+  (set app.graph-view-factory original-graph-view-factory)
   (set app.first-person-controls nil))
 
 (fn normal-state-backquote-opens-fennel-interpreters []
@@ -1662,6 +1775,7 @@
                                      (set opens (+ opens 1))
                                      opts)})
   (local state (NormalState))
+  (own-test-state! :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_BACKQUOTE})
   (app.engine.events.key-down.emit {:key KEY_BACKQUOTE})
@@ -1719,6 +1833,8 @@
                      :fn state-enter-fails-fast-when-used-engine-signal-missing})
 (table.insert tests {:name "State enters only connect declared routes"
                      :fn state-enters-only-connect-declared-routes})
+(table.insert tests {:name "State route wrappers fail fast on malformed config"
+                     :fn state-route-wrappers-fail-fast-on-malformed-config})
 (table.insert tests {:name "Normal state directional focus triggers" :fn normal-state-directional-focus-triggers})
 (table.insert tests {:name "Normal state directional focus skips while input active"
                      :fn normal-state-directional-focus-skips-with-input})
@@ -1730,19 +1846,33 @@
 (fn with-state-recorder [body]
   (local original app.states)
   (local transitions [])
-  (set app.states {:set-state (fn [name]
-                                  (table.insert transitions name))
-                     :active-name (fn [] :text)})
-  (local (ok result) (pcall (fn [] (body transitions))))
-  (set app.states original)
+  (local states
+    (States {:hud_provider command-hints-hud-provider
+             :focus_manager_provider (fn [_self]
+                                       app.focus)}))
+  (states:add-state :text {})
+  (states:set-state :text)
+  (local original-set-state states.set-state)
+  (set states.set-state
+       (fn [_self name]
+         (when (not (states:get-state name))
+           (states:add-state name {}))
+         (table.insert transitions name)
+         (original-set-state states name)))
+  (fn install-state [name state]
+    (states:add-state name state)
+    state)
+  (set-app-states! states)
+  (local (ok result) (pcall (fn [] (body transitions install-state states))))
+  (set-app-states! original)
   (when (not ok)
     (error result))
   result)
 
 (fn normal-state-leader-enters-leader-state []
   (with-state-recorder
-    (fn [transitions]
-      (local state (NormalState))
+    (fn [transitions install-state]
+      (local state (install-state :normal (NormalState)))
       (state.on-key-down {:key KEY_SPACE})
       (assert (= (# transitions) 1) "Space should move to leader state")
       (assert (= (. transitions 1) :leader))
@@ -1752,8 +1882,8 @@
 
 (fn leader-state-c-enters-camera-state []
   (with-state-recorder
-    (fn [transitions]
-      (local state (LeaderState))
+    (fn [transitions install-state]
+      (local state (install-state :leader (LeaderState)))
       (state.on-key-down {:key KEY_C})
       (assert (= (# transitions) 1) "C should move to camera state")
       (assert (= (. transitions 1) :camera)))))
@@ -1764,50 +1894,62 @@
   (local original-states app.states)
   (local transitions [])
   (var panel-added? false)
+  (local states
+    (States {:hud_provider (fn [_self]
+                             app.hud)
+             :focus_manager_provider (fn [_self]
+                                       app.focus)}))
   (set app.hud {:add-panel-child (fn [_self _opts]
                                   (set panel-added? true)
                                   {:set-items (fn [_view _items] nil)
                                    :set-query (fn [_view _query] nil)})
-                :remove-panel-child (fn [_self _element] true)})
-  (set app.states {:set-state (fn [name]
-                                (table.insert transitions name))
-                   :active-name (fn [] :leader)})
+                :remove-panel-child (fn [_self _element] true)
+                :command-hints (make-command-hints-stub)})
+  (states:add-state :leader {})
+  (states:set-state :leader)
+  (local original-set-state states.set-state)
+  (set states.set-state
+       (fn [_self name]
+         (table.insert transitions name)
+         (original-set-state states name)))
+  (set-app-states! states)
   (set app.engine {:get-asset-path (fn [path]
                                     (if (= path "lua/launchables")
                                         (.. (or (os.getenv "SPACE_ASSETS_PATH") ".") "/lua/launchables")
                                         path))})
   (local state (LeaderState))
+  (states:add-state :subject state)
   (state.on-key-down {:key KEY_P})
   (assert (= (# transitions) 0) "Leader-P should not force a state transition")
   (assert panel-added? "Leader-P should open launcher")
   (set app.hud original-hud)
   (set app.engine original-engine)
-  (set app.states original-states))
+  (set-app-states! original-states))
 
 (fn camera-state-f-enters-fpc-state []
   (with-state-recorder
-    (fn [transitions]
-      (local state (CameraState))
+    (fn [transitions install-state]
+      (local state (install-state :camera (CameraState)))
       (state.on-key-down {:key KEY_F})
       (assert (= (# transitions) 1) "F should move to fpc state")
       (assert (= (. transitions 1) :fpc)))))
 
 (fn camera-state-escape-exits-to-normal []
   (with-state-recorder
-    (fn [transitions]
-      (local state (CameraState))
+    (fn [transitions install-state]
+      (local state (install-state :camera (CameraState)))
       (state.on-key-down {:key KEY_ESCAPE})
       (assert (= (# transitions) 1) "Escape should move to normal state")
       (assert (= (. transitions 1) :normal)))))
 
 (fn camera-state-zero-resets-camera []
   (with-state-recorder
-    (fn [transitions]
+    (fn [transitions install-state]
       (local original-camera app.camera)
       (local camera (Camera {:position (glm.vec3 1 2 3)
                              :rotation (glm.quat 0 1 0 0)}))
       (set app.camera camera)
-      (local state (CameraState))
+      (local state (install-state :camera (CameraState)))
       (state.on-key-down {:key (string.byte "0")})
       (assert (= (# transitions) 0))
       (assert (= camera.position.x 0))
@@ -1822,8 +1964,8 @@
 
 (fn fpc-state-escape-exits-to-normal []
   (with-state-recorder
-    (fn [transitions]
-      (local state (FpcState))
+    (fn [transitions install-state]
+      (local state (install-state :fpc (FpcState)))
       (state.on-key-down {:key KEY_ESCAPE})
       (assert (= (# transitions) 1) "Escape should move to normal state")
       (assert (= (. transitions 1) :normal)))))
@@ -1832,6 +1974,7 @@
   (reset-engine-events)
   (local calls {:input 0 :clickables 0 :hover 0 :movables 0})
   (local controls (create-controls-stub))
+  (local original-states app.states)
   (local original-controls app.first-person-controls)
   (local original-clickables app.clickables)
   (local original-hoverables app.hoverables)
@@ -1855,8 +1998,13 @@
                 :on-mouse-button-down (fn [_self _payload]
                                         (set calls.input (+ calls.input 1))
                                         true)})
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (states:add-state :normal {})
+  (states:set-state :normal)
+  (set-app-states! states)
   (InputState.connect-input input)
   (local state (FpcState))
+  (states:add-state :fpc state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key 44})
   (app.engine.events.mouse-button-down.emit {:button 1 :x 0 :y 0})
@@ -1869,6 +2017,7 @@
   (assert (= controls.record.mouse_button_down 1))
   (state.on-leave)
   (InputState.disconnect-input input)
+  (set-app-states! original-states)
   (set app.clickables original-clickables)
   (set app.hoverables original-hoverables)
   (set app.movables original-movables)
@@ -1876,8 +2025,8 @@
 
 (fn leader-state-q-and-escape-transitions []
   (with-state-recorder
-    (fn [transitions]
-      (local state (LeaderState))
+    (fn [transitions install-state]
+      (local state (install-state :leader (LeaderState)))
       (state.on-key-down {:key KEY_Q})
       (state.on-key-down {:key KEY_ESCAPE})
       (assert (= (# transitions) 2))
@@ -1893,8 +2042,8 @@
          (pcall
            (fn []
              (with-state-recorder
-               (fn [transitions]
-                 (local state (QuitState))
+               (fn [transitions install-state]
+                 (local state (install-state :quit (QuitState)))
                  (state.on-key-down {:key KEY_Q})
                  (state.on-key-down {:key KEY_ESCAPE})
                  (assert (= quit-calls 1) "Quit state should invoke app.engine.quit on q")
@@ -1978,10 +2127,10 @@
 
 (fn text-state-handles-navigation []
   (with-state-recorder
-    (fn [transitions]
+    (fn [transitions install-state]
       (local input (make-input-stub {:text "abc"}))
       (InputState.connect-input input)
-      (local state (TextState))
+      (local state (install-state :text (TextState)))
       (state.on-key-down {:key (string.byte "i")})
       (Runtime.dispatch-text-input nil)
       (assert (= (. transitions 1) :insert))
@@ -1998,11 +2147,11 @@
 
 (fn text-state-horizontal-stays-on-line []
   (with-state-recorder
-    (fn [_transitions]
+    (fn [_transitions install-state]
       (local input (make-input-stub {:text "alpha\nbeta" :multiline? true}))
       (InputState.connect-input input)
       (input:move-caret-to 5)
-      (local state (TextState))
+      (local state (install-state :text (TextState)))
       (state.on-key-down {:key (string.byte "l")})
       (assert (= input.model.cursor-line 0))
       (assert (= input.model.cursor-column 4))
@@ -2014,11 +2163,11 @@
 
 (fn text-state-supports-vertical-navigation []
   (with-state-recorder
-    (fn [_transitions]
+    (fn [_transitions install-state]
       (local input (make-input-stub {:text "car\ntruck\nplane" :multiline? true}))
       (InputState.connect-input input)
       (input:move-caret-to 2)
-      (local state (TextState))
+      (local state (install-state :text (TextState)))
       (state.on-key-down {:key (string.byte "j")})
       (assert (= input.model.cursor-line 1))
       (assert (= input.model.cursor-column 2))
@@ -2028,8 +2177,8 @@
 
 (fn text-state-open-line-commands []
   (with-state-recorder
-    (fn [_transitions]
-      (local state (TextState))
+    (fn [_transitions install-state]
+      (local state (install-state :text (TextState)))
       (local below (make-input-stub {:text "foo\nbar" :multiline? true}))
       (InputState.connect-input below)
       (state.on-key-down {:key (string.byte "o")})
@@ -2050,11 +2199,11 @@
 
 (fn text-state-line-jumps []
   (with-state-recorder
-    (fn [_transitions]
+    (fn [_transitions install-state]
       (local input (make-input-stub {:text "one\ntwo\nthree" :multiline? true}))
       (InputState.connect-input input)
       (input:move-caret-to 4)
-      (local state (TextState))
+      (local state (install-state :text (TextState)))
       (state.on-key-down {:key (string.byte "g")})
       (state.on-key-down {:key (string.byte "g")})
       (assert (= input.model.cursor-line 0))
@@ -2066,8 +2215,8 @@
 
 (fn text-state-linewise-insert-shortcuts []
   (with-state-recorder
-    (fn [_transitions]
-      (local state (TextState))
+    (fn [_transitions install-state]
+      (local state (install-state :text (TextState)))
       (local input (make-input-stub {:text "  foo" :multiline? true}))
       (InputState.connect-input input)
       (state.on-key-down {:key (string.byte "i") :mod SHIFT-MOD})
@@ -2086,8 +2235,8 @@
 
 (fn text-state-clamps-before-delete []
   (with-state-recorder
-    (fn [_transitions]
-      (local state (TextState))
+    (fn [_transitions install-state]
+      (local state (install-state :text (TextState)))
       (local input (make-input-stub {:text "abc"}))
       (InputState.connect-input input)
       (input:move-caret-to 3)
@@ -2098,11 +2247,11 @@
 
 (fn text-state-ignores-text-input-when-entering-insert []
   (with-state-recorder
-    (fn [_transitions]
+    (fn [_transitions install-state]
       (local input (make-input-stub))
       (InputState.connect-input input)
-      (local text-state (TextState))
-      (local insert-state (InsertState))
+      (local text-state (install-state :text (TextState)))
+      (local insert-state (install-state :insert (InsertState)))
       (text-state.on-key-down {:key (string.byte "i")})
       (insert-state.on-text-input {:text "i"})
       (insert-state.on-text-input {:text "a"})
@@ -2116,12 +2265,12 @@
 
 (fn text-state-swallows-unhandled-keys-when-input-active []
   (with-state-recorder
-    (fn [_transitions]
+    (fn [_transitions install-state]
       (local controls (create-controls-stub))
       (set app.first-person-controls controls)
       (local input (make-input-stub {:text "abc"}))
       (InputState.connect-input input)
-      (local state (TextState))
+      (local state (install-state :text (TextState)))
       (state.on-key-down {:key (string.byte "z")})
       (assert (= controls.record.key_down nil)
               "Unhandled text keys should not reach controls when input is active")
@@ -2130,11 +2279,11 @@
 
 (fn insert-state-handles-editing []
   (with-state-recorder
-    (fn [transitions]
+    (fn [transitions install-state]
       (local input (make-input-stub {:text "abcd"}))
       (input:move-caret-to 2)
       (InputState.connect-input input)
-      (local state (InsertState))
+      (local state (install-state :insert (InsertState)))
       (state.on-key-down {:key 27})
       (assert (= (. transitions 1) :text))
       (assert (= input.mode :normal))
@@ -2150,11 +2299,11 @@
 
 (fn insert-state-inserts-newline-when-multiline []
   (with-state-recorder
-    (fn [transitions]
+    (fn [transitions install-state]
       (local input (make-input-stub {:multiline? true}))
       (InputState.connect-input input)
       (input:enter-insert-mode)
-      (local state (InsertState))
+      (local state (install-state :insert (InsertState)))
       (state.on-key-down {:key 13})
       (assert (= input.mode :insert))
       (assert (= (. input.inserted 1) "\n"))

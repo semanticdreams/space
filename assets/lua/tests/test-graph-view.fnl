@@ -25,6 +25,7 @@
 (local fs (require :fs))
 (local PathUtils (require :tests.path-utils))
 (local TestSupport (require :tests/test-support))
+(local StateSystemBindings (require :state-system-bindings))
 
 (local tests [])
 (local appdirs (require :appdirs))
@@ -41,6 +42,21 @@
                 (or message "codepoints mismatch"))))
 
 (local paths-eq PathUtils.paths-eq)
+
+(fn ensure-command-hints-hud! [states]
+    (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
+        (states:set-hud-provider
+            (fn [_self]
+                {:command-hints
+                 {:handle-toggle-key (fn [_manager _payload] true)
+                  :close-on-handled-event (fn [_manager _route-key _payload] false)}})))
+    states)
+
+(fn set-app-states! [states]
+    (ensure-command-hints-hud! states)
+    (StateSystemBindings.bind-states-host states)
+    (set app.states states)
+    states)
 
 (fn find-fs-node-by-path [graph target-path]
     (var matched nil)
@@ -1277,11 +1293,11 @@
             (set app.hud target)
             (set app.scene scene)
             (local states (States))
-            (states.add-state :normal {})
-            (states.add-state :terrain-rect-pick (TerrainRectPickState))
-            (states.set-state :normal)
+            (states:add-state :normal {})
+            (states:add-state :terrain-rect-pick (TerrainRectPickState))
+            (states:set-state :normal)
             (set suspended-state (TestSupport.suspend-active-state original-states))
-            (set app.states states)
+            (set-app-states! states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
                                                     :world-manager manager
@@ -1300,7 +1316,7 @@
             (assert tool-view "Expected terrain tool view inside hosted dialog")
             (assert tool-view.pick-button "Hosted terrain tool should expose pick button")
             (tool-view.pick-button:on-click {})
-            (assert (= (app.states.active-name) :terrain-rect-pick)
+            (assert (= (app.states:active-name) :terrain-rect-pick)
                     "Hosted terrain tool pick should enter the terrain rectangle pick state")
             (assert app.terrain-rect-pick-session
                     "Hosted terrain tool pick should register the active terrain rectangle pick session")
@@ -1316,7 +1332,7 @@
             (assert (= picked-target.z1 4))
             (assert-codepoints-eq (tool-view.selection-label:get-codepoints)
                                   (TextUtils.codepoints-from-text "12 samples across [1, 2] to [3, 4]"))
-            (assert (= (app.states.active-name) :normal)
+            (assert (= (app.states:active-name) :normal)
                     "Hosted terrain tool pick should restore the previous state after completion")
             (views:drop-all)
             (graph:drop)
@@ -1329,7 +1345,7 @@
             (set app.movables original-movables)
             (set app.resizables original-resizables)
             (set app.first-person-controls original-fpc)
-            (set app.states original-states)
+            (set-app-states! original-states)
             (TestSupport.resume-active-state suspended-state)
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
@@ -1422,11 +1438,11 @@
             (set app.hud target)
             (set app.scene scene)
             (local states (States))
-            (states.add-state :normal {})
-            (states.add-state :terrain-rect-pick (TerrainRectPickState))
-            (states.set-state :normal)
+            (states:add-state :normal {})
+            (states:add-state :terrain-rect-pick (TerrainRectPickState))
+            (states:set-state :normal)
             (set suspended-state (TestSupport.suspend-active-state original-states))
-            (set app.states states)
+            (set-app-states! states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
                                                     :world-manager manager
@@ -1448,7 +1464,7 @@
                      (values true (glm.vec3 0 0 0) 0.0)))
             (app.clickables:on-mouse-button-down {:button 1 :x 5 :y 5 :timestamp 10})
             (app.clickables:on-mouse-button-up {:button 1 :x 5 :y 5 :timestamp 10})
-            (assert (= (app.states.active-name) :terrain-rect-pick)
+            (assert (= (app.states:active-name) :terrain-rect-pick)
                     "clickables-driven pick button should enter the terrain rectangle pick state")
             (assert app.terrain-rect-pick-session
                     "clickables-driven pick button should register the active terrain rectangle pick session")
@@ -1476,7 +1492,7 @@
             (set app.movables original-movables)
             (set app.resizables original-resizables)
             (set app.first-person-controls original-fpc)
-            (set app.states original-states)
+            (set-app-states! original-states)
             (TestSupport.resume-active-state suspended-state)
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 
@@ -1570,11 +1586,11 @@
             (set app.hud target)
             (set app.scene scene)
             (local states (States))
-            (states.add-state :normal (NormalState))
-            (states.add-state :terrain-rect-pick (TerrainRectPickState))
-            (states.set-state :normal)
+            (states:add-state :normal (NormalState))
+            (states:add-state :terrain-rect-pick (TerrainRectPickState))
+            (states:set-state :normal)
             (set suspended-state (TestSupport.suspend-active-state original-states))
-            (set app.states states)
+            (set-app-states! states)
             (local graph (Graph {:with-start false}))
             (local node (HeightfieldPerlinToolNode {:world-id "world-a"
                                                     :world-manager manager
@@ -1596,7 +1612,7 @@
                      (values true (glm.vec3 0 0 0) 0.0)))
             (app.engine.events.mouse-button-down.emit {:button 1 :x 5 :y 5 :timestamp 10})
             (app.engine.events.mouse-button-up.emit {:button 1 :x 5 :y 5 :timestamp 10})
-            (assert (= (app.states.active-name) :terrain-rect-pick)
+            (assert (= (app.states:active-name) :terrain-rect-pick)
                     "engine-event click should enter terrain rect pick state")
             (assert app.terrain-rect-pick-session
                     "engine-event click should register active terrain pick session")
@@ -1624,7 +1640,7 @@
             (set app.movables original-movables)
             (set app.resizables original-resizables)
             (set app.first-person-controls original-fpc)
-            (set app.states original-states)
+            (set-app-states! original-states)
             (TestSupport.resume-active-state suspended-state)
             (set app.terrain-rect-pick-session original-terrain-rect-pick-session))))
 

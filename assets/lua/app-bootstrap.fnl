@@ -67,19 +67,25 @@
 
 (fn init-states []
   (local States (require :states))
-  (set app.states (States))
-  (app.states.add-state :normal ((require :normal-state)))
-  (app.states.add-state :leader ((require :leader-state)))
-  (app.states.add-state :quit ((require :quit-state)))
-  (app.states.add-state :text ((require :text-state)))
-  (app.states.add-state :insert ((require :insert-state)))
-  (app.states.add-state :camera ((require :camera-state)))
-  (app.states.add-state :fpc ((require :fpc-state)))
-  (app.states.add-state :terrain-rect-pick ((require :terrain-rect-pick-state)))
-  (app.states.add-state :terrain-paint ((require :terrain-paint-state)))
-  (app.states.add-state :car ((require :car-state)))
-  (app.states.add-state :tetris ((require :tetris-state)))
-  (app.states.set-state :normal)
+  (local StateSystemBindings (require :state-system-bindings))
+  (set app.states
+       (States {:hud_provider (fn [_states]
+                                app.hud)
+                :focus_manager_provider (fn [_states]
+                                          app.focus)}))
+  (StateSystemBindings.bind-states-host app.states)
+  (app.states:add-state :normal ((require :normal-state)))
+  (app.states:add-state :leader ((require :leader-state)))
+  (app.states:add-state :quit ((require :quit-state)))
+  (app.states:add-state :text ((require :text-state)))
+  (app.states:add-state :insert ((require :insert-state)))
+  (app.states:add-state :camera ((require :camera-state)))
+  (app.states:add-state :fpc ((require :fpc-state)))
+  (app.states:add-state :terrain-rect-pick ((require :terrain-rect-pick-state)))
+  (app.states:add-state :terrain-paint ((require :terrain-paint-state)))
+  (app.states:add-state :car ((require :car-state)))
+  (app.states:add-state :tetris ((require :tetris-state)))
+  (app.states:set-state :normal)
   app.states)
 
 {:init-themes init-themes

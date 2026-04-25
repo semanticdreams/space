@@ -790,6 +790,7 @@
   (when app.hud
     (local contrib (resolve-active-world-hud-contrib))
     (set app.active-world-hud-contrib contrib)
+    (set app.hud.world-hud-contrib contrib)
     (local control-panel-opts {:status-builder app.world-tabs-builder})
     (local status-panel-opts {})
     (when contrib.control_panel_body
@@ -1446,6 +1447,7 @@
     (set app.browser-cube-surface nil))
   (when app.hud
     (clear-active-world-hud-overlay)
+    (set app.hud.world-hud-contrib nil)
     (app.hud:drop)
     (set app.hud nil))
   (when app.renderers

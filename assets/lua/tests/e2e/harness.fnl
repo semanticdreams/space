@@ -161,20 +161,20 @@
     (fn [child-ctx]
       ((Text {:text "CONTROL Status: OK"
               :style control-status-style}) child-ctx)))
-  (local state-builder
+  (local commands-builder
+      (fn [child-ctx]
+      ((Text {:text "[f1] more"
+                :style status-style}) child-ctx)))
+  (local info-builder
     (fn [child-ctx]
-      ((Text {:text "State: test"
-              :style status-style}) child-ctx)))
-  (local focus-builder
-    (fn [child-ctx]
-      ((Text {:text "Focus: none"
+      ((Text {:text "State: test   Focus: none"
               :style status-style}) child-ctx)))
   (local control-builder
     (ControlPanelLayout {:status-builder status-builder
                          :button-row-builder (make-test-button-row)}))
   (local status-builder-node
-    (StatusPanelLayout {:state-builder state-builder
-                        :focus-builder focus-builder}))
+    (StatusPanelLayout {:commands-builder commands-builder
+                        :info-builder info-builder}))
   (HudLayout.make-hud-builder {:control-builder control-builder
                                :status-builder status-builder-node}))
 

@@ -1,6 +1,8 @@
 (local glm (require :glm))
 (local Main (require :main))
 (local NormalState (require :normal-state))
+(local States (require :states))
+(local StateSystemBindings (require :state-system-bindings))
 (local Scene (require :scene))
 (local Ball (require :ball))
 (local Movables (require :movables))
@@ -30,6 +32,22 @@
        (approx a.y b.y)
        (approx a.z b.z)))
 
+(fn command-hints-hud-provider [_self]
+  {:command-hints
+   {:handle-toggle-key (fn [_manager _payload] true)
+    :close-on-handled-event (fn [_manager _route-key _payload] false)}})
+
+(fn bind-normal-state! [state]
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (states:add-state :normal state)
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  states)
+
+(fn restore-states! [states]
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states))
+
 (fn drag-through-normal-state-moves-scene-entity []
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
@@ -40,6 +58,7 @@
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
+  (local original-states app.states)
   (local original-viewport app.viewport)
   (local original-create-default-projection app.create-default-projection)
   (var scene nil)
@@ -86,6 +105,7 @@
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
+    (restore-states! original-states)
     (set app.viewport original-viewport)
     (set app.create-default-projection original-create-default-projection))
 
@@ -128,6 +148,7 @@
                     :direction (glm.vec3 0 0 -1)}))
 
             (set state (NormalState))
+            (bind-normal-state! state)
             (state.on-enter)
 
             (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 256})
@@ -158,6 +179,7 @@
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
+  (local original-states app.states)
   (local original-create-default-projection app.create-default-projection)
   (var scene nil)
   (var movables nil)
@@ -203,6 +225,7 @@
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
+    (restore-states! original-states)
     (set app.create-default-projection original-create-default-projection))
 
   (let [(ok err)
@@ -238,6 +261,7 @@
                     :direction (glm.vec3 0 0 -1)}))
 
             (set state (NormalState))
+            (bind-normal-state! state)
             (state.on-enter)
 
             (app.engine.events.mouse-button-down.emit {:button 1 :x 3.25 :y 3.25 :mod 256})
@@ -276,6 +300,7 @@
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
+  (local original-states app.states)
   (local original-create-default-projection app.create-default-projection)
   (var scene nil)
   (var movables nil)
@@ -321,6 +346,7 @@
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
+    (restore-states! original-states)
     (set app.create-default-projection original-create-default-projection))
 
   (let [(ok err)
@@ -357,6 +383,7 @@
                     :direction (glm.vec3 0 0 -1)}))
 
             (set state (NormalState))
+            (bind-normal-state! state)
             (state.on-enter)
 
             (local initial-selection
@@ -418,6 +445,7 @@
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
+  (local original-states app.states)
   (local original-viewport app.viewport)
   (local original-create-default-projection app.create-default-projection)
   (local original-active-surface app.active-interaction-surface)
@@ -487,6 +515,7 @@
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
+    (restore-states! original-states)
     (set app.viewport original-viewport)
     (set app.create-default-projection original-create-default-projection)
     (set app.active-interaction-surface original-active-surface)
@@ -573,6 +602,7 @@
         (app.set-canvas-visible false)
 
         (set state (NormalState))
+        (bind-normal-state! state)
         (state.on-enter)
 
         (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 256})

@@ -12,6 +12,8 @@
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local CameraHandlers (require :state-handlers/camera))
 (local GraphView (require :graph/view))
+(local Runtime (require :state-runtime))
+(local {: entry : section} (require :command-hints))
 
 (local KEY_SPACE (string.byte " "))
 (local KEY_BACKQUOTE (string.byte "`"))
@@ -58,6 +60,12 @@
 
   (fn graph-interaction-enabled? []
     (not (= app.active-canvas-feature "drawing")))
+
+  (fn graph-selection-count []
+    (local graph-view app.graph-view)
+    (if (and graph-view graph-view.selection graph-view.selection.selected-nodes)
+        (length graph-view.selection.selected-nodes)
+        0))
 
   (fn create-graph-view []
     (if (and app.graph-view-factory (= (type app.graph-view-factory) :function))
@@ -113,6 +121,26 @@
     (launchable.open-panel {:scene app.scene})
     true)
 
+  (fn normal-command-sections [payload]
+    (local entries [(entry "space" "leader" {:priority 10})])
+    (local focus-manager (and payload payload.focus-manager))
+    (local active-input (and payload payload.active-input))
+    (when (or (and focus-manager focus-manager.activate-focused-from-payload)
+              (and (graph-interaction-enabled?)
+                   app.graph-view
+                   app.graph-view.open-focused-node))
+      (table.insert entries (entry "enter" "activate" {:priority 20})))
+    (when (and (graph-interaction-enabled?)
+               (> (graph-selection-count) 0))
+      (table.insert entries (entry "del" "delete-selection" {:priority 25})))
+    (when focus-manager
+      (table.insert entries (entry "tab" "focus-next" {:priority 30 :show-collapsed? false}))
+      (when (not active-input)
+        (table.insert entries (entry "h/j/k/l" "focus-direction" {:priority 31 :show-collapsed? false}))))
+    (table.insert entries (entry "f4" "toggle-graph" {:priority 40}))
+    (table.insert entries (entry "`" "fennel-repl" {:priority 50}))
+    [(section :mode "MODE" entries)])
+
   (local NormalCommands
     {:key-down
      (fn [ctx payload]
@@ -120,94 +148,116 @@
        (local set-state (. ctx :set-state))
        (if (= key KEY_SPACE)
            (do
+             ((. ctx :mark-command-executed!))
              (set-state :leader)
              true)
            (= key SDLK_RETURN)
            (do
-             (local focus-manager app.focus)
-             (if (and focus-manager focus-manager.activate-focused-from-payload)
-                 (if (focus-manager:activate-focused-from-payload payload)
-                     true
-                     (maybe-open-focused-graph-node))
-                 (maybe-open-focused-graph-node)))
+             (local focus-manager ((. ctx :focus-manager)))
+             (local handled
+               (if (and focus-manager focus-manager.activate-focused-from-payload)
+                   (if (focus-manager:activate-focused-from-payload payload)
+                       true
+                       (maybe-open-focused-graph-node))
+                   (maybe-open-focused-graph-node)))
+           (when handled
+               ((. ctx :mark-command-executed!)))
+             handled)
            (= key SDLK_DELETE)
-           (remove-selected-nodes)
+           (do
+             (local handled (remove-selected-nodes))
+             (when handled
+               ((. ctx :mark-command-executed!)))
+             handled)
            (= key SDLK_F4)
-           (toggle-graph-view)
+           (do
+             (local handled (toggle-graph-view))
+             (when handled
+               ((. ctx :mark-command-executed!)))
+             handled)
            (= key KEY_BACKQUOTE)
-           (open-fennel-interpreter)
+           (do
+             (local handled (open-fennel-interpreter))
+             (when handled
+               ((. ctx :mark-command-executed!)))
+             handled)
            false))})
 
-  (State
-    {:name :normal
-     :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
-              :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
-              :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
-              :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
-              :pen-proximity-in (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                               PenHandlers.PenProximityIn])
-              :pen-proximity-out (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                                PenHandlers.PenProximityOut])
-              :pen-motion (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                         PenHandlers.PenMotion])
-              :pen-down (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                       PenHandlers.PenDown])
-              :pen-up (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                     PenHandlers.PenUp])
-              :pen-button-down (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                              PenHandlers.PenButtonDown])
-              :pen-button-up (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                            PenHandlers.PenButtonUp])
-              :pen-axis (Routes.Chain [DrawingPenOverride.PenToolOverride
-                                       PenHandlers.PenAxis])
-              :text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
-              :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
-              :key-down (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
-                                                 DrawingHandlers.DrawingKeyDown
-                                                 NormalCommands
-                                                 FocusHandlers.FocusTabKeyDown
-                                                 FocusHandlers.FocusDirectionKeyDown
+  (local state
+    (State
+      {:name :normal
+       :route-wrappers [Routes.CommandHints]
+       :command_hints_provider (fn [_self payload]
+                                 (normal-command-sections payload))
+       :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
+                :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
+                :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
+                :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+                :pen-proximity-in (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                                 PenHandlers.PenProximityIn])
+                :pen-proximity-out (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                                  PenHandlers.PenProximityOut])
+                :pen-motion (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                           PenHandlers.PenMotion])
+                :pen-down (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                         PenHandlers.PenDown])
+                :pen-up (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                       PenHandlers.PenUp])
+                :pen-button-down (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                                PenHandlers.PenButtonDown])
+                :pen-button-up (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                              PenHandlers.PenButtonUp])
+                :pen-axis (Routes.Chain [DrawingPenOverride.PenToolOverride
+                                         PenHandlers.PenAxis])
+                :text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
+                :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
+                :key-down (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
+                                                   DrawingHandlers.DrawingKeyDown
+                                                   NormalCommands
+                                                   FocusHandlers.FocusTabKeyDown
+                                                   FocusHandlers.FocusDirectionKeyDown
+                                                   FocusHandlers.ActiveInputKeyBlock])
+                :key-up (Routes.FirstHandlerWins [FocusHandlers.InputKeyUpDispatch
                                                  FocusHandlers.ActiveInputKeyBlock])
-              :key-up (Routes.FirstHandlerWins [FocusHandlers.InputKeyUpDispatch
-                                               FocusHandlers.ActiveInputKeyBlock])
-              :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
-                                                PointerHandlers.ResizableMouseButtonDown
-                                                PointerHandlers.ClickableMouseButtonDown
-                                                DrawingHandlers.DrawingMouseButtonDown
-                                                PointerHandlers.MovableMouseButtonDown
-                                                PointerHandlers.SelectionMouseButtonDown
-                                                PointerHandlers.CameraMouseButtonDown])
-              :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
-                                              PointerHandlers.ResizableMouseButtonUp
-                                              PointerHandlers.ClickableMouseButtonUp
-                                              DrawingHandlers.DrawingMouseButtonUp
-                                              PointerHandlers.MovableMouseButtonUp
-                                              PointerHandlers.SelectionMouseButtonUp
-                                              PointerHandlers.CameraMouseButtonUp
-                                              HoverHandlers.HoverAfterMouseButtonUp])
-              :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
-                                           PointerHandlers.MovableMouseMotion
-                                           PointerHandlers.ResizableMouseMotion
-                                           DrawingHandlers.DrawingMouseMotion
-                                           PointerHandlers.CameraDragMouseMotion
-                                           PointerHandlers.SelectionMouseMotion
-                                           PointerHandlers.CameraMouseMotion
-                                           HoverHandlers.HoverMouseMotion])
-              :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
-                                                    PointerHandlers.HoveredMouseWheel
-                                                    PointerHandlers.CameraMouseWheel])
-              :gamepad-button-down (Routes.FirstHandlerWins [GamepadHandlers.GamepadButtonDown])
-              :gamepad-axis-motion (Routes.FirstHandlerWins [GamepadHandlers.GamepadAxisMotion])
-              :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
-              :updated (Routes.Chain [CameraHandlers.CameraUpdated
-                                      HoverHandlers.HoverUpdated])}
-     :enter [PenHandlers.PenLifecycle
-             DrawingPenOverride.PenToolOverride
-             TouchHandlers.TouchLifecycle
-             HoverHandlers.HoverLifecycle]
-     :leave [DrawingPenOverride.PenToolOverride
-             PenHandlers.PenLifecycle
-             TouchHandlers.TouchLifecycle
-             HoverHandlers.HoverLifecycle]}))
+                :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
+                                                  PointerHandlers.ResizableMouseButtonDown
+                                                  PointerHandlers.ClickableMouseButtonDown
+                                                  DrawingHandlers.DrawingMouseButtonDown
+                                                  PointerHandlers.MovableMouseButtonDown
+                                                  PointerHandlers.SelectionMouseButtonDown
+                                                  PointerHandlers.CameraMouseButtonDown])
+                :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
+                                                PointerHandlers.ResizableMouseButtonUp
+                                                PointerHandlers.ClickableMouseButtonUp
+                                                DrawingHandlers.DrawingMouseButtonUp
+                                                PointerHandlers.MovableMouseButtonUp
+                                                PointerHandlers.SelectionMouseButtonUp
+                                                PointerHandlers.CameraMouseButtonUp
+                                                HoverHandlers.HoverAfterMouseButtonUp])
+                :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
+                                             PointerHandlers.MovableMouseMotion
+                                             PointerHandlers.ResizableMouseMotion
+                                             DrawingHandlers.DrawingMouseMotion
+                                             PointerHandlers.CameraDragMouseMotion
+                                             PointerHandlers.SelectionMouseMotion
+                                             PointerHandlers.CameraMouseMotion
+                                             HoverHandlers.HoverMouseMotion])
+                :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                                      PointerHandlers.HoveredMouseWheel
+                                                      PointerHandlers.CameraMouseWheel])
+                :gamepad-button-down (Routes.FirstHandlerWins [GamepadHandlers.GamepadButtonDown])
+                :gamepad-axis-motion (Routes.FirstHandlerWins [GamepadHandlers.GamepadAxisMotion])
+                :gamepad-removed (Routes.FirstHandlerWins [GamepadHandlers.GamepadRemoved])
+                :updated (Routes.Chain [CameraHandlers.CameraUpdated
+                                        HoverHandlers.HoverUpdated])}
+       :enter [PenHandlers.PenLifecycle
+               DrawingPenOverride.PenToolOverride
+               TouchHandlers.TouchLifecycle
+               HoverHandlers.HoverLifecycle]
+       :leave [DrawingPenOverride.PenToolOverride
+               PenHandlers.PenLifecycle
+               TouchHandlers.TouchLifecycle
+               HoverHandlers.HoverLifecycle]}))
+  state)
 
 NormalState

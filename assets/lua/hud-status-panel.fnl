@@ -1,109 +1,112 @@
 (local glm (require :glm))
 (local Text (require :text))
+(local CommandHints (require :command-hints))
 (local {: StatusPanelLayout} (require :hud-status-panel-layout))
 (local {: truncate-with-ellipsis} (require :graph/view/utils))
+(local {: codepoints-from-text : measure-single-line} (require :text-utils))
 
-(fn keyword->label [value fallback]
+(local toggle-text (.. "[" (CommandHints.key-label CommandHints.KEY_F1) "] more"))
+
+(fn keyword->label [value default-label]
   (local raw (and value (tostring value)))
   (local trimmed
     (if (and raw (> (string.len raw) 0) (= (string.sub raw 1 1) ":"))
         (string.sub raw 2)
         raw))
-  (or trimmed fallback))
+  (or trimmed default-label))
 
-(fn current-state-text [states]
+(fn current-state-label [states]
   (local state-name (and states states.active-name
-                         (states.active-name)))
-  (local label (keyword->label state-name "Unknown"))
+                         (states:active-name)))
+  (local label (keyword->label state-name "unknown"))
   (local first-line (or (string.match label "^[^\n]*") label))
-  (local trimmed (truncate-with-ellipsis first-line 32))
-  (string.format "State: %s" trimmed))
+  (truncate-with-ellipsis first-line 24))
 
-(fn current-focus-text [manager]
+(fn current-focus-label [manager]
   (local focus-node (and manager manager.get-focused-node
                          (manager:get-focused-node)))
-  (local label (keyword->label (and focus-node focus-node.name) "None"))
+  (local label (keyword->label (and focus-node focus-node.name) "none"))
   (local first-line (or (string.match label "^[^\n]*") label))
-  (local trimmed (truncate-with-ellipsis first-line 32))
-  (string.format "Focus: %s"
-                 trimmed))
+  (truncate-with-ellipsis first-line 24))
+
+(fn current-focus-manager [hud]
+  (assert hud "StatusPanel requires a HUD")
+  (assert hud.get-focus-manager "StatusPanel HUD must expose :get-focus-manager")
+  (hud:get-focus-manager))
+
+(fn info-text [states manager]
+  (.. "State: "
+      (current-state-label states)
+      "   Focus: "
+      (current-focus-label manager)))
+
+(fn measure-line-width [text style]
+  (local layout {:measure (glm.vec3 0)})
+  (measure-single-line layout (codepoints-from-text text) style)
+  (. layout.measure 1))
 
 (fn StatusPanel [_opts]
   (local options (or _opts {}))
   (fn build [ctx]
-    (local hud (or ctx.pointer-target {}))
-    (local focus-manager (or hud.focus-manager (and ctx ctx.focus ctx.focus.manager)))
-    (local states-instance (and ctx ctx.states))
-    (var state-text-entity nil)
-    (var focus-text-entity nil)
-    (local state-text (Text {:text (current-state-text states-instance)}))
-    (local focus-text (Text {:text (current-focus-text focus-manager)}))
+    (local hud (assert ctx.pointer-target "StatusPanel requires ctx.pointer-target"))
+    (local command-hints
+      (if options.commands-builder
+          hud.command-hints
+          (assert hud.command-hints
+                  "StatusPanel requires hud.command-hints when using default commands builder")))
+    (var commands-entity nil)
+    (var info-entity nil)
+    (var last-commands-text nil)
+    (var last-info-text nil)
 
-    (local build-state-text
-      (fn [child-ctx]
-        (set state-text-entity (state-text child-ctx))
-        state-text-entity))
+    (local commands-builder
+      (or options.commands-builder
+          (fn [child-ctx]
+            (set commands-entity ((Text {:text ""}) child-ctx))
+            commands-entity)))
+    (local info-builder
+      (or options.info-builder
+          (fn [child-ctx]
+            (set info-entity ((Text {:text ""}) child-ctx))
+            info-entity)))
 
-    (local build-focus-text
-      (fn [child-ctx]
-        (set focus-text-entity (focus-text child-ctx))
-        focus-text-entity))
+    (fn refresh-commands []
+      (when (and command-hints commands-entity)
+        (local next-text command-hints.collapsed)
+        (when (not (= next-text last-commands-text))
+          (set last-commands-text next-text)
+          (commands-entity:set-text next-text))))
 
-    (var state-listener nil)
-    (var focus-focus-listener nil)
-    (var focus-blur-listener nil)
+    (fn refresh-info []
+      (when info-entity
+        (local next-text (info-text hud.states (current-focus-manager hud)))
+        (when (not (= next-text last-info-text))
+          (set last-info-text next-text)
+          (info-entity:set-text next-text))))
 
-    (fn update-state-label []
-      (when state-text-entity
-        (state-text-entity:set-text (current-state-text states-instance))))
-
-    (fn update-focus-label []
-      (when focus-text-entity
-        (focus-text-entity:set-text (current-focus-text focus-manager))))
-
-    (fn attach-listeners []
-      (when (and states-instance states-instance.changed (not state-listener))
-        (set state-listener
-             (states-instance.changed.connect
-               (fn [_event]
-                 (update-state-label)))))
-      (when (and focus-manager focus-manager.focus-focus (not focus-focus-listener))
-        (set focus-focus-listener
-             (focus-manager.focus-focus.connect
-               (fn [_event]
-                 (update-focus-label)))))
-      (when (and focus-manager focus-manager.focus-blur (not focus-blur-listener))
-        (set focus-blur-listener
-             (focus-manager.focus-blur.connect
-               (fn [_event]
-                 (update-focus-label))))))
-
-    (fn detach-listeners []
-      (when (and state-listener states-instance states-instance.changed)
-        (states-instance.changed.disconnect state-listener true)
-        (set state-listener nil))
-      (when (and focus-focus-listener focus-manager focus-manager.focus-focus)
-        (focus-manager.focus-focus.disconnect focus-focus-listener true)
-        (set focus-focus-listener nil))
-      (when (and focus-blur-listener focus-manager focus-manager.focus-blur)
-        (focus-manager.focus-blur.disconnect focus-blur-listener true)
-        (set focus-blur-listener nil)))
+    (fn commands-min-width []
+      (local style (and commands-entity commands-entity.style))
+      (if style
+          (measure-line-width toggle-text style)
+          nil))
 
     (local panel
-      ((StatusPanelLayout {:state-builder (or options.state-builder build-state-text)
-                           :focus-builder (or options.focus-builder build-focus-text)
-                           :body-builder options.body-builder}) ctx))
+      ((StatusPanelLayout {:commands-builder commands-builder
+                           :info-builder info-builder
+                           :commands-min-width-provider commands-min-width
+                           :body-builder options.body-builder})
+       ctx))
 
-    (update-state-label)
-    (update-focus-label)
-    (attach-listeners)
+    (fn update [_self]
+      (when command-hints
+        (command-hints:update {:max-width (and panel panel.commands-max-width
+                                               (panel:commands-max-width))
+                               :style (and commands-entity commands-entity.style)}))
+      (refresh-commands)
+      (refresh-info))
 
-    (local original-drop panel.drop)
-    (set panel.drop
-         (fn [self]
-           (detach-listeners)
-           (when original-drop
-             (original-drop self))))
+    (set panel.update update)
+    (update nil)
     panel))
 
 (local exports {:StatusPanel StatusPanel})

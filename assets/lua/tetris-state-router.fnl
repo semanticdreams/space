@@ -1,14 +1,34 @@
 (var active-board nil)
+(var states-provider nil)
+
+(fn assert-provider [provider]
+  (assert (or (= provider nil)
+              (= (type provider) :function))
+          "TetrisStateRouter states provider must be a function"))
+
+(fn states-host [action]
+  (local states (and states-provider
+                     (states-provider)))
+  (assert states
+          (.. "TetrisStateRouter requires a states host for " action))
+  states)
+
+(fn set-states-provider [provider]
+  (assert-provider provider)
+  (set states-provider provider)
+  provider)
 
 (fn set-state [name]
-  (when (and app.engine app.states app.states.set-state)
-    (app.states.set-state name)))
+  (local states (states-host "state transitions"))
+  (assert (and states states.set-state)
+          "TetrisStateRouter requires a states host for state transitions")
+  (states:set-state name))
 
 (fn current-state-name []
-  (and app.engine
-       app.states
-       app.states.active-name
-       (app.states.active-name)))
+  (local states (states-host "current-state-name"))
+  (assert states.active-name
+          "TetrisStateRouter states host must expose :active-name")
+  (states:active-name))
 
 (fn release-active-board []
   (when active-board
@@ -46,4 +66,7 @@
  :disconnect-board disconnect-board
  :dispatch dispatch
  :active-board (fn [] active-board)
+ :current-state-name current-state-name
+ :set-state set-state
+ :set-states-provider set-states-provider
  :release-active-board release-active-board}

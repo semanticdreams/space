@@ -4,9 +4,11 @@
 (local BuildContext (require :build-context))
 (local {: FocusManager} (require :focus))
 (local {: LayoutRoot} (require :layout))
+(local States (require :states))
 (local InputState (require :input-state-router))
 (local TextState (require :text-state))
 (local InsertState (require :insert-state))
+(local StateSystemBindings (require :state-system-bindings))
 (local {: fallback-glyph} (require :text-utils))
 (local gl (require :gl))
 
@@ -25,6 +27,36 @@
   (each [_ _ (pairs queue.lookup)]
     (set count (+ count 1)))
   count)
+
+(fn make-command-hints-stub []
+  {:handle-toggle-key (fn [_self _payload] true)
+   :close-on-handled-event (fn [_self _route-key _payload] false)})
+
+(fn make-command-hints-hud-stub []
+  {:command-hints (make-command-hints-stub)})
+
+(fn command-hints-hud-provider [_self]
+  (make-command-hints-hud-stub))
+
+(fn ensure-command-hints-hud! [states]
+  (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
+    (states:set-hud-provider command-hints-hud-provider))
+  states)
+
+(fn set-app-states! [states]
+  (ensure-command-hints-hud! states)
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  states)
+
+(fn own-test-state! [name state]
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (states:add-state :normal {})
+  (states:add-state name {})
+  (states:set-state name)
+  (states:add-state name state)
+  (set-app-states! states)
+  states)
 
 (fn make-clickables-stub []
   (local state {:register 0 :unregister 0})
@@ -282,17 +314,26 @@
       (local ctx-info (make-focus-build-ctx _stubs))
       (local input ((Input {}) ctx-info.ctx))
       (local original-states app.states)
+      (local states (States))
       (var transitions [])
-      (local stub {:set-state (fn [name]
-                                (table.insert transitions name))
-                   :active-name (fn [] :text)})
-      (set app.states stub)
+      (states:add-state :text {})
+      (states:set-state :text)
+      (local original-set-state states.set-state)
+      (set states.set-state
+           (fn [_self name]
+             (when (not (states:get-state name))
+               (states:add-state name {}))
+             (table.insert transitions name)
+             (original-set-state states name)))
+      (set-app-states! states)
       (let [(ok result)
             (pcall
               (fn []
                 (InputState.connect-input input)
                 (local text-state (TextState))
                 (local insert-state (InsertState))
+                (states:add-state :text text-state)
+                (states:add-state :insert insert-state)
                 (text-state.on-key-down {:key (string.byte "i")})
                 (assert (= input.mode :insert))
                 (assert (= (input:get-text) ""))
@@ -305,8 +346,8 @@
                 (assert (= (. transitions 2) :text))
                 (text-state.on-key-down {:key (string.byte "l")})
                 (assert (= input.cursor-index 0))))]
-        (set app.states original-states)
         (InputState.disconnect-input input)
+        (set-app-states! original-states)
         (input:drop)
         (when (not ok)
           (error result))))))
@@ -341,6 +382,12 @@
   (with-pointer-stubs
     (fn [_stubs]
       (local ctx-info (make-focus-build-ctx _stubs))
+      (local original-states app.states)
+      (local states (States))
+      (states:add-state :normal {})
+      (states:add-state :text {})
+      (states:set-state :normal)
+      (set-app-states! states)
       (with-input-state-spy
         (fn [spy]
           (local input ((Input {}) ctx-info.ctx))
@@ -350,7 +397,8 @@
           (assert (= (spy.connect-count) 1))
           (assert (= (spy.last-input) input))
           (input:drop)
-          (assert (= (spy.disconnect-count) 1)))))))
+          (assert (= (spy.disconnect-count) 1))))
+      (set-app-states! original-states))))
 
 (fn input-double-drop-errors []
   (with-pointer-stubs
@@ -453,6 +501,8 @@
       (local ctx-info (make-focus-build-ctx _stubs))
       (local input ((Input {:multiline? true}) ctx-info.ctx))
       (local text-state (TextState))
+      (local original-states app.states)
+      (own-test-state! :text text-state)
       (var submitted 0)
       (local listener
         (input.submitted:connect
@@ -462,6 +512,7 @@
       (text-state.on-key-down {:key 13 :mod 64})
       (assert (= submitted 1))
       (InputState.disconnect-input input)
+      (set-app-states! original-states)
       (input.submitted:disconnect listener true)
       (input:drop))))
 
@@ -471,6 +522,8 @@
       (local ctx-info (make-focus-build-ctx _stubs))
       (local input ((Input {:multiline? true}) ctx-info.ctx))
       (local insert-state (InsertState))
+      (local original-states app.states)
+      (own-test-state! :insert insert-state)
       (var submitted 0)
       (local listener
         (input.submitted:connect
@@ -482,6 +535,7 @@
       (assert (= submitted 1))
       (assert (= (input:get-text) "line"))
       (InputState.disconnect-input input)
+      (set-app-states! original-states)
       (input.submitted:disconnect listener true)
       (input:drop))))
 
@@ -530,20 +584,18 @@
       (root:update)
       (input:drop))))
 
-(local States (require :states))
-
 (fn make-state-tracker []
   (local tracker {:current :normal
                   :transitions [:normal]})
   (local states (States))
   (local original-set states.set-state)
-  (states.add-state :normal {:on-enter (fn []
+  (states:add-state :normal {:on-enter (fn []
                                          (table.insert tracker.transitions :normal)
                                          (set tracker.current :normal))})
-  (states.add-state :text {:on-enter (fn []
+  (states:add-state :text {:on-enter (fn []
                                        (table.insert tracker.transitions :text)
                                        (set tracker.current :text))})
-  (states.add-state :insert {:on-enter (fn []
+  (states:add-state :insert {:on-enter (fn []
                                          (set tracker.current :insert))})
   (set states.set-state
        (fn [self-or-name maybe-name]
@@ -551,7 +603,7 @@
          (when name
            (when (not (states:get-state name))
              (states:add-state name {}))
-           (local result (original-set name))
+           (local result (original-set states name))
            (set tracker.current name)
            result)))
   {:states states
@@ -569,7 +621,7 @@
       (let [(ok result)
             (pcall
               (fn []
-                (set app.states states)
+                (set-app-states! states)
                 (InputState.release-active-input)
                 (states:set-state :normal)
                 (local ctx-info (make-focus-build-ctx _stubs))
@@ -600,7 +652,7 @@
           (input:drop))
         (when manager
           (manager:drop))
-        (set app.states original-states)
+        (set-app-states! original-states)
         (when (not ok)
           (error result))))))
 
@@ -616,7 +668,7 @@
       (let [(ok result)
             (pcall
               (fn []
-                (set app.states states)
+                (set-app-states! states)
                 (InputState.release-active-input)
                 (states:set-state :normal)
                 (local ctx-info (make-focus-build-ctx _stubs))
@@ -645,7 +697,7 @@
           (input:drop))
         (when manager
           (manager:drop))
-        (set app.states original-states)
+        (set-app-states! original-states)
         (when (not ok)
           (error result))))))
 

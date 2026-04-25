@@ -8,6 +8,7 @@
 (local Stack (require :stack))
 (local MathUtils (require :math-utils))
 (local LightingViewState (require :lighting-view-state))
+(local {: CommandHints} (require :hud-command-hints))
 
 (local identity-view (glm.mat4 1))
 (local default-world-scale 0.05)
@@ -85,6 +86,8 @@
                        :focus-scope focus-scope}))
   (local self {:layout-root layout-root
                :build-context ctx
+               :states options.states
+               :world-hud-contrib nil
                :projection nil
                :projection-version 0
                :viewport nil
@@ -102,6 +105,7 @@
                :half-height 1
                :focus-manager focus-manager
                :focus-scope focus-scope
+               :command-hints nil
                :interaction-surface :hud
                :default-panel-location "tiles"})
 
@@ -488,6 +492,8 @@
         (layout:mark-measure-dirty))))
 
   (fn attach-entity [self entity]
+    (when self.command-hints
+      (self.command-hints:reset-overlay))
     (when self.entity
       (self:unregister-entity self.entity)
       (self.entity:drop))
@@ -760,6 +766,8 @@
     true)
 
   (fn drop [self]
+    (when self.command-hints
+      (self.command-hints:reset-overlay))
     (when self.entity
       (self:unregister-entity self.entity)
       (self.entity:drop)
@@ -773,6 +781,15 @@
 
   (fn get-view-matrix [_self]
     identity-view)
+
+  (fn get-focus-manager [self]
+    (local states self.states)
+    (if states
+        (do
+          (assert states.get-focus-manager
+                  "Hud states host must expose :get-focus-manager")
+          (states:get-focus-manager))
+        self.focus-manager))
 
   (fn get-lighting-view-state [_self]
     (LightingViewState.orthographic (glm.vec3 0.0 0.0 1.0)))
@@ -879,6 +896,7 @@
   (set self.drop drop)
   (set self.update-root-transform update-root-transform)
   (set self.get-view-matrix get-view-matrix)
+  (set self.get-focus-manager get-focus-manager)
   (set self.get-lighting-view-state get-lighting-view-state)
   (set self.get-triangle-vector get-triangle-vector)
   (set self.get-triangle-batches get-triangle-batches)
@@ -893,6 +911,7 @@
   (set self.on-viewport-changed on-viewport-changed)
   (set self.update update)
   (set self.update-projection update-projection)
+  (set self.command-hints (CommandHints self))
   (set self.screen-pos-ray screen-pos-ray)
   (set self.add-panel-child add-panel-child)
   (set self.remove-panel-child remove-panel-child)

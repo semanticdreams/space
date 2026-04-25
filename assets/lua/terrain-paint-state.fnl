@@ -5,6 +5,7 @@
 (local PenPointer (require :state-handlers/pen-pointer))
 (local CameraHandlers (require :state-handlers/camera))
 (local TerrainPaintManager (require :graph/view/terrain-paint-manager))
+(local {: entry : section} (require :command-hints))
 
 (fn active-session []
   (TerrainPaintManager.active-session))
@@ -35,19 +36,22 @@
                 (cleanup-if-needed)))
      :leave (fn [_ctx]
               (set pending-motion nil))
-     :key-down (fn [_ctx payload]
+     :key-down (fn [ctx payload]
                  (local session (active-session))
                  (if session
                      (do
-                       (session:on-key-down payload)
+                       (local handled (session:on-key-down payload))
+                       (when handled
+                         ((. ctx :mark-command-executed!)))
                        (cleanup-if-needed)
-                       true)
+                       handled)
                      (do
                        (cleanup-if-needed)
-                       true)))
-     :mouse-button-down (fn [_ctx payload]
+                       false)))
+     :mouse-button-down (fn [ctx payload]
                           (local session (active-session))
                           (when (and session (= payload.button 1))
+                            ((. ctx :mark-command-executed!))
                             (set pending-motion nil)
                             (session:begin-stroke {:x payload.x
                                                    :y payload.y
@@ -55,9 +59,10 @@
                                                    :timestamp payload.timestamp})
                             (cleanup-if-needed))
                           true)
-     :mouse-button-up (fn [_ctx payload]
+     :mouse-button-up (fn [ctx payload]
                         (local session (active-session))
                         (when (and session (= payload.button 1))
+                          ((. ctx :mark-command-executed!))
                           (flush-pending-motion session)
                           (session:end-stroke {:x payload.x
                                                :y payload.y
@@ -80,34 +85,42 @@
                 (cleanup-if-needed)
                 true)})
 
-  (State
-    {:name :terrain-paint
-     :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
-              :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
-              :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
-              :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
-              :pen-proximity-in (Routes.Chain [PenHandlers.PenProximityIn])
-              :pen-proximity-out (Routes.Chain [PenHandlers.PenProximityOut])
-              :pen-motion (Routes.Chain [PenHandlers.PenMotion])
-              :pen-down (Routes.Chain [PenHandlers.PenDown])
-              :pen-up (Routes.Chain [PenHandlers.PenUp])
-              :pen-button-down (Routes.Chain [PenHandlers.PenButtonDown])
-              :pen-button-up (Routes.Chain [PenHandlers.PenButtonUp])
-              :pen-axis (Routes.Chain [PenHandlers.PenAxis])
-              :key-down (Routes.FirstHandlerWins [TerrainPaint])
-              :mouse-button-down (Routes.FirstHandlerWins [TerrainPaint])
-              :mouse-button-up (Routes.FirstHandlerWins [TerrainPaint])
-              :mouse-motion (Routes.FirstHandlerWins [TerrainPaint])
-              :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
-                                                    PointerHandlers.HoveredMouseWheel
-                                                    PointerHandlers.CameraMouseWheel])
-              :updated (Routes.Chain [TerrainPaint
-                                      CameraHandlers.CameraUpdated])}
-     :enter [PenHandlers.PenLifecycle
-             TouchHandlers.TouchLifecycle
-             TerrainPaint]
-     :leave [PenHandlers.PenLifecycle
-             TouchHandlers.TouchLifecycle
-             TerrainPaint]}))
+  (local state
+    (State
+      {:name :terrain-paint
+       :route-wrappers [Routes.CommandHints]
+       :command_hints_provider (fn [_ctx]
+                                 [(section :mode
+                                           "MODE"
+                                           [(entry "drag" "paint-stroke" {:priority 10})
+                                            (entry "esc" "cancel" {:priority 20})])])
+       :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
+                :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
+                :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
+                :touch-canceled (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseCanceled])
+                :pen-proximity-in (Routes.Chain [PenHandlers.PenProximityIn])
+                :pen-proximity-out (Routes.Chain [PenHandlers.PenProximityOut])
+                :pen-motion (Routes.Chain [PenHandlers.PenMotion])
+                :pen-down (Routes.Chain [PenHandlers.PenDown])
+                :pen-up (Routes.Chain [PenHandlers.PenUp])
+                :pen-button-down (Routes.Chain [PenHandlers.PenButtonDown])
+                :pen-button-up (Routes.Chain [PenHandlers.PenButtonUp])
+                :pen-axis (Routes.Chain [PenHandlers.PenAxis])
+                :key-down (Routes.FirstHandlerWins [TerrainPaint])
+                :mouse-button-down (Routes.FirstHandlerWins [TerrainPaint])
+                :mouse-button-up (Routes.FirstHandlerWins [TerrainPaint])
+                :mouse-motion (Routes.FirstHandlerWins [TerrainPaint])
+                :mouse-wheel (Routes.FirstHandlerWins [PointerHandlers.InputMouseWheelDispatch
+                                                      PointerHandlers.HoveredMouseWheel
+                                                      PointerHandlers.CameraMouseWheel])
+                :updated (Routes.Chain [TerrainPaint
+                                        CameraHandlers.CameraUpdated])}
+       :enter [PenHandlers.PenLifecycle
+               TouchHandlers.TouchLifecycle
+               TerrainPaint]
+       :leave [PenHandlers.PenLifecycle
+               TouchHandlers.TouchLifecycle
+               TerrainPaint]}))
+  state)
 
 TerrainPaintState

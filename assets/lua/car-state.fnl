@@ -22,6 +22,7 @@
 (local offset-from-physics (. Utils :offset-from-physics))
 (local wheel-lateral-offset (. Utils :wheel-lateral-offset))
 (local find-car (. Utils :find-car))
+(local {: entry : section} (require :command-hints))
 
 (local KEY
   {:forward (string.byte "w")
@@ -39,6 +40,14 @@
 (local max-steer 0.6)
 (local steer-step 0.04)
 (local suspension-rest-scale 0.55)
+
+(fn tracked-key? [key]
+  (or (= key KEY.forward)
+      (= key KEY.backward)
+      (= key KEY.left)
+      (= key KEY.right)
+      (= key KEY.brake)
+      (= key KEY.reset)))
 
 
 (fn CarState []
@@ -278,26 +287,29 @@
       (local transform (state.vehicle:getChassisWorldTransform))
       (sync-layout-from-transform transform)))
 
-  (fn on-key-down [payload]
+  (fn on-key-down [ctx payload]
     (local key (and payload payload.key))
     (if (= key SDLK_ESCAPE)
         (do
-          (when (and app.engine app.states app.states.set-state)
-            (app.states.set-state :normal))
+          ((. ctx :set-state) :normal)
           (set state.keys {})
           (reset-vehicle)
           (reset-layout-dirt)
           true)
-        (do
-          (when key
-            (set (. state.keys key) true))
-          true)))
+        (if (tracked-key? key)
+            (do
+              (when key
+                (set (. state.keys key) true))
+              true)
+            false)))
 
   (fn on-key-up [payload]
     (local key (and payload payload.key))
-    (when key
-      (set (. state.keys key) nil))
-    true)
+    (if (tracked-key? key)
+        (do
+          (set (. state.keys key) nil)
+          true)
+        false))
 
   (fn on-enter []
     (resolve-car)
@@ -318,9 +330,28 @@
               (on-enter))
      :leave (fn [_ctx]
               (on-leave))})
+  (fn car-command-sections []
+    [(section :mode
+              "MODE"
+              [(entry "w" "accelerate" {:priority 10})
+               (entry "s" "reverse" {:priority 11})
+               (entry "a/d" "steer" {:priority 12})
+               (entry "space" "brake" {:priority 13})
+               (entry "r" "reset-car" {:priority 20})
+               (entry "esc" "normal-mode" {:priority 30})])])
   (local CarControls
-    {:key-down (fn [_ctx payload]
-                 (on-key-down payload))
+    {:key-down (fn [ctx payload]
+                 (local handled (on-key-down ctx payload))
+                 (when (and handled
+                            (or (= (and payload payload.key) SDLK_ESCAPE)
+                                (= (and payload payload.key) KEY.forward)
+                                (= (and payload payload.key) KEY.backward)
+                                (= (and payload payload.key) KEY.left)
+                                (= (and payload payload.key) KEY.right)
+                                (= (and payload payload.key) KEY.brake)
+                                (= (and payload payload.key) KEY.reset)))
+                   ((. ctx :mark-command-executed!)))
+                 handled)
      :key-up (fn [_ctx payload]
                (on-key-up payload))
      :updated (fn [_ctx delta]
@@ -328,6 +359,9 @@
   (local result
     (State
       {:name :car
+       :route-wrappers [Routes.CommandHints]
+       :command_hints_provider (fn [_ctx]
+                                 (car-command-sections))
        :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
                 :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
                 :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])

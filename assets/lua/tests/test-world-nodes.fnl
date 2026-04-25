@@ -3174,13 +3174,19 @@
      :get-record (fn [] terrain-record)
      :get-live-scene (fn [] scene)
      :apply-values (fn [_self _values] true)})
-  (local states (States))
+  (local states
+    (States {:hud_provider
+             (fn [_self]
+               {:command-hints
+                {:handle-toggle-key (fn [_manager _payload] true)
+                 :close-on-handled-event (fn [_manager _route-key _payload] false)}})}))
   (set app.hud {:build-context ctx
                 :world-units-per-pixel 1})
-  (states.add-state :normal {})
-  (states.add-state :terrain-rect-pick (TerrainRectPickState))
-  (states.set-state :normal)
+  (states:add-state :normal {})
+  (states:add-state :terrain-rect-pick (TerrainRectPickState))
+  (states:set-state :normal)
   (set suspended-state (TestSupport.suspend-active-state original-states))
+  ((. (require :state-system-bindings) :bind-states-host) states)
   (set app.states states)
   (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
                        :on-mouse-button-up (fn [_self _payload] nil)
@@ -3190,7 +3196,7 @@
   (assert view.pick-button.enabled? "perlin tool live pick should enable when the terrain world is active")
   (for [_ 1 2]
     (view.pick-button:on-click {})
-    (assert (= (app.states.active-name) :terrain-rect-pick)
+    (assert (= (app.states:active-name) :terrain-rect-pick)
             "clicking pick rectangle should enter the explicit terrain rectangle pick state")
     (assert app.terrain-rect-pick-session
             "clicking pick rectangle should register the active terrain rectangle pick session")
@@ -3198,7 +3204,7 @@
     (app.engine.events.mouse-motion.emit {:x 40 :y 60})
     (app.engine.events.updated.emit 0.016)
     (app.engine.events.mouse-button-up.emit {:button 1 :x 40 :y 60})
-    (assert (= (app.states.active-name) :normal)
+    (assert (= (app.states:active-name) :normal)
             "successful rectangle picking should restore the previous state"))
   (local draft (and view.form (view.form:get-draft)))
   (local picked-target (and draft draft.picked-target))
@@ -3209,6 +3215,7 @@
   (assert (= picked-target.z1 4))
   (assert (= (text-entity-value view.selection-label) "12 samples across [1, 2] to [3, 4]"))
   (set app.terrain-rect-pick-session original-terrain-rect-pick-session)
+  ((. (require :state-system-bindings) :bind-states-host) original-states)
   (set app.states original-states)
   (TestSupport.resume-active-state suspended-state)
   (set app.hud original-hud)

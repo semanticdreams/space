@@ -1,20 +1,37 @@
 (local tests [])
+(local States (require :states))
 (local TetrisState (require :tetris-state))
 (local TetrisStateRouter (require :tetris-state-router))
+(local StateSystemBindings (require :state-system-bindings))
 
 (local SDLK_ESCAPE 27)
 (local SDLK_LEFT 1073741904)
 
+(fn make-command-hints-stub []
+  {:handle-toggle-key (fn [_self _payload] true)
+   :close-on-handled-event (fn [_self _route-key _payload] false)})
+
+(fn command-hints-hud-provider [_self]
+  {:command-hints (make-command-hints-stub)})
+
 (fn with-state-stub [body]
   (local original-states app.states)
   (local original-engine app.engine)
-  (local state-record {:name :normal :transitions []})
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (local state-record {:transitions []
+                       :states states})
   (set app.engine (or app.engine {}))
-  (set app.states {:set-state (fn [name]
-                                 (set state-record.name name)
-                                 (table.insert state-record.transitions name))
-                   :active-name (fn [] state-record.name)})
-  (let [(ok result) (pcall (fn [] (body state-record)))]
+  (states:add-state :normal {})
+  (states:add-state :tetris {})
+  (states:set-state :normal)
+  (states.changed:connect
+    (fn [event]
+      (table.insert state-record.transitions event.current)))
+  (set app.states states)
+  (StateSystemBindings.bind-states-host states)
+  (local (ok result) (pcall (fn [] (body state-record))))
+  (do
+    (StateSystemBindings.bind-states-host original-states)
     (set app.states original-states)
     (set app.engine original-engine)
     (when (not ok)
@@ -38,22 +55,24 @@
 
 (fn tetris-state-dispatches-pause []
   (with-state-stub
-    (fn [_record]
+    (fn [record]
       (var paused false)
       (local board {:on-pause (fn [_self _payload] (set paused true))})
       (TetrisStateRouter.connect-board board)
       (local state (TetrisState))
+      (record.states:add-state :tetris state)
       (state.on-key-down {:key SDLK_ESCAPE})
       (TetrisStateRouter.release-active-board)
       (assert paused "Escape should pause the board"))))
 
 (fn tetris-state-dispatches-keydown []
   (with-state-stub
-    (fn [_record]
+    (fn [record]
       (var last-key nil)
       (local board {:on-key-down (fn [_self payload] (set last-key payload.key))})
       (TetrisStateRouter.connect-board board)
       (local state (TetrisState))
+      (record.states:add-state :tetris state)
       (state.on-key-down {:key SDLK_LEFT})
       (TetrisStateRouter.release-active-board)
       (assert (= last-key SDLK_LEFT) "Arrow key should dispatch to board"))))

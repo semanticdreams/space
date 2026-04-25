@@ -4,10 +4,13 @@
 (local BuildContext (require :build-context))
 (local {: LayoutRoot} (require :layout))
 (local States (require :states))
+(local StateSystemBindings (require :state-system-bindings))
 
 (local tests [])
 
 (local bt (require :bt))
+(local KEY_F1 1073741882)
+(local KEY_UNRELATED (string.byte "u"))
 (local reset-engine-events
   (fn []
     (when _G.reset-engine-events
@@ -17,7 +20,9 @@
   (when (not (and app.engine app.engine.events app.engine.events.updated))
     (reset-engine-events))
   (when (not (and app.engine app.states))
-    (set app.states (States))))
+    (local states (States))
+    (StateSystemBindings.bind-states-host states)
+    (set app.states states)))
 
 (fn build-demo-car [position]
   (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
@@ -32,6 +37,48 @@
   (root:update)
   (set app.scene {:entity host})
   {:host host :root root})
+
+(fn with-demo-car-state [body opts]
+  (local options (or opts {}))
+  (local original-states app.states)
+  (local original-scene app.scene)
+  (var build nil)
+  (var host nil)
+  (var state nil)
+  (local states
+    (or options.states
+        (States {:hud_provider
+                 (fn [_states]
+                   {:command-hints
+                    {:handle-toggle-key (fn [_self _payload]
+                                          false)
+                     :close-on-handled-event (fn [_self _route-key _payload]
+                                               false)}})})))
+  (when (not options.states)
+    (states:add-state :normal {})
+    (states:set-state :normal))
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  (local (ok result)
+    (pcall
+      (fn []
+        (set build (build-demo-car (glm.vec3 0 0 0)))
+        (set host build.host)
+        (set state (CarState))
+        (when states
+          (states:add-state :car state))
+        (state:on-enter)
+        (body state host))))
+  (when state
+    (state:on-leave))
+  (when host
+    (host:drop))
+  (set app.scene original-scene)
+  (StateSystemBindings.bind-states-host original-states)
+  (set app.states original-states)
+  (when (not ok)
+    (error result))
+  result)
 
 (fn vehicle-binding-creates-raycast []
   (assert bt "Vehicle test requires Bullet bindings")
@@ -69,61 +116,85 @@
   (assert bt "Car state test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
   (ensure-events-and-states)
-  (local build (build-demo-car (glm.vec3 0 0 0)))
-  (local host build.host)
-  (local state (CarState))
-  (state:on-enter)
-  (state:on-key-down {:key CarState.KEY.forward})
-  (state:on-key-down {:key CarState.KEY.left})
-  (state:on-updated 0.016)
-  (local internal state.__car_state)
-  (local vehicle (and internal internal.vehicle))
-  (local steer (and internal internal.steer))
-  (state:on-key-up {:key CarState.KEY.forward})
-  (state:on-key-up {:key CarState.KEY.left})
-  (state:on-leave)
-  (host:drop)
-  (assert vehicle "Car state did not create a vehicle")
-  (assert (= (vehicle:getNumWheels) 4) "Vehicle did not add four wheels")
-  (assert (< (or steer 0) 0) "Left key did not update steering state"))
+  (with-demo-car-state
+    (fn [state _host]
+      (state:on-key-down {:key CarState.KEY.forward})
+      (state:on-key-down {:key CarState.KEY.left})
+      (state:on-updated 0.016)
+      (local internal state.__car_state)
+      (local vehicle (and internal internal.vehicle))
+      (local steer (and internal internal.steer))
+      (state:on-key-up {:key CarState.KEY.forward})
+      (state:on-key-up {:key CarState.KEY.left})
+      (assert vehicle "Car state did not create a vehicle")
+      (assert (= (vehicle:getNumWheels) 4) "Vehicle did not add four wheels")
+      (assert (< (or steer 0) 0) "Left key did not update steering state"))))
 
 (fn car-state-ignores-first-person-controls []
   (ensure-events-and-states)
-  (local build (build-demo-car (glm.vec3 0 0 0)))
-  (local host build.host)
   (var called 0)
   (set app.first-person-controls {:update (fn [_ delta]
                                               (set called (+ called 1))
                                               (assert delta "Expected delta to be provided"))})
-  (local state (CarState))
-  (state:on-enter)
-  (state:on-updated 0.02)
-  (state:on-leave)
-  (host:drop)
+  (with-demo-car-state
+    (fn [state _host]
+      (state:on-updated 0.02)))
   (assert (= called 0) "Car state should not forward updates to first-person controls"))
 
 (fn car-state-survives-gc-during-physics-step []
   (assert bt "Car state test requires Bullet bindings")
   (assert (and app.engine app.engine.physics) "Physics instance not available")
   (ensure-events-and-states)
-  (local build (build-demo-car (glm.vec3 0 0 0)))
-  (local host build.host)
-  (local state (CarState))
-  (state:on-enter)
-  (local internal state.__car_state)
-  (assert internal.vehicle "Car state did not create a vehicle")
-  (collectgarbage)
-  (collectgarbage)
-  (app.engine.physics:update 16)
-  (state:on-updated 0.016)
-  (assert internal.vehicle "Vehicle lost during physics update")
-  (state:on-leave)
-  (host:drop))
+  (with-demo-car-state
+    (fn [state _host]
+      (local internal state.__car_state)
+      (assert internal.vehicle "Car state did not create a vehicle")
+      (collectgarbage)
+      (collectgarbage)
+      (app.engine.physics:update 16)
+      (state:on-updated 0.016)
+      (assert internal.vehicle "Vehicle lost during physics update"))))
+
+(fn car-state-does-not-swallow-unrelated-keys []
+  (ensure-events-and-states)
+  (with-demo-car-state
+    (fn [state _host]
+      (local handled (state:on-key-down {:key KEY_UNRELATED}))
+      (local internal state.__car_state)
+      (local key-state (. internal.keys KEY_UNRELATED))
+      (assert (not handled) "Car state should let unrelated keys fall through")
+      (assert (= key-state nil) "Car state should not record unrelated keys as active"))))
+
+(fn car-state-f1-toggles-command-hints []
+  (ensure-events-and-states)
+  (var toggles 0)
+  (local states
+    (States {:hud_provider
+             (fn [_states]
+               {:command-hints
+                {:handle-toggle-key (fn [_self payload]
+                                      (assert (= payload.key KEY_F1)
+                                              "F1 toggle should receive the original payload")
+                                      (set toggles (+ toggles 1))
+                                      true)
+                 :close-on-handled-event (fn [_self _route-key _payload]
+                                           false)}})}))
+  (states:add-state :normal {})
+  (states:set-state :normal)
+  (with-demo-car-state
+    (fn [state _host]
+      (assert (state:on-key-down {:key KEY_F1})
+              "Car state should route unhandled F1 to command hints")
+      (assert (= toggles 1)
+              "Car state F1 should toggle command hints through the HUD host"))
+    {:states states}))
 
 (table.insert tests {:name "Vehicle bindings expose raycast vehicle" :fn vehicle-binding-creates-raycast})
 (table.insert tests {:name "Car state moves car with keyboard input" :fn car-state-drives-forward})
 (table.insert tests {:name "Car state does not touch first-person controls" :fn car-state-ignores-first-person-controls})
 (table.insert tests {:name "Car state keeps Bullet objects alive across GC" :fn car-state-survives-gc-during-physics-step})
+(table.insert tests {:name "Car state does not swallow unrelated keys" :fn car-state-does-not-swallow-unrelated-keys})
+(table.insert tests {:name "Car state F1 toggles command hints" :fn car-state-f1-toggles-command-hints})
 
 (local main
   (fn []

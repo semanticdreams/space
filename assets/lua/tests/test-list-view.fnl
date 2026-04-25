@@ -6,10 +6,28 @@
 (local {: FocusManager} (require :focus))
 (local Button (require :button))
 (local NormalState (require :normal-state))
+(local States (require :states))
+(local StateSystemBindings (require :state-system-bindings))
 
 (local tests [])
 
 (local approx (. MathUtils :approx))
+
+(fn command-hints-hud-provider [_self]
+  {:command-hints
+   {:handle-toggle-key (fn [_manager _payload] true)
+    :close-on-handled-event (fn [_manager _route-key _payload] false)}})
+
+(fn ensure-command-hints-hud! [states]
+  (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
+    (states:set-hud-provider command-hints-hud-provider))
+  states)
+
+(fn set-app-states! [states]
+  (ensure-command-hints-hud! states)
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  states)
 
 (fn color= [a b]
   (and (approx a.x b.x)
@@ -251,10 +269,18 @@
   (assert item "ListView should build an item widget")
   (item:request-focus)
   (local original-focus app.focus)
+  (local original-states app.states)
+  (local states
+    (States {:focus_manager_provider (fn [_self]
+                                       app.focus)
+             :hud_provider command-hints-hud-provider}))
   (set app.focus manager)
+  (set-app-states! states)
   (local state (NormalState))
+  (states:add-state :normal state)
   (state.on-key-down {:key 13})
   (assert (= clicks 1) "Enter should activate focused list item")
+  (set-app-states! original-states)
   (set app.focus original-focus)
   (list:drop)
   (manager:drop))

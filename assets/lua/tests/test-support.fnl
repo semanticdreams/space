@@ -5,7 +5,7 @@
   (app.engine.get-asset-path (.. "lua/tests/data/" name)))
 
 (fn suspend-active-state [states]
-  (var active-state (and states states.active-state (states.active-state)))
+  (var active-state (and states states.active-state (states:active-state)))
   (when (and active-state active-state.on-leave)
     (local (ok err) (pcall active-state.on-leave active-state))
     (if ok

@@ -5,10 +5,18 @@
 (local InputState (require :input-state-router))
 (local States (require :states))
 (local NormalState (require :normal-state))
+(local StateSystemBindings (require :state-system-bindings))
 (local Signal (require :signal))
 (local terminal (require :terminal))
 
 (local tests [])
+
+(fn make-command-hints-stub []
+  {:handle-toggle-key (fn [_self _payload] true)
+   :close-on-handled-event (fn [_self _route-key _payload] false)})
+
+(fn command-hints-hud-provider [_self]
+  {:command-hints (make-command-hints-stub)})
 
 (local reset-engine-events
   (fn []
@@ -95,17 +103,26 @@
 
 (fn setup-state []
   (reset-engine-events)
+  (local original-states app.states)
   (set app.focus nil)
-  (set app.states (States))
-  (app.states.add-state :normal (NormalState))
-  (app.states.set-state :normal)
-  (app.states.get-state :normal))
+  (local states (States {:hud_provider command-hints-hud-provider
+                         :focus_manager_provider (fn [_self]
+                                                   app.focus)}))
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  (app.states:add-state :normal (NormalState))
+  (app.states:set-state :normal)
+  {:state (app.states:get-state :normal)
+   :original-states original-states})
 
-(fn teardown-state [state]
+(fn teardown-state [session]
+  (local state (and session session.state))
+  (local original-states (and session session.original-states))
   (when state
     (state.on-leave))
   (set app.focus nil)
-  (set app.states nil))
+  (StateSystemBindings.bind-states-host original-states)
+  (set app.states original-states))
 
 (fn make-widget [options]
   (local builder (TerminalWidget options))
@@ -140,7 +157,8 @@
            (fn [first handler]
              (set text-input-connect-count (+ text-input-connect-count 1))
              (original-connect first handler)))
-      (local state (setup-state))
+      (local session (setup-state))
+      (local state session.state)
       (set text-input-signal.connect original-connect)
       (local manager (FocusManager {:root-name "root"}))
       (local root (manager:get-root-scope))
@@ -180,7 +198,7 @@
       (assert mouse-call.pressed)
       (widget:drop)
       (manager:drop)
-      (teardown-state state)
+      (teardown-state session)
       (set app.engine.events original-events))))
 
 (fn terminal-updates-on-frame []

@@ -1,13 +1,38 @@
 
+(var states-provider nil)
+
+(fn assert-provider [provider]
+  (assert (or (= provider nil)
+              (= (type provider) :function))
+          "TerrainRectPickManager states provider must be a function"))
+
+(fn set-states-provider [provider]
+  (assert-provider provider)
+  (set states-provider provider)
+  provider)
+
+(fn require-states-host [action]
+  (local states (and states-provider
+                     (states-provider)))
+  (assert states
+          (.. "TerrainRectPickManager requires a states host for " action))
+  states)
 
 (fn current-state-name []
-  (and app.states app.states.active-name (app.states.active-name)))
+  (local states (require-states-host "current-state-name"))
+  (assert states.active-name
+          "TerrainRectPickManager states host must expose :active-name")
+  (states:active-name))
 
 (fn restore-previous-state []
-  (local previous (or app.terrain-rect-pick-previous-state :normal))
+  (local previous app.terrain-rect-pick-previous-state)
+  (assert previous
+          "TerrainRectPickManager requires a recorded previous state to restore")
+  (local states (require-states-host "restore-previous-state"))
   (set app.terrain-rect-pick-previous-state nil)
-  (when (and app.states app.states.set-state)
-    (app.states.set-state previous)))
+  (assert states.set-state
+          "TerrainRectPickManager states host must expose :set-state")
+  (states:set-state previous))
 
 (fn clear-previous-state []
   (set app.terrain-rect-pick-previous-state nil)
@@ -60,18 +85,26 @@
   (when (active-session)
     (cancel-active-session))
   (local current (current-state-name))
+  (assert current
+          "TerrainRectPickManager.begin requires an active state")
   (set app.terrain-rect-pick-session session)
   (set app.terrain-rect-pick-previous-state
        (if (= current :terrain-rect-pick)
-           (or app.terrain-rect-pick-previous-state :normal)
-           (or current :normal)))
+           (do
+             (assert app.terrain-rect-pick-previous-state
+                     "TerrainRectPickManager.begin requires previous state when already in terrain-rect-pick")
+             app.terrain-rect-pick-previous-state)
+           current))
   (session:begin)
-  (when (and app.states app.states.set-state)
-    (app.states.set-state :terrain-rect-pick))
+  (local states (require-states-host "begin"))
+  (assert states.set-state
+          "TerrainRectPickManager states host must expose :set-state")
+  (states:set-state :terrain-rect-pick)
   session)
 
 {:begin begin
  :active-session active-session
  :cleanup-inactive-session cleanup-inactive-session
  :cleanup-session cleanup-session
- :cancel-active-session cancel-active-session}
+ :cancel-active-session cancel-active-session
+ :set-states-provider set-states-provider}

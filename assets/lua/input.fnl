@@ -14,16 +14,6 @@
 (local {: resolve-input-colors
         : resolve-padding} (require :widget-theme-utils))
 
-(fn current-state-name []
-  (and app.engine
-       app.states
-       app.states.active-name
-       (app.states.active-name)))
-
-(fn set-state [name]
-  (when (and app.engine app.states app.states.set-state)
-    (app.states.set-state name)))
-
 (fn current-active-input []
   (and InputState
        InputState.active-input
@@ -690,8 +680,8 @@
         (set self.focused? true)
         (self:enter-normal-mode)
         (connect-to-state self)
-        (when (not (= (current-state-name) :text))
-          (set-state :text))
+        (when (not (= (InputState.current-state-name) :text))
+          (InputState.set-state :text))
         (self:update-focus-visual)))
 
     (fn handle-blur [self]
@@ -703,9 +693,10 @@
                    InputState.release-active-input
                    (= (InputState.active-input) self))
           (InputState.release-active-input))
-        (when (or (= (current-state-name) :text)
-                  (= (current-state-name) :insert))
-          (set-state :normal))
+        (local state-name (InputState.current-state-name))
+        (when (or (= state-name :text)
+                  (= state-name :insert))
+          (InputState.set-state :normal))
         (self:enter-normal-mode)
         (self:update-focus-visual)))
 

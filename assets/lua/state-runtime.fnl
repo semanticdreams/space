@@ -57,9 +57,11 @@
        (not (clickables-active?))
        (not (movables-active?))
        (not (resizables-active?))
-       (let [controls (active-controls)]
+       (do
+         (local controls (active-controls))
          (or (not controls)
-             (let [drag? (and controls controls.drag-active?)]
+             (do
+               (local drag? (and controls controls.drag-active?))
                (not (and drag? (drag? controls))))))))
 
 (fn handle-hover [payload]
@@ -84,18 +86,29 @@
   (local handled (dispatch-hovered-mouse-wheel payload))
   (if handled
       true
-      (let [controls (active-controls)]
+      (do
+        (local controls (active-controls))
         (and controls
              (controls:on-mouse-wheel payload)))))
 
-(fn handle-focus-tab [payload]
-  (if (and app.focus
-           payload
+(fn ctx-focus-manager [ctx action]
+  (assert (and ctx ctx.focus-manager)
+          "state runtime focus handling requires ctx.focus-manager")
+  (local focus-manager ((. ctx :focus-manager)))
+  (assert focus-manager
+          (.. "state runtime focus handling requires a focus manager for " action))
+  focus-manager)
+
+(fn handle-focus-tab [ctx payload]
+  (if (and payload
            (= payload.key SDLK_TAB)
            (not (ctrl-held? payload))
            (not (alt-held? payload)))
       (do
-        (app.focus:focus-next {:backwards? (shift-held? payload)})
+        (local focus-manager (ctx-focus-manager ctx "tab navigation"))
+        (assert focus-manager.focus-next
+                "state runtime focus tab handling requires focus-manager:focus-next")
+        (focus-manager:focus-next {:backwards? (shift-held? payload)})
         true)
       false))
 
@@ -110,15 +123,19 @@
                   :down
                   nil)))))
 
-(fn handle-focus-direction [payload]
-  (if (and app.focus payload)
-      (let [direction (focus-direction-for-key payload.key)]
+(fn handle-focus-direction [ctx payload]
+  (if payload
+      (do
+        (local direction (focus-direction-for-key payload.key))
         (if direction
             (if (InputState.active-input)
                 false
                 (do
-                  (app.focus:focus-direction {:direction direction
-                                              :camera app.camera})
+                  (local focus-manager (ctx-focus-manager ctx "directional navigation"))
+                  (assert focus-manager.focus-direction
+                          "state runtime focus direction handling requires focus-manager:focus-direction")
+                  (focus-manager:focus-direction {:direction direction
+                                                  :camera app.camera})
                   true))
             false))
       false))
@@ -143,8 +160,7 @@
 
 (fn reset []
   (set ignore-next-text-input-count 0)
-  (when InputState.reset
-    (InputState.reset)))
+  (InputState.reset))
 
 {:shift-held? shift-held?
  :ctrl-held? ctrl-held?

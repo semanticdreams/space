@@ -1,18 +1,38 @@
 (var active-input nil)
+(var states-provider nil)
+
+(fn assert-provider [provider]
+  (assert (or (= provider nil)
+              (= (type provider) :function))
+          "InputStateRouter states provider must be a function"))
+
+(fn states-host [action]
+  (local states (and states-provider
+                     (states-provider)))
+  (assert states
+          (.. "InputStateRouter requires a states host for " action))
+  states)
+
+(fn set-states-provider [provider]
+  (assert-provider provider)
+  (set states-provider provider)
+  provider)
 
 (fn set-state [name]
-  (when (and app.engine app.states app.states.set-state)
-    (app.states.set-state name)))
+  (local states (states-host "state transitions"))
+  (assert (and states states.set-state)
+          "InputStateRouter requires a states host for state transitions")
+  (states:set-state name))
 
 (fn set-text-input-enabled [enabled?]
   (when (and app.engine app.engine.set-text-input-enabled)
     (app.engine.set-text-input-enabled enabled?)))
 
 (fn current-state-name []
-  (and app.engine
-       app.states
-       app.states.active-name
-       (app.states.active-name)))
+  (local states (states-host "current-state-name"))
+  (assert states.active-name
+          "InputStateRouter states host must expose :active-name")
+  (states:active-name))
 
 (fn release-active-input []
   (when active-input
@@ -56,6 +76,9 @@
  :disconnect-input disconnect-input
  :dispatch-input dispatch-input
  :active-input (fn [] active-input)
+ :current-state-name current-state-name
+ :set-state set-state
+ :set-states-provider set-states-provider
  :reset reset
  :release-active-input release-active-input}
 

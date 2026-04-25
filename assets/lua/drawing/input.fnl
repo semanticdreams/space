@@ -1,6 +1,7 @@
 (local Runtime (require :state-runtime))
 (local Common (require :state-handlers/common))
 (local HitTest (require :drawing/hit-test))
+(local {: entry : section} (require :command-hints))
 
 (local SDL_BUTTON_LEFT 1)
 (local SDLK_DELETE 127)
@@ -31,6 +32,24 @@
   (and app.drawing-controller app.drawing-controller.active-layer
        (app.drawing-controller:active-layer)))
 
+(fn command-hints-sections [_payload]
+  (local controller (active-controller))
+  (if (not controller)
+      []
+      (do
+        (local entries [])
+        (when (> (controller:selection-count) 0)
+          (table.insert entries (entry "del" "delete-selection" {:priority 10})))
+        (when (controller:can-undo?)
+          (table.insert entries (entry "ctrl+z" "undo" {:priority 20})))
+        (when (controller:can-redo?)
+          (table.insert entries (entry "ctrl+y" "redo" {:priority 21})))
+        (when (controller:gesture-active?)
+          (table.insert entries (entry "esc" "cancel-gesture" {:priority 30})))
+        (if (> (length entries) 0)
+            [(section :context "CONTEXT" entries)]
+            []))))
+
 (local DrawingKeyDown
   {:key-down
    (fn [ctx payload]
@@ -41,15 +60,31 @@
          (do
            (local key payload.key)
            (if (= key SDLK_DELETE)
-               (controller:on-delete-selection)
+               (do
+                 (local handled (controller:on-delete-selection))
+                 (when handled
+                   ((. ctx :mark-command-executed!)))
+                 handled)
                (and (Runtime.ctrl-held? payload)
                     (or (= key KEY_Z_LOWER) (= key KEY_Z_UPPER)))
-               (controller:on-undo)
+               (do
+                 (local handled (controller:on-undo))
+                 (when handled
+                   ((. ctx :mark-command-executed!)))
+                 handled)
                (and (Runtime.ctrl-held? payload)
                     (or (= key KEY_Y_LOWER) (= key KEY_Y_UPPER)))
-               (controller:on-redo)
+               (do
+                 (local handled (controller:on-redo))
+                 (when handled
+                   ((. ctx :mark-command-executed!)))
+                 handled)
                (= key SDLK_ESCAPE)
-               (controller:cancel-gesture)
+               (do
+                 (local handled (controller:cancel-gesture))
+                 (when handled
+                   ((. ctx :mark-command-executed!)))
+                 handled)
                false))))})
 
 (local DrawingMouseButtonDown
@@ -122,4 +157,5 @@
 {:DrawingKeyDown DrawingKeyDown
  :DrawingMouseButtonDown DrawingMouseButtonDown
  :DrawingMouseMotion DrawingMouseMotion
- :DrawingMouseButtonUp DrawingMouseButtonUp}
+ :DrawingMouseButtonUp DrawingMouseButtonUp
+ :CommandHintsProvider command-hints-sections}

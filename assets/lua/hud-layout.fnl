@@ -25,6 +25,15 @@
   (local half-height (or target.half-height 0))
   (math.max 0.001 (- (* half-height 2) (* margin 2))))
 
+(fn status-root-height [hud]
+  (assert hud "StatusAnchored requires :hud or ctx.pointer-target")
+  (local entity (assert hud.entity "StatusAnchored requires hud.entity"))
+  (local status-root (assert entity.status-root "StatusAnchored requires hud.entity.status-root"))
+  (local layout (assert status-root.layout "StatusAnchored requires hud.entity.status-root.layout"))
+  (local size (or layout.size layout.measure))
+  (assert size "StatusAnchored requires status-root layout size or measure")
+  size.y)
+
 (fn FullWidth [opts]
   (assert opts.child "FullWidth requires :child")
   (fn build [ctx]
@@ -64,6 +73,39 @@
       (child:drop))
 
     {: child : layout : drop}))
+
+(fn StatusAnchored [opts]
+  (assert opts.child "StatusAnchored requires :child")
+  (fn build [ctx]
+    (local child (opts.child ctx))
+    (local hud (or opts.hud ctx.pointer-target))
+
+    (fn measurer [self]
+      (child.layout:measurer)
+      (set self.measure child.layout.measure))
+
+    (fn layouter [self]
+      (set self.size (or self.size self.measure))
+      (local offset (glm.vec3 0 (status-root-height hud) 0))
+      (set child.layout.size self.size)
+      (set child.layout.position (+ self.position (self.rotation:rotate offset)))
+      (set child.layout.rotation self.rotation)
+      (set child.layout.depth-offset-index self.depth-offset-index)
+      (set child.layout.clip-region self.clip-region)
+      (child.layout:layouter))
+
+    (local layout
+      (Layout {:name (or opts.name "status-anchored")
+               : measurer : layouter
+               :children [child.layout]}))
+
+    (fn drop [self]
+      (self.layout:drop)
+      (child:drop))
+
+    {:child child
+     :layout layout
+     :drop drop}))
 
 (fn make-overlay-root []
   (fn build [_ctx]
@@ -257,6 +299,8 @@
 
     {:layout layout
      :update update
+     :control-root control
+     :status-root status
      :tiles-root tiles
      :float-root float
      :left-dock-root left-dock
@@ -264,5 +308,6 @@
      :drop drop}))
 
 {:FullWidth FullWidth
+ :StatusAnchored StatusAnchored
  :make-overlay-root make-overlay-root
  :make-hud-builder make-hud-builder}

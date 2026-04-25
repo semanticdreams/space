@@ -10,6 +10,7 @@
 (local CameraHandlers (require :state-handlers/camera))
 (local Runtime (require :state-runtime))
 (local InputState (require :input-state-router))
+(local {: entry : section : KEY_F1} (require :command-hints))
 
 (local SDLK_RETURN 13)
 (local SDLK_LEFT 1073741904)
@@ -47,28 +48,22 @@
       (or (. shifted-key-map key) key)
       key))
 
-(local whitespace-codepoints
-  (let [table {}]
-    (tset table 9 true)
-    (tset table 10 true)
-    (tset table 11 true)
-    (tset table 12 true)
-    (tset table 13 true)
-    (tset table 32 true)
-    table))
+(local whitespace-codepoints {})
+(tset whitespace-codepoints 9 true)
+(tset whitespace-codepoints 10 true)
+(tset whitespace-codepoints 11 true)
+(tset whitespace-codepoints 12 true)
+(tset whitespace-codepoints 13 true)
+(tset whitespace-codepoints 32 true)
 
 (fn whitespace? [codepoint]
   (and codepoint (. whitespace-codepoints codepoint)))
 
-(fn set-state [name]
-  (when (and app.engine app.states app.states.set-state)
-    (app.states.set-state name)))
-
 (fn active-input []
   (and InputState InputState.active-input (InputState.active-input)))
 
-(fn enter-insert-mode []
-  (set-state :insert))
+(fn enter-insert-mode [ctx]
+  ((. ctx :set-state) :insert))
 
 (fn input-model [input]
   (or (and input input.model) input))
@@ -118,7 +113,8 @@
 (fn line-first-nonblank [line]
   (if (not line)
       0
-      (let [codepoints (or line.codepoints [])]
+      (do
+        (local codepoints (or line.codepoints []))
         (var column 0)
         (var found nil)
         (each [_ codepoint (ipairs codepoints)]
@@ -149,49 +145,56 @@
   (local lines (input-lines input))
   (local model (input-model input))
   (if (not lines)
-      (let [codepoints (or (and model model.codepoints) [])
-            total (length codepoints)
-            clamped (clamp-column-to-line total column)
-            moved (input:move-caret-to clamped)]
+      (do
+        (local codepoints (or (and model model.codepoints) []))
+        (local total (length codepoints))
+        (local clamped (clamp-column-to-line total column))
+        (local moved (input:move-caret-to clamped))
         (remember-column input clamped)
         moved)
-      (let [total (line-count lines)]
+      (do
+        (local total (line-count lines))
         (if (<= total 0)
-            (let [moved (input:move-caret-to 0)]
+            (do
+              (local moved (input:move-caret-to 0))
               (remember-column input 0)
               moved)
-            (let [clamped (clamp-line-index lines line-index)
-                  line-size (line-length lines clamped)
-                  clamped-column (clamp-column-to-line line-size column)
-                  start (line-start-index lines clamped)
-                  target (+ start clamped-column)
-                  moved (input:move-caret-to target)]
+            (do
+              (local clamped (clamp-line-index lines line-index))
+              (local line-size (line-length lines clamped))
+              (local clamped-column (clamp-column-to-line line-size column))
+              (local start (line-start-index lines clamped))
+              (local target (+ start clamped-column))
+              (local moved (input:move-caret-to target))
               (remember-column input clamped-column)
               moved)))))
 
 (fn move-to-line-edge [input edge]
   (local lines (input-lines input))
   (if (not lines)
-      (let [model (input-model input)
-            codepoints (or (and model model.codepoints) [])
-            column (if (= edge :start)
-                       0
-                       (last-valid-column (length codepoints)))]
+      (do
+        (local model (input-model input))
+        (local codepoints (or (and model model.codepoints) []))
+        (local column (if (= edge :start)
+                          0
+                          (last-valid-column (length codepoints))))
         (move-to-line-column input 0 column))
-      (let [current (clamp-line-index lines (current-line-index input))
-            line-size (line-length lines current)
-            column (if (= edge :start)
-                       0
-                       (last-valid-column line-size))]
+      (do
+        (local current (clamp-line-index lines (current-line-index input)))
+        (local line-size (line-length lines current))
+        (local column (if (= edge :start)
+                          0
+                          (last-valid-column line-size)))
         (move-to-line-column input current column))))
 
 (fn move-to-first-nonblank [input]
   (local lines (input-lines input))
   (if (not lines)
       (move-to-line-edge input :start)
-      (let [current (clamp-line-index lines (current-line-index input))
-            line (. lines (+ current 1))
-            column (line-first-nonblank line)]
+      (do
+        (local current (clamp-line-index lines (current-line-index input)))
+        (local line (. lines (+ current 1)))
+        (local column (line-first-nonblank line))
         (move-to-line-column input current column))))
 
 (fn move-to-first-line [input]
@@ -211,20 +214,23 @@
   (local lines (input-lines input))
   (if (or (not model) (not lines))
       (input:move-caret delta)
-      (let [column (math.max 0 (or model.cursor-column 0))
-            line-index (math.max 0 (or model.cursor-line 0))
-            line-size (line-length lines line-index)
-            max-column (last-valid-column line-size)]
+      (do
+        (local column (math.max 0 (or model.cursor-column 0)))
+        (local line-index (math.max 0 (or model.cursor-line 0)))
+        (local line-size (line-length lines line-index))
+        (local max-column (last-valid-column line-size))
         (if (< delta 0)
             (if (> column 0)
-                (let [moved (input:move-caret delta)]
+                (do
+                  (local moved (input:move-caret delta))
                   (when moved
                     (remember-column input nil))
                   moved)
                 false)
             (if (and (> line-size 0)
                      (< column max-column))
-                (let [moved (input:move-caret delta)]
+                (do
+                  (local moved (input:move-caret delta))
                   (when moved
                     (remember-column input nil))
                   moved)
@@ -235,11 +241,13 @@
   (local lines (input-lines input))
   (if (not lines)
       false
-      (let [total (line-count lines)]
+      (do
+        (local total (line-count lines))
         (if (<= total 0)
             false
-            (let [current (clamp-line-index lines (current-line-index input))
-                  target (math.max 0 (math.min (+ current delta) (- total 1)))]
+            (do
+              (local current (clamp-line-index lines (current-line-index input)))
+              (local target (math.max 0 (math.min (+ current delta) (- total 1))))
               (if (= target current)
                   false
                   (move-to-line-column input target (preferred-column input))))))))
@@ -248,21 +256,22 @@
   (local lines (input-lines input))
   (if (not lines)
       (move-to-line-column input 0 (current-column input))
-      (let [current-line (clamp-line-index lines (current-line-index input))
-            column (current-column input)
-            line-size (line-length lines current-line)
-            clamped (clamp-column-to-line line-size column)]
+      (do
+        (local current-line (clamp-line-index lines (current-line-index input)))
+        (local column (current-column input))
+        (local line-size (line-length lines current-line))
+        (local clamped (clamp-column-to-line line-size column))
         (if (= column clamped)
             false
             (move-to-line-column input current-line clamped)))))
 
-(fn enter-insert-state [input]
+(fn enter-insert-state [ctx input]
   (input:enter-insert-mode)
   (Runtime.ignore-next-text-input)
-  (enter-insert-mode)
+  (enter-insert-mode ctx)
   true)
 
-(fn open-line-below [input]
+(fn open-line-below [ctx input]
   (if (not (= input.multiline? true))
       false
       (do
@@ -270,43 +279,45 @@
         (input:move-caret 1)
         (input:insert-text "\n")
         (remember-column input 0)
-        (enter-insert-state input))))
+        (enter-insert-state ctx input))))
 
-(fn open-line-above [input]
+(fn open-line-above [ctx input]
   (if (not (= input.multiline? true))
       false
-      (let [lines (input-lines input)]
+      (do
+        (local lines (input-lines input))
         (if (not lines)
             false
-            (let [current (clamp-line-index lines (current-line-index input))
-                  start (line-start-index lines current)]
+            (do
+              (local current (clamp-line-index lines (current-line-index input)))
+              (local start (line-start-index lines current))
               (input:move-caret-to start)
               (input:insert-text "\n")
               (input:move-caret-to start)
               (remember-column input 0)
-              (enter-insert-state input))))))
+              (enter-insert-state ctx input))))))
 
-(fn command-enter-insert [input _state]
-  (enter-insert-state input))
+(fn command-enter-insert [input _state ctx]
+  (enter-insert-state ctx input))
 
-(fn command-insert-after [input _state]
+(fn command-insert-after [input _state ctx]
   (input:move-caret 1)
-  (enter-insert-state input))
+  (enter-insert-state ctx input))
 
-(fn command-append-line-end [input _state]
+(fn command-append-line-end [input _state ctx]
   (move-to-line-edge input :end)
   (input:move-caret 1)
-  (enter-insert-state input))
+  (enter-insert-state ctx input))
 
-(fn command-insert-line-start [input _state]
+(fn command-insert-line-start [input _state ctx]
   (move-to-first-nonblank input)
-  (enter-insert-state input))
+  (enter-insert-state ctx input))
 
-(fn command-open-line-below [input _state]
-  (open-line-below input))
+(fn command-open-line-below [input _state ctx]
+  (open-line-below ctx input))
 
-(fn command-open-line-above [input _state]
-  (open-line-above input))
+(fn command-open-line-above [input _state ctx]
+  (open-line-above ctx input))
 
 (fn command-go-last-line [input _state]
   (move-to-last-line input))
@@ -343,29 +354,57 @@
   (local line-start (command-line-edge :start))
   (local line-end (command-line-edge :end))
   (local keymap {})
+  (local root-entries [])
+  (local prefixes {})
   (fn bind [target key binding]
     (tset target key binding))
+  (fn hint [key label priority opts]
+    (local options (or opts {}))
+    (entry key label {:priority priority
+                      :show-collapsed? options.show-collapsed?}))
   (bind keymap KEY.i {:handler command-enter-insert})
+  (table.insert root-entries (hint "i" "insert" 10))
   (bind keymap KEY.a {:handler command-insert-after})
+  (table.insert root-entries (hint "a" "append-after" 11))
   (bind keymap KEY.A {:handler command-append-line-end})
+  (table.insert root-entries (hint "A" "append-line-end" 12 {:show-collapsed? false}))
   (bind keymap KEY.I {:handler command-insert-line-start})
+  (table.insert root-entries (hint "I" "insert-line-start" 13 {:show-collapsed? false}))
   (bind keymap KEY.o {:handler command-open-line-below})
+  (table.insert root-entries (hint "o" "open-below" 14))
   (bind keymap KEY.O {:handler command-open-line-above})
+  (table.insert root-entries (hint "O" "open-above" 15 {:show-collapsed? false}))
   (local g-map {})
   (bind g-map KEY.g {:handler command-go-first-line})
+  (set (. prefixes g-map)
+       {:title "GOTO"
+        :entries [(hint "g" "first-line" 10)
+                  (hint "esc" "cancel-prefix" 90)]})
   (bind keymap KEY.g {:next g-map})
+  (table.insert root-entries (hint "g" "goto" 20))
   (bind keymap KEY.G {:handler command-go-last-line})
+  (table.insert root-entries (hint "G" "last-line" 21 {:show-collapsed? false}))
   (bind keymap KEY.h {:handler move-left})
+  (table.insert root-entries (hint "h" "left" 30))
   (bind keymap KEY.l {:handler move-right})
+  (table.insert root-entries (hint "l" "right" 31))
   (bind keymap KEY.j {:handler move-down})
+  (table.insert root-entries (hint "j" "down" 32))
   (bind keymap KEY.k {:handler move-up})
+  (table.insert root-entries (hint "k" "up" 33))
   (bind keymap KEY.zero {:handler line-start})
+  (table.insert root-entries (hint "0" "line-start" 40 {:show-collapsed? false}))
   (bind keymap KEY.dollar {:handler line-end})
+  (table.insert root-entries (hint "$" "line-end" 41 {:show-collapsed? false}))
   (bind keymap KEY.caret {:handler command-first-nonblank})
+  (table.insert root-entries (hint "^" "first-nonblank" 42 {:show-collapsed? false}))
   (bind keymap KEY.x {:handler command-delete-forward})
+  (table.insert root-entries (hint "x" "delete-char" 50))
   (bind keymap SDLK_LEFT {:handler move-left})
   (bind keymap SDLK_RIGHT {:handler move-right})
-  keymap)
+  {:keymap keymap
+   :root-entries root-entries
+   :prefixes prefixes})
 
 (fn binding-handler [binding]
   (if (= (type binding) "table")
@@ -377,17 +416,22 @@
 (fn binding-next [binding]
   (and (= (type binding) "table") binding.next))
 
-(fn apply-binding [state input binding]
+(fn apply-binding [ctx state input binding]
   (local next (binding-next binding))
   (if next
       (do
         (set state.pending-keymap next)
         true)
-      (let [handler (binding-handler binding)]
+      (do
+        (local handler (binding-handler binding))
         (set state.pending-keymap nil)
-        (if handler
-            (handler input state)
-            false))))
+        (if (not handler)
+            false
+            (do
+              (local handled (handler input state ctx))
+              (when handled
+                ((. ctx :mark-command-executed!)))
+              handled)))))
 
 (fn resolve-binding [state key]
   (local keymap (or state.pending-keymap state.keymap))
@@ -400,24 +444,24 @@
             (resolve-binding state key))
           nil)))
 
-(fn handle-key-command [state input key]
+(fn handle-key-command [ctx state input key]
   (local binding (resolve-binding state key))
   (if binding
-      (apply-binding state input binding)
+      (apply-binding ctx state input binding)
       false))
 
-(fn handle-text-key [state payload]
+(fn handle-text-key [ctx state payload]
   (local input (active-input))
   (if (not input)
       false
       (do
         (clamp-caret-to-current-line input)
-        (let [key (resolve-key payload)]
-          (if (not key)
-              false
-              (handle-key-command state input key))))))
+        (local key (resolve-key payload))
+        (if (not key)
+            false
+            (handle-key-command ctx state input key)))))
 
-(fn handle-submit [payload]
+(fn handle-submit [ctx payload]
   (local input (active-input))
   (if (not input)
       false
@@ -426,22 +470,35 @@
                (Runtime.ctrl-held? payload))
           (do
             (input:submit payload)
+            ((. ctx :mark-command-executed!))
             true)
           false)))
 
-(fn on-key-down [state payload]
-  (if (handle-submit payload)
+(fn on-key-down [ctx state payload]
+  (local mark-command (fn []
+                        ((. ctx :mark-command-executed!))))
+  (if (handle-submit ctx payload)
       true
-      (if (InputState.dispatch-input :on-key-down payload)
-          true
-          (if (handle-text-key state payload)
-              true
-              (if (Runtime.handle-focus-tab payload)
-                  true
-                  (if (active-input)
-                      true
-                      (and app.first-person-controls
-                           (app.first-person-controls:on-key-down payload))))))))
+      (InputState.dispatch-input :on-key-down payload)
+      (do
+        (mark-command)
+        true)
+      (handle-text-key ctx state payload)
+      true
+      (Runtime.handle-focus-tab ctx payload)
+      (do
+        (mark-command)
+        true)
+      (and (active-input)
+           (not (= (and payload payload.key) KEY_F1)))
+      true
+      app.first-person-controls
+      (do
+        (local handled (app.first-person-controls:on-key-down payload))
+        (when handled
+          (mark-command))
+        handled)
+      false))
 
 (fn sync-mode []
   (local input (active-input))
@@ -457,11 +514,35 @@
                 (set state.pending-keymap nil))
               (sync-mode))})
   (local TextCommands
-    {:key-down (fn [_ctx payload]
-                 (on-key-down state payload))})
+    {:key-down (fn [ctx payload]
+                 (not (not (on-key-down ctx state payload))))})
   (set state
        (State
-         {:name :text
+        {:name :text
+         :route-wrappers [Routes.CommandHints]
+          :command_hints_provider
+          (fn [_self payload]
+            (local prefixes state.command_hints_prefixes)
+            (local pending state.pending-keymap)
+            (local prefix-meta (and prefixes pending (. prefixes pending)))
+            (local focus-manager (and payload payload.focus-manager))
+            (local entries [])
+            (if prefix-meta
+                (each [_ hint (ipairs (or prefix-meta.entries []))]
+                  (table.insert entries hint))
+                (do
+                  (each [_ hint (ipairs (or state.command_hints_root []))]
+                    (table.insert entries hint))
+                  (table.insert entries (entry "ctrl+enter" "submit" {:priority 16 :show-collapsed? false}))
+                  (when focus-manager
+                    (table.insert entries (entry "tab" "focus-next" {:priority 60 :show-collapsed? false})))))
+            (if (> (length entries) 0)
+                [(section :mode
+                          (if (and prefix-meta prefix-meta.title)
+                              (.. "MODE " prefix-meta.title)
+                              "MODE")
+                          entries)]
+                []))
           :routes {:touch-down (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseDown])
                    :touch-motion (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseMotion])
                    :touch-up (Routes.FirstHandlerWins [TouchHandlers.PrimaryTouchMouseUp])
@@ -514,7 +595,10 @@
           :leave [PenHandlers.PenLifecycle
                   TouchHandlers.TouchLifecycle
                   HoverHandlers.HoverLifecycle]}))
-  (set state.keymap (make-default-keymap))
+  (local keymap-model (make-default-keymap))
+  (set state.keymap keymap-model.keymap)
+  (set state.command_hints_root keymap-model.root-entries)
+  (set state.command_hints_prefixes keymap-model.prefixes)
   (set state.pending-keymap nil)
   state)
 

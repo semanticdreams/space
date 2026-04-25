@@ -25,10 +25,26 @@
 (local HeightfieldTerrainGrid (require :heightfield-terrain-grid))
 (local fixtures (require :tests/http-fixtures))
 (local TestSupport (require :tests/test-support))
+(local StateSystemBindings (require :state-system-bindings))
 
 (local tests [])
 
 (local approx (. MathUtils :approx))
+
+(fn ensure-command-hints-hud! [states]
+  (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
+    (states:set-hud-provider
+      (fn [_self]
+        {:command-hints
+         {:handle-toggle-key (fn [_manager _payload] true)
+          :close-on-handled-event (fn [_manager _route-key _payload] false)}})))
+  states)
+
+(fn set-app-states! [states]
+  (ensure-command-hints-hud! states)
+  (StateSystemBindings.bind-states-host states)
+  (set app.states states)
+  states)
 
 (fn vec3-approx= [a b]
   (and (approx a.x b.x)
@@ -1436,11 +1452,11 @@
                                     :on-stamp-batch (fn [targets _hit]
                                                       (table.insert stamped-batches targets))}))
         (local states (States))
-        (states.add-state :normal {})
-        (states.add-state :terrain-paint (TerrainPaintState))
-        (states.set-state :normal)
+        (states:add-state :normal {})
+        (states:add-state :terrain-paint (TerrainPaintState))
+        (states:set-state :normal)
         (set suspended-state (TestSupport.suspend-active-state original-states))
-        (set app.states states)
+        (set-app-states! states)
         (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
                              :on-mouse-button-up (fn [_self _payload] nil)
                              :active? false})
@@ -1475,7 +1491,7 @@
                 "paint capture should include intermediate samples along the stroke")
         (assert (= (. (. (. stamped-batches 2) 2) :x0) 3)
                 "paint capture should include the moved-to sample under the cursor")
-        (assert (= (states.active-name) :normal)
+        (assert (= (states:active-name) :normal)
                 "paint capture should restore the previous state after completion")
         (capture:drop))))
   (app.set-viewport original-viewport)
@@ -1484,7 +1500,7 @@
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
   (when (not ok)
@@ -1539,11 +1555,11 @@
                                                :projection projection
                                                :viewport viewport}}))
         (local states (States))
-        (states.add-state :normal {})
-        (states.add-state :terrain-paint (TerrainPaintState))
-        (states.set-state :normal)
+        (states:add-state :normal {})
+        (states:add-state :terrain-paint (TerrainPaintState))
+        (states:set-state :normal)
         (set suspended-state (TestSupport.suspend-active-state original-states))
-        (set app.states states)
+        (set-app-states! states)
         (set app.clickables {:on-mouse-button-down (fn [_self _payload] nil)
                              :on-mouse-button-up (fn [_self _payload] nil)
                              :active? false})
@@ -1577,7 +1593,7 @@
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
   (when (not ok)
@@ -1640,11 +1656,11 @@
                                         :update (fn [_self _delta] nil)
                                         :drag-active? (fn [_self] false)})
         (local states (States))
-        (states.add-state :normal {})
-        (states.add-state :terrain-rect-pick (TerrainRectPickState))
-        (states.set-state :normal)
+        (states:add-state :normal {})
+        (states:add-state :terrain-rect-pick (TerrainRectPickState))
+        (states:set-state :normal)
         (set suspended-state (TestSupport.suspend-active-state original-states))
-        (set app.states states)
+        (set-app-states! states)
         (var resolved-target nil)
         (local capture
           (HeightfieldTargetCapture {:scene scene
@@ -1656,7 +1672,7 @@
                                      :on-target (fn [target _result]
                                                   (set resolved-target target))}))
         (TerrainRectPickManager.begin capture)
-        (assert (= (app.states.active-name) :terrain-rect-pick)
+        (assert (= (app.states:active-name) :terrain-rect-pick)
                 "terrain rectangle picking should enter an explicit app state")
         (local active-state (app.states:active-state))
         (active-state:on-mouse-wheel {:x 0 :y 1})
@@ -1669,7 +1685,7 @@
                 "terrain rectangle pick state should route engine mouse events to the active session")
         (assert (= resolved-target.x0 1))
         (assert (= resolved-target.x1 3))
-        (assert (= (app.states.active-name) :normal)
+        (assert (= (app.states:active-name) :normal)
                 "terrain rectangle pick state should restore the previous state after completion")
         (capture:drop))))
   (app.set-viewport original-viewport)
@@ -1678,7 +1694,7 @@
   (set app.movables original-movables)
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
-  (set app.states original-states)
+  (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
   (when (not ok)

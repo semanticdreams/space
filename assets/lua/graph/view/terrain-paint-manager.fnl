@@ -1,12 +1,37 @@
+(var states-provider nil)
+
+(fn assert-provider [provider]
+  (assert (or (= provider nil)
+              (= (type provider) :function))
+          "TerrainPaintManager states provider must be a function"))
+
+(fn set-states-provider [provider]
+  (assert-provider provider)
+  (set states-provider provider)
+  provider)
+
+(fn require-states-host [action]
+  (local states (and states-provider
+                     (states-provider)))
+  (assert states
+          (.. "TerrainPaintManager requires a states host for " action))
+  states)
 
 (fn current-state-name []
-  (and app.states app.states.active-name (app.states.active-name)))
+  (local states (require-states-host "current-state-name"))
+  (assert states.active-name
+          "TerrainPaintManager states host must expose :active-name")
+  (states:active-name))
 
 (fn restore-previous-state []
-  (local previous (or app.terrain-paint-previous-state :normal))
+  (local previous app.terrain-paint-previous-state)
+  (assert previous
+          "TerrainPaintManager requires a recorded previous state to restore")
+  (local states (require-states-host "restore-previous-state"))
   (set app.terrain-paint-previous-state nil)
-  (when (and app.states app.states.set-state)
-    (app.states.set-state previous)))
+  (assert states.set-state
+          "TerrainPaintManager states host must expose :set-state")
+  (states:set-state previous))
 
 (fn clear-previous-state []
   (set app.terrain-paint-previous-state nil)
@@ -59,18 +84,26 @@
   (when (active-session)
     (cancel-active-session))
   (local current (current-state-name))
+  (assert current
+          "TerrainPaintManager.begin requires an active state")
   (set app.terrain-paint-session session)
   (set app.terrain-paint-previous-state
        (if (= current :terrain-paint)
-           (or app.terrain-paint-previous-state :normal)
-           (or current :normal)))
+           (do
+             (assert app.terrain-paint-previous-state
+                     "TerrainPaintManager.begin requires previous state when already in terrain-paint")
+             app.terrain-paint-previous-state)
+           current))
   (session:begin)
-  (when (and app.states app.states.set-state)
-    (app.states.set-state :terrain-paint))
+  (local states (require-states-host "begin"))
+  (assert states.set-state
+          "TerrainPaintManager states host must expose :set-state")
+  (states:set-state :terrain-paint)
   session)
 
 {:begin begin
  :active-session active-session
  :cleanup-inactive-session cleanup-inactive-session
  :cleanup-session cleanup-session
- :cancel-active-session cancel-active-session}
+ :cancel-active-session cancel-active-session
+ :set-states-provider set-states-provider}
