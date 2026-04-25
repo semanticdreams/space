@@ -1,6 +1,6 @@
 (local glm (require :glm))
 (local Text (require :text))
-(local {: FullWidth : StatusAnchored} (require :hud-layout))
+(local {: FullWidth} (require :hud-layout))
 (local Padding (require :padding))
 (local Card (require :card))
 (local DrawingInput (require :drawing/input))
@@ -302,16 +302,10 @@
                       :child (fn [_] content)})})
          inner-ctx)))
     (local wrapped
-      ((StatusAnchored
-         {:name "hud-command-hints-overlay-anchor"
+      ((FullWidth
+         {:name "hud-command-hints-overlay"
           :hud manager.hud
-          :child
-          (fn [inner-ctx]
-            ((FullWidth
-               {:name "hud-command-hints-overlay"
-                :hud manager.hud
-                :child card-builder})
-             inner-ctx))})
+          :child card-builder})
        ctx))
     (set wrapped.set-text
          (fn [_self text]
@@ -347,6 +341,7 @@
           (if (not self.overlay-element)
               (set self.overlay-element
                    (self.hud:add-overlay-child {:builder (overlay-builder self)
+                                                :layer :middle
                                                 :depth-offset-index 200})))
           (when self.overlay-element.set-text
             (self.overlay-element:set-text (overlay-text self.sections))))

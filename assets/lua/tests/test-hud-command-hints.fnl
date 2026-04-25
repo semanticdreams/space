@@ -777,16 +777,50 @@
           "overlay should open before re-anchor test")
   (hud:update)
   (local overlay-wrapper hud.command-hints.overlay-element)
-  (local initial-y overlay-wrapper.child.layout.position.y)
+  (local initial-y overlay-wrapper.layout.position.y)
   (set status-height 5)
   (hud.entity.status-root.layout:mark-measure-dirty)
   (hud:update)
-  (local updated-y overlay-wrapper.child.layout.position.y)
-  (local wrapper-y overlay-wrapper.layout.position.y)
+  (local updated-y overlay-wrapper.layout.position.y)
+  (local middle-overlay-y hud.middle-overlay-root.layout.position.y)
   (assert (not (= initial-y updated-y))
           "overlay y position should follow the status strip while open")
-  (assert (= updated-y (+ wrapper-y 5))
-          "overlay should keep its child offset in sync with the updated status strip height")
+  (assert (= updated-y middle-overlay-y)
+          "overlay should stay rooted in the middle overlay layer")
+  (hud:drop)
+  (set app.hud original-hud)
+  (set-app-states! original-states))
+
+(fn overlay-defaults-to-hud-local-origin []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states:add-state :normal (state-with-hints :normal [(entry "space" "leader" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud (build-test-hud states))
+  (set app.hud hud)
+  (assert (hud.command-hints:toggle-overlay)
+          "overlay should open before position check")
+  (hud:update)
+  (local overlay-wrapper hud.command-hints.overlay-element)
+  (local overlay-root hud.middle-overlay-root)
+  (local status-root hud.entity.status-root)
+  (assert overlay-wrapper
+          "command hints should create an overlay element")
+  (assert (= overlay-wrapper.layout.position.x overlay-root.layout.position.x)
+          "default overlay x should start at the HUD overlay root, not world center")
+  (assert (= overlay-wrapper.layout.position.y overlay-root.layout.position.y)
+          "default overlay y should start at the HUD overlay root, not world center")
+  (assert (< (math.abs (- overlay-root.layout.position.y
+                          (+ status-root.layout.position.y status-root.layout.size.y)))
+             0.001)
+          (.. "command hints overlay root should sit directly above the status panel; got overlay-y "
+              overlay-wrapper.layout.position.y
+              " status-y "
+              status-root.layout.position.y
+              " status-height "
+              status-root.layout.size.y))
   (hud:drop)
   (set app.hud original-hud)
   (set-app-states! original-states))
@@ -894,6 +928,8 @@
                      :fn terrain-rect-pick-unhandled-f1-opens-overlay})
 (table.insert tests {:name "Overlay reanchors while open"
                      :fn overlay-reanchors-while-open})
+(table.insert tests {:name "Overlay defaults to HUD local origin"
+                     :fn overlay-defaults-to-hud-local-origin})
 (table.insert tests {:name "Width path preserves the F1 toggle"
                      :fn width-path-preserves-f1-toggle})
 (table.insert tests {:name "Width path preserves the F1 toggle with status body"

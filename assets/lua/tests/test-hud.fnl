@@ -158,6 +158,47 @@
   (set app.viewport original-viewport)
   (set app.engine original-engine))
 
+(fn hud-overlay-layers-are-explicit []
+  (local hud (build-test-hud 1920 1080))
+  (local full-overlay
+    (hud:add-overlay-child {:builder (fixed-widget "full-overlay" (glm.vec3 2 1 0))}))
+  (local middle-overlay
+    (hud:add-overlay-child {:builder (fixed-widget "middle-overlay" (glm.vec3 2 1 0))
+                            :layer :middle}))
+  (hud:update)
+  (assert (= (length hud.overlay-root.children) 1)
+          "default overlay children should attach to the full HUD overlay")
+  (assert (= (length hud.middle-overlay-root.children) 1)
+          "middle overlay children should require an explicit layer")
+  (assert (= (. (. hud.overlay-root.children 1) :element) full-overlay)
+          "full overlay root should own the default overlay element")
+  (assert (= (. (. hud.middle-overlay-root.children 1) :element) middle-overlay)
+          "middle overlay root should own the explicitly layered overlay element")
+  (hud:drop))
+
+(fn hud-overlay-layer-fails-loudly []
+  (local hud (build-test-hud 1920 1080))
+  (local (ok err)
+    (pcall (fn []
+             (hud:add-overlay-child {:builder (fixed-widget "bad-overlay" (glm.vec3 2 1 0))
+                                     :layer :side}))))
+  (assert (not ok)
+          "unsupported overlay layers should fail")
+  (assert (and err (string.find (tostring err) "Unsupported HUD overlay layer" 1 true))
+          "unsupported overlay layers should report the bad layer")
+  (hud:drop))
+
+(fn hud-overlay-requires-builder []
+  (local hud (build-test-hud 1920 1080))
+  (local (ok err)
+    (pcall (fn []
+             (hud:add-overlay-child {:layer :middle}))))
+  (assert (not ok)
+          "overlay children should require a builder")
+  (assert (and err (string.find (tostring err) "Hud.add-overlay-child requires :builder" 1 true))
+          "missing overlay builders should fail loudly")
+  (hud:drop))
+
 (table.insert tests {:name "Hud adaptive scaling keeps reference scale at 1080p"
                      :fn adaptive-hud-keeps-reference-scale-at-1080p})
 (table.insert tests {:name "Hud adaptive scaling grows at 1200p"
@@ -170,6 +211,12 @@
                      :fn hud-float-persistence-stays-resolution-independent})
 (table.insert tests {:name "Hud screen-pos-ray converts logical input to viewport space"
                      :fn hud-screen-pos-ray-converts-logical-input-to-viewport-space})
+(table.insert tests {:name "Hud overlay layers are explicit"
+                     :fn hud-overlay-layers-are-explicit})
+(table.insert tests {:name "Hud overlay layer fails loudly"
+                     :fn hud-overlay-layer-fails-loudly})
+(table.insert tests {:name "Hud overlay requires builder"
+                     :fn hud-overlay-requires-builder})
 
 (local main
   (fn []

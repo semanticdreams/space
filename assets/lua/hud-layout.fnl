@@ -1,5 +1,7 @@
 (local glm (require :glm))
 (local {: Layout} (require :layout))
+(local {: Flex : FlexChild} (require :flex))
+(local Stack (require :stack))
 (local Tiles (require :tiles))
 (local FloatLayer (require :float-layer))
 (local ControlPanel (require :hud-control-panel))
@@ -24,15 +26,6 @@
   (local margin (* units-per-pixel margin-px))
   (local half-height (or target.half-height 0))
   (math.max 0.001 (- (* half-height 2) (* margin 2))))
-
-(fn status-root-height [hud]
-  (assert hud "StatusAnchored requires :hud or ctx.pointer-target")
-  (local entity (assert hud.entity "StatusAnchored requires hud.entity"))
-  (local status-root (assert entity.status-root "StatusAnchored requires hud.entity.status-root"))
-  (local layout (assert status-root.layout "StatusAnchored requires hud.entity.status-root.layout"))
-  (local size (or layout.size layout.measure))
-  (assert size "StatusAnchored requires status-root layout size or measure")
-  size.y)
 
 (fn FullWidth [opts]
   (assert opts.child "FullWidth requires :child")
@@ -74,39 +67,6 @@
 
     {: child : layout : drop}))
 
-(fn StatusAnchored [opts]
-  (assert opts.child "StatusAnchored requires :child")
-  (fn build [ctx]
-    (local child (opts.child ctx))
-    (local hud (or opts.hud ctx.pointer-target))
-
-    (fn measurer [self]
-      (child.layout:measurer)
-      (set self.measure child.layout.measure))
-
-    (fn layouter [self]
-      (set self.size (or self.size self.measure))
-      (local offset (glm.vec3 0 (status-root-height hud) 0))
-      (set child.layout.size self.size)
-      (set child.layout.position (+ self.position (self.rotation:rotate offset)))
-      (set child.layout.rotation self.rotation)
-      (set child.layout.depth-offset-index self.depth-offset-index)
-      (set child.layout.clip-region self.clip-region)
-      (child.layout:layouter))
-
-    (local layout
-      (Layout {:name (or opts.name "status-anchored")
-               : measurer : layouter
-               :children [child.layout]}))
-
-    (fn drop [self]
-      (self.layout:drop)
-      (child:drop))
-
-    {:child child
-     :layout layout
-     :drop drop}))
-
 (fn make-overlay-root []
   (fn build [_ctx]
     (local depth-layer-step panel-depth-layer-step)
@@ -132,9 +92,8 @@
           (local offset (or metadata.position (glm.vec3 0 0 0)))
           (local rotation (or metadata.rotation (glm.quat 1 0 0 0)))
           (local depth-offset-index
-            (+ (if (= metadata.depth-offset-index nil)
-                   self.depth-offset-index
-                   metadata.depth-offset-index)
+            (+ self.depth-offset-index
+               (or metadata.depth-offset-index 0)
                (* (- idx 1) depth-layer-step)))
           (set layout.position (+ self.position (self.rotation:rotate offset)))
           (set layout.rotation (* self.rotation rotation))
@@ -172,6 +131,7 @@
                             :depth-layer-step tiles-depth-layer-step}))
   (local float-root (FloatLayer {:depth-layer-step panel-depth-layer-step}))
   (local overlay-root (make-overlay-root))
+  (local middle-overlay-root (make-overlay-root))
   (local left-dock-builder options.left-dock-builder)
   (local control-wrapper (FullWidth {:name "control-panel-wrapper"
                                      :child control-builder}))
@@ -183,77 +143,52 @@
     (local tiles (tiles-root ctx))
     (local float (float-root ctx))
     (local overlay (overlay-root ctx))
+    (local middle-overlay (middle-overlay-root ctx))
     (local left-dock (and left-dock-builder (left-dock-builder ctx)))
     (local hud (or ctx.pointer-target {}))
+    (local base-children [])
+    (when left-dock
+      (table.insert base-children (FlexChild (fn [_ctx] left-dock))))
+    (table.insert base-children (FlexChild (fn [_ctx] tiles) 1))
+    (local middle-base
+      ((Flex {:axis 1
+              :xspacing 0
+              :yalign :stretch
+              :children base-children})
+       ctx))
+    (local middle-stack
+      ((Stack {:depth-offset-step panel-depth-layer-step
+               :children [(fn [_ctx] middle-base)
+                          (fn [_ctx] float)
+                          (fn [_ctx] middle-overlay)]})
+       ctx))
+    (local bands
+      ((Flex {:axis 2
+              :xalign :stretch
+              :yspacing 0
+              :children [(FlexChild (fn [_ctx] control))
+                         (FlexChild (fn [_ctx] middle-stack) 1)
+                         (FlexChild (fn [_ctx] status))]})
+       ctx))
 
     (fn measurer [self]
-      (control.layout:measurer)
-      (status.layout:measurer)
-      (tiles.layout:measurer)
-      (float.layout:measurer)
+      (bands.layout:measurer)
       (overlay.layout:measurer)
-      (when left-dock
-        (left-dock.layout:measurer))
       (local width (hud-content-width hud))
       (local height (hud-content-height hud))
-      (local depth (math.max (. control.layout.measure 3)
-                             (. status.layout.measure 3)
-                             (. tiles.layout.measure 3)
-                             (. float.layout.measure 3)
-                             (. overlay.layout.measure 3)
-                             (if left-dock
-                                 (. left-dock.layout.measure 3)
-                                 0)))
+      (local depth (math.max (. bands.layout.measure 3)
+                             (. overlay.layout.measure 3)))
       (set self.measure (glm.vec3 width height depth)))
 
     (fn layouter [self]
       (set self.size self.measure)
       (local base-position self.position)
-      (local height self.size.y)
-      (local top-y (+ base-position.y height))
-      (local control-height (. control.layout.measure 2))
-      (local status-height (. status.layout.measure 2))
-
-      (fn position-child [child y-base depth-offset]
-        (set child.layout.position (glm.vec3 base-position.x y-base base-position.z))
-        (set child.layout.rotation self.rotation)
-        (set child.layout.clip-region self.clip-region)
-        (set child.layout.depth-offset-index depth-offset)
-        (child.layout:layouter))
-
-      (local control-bottom (- top-y control-height))
-      (local status-bottom base-position.y)
-      (local flex-bottom (+ status-bottom status-height))
-      (local flex-height (math.max 0 (- control-bottom flex-bottom)))
-      (local flex-size (glm.vec3 self.size.x flex-height (. tiles.layout.measure 3)))
-      (local dock-width (if left-dock
-                            (. left-dock.layout.measure 1)
-                            0))
-      (local tiles-width (math.max 0.001 (- self.size.x dock-width)))
-      (local tiles-position-x (+ base-position.x dock-width))
-      (local tiles-size (glm.vec3 tiles-width flex-height (. tiles.layout.measure 3)))
-
-      (position-child control control-bottom (+ self.depth-offset-index 1))
-      (position-child status status-bottom self.depth-offset-index)
-      (set tiles.layout.size tiles-size)
-      (set tiles.layout.position (glm.vec3 tiles-position-x flex-bottom base-position.z))
-      (set tiles.layout.rotation self.rotation)
-      (set tiles.layout.clip-region self.clip-region)
-      (set tiles.layout.depth-offset-index (+ self.depth-offset-index 1))
-      (tiles.layout:layouter)
-      (set float.layout.size flex-size)
-      (set float.layout.position (glm.vec3 base-position.x flex-bottom base-position.z))
-      (set float.layout.rotation self.rotation)
-      (set float.layout.clip-region self.clip-region)
-      (set float.layout.depth-offset-index (+ self.depth-offset-index 16))
-      (float.layout:layouter)
-      (when left-dock
-        (set left-dock.layout.size (glm.vec3 dock-width flex-height (. left-dock.layout.measure 3)))
-        (set left-dock.layout.position (glm.vec3 base-position.x flex-bottom base-position.z))
-        (set left-dock.layout.rotation self.rotation)
-        (set left-dock.layout.clip-region self.clip-region)
-        (set left-dock.layout.depth-offset-index (+ self.depth-offset-index 24))
-        (left-dock.layout:layouter))
+      (set bands.layout.size self.size)
+      (set bands.layout.position base-position)
+      (set bands.layout.rotation self.rotation)
+      (set bands.layout.clip-region self.clip-region)
+      (set bands.layout.depth-offset-index self.depth-offset-index)
+      (bands.layout:layouter)
       (set overlay.layout.size self.size)
       (set overlay.layout.position base-position)
       (set overlay.layout.rotation self.rotation)
@@ -265,13 +200,7 @@
       (Layout {:name "hud-panels"
                :measurer measurer
                :layouter layouter
-               :children (icollect [_ child-layout (ipairs [control.layout
-                                                            status.layout
-                                                            tiles.layout
-                                                            float.layout
-                                                            (and left-dock left-dock.layout)
-                                                            overlay.layout])]
-                                   child-layout)}))
+               :children [bands.layout overlay.layout]}))
 
     (fn update [_self]
       (when (and control control.update)
@@ -289,25 +218,22 @@
 
     (fn drop [self]
       (self.layout:drop)
-      (control:drop)
-      (status:drop)
-      (tiles:drop)
-      (float:drop)
-      (when left-dock
-        (left-dock:drop))
+      (bands:drop)
       (overlay:drop))
 
     {:layout layout
      :update update
+     :bands-root bands
+     :middle-root middle-stack
      :control-root control
      :status-root status
      :tiles-root tiles
      :float-root float
      :left-dock-root left-dock
+     :middle-overlay-root middle-overlay
      :overlay-root overlay
      :drop drop}))
 
 {:FullWidth FullWidth
- :StatusAnchored StatusAnchored
  :make-overlay-root make-overlay-root
  :make-hud-builder make-hud-builder}

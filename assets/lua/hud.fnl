@@ -95,6 +95,7 @@
                :tiles nil
                :float nil
                :overlay-root nil
+               :middle-overlay-root nil
                :panel-restorers {}
                :scene options.scene
                :margin-px (or options.margin-px 0)
@@ -501,10 +502,12 @@
     (set self.tiles nil)
     (set self.float nil)
     (set self.overlay-root nil)
+    (set self.middle-overlay-root nil)
     (when entity
       (set self.tiles entity.tiles-root)
       (set self.float entity.float-root)
       (set self.overlay-root entity.overlay-root)
+      (set self.middle-overlay-root entity.middle-overlay-root)
       (entity.layout:set-root self.layout-root)
       (self:update-root-transform)
       (set entity.movables (collect-panel-movables self))
@@ -580,8 +583,7 @@
       (self:refresh-panel-resizables)
       element))
 
-  (fn remove-overlay-child [self element]
-    (local root self.overlay-root)
+  (fn remove-overlay-child-from-root [root element]
     (var removed false)
     (when (and root element)
       (each [idx metadata (ipairs root.children)]
@@ -591,47 +593,64 @@
           (table.remove root.children idx)
           (root.layout:mark-measure-dirty)
           (root.layout:mark-layout-dirty))))
+    removed)
+
+  (fn remove-overlay-child [self element]
+    (local removed (or (remove-overlay-child-from-root self.middle-overlay-root element)
+                       (remove-overlay-child-from-root self.overlay-root element)))
     (when removed
       (when (and element element.drop)
         (element:drop)))
     removed)
 
+  (fn resolve-overlay-root [self opts]
+    (local layer (or (and opts opts.layer) :full))
+    (if (= layer :full)
+        (assert self.overlay-root "Hud.add-overlay-child requires a full overlay root")
+        (= layer :middle)
+        (assert self.middle-overlay-root "Hud.add-overlay-child requires a middle overlay root")
+        (error (.. "Unsupported HUD overlay layer: " (tostring layer)))))
+
   (fn add-overlay-child [self opts]
-    (local root self.overlay-root)
-    (local builder (and opts opts.builder))
-    (when (and root builder)
-      (local builder-options {})
-      (each [key value (pairs (or opts.builder-options {}))]
-        (set (. builder-options key) value))
-      (var element nil)
-      (var close-called? false)
-      (local user-on-close builder-options.on-close)
-      (fn handle-close [dialog button event]
-        (when (not close-called?)
-          (set close-called? true)
-          (when user-on-close
-            (user-on-close dialog button event))
-          (when element
-            (self:remove-overlay-child element))))
-      (set builder-options.on-close handle-close)
-      (set element (builder self.build-context builder-options))
-      (local position (or opts.position (glm.vec3 0 0 0)))
-      (local rotation (or opts.rotation (glm.quat 1 0 0 0)))
-      (local parent-layout root.layout)
-      (local parent-position (or (and parent-layout parent-layout.position) (glm.vec3 0 0 0)))
-      (local parent-rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0)))
-      (local parent-inverse (parent-rotation:inverse))
-      (local offset (parent-inverse:rotate (- position parent-position)))
-      (local local-rotation (* parent-inverse rotation))
-      (local metadata {:element element
-                       :position offset
-                       :rotation local-rotation
-                       :depth-offset-index opts.depth-offset-index})
-      (table.insert root.children metadata)
-      (root.layout:add-child element.layout)
-      (root.layout:mark-measure-dirty)
-      (root.layout:mark-layout-dirty)
-      element))
+    (local options (or opts {}))
+    (local builder options.builder)
+    (when (not builder)
+      (error "Hud.add-overlay-child requires :builder"))
+    (local root (resolve-overlay-root self options))
+    (local builder-options {})
+    (each [key value (pairs (or options.builder-options {}))]
+      (set (. builder-options key) value))
+    (var element nil)
+    (var close-called? false)
+    (local user-on-close builder-options.on-close)
+    (fn handle-close [dialog button event]
+      (when (not close-called?)
+        (set close-called? true)
+        (when user-on-close
+          (user-on-close dialog button event))
+        (when element
+          (self:remove-overlay-child element))))
+    (set builder-options.on-close handle-close)
+    (set element (builder self.build-context builder-options))
+    (local parent-layout (assert root.layout "Hud.add-overlay-child requires overlay root layout"))
+    (local parent-position parent-layout.position)
+    (local parent-rotation parent-layout.rotation)
+    (local parent-inverse (parent-rotation:inverse))
+    (local offset (if options.position
+                      (parent-inverse:rotate (- options.position parent-position))
+                      (glm.vec3 0 0 0)))
+    (local local-rotation (if options.rotation
+                              (* parent-inverse options.rotation)
+                              (glm.quat 1 0 0 0)))
+    (local metadata {:element element
+                     :position offset
+                     :rotation local-rotation
+                     :depth-offset-index options.depth-offset-index})
+    (table.insert root.children metadata)
+    (root.layout:add-child element.layout)
+    (root.layout:mark-measure-dirty)
+    (root.layout:mark-layout-dirty)
+    element)
 
   (fn capture-panel-element-state [self element]
     (local wrapper (resolve-panel-wrapper element))
@@ -775,6 +794,7 @@
     (set self.tiles nil)
     (set self.float nil)
     (set self.overlay-root nil)
+    (set self.middle-overlay-root nil)
     (when (and self.focus-manager self.focus-scope)
       (self.focus-manager:detach self.focus-scope)
       (set self.focus-scope nil)))
