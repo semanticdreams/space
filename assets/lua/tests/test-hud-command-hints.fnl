@@ -148,6 +148,22 @@
   (set app.hud original-hud)
   (set-app-states! original-states))
 
+(fn status-panel-update-populates-width-based-collapsed-field []
+  (local original-states app.states)
+  (local original-hud app.hud)
+  (local states (States))
+  (states:add-state :normal (state-with-hints :normal [(entry "space" "leader" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (local hud (build-test-hud states))
+  (set app.hud hud)
+  (hud:update)
+  (assert (string.find hud.command-hints.collapsed "%[space%] leader")
+          "status-panel width path should populate the collapsed field with visible commands")
+  (hud:drop)
+  (set app.hud original-hud)
+  (set-app-states! original-states))
+
 (fn hud-command-overlay-live-updates []
   (local original-states app.states)
   (local original-hud app.hud)
@@ -884,6 +900,8 @@
 
 (table.insert tests {:name "HUD command strip follows active state"
                      :fn hud-command-strip-follows-active-state})
+(table.insert tests {:name "Status panel update populates width-based collapsed field"
+                     :fn status-panel-update-populates-width-based-collapsed-field})
 (table.insert tests {:name "HUD command overlay live updates"
                      :fn hud-command-overlay-live-updates})
 (table.insert tests {:name "Declarative state command hints provider works"

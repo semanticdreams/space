@@ -65,7 +65,12 @@
       (self.layout:drop)
       (child:drop))
 
-    {: child : layout : drop}))
+    {: child
+     : layout
+     :drop drop
+     :update (fn [_self]
+               (when (and child child.update)
+                 (child:update)))}))
 
 (fn make-overlay-root []
   (fn build [_ctx]
