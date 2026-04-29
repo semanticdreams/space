@@ -230,11 +230,19 @@ Engine::Engine() {
 }
 
 bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig& config) {
+    headless_mode_ = config.headless;
     log_set_frame_id_provider(&frame_id);
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_PEN_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_PEN_TOUCH_EVENTS, "0");
+    auto initialize_keyboard_state = [this]() {
+        inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
+        if (inputState.keyboardState.currentValue == nullptr) {
+            throw std::runtime_error("SDL keyboard state is unavailable after engine startup");
+        }
+        std::memset(inputState.keyboardState.previousValue, 0, SDL_SCANCODE_COUNT);
+    };
     if (!config.headless) {
         window = WindowSdl::create();
         int target_width = config.width > 0 ? config.width : screenWidth;
@@ -242,6 +250,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         if (!window->init(target_width, target_height, config.window_mode)) {
             return false;
         }
+        initialize_keyboard_state();
         window->setTextInputEnabled(false);
         window->logGlParams();
 
@@ -249,10 +258,6 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         SDL_SetGamepadEventsEnabled(true);
         log_input_backend_summary();
         screensaver_inhibited_ = !SDL_ScreenSaverEnabled();
-
-        inputState.keyboardState.currentValue = SDL_GetKeyboardState(nullptr);
-        // Clear previous state memory
-        memset(inputState.keyboardState.previousValue, 0, SDL_SCANCODE_COUNT);
         {
             float mouseX = 0.0F;
             float mouseY = 0.0F;
@@ -267,6 +272,15 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
             openGamepad(gamepad_ids[i], SDL_GetTicks());
         }
         SDL_free(gamepad_ids);
+    } else {
+        const SDL_InitFlags init_flags = SDL_INIT_EVENTS;
+        if (!SDL_Init(init_flags)) {
+            LOG(Error) << "SDL headless initialisation failed";
+            LOG(Error) << SDL_GetError();
+            return false;
+        }
+        sdl_headless_initialized_ = true;
+        initialize_keyboard_state();
     }
 
     http = std::make_unique<HttpClient>();
@@ -562,7 +576,7 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         });
         lua_engine["browser"] = browser_table;
     }
-    isRunning = !config.headless;
+    isRunning = true;
     return true;
 }
 
@@ -590,6 +604,9 @@ void Engine::run() {
 
     auto handle_event = [this, &is_window_management_event](const SDL_Event& event) {
         if (event.type == request_frame_event_type) {
+            return;
+        }
+        if (!window && event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST) {
             return;
         }
         if (input_paused_ && !is_window_management_event(event.type)) {
@@ -1300,10 +1317,12 @@ void Engine::run() {
             dt = timer.computeDeltaTime();
         }
 
-        memcpy(inputState.keyboardState.previousValue, inputState.keyboardState.currentValue, SDL_SCANCODE_COUNT);
+        std::memcpy(inputState.keyboardState.previousValue,
+                    inputState.keyboardState.currentValue,
+                    SDL_SCANCODE_COUNT);
         inputState.mouseState.begin_frame();
         inputState.begin_frame();
-        if (!input_paused_) {
+        if (!input_paused_ && window) {
             float mouseX = static_cast<float>(inputState.mouseState.x);
             float mouseY = static_cast<float>(inputState.mouseState.y);
             SDL_MouseButtonFlags mouseMask = SDL_GetMouseState(&mouseX, &mouseY);
@@ -1369,7 +1388,9 @@ void Engine::run() {
             ResourceManager::processAudioJobs();
         }
 
-        browser_system.tick(frame_id.load(std::memory_order_relaxed));
+        if (window) {
+            browser_system.tick(frame_id.load(std::memory_order_relaxed));
+        }
 
         lua_engine["frame-id"] = frame_id.load(std::memory_order_relaxed);
         dispatch_lua_work();
@@ -1379,10 +1400,12 @@ void Engine::run() {
             payload["frame-id"] = frame_id.load(std::memory_order_relaxed);
             emit_engine_event("engine-tick", payload);
         }
-        const bool render_enabled = !ui_paused_ || has_force_ui_frame;
+        const bool render_enabled = headless_mode_ || !ui_paused_ || has_force_ui_frame;
         if (render_enabled) {
-            window->updateFpsCounter(dt);
-            window->clear();
+            if (window) {
+                window->updateFpsCounter(dt);
+                window->clear();
+            }
             {
                 sol::table events = lua_engine["events"];
                 sol::table signal = events["updated"];
@@ -1390,7 +1413,9 @@ void Engine::run() {
                 fennel_call_fatal(emit, static_cast<uint32_t>(dt));
             }
             frame_id.fetch_add(1, std::memory_order_relaxed);
-            window->swapBuffer();
+            if (window) {
+                window->swapBuffer();
+            }
         }
 
         if (!zero_fps_mode) {
@@ -1488,6 +1513,10 @@ void Engine::shutdown() {
     setScreensaverInhibited(false);
     if (window) {
         window->clean();
+    }
+    if (sdl_headless_initialized_) {
+        SDL_Quit();
+        sdl_headless_initialized_ = false;
     }
 }
 

@@ -60,6 +60,8 @@
 
   (when (env-enabled? "SPACE_MATRIX_TEST")
     (table.insert result :tests.test-matrix))
+  (when (env-enabled? "SPACE_REALTIME_TEST")
+    (table.insert result :tests.test-realtime-online))
   (when (env-enabled? "SKIP_KEYRING_TESTS")
     (local filtered [])
     (each [_ module-name (ipairs result)]

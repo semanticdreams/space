@@ -166,6 +166,7 @@
     :tests.test-wallet-rpc
     :tests.test-wallet-core
     :tests.test-rate-limiter
+    :tests.test-realtime-offline
     :tests.test-openai-offline
     :tests.test-openai-tools-offline
     :tests.test-llm-tools

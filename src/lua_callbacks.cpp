@@ -6,6 +6,7 @@
 #include <queue>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -24,9 +25,45 @@ struct Pending {
 std::atomic<uint64_t> next_id { 1 };
 std::mutex registry_mutex;
 std::unordered_map<uint64_t, sol::protected_function> registry;
+std::unordered_set<uint64_t> deferred_unregister_ids;
+std::unordered_set<uint64_t> retired_ids;
 
 std::mutex queue_mutex;
 std::vector<Pending> pending_queue;
+thread_local std::size_t dispatch_depth = 0;
+
+std::vector<Pending> take_pending_callbacks(const std::unordered_set<uint64_t>* allowed_ids, std::size_t max_results)
+{
+    std::vector<Pending> to_process;
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    if (pending_queue.empty()) {
+        return to_process;
+    }
+
+    if (!allowed_ids && (max_results == 0 || max_results >= pending_queue.size())) {
+        to_process.swap(pending_queue);
+        return to_process;
+    }
+
+    std::vector<Pending> remaining;
+    remaining.reserve(pending_queue.size());
+    if (max_results > 0) {
+        to_process.reserve(max_results);
+    }
+
+    for (auto& item : pending_queue) {
+        const bool allowed = !allowed_ids || allowed_ids->find(item.id) != allowed_ids->end();
+        const bool has_capacity = max_results == 0 || to_process.size() < max_results;
+        if (allowed && has_capacity) {
+            to_process.push_back(std::move(item));
+        } else {
+            remaining.push_back(std::move(item));
+        }
+    }
+
+    pending_queue.swap(remaining);
+    return to_process;
+}
 
 std::optional<uint64_t> parse_optional_u64(const sol::object& value)
 {
@@ -64,6 +101,41 @@ bool call_until(const sol::function& fn)
     }
     return value.valid() && value != sol::lua_nil;
 }
+
+void flush_deferred_unregistrations()
+{
+    if (dispatch_depth != 0) {
+        return;
+    }
+
+    std::unordered_set<uint64_t> ids;
+    {
+        std::lock_guard<std::mutex> lock(registry_mutex);
+        if (deferred_unregister_ids.empty()) {
+            return;
+        }
+        ids.swap(deferred_unregister_ids);
+        for (uint64_t id : ids) {
+            registry.erase(id);
+            retired_ids.erase(id);
+        }
+    }
+}
+
+struct DispatchScope {
+    DispatchScope()
+    {
+        ++dispatch_depth;
+    }
+
+    ~DispatchScope()
+    {
+        if (dispatch_depth > 0) {
+            --dispatch_depth;
+        }
+        flush_deferred_unregistrations();
+    }
+};
 
 } // namespace
 
@@ -191,6 +263,11 @@ uint64_t lua_callbacks_register(sol::function fn)
 bool lua_callbacks_unregister(uint64_t id)
 {
     std::lock_guard<std::mutex> lock(registry_mutex);
+    if (dispatch_depth > 0) {
+        deferred_unregister_ids.insert(id);
+        return registry.find(id) != registry.end();
+    }
+    retired_ids.erase(id);
     return registry.erase(id) > 0;
 }
 
@@ -205,31 +282,19 @@ void lua_callbacks_enqueue(uint64_t id, std::function<sol::object(sol::state_vie
 
 void lua_callbacks_dispatch(sol::state_view lua, std::size_t max_results)
 {
-    std::vector<Pending> to_process;
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        if (pending_queue.empty()) {
-            return;
-        }
-        if (max_results == 0 || max_results >= pending_queue.size()) {
-            to_process.swap(pending_queue);
-        } else {
-            to_process.reserve(max_results);
-            auto begin = pending_queue.begin();
-            auto split = begin + static_cast<std::ptrdiff_t>(max_results);
-            to_process.insert(to_process.end(),
-                              std::make_move_iterator(begin),
-                              std::make_move_iterator(split));
-            pending_queue.erase(begin, split);
-        }
+    std::vector<Pending> to_process = take_pending_callbacks(nullptr, max_results);
+    if (to_process.empty()) {
+        return;
     }
 
-    std::vector<Pending> deferred;
-
+    DispatchScope dispatch_scope;
     for (auto& item : to_process) {
         sol::protected_function callback;
         {
             std::lock_guard<std::mutex> lock(registry_mutex);
+            if (retired_ids.find(item.id) != retired_ids.end()) {
+                continue;
+            }
             auto it = registry.find(item.id);
             if (it != registry.end()) {
                 callback = it->second;
@@ -247,11 +312,89 @@ void lua_callbacks_dispatch(sol::state_view lua, std::size_t max_results)
     }
 }
 
+std::size_t lua_callbacks_dispatch_ids(sol::state_view lua, const std::vector<uint64_t>& ids, std::size_t max_results)
+{
+    if (ids.empty()) {
+        return 0;
+    }
+
+    std::unordered_set<uint64_t> allowed_ids(ids.begin(), ids.end());
+    std::vector<Pending> to_process = take_pending_callbacks(&allowed_ids, max_results);
+    if (to_process.empty()) {
+        return 0;
+    }
+
+    DispatchScope dispatch_scope;
+    for (auto& item : to_process) {
+        sol::protected_function callback;
+        {
+            std::lock_guard<std::mutex> lock(registry_mutex);
+            if (retired_ids.find(item.id) != retired_ids.end()) {
+                continue;
+            }
+            auto it = registry.find(item.id);
+            if (it != registry.end()) {
+                callback = it->second;
+            }
+        }
+        if (!callback.valid()) {
+            continue;
+        }
+        sol::object payload = item.builder ? item.builder(lua) : sol::lua_nil;
+        sol::protected_function_result result = callback(payload);
+        if (!result.valid()) {
+            sol::error err = result;
+            std::cerr << "[callbacks] invocation failed for id " << item.id << ": " << err.what() << "\n";
+        }
+    }
+
+    return to_process.size();
+}
+
+void lua_callbacks_retire_ids(const std::vector<uint64_t>& ids)
+{
+    if (ids.empty()) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(registry_mutex);
+        for (uint64_t id : ids) {
+            retired_ids.insert(id);
+        }
+    }
+    lua_callbacks_discard_ids(ids);
+}
+
+void lua_callbacks_discard_ids(const std::vector<uint64_t>& ids)
+{
+    if (ids.empty()) {
+        return;
+    }
+
+    std::unordered_set<uint64_t> blocked_ids(ids.begin(), ids.end());
+    std::lock_guard<std::mutex> lock(queue_mutex);
+    if (pending_queue.empty()) {
+        return;
+    }
+
+    std::vector<Pending> remaining;
+    remaining.reserve(pending_queue.size());
+    for (auto& item : pending_queue) {
+        if (blocked_ids.find(item.id) == blocked_ids.end()) {
+            remaining.push_back(std::move(item));
+        }
+    }
+    pending_queue.swap(remaining);
+}
+
 void lua_callbacks_shutdown()
 {
     {
         std::lock_guard<std::mutex> lock(registry_mutex);
         registry.clear();
+        deferred_unregister_ids.clear();
+        retired_ids.clear();
     }
     {
         std::lock_guard<std::mutex> lock(queue_mutex);

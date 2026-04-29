@@ -114,6 +114,8 @@ private:
     bool input_paused_ { false };
     bool ui_paused_ { false };
     bool screensaver_inhibited_ { false };
+    bool sdl_headless_initialized_ { false };
+    bool headless_mode_ { false };
 
     // python
     //std::unique_ptr<py::scoped_interpreter> python;

@@ -370,13 +370,12 @@ if(UNIX AND NOT APPLE)
     pkg_check_modules(APPINDICATOR IMPORTED_TARGET ayatana-appindicator3-0.1)
     pkg_check_modules(LIBNOTIFY IMPORTED_TARGET libnotify)
 endif()
-
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 find_package(Boost CONFIG REQUIRED)
 
-file( GLOB SOURCES src/*.cpp src/*.c)
+file( GLOB SOURCES src/*.cpp src/*.c src/realtime/*.cpp )
 if(NOT SPACE_HAS_VTERM)
     list(REMOVE_ITEM SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terminal.cpp
@@ -404,6 +403,36 @@ else()
     )
 endif()
 add_library(${PROJECT_NAME}_lib ${SOURCES})
+file(GLOB YOJIMBO_SOURCES
+    external/yojimbo/source/*.cpp
+)
+add_library(space_yojimbo STATIC
+    ${YOJIMBO_SOURCES}
+    external/yojimbo/netcode/netcode.c
+    external/yojimbo/reliable/reliable.c
+    external/yojimbo/tlsf/tlsf.c
+)
+file(GLOB YOJIMBO_SODIUM_SOURCES external/yojimbo/sodium/*.c)
+if(WIN32)
+    file(GLOB YOJIMBO_SODIUM_ASM_SOURCES external/yojimbo/sodium/*.S)
+    list(APPEND YOJIMBO_SODIUM_SOURCES ${YOJIMBO_SODIUM_ASM_SOURCES})
+endif()
+add_library(space_yojimbo_sodium STATIC ${YOJIMBO_SODIUM_SOURCES})
+target_include_directories(space_yojimbo
+    SYSTEM PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/netcode
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/reliable
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/serialize
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/tlsf
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/sodium
+)
+target_include_directories(space_yojimbo_sodium SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/sodium)
+target_link_libraries(space_yojimbo PUBLIC space_yojimbo_sodium)
+if(WIN32)
+    target_link_libraries(space_yojimbo PRIVATE ws2_32 iphlpapi)
+endif()
 target_compile_definitions(${PROJECT_NAME}_lib PUBLIC GLM_ENABLE_EXPERIMENTAL=1)
 if(SPACE_HAS_VTERM)
     target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_HAS_VTERM=1)
@@ -457,6 +486,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     OpenMP::OpenMP_CXX
     spdlog::spdlog
     Boost::headers
+    space_yojimbo
 )
 if(TARGET BulletInverseDynamics)
     target_link_libraries(${PROJECT_NAME}_lib BulletInverseDynamics)
@@ -779,6 +809,27 @@ add_executable(test_lua_module_error_integration
 )
 add_test(NAME test_lua_module_error_integration COMMAND test_lua_module_error_integration)
 set_tests_properties(test_lua_module_error_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_realtime_core
+    tests/test_realtime_core.cpp
+    src/realtime/auth_ticket.cpp
+    src/realtime/core.cpp
+)
+target_include_directories(test_realtime_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_include_directories(test_realtime_core SYSTEM PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/nlohmann
+)
+target_link_libraries(test_realtime_core space_yojimbo space_yojimbo_sodium)
+if(WIN32)
+    target_include_directories(test_realtime_core SYSTEM PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/yojimbo/sodium)
+    target_link_libraries(test_realtime_core ws2_32 iphlpapi)
+endif()
+add_test(NAME test_realtime_core COMMAND test_realtime_core)
+set_tests_properties(test_realtime_core PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
