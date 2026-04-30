@@ -743,6 +743,10 @@
   (assert (has-action? "Quit")
           "normalized partial drawing context should still include shared actions"))
 
+(fn root-context-menu-actions-validate-canvas-feature-builders []
+  (assert (RootContextMenuActions.validate-canvas-feature-action-builders)
+          "Root context menu actions should validate canvas feature builder wiring"))
+
 (table.insert tests {:name "Menu actions and depth offset" :fn menu-actions-fire-and-increment-depth})
 (table.insert tests {:name "Menu grows downward from click" :fn menu-grows-downward-from-click})
 (table.insert tests {:name "Menu manager opens and closes menu" :fn menu-manager-opens-and-closes})
@@ -766,6 +770,8 @@
                      :fn menu-manager-root-drawing-selection-actions-follow-selection-state})
 (table.insert tests {:name "Root context menu actions normalize partial context"
                      :fn root-context-menu-actions-normalize-partial-context})
+(table.insert tests {:name "Root context menu actions validate canvas feature builders"
+                     :fn root-context-menu-actions-validate-canvas-feature-builders})
 
 (local main
   (fn []

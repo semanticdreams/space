@@ -17,6 +17,7 @@
 (local DrawingController (require :drawing/controller))
 (local {:DrawingRender DrawingRender} (require :drawing/render))
 (local DrawingSidebarView (require :drawing/sidebar-view))
+(local CanvasFeatures (require :canvas-features))
 (local viewport-utils (require :viewport-utils))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
@@ -77,9 +78,9 @@
   (local existing-canvas-state (or (and world.state world.state.canvas) {}))
   (local captured (or canvas-state {}))
   (set captured.active_feature
-       (or (and runtime runtime.active-canvas-feature)
-           existing-canvas-state.active_feature
-           "graph"))
+    (or (and runtime runtime.active-canvas-feature)
+        existing-canvas-state.active_feature
+        (. CanvasFeatures :default-feature-id)))
   (set captured.preferred_interaction_surface
        (encode-interaction-surface
          (or (and runtime runtime.preferred-interaction-surface)
@@ -92,7 +93,7 @@
             :rotation [1 0 0 0]}
    :canvas {:camera {:position [0 0 100]}
             :scale_factor 1.0
-            :active_feature "graph"
+            :active_feature (. CanvasFeatures :default-feature-id)
             :preferred_interaction_surface "scene"
             :panels []}
    :drawing (DrawingDocument.default-state)
@@ -335,6 +336,14 @@
           (set world.state (default-state))
           (set world.state.scene.terrains (TerrainRecords.default-records))))
     (local canvas-state (or (and world.state world.state.canvas) {}))
+    (local (normalized-canvas-feature repaired-feature? feature-repair-reason)
+      (CanvasFeatures.normalize-persisted canvas-state.active_feature))
+    (when repaired-feature?
+      (logging.warn (string.format "[world] %s %s"
+                                   world.id
+                                   feature-repair-reason))
+      (set repaired-persisted-state? true))
+    (set canvas-state.active_feature normalized-canvas-feature)
     (set canvas-state.preferred_interaction_surface
          (encode-interaction-surface canvas-state.preferred_interaction_surface))
     (set world.state.canvas canvas-state)
@@ -763,7 +772,7 @@
        :graph-view graph-view
        :drawing-controller drawing-controller
        :drawing-render drawing-render
-       :active-canvas-feature (or canvas-state.active_feature "graph")
+       :active-canvas-feature (CanvasFeatures.resolve canvas-state.active_feature)
        :preferred-interaction-surface
        (resolve-runtime-interaction-surface canvas-state.preferred_interaction_surface)
        :pending-canvas-state (clone-table world.state.canvas)
@@ -904,7 +913,7 @@
     (when (and active?
                runtime
                runtime.drawing-render
-               (= runtime.active-canvas-feature "drawing"))
+               (CanvasFeatures.supports-drawing-controller? runtime.active-canvas-feature))
       (runtime.drawing-render:update))
     nil)
 

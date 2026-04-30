@@ -8,6 +8,7 @@
 (local Button (require :button))
 (local Input (require :input))
 (local Text (require :text))
+(local CanvasFeatures (require :canvas-features))
 (local {: adjust} (require :widget-theme-utils))
 
 (fn section-title [label]
@@ -567,33 +568,27 @@
         (panel-background theme :panel)))
 
     (fn build-feature-rail []
+      (local feature-children [])
+      (each [_ feature-spec (ipairs (CanvasFeatures.sidebar-feature-specs))]
+        (table.insert feature-children
+                      (FlexChild
+                        (fn [child-ctx]
+                          ((feature-button (. feature-spec :icon)
+                                           (. feature-spec :button-name)
+                                           (. feature-spec :label)
+                                           (CanvasFeatures.matches-id? app.active-canvas-feature
+                                                                      (. feature-spec :id))
+                                           (fn [_button _event]
+                                             (when app.set-active-canvas-feature
+                                               (app.set-active-canvas-feature (. feature-spec :id)))))
+                           child-ctx))
+                        0)))
       (panel-shell
         (fn [inner-ctx]
           ((Flex {:axis 2
                   :xalign :stretch
                   :spacing 0
-                  :children [(FlexChild
-                               (fn [child-ctx]
-                                 ((feature-button "account_tree"
-                                                  "graph-canvas-feature"
-                                                  "Graph"
-                                                  (= app.active-canvas-feature "graph")
-                                                  (fn [_button _event]
-                                                    (when app.set-active-canvas-feature
-                                                      (app.set-active-canvas-feature "graph"))))
-                                  child-ctx))
-                               0)
-                             (FlexChild
-                              (fn [child-ctx]
-                                ((feature-button "draw"
-                                                 "drawing-canvas-feature"
-                                                 "Draw"
-                                                 (= app.active-canvas-feature "drawing")
-                                                 (fn [_button _event]
-                                                   (when app.set-active-canvas-feature
-                                                     (app.set-active-canvas-feature "drawing"))))
-                                  child-ctx))
-                               0)]})
+                  :children feature-children})
            inner-ctx))
         (panel-background theme :rail)
         {:padding false}))
@@ -606,7 +601,7 @@
       (if show-dock?
           (do
             (local builders [(FlexChild (build-feature-rail) 0)])
-            (when (= app.active-canvas-feature "drawing")
+            (when (CanvasFeatures.supports-drawing-sidebar? app.active-canvas-feature)
               (table.insert builders (FlexChild (build-drawing-panel) 0)))
             ((Flex {:axis 1
                     :spacing 0

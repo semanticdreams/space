@@ -4,6 +4,7 @@
 (local bt (require :bt))
 (local WorldManager (require :world-manager))
 (local HomeWorld (require :home-world))
+(local CanvasFeatures (require :canvas-features))
 (local PhysicsContainment (require :physics-containment))
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
@@ -532,6 +533,39 @@
               "World deactivate should persist preferred interaction surface")
       (assert (= canvas-state.active_feature "drawing")
               "World deactivate should keep active canvas feature alongside interaction surface")
+      true)))
+
+(fn home-world-repairs-invalid-persisted-canvas-feature []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :canvas {:active_feature "bogus"
+                                   :preferred_interaction_surface "canvas"}
+                          :graph {:graph {:nodes []
+                                          :edges []}
+                                  :views {:open-node-keys []}}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)
+                                  :background (make-background-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local canvas-state (and world.state world.state.canvas))
+      (assert (= canvas-state.active_feature (. CanvasFeatures :default-feature-id))
+              "HomeWorld should repair invalid persisted canvas feature to the canonical default")
+      (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
+      (local persisted-canvas-state (and persisted.canvas persisted.canvas))
+      (assert (= persisted-canvas-state.active_feature (. CanvasFeatures :default-feature-id))
+              "HomeWorld should persist repaired canvas feature state during load")
       true)))
 
 (fn home-world-new-state-seeds-default-terrain []
@@ -1469,6 +1503,8 @@
                      :fn home-world-deactivate-queues-canvas-and-hud-restore-state})
 (table.insert tests {:name "HomeWorld deactivate persists preferred interaction surface"
                      :fn home-world-deactivate-persists-preferred-interaction-surface})
+(table.insert tests {:name "HomeWorld repairs invalid persisted canvas feature"
+                     :fn home-world-repairs-invalid-persisted-canvas-feature})
 (table.insert tests {:name "HomeWorld new state seeds default terrain"
                      :fn home-world-new-state-seeds-default-terrain})
 (table.insert tests {:name "HomeWorld new state seeds default lights"

@@ -13,6 +13,7 @@
 (local CameraHandlers (require :state-handlers/camera))
 (local GraphView (require :graph/view))
 (local Runtime (require :state-runtime))
+(local CanvasFeatures (require :canvas-features))
 (local {: entry : section} (require :command-hints))
 
 (local KEY_SPACE (string.byte " "))
@@ -29,7 +30,7 @@
                       :allow-touch-during-hover? true}}))
 
   (fn touch-allowed? [payload]
-    (if (= app.active-canvas-feature "drawing")
+    (if (CanvasFeatures.supports-drawing-controller? app.active-canvas-feature)
         (PenHandlers:touch-allowed? payload)
         true))
 
@@ -45,7 +46,7 @@
       {:active? (fn []
                   (and app.drawing-controller
                        (= app.canvas-interactive? true)
-                       (= app.active-canvas-feature "drawing")
+                       (CanvasFeatures.supports-drawing-controller? app.active-canvas-feature)
                        app.drawing-controller.active-layer
                        (app.drawing-controller:active-layer)))
        :get-tool (fn []
@@ -58,8 +59,8 @@
                            "NormalState drawing pen override requires drawing-controller:set-active-tool")
                    (app.drawing-controller:set-active-tool tool))}))
 
-  (fn graph-interaction-enabled? []
-    (not (= app.active-canvas-feature "drawing")))
+  (fn active-canvas-feature-supports-graph-interaction? []
+    (CanvasFeatures.supports-graph-interaction? app.active-canvas-feature))
 
   (fn graph-selection-count []
     (local graph-view app.graph-view)
@@ -83,7 +84,7 @@
                       :camera (or (and app.canvas app.canvas.camera) app.camera)
                       :pointer-target (or app.canvas app.scene)}))))
 
-  (fn toggle-graph-view []
+  (fn handle-f4-toggle []
     (if (and app.canvas app.toggle-active-interaction-surface)
         (app.toggle-active-interaction-surface)
         (if app.graph-view
@@ -98,7 +99,7 @@
               true))))
 
   (fn remove-selected-nodes []
-    (if (not (graph-interaction-enabled?))
+    (if (not (active-canvas-feature-supports-graph-interaction?))
         false
         (do
           (local graph-view app.graph-view)
@@ -106,7 +107,7 @@
             (> (graph-view:remove-selected-nodes) 0)))))
 
   (fn maybe-open-focused-graph-node []
-    (if (not (graph-interaction-enabled?))
+    (if (not (active-canvas-feature-supports-graph-interaction?))
         false
         (do
           (local graph-view app.graph-view)
@@ -126,18 +127,22 @@
     (local focus-manager (and payload payload.focus-manager))
     (local active-input (and payload payload.active-input))
     (when (or (and focus-manager focus-manager.activate-focused-from-payload)
-              (and (graph-interaction-enabled?)
+              (and (active-canvas-feature-supports-graph-interaction?)
                    app.graph-view
                    app.graph-view.open-focused-node))
       (table.insert entries (entry "enter" "activate" {:priority 20})))
-    (when (and (graph-interaction-enabled?)
+    (when (and (active-canvas-feature-supports-graph-interaction?)
                (> (graph-selection-count) 0))
       (table.insert entries (entry "del" "delete-selection" {:priority 25})))
     (when focus-manager
       (table.insert entries (entry "tab" "focus-next" {:priority 30 :show-collapsed? false}))
       (when (not active-input)
         (table.insert entries (entry "h/j/k/l" "focus-direction" {:priority 31 :show-collapsed? false}))))
-    (table.insert entries (entry "f4" "toggle-graph" {:priority 40}))
+    (local f4-label
+      (if (and app.canvas app.toggle-active-interaction-surface)
+          "toggle-canvas"
+          "toggle-graph-view"))
+    (table.insert entries (entry "f4" f4-label {:priority 40}))
     (table.insert entries (entry "`" "fennel-repl" {:priority 50}))
     [(section :mode "MODE" entries)])
 
@@ -171,7 +176,7 @@
              handled)
            (= key SDLK_F4)
            (do
-             (local handled (toggle-graph-view))
+             (local handled (handle-f4-toggle))
              (when handled
                ((. ctx :mark-command-executed!)))
              handled)

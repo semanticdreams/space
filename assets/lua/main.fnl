@@ -12,6 +12,7 @@
 (local EngineModule (require :engine))
 (local AppConfig (require :app-config))
 (local CliArgs (require :cli-args))
+(local CanvasFeatures (require :canvas-features))
 
 (set app.engine-autocreated false)
 (when (not app.engine)
@@ -651,7 +652,7 @@
 (set app.active-pointer-controls nil)
 (set app.preferred-interaction-surface :scene)
 (set app.active-interaction-surface :scene)
-(set app.active-canvas-feature "graph")
+(set app.active-canvas-feature (. CanvasFeatures :default-feature-id))
 (set app.scene-interactive? true)
 (set app.canvas-interactive? false)
 (set app.canvas-visible? false)
@@ -836,10 +837,7 @@
       :scene))
 
 (fn resolve-canvas-feature [feature]
-  (local resolved (or feature "graph"))
-  (if (= resolved "drawing")
-      "drawing"
-      "graph"))
+  (CanvasFeatures.resolve feature))
 
 (fn mark-active-world-hud-dirty []
   (when (and app.hud app.hud.entity app.hud.entity.layout)

@@ -1,5 +1,6 @@
 (local Ball (require :ball))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
+(local CanvasFeatures (require :canvas-features))
 (local Modifiers (require :input-modifiers))
 
 (fn append-actions [target source]
@@ -24,11 +25,11 @@
   (local surface (or app.active-interaction-surface :scene))
   (local canvas-feature
     (if (= surface :canvas)
-        (or app.active-canvas-feature "graph")
+        (CanvasFeatures.resolve app.active-canvas-feature)
         nil))
   (local drawing-controller
     (if (and (= surface :canvas)
-             (= canvas-feature "drawing"))
+             (CanvasFeatures.supports-drawing-controller? canvas-feature))
         app.drawing-controller
         nil))
   (local active-layer
@@ -67,11 +68,11 @@
   (local resolved-surface (or surface :scene))
   (local resolved-canvas-feature
     (if (= resolved-surface :canvas)
-        (or options.canvas-feature app.active-canvas-feature "graph")
+        (CanvasFeatures.resolve (or options.canvas-feature app.active-canvas-feature))
         nil))
   (local drawing-controller
     (if (and (= resolved-surface :canvas)
-             (= resolved-canvas-feature "drawing"))
+             (CanvasFeatures.supports-drawing-controller? resolved-canvas-feature))
         (or (and options.drawing options.drawing.controller)
             app.drawing-controller)
         nil))
@@ -307,26 +308,76 @@
                          (SceneTerrainRecovery.recover scene)))})
   actions)
 
+(local canvas-context-action-builders
+  {:graph graph-root-actions
+   :drawing drawing-root-actions
+   :drawing-selection drawing-selection-actions})
+
+(fn canvas-feature-action-builder [feature-spec key opts]
+  (local options (or opts {}))
+  (assert feature-spec "Canvas feature action dispatch requires feature spec")
+  (local feature-id (. feature-spec :id))
+  (local action-key (and feature-spec (. feature-spec key)))
+  (when (and options.required?
+             (not action-key))
+    (error (.. "Canvas feature "
+               feature-id
+               " missing required "
+               (tostring key)
+               " metadata")))
+  (if action-key
+      (do
+        (local builder (. canvas-context-action-builders action-key))
+        (assert builder
+                (.. "Canvas feature "
+                    feature-id
+                    " references unknown "
+                    (tostring key)
+                    " "
+                    (tostring action-key)))
+        builder)
+      nil))
+
+(fn validate-canvas-feature-action-builders []
+  (each [_ feature-spec (ipairs (CanvasFeatures.feature-specs-in-order))]
+    (canvas-feature-action-builder feature-spec :root-context-actions-key {:required? true})
+    (canvas-feature-action-builder feature-spec :selection-context-actions-key))
+  true)
+
+(validate-canvas-feature-action-builders)
+
+(fn canvas-feature-root-actions [context]
+  (local feature-spec
+    (if (= context.surface :canvas)
+        (CanvasFeatures.spec context.canvas-feature)
+        nil))
+  (local builder
+    (canvas-feature-action-builder feature-spec
+                                   :root-context-actions-key
+                                   {:required? true}))
+  (builder context))
+
+(fn canvas-feature-selection-actions [context]
+  (local feature-spec
+    (if (= context.surface :canvas)
+        (CanvasFeatures.spec context.canvas-feature)
+        nil))
+  (local builder (canvas-feature-action-builder feature-spec :selection-context-actions-key))
+  (if builder
+      (builder context)
+      []))
+
 (local contributors
-  [{:name :drawing-root
+  [{:name :canvas-root
     :mode :replace
     :matches (fn [context]
-               (and (= context.surface :canvas)
-                    (= context.canvas-feature "drawing")))
-    :actions drawing-root-actions}
-   {:name :drawing-selection
+               (= context.surface :canvas))
+    :actions canvas-feature-root-actions}
+   {:name :canvas-selection
     :mode :append
     :matches (fn [context]
-               (and (= context.surface :canvas)
-                    (= context.canvas-feature "drawing")
-                    context.drawing.has-selection?))
-    :actions drawing-selection-actions}
-   {:name :graph-root
-    :mode :replace
-    :matches (fn [context]
-               (and (= context.surface :canvas)
-                    (= context.canvas-feature "graph")))
-    :actions graph-root-actions}
+               (= context.surface :canvas))
+    :actions canvas-feature-selection-actions}
    {:name :scene-root
     :mode :replace
     :matches (fn [context]
@@ -371,6 +422,7 @@
  :actions-for-event actions-for-event
  :actions-for-context actions-for-context
  :actions-for-surface actions-for-surface
+ :validate-canvas-feature-action-builders validate-canvas-feature-action-builders
  :scene-root-actions scene-root-actions
  :graph-root-actions graph-root-actions
  :drawing-root-actions drawing-root-actions}

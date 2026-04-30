@@ -1732,6 +1732,8 @@
 
 (fn normal-state-f4-toggles-graph-view []
   (reset-engine-events)
+  (local original-canvas app.canvas)
+  (local original-toggle-active-interaction-surface app.toggle-active-interaction-surface)
   (local original-graph-view app.graph-view)
   (local original-graph-view-factory app.graph-view-factory)
   (local controls (create-controls-stub))
@@ -1762,9 +1764,53 @@
   (assert (= dropped 1) "F4 should drop an existing graph view")
   (assert (not app.graph-view) "F4 should clear app.graph-view after drop")
   (state.on-leave)
+  (set app.canvas original-canvas)
+  (set app.toggle-active-interaction-surface original-toggle-active-interaction-surface)
   (set app.graph-view original-graph-view)
   (set app.graph-view-factory original-graph-view-factory)
   (set app.first-person-controls nil))
+
+(fn normal-state-f4-toggles-canvas-surface []
+  (reset-engine-events)
+  (local original-canvas app.canvas)
+  (local original-toggle-active-interaction-surface app.toggle-active-interaction-surface)
+  (local controls (create-controls-stub))
+  (set app.first-person-controls controls)
+  (var toggles 0)
+  (set app.canvas {})
+  (set app.toggle-active-interaction-surface
+       (fn []
+         (set toggles (+ toggles 1))
+         true))
+  (local state (NormalState))
+  (own-test-state! :normal state)
+  (state.on-enter)
+  (app.engine.events.key-down.emit {:key KEY_F4})
+  (assert (= toggles 1) "F4 should toggle the canvas surface when canvas shell support exists")
+  (assert (= controls.record.key_down nil) "Handled F4 should not reach controls")
+  (state.on-leave)
+  (set app.canvas original-canvas)
+  (set app.toggle-active-interaction-surface original-toggle-active-interaction-surface)
+  (set app.first-person-controls nil))
+
+(fn normal-state-command-hints-label-f4-as-toggle-canvas []
+  (reset-engine-events)
+  (local original-canvas app.canvas)
+  (local original-toggle-active-interaction-surface app.toggle-active-interaction-surface)
+  (set app.canvas {})
+  (set app.toggle-active-interaction-surface (fn [] true))
+  (local state (NormalState))
+  (local sections (state.command_hints_provider state {}))
+  (local entries (and (> (length sections) 0) (. (. sections 1) :entries)))
+  (var f4-entry nil)
+  (each [_ entry (ipairs (or entries []))]
+    (when (= entry.key "f4")
+      (set f4-entry entry)))
+  (assert f4-entry "NormalState command hints should expose an F4 entry")
+  (assert (= f4-entry.label "toggle-canvas")
+          "NormalState should label F4 as toggle-canvas when the canvas shell is available")
+  (set app.canvas original-canvas)
+  (set app.toggle-active-interaction-surface original-toggle-active-interaction-surface))
 
 (fn normal-state-backquote-opens-fennel-interpreters []
   (reset-engine-events)
@@ -1841,6 +1887,9 @@
 (table.insert tests {:name "Normal state delete removes selected graph nodes" :fn normal-state-delete-removes-graph-selection})
 (table.insert tests {:name "Normal state Enter opens focused graph node" :fn normal-state-enter-opens-focused-graph-node})
 (table.insert tests {:name "Normal state F4 toggles graph view" :fn normal-state-f4-toggles-graph-view})
+(table.insert tests {:name "Normal state F4 toggles canvas surface" :fn normal-state-f4-toggles-canvas-surface})
+(table.insert tests {:name "Normal state command hints label F4 as toggle-canvas"
+                     :fn normal-state-command-hints-label-f4-as-toggle-canvas})
 (table.insert tests {:name "Normal state backquote opens interpreter dialogs" :fn normal-state-backquote-opens-fennel-interpreters})
 
 (fn with-state-recorder [body]

@@ -1,6 +1,7 @@
 (local Runtime (require :state-runtime))
 (local Common (require :state-handlers/common))
 (local HitTest (require :drawing/hit-test))
+(local CanvasFeatures (require :canvas-features))
 (local {: entry : section} (require :command-hints))
 
 (local SDL_BUTTON_LEFT 1)
@@ -18,7 +19,7 @@
 (fn active-controller []
   (and app.drawing-controller
        (= app.canvas-interactive? true)
-       (= app.active-canvas-feature "drawing")
+       (CanvasFeatures.supports-drawing-controller? app.active-canvas-feature)
        app.drawing-controller))
 
 (fn active-canvas-point [payload]

@@ -1,4 +1,5 @@
 (local Main (require :main))
+(local CanvasFeatures (require :canvas-features))
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
@@ -42,17 +43,23 @@
    :hud
    :install-app-shell!
    :layout-root
+   :mark-active-world-hud-dirty
    :object-selector
+   :pointer-target-enabled?
    :preferred-interaction-surface
    :projection
    :reset-projection
    :scene
    :scene-focus-scope
    :scene-interactive?
+   :set-active-canvas-feature
+   :set-active-interaction-surface
+   :set-canvas-visible
    :terrain-paint-previous-state
    :terrain-paint-session
    :terrain-rect-pick-previous-state
    :terrain-rect-pick-session
+   :toggle-active-interaction-surface
    :world-manager])
 
 (fn capture-app-fields [keys]
@@ -209,12 +216,49 @@
               "bind-active-world-runtime should re-enable canvas interaction when canvas mode was persisted")
       true)))
 
+(fn set-active-canvas-feature-rejects-unknown-feature []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (local (ok err)
+        (pcall
+          (fn []
+            (app.set-active-canvas-feature "bogus"))))
+      (assert (not ok)
+              "set-active-canvas-feature should reject unknown canvas features")
+      (assert (and err (string.find err "Unknown canvas feature"))
+              "set-active-canvas-feature should report the invalid feature id clearly")
+      true)))
+
+(fn canvas-features-ordered-specs-include-default-once []
+  (local specs (CanvasFeatures.feature-specs-in-order))
+  (assert (> (length specs) 0)
+          "Canvas feature registry should expose at least one ordered feature spec")
+  (local seen {})
+  (var default-count 0)
+  (each [_ feature-spec (ipairs specs)]
+    (local feature-id (. feature-spec :id))
+    (assert feature-id "Canvas feature registry entries should expose :id")
+    (assert (not (. seen feature-id))
+            (.. "Canvas feature registry should not duplicate ordered id " feature-id))
+    (set (. seen feature-id) true)
+    (when (= feature-id (. CanvasFeatures :default-feature-id))
+      (set default-count (+ default-count 1))))
+  (assert (= default-count 1)
+          "Canvas feature registry should expose the default feature exactly once in order")
+  true)
+
 (table.insert tests {:name "Window resize updates viewport and layout root" :fn window-resize-updates-viewport-and-layout-root})
 (table.insert tests {:name "Window pixel size change updates viewport" :fn window-pixel-size-change-updates-viewport})
 (table.insert tests {:name "app.drop keeps engine events and clears layout root" :fn drop-keeps-engine-events-and-clears-layout-root})
 (table.insert tests {:name "Non-resize events leave viewport unchanged" :fn other-events-leave-viewport-untouched})
 (table.insert tests {:name "bind-active-world-runtime restores runtime interaction surface"
                      :fn bind-active-world-runtime-restores-runtime-interaction-surface})
+(table.insert tests {:name "set-active-canvas-feature rejects unknown features"
+                     :fn set-active-canvas-feature-rejects-unknown-feature})
+(table.insert tests {:name "Canvas features ordered specs include default once"
+                     :fn canvas-features-ordered-specs-include-default-once})
 
 (local main
   (fn []
