@@ -1,13 +1,27 @@
 (global app (or app {}))
 
 (local trace-require (os.getenv "SPACE_TRACE_REQUIRE"))
-(when trace-require
-  (local original-require require)
-  (set _G.require
-       (fn [name]
-         (io.stderr:write (string.format "[require] %s\n" name))
-         (io.stderr:flush)
-         (original-require name))))
+
+(fn install-trace-require! []
+  (local current-wrapper (rawget _G "__space_trace_require_wrapper"))
+  (when (and current-wrapper
+             (= require current-wrapper))
+    (set _G.require (or (rawget _G "__space_trace_require_original")
+                        require)))
+  (when trace-require
+    (local original-require (or (rawget _G "__space_trace_require_original")
+                                require))
+    (local wrapper
+      (fn [name]
+        (io.stderr:write (string.format "[require] %s\n" name))
+        (io.stderr:flush)
+        (original-require name)))
+    (set _G.__space_trace_require_original original-require)
+    (set _G.__space_trace_require_wrapper wrapper)
+    (set _G.require wrapper))
+  _G.require)
+
+(install-trace-require!)
 
 (local EngineModule (require :engine))
 (local AppConfig (require :app-config))
@@ -21,8 +35,10 @@
 
 (local glm (require :glm))
 (global fennel (require :fennel))
+(local callbacks (require :callbacks))
 (local runtime (require :runtime))
 (local logging (require :logging))
+(local Units (require :units))
 
 (set fennel.macro-path runtime.fennel-path)
 
@@ -34,7 +50,9 @@
 (global one (fn [val] (assert (= (length val) 1) val) (. val 1)))
 
 (local DebugLog (require :debug-log))
-(DebugLog.reset-log!)
+(when (not app.__debug-log-session-started?)
+  (DebugLog.reset-log!)
+  (set app.__debug-log-session-started? true))
 (local TerrainIssueLog (require :terrain-issue-log))
 (TerrainIssueLog.start-session! "space startup")
 (local fs (require :fs))
@@ -56,7 +74,6 @@
 (local VolumeControl (require :volume-control))
 (local MenuManager (require :menu-manager))
 (local WalletManager (require :wallet-manager))
-
 (var fennel-cache-dir nil)
 (local bytecode-enabled
   (do
@@ -185,6 +202,19 @@
       (make-fennel-loader module-name module-path)
       nil))
 
+(fn install-fennel-cache-searcher! []
+  (local previous package.__space_fennel_cache_searcher)
+  (when previous
+    (var index nil)
+    (each [i searcher (ipairs package.searchers) &until index]
+      (when (= searcher previous)
+        (set index i)))
+    (when index
+      (table.remove package.searchers index)))
+  (set package.__space_fennel_cache_searcher fennel-cache-searcher)
+  (table.insert package.searchers 1 fennel-cache-searcher)
+  fennel-cache-searcher)
+
 (when (and fs appdirs)
   (local cache-root (appdirs.user-cache-dir "space"))
   (when cache-root
@@ -197,7 +227,7 @@
     (if ok
         (do
           (set fennel-cache-dir target)
-          (table.insert package.searchers 1 fennel-cache-searcher))
+          (install-fennel-cache-searcher!))
         (logging.warn (string.format "[space] fennel cache disabled: %s" err)))))
 
 (fn init-app-dirs []
@@ -249,6 +279,12 @@
   (assert (and app.engine app.engine.now-ms)
           "app.engine.now-ms missing")
   (app.engine:now-ms))
+
+(fn dev-flag-enabled? [value]
+  (and value
+       (not (or (= value "0")
+                (= (string.lower value) "false")
+                (= (string.lower value) "off")))))
 
 (fn sync-physics-paused-state []
   (when (and app.engine app.engine.set-physics-paused)
@@ -355,6 +391,61 @@
   (RuntimePerformance.clear-lease state id)
   (apply-runtime-performance-settings)
   true)
+
+(fn resolve-hot-reload-config []
+  (local override app.hot-reload-config)
+  (local env-watch-path (os.getenv "SPACE_HOT_RELOAD_WATCH_PATH"))
+  (local enabled?
+    (if (and override (not (= override.enabled nil)))
+        (not (= override.enabled false))
+        (dev-flag-enabled? (os.getenv "SPACE_HOT_RELOAD"))))
+  (if (not enabled?)
+      nil
+      {:watch-paths (or (and override override.watch-paths)
+                        (and env-watch-path [env-watch-path])
+                        [(fs.join-path runtime.assets-path "lua")])
+       :debounce-ms (or (and override override.debounce-ms) 150)
+       :module-name (or (and override override.module-name) "main")
+       :preserve-modules (or (and override override.preserve-modules)
+                             ["hot-reload" "units"])
+       :generic? (and override override.generic?)}))
+
+(fn app-root-reload-in-progress? []
+  (and app.__hot-reload-ctx
+       app.__hot-reload-ctx.target-unit
+       (= app.__hot-reload-ctx.target-unit.id "app-root")))
+
+(fn ensure-hot-reload-controller []
+  (local config (resolve-hot-reload-config))
+  (if (not config)
+      nil
+      (do
+        (when (not app.hot-reload-callback-id)
+          (set app.hot-reload-callback-id
+               (callbacks.register
+                 (fn [_payload]
+                   (when (and app.hot-reload-controller
+                              app.hot-reload-controller.reload-now!)
+                     (app.hot-reload-controller:reload-now!))))))
+        (when (not app.hot-reload-controller)
+          (local HotReload (require :hot-reload))
+          (local controller-config
+            {:watch-paths config.watch-paths
+             :debounce-ms config.debounce-ms
+             :module-name config.module-name
+             :preserve-modules config.preserve-modules
+             :generic? config.generic?
+             :on-reload-requested (fn [_controller]
+                                    (assert app.hot-reload-callback-id
+                                            "hot reload callback id missing")
+                                    (callbacks.enqueue app.hot-reload-callback-id true))
+             :units-fn (fn [_root-unit]
+                         (icollect [_ live-unit (ipairs [app.canvas-unit
+                                                         app.hud-unit])]
+                           live-unit))})
+          (set app.hot-reload-controller
+               (HotReload.AppRootController controller-config)))
+        app.hot-reload-controller)))
 
 (fn app.activate-runtime-performance-gameplay-lease [id]
   (assert (and (= (type id) :string) (> (# id) 0))
@@ -529,7 +620,6 @@
 (local {:to-table viewport->table
         :to-glm-vec4 viewport->glm-vec4
         :input-pos->viewport-pos viewport->input-pos} (require :viewport-utils))
-(local Hud (require :hud))
 (local AppViewport (require :app-viewport))
 (local AppProjection (require :app-projection))
 (local {: FocusManager} (require :focus))
@@ -642,6 +732,8 @@
 (set app.scene nil)
 (set app.canvas nil)
 (set app.hud nil)
+(set app.canvas-unit nil)
+(set app.hud-unit nil)
 (set app.profiler nil)
 (set app.movables nil)
 (set app.focus nil)
@@ -678,6 +770,7 @@
 (set app.global-shortcuts-handler nil)
 (set app.remote-control nil)
 (set app.remote-control-endpoint nil)
+(set app.hot-reload-callback-id nil)
 (set app.browser-cube-surface nil)
 (set app.next-frame-queue [])
 (set app.next-frame-pending [])
@@ -811,6 +904,18 @@
     (app.reset-projection)))
 
 (set app.apply-active-world-hud-contrib apply-active-world-hud-contrib)
+
+(fn bind-hud-runtime []
+  (when app.hud
+    (set app.hud.scene app.scene)
+    (when app.hud.build-context
+      (set app.hud.build-context.object-selector app.object-selector)
+      (set app.hud.build-context.layout-root app.layout-root))
+    (when (or app.scene app.active-world-entry app.world-manager)
+      (apply-active-world-hud-contrib)))
+  true)
+
+(set app.bind-hud-runtime bind-hud-runtime)
 
 (fn app.request-theme-change [theme-name]
   (assert theme-name "app.request-theme-change requires a theme name")
@@ -951,17 +1056,12 @@
   (set app.layout-root (and app.scene app.scene.layout-root))
   (when (and app.scene app.scene.set-camera)
     (app.scene:set-camera app.camera))
-  (when app.hud
-    (set app.hud.scene app.scene)
-    (when app.hud.build-context
-      (set app.hud.build-context.object-selector app.object-selector)
-      (set app.hud.build-context.layout-root app.layout-root)))
+  (bind-hud-runtime)
   (when (and app.canvas app.canvas.build-context)
     (set app.canvas.build-context.object-selector app.object-selector))
   (when (and app.scene app.scene.build-context)
     (set app.scene.build-context.object-selector app.object-selector)
     (set app.scene.build-context.layout-root app.layout-root))
-  (apply-active-world-hud-contrib)
   (when (and runtime runtime.restore-surface-state)
     (runtime:restore-surface-state app.canvas app.hud))
   (app.set-active-canvas-feature (and runtime runtime.active-canvas-feature))
@@ -969,7 +1069,37 @@
                                           app.preferred-interaction-surface)
                                       {:sync-canvas-visibility true}))
 
+(fn ensure-hud-unit []
+  (when (not app.hud-unit)
+    (local HudUnitModule (require :hud-unit))
+    (set app.hud-unit
+         (Units.ModuleUnit {:id "hud"
+                            :parent-id "app-root"
+                            :module-name "hud-unit"
+                            :owned-paths ((. HudUnitModule :hud-owned-paths))
+                            :load-export "load-hud!"
+                            :unload-export "unload-hud!"
+                            :snapshot-export "snapshot-hud!"
+                            :restore-export "restore-hud!"})))
+  app.hud-unit)
+
+(fn ensure-canvas-unit []
+  (when (not app.canvas-unit)
+    (local CanvasUnitModule (require :canvas-unit))
+    (set app.canvas-unit
+         (Units.ModuleUnit {:id "canvas"
+                            :parent-id "app-root"
+                            :module-name "canvas-unit"
+                            :owned-paths ((. CanvasUnitModule :canvas-owned-paths))
+                            :load-export "load-canvas!"
+                            :unload-export "unload-canvas!"
+                            :snapshot-export "snapshot-canvas!"
+                            :restore-export "restore-canvas!"})))
+  app.canvas-unit)
+
 (local installable-reset-projection app.reset-projection)
+(local installable-set-viewport app.set-viewport)
+(local installable-create-default-projection app.create-default-projection)
 (local installable-mark-active-world-hud-dirty app.mark-active-world-hud-dirty)
 (local installable-set-canvas-visible app.set-canvas-visible)
 (local installable-set-active-interaction-surface app.set-active-interaction-surface)
@@ -980,6 +1110,8 @@
 
 (fn install-app-shell! []
   (set app.canvas-shell-changed (or app.canvas-shell-changed (Signal)))
+  (set app.set-viewport installable-set-viewport)
+  (set app.create-default-projection installable-create-default-projection)
   (set app.reset-projection installable-reset-projection)
   (set app.mark-active-world-hud-dirty installable-mark-active-world-hud-dirty)
   (set app.set-canvas-visible installable-set-canvas-visible)
@@ -1174,6 +1306,9 @@
     (set app.engine-tick-handler
          (app.engine.events.engine-tick:connect
            (fn [_payload]
+             (when (and app.hot-reload-controller app.hot-reload-controller.update)
+               (when (app.hot-reload-controller:update 0)
+                 (lua "return nil")))
              (when app.remote-control
                (app.remote-control:tick))
              (when (and app.kernels app.kernels.tick)
@@ -1223,13 +1358,9 @@
   (when app.focus
     (app.focus:drop))
   (set app.focus (FocusManager {:root-name "space-focus"}))
-  (local focus-manager app.focus)
-  (local hud-scope (focus-manager:create-scope {:name "hud"
-                                                :directional-traversal-boundary? true}))
-  (focus-manager:attach hud-scope (focus-manager:get-root-scope))
   (set app.scene-focus-scope nil)
   (set app.canvas-focus-scope nil)
-  (set app.hud-focus-scope hud-scope)
+  (set app.hud-focus-scope nil)
   (when app.clickables
     (when app.focus-void-callback
       (app.clickables:unregister-left-click-void-callback app.focus-void-callback)
@@ -1239,8 +1370,6 @@
              (when app.focus
                (app.focus:clear-focus))))
     (app.clickables:register-left-click-void-callback app.focus-void-callback))
-  (local focus-manager app.focus)
-  (local hud-scope app.hud-focus-scope)
   (set app.scene nil)
   (set app.canvas nil)
   (set app.camera nil)
@@ -1260,13 +1389,10 @@
   (set app.terrain-paint-session nil)
   (set app.terrain-paint-previous-state nil)
   (set app.layout-root nil)
-
-  (set app.hud (Hud {:scene nil
-                     :focus-manager focus-manager
-                     :focus-scope hud-scope
-                     :icons app.icons
-                     :states app.states
-                     :movables app.movables}))
+  (set app.hud nil)
+  (ensure-canvas-unit)
+  (local hud-unit (ensure-hud-unit))
+  (hud-unit:load)
   (init-world-manager)
   (when app.world-manager
     (app.world-manager:activate-first))
@@ -1290,17 +1416,24 @@
 
   (when app.system-cursors
     (app.system-cursors:reset))
-  (when app.tray-manager
-    (app.tray-manager.drop)
-    (set app.tray-manager nil))
-  (set app.tray-manager (Tray))
-  (when app.tray-manager
-    (app.tray-manager.setup))
-  (set app.notify (Notify))
+  (if (and (app-root-reload-in-progress?)
+           app.tray-manager
+           app.notify)
+      true
+      (do
+        (when app.tray-manager
+          (app.tray-manager.drop)
+          (set app.tray-manager nil))
+        (set app.tray-manager (Tray))
+        (when app.tray-manager
+          (app.tray-manager.setup))
+        (set app.notify (Notify))
+        true))
   (when app.wallet
     (set app.wallet nil))
   (set app.wallet (WalletManager {}))
   (app.wallet:load-active)
+  (ensure-hot-reload-controller)
 
   (local init-end-ms (wall-now-ms))
   (logging.info
@@ -1311,6 +1444,36 @@
   (logging.info (string.format "[space] first update completed in %.2fms"
                                (- (wall-now-ms) init-end-ms)))
   )
+
+(fn app.snapshot-app-state []
+  (local active-world-id
+    (or (and app.active-world-entry app.active-world-entry.id)
+        (and app.world-manager
+             app.world-manager.active-world-id
+             (app.world-manager:active-world-id))))
+  (local snapshot
+    {:active-world-id active-world-id
+     :active-canvas-feature app.active-canvas-feature
+     :preferred-interaction-surface app.preferred-interaction-surface
+     :active-interaction-surface app.active-interaction-surface
+     :canvas-visible? app.canvas-visible?})
+  snapshot)
+
+(fn app.restore-app-state [state]
+  (local snapshot (or state {}))
+  (when (and snapshot.active-world-id
+             app.world-manager
+             app.world-manager.activate-world-id)
+    (app.world-manager:activate-world-id snapshot.active-world-id))
+  (when (and snapshot.active-canvas-feature app.set-active-canvas-feature)
+    (app.set-active-canvas-feature snapshot.active-canvas-feature))
+  (when (and snapshot.preferred-interaction-surface app.set-active-interaction-surface)
+    (app.set-active-interaction-surface snapshot.preferred-interaction-surface
+                                        {:sync-canvas-visibility false}))
+  (when (and (not (= snapshot.canvas-visible? nil))
+             app.set-canvas-visible)
+    (app.set-canvas-visible snapshot.canvas-visible?))
+  true)
 
 (fn app.update [delta]
   (local profiler app.profiler)
@@ -1403,6 +1566,7 @@
   (when (and app.world-manager app.world-manager.drop)
     (app.world-manager:drop)
     (set app.world-manager nil))
+  (set app.canvas-unit nil)
   (set app.active-world-entry nil)
   (set app.first-person-controls nil)
   (set app.canvas-controls nil)
@@ -1425,6 +1589,9 @@
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)
   (set app.active-world-hud-overlay nil)
+  (when app.hud-unit
+    (app.hud-unit:unload)
+    (set app.hud-unit nil))
   (when app.hoverables
     (app.hoverables:drop)
     (set app.hoverables nil))
@@ -1443,11 +1610,6 @@
   (when app.browser-cube-surface
     (app.browser-cube-surface:drop)
     (set app.browser-cube-surface nil))
-  (when app.hud
-    (clear-active-world-hud-overlay)
-    (set app.hud.world-hud-contrib nil)
-    (app.hud:drop)
-    (set app.hud nil))
   (when app.renderers
     (app.renderers:drop)
     (set app.renderers nil))
@@ -1476,10 +1638,21 @@
   (set app.next-frame-pending [])
   (set app.projection nil)
   (set app.layout-root nil)
-  (when app.tray-manager
-    (app.tray-manager.drop)
-    (set app.tray-manager nil))
-  (set app.notify nil)
+  (if (app-root-reload-in-progress?)
+      (logging.info "[space] drop preserving tray and notify during app-root reload")
+      (do
+        (when app.tray-manager
+          (app.tray-manager.drop)
+          (set app.tray-manager nil))
+        (set app.notify nil)))
+  (when (and (not (app-root-reload-in-progress?))
+             app.hot-reload-callback-id)
+    (callbacks.unregister app.hot-reload-callback-id)
+    (set app.hot-reload-callback-id nil))
+  (when (and (not (app-root-reload-in-progress?))
+             app.hot-reload-controller)
+    (app.hot-reload-controller:drop)
+    (set app.hot-reload-controller nil))
   (when (and app.volume-settings-handler VolumeControl.volume-settings-changed-debounced)
     (VolumeControl.volume-settings-changed-debounced:disconnect app.volume-settings-handler true)
     (set app.volume-settings-handler nil))
@@ -1502,7 +1675,7 @@
   (sync-physics-paused-state)
   )
 
-(when (and app.engine AppConfig.run-main)
+(when (and app.engine AppConfig.run-main (not app.__suppress-main-run?))
   (when app.engine-autocreated
     (set app.engine (EngineModule.Engine (load-window-startup-options)))
     (set app.engine-autocreated false))
@@ -1511,8 +1684,14 @@
   (app.init)
   (app.engine:run)
   (app.drop)
+  (when (and app.hot-reload-controller app.hot-reload-controller.drop)
+    (app.hot-reload-controller:drop)
+    (set app.hot-reload-controller nil))
   (app.engine:shutdown))
 
-{:install-app-shell! install-app-shell!
+{:init-app! app.init
+ :install-app-shell! install-app-shell!
  :bind-active-world-runtime installable-bind-active-world-runtime
- :drop-app! app.drop}
+ :drop-app! app.drop
+ :snapshot-app! app.snapshot-app-state
+ :restore-app! app.restore-app-state}

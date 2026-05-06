@@ -25,21 +25,26 @@
         true)
 
     (fn read-active-id []
-        (when (not (fs.exists active-path))
-            (values nil nil))
-        (local (ok content) (pcall fs.read-file active-path))
-        (when (not ok)
-            (when logging
-                (logging.warn (string.format "[wallet] failed to read %s: %s"
-                                             active-path
-                                             content)))
-            (values nil nil))
-        (local (parse-ok decoded) (pcall json.loads content))
-        (when (not parse-ok)
-            (pcall (fn [] (fs.remove active-path)))
-            (values nil nil))
-        (local id (and decoded decoded.id))
-        (values id decoded))
+        (if (not (fs.exists active-path))
+            (values nil nil)
+            (do
+                (local (ok content) (pcall fs.read-file active-path))
+                (if (not ok)
+                    (do
+                        (when logging
+                            (logging.warn (string.format "[wallet] failed to read %s: %s"
+                                                         active-path
+                                                         content)))
+                        (values nil nil))
+                    (do
+                        (local (parse-ok decoded) (pcall json.loads content))
+                        (if (not parse-ok)
+                            (do
+                                (pcall (fn [] (fs.remove active-path)))
+                                (values nil nil))
+                            (do
+                                (local id (and decoded decoded.id))
+                                (values id decoded))))))))
 
     (fn persist-active-id [id]
         (ensure-wallet-dir)

@@ -219,6 +219,18 @@
         (activate-index tab-number)
         false))
 
+  (fn activate-world-id [world-id]
+    (if (not world-id)
+        false
+        (do
+          (var target-index nil)
+          (each [idx entry (ipairs worlds) &until target-index]
+            (when (= entry.id world-id)
+              (set target-index idx)))
+          (if target-index
+              (activate-index target-index)
+              false))))
+
   (fn create-home-world [opts]
     (local options-arg (or opts {}))
     (local id (next-world-id))
@@ -329,6 +341,7 @@
         :activate-next (fn [_self] (activate-next))
         :activate-previous (fn [_self] (activate-previous))
         :activate-by-tab-number (fn [_self tab-number] (activate-by-tab-number tab-number))
+        :activate-world-id (fn [_self world-id] (activate-world-id world-id))
         :create-home-world (fn [_self opts] (create-home-world opts))
         :close-world-index (fn [_self idx] (close-world-index idx))
         :close-active-world (fn [_self] (close-active-world))

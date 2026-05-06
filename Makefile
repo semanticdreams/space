@@ -1,4 +1,4 @@
-.PHONY: build cmake debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release test test-e2e profile commit prof download-models-data resize-logo docs devlog test-windows-wine
+.PHONY: build cmake debug run pack appimage install install-deb install-rpm clean dump-seed load-seed act release test test-e2e test-live-hot-reload profile commit prof download-models-data resize-logo docs devlog test-windows-wine
 
 cmake:
 	mkdir -p build && cd build && cmake -DCMAKE_BUILD_TYPE=Release -DSPACE_ENABLE_CEF=ON ..
@@ -73,6 +73,13 @@ test-e2e:
 	FENNEL_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
 	FENNEL_MACRO_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
 	SDL_VIDEODRIVER=x11 xvfb-run -a -s "-screen 0 1280x720x24" ./build/space -m tests.e2e:main
+
+test-live-hot-reload:
+	SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 \
+	SPACE_LOG_DIR=/tmp/space/tests/log SPACE_ASSETS_PATH=$(shell pwd)/assets \
+	FENNEL_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
+	FENNEL_MACRO_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
+	./scripts/test-live-hot-reload.sh
 
 test-windows-wine:
 	./scripts/test-windows-under-wine.sh

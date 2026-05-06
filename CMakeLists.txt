@@ -178,6 +178,11 @@ set(WITH_FUZZ OFF CACHE BOOL "Disable libjpeg-turbo fuzz targets" FORCE)
 set(WITH_SIMD OFF CACHE BOOL "Disable libjpeg-turbo SIMD" FORCE)
 add_subdirectory(external/libjpeg-turbo)
 
+set(EFSW_BUILD_STATIC_LIBS OFF CACHE BOOL "Disable extra efsw-static library" FORCE)
+set(EFSW_BUILD_TEST_APP OFF CACHE BOOL "Disable efsw test app" FORCE)
+set(EFSW_INSTALL OFF CACHE BOOL "Disable efsw install targets" FORCE)
+add_subdirectory(external/efsw)
+
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/sol2)
 
 include_directories(SYSTEM ${CMAKE_SOURCE_DIR}/external/cgltf)
@@ -361,6 +366,7 @@ if(SPACE_SUPPRESS_THIRD_PARTY_WARNINGS)
     space_suppress_target_warnings(TrustWalletCore)
     space_suppress_target_warnings(msdf-atlas-gen)
     space_suppress_target_warnings(jpeg-static)
+    space_suppress_target_warnings(efsw)
     space_suppress_target_warnings(spdlog)
     space_suppress_target_warnings(spdlog_header_only)
 endif()
@@ -485,6 +491,7 @@ target_link_libraries(${PROJECT_NAME}_lib
     tree_sitter_javascript
     OpenMP::OpenMP_CXX
     spdlog::spdlog
+    efsw
     Boost::headers
     space_yojimbo
 )

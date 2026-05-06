@@ -38,6 +38,7 @@ void lua_bind_physics(sol::state&);
 void lua_bind_force_layout(sol::state&);
 void lua_bind_colors(sol::state&);
 void lua_bind_audio(sol::state&);
+void lua_bind_file_watch(sol::state&);
 void lua_bind_audio_input(sol::state&);
 void lua_bind_aubio(sol::state&);
 #if defined(SPACE_HAS_VTERM)
@@ -212,6 +213,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_force_layout(lua);
     lua_bind_colors(lua);
     lua_bind_audio(lua);
+    lua_bind_file_watch(lua);
     lua_bind_audio_input(lua);
     lua_bind_aubio(lua);
 #if defined(SPACE_HAS_VTERM)

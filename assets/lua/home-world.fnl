@@ -6,19 +6,14 @@
 (local JsonUtils (require :json-utils))
 (local Camera (require :camera))
 (local Scene (require :scene))
-(local Canvas (require :canvas))
-(local CanvasControls (require :canvas-controls))
 (local {: FirstPersonControls} (require :first-person-controls))
 (local Graph (require :graph/init))
-(local GraphView (require :graph/view))
 (local GraphKeyLoaders (require :graph/key-loaders))
-(local ObjectSelector (require :object-selector))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
-(local {:DrawingRender DrawingRender} (require :drawing/render))
 (local DrawingSidebarView (require :drawing/sidebar-view))
 (local CanvasFeatures (require :canvas-features))
-(local viewport-utils (require :viewport-utils))
+(local CanvasShellState (require :home-world-canvas-shell-state))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
 (local PhysicsContainment (require :physics-containment))
@@ -63,30 +58,9 @@
             (set (. out k) (clone-table v))))
         out)))
 
-(fn resolve-runtime-interaction-surface [surface]
-  (if (or (= surface :canvas)
-          (= surface "canvas"))
-      :canvas
-      :scene))
-
-(fn encode-interaction-surface [surface]
-  (if (= (resolve-runtime-interaction-surface surface) :canvas)
-      "canvas"
-      "scene"))
-
-(fn capture-canvas-shell-state [world runtime canvas-state]
-  (local existing-canvas-state (or (and world.state world.state.canvas) {}))
-  (local captured (or canvas-state {}))
-  (set captured.active_feature
-    (or (and runtime runtime.active-canvas-feature)
-        existing-canvas-state.active_feature
-        (. CanvasFeatures :default-feature-id)))
-  (set captured.preferred_interaction_surface
-       (encode-interaction-surface
-         (or (and runtime runtime.preferred-interaction-surface)
-             existing-canvas-state.preferred_interaction_surface
-             "scene")))
-  captured)
+(local resolve-runtime-interaction-surface CanvasShellState.resolve-runtime-interaction-surface)
+(local encode-interaction-surface CanvasShellState.encode-interaction-surface)
+(local capture-canvas-shell-state CanvasShellState.capture-canvas-shell-state)
 
 (fn base-default-state []
   {:camera {:position [0 0 30]
@@ -235,27 +209,6 @@
               (when (not (= (type decoded) :table))
                 (error (string.format "HomeWorld expected table in %s" path)))
               decoded)))))
-
-(fn project-canvas-position [canvas position opts]
-  (local options (or opts {}))
-  (local viewport (viewport-utils.to-table (or options.viewport app.viewport)))
-  (assert viewport "HomeWorld canvas projection requires a viewport")
-  (assert (> viewport.width 0) "HomeWorld canvas projection requires viewport width > 0")
-  (assert (> viewport.height 0) "HomeWorld canvas projection requires viewport height > 0")
-  (local view (or options.view
-                  (and canvas canvas.get-view-matrix
-                       (canvas:get-view-matrix))))
-  (local projection (or options.projection
-                        (and canvas canvas.projection)))
-  (assert view "HomeWorld canvas projection requires a view matrix")
-  (assert projection "HomeWorld canvas projection requires a projection matrix")
-  (assert (and glm glm.project) "HomeWorld canvas projection requires glm.project")
-  (local viewport-vec (viewport-utils.to-glm-vec4 viewport))
-  (local projected (glm.project position view projection viewport-vec))
-  (assert projected "glm.project returned nil")
-  (glm.vec3 projected.x
-            (- (+ viewport.height viewport.y) projected.y)
-            projected.z))
 
 (fn HomeWorld [opts]
   (local options (or opts {}))
@@ -641,6 +594,12 @@
       (set runtime.pending-hud-state
            (clone-table (and world.state world.state.hud)))))
 
+  (fn current-canvas-runtime-module []
+    (local module (require :home-world-canvas-runtime))
+    (assert (= (type module) :table)
+            "HomeWorld requires :home-world-canvas-runtime to return a table")
+    module)
+
   (fn create-runtime [world ctx]
     (local camera-state (or (and world.state world.state.camera) {}))
     (local (ok parsed-camera-position) (pcall array->vec3 camera-state.position))
@@ -681,13 +640,6 @@
                                            :directional-traversal-boundary? true}))
         (ctx.focus-manager:attach scope ctx.focus-root)
         scope))
-    (local canvas-scope
-      (do
-        (local scope
-          (ctx.focus-manager:create-scope {:name (.. "canvas:" world.id)
-                                           :directional-traversal-boundary? true}))
-        (ctx.focus-manager:attach scope ctx.focus-root)
-        scope))
     (local scene
       (Scene {:focus-manager ctx.focus-manager
               :debug-id (.. "scene:" world.id)
@@ -702,42 +654,6 @@
                   {:scene updated-scene
                    :config (resolve-runtime-containment-config world)}))
               :graph graph}))
-    (local canvas
-      (Canvas {:camera canvas-camera
-               :focus-manager ctx.focus-manager
-               :focus-scope canvas-scope
-               :icons ctx.icons
-               :states ctx.states
-               :movables ctx.movables
-               :scale-factor canvas-state.scale_factor}))
-    (local canvas-controls
-      (CanvasControls {:canvas canvas
-                       :camera canvas-camera}))
-    (local graph-canvas-target
-      {:interaction-surface :canvas
-       :canvas-feature "graph"
-       :screen-pos-ray (fn [_self pos opts]
-                         (canvas:screen-pos-ray pos opts))})
-    (local object-selector
-      (ObjectSelector {:ctx (and canvas canvas.build-context)
-                       :project (fn [position opts]
-                                  (project-canvas-position canvas position opts))
-                       :enabled? true}))
-    (when (and scene scene.build-context)
-      (set scene.build-context.object-selector object-selector))
-    (when (and canvas canvas.build-context)
-      (set canvas.build-context.object-selector object-selector))
-    (when (and ctx.hud ctx.hud.build-context)
-      (set ctx.hud.build-context.object-selector object-selector))
-    (local graph-view
-      (GraphView {:graph graph
-                  :ctx (and canvas canvas.build-context)
-                  :movables ctx.movables
-                  :selector object-selector
-                  :view-target canvas
-                  :camera canvas-camera
-                  :pointer-target graph-canvas-target
-                  :data-dir world.dir}))
     (local drawing-state
       (DrawingDocument.normalize-state
         (or world.state.drawing
@@ -746,32 +662,25 @@
       (DrawingController {:document drawing-state.document
                           :ui drawing-state.ui
                           :data_dir world.dir}))
-    (local drawing-render
-      (DrawingRender {:ctx (and canvas canvas.build-context)
-                      :controller drawing-controller
-                      :canvas canvas}))
     (local graph-state (resolve-graph-core-state world.state.graph))
     (local scene-state (or world.state.scene {}))
     (scene:build-default {:terrains scene-state.terrains})
-    (when graph-state
-      (graph-view:restore-graph-state graph-state))
     (local containment-config
       (apply-runtime-containment! world {:scene scene}))
     (local runtime
       {:camera camera
        :canvas-camera canvas-camera
+       :focus-manager ctx.focus-manager
+       :focus-root ctx.focus-root
+       :icons ctx.icons
+       :states ctx.states
+       :movables ctx.movables
        :physics-containment-config containment-config
        :first-person-controls controls
-       :canvas-controls canvas-controls
        :scene-scope scene-scope
-       :canvas-scope canvas-scope
        :scene scene
-       :canvas canvas
-       :object-selector object-selector
        :graph graph
-       :graph-view graph-view
        :drawing-controller drawing-controller
-       :drawing-render drawing-render
        :active-canvas-feature (CanvasFeatures.resolve canvas-state.active_feature)
        :preferred-interaction-surface
        (resolve-runtime-interaction-surface canvas-state.preferred_interaction_surface)
@@ -784,6 +693,22 @@
                    :start-scheduled? false
                    :scene-panels (clone-table scene-state.panels)
                    :scene-panel-index 1}})
+    (set runtime.load-canvas-runtime
+         (fn [rt]
+           (assert (= rt runtime) "HomeWorld.load-canvas-runtime called with wrong runtime")
+           ((. (current-canvas-runtime-module) :load-runtime-canvas-surface!) world runtime)))
+    (set runtime.unload-canvas-runtime
+         (fn [rt]
+           (assert (= rt runtime) "HomeWorld.unload-canvas-runtime called with wrong runtime")
+           ((. (current-canvas-runtime-module) :drop-runtime-canvas-surface!) runtime)))
+    (set runtime.capture-canvas-unit-state
+         (fn [rt]
+           (assert (= rt runtime) "HomeWorld.capture-canvas-unit-state called with wrong runtime")
+           ((. (current-canvas-runtime-module) :capture-runtime-canvas-unit-state) world runtime)))
+    (set runtime.restore-canvas-unit-state
+         (fn [rt state]
+           (assert (= rt runtime) "HomeWorld.restore-canvas-unit-state called with wrong runtime")
+           ((. (current-canvas-runtime-module) :restore-runtime-canvas-unit-state!) runtime state)))
     (set runtime.restore-surface-state
          (fn [rt canvas-target hud]
            (when (and canvas-target canvas-target.restore-state rt.pending-canvas-state)
@@ -792,6 +717,9 @@
            (when (and hud hud.restore-state rt.pending-hud-state)
              (hud:restore-state rt.pending-hud-state)
              (set rt.pending-hud-state nil))))
+    (runtime:load-canvas-runtime)
+    (when graph-state
+      (runtime.graph-view:restore-graph-state graph-state))
     runtime)
 
   (fn clear-runtime [world ctx reason]
@@ -804,22 +732,8 @@
       (when runtime.first-person-controls
         (runtime.first-person-controls:drop)
         (set runtime.first-person-controls nil))
-      (when runtime.canvas-controls
-        (runtime.canvas-controls:drop)
-        (set runtime.canvas-controls nil))
-      (when runtime.graph-view
-        (runtime.graph-view:drop)
-        (set runtime.graph-view nil))
-      (when runtime.drawing-render
-        (runtime.drawing-render:drop)
-        (set runtime.drawing-render nil))
+      (runtime:unload-canvas-runtime)
       (set runtime.drawing-controller nil)
-      (when runtime.object-selector
-        (runtime.object-selector:drop)
-        (set runtime.object-selector nil))
-      (when runtime.canvas
-        (runtime.canvas:drop)
-        (set runtime.canvas nil))
       (when runtime.scene
         (runtime.scene:drop)
         (set runtime.scene nil))
@@ -833,7 +747,6 @@
         (runtime.camera:drop)
         (set runtime.camera nil))
       (set runtime.scene-scope nil)
-      (set runtime.canvas-scope nil)
       (set world.runtime nil)
       (when reason
         (logging.info (string.format "[world] %s runtime cleared (%s)" world.id reason)))))

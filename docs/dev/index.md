@@ -5,6 +5,7 @@ This section contains internal architecture, implementation notes, and integrati
 - [Concepts](/dev/concepts)
 - [Lifecycle Invariants](/dev/lifecycle-invariants)
 - [Lifecycle Hardening Plan](/dev/lifecycle-hardening-plan)
+- [Reloadable Units And Hot Reload](/dev/reloadable-units)
 - [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown)
 - [Runtime Performance Modes](/dev/runtime-performance)
 - [Video Playback (FFmpeg)](/dev/video-playback)
