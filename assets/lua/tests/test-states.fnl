@@ -438,7 +438,7 @@
   (local original-resizables app.resizables)
   (local original-touch-targets app.touch-gesture-targets)
   (local original-canvas-interactive app.canvas-interactive?)
-  (local original-feature app.active-canvas-feature)
+  (local original-mode app.active-canvas-mode)
   (set app.active-pointer-controls controls)
   (set app.hoverables {:on-enter (fn [])
                        :on-leave (fn [])
@@ -455,7 +455,7 @@
                        :on-mouse-button-up (fn [_self _payload])})
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.canvas-interactive? true)
-  (set app.active-canvas-feature "graph")
+  (set app.active-canvas-mode "graph")
   (local state (NormalState))
   (own-test-state! :normal state)
   (state.on-enter)
@@ -492,7 +492,7 @@
   (set app.resizables original-resizables)
   (set app.touch-gesture-targets original-touch-targets)
   (set app.canvas-interactive? original-canvas-interactive)
-  (set app.active-canvas-feature original-feature))
+  (set app.active-canvas-mode original-mode))
 
 (fn normal-state-forwards-control-click-suppression-to-clickables []
   (reset-engine-events)
@@ -657,7 +657,7 @@
   (local original-controls app.first-person-controls)
   (local original-controller app.drawing-controller)
   (local original-canvas-interactive app.canvas-interactive?)
-  (local original-feature app.active-canvas-feature)
+  (local original-mode app.active-canvas-mode)
   (local tool-log [])
   (set app.hoverables {:on-enter (fn [])
                        :on-leave (fn [])
@@ -677,7 +677,8 @@
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.first-person-controls controls)
   (set app.canvas-interactive? true)
-  (set app.active-canvas-feature "drawing")
+  (set app.active-canvas-mode "drawing")
+  (set app.canvas-mode-drawing-enabled? true)
   (set app.drawing-controller
        {:active-layer (fn [_self] {:id "layer-1" :kind "vector"})
         :active-tool (fn [self] self.tool)
@@ -735,7 +736,8 @@
   (set app.first-person-controls original-controls)
   (set app.drawing-controller original-controller)
   (set app.canvas-interactive? original-canvas-interactive)
-  (set app.active-canvas-feature original-feature))
+  (set app.canvas-mode-drawing-enabled? nil)
+  (set app.active-canvas-mode original-mode))
 
 (fn fpc-state-injects-pen-as-mouse []
   (reset-engine-events)
@@ -1309,7 +1311,7 @@
   (local original-controls app.first-person-controls)
   (local original-controller app.drawing-controller)
   (local original-canvas-interactive app.canvas-interactive?)
-  (local original-feature app.active-canvas-feature)
+  (local original-mode app.active-canvas-mode)
   (local tool-log [])
   (set app.hoverables {:on-enter (fn [])
                        :on-leave (fn [])
@@ -1329,7 +1331,8 @@
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.first-person-controls controls)
   (set app.canvas-interactive? true)
-  (set app.active-canvas-feature "drawing")
+  (set app.active-canvas-mode "drawing")
+  (set app.canvas-mode-drawing-enabled? true)
   (set app.drawing-controller
        {:active-layer (fn [_self] {:id "layer-1" :kind "vector"})
         :active-tool (fn [self] self.tool)
@@ -1388,7 +1391,8 @@
   (set app.first-person-controls original-controls)
   (set app.drawing-controller original-controller)
   (set app.canvas-interactive? original-canvas-interactive)
-  (set app.active-canvas-feature original-feature))
+  (set app.canvas-mode-drawing-enabled? nil)
+  (set app.active-canvas-mode original-mode))
 
 (fn terrain-paint-state-coalesces-motion-until-update []
   (reset-engine-events)
@@ -1631,13 +1635,17 @@
 (fn normal-state-delete-removes-graph-selection []
   (reset-engine-events)
   (local controls (create-controls-stub))
+  (local original-delete-selection app.canvas-mode-delete-selection)
   (set app.first-person-controls controls)
-  (set app.active-canvas-feature "graph")
+  (set app.active-canvas-mode "graph")
   (set app.drawing-controller nil)
   (var removed 0)
   (set app.graph-view {:remove-selected-nodes (fn [_self]
                                                 (set removed (+ removed 1))
                                                 1)})
+  (set app.canvas-mode-delete-selection
+       (fn []
+         (> (app.graph-view:remove-selected-nodes) 0)))
   (local state (NormalState))
   (own-test-state! :normal state)
   (state.on-enter)
@@ -1645,6 +1653,7 @@
   (assert (= removed 1) "Delete should trigger graph selection removal")
   (assert (= controls.record.key_down nil) "Handled delete should not reach controls")
   (state.on-leave)
+  (set app.canvas-mode-delete-selection original-delete-selection)
   (set app.graph-view nil)
   (set app.first-person-controls nil))
 
@@ -1652,8 +1661,9 @@
   (reset-engine-events)
   (local original-states app.states)
   (local controls (create-controls-stub))
+  (local original-activate-focused app.canvas-mode-activate-focused)
   (set app.first-person-controls controls)
-  (set app.active-canvas-feature "graph")
+  (set app.active-canvas-mode "graph")
   (set app.drawing-controller nil)
   (var opened 0)
   (local states
@@ -1662,6 +1672,9 @@
   (set app.graph-view {:open-focused-node (fn [_self]
                                             (set opened (+ opened 1))
                                             true)})
+  (set app.canvas-mode-activate-focused
+       (fn []
+         (app.graph-view:open-focused-node)))
   (set-app-states! states)
   (local state (NormalState))
   (states:add-state :normal state)
@@ -1670,6 +1683,7 @@
   (assert (= opened 1) "Enter should open focused graph node")
   (assert (= controls.record.key_down nil) "Handled enter should not reach controls")
   (state.on-leave)
+  (set app.canvas-mode-activate-focused original-activate-focused)
   (set-app-states! original-states)
   (set app.graph-view nil)
   (set app.first-person-controls nil))
@@ -1730,7 +1744,7 @@
   (set app.focus nil)
   (set app.first-person-controls nil))
 
-(fn normal-state-f4-toggles-graph-view []
+(fn normal-state-f4-ignores-graph-view-factory-without-canvas-shell []
   (reset-engine-events)
   (local original-canvas app.canvas)
   (local original-toggle-active-interaction-surface app.toggle-active-interaction-surface)
@@ -1738,7 +1752,7 @@
   (local original-graph-view-factory app.graph-view-factory)
   (local controls (create-controls-stub))
   (set app.first-person-controls controls)
-  (set app.active-canvas-feature "graph")
+  (set app.active-canvas-mode "graph")
   (set app.drawing-controller nil)
   (set app.canvas nil)
   (set app.toggle-active-interaction-surface nil)
@@ -1757,12 +1771,9 @@
   (own-test-state! :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key KEY_F4})
-  (assert (= created 1) "F4 should create a graph view when missing")
-  (assert app.graph-view "F4 should set app.graph-view")
-  (assert (= controls.record.key_down nil) "Handled F4 should not reach controls")
-  (app.engine.events.key-down.emit {:key KEY_F4})
-  (assert (= dropped 1) "F4 should drop an existing graph view")
-  (assert (not app.graph-view) "F4 should clear app.graph-view after drop")
+  (assert (= created 0) "F4 should not recreate removed graph-view fallback behavior")
+  (assert (not app.graph-view) "F4 should leave app.graph-view unchanged without canvas shell support")
+  (assert (= controls.record.key_down nil) "F4 should remain a no-op when no canvas shell is available")
   (state.on-leave)
   (set app.canvas original-canvas)
   (set app.toggle-active-interaction-surface original-toggle-active-interaction-surface)
@@ -1886,7 +1897,8 @@
                      :fn normal-state-directional-focus-skips-with-input})
 (table.insert tests {:name "Normal state delete removes selected graph nodes" :fn normal-state-delete-removes-graph-selection})
 (table.insert tests {:name "Normal state Enter opens focused graph node" :fn normal-state-enter-opens-focused-graph-node})
-(table.insert tests {:name "Normal state F4 toggles graph view" :fn normal-state-f4-toggles-graph-view})
+(table.insert tests {:name "Normal state F4 ignores graph view factory without canvas shell"
+                     :fn normal-state-f4-ignores-graph-view-factory-without-canvas-shell})
 (table.insert tests {:name "Normal state F4 toggles canvas surface" :fn normal-state-f4-toggles-canvas-surface})
 (table.insert tests {:name "Normal state command hints label F4 as toggle-canvas"
                      :fn normal-state-command-hints-label-f4-as-toggle-canvas})

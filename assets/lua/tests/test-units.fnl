@@ -7,6 +7,7 @@
 (local HotReload (require :hot-reload))
 (local LauncherLaunchable (require :launchables/launcher))
 (local runtime (require :runtime))
+(local CanvasModes (require :canvas-modes))
 (local Units (require :units))
 
 (local tests [])
@@ -70,6 +71,10 @@
     (when (= searcher target)
       (set count (+ count 1))))
   count)
+
+(fn canvas-mode-unit [mode-id]
+  (and app.canvas-mode-units
+       (. app.canvas-mode-units mode-id)))
 
 (fn wait-until [predicate opts]
   (local options (or opts {}))
@@ -545,7 +550,7 @@
                        :position [6 7 0]
                        :rotation [1 0 0 0]
                        :size [16 10 0]}})
-            (app.set-active-canvas-feature "drawing")
+            (app.set-active-canvas-mode "drawing")
             (app.set-active-interaction-surface :canvas
                                                 {:sync-canvas-visibility true})
             (app.canvas:update)
@@ -571,8 +576,8 @@
                     "Canvas unit reload should preserve drawing controller")
             (assert (= app.world-manager old-world-manager)
                     "Canvas unit reload should avoid reloading world manager")
-            (assert (= app.active-canvas-feature "drawing")
-                    "Canvas unit reload should preserve active canvas feature")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Canvas unit reload should preserve active canvas mode")
             (assert (= app.active-interaction-surface :canvas)
                     "Canvas unit reload should preserve active interaction surface")
             (assert (= app.canvas-visible? true)
@@ -643,7 +648,7 @@
                        :position [8 9 0]
                        :rotation [1 0 0 0]
                        :size [18 11 0]}})
-            (app.set-active-canvas-feature "drawing")
+            (app.set-active-canvas-mode "drawing")
             (app.set-active-interaction-surface :canvas
                                                 {:sync-canvas-visibility true})
             (app.canvas:update)
@@ -662,8 +667,8 @@
                     "Expected routed canvas reload to avoid reloading app root")
             (assert (= app.graph old-graph)
                     "Expected routed canvas reload to preserve graph owner")
-            (assert (= app.active-canvas-feature "drawing")
-                    "Expected routed canvas reload to preserve active canvas feature")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Expected routed canvas reload to preserve active canvas mode")
             (assert (= app.active-interaction-surface :canvas)
                     "Expected routed canvas reload to preserve interaction surface")
             (app.canvas:update)
@@ -740,6 +745,213 @@
           result
           (error result)))))
 
+(fn hot-reload-routes-drawing-mode-file-changes-to-drawing-mode-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init-app!))
+            (assert (canvas-mode-unit "drawing")
+                    "Expected drawing canvas mode unit after app init")
+            (app.set-active-canvas-mode "drawing")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Expected drawing mode to become active before routed reload")
+            (assert (= app.canvas-mode-drawing-enabled? true)
+                    "Expected drawing mode hooks before routed reload")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init-app!"
+                 :unload-export "drop-app!"
+                 :snapshot-export "snapshot-app!"
+                 :restore-export "restore-app!"}))
+            (local controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "drawing")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-units"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "drawing"
+                                                      "input.fnl")
+                                  :action "modified"}]})
+                    "Expected drawing mode file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "drawing-canvas-mode")
+                    "Expected drawing mode file change to target drawing mode unit")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Expected drawing mode unit reload to preserve active mode")
+            (assert (= app.canvas-mode-drawing-enabled? true)
+                    "Expected drawing mode unit reload to restore drawing hooks")
+            (assert app.canvas-mode-command-hints-provider
+                    "Expected drawing mode unit reload to restore command hints hook")
+            (controller:drop)
+            true)))
+      (when (and (= (type (. (require :main) :drop-app!)) :function)
+                 app.engine)
+        ((. (require :main) :drop-app!)))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn unloading-active-drawing-mode-updates-shell-state []
+  (local Main (require-main!))
+  (local original-init-renderers AppBootstrap.init-renderers)
+  (set AppBootstrap.init-renderers
+       (fn [_opts]
+         (install-renderer-stub!)))
+  (local (ok result)
+    (pcall
+      (fn []
+        ((. Main :install-app-shell!))
+        ((. Main :init-app!))
+        (assert (canvas-mode-unit "drawing")
+                "Expected drawing canvas mode unit after app init")
+        (app.set-active-canvas-mode "drawing")
+        (assert (= app.active-canvas-mode "drawing")
+                "Expected drawing mode active before unloading its unit")
+        (local drawing-mode-unit (canvas-mode-unit "drawing"))
+        (drawing-mode-unit:unload)
+        (assert (= app.active-canvas-mode nil)
+                "Expected unloading active drawing mode to clear the active mode")
+        (assert (= (CanvasModes.active-mode-id) nil)
+                "Expected CanvasModes registry to clear the active mode on unload")
+        (assert (not (= app.canvas-mode-drawing-enabled? true))
+                "Expected drawing-only hooks to clear after unloading drawing mode")
+        true)))
+  (when (and (= (type (. (require :main) :drop-app!)) :function)
+             app.engine)
+    ((. (require :main) :drop-app!)))
+  (set AppBootstrap.init-renderers original-init-renderers)
+  (if ok
+      result
+      (error result)))
+
+(fn hot-reload-routes-drawing-mode-actions-file-changes-to-drawing-mode-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init-app!))
+            (assert (canvas-mode-unit "drawing")
+                    "Expected drawing canvas mode unit after app init")
+            (app.set-active-canvas-mode "drawing")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init-app!"
+                 :unload-export "drop-app!"
+                 :snapshot-export "snapshot-app!"
+                 :restore-export "restore-app!"}))
+            (local controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "drawing")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-units"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "drawing-canvas-mode-actions.fnl")
+                                  :action "modified"}]})
+                    "Expected drawing mode actions file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "drawing-canvas-mode")
+                    "Expected drawing mode actions file change to target drawing mode unit")
+            (controller:drop)
+            true)))
+      (when (and (= (type (. (require :main) :drop-app!)) :function)
+                 app.engine)
+        ((. (require :main) :drop-app!)))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn canvas-modes-require-registration-before-activation []
+  (local previous-registry app.canvas-mode-registry)
+  (local previous-root-actions app.canvas-mode-root-actions)
+  (local previous-selection-actions app.canvas-mode-selection-actions)
+  (local previous-left-dock-builder app.canvas-mode-left-dock-builder)
+  (local previous-command-hints-provider app.canvas-mode-command-hints-provider)
+  (local previous-delete-selection app.canvas-mode-delete-selection)
+  (local previous-activate-focused app.canvas-mode-activate-focused)
+  (local previous-drawing-enabled app.canvas-mode-drawing-enabled?)
+  (local previous-target-enabled app.canvas-mode-target-enabled?)
+  (local previous-mode-update app.canvas-mode-update)
+  (set app.canvas-mode-registry nil)
+  (CanvasModes.clear-mode-runtime-hooks!)
+  (local (resolve-ok _resolve-err)
+    (pcall CanvasModes.resolve "graph"))
+  (assert (not resolve-ok)
+          "CanvasModes.resolve should reject built-in ids before they are registered")
+  (CanvasModes.register-mode
+    {:id "graph"
+     :label "Graph"
+     :icon "account_tree"
+     :button-name "graph-canvas-mode"
+     :show-in-sidebar? true
+     :activate (fn [ctx]
+                 (ctx:set-root-actions! (fn [_context] []))
+                 {:mode-id "graph"})
+     :deactivate (fn [_ctx _session]
+                   true)})
+  (CanvasModes.activate-mode "graph")
+  (assert (= (CanvasModes.active-mode-id) "graph")
+          "CanvasModes.activate-mode should activate a registered mode")
+  (CanvasModes.unregister-mode "graph")
+  (local (activate-ok _activate-err)
+    (pcall CanvasModes.activate-mode "graph"))
+  (set app.canvas-mode-registry previous-registry)
+  (set app.canvas-mode-root-actions previous-root-actions)
+  (set app.canvas-mode-selection-actions previous-selection-actions)
+  (set app.canvas-mode-left-dock-builder previous-left-dock-builder)
+  (set app.canvas-mode-command-hints-provider previous-command-hints-provider)
+  (set app.canvas-mode-delete-selection previous-delete-selection)
+  (set app.canvas-mode-activate-focused previous-activate-focused)
+  (set app.canvas-mode-drawing-enabled? previous-drawing-enabled)
+  (set app.canvas-mode-target-enabled? previous-target-enabled)
+  (set app.canvas-mode-update previous-mode-update)
+  (assert (not activate-ok)
+          "CanvasModes.activate-mode should reject modes once they are unregistered"))
+
 (table.insert tests {:name "file-watch detects write/delete events"
                      :fn file-watch-detects-basic-events})
 (table.insert tests {:name "module unit reload applies edited implementation"
@@ -760,6 +972,14 @@
                      :fn hot-reload-routes-canvas-file-changes-to-canvas-unit})
 (table.insert tests {:name "hot reload routes canvas shell state file changes to canvas unit"
                      :fn hot-reload-routes-canvas-shell-state-file-changes-to-canvas-unit})
+(table.insert tests {:name "hot reload routes drawing mode file changes to drawing mode unit"
+                     :fn hot-reload-routes-drawing-mode-file-changes-to-drawing-mode-unit})
+(table.insert tests {:name "unloading active drawing mode updates shell state"
+                     :fn unloading-active-drawing-mode-updates-shell-state})
+(table.insert tests {:name "hot reload routes drawing mode actions file changes to drawing mode unit"
+                     :fn hot-reload-routes-drawing-mode-actions-file-changes-to-drawing-mode-unit})
+(table.insert tests {:name "canvas modes require registration before activation"
+                     :fn canvas-modes-require-registration-before-activation})
 
 (local main
   (fn []

@@ -1,4 +1,4 @@
-(local CanvasFeatures (require :canvas-features))
+(local CanvasModes (require :canvas-modes))
 
 (fn resolve-runtime-interaction-surface [surface]
   (if (or (= surface :canvas)
@@ -14,10 +14,9 @@
 (fn capture-canvas-shell-state [world runtime canvas-state]
   (local existing-canvas-state (or (and world.state world.state.canvas) {}))
   (local captured (or canvas-state {}))
-  (set captured.active_feature
-       (or (and runtime runtime.active-canvas-feature)
-           existing-canvas-state.active_feature
-           (. CanvasFeatures :default-feature-id)))
+  (if (and runtime runtime.requested-canvas-mode-known?)
+      (set captured.active_mode runtime.requested-canvas-mode-id)
+      (set captured.active_mode existing-canvas-state.active_mode))
   (set captured.preferred_interaction_surface
        (encode-interaction-surface
          (or (and runtime runtime.preferred-interaction-surface)

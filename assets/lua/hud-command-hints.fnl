@@ -3,7 +3,6 @@
 (local {: FullWidth} (require :hud-layout))
 (local Padding (require :padding))
 (local Card (require :card))
-(local DrawingInput (require :drawing/input))
 (local CommandHint (require :command-hints))
 (local Runtime (require :state-runtime))
 (local {: codepoints-from-text : measure-single-line} (require :text-utils))
@@ -38,11 +37,6 @@
   (local focus-manager (current-focus-manager hud))
   (and focus-manager focus-manager.get-focused-node
        (focus-manager:get-focused-node)))
-
-(fn bind-context-provider [provider]
-  (and provider
-       (fn [payload]
-         (provider payload))))
 
 (fn resolve-provider [owner]
   (local provider (and owner owner.command_hints_provider))
@@ -89,18 +83,6 @@
                              :mode
                              "MODE"))
 
-(fn drawing-context-sections [hud expanded?]
-  (local focus-manager (current-focus-manager hud))
-  (collect-provider-sections (bind-context-provider DrawingInput.CommandHintsProvider)
-                             {:expanded? expanded?
-                              :state-name (current-state-name hud)
-                              :state (current-state hud)
-                              :focus-node (active-focused-node hud)
-                              :focus-manager focus-manager
-                              :active-input (Runtime.active-input)}
-                             :context
-                             "CONTEXT"))
-
 (fn world-context-sections [hud expanded?]
   (local contrib (and hud hud.world-hud-contrib))
   (local focus-manager (current-focus-manager hud))
@@ -115,12 +97,7 @@
                              "CONTEXT"))
 
 (fn context-sections [hud expanded?]
-  (local sections [])
-  (each [_ section (ipairs (drawing-context-sections hud expanded?))]
-    (table.insert sections section))
-  (each [_ section (ipairs (world-context-sections hud expanded?))]
-    (table.insert sections section))
-  sections)
+  (world-context-sections hud expanded?))
 
 (fn overlay-toggle-command [expanded?]
   (entry "f1" (if expanded? "less" "more") {:priority 999 :id :toggle}))

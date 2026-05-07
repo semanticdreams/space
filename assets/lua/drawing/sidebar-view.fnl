@@ -8,7 +8,6 @@
 (local Button (require :button))
 (local Input (require :input))
 (local Text (require :text))
-(local CanvasFeatures (require :canvas-features))
 (local {: adjust} (require :widget-theme-utils))
 
 (fn section-title [label]
@@ -71,32 +70,15 @@
                       :variant (if active? :primary :secondary)})
   (Button button-opts))
 
-(fn feature-button [icon name label active? on-click]
-  (assert on-click "feature-button requires on-click")
-  (Button {:padding [0.4 0.25]
-           :focusable? false
-           :icon icon
-           :icon-style {:scale 3.2}
-           :name name
-           :focus-name label
-           :on-click (fn [button event]
-                       (when (not active?)
-                         (on-click button event)))
-           :variant (if active? :primary :secondary)}))
-
 (fn state-button [label active? on-click]
   (action-button label {:on-click on-click
                         :variant (if active? :primary :secondary)}))
 
-(fn panel-background [theme kind]
+(fn panel-background [theme]
   (local card-theme (and theme theme.card))
   (local base (or (and card-theme card-theme.background)
-                  (if (= kind :rail)
-                      (glm.vec4 0.08 0.1 0.14 0.96)
-                      (glm.vec4 0.12 0.14 0.18 0.96))))
-  (if (= kind :rail)
-      (adjust base (if (and theme (= theme.name :light)) -0.06 -0.04))
-      (adjust base (if (and theme (= theme.name :light)) -0.03 0.0))))
+                  (glm.vec4 0.12 0.14 0.18 0.96)))
+  (adjust base (if (and theme (= theme.name :light)) -0.03 0.0)))
 
 (fn DrawingSidebarView [opts]
   (local options (or opts {}))
@@ -565,33 +547,7 @@
                                 (build-empty-panel-children can-add-raster? show-history?)
                                 (build-active-panel-children active-layer layers can-add-raster?))})
            inner-ctx))
-        (panel-background theme :panel)))
-
-    (fn build-feature-rail []
-      (local feature-children [])
-      (each [_ feature-spec (ipairs (CanvasFeatures.sidebar-feature-specs))]
-        (table.insert feature-children
-                      (FlexChild
-                        (fn [child-ctx]
-                          ((feature-button (. feature-spec :icon)
-                                           (. feature-spec :button-name)
-                                           (. feature-spec :label)
-                                           (CanvasFeatures.matches-id? app.active-canvas-feature
-                                                                      (. feature-spec :id))
-                                           (fn [_button _event]
-                                             (when app.set-active-canvas-feature
-                                               (app.set-active-canvas-feature (. feature-spec :id)))))
-                           child-ctx))
-                        0)))
-      (panel-shell
-        (fn [inner-ctx]
-          ((Flex {:axis 2
-                  :xalign :stretch
-                  :spacing 0
-                  :children feature-children})
-           inner-ctx))
-        (panel-background theme :rail)
-        {:padding false}))
+        (panel-background theme)))
 
     (fn build-content []
       (local show-dock?
@@ -599,15 +555,11 @@
              (= app.active-interaction-surface :canvas)
              (= app.canvas-visible? true)))
       (if show-dock?
-          (do
-            (local builders [(FlexChild (build-feature-rail) 0)])
-            (when (CanvasFeatures.supports-drawing-sidebar? app.active-canvas-feature)
-              (table.insert builders (FlexChild (build-drawing-panel) 0)))
-            ((Flex {:axis 1
-                    :spacing 0
-                    :yalign :stretch
-                    :children builders})
-             ctx))
+          ((Flex {:axis 1
+                  :spacing 0
+                  :yalign :stretch
+                  :children [(FlexChild (build-drawing-panel) 0)]})
+           ctx)
           nil))
 
     (fn rebuild-children! []

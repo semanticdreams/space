@@ -9,7 +9,8 @@
   (icollect [_ path (ipairs [(fs.join-path lua-root "canvas-unit.fnl")
                              (fs.join-path lua-root "canvas.fnl")
                              (fs.join-path lua-root "canvas-controls.fnl")
-                             (fs.join-path lua-root "canvas-features.fnl")
+                             (fs.join-path lua-root "canvas-mode-dock-view.fnl")
+                             (fs.join-path lua-root "canvas-modes.fnl")
                              (fs.join-path lua-root "object-selector.fnl")
                              (fs.join-path lua-root "graph/view.fnl")
                              graph-view-root

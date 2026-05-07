@@ -11,8 +11,8 @@
 (local GraphKeyLoaders (require :graph/key-loaders))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
-(local DrawingSidebarView (require :drawing/sidebar-view))
-(local CanvasFeatures (require :canvas-features))
+(local CanvasModeDockView (require :canvas-mode-dock-view))
+(local CanvasModes (require :canvas-modes))
 (local CanvasShellState (require :home-world-canvas-shell-state))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
@@ -67,7 +67,7 @@
             :rotation [1 0 0 0]}
    :canvas {:camera {:position [0 0 100]}
             :scale_factor 1.0
-            :active_feature (. CanvasFeatures :default-feature-id)
+            :active_mode nil
             :preferred_interaction_surface "scene"
             :panels []}
    :drawing (DrawingDocument.default-state)
@@ -289,14 +289,14 @@
           (set world.state (default-state))
           (set world.state.scene.terrains (TerrainRecords.default-records))))
     (local canvas-state (or (and world.state world.state.canvas) {}))
-    (local (normalized-canvas-feature repaired-feature? feature-repair-reason)
-      (CanvasFeatures.normalize-persisted canvas-state.active_feature))
-    (when repaired-feature?
+    (local (normalized-canvas-mode repaired-mode? mode-repair-reason)
+      (CanvasModes.normalize-persisted canvas-state.active_mode))
+    (when repaired-mode?
       (logging.warn (string.format "[world] %s %s"
                                    world.id
-                                   feature-repair-reason))
+                                   mode-repair-reason))
       (set repaired-persisted-state? true))
-    (set canvas-state.active_feature normalized-canvas-feature)
+    (set canvas-state.active_mode normalized-canvas-mode)
     (set canvas-state.preferred_interaction_surface
          (encode-interaction-surface canvas-state.preferred_interaction_surface))
     (set world.state.canvas canvas-state)
@@ -681,7 +681,9 @@
        :scene scene
        :graph graph
        :drawing-controller drawing-controller
-       :active-canvas-feature (CanvasFeatures.resolve canvas-state.active_feature)
+       :active-canvas-mode nil
+       :requested-canvas-mode-id canvas-state.active_mode
+       :requested-canvas-mode-known? true
        :preferred-interaction-surface
        (resolve-runtime-interaction-surface canvas-state.preferred_interaction_surface)
        :pending-canvas-state (clone-table world.state.canvas)
@@ -825,9 +827,10 @@
       (runtime.graph-view:update delta))
     (when (and active?
                runtime
-               runtime.drawing-render
-               (CanvasFeatures.supports-drawing-controller? runtime.active-canvas-feature))
-      (runtime.drawing-render:update))
+               app.canvas-mode-update)
+      (app.canvas-mode-update {:world world
+                               :runtime runtime
+                               :delta delta}))
     nil)
 
   (fn get-runtime [world]
@@ -835,8 +838,8 @@
 
   (fn get-hud-contrib [world]
     (local runtime world.runtime)
-    (if (and runtime runtime.drawing-controller)
-        {:left_dock_builder (DrawingSidebarView {:controller runtime.drawing-controller})}
+    (if runtime
+        {:left_dock_builder (CanvasModeDockView {})}
         nil))
 
   (set self.init init)

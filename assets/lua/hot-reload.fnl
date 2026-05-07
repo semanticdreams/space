@@ -429,6 +429,8 @@
           (logging.info (string.format
                           "[hot-reload] load target=%s"
                           target-unit.id))
+          (when (= target-unit.id "app-root")
+            (set _G.__space_debug_log_session_started true))
           (target-unit:load reload-ctx)
           (logging.info (string.format
                           "[hot-reload] restore target=%s"

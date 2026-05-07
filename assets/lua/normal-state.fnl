@@ -8,12 +8,9 @@
 (local TouchTransform (require :state-handlers/touch-transform))
 (local PenPointer (require :state-handlers/pen-pointer))
 (local PenToolOverride (require :state-handlers/pen-tool-override))
-(local DrawingHandlers (require :drawing/input))
 (local GamepadHandlers (require :state-handlers/gamepad))
 (local CameraHandlers (require :state-handlers/camera))
-(local GraphView (require :graph/view))
 (local Runtime (require :state-runtime))
-(local CanvasFeatures (require :canvas-features))
 (local {: entry : section} (require :command-hints))
 
 (local KEY_SPACE (string.byte " "))
@@ -21,6 +18,19 @@
 (local SDLK_RETURN 13)
 (local SDLK_DELETE 127)
 (local SDLK_F4 1073741885)
+
+(fn normalize-handlers [handlers]
+  (if (or (= handlers nil)
+          (= (type handlers) :table))
+      handlers
+      [handlers]))
+
+(fn resolve-handler [handler event-name]
+  (if (not handler)
+      nil
+      (if (= (type handler) :function)
+          handler
+          (. handler event-name))))
 
 (fn NormalState []
   (local PenHandlers
@@ -30,7 +40,7 @@
                       :allow-touch-during-hover? true}}))
 
   (fn touch-allowed? [payload]
-    (if (CanvasFeatures.supports-drawing-controller? app.active-canvas-feature)
+    (if (= app.canvas-mode-drawing-enabled? true)
         (PenHandlers:touch-allowed? payload)
         true))
 
@@ -46,7 +56,7 @@
       {:active? (fn []
                   (and app.drawing-controller
                        (= app.canvas-interactive? true)
-                       (CanvasFeatures.supports-drawing-controller? app.active-canvas-feature)
+                       (= app.canvas-mode-drawing-enabled? true)
                        app.drawing-controller.active-layer
                        (app.drawing-controller:active-layer)))
        :get-tool (fn []
@@ -59,61 +69,20 @@
                            "NormalState drawing pen override requires drawing-controller:set-active-tool")
                    (app.drawing-controller:set-active-tool tool))}))
 
-  (fn active-canvas-feature-supports-graph-interaction? []
-    (CanvasFeatures.supports-graph-interaction? app.active-canvas-feature))
-
-  (fn graph-selection-count []
-    (local graph-view app.graph-view)
-    (if (and graph-view graph-view.selection graph-view.selection.selected-nodes)
-        (length graph-view.selection.selected-nodes)
-        0))
-
-  (fn create-graph-view []
-    (if (and app.graph-view-factory (= (type app.graph-view-factory) :function))
-        (app.graph-view-factory)
-        (do
-          (assert app.graph "NormalState requires app.graph to create GraphView")
-          (local ctx (or (and app.canvas app.canvas.build-context)
-                         (and app.scene app.scene.build-context)))
-          (assert ctx "NormalState requires canvas or scene build-context to create GraphView")
-          (GraphView {:graph app.graph
-                      :ctx ctx
-                      :movables app.movables
-                      :selector app.object-selector
-                      :view-target (or app.canvas app.hud)
-                      :camera (or (and app.canvas app.canvas.camera) app.camera)
-                      :pointer-target (or app.canvas app.scene)}))))
-
   (fn handle-f4-toggle []
     (if (and app.canvas app.toggle-active-interaction-surface)
         (app.toggle-active-interaction-surface)
-        (if app.graph-view
-            (do
-              (app.graph-view:drop)
-              (set app.graph-view nil)
-              true)
-            (do
-              (local view (create-graph-view))
-              (assert view "NormalState GraphView factory returned nil")
-              (set app.graph-view view)
-              true))))
+        false))
 
   (fn remove-selected-nodes []
-    (if (not (active-canvas-feature-supports-graph-interaction?))
-        false
-        (do
-          (local graph-view app.graph-view)
-          (when (and graph-view graph-view.remove-selected-nodes)
-            (> (graph-view:remove-selected-nodes) 0)))))
+    (if app.canvas-mode-delete-selection
+        (app.canvas-mode-delete-selection)
+        false))
 
   (fn maybe-open-focused-graph-node []
-    (if (not (active-canvas-feature-supports-graph-interaction?))
-        false
-        (do
-          (local graph-view app.graph-view)
-          (and graph-view
-               graph-view.open-focused-node
-               (graph-view:open-focused-node)))))
+    (if app.canvas-mode-activate-focused
+        (app.canvas-mode-activate-focused)
+        false))
 
   (fn open-fennel-interpreter []
     (local launchable (require :launchables/fennel-interpreter))
@@ -122,18 +91,38 @@
     (launchable.open-panel {:scene app.scene})
     true)
 
+  (fn dispatch-mode-input [event-name ctx payload]
+    (local handlers
+      (normalize-handlers
+        (and app.canvas-mode-input-handlers
+             (. app.canvas-mode-input-handlers event-name))))
+    (var handled false)
+    (each [_ handler (ipairs (or handlers []))]
+      (local event-handler (resolve-handler handler event-name))
+      (when (and event-handler
+                 (event-handler ctx payload))
+        (set handled true)))
+    handled)
+
+  (local CanvasModeInput
+    {:key-down (fn [ctx payload]
+                 (dispatch-mode-input :key-down ctx payload))
+     :key-up (fn [ctx payload]
+               (dispatch-mode-input :key-up ctx payload))
+     :mouse-button-down (fn [ctx payload]
+                          (dispatch-mode-input :mouse-button-down ctx payload))
+     :mouse-button-up (fn [ctx payload]
+                        (dispatch-mode-input :mouse-button-up ctx payload))
+     :mouse-motion (fn [ctx payload]
+                     (dispatch-mode-input :mouse-motion ctx payload))})
+
   (fn normal-command-sections [payload]
     (local entries [(entry "space" "leader" {:priority 10})])
     (local focus-manager (and payload payload.focus-manager))
     (local active-input (and payload payload.active-input))
     (when (or (and focus-manager focus-manager.activate-focused-from-payload)
-              (and (active-canvas-feature-supports-graph-interaction?)
-                   app.graph-view
-                   app.graph-view.open-focused-node))
+              app.canvas-mode-activate-focused)
       (table.insert entries (entry "enter" "activate" {:priority 20})))
-    (when (and (active-canvas-feature-supports-graph-interaction?)
-               (> (graph-selection-count) 0))
-      (table.insert entries (entry "del" "delete-selection" {:priority 25})))
     (when focus-manager
       (table.insert entries (entry "tab" "focus-next" {:priority 30 :show-collapsed? false}))
       (when (not active-input)
@@ -144,7 +133,12 @@
           "toggle-graph-view"))
     (table.insert entries (entry "f4" f4-label {:priority 40}))
     (table.insert entries (entry "`" "fennel-repl" {:priority 50}))
-    [(section :mode "MODE" entries)])
+    (local sections [(section :mode "MODE" entries)])
+    (local provider app.canvas-mode-command-hints-provider)
+    (when provider
+      (each [_ extra-section (ipairs (or (provider payload) []))]
+        (table.insert sections extra-section)))
+    sections)
 
   (local NormalCommands
     {:key-down
@@ -217,24 +211,25 @@
                 :text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
                 :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
                 :key-down (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
-                                                   DrawingHandlers.DrawingKeyDown
+                                                   CanvasModeInput
                                                    NormalCommands
                                                    FocusHandlers.FocusTabKeyDown
                                                    FocusHandlers.FocusDirectionKeyDown
                                                    FocusHandlers.ActiveInputKeyBlock])
                 :key-up (Routes.FirstHandlerWins [FocusHandlers.InputKeyUpDispatch
+                                                 CanvasModeInput
                                                  FocusHandlers.ActiveInputKeyBlock])
                 :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
                                                   PointerHandlers.ResizableMouseButtonDown
                                                   PointerHandlers.ClickableMouseButtonDown
-                                                  DrawingHandlers.DrawingMouseButtonDown
+                                                  CanvasModeInput
                                                   PointerHandlers.MovableMouseButtonDown
                                                   PointerHandlers.SelectionMouseButtonDown
                                                   PointerHandlers.CameraMouseButtonDown])
                 :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
                                                 PointerHandlers.ResizableMouseButtonUp
                                                 PointerHandlers.ClickableMouseButtonUp
-                                                DrawingHandlers.DrawingMouseButtonUp
+                                                CanvasModeInput
                                                 PointerHandlers.MovableMouseButtonUp
                                                 PointerHandlers.SelectionMouseButtonUp
                                                 PointerHandlers.CameraMouseButtonUp
@@ -242,7 +237,7 @@
                 :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
                                              PointerHandlers.MovableMouseMotion
                                              PointerHandlers.ResizableMouseMotion
-                                             DrawingHandlers.DrawingMouseMotion
+                                             CanvasModeInput
                                              PointerHandlers.CameraDragMouseMotion
                                              PointerHandlers.SelectionMouseMotion
                                              PointerHandlers.CameraMouseMotion

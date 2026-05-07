@@ -54,7 +54,9 @@
   (var delete-calls 0)
   (var open-calls 0)
   (with-app-bindings
-    {:active-canvas-feature "drawing"
+    {:active-canvas-mode "drawing"
+     :canvas-interactive? true
+     :canvas-mode-drawing-enabled? true
      :drawing-controller {:on-delete-selection (fn [_self] false)}
      :graph-view {:remove-selected-nodes (fn [_self]
                                            (set delete-calls (+ delete-calls 1))
@@ -78,7 +80,9 @@
                      :cancel 0})
   (local input-events [])
   (with-app-bindings
-    {:active-canvas-feature "drawing"
+    {:active-canvas-mode "drawing"
+     :canvas-interactive? true
+     :canvas-mode-drawing-enabled? true
      :drawing-controller {:on-delete-selection (fn [_self]
                                                  (set draw-calls.delete (+ draw-calls.delete 1))
                                                  true)

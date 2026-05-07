@@ -1,16 +1,12 @@
 (local Ball (require :ball))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
-(local CanvasFeatures (require :canvas-features))
+(local CanvasModes (require :canvas-modes))
 (local Modifiers (require :input-modifiers))
 
 (fn append-actions [target source]
   (each [_ action (ipairs (or source []))]
     (table.insert target action))
   target)
-
-(fn selected-graph-nodes [view]
-  (or (and view view.selection view.selection.selected-nodes)
-      []))
 
 (fn merge-context-part [defaults overrides]
   (local merged {})
@@ -21,146 +17,84 @@
       (set (. merged k) v)))
   merged)
 
+(fn resolve-context-canvas-mode [mode-id]
+  (if (= mode-id nil)
+      app.active-canvas-mode
+      (CanvasModes.resolve mode-id)))
+
+(fn enrich-active-canvas-context! [context]
+  (if (and (= context.surface :canvas)
+           app.canvas-mode-context-enricher
+           (= (CanvasModes.active-mode-id) context.canvas-mode))
+      (do
+        (app.canvas-mode-context-enricher context)
+        context)
+      context))
+
 (fn build-context [event]
   (local surface (or app.active-interaction-surface :scene))
-  (local canvas-feature
+  (local canvas-mode
     (if (= surface :canvas)
-        (CanvasFeatures.resolve app.active-canvas-feature)
+        (resolve-context-canvas-mode
+          app.active-canvas-mode)
         nil))
-  (local drawing-controller
-    (if (and (= surface :canvas)
-             (CanvasFeatures.supports-drawing-controller? canvas-feature))
-        app.drawing-controller
-        nil))
-  (local active-layer
-    (and drawing-controller drawing-controller.active-layer
-         (drawing-controller:active-layer)))
-  (local selection-count
-    (if (and drawing-controller drawing-controller.selection-count)
-        (drawing-controller:selection-count)
-        0))
-  (local layer-count
-    (if (and drawing-controller drawing-controller.layer-count)
-        (drawing-controller:layer-count)
-        0))
-  (local graph-view app.graph-view)
-  {:event event
-   :surface surface
-   :canvas-feature canvas-feature
-   :modifiers {:shift? (Modifiers.shift-held? (and event event.mod))
-               :ctrl? (Modifiers.ctrl-held? (and event event.mod))
-               :alt? (Modifiers.alt-held? (and event event.mod))}
-   :engine app.engine
-   :targets {:canvas app.canvas
-             :hud app.hud}
-   :scene {:scene app.scene}
-   :graph {:graph app.graph
-           :view graph-view
-           :selected-nodes (selected-graph-nodes graph-view)}
-   :drawing {:controller drawing-controller
-             :active-layer active-layer
-             :selection-count selection-count
-             :layer-count layer-count
-             :has-selection? (> selection-count 0)}})
+  (enrich-active-canvas-context!
+    {:event event
+     :surface surface
+     :canvas-mode canvas-mode
+     :modifiers {:shift? (Modifiers.shift-held? (and event event.mod))
+                 :ctrl? (Modifiers.ctrl-held? (and event event.mod))
+                 :alt? (Modifiers.alt-held? (and event event.mod))}
+     :engine app.engine
+     :targets {:canvas app.canvas
+               :hud app.hud}
+     :scene {:scene app.scene}
+     :graph {:graph app.graph
+             :view app.graph-view}
+     :drawing {}}))
 
 (fn empty-context [surface opts]
   (local options (or opts {}))
   (local resolved-surface (or surface :scene))
-  (local resolved-canvas-feature
+  (local resolved-canvas-mode
     (if (= resolved-surface :canvas)
-        (CanvasFeatures.resolve (or options.canvas-feature app.active-canvas-feature))
+        (resolve-context-canvas-mode
+          (or options.canvas-mode
+              app.active-canvas-mode))
         nil))
-  (local drawing-controller
-    (if (and (= resolved-surface :canvas)
-             (CanvasFeatures.supports-drawing-controller? resolved-canvas-feature))
-        (or (and options.drawing options.drawing.controller)
-            app.drawing-controller)
-        nil))
-  (local graph-view (or (and options.graph options.graph.view)
-                        app.graph-view))
   (local targets-defaults {:canvas app.canvas
                            :hud app.hud})
   (local scene-defaults {:scene app.scene})
   (local graph-defaults {:graph app.graph
-                         :view graph-view
-                         :selected-nodes (selected-graph-nodes graph-view)})
-  (local drawing-defaults
-    {:controller drawing-controller
-     :active-layer (and drawing-controller drawing-controller.active-layer
-                        (drawing-controller:active-layer))
-     :selection-count (if (and drawing-controller drawing-controller.selection-count)
-                          (drawing-controller:selection-count)
-                          0)
-     :layer-count (if (and drawing-controller drawing-controller.layer-count)
-                      (drawing-controller:layer-count)
-                      0)
-     :has-selection? (if (and drawing-controller drawing-controller.selection-count)
-                         (> (drawing-controller:selection-count) 0)
-                         false)})
-  {:event (or options.event nil)
-   :surface resolved-surface
-   :canvas-feature (if (= resolved-surface :canvas)
-                       resolved-canvas-feature
-                       nil)
-   :modifiers (merge-context-part {:shift? false
-                                   :ctrl? false
-                                   :alt? false}
-                                  options.modifiers)
-   :engine (or options.engine app.engine)
-   :targets (merge-context-part targets-defaults options.targets)
-   :scene (merge-context-part scene-defaults options.scene)
-   :graph (merge-context-part graph-defaults options.graph)
-   :drawing (merge-context-part drawing-defaults options.drawing)})
+                         :view (or (and options.graph options.graph.view)
+                                   app.graph-view)})
+  (enrich-active-canvas-context!
+    {:event (or options.event nil)
+     :surface resolved-surface
+     :canvas-mode (if (= resolved-surface :canvas)
+                      resolved-canvas-mode
+                      nil)
+     :modifiers (merge-context-part {:shift? false
+                                     :ctrl? false
+                                     :alt? false}
+                                    options.modifiers)
+     :engine (or options.engine app.engine)
+     :targets (merge-context-part targets-defaults options.targets)
+     :scene (merge-context-part scene-defaults options.scene)
+     :graph (merge-context-part graph-defaults options.graph)
+     :drawing (merge-context-part {} options.drawing)}))
 
 (fn normalize-context [context]
   (local raw (or context {}))
   (empty-context (or raw.surface :scene)
                  {:event raw.event
-                  :canvas-feature raw.canvas-feature
+                  :canvas-mode raw.canvas-mode
                   :modifiers raw.modifiers
                   :engine raw.engine
                   :targets raw.targets
                   :scene raw.scene
                   :graph raw.graph
                   :drawing raw.drawing}))
-
-(fn show-link-entities-for-selection [context]
-  (local graph (and context.graph context.graph.graph))
-  (when (not graph)
-    (lua "return nil"))
-  (local selected (or (and context.graph context.graph.selected-nodes)
-                      []))
-  (when (<= (length selected) 0)
-    (lua "return nil"))
-
-  (local selected-keys {})
-  (each [_ node (ipairs selected)]
-    (local key (and node node.key))
-    (when key
-      (set (. selected-keys (tostring key)) true)))
-  (when (= (next selected-keys) nil)
-    (lua "return nil"))
-
-  (local LinkEntityStore (require :entities/link))
-  (local store (LinkEntityStore.get-default))
-  (local {:LinkEntityNode LinkEntityNode} (require :graph/nodes/link-entity))
-  (local entities (store:list-entities))
-  (each [_ entity (ipairs (or entities []))]
-    (local source-key (tostring (or (and entity entity.source-key) "")))
-    (local target-key (tostring (or (and entity entity.target-key) "")))
-    (local entity-keys {source-key true target-key true})
-    (var all-match true)
-    (each [k _ (pairs selected-keys) &until (not all-match)]
-      (when (not (. entity-keys k))
-        (set all-match false)))
-    (when all-match
-      (local id (tostring (or (and entity entity.id) "")))
-      (when (> (string.len id) 0)
-        (local key (.. "link-entity:" id))
-        (when (not (graph:lookup key))
-          (graph:add-node (LinkEntityNode {:entity-id id
-                                           :store store}))))))
-  nil)
 
 (fn shared-root-actions [context]
   [{:name "Quit"
@@ -169,109 +103,6 @@
           (local engine context.engine)
           (when (and engine engine.quit)
             (engine.quit)))}])
-
-(fn graph-root-actions [context]
-  (local actions [])
-  (local graph (and context.graph context.graph.graph))
-  (local selected (or (and context.graph context.graph.selected-nodes) []))
-  (local canvas-target (or (and context.targets context.targets.canvas)
-                           (and context.targets context.targets.hud)))
-  (table.insert actions
-                {:name "Create String Entity"
-                 :icon "note_add"
-                 :fn (fn [_button _event]
-                       (local StringEntityStore (require :entities/string))
-                       (local store (StringEntityStore.get-default))
-                       (local entity (store:create-entity {}))
-                       (when (and graph entity)
-                         (local {:StringEntityNode StringEntityNode} (require :graph/nodes/string-entity))
-                         (local node (StringEntityNode {:entity-id entity.id
-                                                        :store store}))
-                         (graph:add-node node)))})
-  (table.insert actions
-                {:name "Create Link Entity"
-                 :icon "link"
-                 :fn (fn [_button _event]
-                       (local LinkEntityStore (require :entities/link))
-                       (local store (LinkEntityStore.get-default))
-                       (local opts {})
-                       (when (= (length selected) 2)
-                         (set opts.source-key (or (. selected 1 :key) ""))
-                         (set opts.target-key (or (. selected 2 :key) ""))
-                         nil)
-                       (local entity (store:create-entity opts))
-                       (when (and graph entity)
-                         (local {:LinkEntityNode LinkEntityNode} (require :graph/nodes/link-entity))
-                         (local node (LinkEntityNode {:entity-id entity.id
-                                                      :store store}))
-                         (graph:add-node node)))})
-  (table.insert actions
-                {:name "Show link entities"
-                 :icon "link"
-                 :fn (fn [_button _event]
-                       (show-link-entities-for-selection context))})
-  (table.insert actions
-                {:name "Create List Entity"
-                 :icon "playlist_add"
-                 :fn (fn [_button _event]
-                       (local ListEntityStore (require :entities/list))
-                       (local store (ListEntityStore.get-default))
-                       (local items [])
-                       (each [_ node (ipairs selected)]
-                         (when (and node node.key)
-                           (table.insert items node.key)))
-                       (local entity (store:create-entity {:items items}))
-                       (when (and graph entity)
-                         (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
-                         (local node (ListEntityNode {:entity-id entity.id
-                                                      :store store}))
-                         (graph:add-node node)))})
-  (table.insert actions
-                {:name "Graph Control"
-                 :icon "tune"
-                 :fn (fn [_button _event]
-                       (local launchable (require :launchables/graph-control))
-                       (launchable.open-panel {:target canvas-target}))})
-  actions)
-
-(fn drawing-root-actions [context]
-  (local controller (and context.drawing context.drawing.controller))
-  (local actions [])
-  (when controller
-    (table.insert actions
-                  {:name "Add Vector Layer"
-                   :icon "draw"
-                   :fn (fn [_button _event]
-                         (controller:add-layer "vector"))})
-    (table.insert actions
-                  {:name "Add Raster Layer"
-                   :icon "brush"
-                   :fn (fn [_button _event]
-                         (controller:add-layer "raster"))})
-    (table.insert actions
-                  {:name "Duplicate Layer"
-                   :icon "layers"
-                   :fn (fn [_button _event]
-                         (controller:duplicate-active-layer))})
-    (when (> (or context.drawing.layer-count 0) 1)
-      (table.insert actions
-                    {:name "Delete Active Layer"
-                     :icon "delete"
-                     :variant :danger
-                     :fn (fn [_button _event]
-                           (controller:delete-active-layer))})))
-  actions)
-
-(fn drawing-selection-actions [context]
-  (local controller (and context.drawing context.drawing.controller))
-  (if (and controller
-           context.drawing.has-selection?)
-      [{:name "Delete Selection"
-        :icon "delete"
-        :variant :danger
-        :fn (fn [_button _event]
-              (controller:on-delete-selection))}]
-      []))
 
 (fn scene-root-actions [context]
   (local scene (and context.scene context.scene.scene))
@@ -308,63 +139,16 @@
                          (SceneTerrainRecovery.recover scene)))})
   actions)
 
-(local canvas-context-action-builders
-  {:graph graph-root-actions
-   :drawing drawing-root-actions
-   :drawing-selection drawing-selection-actions})
+(fn canvas-mode-root-actions [context]
+  (if (and app.canvas-mode-root-actions
+           (= (CanvasModes.active-mode-id) context.canvas-mode))
+      (app.canvas-mode-root-actions context)
+      []))
 
-(fn canvas-feature-action-builder [feature-spec key opts]
-  (local options (or opts {}))
-  (assert feature-spec "Canvas feature action dispatch requires feature spec")
-  (local feature-id (. feature-spec :id))
-  (local action-key (and feature-spec (. feature-spec key)))
-  (when (and options.required?
-             (not action-key))
-    (error (.. "Canvas feature "
-               feature-id
-               " missing required "
-               (tostring key)
-               " metadata")))
-  (if action-key
-      (do
-        (local builder (. canvas-context-action-builders action-key))
-        (assert builder
-                (.. "Canvas feature "
-                    feature-id
-                    " references unknown "
-                    (tostring key)
-                    " "
-                    (tostring action-key)))
-        builder)
-      nil))
-
-(fn validate-canvas-feature-action-builders []
-  (each [_ feature-spec (ipairs (CanvasFeatures.feature-specs-in-order))]
-    (canvas-feature-action-builder feature-spec :root-context-actions-key {:required? true})
-    (canvas-feature-action-builder feature-spec :selection-context-actions-key))
-  true)
-
-(validate-canvas-feature-action-builders)
-
-(fn canvas-feature-root-actions [context]
-  (local feature-spec
-    (if (= context.surface :canvas)
-        (CanvasFeatures.spec context.canvas-feature)
-        nil))
-  (local builder
-    (canvas-feature-action-builder feature-spec
-                                   :root-context-actions-key
-                                   {:required? true}))
-  (builder context))
-
-(fn canvas-feature-selection-actions [context]
-  (local feature-spec
-    (if (= context.surface :canvas)
-        (CanvasFeatures.spec context.canvas-feature)
-        nil))
-  (local builder (canvas-feature-action-builder feature-spec :selection-context-actions-key))
-  (if builder
-      (builder context)
+(fn canvas-mode-selection-actions [context]
+  (if (and app.canvas-mode-selection-actions
+           (= (CanvasModes.active-mode-id) context.canvas-mode))
+      (app.canvas-mode-selection-actions context)
       []))
 
 (local contributors
@@ -372,12 +156,12 @@
     :mode :replace
     :matches (fn [context]
                (= context.surface :canvas))
-    :actions canvas-feature-root-actions}
+    :actions canvas-mode-root-actions}
    {:name :canvas-selection
     :mode :append
     :matches (fn [context]
                (= context.surface :canvas))
-    :actions canvas-feature-selection-actions}
+    :actions canvas-mode-selection-actions}
    {:name :scene-root
     :mode :replace
     :matches (fn [context]
@@ -422,7 +206,4 @@
  :actions-for-event actions-for-event
  :actions-for-context actions-for-context
  :actions-for-surface actions-for-surface
- :validate-canvas-feature-action-builders validate-canvas-feature-action-builders
- :scene-root-actions scene-root-actions
- :graph-root-actions graph-root-actions
- :drawing-root-actions drawing-root-actions}
+ :scene-root-actions scene-root-actions}

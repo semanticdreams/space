@@ -2,7 +2,10 @@
 (local _ (require :main))
 (local Menu (require :menu))
 (local MenuManager (require :menu-manager))
+(local CanvasModes (require :canvas-modes))
 (local RootContextMenuActions (require :root-context-menu-actions))
+(local GraphCanvasModeActions (require :graph-canvas-mode-actions))
+(local DrawingCanvasModeActions (require :drawing-canvas-mode-actions))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local {: Layout} (require :layout))
 (local fs (require :fs))
@@ -64,6 +67,67 @@
   (if ok
       result
       (error result)))
+
+(fn ensure-built-in-canvas-modes! []
+  (local registry (CanvasModes.ensure-registry))
+  (when (not (. registry.modes "graph"))
+    (CanvasModes.register-mode
+      {:id "graph"
+       :label "Graph"
+       :icon "account_tree"
+       :button-name "graph-canvas-mode"
+       :show-in-sidebar? true
+       :activate (fn [ctx]
+                   (ctx:set-context-enricher!
+                     (fn [context]
+                       (set context.graph
+                            {:graph app.graph
+                             :view app.graph-view
+                             :selected-nodes (GraphCanvasModeActions.selected-graph-nodes app.graph-view)})
+                       context))
+                   (ctx:set-root-actions! (. GraphCanvasModeActions :graph-root-actions))
+                   (ctx:set-selection-actions! nil)
+                   {:mode-id "graph"})
+       :deactivate (fn [_ctx _session]
+                     true)}))
+  (when (not (. registry.modes "drawing"))
+    (CanvasModes.register-mode
+      {:id "drawing"
+       :label "Draw"
+       :icon "draw"
+       :button-name "drawing-canvas-mode"
+       :show-in-sidebar? true
+       :activate (fn [ctx]
+                   (ctx:set-context-enricher!
+                     (fn [context]
+                       (local controller app.drawing-controller)
+                       (local selection-count
+                         (if (and controller controller.selection-count)
+                             (controller:selection-count)
+                             0))
+                       (set context.drawing
+                            {:controller controller
+                             :active-layer (and controller controller.active-layer
+                                                (controller:active-layer))
+                             :selection-count selection-count
+                             :layer-count (if (and controller controller.layer-count)
+                                              (controller:layer-count)
+                                              0)
+                             :has-selection? (> selection-count 0)})
+                       context))
+                   (ctx:set-root-actions! (. DrawingCanvasModeActions :drawing-root-actions))
+                   (ctx:set-selection-actions! (. DrawingCanvasModeActions :drawing-selection-actions))
+                   (ctx:set-drawing-enabled! true)
+                   {:mode-id "drawing"})
+       :deactivate (fn [_ctx _session]
+                     true)}))
+  true)
+
+(fn activate-canvas-mode! [mode-id]
+  (ensure-built-in-canvas-modes!)
+  (CanvasModes.activate-mode mode-id)
+  (set app.active-canvas-mode mode-id)
+  mode-id)
 
 (fn make-vector-buffer []
   (local buffer {})
@@ -258,6 +322,7 @@
   (with-temp-dir
     (fn [root]
       (reset-engine-events)
+      (ensure-built-in-canvas-modes!)
       (local clickables (make-clickables-stub))
       (local hoverables (make-hoverables-stub))
       (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
@@ -285,6 +350,7 @@
       (set app.graph graph)
       (set app.graph-view {:selection {:selected-nodes [a]}})
       (set app.active-interaction-surface :canvas)
+      (activate-canvas-mode! "graph")
 
       (local manager
         (MenuManager {:clickables clickables
@@ -573,8 +639,9 @@
   (when (not ok)
     (error err)))
 
-(fn menu-manager-root-drawing-actions-follow-canvas-feature []
+(fn menu-manager-root-drawing-actions-follow-canvas-mode []
   (reset-engine-events)
+  (ensure-built-in-canvas-modes!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
@@ -584,10 +651,10 @@
                 :duplicate 0
                 :delete-layer 0})
   (local original-surface app.active-interaction-surface)
-  (local original-feature app.active-canvas-feature)
+  (local original-mode app.active-canvas-mode)
   (local original-controller app.drawing-controller)
   (set app.active-interaction-surface :canvas)
-  (set app.active-canvas-feature "drawing")
+  (activate-canvas-mode! "drawing")
   (set app.drawing-controller
        {:active-layer (fn [_self]
                         {:id "layer-1"
@@ -643,7 +710,7 @@
 
   (manager:drop)
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-feature original-feature)
+  (set app.active-canvas-mode original-mode)
   (set app.drawing-controller original-controller)
 
   (when (not ok)
@@ -651,16 +718,17 @@
 
 (fn menu-manager-root-drawing-selection-actions-follow-selection-state []
   (reset-engine-events)
+  (ensure-built-in-canvas-modes!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:delete-selection 0})
   (local original-surface app.active-interaction-surface)
-  (local original-feature app.active-canvas-feature)
+  (local original-mode app.active-canvas-mode)
   (local original-controller app.drawing-controller)
   (set app.active-interaction-surface :canvas)
-  (set app.active-canvas-feature "drawing")
+  (activate-canvas-mode! "drawing")
   (set app.drawing-controller
        {:active-layer (fn [_self]
                         {:id "layer-1"
@@ -697,19 +765,20 @@
 
   (manager:drop)
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-feature original-feature)
+  (set app.active-canvas-mode original-mode)
   (set app.drawing-controller original-controller)
 
   (when (not ok)
     (error err)))
 
 (fn root-context-menu-actions-normalize-partial-context []
+  (ensure-built-in-canvas-modes!)
   (local original-surface app.active-interaction-surface)
-  (local original-feature app.active-canvas-feature)
+  (local original-mode app.active-canvas-mode)
   (local original-controller app.drawing-controller)
   (local original-engine app.engine)
   (set app.active-interaction-surface :canvas)
-  (set app.active-canvas-feature "drawing")
+  (activate-canvas-mode! "graph")
   (set app.engine {:quit (fn [] nil)})
   (set app.drawing-controller
        {:active-layer (fn [_self]
@@ -724,9 +793,9 @@
   (local (ok actions)
     (pcall RootContextMenuActions.actions-for-context
            {:surface :canvas
-            :canvas-feature "drawing"}))
+            :canvas-mode "drawing"}))
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-feature original-feature)
+  (set app.active-canvas-mode original-mode)
   (set app.drawing-controller original-controller)
   (set app.engine original-engine)
   (assert ok
@@ -738,14 +807,109 @@
         (when (= action.name name)
           (set found true)))
       found))
-  (assert (has-action? "Add Vector Layer")
-          "normalized partial drawing context should still include drawing root actions")
+  (assert (not (has-action? "Add Vector Layer"))
+          "partial drawing contexts should not borrow drawing actions when drawing mode is not active")
   (assert (has-action? "Quit")
           "normalized partial drawing context should still include shared actions"))
 
-(fn root-context-menu-actions-validate-canvas-feature-builders []
-  (assert (RootContextMenuActions.validate-canvas-feature-action-builders)
-          "Root context menu actions should validate canvas feature builder wiring"))
+(fn root-context-menu-actions-does-not-switch-active-mode-for_partial_context []
+  (ensure-built-in-canvas-modes!)
+  (local original-surface app.active-interaction-surface)
+  (local original-mode app.active-canvas-mode)
+  (local original-controller app.drawing-controller)
+  (local original-set-active-canvas-mode app.set-active-canvas-mode)
+  (var calls 0)
+  (set app.active-interaction-surface :canvas)
+  (activate-canvas-mode! "graph")
+  (set app.set-active-canvas-mode
+       (fn [_mode-id]
+         (set calls (+ calls 1))
+         (error "actions-for-context should not switch the active mode")))
+  (set app.drawing-controller
+       {:active-layer (fn [_self]
+                        {:id "layer-1"
+                         :name "Sketch"
+                         :kind "vector"})
+        :selection-count (fn [_self] 0)
+        :layer-count (fn [_self] 2)
+        :add-layer (fn [_self _kind] nil)
+        :duplicate-active-layer (fn [_self] true)
+        :delete-active-layer (fn [_self] true)})
+  (local (ok actions)
+    (pcall RootContextMenuActions.actions-for-context
+           {:surface :canvas
+            :canvas-mode "drawing"}))
+  (set app.active-interaction-surface original-surface)
+  (set app.active-canvas-mode original-mode)
+  (set app.drawing-controller original-controller)
+  (set app.set-active-canvas-mode original-set-active-canvas-mode)
+  (assert ok
+          "actions-for-context should build partial drawing context without switching the active mode")
+  (assert (= calls 0)
+          "actions-for-context should not call set-active-canvas-mode for a hypothetical context")
+  (var found false)
+  (each [_ action (ipairs actions)]
+    (when (= action.name "Add Vector Layer")
+      (set found true)))
+  (assert (not found)
+          "partial drawing context should not expose drawing actions without switching the active mode"))
+
+(fn root-context-menu-actions-support-active-custom-canvas-mode []
+  (local original-surface app.active-interaction-surface)
+  (local original-mode app.active-canvas-mode)
+  (local original-registry app.canvas-mode-registry)
+  (local original-root-actions app.canvas-mode-root-actions)
+  (local original-selection-actions app.canvas-mode-selection-actions)
+  (local original-left-dock-builder app.canvas-mode-left-dock-builder)
+  (local original-command-hints-provider app.canvas-mode-command-hints-provider)
+  (local original-delete-selection app.canvas-mode-delete-selection)
+  (local original-activate-focused app.canvas-mode-activate-focused)
+  (local original-drawing-enabled app.canvas-mode-drawing-enabled?)
+  (local original-target-enabled app.canvas-mode-target-enabled?)
+  (local original-mode-update app.canvas-mode-update)
+  (set app.canvas-mode-registry nil)
+  (CanvasModes.clear-mode-runtime-hooks!)
+  (CanvasModes.register-mode
+    {:id "custom-note"
+     :label "Custom"
+     :icon "draw"
+     :button-name "custom-note-mode"
+     :show-in-sidebar? true
+     :activate (fn [ctx]
+                 (ctx:set-root-actions!
+                   (fn [_context]
+                     [{:name "Custom Action"
+                       :fn (fn [_button _event] true)}]))
+                 {:mode-id "custom-note"})
+     :deactivate (fn [_ctx _session]
+                   true)})
+  (CanvasModes.activate-mode "custom-note")
+  (set app.active-interaction-surface :canvas)
+  (set app.active-canvas-mode "custom-note")
+  (local (ok actions)
+    (pcall RootContextMenuActions.actions-for-context
+           {:surface :canvas
+            :canvas-mode "custom-note"}))
+  (set app.active-interaction-surface original-surface)
+  (set app.active-canvas-mode original-mode)
+  (set app.canvas-mode-registry original-registry)
+  (set app.canvas-mode-root-actions original-root-actions)
+  (set app.canvas-mode-selection-actions original-selection-actions)
+  (set app.canvas-mode-left-dock-builder original-left-dock-builder)
+  (set app.canvas-mode-command-hints-provider original-command-hints-provider)
+  (set app.canvas-mode-delete-selection original-delete-selection)
+  (set app.canvas-mode-activate-focused original-activate-focused)
+  (set app.canvas-mode-drawing-enabled? original-drawing-enabled)
+  (set app.canvas-mode-target-enabled? original-target-enabled)
+  (set app.canvas-mode-update original-mode-update)
+  (assert ok
+          "actions-for-context should support active custom canvas modes")
+  (var found false)
+  (each [_ action (ipairs actions)]
+    (when (= action.name "Custom Action")
+      (set found true)))
+  (assert found
+          "active custom canvas mode should contribute its root actions"))
 
 (table.insert tests {:name "Menu actions and depth offset" :fn menu-actions-fire-and-increment-depth})
 (table.insert tests {:name "Menu grows downward from click" :fn menu-grows-downward-from-click})
@@ -764,14 +928,16 @@
                      :fn menu-manager-root-light-ball-invokes-scene})
 (table.insert tests {:name "Menu root recover terrain-bound objects invokes scene"
                      :fn menu-manager-root-recover-terrain-bound-objects-invokes-scene})
-(table.insert tests {:name "Menu root drawing actions follow canvas feature"
-                     :fn menu-manager-root-drawing-actions-follow-canvas-feature})
+(table.insert tests {:name "Menu root drawing actions follow canvas mode"
+                     :fn menu-manager-root-drawing-actions-follow-canvas-mode})
 (table.insert tests {:name "Menu root drawing selection actions follow selection state"
                      :fn menu-manager-root-drawing-selection-actions-follow-selection-state})
 (table.insert tests {:name "Root context menu actions normalize partial context"
                      :fn root-context-menu-actions-normalize-partial-context})
-(table.insert tests {:name "Root context menu actions validate canvas feature builders"
-                     :fn root-context-menu-actions-validate-canvas-feature-builders})
+(table.insert tests {:name "Root context menu actions stay side-effect free for partial mode context"
+                     :fn root-context-menu-actions-does-not-switch-active-mode-for_partial_context})
+(table.insert tests {:name "Root context menu actions support active custom canvas mode"
+                     :fn root-context-menu-actions-support-active-custom-canvas-mode})
 
 (local main
   (fn []

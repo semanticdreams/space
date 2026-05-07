@@ -26,7 +26,7 @@
 (local EngineModule (require :engine))
 (local AppConfig (require :app-config))
 (local CliArgs (require :cli-args))
-(local CanvasFeatures (require :canvas-features))
+(local CanvasModes (require :canvas-modes))
 
 (set app.engine-autocreated false)
 (when (not app.engine)
@@ -49,10 +49,15 @@
 
 (global one (fn [val] (assert (= (length val) 1) val) (. val 1)))
 
+(local debug-log-root-reload?
+  (and app.__hot-reload-ctx
+       app.__hot-reload-ctx.target-unit
+       (= app.__hot-reload-ctx.target-unit.id "app-root")))
 (local DebugLog (require :debug-log))
-(when (not app.__debug-log-session-started?)
+(when (and (not debug-log-root-reload?)
+           (not (rawget _G "__space_debug_log_session_started")))
   (DebugLog.reset-log!)
-  (set app.__debug-log-session-started? true))
+  (set _G.__space_debug_log_session_started true))
 (local TerrainIssueLog (require :terrain-issue-log))
 (TerrainIssueLog.start-session! "space startup")
 (local fs (require :fs))
@@ -440,9 +445,15 @@
                                             "hot reload callback id missing")
                                     (callbacks.enqueue app.hot-reload-callback-id true))
              :units-fn (fn [_root-unit]
-                         (icollect [_ live-unit (ipairs [app.canvas-unit
-                                                         app.hud-unit])]
-                           live-unit))})
+                         (local live-units [])
+                         (when app.canvas-unit
+                           (table.insert live-units app.canvas-unit))
+                         (when app.hud-unit
+                           (table.insert live-units app.hud-unit))
+                         (each [_ live-unit (pairs (or app.canvas-mode-units {}))]
+                           (when live-unit
+                             (table.insert live-units live-unit)))
+                         live-units)})
           (set app.hot-reload-controller
                (HotReload.AppRootController controller-config)))
         app.hot-reload-controller)))
@@ -734,6 +745,7 @@
 (set app.hud nil)
 (set app.canvas-unit nil)
 (set app.hud-unit nil)
+(set app.canvas-mode-units nil)
 (set app.profiler nil)
 (set app.movables nil)
 (set app.focus nil)
@@ -744,7 +756,7 @@
 (set app.active-pointer-controls nil)
 (set app.preferred-interaction-surface :scene)
 (set app.active-interaction-surface :scene)
-(set app.active-canvas-feature (. CanvasFeatures :default-feature-id))
+(set app.active-canvas-mode nil)
 (set app.scene-interactive? true)
 (set app.canvas-interactive? false)
 (set app.canvas-visible? false)
@@ -805,13 +817,13 @@
 
 (fn canvas-shell-state []
   {:interaction-surface app.active-interaction-surface
-   :canvas-feature app.active-canvas-feature
+   :canvas-mode app.active-canvas-mode
    :canvas-visible? (= app.canvas-visible? true)})
 
 (fn canvas-shell-state= [a b]
   (and a b
        (= a.interaction-surface b.interaction-surface)
-       (= a.canvas-feature b.canvas-feature)
+       (= a.canvas-mode b.canvas-mode)
        (= a.canvas-visible? b.canvas-visible?)))
 
 (fn emit-canvas-shell-changed [reason previous]
@@ -941,8 +953,8 @@
       :canvas
       :scene))
 
-(fn resolve-canvas-feature [feature]
-  (CanvasFeatures.resolve feature))
+(fn resolve-canvas-mode [mode-id]
+  (CanvasModes.resolve mode-id))
 
 (fn mark-active-world-hud-dirty []
   (when (and app.hud app.hud.entity app.hud.entity.layout)
@@ -988,13 +1000,16 @@
          app.preferred-interaction-surface))
   (sync-interaction-surface-state "interaction-surface" previous))
 
-(fn app.set-active-canvas-feature [feature]
+(fn app.set-active-canvas-mode [mode-id]
   (local previous (canvas-shell-state))
-  (local resolved (resolve-canvas-feature feature))
-  (set app.active-canvas-feature resolved)
+  (local resolved (resolve-canvas-mode mode-id))
+  (CanvasModes.activate-mode resolved)
+  (set app.active-canvas-mode resolved)
   (when app.active-world-runtime
-    (set app.active-world-runtime.active-canvas-feature resolved))
-  (emit-canvas-shell-changed "canvas-feature" previous)
+    (set app.active-world-runtime.requested-canvas-mode-id resolved)
+    (set app.active-world-runtime.requested-canvas-mode-known? true)
+    (set app.active-world-runtime.active-canvas-mode resolved))
+  (emit-canvas-shell-changed "canvas-mode" previous)
   (mark-active-world-hud-dirty)
   resolved)
 
@@ -1022,12 +1037,12 @@
 
 (fn app.pointer-target-enabled? [target]
   (local surface (pointer-target-surface target))
-  (local canvas-feature (and target target.canvas-feature))
+  (local canvas-target-enabled? app.canvas-mode-target-enabled?)
   (local canvas-enabled?
     (and (= app.canvas-interactive? true)
-         (if canvas-feature
-             (= (resolve-canvas-feature canvas-feature) app.active-canvas-feature)
-             true)))
+         (if canvas-target-enabled?
+             (canvas-target-enabled? target)
+             (= (and target target.canvas-target-kind) nil))))
   (if (= surface :scene)
       (= app.scene-interactive? true)
       (if (= surface :canvas)
@@ -1064,7 +1079,18 @@
     (set app.scene.build-context.layout-root app.layout-root))
   (when (and runtime runtime.restore-surface-state)
     (runtime:restore-surface-state app.canvas app.hud))
-  (app.set-active-canvas-feature (and runtime runtime.active-canvas-feature))
+  (local requested-mode-id
+    (if (and runtime runtime.requested-canvas-mode-known?)
+        runtime.requested-canvas-mode-id
+        (and runtime runtime.active-canvas-mode)))
+  (if (CanvasModes.mode-registered? requested-mode-id)
+      (app.set-active-canvas-mode requested-mode-id)
+      (do
+        (CanvasModes.activate-mode nil)
+        (set app.active-canvas-mode nil)
+        (when runtime
+          (set runtime.requested-canvas-mode-known? true)
+          (set runtime.active-canvas-mode nil))))
   (app.set-active-interaction-surface (or (and runtime runtime.preferred-interaction-surface)
                                           app.preferred-interaction-surface)
                                       {:sync-canvas-visibility true}))
@@ -1097,13 +1123,70 @@
                             :restore-export "restore-canvas!"})))
   app.canvas-unit)
 
+(local built-in-canvas-mode-unit-specs
+  [{:mode-id "graph"
+    :unit-id "graph-canvas-mode"
+    :module-name "graph-canvas-mode-unit"
+    :owned-paths-export "graph-mode-owned-paths"
+    :load-export "load-graph-canvas-mode!"
+    :unload-export "unload-graph-canvas-mode!"
+    :snapshot-export "snapshot-graph-canvas-mode!"
+    :restore-export "restore-graph-canvas-mode!"}
+   {:mode-id "drawing"
+    :unit-id "drawing-canvas-mode"
+    :module-name "drawing-canvas-mode-unit"
+    :owned-paths-export "drawing-mode-owned-paths"
+    :load-export "load-drawing-canvas-mode!"
+    :unload-export "unload-drawing-canvas-mode!"
+    :snapshot-export "snapshot-drawing-canvas-mode!"
+    :restore-export "restore-drawing-canvas-mode!"}])
+
+(fn ensure-canvas-mode-units []
+  (set app.canvas-mode-units (or app.canvas-mode-units {}))
+  app.canvas-mode-units)
+
+(fn ensure-built-in-canvas-mode-unit [unit-spec]
+  (local units (ensure-canvas-mode-units))
+  (local existing (. units unit-spec.mode-id))
+  (if existing
+      existing
+      (do
+        (local ModeUnitModule (require unit-spec.module-name))
+        (local unit
+          (Units.ModuleUnit {:id unit-spec.unit-id
+                             :parent-id "app-root"
+                             :module-name unit-spec.module-name
+                             :owned-paths ((. ModeUnitModule unit-spec.owned-paths-export))
+                             :load-export unit-spec.load-export
+                             :unload-export unit-spec.unload-export
+                             :snapshot-export unit-spec.snapshot-export
+                             :restore-export unit-spec.restore-export}))
+        (set (. units unit-spec.mode-id) unit)
+        unit)))
+
+(fn load-built-in-canvas-mode-units! []
+  (each [_ unit-spec (ipairs built-in-canvas-mode-unit-specs)]
+    (local unit (ensure-built-in-canvas-mode-unit unit-spec))
+    (unit:load))
+  true)
+
+(fn unload-built-in-canvas-mode-units! []
+  (when app.canvas-mode-units
+    (for [i (length built-in-canvas-mode-unit-specs) 1 -1]
+      (local unit-spec (. built-in-canvas-mode-unit-specs i))
+      (local unit (. app.canvas-mode-units unit-spec.mode-id))
+      (when unit
+        (unit:unload)
+        (set (. app.canvas-mode-units unit-spec.mode-id) nil))))
+  true)
+
 (local installable-reset-projection app.reset-projection)
 (local installable-set-viewport app.set-viewport)
 (local installable-create-default-projection app.create-default-projection)
 (local installable-mark-active-world-hud-dirty app.mark-active-world-hud-dirty)
 (local installable-set-canvas-visible app.set-canvas-visible)
 (local installable-set-active-interaction-surface app.set-active-interaction-surface)
-(local installable-set-active-canvas-feature app.set-active-canvas-feature)
+(local installable-set-active-canvas-mode app.set-active-canvas-mode)
 (local installable-toggle-active-interaction-surface app.toggle-active-interaction-surface)
 (local installable-pointer-target-enabled? app.pointer-target-enabled?)
 (local installable-bind-active-world-runtime bind-active-world-runtime)
@@ -1116,7 +1199,7 @@
   (set app.mark-active-world-hud-dirty installable-mark-active-world-hud-dirty)
   (set app.set-canvas-visible installable-set-canvas-visible)
   (set app.set-active-interaction-surface installable-set-active-interaction-surface)
-  (set app.set-active-canvas-feature installable-set-active-canvas-feature)
+  (set app.set-active-canvas-mode installable-set-active-canvas-mode)
   (set app.toggle-active-interaction-surface installable-toggle-active-interaction-surface)
   (set app.pointer-target-enabled? installable-pointer-target-enabled?)
   (set app.bind-active-world-runtime installable-bind-active-world-runtime)
@@ -1390,9 +1473,11 @@
   (set app.terrain-paint-previous-state nil)
   (set app.layout-root nil)
   (set app.hud nil)
+  (CanvasModes.clear-mode-runtime-hooks!)
   (ensure-canvas-unit)
   (local hud-unit (ensure-hud-unit))
   (hud-unit:load)
+  (load-built-in-canvas-mode-units!)
   (init-world-manager)
   (when app.world-manager
     (app.world-manager:activate-first))
@@ -1445,6 +1530,22 @@
                                (- (wall-now-ms) init-end-ms)))
   )
 
+(fn read-debug-log-content []
+  (local (ok content) (pcall fs.read-file DebugLog.log-path))
+  (if ok content nil))
+
+(fn restore-debug-log-history! [snapshot-content]
+  (when snapshot-content
+    (local (ok current-content) (pcall fs.read-file DebugLog.log-path))
+    (local current (if ok current-content ""))
+    (when (not (and ok
+                    (string.find current snapshot-content 1 true)))
+      (local combined
+        (if (> (# current) 0)
+            (.. snapshot-content "\n" current)
+            snapshot-content))
+      (pcall fs.write-file DebugLog.log-path combined))))
+
 (fn app.snapshot-app-state []
   (local active-world-id
     (or (and app.active-world-entry app.active-world-entry.id)
@@ -1453,10 +1554,11 @@
              (app.world-manager:active-world-id))))
   (local snapshot
     {:active-world-id active-world-id
-     :active-canvas-feature app.active-canvas-feature
+     :active-canvas-mode app.active-canvas-mode
      :preferred-interaction-surface app.preferred-interaction-surface
      :active-interaction-surface app.active-interaction-surface
-     :canvas-visible? app.canvas-visible?})
+     :canvas-visible? app.canvas-visible?
+     :debug-log-content (read-debug-log-content)})
   snapshot)
 
 (fn app.restore-app-state [state]
@@ -1465,14 +1567,15 @@
              app.world-manager
              app.world-manager.activate-world-id)
     (app.world-manager:activate-world-id snapshot.active-world-id))
-  (when (and snapshot.active-canvas-feature app.set-active-canvas-feature)
-    (app.set-active-canvas-feature snapshot.active-canvas-feature))
+  (when app.set-active-canvas-mode
+    (app.set-active-canvas-mode snapshot.active-canvas-mode))
   (when (and snapshot.preferred-interaction-surface app.set-active-interaction-surface)
     (app.set-active-interaction-surface snapshot.preferred-interaction-surface
                                         {:sync-canvas-visibility false}))
   (when (and (not (= snapshot.canvas-visible? nil))
              app.set-canvas-visible)
     (app.set-canvas-visible snapshot.canvas-visible?))
+  (restore-debug-log-history! snapshot.debug-log-content)
   true)
 
 (fn app.update [delta]
@@ -1583,12 +1686,16 @@
   (set app.canvas nil)
   (set app.preferred-interaction-surface :scene)
   (set app.active-interaction-surface :scene)
+  (set app.active-canvas-mode nil)
   (set app.scene-interactive? true)
   (set app.canvas-interactive? false)
   (set app.canvas-visible? false)
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)
   (set app.active-world-hud-overlay nil)
+  (CanvasModes.clear-mode-runtime-hooks!)
+  (unload-built-in-canvas-mode-units!)
+  (set app.canvas-mode-units nil)
   (when app.hud-unit
     (app.hud-unit:unload)
     (set app.hud-unit nil))

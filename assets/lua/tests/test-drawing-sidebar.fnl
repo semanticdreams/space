@@ -6,9 +6,10 @@
 (local Hoverables (require :hoverables))
 (local MathUtils (require :math-utils))
 (local Signal (require :signal))
-(local {: LayoutRoot} (require :layout))
+(local CanvasModes (require :canvas-modes))
 (local DrawingController (require :drawing/controller))
 (local DrawingSidebarView (require :drawing/sidebar-view))
+(local CanvasModeDockView (require :canvas-mode-dock-view))
 (local Themes (require :themes))
 (local DarkTheme (require :dark-theme))
 (local LightTheme (require :light-theme))
@@ -41,6 +42,35 @@
     (fn [controller dir]
       (controller:add-layer "vector")
       (f controller dir))))
+
+(fn ensure-built-in-canvas-modes! []
+  (local registry (CanvasModes.ensure-registry))
+  (when (not (. registry.modes "graph"))
+    (CanvasModes.register-mode
+      {:id "graph"
+       :label "Graph"
+       :icon "account_tree"
+       :button-name "graph-canvas-mode"
+       :show-in-sidebar? true
+       :activate (fn [_ctx] {:mode-id "graph"})
+       :deactivate (fn [_ctx _session] true)}))
+  (when (not (. registry.modes "drawing"))
+    (CanvasModes.register-mode
+      {:id "drawing"
+       :label "Draw"
+       :icon "draw"
+       :button-name "drawing-canvas-mode"
+       :show-in-sidebar? true
+       :activate (fn [ctx]
+                   (ctx:set-drawing-enabled! true)
+                   (ctx:set-left-dock-builder!
+                     (fn [build-ctx]
+                       (if app.drawing-controller
+                           ((DrawingSidebarView {:controller app.drawing-controller}) build-ctx)
+                           nil)))
+                   {:mode-id "drawing"})
+       :deactivate (fn [_ctx _session] true)}))
+  true)
 
 (fn make-icons-stub []
   (local glyph {:advance 1})
@@ -138,8 +168,20 @@
                    :canvas-visible? app.canvas-visible?
                    :preferred-interaction-surface app.preferred-interaction-surface
                    :active-interaction-surface app.active-interaction-surface
-                   :active-canvas-feature app.active-canvas-feature
+                   :active-canvas-mode app.active-canvas-mode
+                   :canvas-mode-activate-focused app.canvas-mode-activate-focused
+                   :canvas-mode-command-hints-provider app.canvas-mode-command-hints-provider
+                   :canvas-mode-delete-selection app.canvas-mode-delete-selection
+                   :canvas-mode-drawing-enabled? app.canvas-mode-drawing-enabled?
+                   :canvas-mode-left-dock-builder app.canvas-mode-left-dock-builder
+                   :canvas-mode-registry app.canvas-mode-registry
+                   :canvas-mode-root-actions app.canvas-mode-root-actions
+                   :canvas-mode-selection-actions app.canvas-mode-selection-actions
+                   :canvas-mode-target-enabled? app.canvas-mode-target-enabled?
+                   :canvas-mode-update app.canvas-mode-update
+                   :canvas-modes-changed app.canvas-modes-changed
                    :canvas-shell-changed app.canvas-shell-changed
+                   :canvas-mode-units app.canvas-mode-units
                    :themes app.themes})
   (set app.clickables (Clickables))
   (set app.hoverables (Hoverables))
@@ -148,7 +190,8 @@
   (set app.canvas-visible? true)
   (set app.preferred-interaction-surface :canvas)
   (set app.active-interaction-surface :canvas)
-  (set app.active-canvas-feature "graph")
+  (ensure-built-in-canvas-modes!)
+  (CanvasModes.activate-mode "graph")
   (local (ok result) (pcall body))
   (when (and app.clickables app.clickables.drop)
     (app.clickables:drop))
@@ -164,15 +207,14 @@
   (when app.canvas-shell-changed
     (app.canvas-shell-changed:emit {:reason reason
                                     :current {:interaction-surface app.active-interaction-surface
-                                              :canvas-feature app.active-canvas-feature
+                                              :canvas-mode app.active-canvas-mode
                                               :canvas-visible? app.canvas-visible?}})))
 
-(fn set-canvas-feature [feature]
-  (if app.set-active-canvas-feature
-      (app.set-active-canvas-feature feature)
-      (do
-        (set app.active-canvas-feature feature)
-        (emit-canvas-shell-changed "canvas-feature"))))
+(fn set-canvas-mode [mode-id]
+  (CanvasModes.activate-mode mode-id)
+  (set app.active-canvas-mode mode-id)
+  (emit-canvas-shell-changed "canvas-mode")
+  mode-id)
 
 (fn set-interaction-surface [surface]
   (if app.set-active-interaction-surface
@@ -183,28 +225,28 @@
         (set app.canvas-visible? (= surface :canvas))
         (emit-canvas-shell-changed "interaction-surface"))))
 
-(fn sidebar-width-reflects-active-canvas-feature []
+(fn sidebar-width-reflects-active-canvas-mode []
   (with-sidebar-env
     (fn []
       (with-controller
         (fn [controller]
-          (local ctx (make-ctx))
-          (local sidebar-builder (DrawingSidebarView {:controller controller}))
-          (local sidebar (sidebar-builder ctx))
-          (sidebar.layout:measurer)
-          (local graph-width (. sidebar.layout.measure 1))
+          (local original-controller app.drawing-controller)
+          (set app.drawing-controller controller)
+          (local dock ((CanvasModeDockView {}) (make-ctx)))
+          (dock.layout:measurer)
+          (local graph-width (. dock.layout.measure 1))
           (assert (> graph-width 0))
-          (set-canvas-feature "drawing")
-          (sidebar:update)
-          (sidebar.layout:measurer)
-          (local drawing-width (. sidebar.layout.measure 1))
+          (set-canvas-mode "drawing")
+          (dock:update)
+          (dock.layout:measurer)
+          (local drawing-width (. dock.layout.measure 1))
           (assert (> drawing-width graph-width))
-          (sidebar:drop))))))
+          (dock:drop)
+          (set app.drawing-controller original-controller))))))
 
 (fn sidebar-width-follows-panel-measure []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
       (with-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -212,14 +254,12 @@
           (local sidebar (sidebar-builder ctx))
           (sidebar.layout:measurer)
           (local content-layout (. sidebar.layout.children 1))
-          (local rail-layout (and content-layout (. content-layout.children 1)))
-          (local panel-layout (and content-layout (. content-layout.children 2)))
+          (local panel-layout (and content-layout (. content-layout.children 1)))
           (assert content-layout "drawing sidebar should create its composed content layout")
-          (assert rail-layout "drawing sidebar should create its feature rail layout")
           (assert panel-layout "drawing sidebar should create its drawing panel layout")
           (assert (MathUtils.approx (. sidebar.layout.measure 1)
-                                    (+ (. rail-layout.measure 1) (. panel-layout.measure 1)))
-                  "drawing sidebar width should be derived from the measured rail and panel widths")
+                                    (. panel-layout.measure 1))
+                  "drawing sidebar width should match the measured drawing panel width")
           (sidebar:drop))))))
 
 (fn sidebar-feature-buttons-fill-rail-width []
@@ -227,17 +267,17 @@
     (fn []
       (with-controller
         (fn [controller]
-          (local ctx (make-ctx))
-          (local sidebar-builder (DrawingSidebarView {:controller controller}))
-          (local sidebar (sidebar-builder ctx))
-          (sidebar.layout:measurer)
-          (set sidebar.layout.position (glm.vec3 0 0 0))
-          (set sidebar.layout.size sidebar.layout.measure)
-          (set sidebar.layout.rotation (glm.quat 1 0 0 0))
-          (set sidebar.layout.clip-region nil)
-          (set sidebar.layout.depth-offset-index 0)
-          (sidebar.layout:layouter)
-          (local content-layout (. sidebar.layout.children 1))
+          (local original-controller app.drawing-controller)
+          (set app.drawing-controller controller)
+          (local dock ((CanvasModeDockView {}) (make-ctx)))
+          (dock.layout:measurer)
+          (set dock.layout.position (glm.vec3 0 0 0))
+          (set dock.layout.size dock.layout.measure)
+          (set dock.layout.rotation (glm.quat 1 0 0 0))
+          (set dock.layout.clip-region nil)
+          (set dock.layout.depth-offset-index 0)
+          (dock.layout:layouter)
+          (local content-layout (. dock.layout.children 1))
           (local rail-layout (and content-layout (. content-layout.children 1)))
           (assert rail-layout "drawing sidebar should create its feature rail layout")
           (local rail-flex-layout (. rail-layout.children 2))
@@ -271,12 +311,13 @@
           (assert (MathUtils.approx (+ graph-button-layout.size.y draw-button-layout.size.y)
                                     rail-flex-layout.size.y)
                   "drawing sidebar feature rail should stack icon buttons without spacing")
-          (sidebar:drop))))))
+          (dock:drop)
+          (set app.drawing-controller original-controller))))))
 
 (fn sidebar-rename-input-syncs-after-history []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -303,7 +344,7 @@
 (fn sidebar-keeps-fill-toggle-clickable []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -321,7 +362,7 @@
 (fn sidebar-disables-raster-move-without-selection []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-controller
         (fn [controller]
           (controller:add-layer "raster")
@@ -338,7 +379,7 @@
 (fn sidebar-empty-state-shows-create-actions-only []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -360,7 +401,7 @@
 (fn sidebar-ignores-gesture-only-controller-noise []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -381,7 +422,7 @@
 (fn sidebar-ignores-raster-edit-noise-when-visible-state-stays-stable []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-controller
         (fn [controller]
           (controller:add-layer "raster")
@@ -410,7 +451,7 @@
 (fn sidebar-rejects-untrimmed-rename-input []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -434,7 +475,7 @@
 (fn sidebar-enables-save-for-valid-rename-input []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -461,7 +502,7 @@
 (fn sidebar-ignores-selection-count-noise-when-delete-stays-enabled []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (with-vector-controller
         (fn [controller]
           (controller:set-active-tool "rectangle")
@@ -488,27 +529,28 @@
                   "drawing sidebar should not rebuild when selection count changes but Delete stays enabled")
           (sidebar:drop))))))
 
-(fn sidebar-reconciles-on-canvas-feature-changes []
+(fn sidebar-reconciles-on-canvas-mode-changes []
   (with-sidebar-env
     (fn []
       (with-controller
         (fn [controller]
-          (local ctx (make-ctx))
-          (local sidebar-builder (DrawingSidebarView {:controller controller}))
-          (local sidebar (sidebar-builder ctx))
-          (local root (LayoutRoot))
-          (sidebar.layout:set-root root)
-          (sidebar.layout:mark-measure-dirty)
-          (local (ok-initial err-initial) (pcall (fn [] (root:update))))
-          (assert ok-initial (.. "initial layout update failed: " (tostring err-initial)))
-          (local graph-width (. sidebar.layout.measure 1))
-          (set-canvas-feature "drawing")
-          (sidebar:update)
-          (local (ok err) (pcall (fn [] (root:update))))
+          (local original-controller app.drawing-controller)
+          (set app.drawing-controller controller)
+          (local sidebar ((CanvasModeDockView {}) (make-ctx)))
+          (sidebar.layout:measurer)
+          (set-canvas-mode "drawing")
+          (local (ok err)
+            (pcall
+              (fn []
+                (sidebar:update)
+                (sidebar.layout:measurer))))
           (assert ok (.. "sidebar should reconcile cleanly after app canvas feature changes: " (tostring err)))
-          (assert (> (. sidebar.layout.measure 1) graph-width)
-                  "sidebar should expand immediately after the canvas feature changes")
-          (sidebar:drop))))))
+          (local drawing-content-layout (. sidebar.layout.children 1))
+          (local drawing-panel-layout (and drawing-content-layout (. drawing-content-layout.children 2)))
+          (assert drawing-panel-layout
+                  "canvas mode dock should rebuild to include the drawing panel after switching modes")
+          (sidebar:drop)
+          (set app.drawing-controller original-controller))))))
 
 (fn sidebar-appears-when-switching-to-canvas-surface []
   (with-sidebar-env
@@ -533,7 +575,6 @@
 (fn sidebar-fills-allocated-dock-height []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-feature "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -548,20 +589,13 @@
           (set sidebar.layout.depth-offset-index 0)
           (sidebar.layout:layouter)
           (local content-layout (. sidebar.layout.children 1))
-          (local rail-layout (and content-layout (. content-layout.children 1)))
-          (local panel-layout (and content-layout (. content-layout.children 2)))
+          (local panel-layout (and content-layout (. content-layout.children 1)))
           (assert content-layout "drawing sidebar should create its composed content layout in drawing mode")
-          (assert rail-layout "drawing sidebar should create the feature rail layout in drawing mode")
           (assert panel-layout "drawing sidebar should create the drawing panel layout in drawing mode")
-          (assert (= rail-layout.position.y 7)
-                  "drawing sidebar feature rail should start at the top-left dock origin")
           (assert (= panel-layout.position.y 7)
                   "drawing sidebar panel should start at the top-left dock origin")
-          (assert (MathUtils.approx panel-layout.position.x
-                                    (+ rail-layout.position.x rail-layout.size.x))
-                  "drawing sidebar panel should sit flush against the feature rail without a gap")
-          (assert (= rail-layout.size.y (+ measured.y 8))
-                  "drawing sidebar feature rail should fill the allocated dock height")
+          (assert (= panel-layout.position.x 5)
+                  "drawing sidebar panel should start at the left dock origin")
           (assert (= panel-layout.size.y (+ measured.y 8))
                   "drawing sidebar panel should fill the allocated dock height")
           (sidebar:drop))))))
@@ -573,20 +607,16 @@
       (themes.add-theme :dark DarkTheme)
       (themes.add-theme :light LightTheme)
       (set app.themes themes)
-      (set app.active-canvas-feature "drawing")
+      (set app.active-canvas-mode "drawing")
       (themes.set-theme :dark)
       (with-vector-controller
         (fn [controller]
           (local dark-sidebar ((DrawingSidebarView {:controller controller}) (make-ctx)))
           (dark-sidebar.layout:measurer)
-          (local dark-draw (find-clickable-button-by-icon "draw"))
           (local dark-select (find-clickable-button "Select"))
           (local dark-primary-colors (themes.get-button-colors :primary))
           (local dark-primary (. dark-primary-colors :background))
-          (assert dark-draw "drawing sidebar should expose a Draw button in dark theme")
           (assert dark-select "drawing sidebar should expose a Select button in dark theme")
-          (assert (color-array= dark-draw.background-color dark-primary)
-                  "drawing sidebar active rail button should use the dark theme primary color")
           (assert (color-array= dark-select.background-color dark-primary)
                   "drawing sidebar active tool button should use the dark theme primary color")
           (dark-sidebar:drop)
@@ -594,20 +624,91 @@
           (themes.set-theme :light)
           (local light-sidebar ((DrawingSidebarView {:controller controller}) (make-ctx)))
           (light-sidebar.layout:measurer)
-          (local light-draw (find-clickable-button-by-icon "draw"))
           (local light-select (find-clickable-button "Select"))
           (local light-primary-colors (themes.get-button-colors :primary))
           (local light-primary (. light-primary-colors :background))
-          (assert light-draw "drawing sidebar should expose a Draw button in light theme")
           (assert light-select "drawing sidebar should expose a Select button in light theme")
-          (assert (color-array= light-draw.background-color light-primary)
-                  "drawing sidebar active rail button should use the light theme primary color")
           (assert (color-array= light-select.background-color light-primary)
                   "drawing sidebar active tool button should use the light theme primary color")
           (light-sidebar:drop))))))
 
-(table.insert tests {:name "Drawing sidebar expands in drawing feature mode"
-                     :fn sidebar-width-reflects-active-canvas-feature})
+(fn canvas-mode-dock-view-rebuilds-without-stale-layout-children []
+  (with-sidebar-env
+    (fn []
+      (with-controller
+        (fn [controller]
+          (local original-controller app.drawing-controller)
+          (set app.drawing-controller controller)
+          (local dock ((CanvasModeDockView {}) (make-ctx)))
+          (dock.layout:measurer)
+          (assert (= (length dock.layout.children) 1)
+                  "canvas mode dock should start with exactly one root child")
+          (set-canvas-mode "drawing")
+          (dock:update)
+          (dock.layout:measurer)
+          (assert (= (length dock.layout.children) 1)
+                  "canvas mode dock should replace its root child when switching to drawing")
+          (set-canvas-mode "graph")
+          (dock:update)
+          (dock.layout:measurer)
+          (assert (= (length dock.layout.children) 1)
+                  "canvas mode dock should not accumulate stale root children when switching back")
+          (dock:drop)
+          (set app.drawing-controller original-controller))))))
+
+(fn canvas-mode-dock-view-rebuilds-when-modes-register-at-runtime []
+  (with-sidebar-env
+    (fn []
+      (local original-registry app.canvas-mode-registry)
+      (local original-signal app.canvas-modes-changed)
+      (set app.canvas-mode-registry nil)
+      (set app.canvas-modes-changed nil)
+      (CanvasModes.register-mode
+        {:id "graph"
+         :label "Graph"
+         :icon "account_tree"
+         :button-name "graph-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [_ctx] {:mode-id "graph"})
+         :deactivate (fn [_ctx _session] true)})
+      (CanvasModes.register-mode
+        {:id "drawing"
+         :label "Draw"
+         :icon "draw"
+         :button-name "drawing-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [_ctx] {:mode-id "drawing"})
+         :deactivate (fn [_ctx _session] true)})
+      (set app.active-canvas-mode "graph")
+      (set app.active-canvas-mode "graph")
+      (local dock ((CanvasModeDockView {}) (make-ctx)))
+      (dock.layout:measurer)
+      (var content-layout (. dock.layout.children 1))
+      (var rail-layout (and content-layout (. content-layout.children 1)))
+      (var rail-flex-layout (and rail-layout (. rail-layout.children 2)))
+      (assert (= (length rail-flex-layout.children) 2)
+              "canvas mode dock should start with two built-in mode buttons")
+      (CanvasModes.register-mode
+        {:id "custom-note"
+         :label "Custom"
+         :icon "draw"
+         :button-name "custom-note-mode"
+         :show-in-sidebar? true
+         :activate (fn [_ctx] {:mode-id "custom-note"})
+         :deactivate (fn [_ctx _session] true)})
+      (dock:update)
+      (dock.layout:measurer)
+      (set content-layout (. dock.layout.children 1))
+      (set rail-layout (and content-layout (. content-layout.children 1)))
+      (set rail-flex-layout (and rail-layout (. rail-layout.children 2)))
+      (assert (= (length rail-flex-layout.children) 3)
+              "canvas mode dock should rebuild when a new runtime mode is registered")
+      (dock:drop)
+      (set app.canvas-mode-registry original-registry)
+      (set app.canvas-modes-changed original-signal))))
+
+(table.insert tests {:name "Drawing sidebar expands in drawing mode"
+                     :fn sidebar-width-reflects-active-canvas-mode})
 (table.insert tests {:name "Drawing sidebar width follows panel measure"
                      :fn sidebar-width-follows-panel-measure})
 (table.insert tests {:name "Drawing sidebar feature buttons fill rail width"
@@ -630,14 +731,18 @@
                      :fn sidebar-enables-save-for-valid-rename-input})
 (table.insert tests {:name "Drawing sidebar ignores selection count noise when delete stays enabled"
                      :fn sidebar-ignores-selection-count-noise-when-delete-stays-enabled})
-(table.insert tests {:name "Drawing sidebar reconciles on canvas feature changes"
-                     :fn sidebar-reconciles-on-canvas-feature-changes})
+(table.insert tests {:name "Drawing sidebar reconciles on canvas mode changes"
+                     :fn sidebar-reconciles-on-canvas-mode-changes})
 (table.insert tests {:name "Drawing sidebar appears when switching to canvas surface"
                      :fn sidebar-appears-when-switching-to-canvas-surface})
 (table.insert tests {:name "Drawing sidebar fills allocated dock height"
                      :fn sidebar-fills-allocated-dock-height})
 (table.insert tests {:name "Drawing sidebar adopts light theme colors"
                      :fn sidebar-adopts-light-theme-colors})
+(table.insert tests {:name "Canvas mode dock view rebuilds without stale layout children"
+                     :fn canvas-mode-dock-view-rebuilds-without-stale-layout-children})
+(table.insert tests {:name "Canvas mode dock view rebuilds when modes register at runtime"
+                     :fn canvas-mode-dock-view-rebuilds-when-modes-register-at-runtime})
 
 (local main
   (fn []

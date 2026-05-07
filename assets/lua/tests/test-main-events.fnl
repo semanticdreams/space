@@ -1,5 +1,5 @@
 (local Main (require :main))
-(local CanvasFeatures (require :canvas-features))
+(local CanvasModes (require :canvas-modes))
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
@@ -19,8 +19,26 @@
                           :drop (fn [_] nil)})
     app.renderers))
 
+(fn ensure-built-in-canvas-modes! []
+  (local registry (CanvasModes.ensure-registry))
+  (when (not (. registry.modes "graph"))
+    (CanvasModes.register-mode {:id "graph"
+                                :label "Graph"
+                                :icon "account_tree"
+                                :button-name "graph-canvas-mode"
+                                :show-in-sidebar? true
+                                :activate (fn [_ctx] nil)}))
+  (when (not (. registry.modes "drawing"))
+    (CanvasModes.register-mode {:id "drawing"
+                                :label "Draw"
+                                :icon "draw"
+                                :button-name "drawing-canvas-mode"
+                                :show-in-sidebar? true
+                                :activate (fn [_ctx] nil)}))
+  true)
+
 (local bind-state-keys
-  [:active-canvas-feature
+  [:active-canvas-mode
    :active-interaction-surface
    :active-pointer-controls
    :active-world-entry
@@ -33,6 +51,20 @@
    :canvas-controls
    :canvas-focus-scope
    :canvas-interactive?
+   :canvas-mode-activate-focused
+   :canvas-mode-command-hints-provider
+   :canvas-mode-context-enricher
+   :canvas-mode-delete-selection
+   :canvas-mode-drawing-enabled?
+   :canvas-mode-input-handlers
+   :canvas-mode-left-dock-builder
+   :canvas-mode-target-enabled?
+   :canvas-mode-update
+   :canvas-mode-units
+   :canvas-mode-registry
+   :canvas-mode-root-actions
+   :canvas-mode-selection-actions
+   :canvas-modes-changed
    :canvas-shell-changed
    :canvas-visible?
    :drawing-controller
@@ -52,7 +84,7 @@
    :scene
    :scene-focus-scope
    :scene-interactive?
-   :set-active-canvas-feature
+   :set-active-canvas-mode
    :set-active-interaction-surface
    :set-canvas-visible
    :terrain-paint-previous-state
@@ -166,8 +198,9 @@
     (fn []
       (reset-state)
       (Main.install-app-shell!)
+      (ensure-built-in-canvas-modes!)
       (var restored false)
-      (var active-canvas-feature nil)
+      (var active-canvas-mode nil)
       (var preferred-surface nil)
       (var active-surface nil)
       (var canvas-visible? nil)
@@ -189,7 +222,7 @@
         (set app.reset-projection (fn [] true))
         (Main.bind-active-world-runtime
           {:id "world-a"}
-          {:active-canvas-feature "drawing"
+          {:active-canvas-mode "drawing"
            :preferred-interaction-surface :canvas
            :restore-surface-state (fn [_self _canvas _hud]
                                     (set restored true))
@@ -198,14 +231,14 @@
            :scene nil
            :canvas {:build-context {}
                     :restore-state (fn [_self _state] true)}})
-        (set active-canvas-feature app.active-canvas-feature)
+        (set active-canvas-mode app.active-canvas-mode)
         (set preferred-surface app.preferred-interaction-surface)
         (set active-surface app.active-interaction-surface)
         (set canvas-visible? app.canvas-visible?)
         (set canvas-interactive? app.canvas-interactive?)
       (assert restored "bind-active-world-runtime should restore target surface state before shell sync")
-      (assert (= active-canvas-feature "drawing")
-              "bind-active-world-runtime should restore active canvas feature from runtime")
+      (assert (= active-canvas-mode "drawing")
+              "bind-active-world-runtime should restore active canvas mode from runtime")
       (assert (= preferred-surface :canvas)
               "bind-active-world-runtime should adopt runtime interaction surface preference")
       (assert (= active-surface :canvas)
@@ -216,7 +249,27 @@
               "bind-active-world-runtime should re-enable canvas interaction when canvas mode was persisted")
       true)))
 
-(fn set-active-canvas-feature-rejects-unknown-feature []
+(fn bind-active-world-runtime-preserves-explicit-nil-canvas-mode []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (ensure-built-in-canvas-modes!)
+      (CanvasModes.activate-mode "drawing")
+      (local runtime
+        {:requested-canvas-mode-id nil
+         :requested-canvas-mode-known? true
+         :active-canvas-mode "drawing"
+         :preferred-interaction-surface :canvas
+         :restore-surface-state (fn [_self _canvas _hud] true)})
+      (app.bind-active-world-runtime {:id "test-world"} runtime)
+      (assert (= app.active-canvas-mode nil)
+              "bind-active-world-runtime should preserve an explicit nil requested canvas mode")
+      (assert (= runtime.active-canvas-mode nil)
+              "bind-active-world-runtime should clear stale runtime active mode when requested mode is nil")
+      true)))
+
+(fn set-active-canvas-mode-rejects-unknown-mode []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
@@ -224,30 +277,100 @@
       (local (ok err)
         (pcall
           (fn []
-            (app.set-active-canvas-feature "bogus"))))
+            (app.set-active-canvas-mode "bogus"))))
       (assert (not ok)
-              "set-active-canvas-feature should reject unknown canvas features")
-      (assert (and err (string.find err "Unknown canvas feature"))
-              "set-active-canvas-feature should report the invalid feature id clearly")
+              "set-active-canvas-mode should reject unknown canvas modes")
+      (assert (and err (string.find err "Unknown canvas mode"))
+              "set-active-canvas-mode should report the invalid mode id clearly")
       true)))
 
-(fn canvas-features-ordered-specs-include-default-once []
-  (local specs (CanvasFeatures.feature-specs-in-order))
-  (assert (> (length specs) 0)
-          "Canvas feature registry should expose at least one ordered feature spec")
-  (local seen {})
-  (var default-count 0)
-  (each [_ feature-spec (ipairs specs)]
-    (local feature-id (. feature-spec :id))
-    (assert feature-id "Canvas feature registry entries should expose :id")
-    (assert (not (. seen feature-id))
-            (.. "Canvas feature registry should not duplicate ordered id " feature-id))
-    (set (. seen feature-id) true)
-    (when (= feature-id (. CanvasFeatures :default-feature-id))
-      (set default-count (+ default-count 1))))
-  (assert (= default-count 1)
-          "Canvas feature registry should expose the default feature exactly once in order")
+(fn canvas-modes-ordered-specs-preserve-registration-order []
+  (local original-registry app.canvas-mode-registry)
+  (set app.canvas-mode-registry nil)
+  (CanvasModes.register-mode {:id "graph"
+                              :label "Graph"
+                              :icon "account_tree"
+                              :button-name "graph-canvas-mode"
+                              :show-in-sidebar? true
+                              :activate (fn [_ctx] nil)})
+  (CanvasModes.register-mode {:id "drawing"
+                              :label "Draw"
+                              :icon "draw"
+                              :button-name "drawing-canvas-mode"
+                              :show-in-sidebar? true
+                              :activate (fn [_ctx] nil)})
+  (local specs (CanvasModes.mode-specs-in-order))
+  (assert (= (length specs) 2)
+          "Canvas mode registry should preserve both registered mode specs")
+  (assert (= (. (. specs 1) :id) "graph")
+          "Canvas mode registry should preserve registration order for the first mode")
+  (assert (= (. (. specs 2) :id) "drawing")
+          "Canvas mode registry should preserve registration order for the second mode")
+  (set app.canvas-mode-registry original-registry)
   true)
+
+(fn invalid-persisted-canvas-mode-clears-to-nil []
+  (local (normalized repaired? reason)
+    (CanvasModes.normalize-persisted 42))
+  (assert (= normalized nil)
+          "CanvasModes.normalize-persisted should clear invalid persisted mode values to nil")
+  (assert repaired?
+          "CanvasModes.normalize-persisted should report repaired invalid persisted mode values")
+  (assert (and reason (string.find reason "clearing to nil"))
+          "CanvasModes.normalize-persisted should report that invalid persisted mode values were cleared")
+  true)
+
+(fn canvas-mode-activation-failure-restores-previous-mode []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (set app.canvas-mode-registry nil)
+      (CanvasModes.clear-mode-runtime-hooks!)
+      (CanvasModes.register-mode
+        {:id "graph"
+         :label "Graph"
+         :icon "account_tree"
+         :button-name "graph-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [ctx]
+                     (ctx:set-root-actions! (fn [_context] []))
+                     {:mode-id "graph"})})
+      (CanvasModes.register-mode
+        {:id "broken"
+         :label "Broken"
+         :icon "draw"
+         :button-name "broken-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [ctx]
+                     (set app.__broken-mode-side-effect "armed")
+                     (ctx:defer-cleanup! (fn []
+                                           (set app.__broken-mode-side-effect nil)))
+                     (ctx:set-root-actions! (fn [_context]
+                                              [{:name "broken"}]))
+                     (error "boom"))})
+      (CanvasModes.activate-mode "graph")
+      (local previous-root-actions app.canvas-mode-root-actions)
+      (local (ok err)
+        (pcall
+          (fn []
+            (CanvasModes.activate-mode "broken"))))
+      (assert (not ok)
+              "CanvasModes.activate-mode should fail loudly when the new mode activation throws")
+      (assert (and err (string.find err "Canvas mode activation failed for broken"))
+              "CanvasModes.activate-mode should report the failing mode id")
+      (assert (= (CanvasModes.active-mode-id) "graph")
+              "CanvasModes.activate-mode should restore the previous active mode on failure")
+      (assert (= app.active-canvas-mode "graph")
+              "Canvas mode activation rollback should restore app.active-canvas-mode")
+      (assert (= (type app.canvas-mode-root-actions) :function)
+              "Canvas mode activation rollback should restore a root action hook")
+      (assert (not (= app.canvas-mode-root-actions previous-root-actions nil))
+              "Canvas mode activation rollback should not leave the root action hook cleared")
+      (assert (= (length (app.canvas-mode-root-actions {})) 0)
+              "Canvas mode activation rollback should restore the previous root action behavior")
+      (assert (= app.__broken-mode-side-effect nil)
+              "Canvas mode activation rollback should run deferred cleanup for failed activation side effects")
+      true)))
 
 (table.insert tests {:name "Window resize updates viewport and layout root" :fn window-resize-updates-viewport-and-layout-root})
 (table.insert tests {:name "Window pixel size change updates viewport" :fn window-pixel-size-change-updates-viewport})
@@ -255,10 +378,16 @@
 (table.insert tests {:name "Non-resize events leave viewport unchanged" :fn other-events-leave-viewport-untouched})
 (table.insert tests {:name "bind-active-world-runtime restores runtime interaction surface"
                      :fn bind-active-world-runtime-restores-runtime-interaction-surface})
-(table.insert tests {:name "set-active-canvas-feature rejects unknown features"
-                     :fn set-active-canvas-feature-rejects-unknown-feature})
-(table.insert tests {:name "Canvas features ordered specs include default once"
-                     :fn canvas-features-ordered-specs-include-default-once})
+(table.insert tests {:name "bind-active-world-runtime preserves explicit nil canvas mode"
+                     :fn bind-active-world-runtime-preserves-explicit-nil-canvas-mode})
+(table.insert tests {:name "set-active-canvas-mode rejects unknown modes"
+                     :fn set-active-canvas-mode-rejects-unknown-mode})
+(table.insert tests {:name "Canvas modes ordered specs preserve registration order"
+                     :fn canvas-modes-ordered-specs-preserve-registration-order})
+(table.insert tests {:name "Invalid persisted canvas mode clears to nil"
+                     :fn invalid-persisted-canvas-mode-clears-to-nil})
+(table.insert tests {:name "Canvas mode activation failure restores previous mode"
+                     :fn canvas-mode-activation-failure-restores-previous-mode})
 
 (local main
   (fn []

@@ -270,14 +270,14 @@
                        :mark-active-world-hud-dirty app.mark-active-world-hud-dirty
                        :reset-projection app.reset-projection
                        :set-active-interaction-surface app.set-active-interaction-surface
-                       :set-active-canvas-feature app.set-active-canvas-feature
+                       :set-active-canvas-mode app.set-active-canvas-mode
                        :bind-active-world-runtime app.bind-active-world-runtime
                        :world-manager app.world-manager
                        :active-world-entry app.active-world-entry
                        :active-world-runtime app.active-world-runtime
                        :preferred-interaction-surface app.preferred-interaction-surface
                        :active-interaction-surface app.active-interaction-surface
-                       :active-canvas-feature app.active-canvas-feature
+                       :active-canvas-mode app.active-canvas-mode
                        :canvas-shell-changed app.canvas-shell-changed
                        :canvas-visible? app.canvas-visible?
                        :scene-interactive? app.scene-interactive?
@@ -330,12 +330,12 @@
     ctx
     (fn [env]
       (env.set-stage "assert start graph")
-      (assert (= app.active-canvas-feature "graph")
+      (assert (= app.active-canvas-mode "graph")
               "drawing workflow e2e should start in graph mode")
       (env.set-stage "click draw")
       (click-button-icon env "draw")
       (env.set-stage "assert drawing mode")
-      (assert (= app.active-canvas-feature "drawing")
+      (assert (= app.active-canvas-mode "drawing")
               "drawing workflow e2e should enter drawing mode")
       (env.set-stage "add vector layer")
       (click-button env "+ Vector")
@@ -360,12 +360,12 @@
       (env.set-stage "click graph")
       (click-button-icon env "account_tree")
       (env.set-stage "assert graph mode")
-      (assert (= app.active-canvas-feature "graph")
+      (assert (= app.active-canvas-mode "graph")
               "drawing workflow e2e should switch back to graph mode")
       (env.set-stage "click draw again")
       (click-button-icon env "draw")
       (env.set-stage "assert drawing mode again")
-      (assert (= app.active-canvas-feature "drawing")
+      (assert (= app.active-canvas-mode "drawing")
               "drawing workflow e2e should switch back to drawing mode")
       (env.set-stage "click select")
       (click-button env "Select")

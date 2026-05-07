@@ -4,7 +4,7 @@
 (local GraphView (require :graph/view))
 (local ObjectSelector (require :object-selector))
 (local {:DrawingRender DrawingRender} (require :drawing/render))
-(local CanvasFeatures (require :canvas-features))
+(local CanvasModes (require :canvas-modes))
 (local CanvasShellState (require :home-world-canvas-shell-state))
 (local viewport-utils (require :viewport-utils))
 
@@ -89,7 +89,7 @@
                      :camera runtime.canvas-camera}))
   (local graph-canvas-target
     {:interaction-surface :canvas
-     :canvas-feature "graph"
+     :canvas-target-kind :graph-view
      :screen-pos-ray (fn [_self pos opts]
                        (canvas:screen-pos-ray pos opts))})
   (local object-selector
@@ -128,11 +128,12 @@
 
 (fn restore-runtime-canvas-unit-state! [runtime state]
   (local canvas-state (clone-table (or state {})))
+  (local (normalized-mode)
+    (CanvasModes.normalize-persisted canvas-state.active_mode))
   (set runtime.pending-canvas-state canvas-state)
-  (set runtime.active-canvas-feature
-       (CanvasFeatures.resolve
-         (or canvas-state.active_feature
-             (. CanvasFeatures :default-feature-id))))
+  (set runtime.requested-canvas-mode-id normalized-mode)
+  (set runtime.requested-canvas-mode-known? true)
+  (set runtime.active-canvas-mode nil)
   (set runtime.preferred-interaction-surface
        (resolve-runtime-interaction-surface
          (or canvas-state.preferred_interaction_surface
