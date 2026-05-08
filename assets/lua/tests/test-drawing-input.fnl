@@ -13,12 +13,15 @@
 (fn command-hints-hud-provider [_self]
   {:command-hints (make-command-hints-stub)})
 
+(local DrawingInput (require :drawing/input))
+
 (local KEY_DELETE 127)
 (local KEY_RETURN 13)
 (local KEY_ESCAPE 27)
 (local KEY_Z_LOWER (string.byte "z"))
 (local KEY_Y_LOWER (string.byte "y"))
 (local CTRL-MOD 64)
+(local SDL_BUTTON_LEFT 1)
 
 (fn with-app-bindings [bindings body]
   (local previous {})
@@ -113,6 +116,68 @@
           (assert (= draw-calls.undo 0))
           (assert (= draw-calls.redo 0))
           (assert (= draw-calls.cancel 0)))))))
+
+(fn mock-canvas []
+  (local glm (require :glm))
+  {:screen-pos-ray (fn [_self _payload]
+                     {:origin (glm.vec3 0 0 0)
+                      :direction (glm.vec3 1 1 1)})})
+
+(fn draw-mode-input-bindings [controller-methods]
+  {:active-canvas-mode "drawing"
+   :canvas-interactive? true
+   :canvas-mode-drawing-enabled? true
+   :canvas (mock-canvas)
+   :drawing-controller controller-methods
+   :canvas-mode-input-handlers {:mouse-button-down (. DrawingInput :DrawingMouseButtonDown)
+                                :mouse-motion (. DrawingInput :DrawingMouseMotion)
+                                :mouse-button-up (. DrawingInput :DrawingMouseButtonUp)}
+   :clickables nil
+   :movables nil
+   :resizables nil
+   :focus nil})
+
+(fn drawing-pen-mouse-down-begins-gesture []
+  (var gesture-tool nil)
+  (var gesture-point nil)
+  (with-app-bindings
+    (draw-mode-input-bindings
+      {:active-tool (fn [_self] "pen")
+       :begin-gesture (fn [_self tool point _opts]
+                        (set gesture-tool tool)
+                        (set gesture-point point)
+                        true)
+       :active-layer (fn [_self] {:kind "vector"})})
+    (fn []
+      (with-normal-state
+        (fn [state]
+          (set gesture-tool nil)
+          (set gesture-point nil)
+          (state:on-mouse-button-down {:button SDL_BUTTON_LEFT :x 0 :y 0 :timestamp 0})
+          (assert gesture-point "expected mouse-down to begin gesture with pen tool")
+          (assert (= gesture-tool "pen") (.. "expected pen but got " (tostring gesture-tool))))))))
+
+(fn drawing-select-mouse-down-does-not-begin-gesture []
+  (var gesture-called false)
+  (with-app-bindings
+    (draw-mode-input-bindings
+      {:active-tool (fn [_self] "select")
+       :begin-gesture (fn [_self _tool _point _opts]
+                        (set gesture-called true)
+                        true)
+       :active-layer (fn [_self] {:kind "vector"})
+       :on-select (fn [_self _object _additive] nil)})
+    (fn []
+      (with-normal-state
+        (fn [state]
+          (set gesture-called false)
+          (state:on-mouse-button-down {:button SDL_BUTTON_LEFT :x 0 :y 0 :timestamp 0})
+          (assert (not gesture-called) "expected select tool to NOT begin gesture"))))))
+
+(table.insert tests {:name "Pen tool mouse-down dispatches to begin-gesture"
+                     :fn drawing-pen-mouse-down-begins-gesture})
+(table.insert tests {:name "Select tool mouse-down does not begin gesture"
+                     :fn drawing-select-mouse-down-does-not-begin-gesture})
 
 (table.insert tests {:name "Drawing mode blocks graph keyboard actions"
                      :fn drawing-mode-blocks-graph-keyboard-actions})

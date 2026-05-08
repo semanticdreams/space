@@ -19,18 +19,7 @@
 (local SDLK_DELETE 127)
 (local SDLK_F4 1073741885)
 
-(fn normalize-handlers [handlers]
-  (if (or (= handlers nil)
-          (= (type handlers) :table))
-      handlers
-      [handlers]))
-
-(fn resolve-handler [handler event-name]
-  (if (not handler)
-      nil
-      (if (= (type handler) :function)
-          handler
-          (. handler event-name))))
+(local {: normalize-handlers : resolve-handler} (require :state-routes))
 
 (fn NormalState []
   (local PenHandlers

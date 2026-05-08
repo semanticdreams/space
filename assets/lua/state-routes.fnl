@@ -1,16 +1,20 @@
 (local {: KEY_F1} (require :command-hints))
 
 (fn normalize-handlers [handlers]
-  (if (and handlers (= (type handlers) :table))
+  (if (= handlers nil)
+      nil
+      (= (type handlers) :function)
+      [handlers]
+      (. handlers 1)
       handlers
       [handlers]))
 
 (fn resolve-handler [handler event-name]
   (if (not handler)
       nil
-      (if (= (type handler) :function)
-          handler
-          (. handler event-name))))
+      (= (type handler) :function)
+      handler
+      (. handler event-name)))
 
 (fn require-command-hints-manager [ctx state]
   (local hud ((. ctx :hud)))
@@ -82,4 +86,6 @@
 {:FirstHandlerWins FirstHandlerWins
  :Broadcast Broadcast
  :Chain Chain
- :CommandHints CommandHints}
+ :CommandHints CommandHints
+ :normalize-handlers normalize-handlers
+ :resolve-handler resolve-handler}
