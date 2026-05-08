@@ -39,8 +39,11 @@
 (local runtime (require :runtime))
 (local logging (require :logging))
 (local Units (require :units))
+(local UnitManager (require :unit-manager))
 
 (set fennel.macro-path runtime.fennel-path)
+
+(set app.unit-manager (or app.unit-manager (UnitManager {})))
 
 (global pp (fn [x] (logging.debug (fennel.view x))))
 
@@ -445,15 +448,7 @@
                                             "hot reload callback id missing")
                                     (callbacks.enqueue app.hot-reload-callback-id true))
              :units-fn (fn [_root-unit]
-                         (local live-units [])
-                         (when app.canvas-unit
-                           (table.insert live-units app.canvas-unit))
-                         (when app.hud-unit
-                           (table.insert live-units app.hud-unit))
-                         (each [_ live-unit (pairs (or app.canvas-mode-units {}))]
-                           (when live-unit
-                             (table.insert live-units live-unit)))
-                         live-units)})
+                          (app.unit-manager:list))})
           (set app.hot-reload-controller
                (HotReload.AppRootController controller-config)))
         app.hot-reload-controller)))
@@ -1106,7 +1101,8 @@
                             :load-export "load-hud!"
                             :unload-export "unload-hud!"
                             :snapshot-export "snapshot-hud!"
-                            :restore-export "restore-hud!"})))
+                            :restore-export "restore-hud!"}))
+    (app.unit-manager:register app.hud-unit))
   app.hud-unit)
 
 (fn ensure-canvas-unit []
@@ -1120,7 +1116,8 @@
                             :load-export "load-canvas!"
                             :unload-export "unload-canvas!"
                             :snapshot-export "snapshot-canvas!"
-                            :restore-export "restore-canvas!"})))
+                            :restore-export "restore-canvas!"}))
+    (app.unit-manager:register app.canvas-unit))
   app.canvas-unit)
 
 (local built-in-canvas-mode-unit-specs
@@ -1162,22 +1159,13 @@
                              :snapshot-export unit-spec.snapshot-export
                              :restore-export unit-spec.restore-export}))
         (set (. units unit-spec.mode-id) unit)
+        (app.unit-manager:register unit)
         unit)))
 
 (fn load-built-in-canvas-mode-units! []
   (each [_ unit-spec (ipairs built-in-canvas-mode-unit-specs)]
     (local unit (ensure-built-in-canvas-mode-unit unit-spec))
     (unit:load))
-  true)
-
-(fn unload-built-in-canvas-mode-units! []
-  (when app.canvas-mode-units
-    (for [i (length built-in-canvas-mode-unit-specs) 1 -1]
-      (local unit-spec (. built-in-canvas-mode-unit-specs i))
-      (local unit (. app.canvas-mode-units unit-spec.mode-id))
-      (when unit
-        (unit:unload)
-        (set (. app.canvas-mode-units unit-spec.mode-id) nil))))
   true)
 
 (local installable-reset-projection app.reset-projection)
@@ -1669,6 +1657,8 @@
   (when (and app.world-manager app.world-manager.drop)
     (app.world-manager:drop)
     (set app.world-manager nil))
+  (CanvasModes.clear-mode-runtime-hooks!)
+  (app.unit-manager:clear)
   (set app.canvas-unit nil)
   (set app.active-world-entry nil)
   (set app.first-person-controls nil)
@@ -1693,12 +1683,8 @@
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)
   (set app.active-world-hud-overlay nil)
-  (CanvasModes.clear-mode-runtime-hooks!)
-  (unload-built-in-canvas-mode-units!)
   (set app.canvas-mode-units nil)
-  (when app.hud-unit
-    (app.hud-unit:unload)
-    (set app.hud-unit nil))
+  (set app.hud-unit nil)
   (when app.hoverables
     (app.hoverables:drop)
     (set app.hoverables nil))

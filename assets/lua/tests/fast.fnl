@@ -92,6 +92,7 @@
     :tests.test-sysinfo
     :tests.test-flamegraph
     :tests.test-units
+    :tests.test-unit-manager
     :tests.test-vector-buffer
     :tests.test-points
     :tests.test-layered-point

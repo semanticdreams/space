@@ -48,12 +48,19 @@
   (local snapshot-export (or options.snapshot-export "snapshot-app!"))
   (local restore-export (or options.restore-export "restore-app!"))
   (local suppress-run-main? (not (= options.suppress-run-main? false)))
+  (local module-paths options.module-paths)
 
   (fn require-module []
     (local previous (and app app.__suppress-main-run?))
     (when app
       (set app.__suppress-main-run? suppress-run-main?))
+    (local fennel (require :fennel))
+    (local old-fennel-path fennel.path)
+    (when module-paths
+      (set fennel.path (.. module-paths ";" fennel.path)))
     (local (ok result) (pcall require module-name))
+    (when module-paths
+      (set fennel.path old-fennel-path))
     (when app
       (set app.__suppress-main-run? previous))
     (if ok
@@ -83,5 +90,71 @@
          :restore (fn [state _ctx]
                     (call-export restore-export state))}))
 
+(fn SourceUnit [opts]
+  (local options (or opts {}))
+  (local id (assert options.id "SourceUnit requires :id"))
+  (local source (assert options.source "SourceUnit requires :source"))
+  (local load-export (or options.load-export "init-app!"))
+  (local unload-export (or options.unload-export "drop-app!"))
+  (local snapshot-export options.snapshot-export)
+  (local restore-export options.restore-export)
+  (local fennel-path options.fennel-path)
+  (var module-table nil)
+
+  (fn eval-source []
+    (local fennel (require :fennel))
+    (local old-fennel-path fennel.path)
+    (when fennel-path
+      (set fennel.path fennel-path))
+    (local (ok lua-source) (pcall fennel.compile-string source {:filename id}))
+    (when fennel-path
+      (set fennel.path old-fennel-path))
+    (when (not ok)
+      (error (.. "SourceUnit " id " compile error: " lua-source)))
+    (local (chunk err) (load lua-source id :t))
+    (when (not chunk)
+      (error (.. "SourceUnit " id " eval error: " (or err "unknown"))))
+    (local (eval-ok result) (pcall chunk))
+    (when (not eval-ok)
+      (error (.. "SourceUnit " id " runtime error: " result)))
+    (set module-table (if (= (type result) :table) result {})))
+
+  (fn ensure-module []
+    (when (not module-table)
+      (eval-source))
+    module-table)
+
+  (fn clear-module []
+    (set module-table nil))
+
+  (fn call-export [export-name args]
+    (when export-name
+      (local module (ensure-module))
+      (assert (= (type module) :table)
+              (.. "SourceUnit " id " did not return a table"))
+      (local handler (. module export-name))
+      (assert (= (type handler) :function)
+              (.. "SourceUnit " id " missing function " export-name))
+      (if (= args nil)
+          (handler)
+          (handler args))))
+
+  (Unit {:id id
+         :parent-id options.parent-id
+         :owned-paths (clone-list options.owned-paths)
+         :load (fn [_ctx]
+                 (call-export load-export nil))
+         :unload (fn [_ctx]
+                   (call-export unload-export nil)
+                   (clear-module))
+         :snapshot (fn [_ctx]
+                     (when snapshot-export
+                       (call-export snapshot-export nil)))
+         :restore (fn [state _ctx]
+                    (when restore-export
+                      (call-export restore-export state))
+                    true)}))
+
 {:Unit Unit
- :ModuleUnit ModuleUnit}
+ :ModuleUnit ModuleUnit
+ :SourceUnit SourceUnit}
