@@ -1176,22 +1176,25 @@
   (when (and app.code-dir fs fs.list-dir (fs.exists app.code-dir))
     (local (ok entries) (pcall fs.list-dir app.code-dir false))
     (when ok
-      (local fennel-files [])
+      (local candidates [])
       (each [_ entry (ipairs entries)]
-        (when (and entry.is-file entry.name
-                   (string.match entry.name "^([^.]+)%.fnl$"))
-          (table.insert fennel-files entry)))
-      (table.sort fennel-files (fn [a b] (< a.name b.name)))
-      (each [_ entry (ipairs fennel-files)]
         (local module-name (string.match entry.name "^([^.]+)%.fnl$"))
-        (local file-path (fs.join-path app.code-dir entry.name))
-        (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+        (if (and entry.is-file module-name)
+            (table.insert candidates {:name module-name
+                                      :path (fs.join-path app.code-dir entry.name)})
+            (and entry.is-dir entry.name
+                 (fs.exists (fs.join-path app.code-dir entry.name "init.fnl")))
+            (table.insert candidates {:name entry.name
+                                      :path (fs.join-path app.code-dir entry.name "init.fnl")})))
+      (table.sort candidates (fn [a b] (< a.name b.name)))
+      (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+      (each [_ candidate (ipairs candidates)]
         (local unit
-          (Units.ModuleUnit {:id (.. "user-" module-name)
+          (Units.ModuleUnit {:id (.. "user-" candidate.name)
                              :parent-id "app-root"
-                             :module-name module-name
+                             :module-name candidate.name
                              :module-paths module-paths
-                             :owned-paths [file-path]}))
+                             :owned-paths [candidate.path]}))
         (app.unit-manager:register unit)
         (unit:load))))
   true)
@@ -1814,6 +1817,7 @@
 {:init app.init
  :install-app-shell! install-app-shell!
  :bind-active-world-runtime installable-bind-active-world-runtime
+ :ensure-user-code-units! ensure-user-code-units!
  :drop app.drop
  :snapshot app.snapshot-app-state
  :restore app.restore-app-state}

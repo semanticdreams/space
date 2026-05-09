@@ -1,5 +1,6 @@
 (local Units (require :units))
 (local UnitManager (require :unit-manager))
+(local Main (require :main))
 (local fs (require :fs))
 (local tempfile (require :tempfile))
 
@@ -297,65 +298,99 @@
 (table.insert tests {:name "unit-manager list returns insertion order"
                       :fn unit-manager-list-returns-insertion-order})
 
-(fn user-code-directory-scanner-loads-all-fnl-files []
+(fn user-code-directory-scanner-loads-top-level-and-subdir-init-fnl []
   (with-temp-dir
     (fn [dir]
       (local old-fennel-path (. (require :fennel) :path))
-      (local module-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+      (fs.create-dirs (fs.join-path dir "beta"))
       (fs.write-file (fs.join-path dir "alpha.fnl")
                      (.. "(fn init [] (set app.__alpha-loaded true) true)\n"
                          "(fn drop [] (set app.__alpha-loaded false) true)\n"
                          "{:init init :drop drop}"))
-      (fs.write-file (fs.join-path dir "beta.fnl")
-                     (.. "(fn init [] (set app.__beta-loaded true) true)\n"
-                         "(fn drop [] (set app.__beta-loaded false) true)\n"
+      (fs.write-file (fs.join-path dir "beta" "init.fnl")
+                     (.. "(fn init [] (set app.__beta-init-loaded true) true)\n"
+                         "(fn drop [] (set app.__beta-init-loaded false) true)\n"
                          "{:init init :drop drop}"))
-      ;; Dotted filenames should be skipped (dots interfere with Lua require)
+      ;; File inside subdir that is NOT init.fnl — should not be a separate unit
+      (fs.write-file (fs.join-path dir "beta" "helper.fnl")
+                     "(fn init [] (set app.__beta-helper-loaded true) true) {:init init}")
+      ;; Dotted filename — should be skipped
       (fs.write-file (fs.join-path dir "bad.name.fnl")
                      "(fn init [] (set app.__bad-loaded true) true) {:init init}")
       (set app.__alpha-loaded nil)
-      (set app.__beta-loaded nil)
+      (set app.__beta-init-loaded nil)
+      (set app.__beta-helper-loaded nil)
       (set app.__bad-loaded nil)
       (local (ok err)
         (pcall
           (fn []
-            (local entries (fs.list-dir dir false))
-            (local fennel-files [])
-            (each [_ entry (ipairs entries)]
-              (when (and entry.is-file entry.name
-                         (string.match entry.name "^([^.]+)%.fnl$"))
-                (table.insert fennel-files entry)))
-            (table.sort fennel-files (fn [a b] (< a.name b.name)))
-            (var loaded-count 0)
-            (local manager (UnitManager {}))
-            (each [_ entry (ipairs fennel-files)]
-              (local module-name (string.match entry.name "^([^.]+)%.fnl$"))
-              (local unit
-                (Units.ModuleUnit {:id (.. "user-" module-name)
-                                   :parent-id "app-root"
-                                   :module-name module-name
-                                   :module-paths module-paths
-                                   :suppress-run-main? false}))
-              (manager:register unit)
-              (unit:load)
-              (set loaded-count (+ loaded-count 1)))
-            (assert (= loaded-count 2) "should load only fnl files without dots in name")
-            (assert app.__alpha-loaded "alpha should be loaded")
-            (assert app.__beta-loaded "beta should be loaded")
+            (set app.unit-manager (or app.unit-manager (UnitManager {})))
+            (local original-code-dir app.code-dir)
+            (set app.code-dir dir)
+            (Main.ensure-user-code-units!)
+            (set app.code-dir original-code-dir)
+            (assert app.__alpha-loaded "top-level alpha.fnl should be loaded")
+            (assert app.__beta-init-loaded "subdir beta/init.fnl should be loaded")
+            (assert (not app.__beta-helper-loaded) "subdir helper.fnl should not be a separate unit")
             (assert (not app.__bad-loaded) "dotted filename should be skipped")
-            (manager:clear)
+            (assert (= (app.unit-manager:count) 2) "should register exactly 2 user units")
+            (app.unit-manager:clear)
             (assert (not app.__alpha-loaded) "alpha should be unloaded on clear")
-            (assert (not app.__beta-loaded) "beta should be unloaded on clear")
-            (assert (= (manager:count) 0) "manager should be empty after clear"))))
+            (assert (not app.__beta-init-loaded) "beta-init should be unloaded on clear")
+            (assert (= (app.unit-manager:count) 0) "manager should be empty after clear")
+            (app.unit-manager:clear))))
       (tset (require :fennel) :path old-fennel-path)
       (set app.__alpha-loaded nil)
-      (set app.__beta-loaded nil)
+      (set app.__beta-init-loaded nil)
+      (set app.__beta-helper-loaded nil)
       (set app.__bad-loaded nil)
       (when (not ok)
         (error err)))))
 
-(table.insert tests {:name "user code directory scanner loads all fnl files"
-                     :fn user-code-directory-scanner-loads-all-fnl-files})
+(table.insert tests {:name "scanner loads top-level fnl and subdir init.fnl"
+                     :fn user-code-directory-scanner-loads-top-level-and-subdir-init-fnl})
+
+(fn user-code-unit-replaces-app-state-and-survives-clear []
+  (with-temp-dir
+    (fn [dir]
+      (local old-fennel-path (. (require :fennel) :path))
+      (fs.write-file (fs.join-path dir "replace-hud.fnl")
+                     (.. "(fn init []\n"
+                         "  (set app.__old-hud app.hud)\n"
+                         "  (set app.hud \"replaced-by-user-code\")\n"
+                         "  true)\n"
+                         "(fn drop []\n"
+                         "  (set app.hud app.__old-hud)\n"
+                         "  (set app.__old-hud nil)\n"
+                         "  true)\n"
+                         "{:init init :drop drop}"))
+      (set app.hud "original-hud")
+      (set app.__old-hud nil)
+      (local (ok err)
+        (pcall
+          (fn []
+            (set app.unit-manager (or app.unit-manager (UnitManager {})))
+            (local original-code-dir app.code-dir)
+            (set app.code-dir dir)
+            (Main.ensure-user-code-units!)
+            (set app.code-dir original-code-dir)
+            (assert (= app.hud "replaced-by-user-code")
+                    "user code should replace app.hud")
+            (assert (= (app.unit-manager:count) 1)
+                    "should register exactly 1 user unit")
+            (app.unit-manager:clear)
+            (assert (= app.hud "original-hud")
+                    "drop should restore original hud")
+            (assert (= (app.unit-manager:count) 0)
+                    "manager should be empty after clear")
+            (app.unit-manager:clear))))
+      (tset (require :fennel) :path old-fennel-path)
+      (set app.hud nil)
+      (when (not ok)
+        (error err)))))
+
+(table.insert tests {:name "user code unit replaces app state and survives clear"
+                     :fn user-code-unit-replaces-app-state-and-survives-clear})
 
 (local main
   (fn []
