@@ -245,11 +245,15 @@
     (set app.user-data-dir data-dir)
     (local apps-dir (fs.join-path data-dir "apps"))
     (local worlds-dir (fs.join-path data-dir "worlds"))
+    (local code-dir (fs.join-path data-dir "code"))
     (when (and fs fs.create-dirs)
       (fs.create-dirs apps-dir))
     (when (and fs fs.create-dirs)
       (fs.create-dirs worlds-dir))
+    (when (and fs fs.create-dirs)
+      (fs.create-dirs code-dir))
     (set app.worlds-dir worlds-dir)
+    (set app.code-dir code-dir)
     (set app.get-app-dir
          (fn [name]
            (assert (and name (> (string.len name) 0)) "app.get-app-dir requires a name")
@@ -1168,6 +1172,30 @@
     (unit:load))
   true)
 
+(fn ensure-user-code-units! []
+  (when (and app.code-dir fs fs.list-dir (fs.exists app.code-dir))
+    (local (ok entries) (pcall fs.list-dir app.code-dir false))
+    (when ok
+      (local fennel-files [])
+      (each [_ entry (ipairs entries)]
+        (when (and entry.is-file entry.name
+                   (string.match entry.name "^([^.]+)%.fnl$"))
+          (table.insert fennel-files entry)))
+      (table.sort fennel-files (fn [a b] (< a.name b.name)))
+      (each [_ entry (ipairs fennel-files)]
+        (local module-name (string.match entry.name "^([^.]+)%.fnl$"))
+        (local file-path (fs.join-path app.code-dir entry.name))
+        (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+        (local unit
+          (Units.ModuleUnit {:id (.. "user-" module-name)
+                             :parent-id "app-root"
+                             :module-name module-name
+                             :module-paths module-paths
+                             :owned-paths [file-path]}))
+        (app.unit-manager:register unit)
+        (unit:load))))
+  true)
+
 (local installable-reset-projection app.reset-projection)
 (local installable-set-viewport app.set-viewport)
 (local installable-create-default-projection app.create-default-projection)
@@ -1466,6 +1494,7 @@
   (local hud-unit (ensure-hud-unit))
   (hud-unit:load)
   (load-built-in-canvas-mode-units!)
+  (ensure-user-code-units!)
   (init-world-manager)
   (when app.world-manager
     (app.world-manager:activate-first))
@@ -1782,9 +1811,9 @@
     (set app.hot-reload-controller nil))
   (app.engine:shutdown))
 
-{:init-app! app.init
+{:init app.init
  :install-app-shell! install-app-shell!
  :bind-active-world-runtime installable-bind-active-world-runtime
- :drop-app! app.drop
- :snapshot-app! app.snapshot-app-state
- :restore-app! app.restore-app-state}
+ :drop app.drop
+ :snapshot app.snapshot-app-state
+ :restore app.restore-app-state}

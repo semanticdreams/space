@@ -101,14 +101,14 @@
 
 (fn source-unit-loads-and-runs-inline-fennel []
   (local source
-    (.. "(fn init-app! []\n"
+    (.. "(fn init []\n"
         "  (set app.__source-test-value \"hello from source\")\n"
         "  true)\n"
-        "(fn drop-app! []\n"
+        "(fn drop []\n"
         "  (set app.__source-test-value \"cleaned\")\n"
         "  true)\n"
-        "{:init-app! init-app!\n"
-        " :drop-app! drop-app!}"))
+        "{:init init\n"
+        " :drop drop}"))
   (set app.__source-test-value nil)
   (local unit (Units.SourceUnit {:id "source-test"
                                   :source source}))
@@ -123,25 +123,25 @@
 (fn source-unit-snapshot-and-restore []
   (local source
     (.. "(local value 10)\n"
-        "(fn init-app! []\n"
+        "(fn init []\n"
         "  (set app.__snap-value value)\n"
         "  true)\n"
-        "(fn drop-app! [] true)\n"
-        "(fn snapshot-app! []\n"
+        "(fn drop [] true)\n"
+        "(fn snapshot []\n"
         "  (.. \"snap-\" (tostring value)))\n"
-        "(fn restore-app! [state]\n"
+        "(fn restore [state]\n"
         "  (set app.__restored-state state)\n"
         "  true)\n"
-        "{:init-app! init-app!\n"
-        " :drop-app! drop-app!\n"
-        " :snapshot-app! snapshot-app!\n"
-        " :restore-app! restore-app!}"))
+        "{:init init\n"
+        " :drop drop\n"
+        " :snapshot snapshot\n"
+        " :restore restore}"))
   (set app.__snap-value nil)
   (set app.__restored-state nil)
   (local unit (Units.SourceUnit {:id "source-snap"
                                   :source source
-                                  :snapshot-export "snapshot-app!"
-                                  :restore-export "restore-app!"}))
+                                  :snapshot-export "snapshot"
+                                  :restore-export "restore"}))
   (unit:load)
   (assert (= app.__snap-value 10) "load should execute source")
   (local state (unit:snapshot))
@@ -154,26 +154,26 @@
 
 (fn source-unit-reload-roundtrips []
   (local source
-    (.. "(fn init-app! []\n"
+    (.. "(fn init []\n"
         "  (set app.__reload-val (or app.__reload-val 0))\n"
         "  (set app.__reload-val (+ app.__reload-val 1))\n"
         "  true)\n"
-        "(fn drop-app! [] true)\n"
-        "(fn snapshot-app! []\n"
+        "(fn drop [] true)\n"
+        "(fn snapshot []\n"
         "  (.. \"v\" (tostring app.__reload-val)))\n"
-        "(fn restore-app! [state]\n"
+        "(fn restore [state]\n"
         "  (set app.__reload-restored state)\n"
         "  true)\n"
-        "{:init-app! init-app!\n"
-        " :drop-app! drop-app!\n"
-        " :snapshot-app! snapshot-app!\n"
-        " :restore-app! restore-app!}"))
+        "{:init init\n"
+        " :drop drop\n"
+        " :snapshot snapshot\n"
+        " :restore restore}"))
   (set app.__reload-val nil)
   (set app.__reload-restored nil)
   (local unit (Units.SourceUnit {:id "source-reload"
                                   :source source
-                                  :snapshot-export "snapshot-app!"
-                                  :restore-export "restore-app!"}))
+                                  :snapshot-export "snapshot"
+                                  :restore-export "restore"}))
   (unit:load)
   (assert (= app.__reload-val 1) "first load should set val to 1")
   (unit:reload)
@@ -186,14 +186,14 @@
 (fn source-unit-optional-snapshot-restore []
   "SourceUnit should work without snapshot/restore exports"
   (local source
-    (.. "(fn init-app! []\n"
+    (.. "(fn init []\n"
         "  (set app.__opt-val \"loaded\")\n"
         "  true)\n"
-        "(fn drop-app! []\n"
+        "(fn drop []\n"
         "  (set app.__opt-val \"dropped\")\n"
         "  true)\n"
-        "{:init-app! init-app!\n"
-        " :drop-app! drop-app!}"))
+        "{:init init\n"
+        " :drop drop}"))
   (set app.__opt-val nil)
   (local unit (Units.SourceUnit {:id "source-optional"
                                   :source source}))
@@ -211,14 +211,14 @@
     (fn [dir]
       (local old-fennel-path (. (require :fennel) :path))
       (fs.write-file (fs.join-path dir "custom-module.fnl")
-                     (.. "(fn init-app! []\n"
+                     (.. "(fn init []\n"
                          "  (set app.__custom-val \"works\")\n"
                          "  true)\n"
-                         "(fn drop-app! []\n"
+                         "(fn drop []\n"
                          "  (set app.__custom-val nil)\n"
                          "  true)\n"
-                         "{:init-app! init-app!\n"
-                         " :drop-app! drop-app!}"))
+                         "{:init init\n"
+                         " :drop drop}"))
       (set app.__custom-val nil)
       (local fennel-module-prefix (.. dir "/?.fnl;" dir "/?/init.fnl"))
       (local (ok err)
@@ -228,8 +228,8 @@
               (Units.ModuleUnit {:id "custom-module"
                                  :module-name "custom-module"
                                  :module-paths fennel-module-prefix
-                                 :load-export "init-app!"
-                                 :unload-export "drop-app!"
+                                 :load-export "init"
+                                 :unload-export "drop"
                                  :suppress-run-main? false}))
             (unit:load)
             (assert (= app.__custom-val "works")
@@ -295,7 +295,67 @@
 (table.insert tests {:name "unit registry survives clear and reuse"
                      :fn unit-registry-survives-clear-and-reuse})
 (table.insert tests {:name "unit-manager list returns insertion order"
-                     :fn unit-manager-list-returns-insertion-order})
+                      :fn unit-manager-list-returns-insertion-order})
+
+(fn user-code-directory-scanner-loads-all-fnl-files []
+  (with-temp-dir
+    (fn [dir]
+      (local old-fennel-path (. (require :fennel) :path))
+      (local module-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+      (fs.write-file (fs.join-path dir "alpha.fnl")
+                     (.. "(fn init [] (set app.__alpha-loaded true) true)\n"
+                         "(fn drop [] (set app.__alpha-loaded false) true)\n"
+                         "{:init init :drop drop}"))
+      (fs.write-file (fs.join-path dir "beta.fnl")
+                     (.. "(fn init [] (set app.__beta-loaded true) true)\n"
+                         "(fn drop [] (set app.__beta-loaded false) true)\n"
+                         "{:init init :drop drop}"))
+      ;; Dotted filenames should be skipped (dots interfere with Lua require)
+      (fs.write-file (fs.join-path dir "bad.name.fnl")
+                     "(fn init [] (set app.__bad-loaded true) true) {:init init}")
+      (set app.__alpha-loaded nil)
+      (set app.__beta-loaded nil)
+      (set app.__bad-loaded nil)
+      (local (ok err)
+        (pcall
+          (fn []
+            (local entries (fs.list-dir dir false))
+            (local fennel-files [])
+            (each [_ entry (ipairs entries)]
+              (when (and entry.is-file entry.name
+                         (string.match entry.name "^([^.]+)%.fnl$"))
+                (table.insert fennel-files entry)))
+            (table.sort fennel-files (fn [a b] (< a.name b.name)))
+            (var loaded-count 0)
+            (local manager (UnitManager {}))
+            (each [_ entry (ipairs fennel-files)]
+              (local module-name (string.match entry.name "^([^.]+)%.fnl$"))
+              (local unit
+                (Units.ModuleUnit {:id (.. "user-" module-name)
+                                   :parent-id "app-root"
+                                   :module-name module-name
+                                   :module-paths module-paths
+                                   :suppress-run-main? false}))
+              (manager:register unit)
+              (unit:load)
+              (set loaded-count (+ loaded-count 1)))
+            (assert (= loaded-count 2) "should load only fnl files without dots in name")
+            (assert app.__alpha-loaded "alpha should be loaded")
+            (assert app.__beta-loaded "beta should be loaded")
+            (assert (not app.__bad-loaded) "dotted filename should be skipped")
+            (manager:clear)
+            (assert (not app.__alpha-loaded) "alpha should be unloaded on clear")
+            (assert (not app.__beta-loaded) "beta should be unloaded on clear")
+            (assert (= (manager:count) 0) "manager should be empty after clear"))))
+      (tset (require :fennel) :path old-fennel-path)
+      (set app.__alpha-loaded nil)
+      (set app.__beta-loaded nil)
+      (set app.__bad-loaded nil)
+      (when (not ok)
+        (error err)))))
+
+(table.insert tests {:name "user code directory scanner loads all fnl files"
+                     :fn user-code-directory-scanner-loads-all-fnl-files})
 
 (local main
   (fn []

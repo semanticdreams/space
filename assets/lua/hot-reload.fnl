@@ -521,10 +521,10 @@
                         options.watch-paths)
        :module-name (or options.module-name "main")
        :suppress-run-main? true
-       :load-export (or options.load-export "init-app!")
-       :unload-export (or options.unload-export "drop-app!")
-       :snapshot-export (or options.snapshot-export "snapshot-app!")
-       :restore-export (or options.restore-export "restore-app!")}))
+       :load-export (or options.load-export "init")
+       :unload-export (or options.unload-export "drop")
+       :snapshot-export (or options.snapshot-export "snapshot")
+       :restore-export (or options.restore-export "restore")}))
   (fn all-units [root-unit]
     (local units [])
     (append-unique-unit! units root-unit)

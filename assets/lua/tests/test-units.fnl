@@ -294,7 +294,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (DebugLog.log "test" "root reload marker")
             (local before-debug-log (fs.read-file DebugLog.log-path))
             (assert (string.find before-debug-log "root reload marker" 1 true)
@@ -335,8 +335,8 @@
       (when app.hot-reload-controller
         (app.hot-reload-controller:drop)
         (set app.hot-reload-controller nil))
-      (when (= (type (. (require :main) :drop-app!)) :function)
-        ((. (require :main) :drop-app!)))
+      (when (= (type (. (require :main) :drop)) :function)
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
       (set app.hot-reload-controller original-controller)
@@ -364,16 +364,16 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert app.hot-reload-controller
                     "Expected app.hot-reload-controller after init")
             (assert app.hot-reload-callback-id
                     "Expected app.hot-reload-callback-id after init")
-            ((. Main :drop-app!))
+            ((. Main :drop))
             (assert (= app.hot-reload-controller nil)
-                    "Expected drop-app! to clear app.hot-reload-controller")
+                    "Expected drop to clear app.hot-reload-controller")
             (assert (= app.hot-reload-callback-id nil)
-                    "Expected drop-app! to clear app.hot-reload-callback-id")
+                    "Expected drop to clear app.hot-reload-callback-id")
             true)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
@@ -393,7 +393,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert app.hud-unit "Expected app.hud-unit after app init")
             (assert app.hud "Expected app.hud after app init")
             (local old-hud app.hud)
@@ -434,9 +434,9 @@
             (assert after-panel.relative-position
                     "Expected HUD unit reload to preserve panel position state")
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -455,7 +455,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert app.hud-unit "Expected app.hud-unit after app init")
             (local root-unit
               (Units.ModuleUnit
@@ -463,10 +463,10 @@
                  :owned-paths [watch-root]
                  :module-name "main"
                  :suppress-run-main? true
-                 :load-export "init-app!"
-                 :unload-export "drop-app!"
-                 :snapshot-export "snapshot-app!"
-                 :restore-export "restore-app!"}))
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
             (local controller
               (HotReload.HotReloadController
                 {:unit root-unit
@@ -510,9 +510,9 @@
                     "Expected routed HUD reload to preserve panel count")
             (controller:drop)
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -530,7 +530,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert app.canvas-unit "Expected app.canvas-unit after app init")
             (assert app.canvas "Expected app.canvas after app init")
             (assert app.canvas-controls "Expected app.canvas-controls after app init")
@@ -594,9 +594,9 @@
             (assert (= after-panel.restorer-module before-panel.restorer-module)
                     "Expected canvas unit reload to preserve panel restorer module")
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -615,7 +615,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert app.canvas-unit "Expected app.canvas-unit after app init")
             (assert app.hud-unit "Expected app.hud-unit after app init")
             (local root-unit
@@ -624,10 +624,10 @@
                  :owned-paths [watch-root]
                  :module-name "main"
                  :suppress-run-main? true
-                 :load-export "init-app!"
-                 :unload-export "drop-app!"
-                 :snapshot-export "snapshot-app!"
-                 :restore-export "restore-app!"}))
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
             (local controller
               (HotReload.HotReloadController
                 {:unit root-unit
@@ -678,9 +678,9 @@
                     "Expected routed canvas reload to preserve panel count")
             (controller:drop)
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -699,7 +699,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert app.canvas-unit "Expected app.canvas-unit after app init")
             (assert app.hud-unit "Expected app.hud-unit after app init")
             (local root-unit
@@ -708,10 +708,10 @@
                  :owned-paths [watch-root]
                  :module-name "main"
                  :suppress-run-main? true
-                 :load-export "init-app!"
-                 :unload-export "drop-app!"
-                 :snapshot-export "snapshot-app!"
-                 :restore-export "restore-app!"}))
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
             (local controller
               (HotReload.HotReloadController
                 {:unit root-unit
@@ -737,9 +737,9 @@
                     "Expected routed canvas helper reload to replace app.canvas")
             (controller:drop)
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -758,7 +758,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert (canvas-mode-unit "drawing")
                     "Expected drawing canvas mode unit after app init")
             (app.set-active-canvas-mode "drawing")
@@ -772,10 +772,10 @@
                  :owned-paths [watch-root]
                  :module-name "main"
                  :suppress-run-main? true
-                 :load-export "init-app!"
-                 :unload-export "drop-app!"
-                 :snapshot-export "snapshot-app!"
-                 :restore-export "restore-app!"}))
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
             (local controller
               (HotReload.HotReloadController
                 {:unit root-unit
@@ -806,9 +806,9 @@
                     "Expected drawing mode unit reload to restore command hints hook")
             (controller:drop)
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -824,7 +824,7 @@
     (pcall
       (fn []
         ((. Main :install-app-shell!))
-        ((. Main :init-app!))
+        ((. Main :init))
         (assert (canvas-mode-unit "drawing")
                 "Expected drawing canvas mode unit after app init")
         (app.set-active-canvas-mode "drawing")
@@ -839,9 +839,9 @@
         (assert (not (= app.canvas-mode-drawing-enabled? true))
                 "Expected drawing-only hooks to clear after unloading drawing mode")
         true)))
-  (when (and (= (type (. (require :main) :drop-app!)) :function)
+  (when (and (= (type (. (require :main) :drop)) :function)
              app.engine)
-    ((. (require :main) :drop-app!)))
+    ((. (require :main) :drop)))
   (set AppBootstrap.init-renderers original-init-renderers)
   (if ok
       result
@@ -860,7 +860,7 @@
         (pcall
           (fn []
             ((. Main :install-app-shell!))
-            ((. Main :init-app!))
+            ((. Main :init))
             (assert (canvas-mode-unit "drawing")
                     "Expected drawing canvas mode unit after app init")
             (app.set-active-canvas-mode "drawing")
@@ -870,10 +870,10 @@
                  :owned-paths [watch-root]
                  :module-name "main"
                  :suppress-run-main? true
-                 :load-export "init-app!"
-                 :unload-export "drop-app!"
-                 :snapshot-export "snapshot-app!"
-                 :restore-export "restore-app!"}))
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
             (local controller
               (HotReload.HotReloadController
                 {:unit root-unit
@@ -897,9 +897,9 @@
                     "Expected drawing mode actions file change to target drawing mode unit")
             (controller:drop)
             true)))
-      (when (and (= (type (. (require :main) :drop-app!)) :function)
+      (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop-app!)))
+        ((. (require :main) :drop)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result

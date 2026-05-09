@@ -175,10 +175,10 @@ Important details:
 
 The root app reload uses `ModuleUnit` to call:
 
-- `init-app!`
-- `drop-app!`
-- `snapshot-app!`
-- `restore-app!`
+- `init`
+- `drop`
+- `snapshot`
+- `restore`
 
 from `assets/lua/main.fnl`.
 
@@ -259,10 +259,10 @@ The root unit is the whole app, implemented as a `ModuleUnit` targeting `main`.
 
 Its exports are:
 
-- `init-app!`
-- `drop-app!`
-- `snapshot-app!`
-- `restore-app!`
+- `init`
+- `drop`
+- `snapshot`
+- `restore`
 
 The root unit is still the default fallback when routing cannot target a smaller unit.
 

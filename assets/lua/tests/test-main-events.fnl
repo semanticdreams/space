@@ -165,7 +165,7 @@
   (var fired false)
   (app.engine.events.key-down.connect (fn [_] (set fired true)))
   (set app.layout-root {:mark-measure-dirty (fn [_])})
-  (Main.drop-app!)
+  (Main.drop)
   (when (not app.intersectables)
     (set app.intersectables (or original-intersectables (Intersectables))))
   (when (not app.clickables)
