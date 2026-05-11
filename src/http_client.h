@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -23,6 +24,7 @@ struct HttpRequest {
     long delay_ms { 0 };
     bool follow_redirects { true };
     std::string user_agent { "space-http/1.0" };
+    std::function<void(const char* data, std::size_t len)> chunk_callback;
 };
 
 struct HttpResponse {

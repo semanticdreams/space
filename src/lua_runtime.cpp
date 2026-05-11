@@ -2,10 +2,13 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 
 #include "asset_manager.h"
+#include "http_client.h"
 #include "lua_callbacks.h"
 #include "lua_engine.h"
+#include "lua_http.h"
 #include "lua_ray_box.h"
 #include "lua_notify.h"
 #include "lua_tray.h"
@@ -70,6 +73,7 @@ void LuaRuntime::init()
                        sol::lib::math, sol::lib::string, sol::lib::debug,
                        sol::lib::io, sol::lib::os, sol::lib::utf8);
     lua.require("lsqlite3", luaopen_lsqlite3);
+    http = std::make_unique<HttpClient>();
     install_base_bindings();
     configure_package_paths();
     lua["package"]["preload"]["runtime"] = [this](sol::this_state ts) -> sol::object {
@@ -227,6 +231,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_uuid(lua);
     lua_bind_shell(lua);
     lua_bind_process(lua);
+    lua_bind_http(lua, *http);
     lua_bind_gccjit(lua);
     lua_bind_sysinfo(lua);
     lua_bind_perlin_terrain(lua);
@@ -273,4 +278,17 @@ void LuaRuntime::configure_package_paths()
     std::string package_path = lua_path + "/?.lua";
     fennel_path_value = lua_path + "/?.fnl";
     lua["package"]["path"] = lua["package"]["path"].get<std::string>() + ";" + package_path;
+}
+
+LuaRuntime::~LuaRuntime()
+{
+    if (http) {
+        http->shutdown();
+        lua_http_drop(lua);
+    }
+}
+
+HttpClient& LuaRuntime::http_client()
+{
+    return *http;
 }

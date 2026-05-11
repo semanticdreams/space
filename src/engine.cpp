@@ -283,7 +283,6 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
         initialize_keyboard_state();
     }
 
-    http = std::make_unique<HttpClient>();
     jobs = std::make_unique<JobSystem>();
     register_default_job_handlers(*jobs);
     register_texture_job_handlers(*jobs);
@@ -449,7 +448,6 @@ bool Engine::start(sol::state& lua, sol::table engine_table, const EngineConfig&
     });
     lua_bind_jobs(*lua_state, lua_engine, *jobs);
     lua_bind_keyring(*lua_state, keyring);
-    lua_bind_http(*lua_state, *http);
     {
         sol::table mouse_buttons = lua_state->create_table();
         mouse_buttons["left"] = SDL_BUTTON_LEFT;
@@ -1494,7 +1492,6 @@ void Engine::shutdown() {
     closeAllGamepads(SDL_GetTicks());
     lua_jobs_clear_callbacks();
     lua_keyring_drop(*lua_state);
-    lua_http_drop(*lua_state);
     lua_process_drop(*lua_state);
     lua_callbacks_shutdown();
     video_manager.drop_all();
@@ -1503,9 +1500,6 @@ void Engine::shutdown() {
     ResourceManager::clearPending();
     ResourceManager::clear();
     log_set_frame_id_provider(nullptr);
-    if (http) {
-        http->shutdown();
-    }
     if (jobs) {
         jobs->shutdown();
     }

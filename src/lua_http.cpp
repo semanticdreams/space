@@ -15,7 +15,17 @@ struct LuaHttp
 {
     HttpClient* client { nullptr };
     std::unordered_map<uint64_t, uint64_t> callback_ids;
+    std::unordered_map<uint64_t, uint64_t> stream_callback_ids;
     std::vector<HttpResponse> buffered;
+
+    void cleanup_stream_callback(uint64_t request_id)
+    {
+        auto it = stream_callback_ids.find(request_id);
+        if (it != stream_callback_ids.end()) {
+            lua_callbacks_unregister(it->second);
+            stream_callback_ids.erase(it);
+        }
+    }
 
     uint64_t request(sol::table opts)
     {
@@ -48,9 +58,31 @@ struct LuaHttp
             }
         }
 
+        sol::optional<bool> stream_opt = opts.get<sol::optional<bool>>("stream");
+        bool stream = stream_opt.value_or(false);
+
         if (req.url.empty()) {
             throw sol::error("http.request requires a url");
         }
+
+        if (stream) {
+            if (!cb_func) {
+                throw sol::error("http.request with stream=true requires a callback");
+            }
+            uint64_t stream_cb_id = lua_callbacks_register(cb_func.value());
+            req.chunk_callback = [stream_cb_id](const char* data, std::size_t len) {
+                lua_callbacks_enqueue(stream_cb_id,
+                    [chunk = std::string(data, len)](sol::state_view l) {
+                        sol::table item = l.create_table();
+                        item["chunk"] = chunk;
+                        return sol::make_object(l, item);
+                    });
+            };
+            uint64_t id = client->submit(req);
+            stream_callback_ids[id] = stream_cb_id;
+            return id;
+        }
+
         uint64_t id = client->submit(req);
         if (cb_func) {
             uint64_t cb_id = lua_callbacks_register(cb_func.value());
@@ -83,6 +115,15 @@ struct LuaHttp
 
         std::vector<HttpResponse> polled = client->poll(max);
         for (auto& r : polled) {
+            auto stream_it = stream_callback_ids.find(r.id);
+            if (stream_it != stream_callback_ids.end()) {
+                lua_callbacks_enqueue(stream_it->second, [](sol::state_view l) {
+                    sol::table item = l.create_table();
+                    item["done"] = true;
+                    return sol::make_object(l, item);
+                });
+            }
+            cleanup_stream_callback(r.id);
             auto it = callback_ids.find(r.id);
             if (it != callback_ids.end()) {
                 uint64_t cb_id = it->second;
@@ -132,6 +173,15 @@ struct LuaHttp
     {
         std::vector<HttpResponse> responses = client->poll(0);
         for (auto& res : responses) {
+            auto stream_it = stream_callback_ids.find(res.id);
+            if (stream_it != stream_callback_ids.end()) {
+                lua_callbacks_enqueue(stream_it->second, [](sol::state_view l) {
+                    sol::table item = l.create_table();
+                    item["done"] = true;
+                    return sol::make_object(l, item);
+                });
+            }
+            cleanup_stream_callback(res.id);
             auto it = callback_ids.find(res.id);
             if (it != callback_ids.end()) {
                 uint64_t cb_id = it->second;
@@ -196,9 +246,19 @@ void lua_http_drop(sol::state& lua)
 {
     LuaHttp* state = get_lua_http(lua);
     if (state != nullptr) {
+        for (auto& kv : state->stream_callback_ids) {
+            lua_callbacks_unregister(kv.second);
+        }
+        state->stream_callback_ids.clear();
+        for (auto& kv : state->callback_ids) {
+            lua_callbacks_unregister(kv.second);
+        }
+        state->callback_ids.clear();
         sol::table package = lua["package"];
         sol::table loaded = package["loaded"];
         loaded["http"] = sol::lua_nil;
+        sol::table preload = package["preload"];
+        preload["http"] = sol::lua_nil;
         lua["http-handle"] = sol::lua_nil;
         delete state;
     }

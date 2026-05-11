@@ -4,16 +4,28 @@
 #include <chrono>
 #include <cctype>
 #include <curl/curl.h>
+#include <functional>
 #include <stdexcept>
 #include <utility>
 
 namespace {
 
+struct WriteContext {
+    std::string* body { nullptr };
+    const std::function<void(const char*, std::size_t)>* chunk_callback { nullptr };
+};
+
 std::size_t write_body(char* ptr, std::size_t size, std::size_t nmemb, void* userdata)
 {
-    std::string* body = static_cast<std::string*>(userdata);
-    body->append(ptr, size * nmemb);
-    return size * nmemb;
+    WriteContext* ctx = static_cast<WriteContext*>(userdata);
+    std::size_t total = size * nmemb;
+    if (ctx->body) {
+        ctx->body->append(ptr, total);
+    }
+    if (ctx->chunk_callback && *ctx->chunk_callback) {
+        (*ctx->chunk_callback)(ptr, total);
+    }
+    return total;
 }
 
 std::size_t write_header(char* buffer, std::size_t size, std::size_t nitems, void* userdata)
@@ -171,8 +183,14 @@ void HttpClient::worker_loop()
 
         if (req.cancel_flag && req.cancel_flag->load()) {
             HttpResponse cancelled = make_cancelled_response(req);
-            std::lock_guard<std::mutex> lock(completed_mutex);
-            completed.push_back(std::move(cancelled));
+            {
+                std::lock_guard<std::mutex> lock(completed_mutex);
+                completed.push_back(std::move(cancelled));
+            }
+            {
+                std::lock_guard<std::mutex> lock(queue_mutex);
+                cancel_flags.erase(req.id);
+            }
             continue;
         }
 
@@ -211,12 +229,15 @@ HttpResponse HttpClient::perform(const QueuedRequest& req)
 
     std::string body;
     std::vector<std::pair<std::string, std::string>> headers_out;
+    WriteContext ctx;
+    ctx.body = &body;
+    ctx.chunk_callback = &req.request.chunk_callback;
 
     curl_easy_setopt(curl, CURLOPT_URL, req.request.url.c_str());
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, req.request.follow_redirects ? 1L : 0L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, req.request.user_agent.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_body);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, write_header);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &headers_out);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");

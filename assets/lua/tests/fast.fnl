@@ -89,6 +89,7 @@
     :tests.test-ripgrep-view
     :tests.test-process
     :tests.test-codex-sdk
+    :tests.test-opencode-sdk
     :tests.test-sysinfo
     :tests.test-flamegraph
     :tests.test-units

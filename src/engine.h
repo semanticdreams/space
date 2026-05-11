@@ -20,7 +20,6 @@
 #include "physics.h"
 #include "audio.h"
 #include "job_system.h"
-#include "http_client.h"
 #include "keyring.h"
 #include "video_player.h"
 #include "browser_system.h"
@@ -84,7 +83,6 @@ private:
     Audio audio;
     VideoManager video_manager;
     std::unique_ptr<JobSystem> jobs;
-    std::unique_ptr<HttpClient> http;
     Keyring keyring;
     browser::BrowserSystem browser_system;
 

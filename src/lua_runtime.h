@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <string>
 
 #ifndef SOL_ALL_SAFETIES_ON
@@ -7,9 +8,12 @@
 #endif
 #include <sol/sol.hpp>
 
+class HttpClient;
+
 class LuaRuntime {
 public:
     LuaRuntime();
+    ~LuaRuntime();
     void init();
     void install_fennel(bool correlate);
     void require_module(const std::string& name);
@@ -21,6 +25,7 @@ public:
     sol::state& state() { return lua; }
     const std::string& assets_path() const { return assets_path_value; }
     const std::string& fennel_path() const { return fennel_path_value; }
+    HttpClient& http_client();
 
 private:
     sol::object require_module_object(const std::string& name);
@@ -35,4 +40,5 @@ private:
     sol::state lua;
     std::string assets_path_value;
     std::string fennel_path_value;
+    std::unique_ptr<HttpClient> http;
 };
