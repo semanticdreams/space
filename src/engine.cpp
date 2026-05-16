@@ -3,6 +3,7 @@
 #include "resource_manager.h"
 #include "lua_callbacks.h"
 #include "lua_http.h"
+#include "lua_http_server.h"
 #include "lua_process.h"
 #include "cgltf_jobs.h"
 #include "lua_jobs.h"
@@ -588,6 +589,7 @@ void Engine::run() {
         }
         lua_http_dispatch(*lua_state);
         lua_process_dispatch(*lua_state);
+        lua_http_server_dispatch(*lua_state);
         lua_callbacks_dispatch(*lua_state);
     };
 

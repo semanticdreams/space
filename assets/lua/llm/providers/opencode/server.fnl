@@ -1,4 +1,6 @@
 (local process (require :process))
+(local sysinfo (require :sysinfo))
+(local callbacks (require :callbacks))
 (local logging (require :logging))
 
 (local default-hostname "127.0.0.1")
@@ -6,7 +8,7 @@
 (local default-timeout-ms 10000)
 
 (fn now-ms []
-  (math.floor (* (os.clock) 1000)))
+  (sysinfo.now-ms))
 
 (fn Server [opts]
   (local options (or opts {}))
@@ -25,9 +27,6 @@
 
   (fn build-args []
     (local args [opencode-path "serve" (.. "--hostname=" hostname) (.. "--port=" (tostring port))])
-    (when options.config
-      (table.insert args "--config")
-      (table.insert args options.config))
     args)
 
   (var process-id nil)
@@ -38,23 +37,23 @@
     (local started (now-ms))
     (var line-buffer "")
     (while (and (not server-url) (< (- (now-ms) started) timeout-ms))
-      (let [output (process.read process-id)]
-        (when (and output output.stdout (> (# output.stdout) 0))
-          (set line-buffer (.. line-buffer output.stdout))
-          (while (string.find line-buffer "\n")
-            (let [nl (string.find line-buffer "\n")
-                  line (string.sub line-buffer 1 (- nl 1))]
-              (set line-buffer (string.sub line-buffer (+ nl 1)))
-              (let [idx (string.find line "listening on ")]
-                (when idx
-                  (set server-url (string.gsub (string.sub line (+ idx 13)) "%s+$" ""))
-                  (logging.info "[opencode] server listening on " server-url))))))
-        (when output.finished
-          (local detail (if (> (# (or output.stderr "")) 0) output.stderr output.stdout))
-          (error (.. "opencode server exited early: " (or detail "")))))
+      (local output (process.read process-id))
+      (when (and output output.stdout (> (# output.stdout) 0))
+        (set line-buffer (.. line-buffer output.stdout))
+        (while (string.find line-buffer "\n")
+          (local nl (string.find line-buffer "\n"))
+          (local line (string.sub line-buffer 1 (- nl 1)))
+          (set line-buffer (string.sub line-buffer (+ nl 1)))
+          (local idx (string.find line "listening on "))
+          (when idx
+            (set server-url (string.gsub (string.sub line (+ idx 13)) "%s+$" ""))
+            (logging.info "[opencode] server listening on " server-url))))
+      (when output.finished
+        (local detail (if (> (# (or output.stderr "")) 0) output.stderr output.stdout))
+        (error (.. "opencode server exited early: " (or detail ""))))
       (process.poll 0)
-      (let [(_ sysinfo) (pcall require :sysinfo)]
-        (when sysinfo (sysinfo.sleep 0.05))))
+      (callbacks.run-loop {:poll-http true :poll-process false :sleep-ms 0 :timeout-ms 1})
+      (sysinfo.sleep 0.05))
     (when (not server-url)
       (error (.. "opencode server did not start within " timeout-ms "ms"))))
 

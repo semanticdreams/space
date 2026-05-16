@@ -460,6 +460,7 @@ target_include_directories(${PROJECT_NAME}_lib
     SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/external/nlohmann
     ${CMAKE_CURRENT_SOURCE_DIR}/external/tomlplusplus/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/cpp-httplib
 )
 target_include_directories(${PROJECT_NAME}_lib
     SYSTEM PRIVATE

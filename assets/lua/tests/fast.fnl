@@ -90,6 +90,9 @@
     :tests.test-process
     :tests.test-codex-sdk
     :tests.test-opencode-sdk
+    :tests.test-mcp
+    :tests.test-http-server
+    :tests.test-mcp-http
     :tests.test-sysinfo
     :tests.test-flamegraph
     :tests.test-units

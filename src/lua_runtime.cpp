@@ -9,6 +9,7 @@
 #include "lua_callbacks.h"
 #include "lua_engine.h"
 #include "lua_http.h"
+#include "lua_http_server.h"
 #include "lua_ray_box.h"
 #include "lua_notify.h"
 #include "lua_tray.h"
@@ -232,6 +233,7 @@ void LuaRuntime::install_base_bindings()
     lua_bind_shell(lua);
     lua_bind_process(lua);
     lua_bind_http(lua, *http);
+    lua_bind_http_server(lua);
     lua_bind_gccjit(lua);
     lua_bind_sysinfo(lua);
     lua_bind_perlin_terrain(lua);

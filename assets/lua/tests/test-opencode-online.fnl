@@ -5,6 +5,7 @@
 
 (local OpencodeSdk (require :llm/providers/opencode))
 (local callbacks (require :callbacks))
+(local sysinfo (require :sysinfo))
 
 (var passed 0)
 (var failed 0)
@@ -15,29 +16,41 @@
   (when (not condition)
     (error (or message "assertion failed"))))
 
+(fn assert-response-ok [result label]
+  (assert-ok result (.. label " should return a response"))
+  (assert-ok result.ok
+             (.. label " failed: "
+                 (or result.raw
+                     (and (= (type result.data) "table") result.data.error)
+                     result.error
+                     "unknown error"))))
+
 (fn run-test [name f]
   (io.write (.. "  " name " ... "))
   (io.flush)
-  (let [(ok result) (pcall f)]
-    (if ok
-        (do
-          (set passed (+ passed 1))
-          (print "PASS"))
-        (do
-          (set failed (+ failed 1))
-          (table.insert failures {:name name :error (tostring result)})
-          (print (.. "FAIL: " (tostring result)))))))
+  (local (ok result) (pcall f))
+  (if ok
+      (do
+        (set passed (+ passed 1))
+        (print "PASS"))
+      (do
+        (set failed (+ failed 1))
+        (table.insert failures {:name name :error (tostring result)})
+        (print (.. "FAIL: " (tostring result))))))
 
 (fn poll-events [timeout-ms]
   (callbacks.run-loop {:poll-http true :sleep-ms 50 :timeout-ms (or timeout-ms 1000)}))
 
+(fn now-ms []
+  (sysinfo.now-ms))
+
 (fn wait-for [pred timeout-ms]
-  (local deadline (+ (os.clock) (/ (or timeout-ms 5000) 1000)))
+  (local deadline (+ (now-ms) (or timeout-ms 5000)))
   (var result nil)
-  (while (and (not result) (< (os.clock) deadline))
+  (while (and (not result) (< (now-ms) deadline))
     (callbacks.run-loop {:poll-http true :sleep-ms 50 :timeout-ms 100})
-    (let [(ok val) (pcall pred)]
-      (when ok (set result val))))
+    (local (ok val) (pcall pred))
+    (when ok (set result val)))
   (assert-ok result (.. "timeout after " (or timeout-ms 5000) "ms waiting for condition")))
 
 (fn main []
@@ -53,20 +66,21 @@
 
   ;; Check if opencode is available
   (local process (require :process))
-  (let [check (process.run {:args [opencode-path "--version"] :timeout_seconds 5})]
-    (if (not (= check.exit-code 0))
-        (do
-          (print "ERROR: opencode not available. Install or set OPENCODE_PATH.")
-          (print "  stderr: " (or check.stderr ""))
-          (os.exit 1))
-        (print "  version check: OK (" (or check.stdout "unknown") ")")))
+  (local check (process.run {:args [opencode-path "--version"] :timeout_seconds 5}))
+  (if (not (= check.exit-code 0))
+      (do
+        (print "ERROR: opencode not available. Install or set OPENCODE_PATH.")
+        (print "  stderr: " (or check.stderr ""))
+        (os.exit 1))
+      (print "  version check: OK (" (or check.stdout "unknown") ")"))
 
-  (math.randomseed (os.time))
-
-  ;; Use random-ish ports to avoid conflicts with previous runs
-  (local base-port (+ 14000 (math.random 500 999)))
-  (local port1 base-port)
-  (local port2 (+ base-port 1))
+  (math.randomseed (math.floor (sysinfo.now-ms)))
+  (local port1 (+ 20000 (math.random 0 20000)))
+  (var port2 0)
+  (while (= port2 0)
+    (local candidate (+ 20000 (math.random 0 20000)))
+    (when (not= candidate port1)
+      (set port2 candidate)))
 
   (print "")
   (print (.. "Using ports: " port1 ", " port2))
@@ -93,7 +107,8 @@
     (fn []
       (var result nil)
       (server.global.health (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "health check")
       (assert-ok result.data.healthy "server should report healthy")
       (assert-ok result.data.version "server should report version")
       (print "  version: " result.data.version)))
@@ -102,14 +117,15 @@
     (fn []
       (var result nil)
       (server.config.get (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
-      (assert-ok result.ok "config get should succeed")))
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "config get")))
 
   (run-test "config providers"
     (fn []
       (var result nil)
       (server.config.providers (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "config providers")
       (assert-ok result.data.providers "providers should be present")
       (assert-ok (> (# result.data.providers) 0) "should have at least one provider")
       (print "  providers: " (# result.data.providers))))
@@ -123,7 +139,8 @@
       (var result nil)
       (server.session.create {:title "sdk-online-test"}
                              (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "create session")
       (assert-ok result.data.id "session should have an id")
       (set session-id result.data.id)
       (print "  id: " result.data.id)))
@@ -132,14 +149,16 @@
     (fn []
       (var result nil)
       (server.session.list (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "list sessions")
       (assert-ok (>= (# result.data) 1) "should list at least 1 session")))
 
   (run-test "get session"
     (fn []
       (var result nil)
       (server.session.get session-id (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "get session")
       (assert-ok (= result.data.id session-id) "session id should match")))
 
   (run-test "update session"
@@ -147,8 +166,8 @@
       (var result nil)
       (server.session.update session-id {:title "sdk-online-test-updated"}
                              (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
-      (assert-ok result.ok "update should succeed")))
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "update session")))
 
   ;; ── Prompt / LLM interaction ──
   (print "")
@@ -158,7 +177,8 @@
   (var primary-providers [])
   (var config-result nil)
   (server.config.providers (fn [r] (set config-result r)))
-  (wait-for #(and config-result config-result.ok) 5000)
+  (wait-for #(not= config-result nil) 5000)
+  (assert-response-ok config-result "config providers")
   (when (and config-result config-result.data)
     (local defaults (or config-result.data.default {}))
     (each [k v (pairs defaults)]
@@ -180,8 +200,9 @@
                                  {:model model
                                   :parts [{:type "text" :text "What is 2+2? Reply with exactly the number and nothing else."}]}
                                  (fn [r] (set result r)))
-          (wait-for #(and result result.ok) 60000)))
+          (wait-for #(not= result nil) 60000)))
       (assert-ok result "prompt should return a result")
+      (assert-response-ok result "prompt with text")
       (assert-ok result.data "prompt should return data")
       (print "  model used: " (or current-model.providerID "?") "/" (or current-model.modelID "?"))
       (if (and result.data.info result.data.info.error)
@@ -209,14 +230,16 @@
     (fn []
       (var result nil)
       (server.file.status nil (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "file status")
       (assert-ok (= (type result.data) "table") "status should return a table")))
 
   (run-test "find text"
     (fn []
       (var result nil)
       (server.find.text "function" (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "find text")
       (assert-ok (= (type result.data) "table") "find text should return a table")))
 
   ;; ── SSE Events ──
@@ -245,8 +268,8 @@
       (when session-id
         (var result nil)
         (server.session.delete session-id (fn [r] (set result r)))
-        (wait-for #(and result result.ok) 5000)
-        (assert-ok result.ok "delete should succeed"))))
+        (wait-for #(not= result nil) 5000)
+        (assert-response-ok result "delete session"))))
 
   (run-test "close server"
     (fn []
@@ -262,7 +285,8 @@
       (local s (OpencodeSdk.Opencode {:opencode-path opencode-path :port port2}))
       (var result nil)
       (s.global.health (fn [r] (set result r)))
-      (wait-for #(and result result.ok) 5000)
+      (wait-for #(not= result nil) 5000)
+      (assert-response-ok result "fresh server health")
       (assert-ok result.data.healthy "should be healthy")
 
       ;; Now create a client-only connection
@@ -270,7 +294,8 @@
       (local client-only (OpencodeSdk.OpencodeClient {:base-url url}))
       (var result2 nil)
       (client-only.global.health (fn [r] (set result2 r)))
-      (wait-for #(and result2 result2.ok) 5000)
+      (wait-for #(not= result2 nil) 5000)
+      (assert-response-ok result2 "client-only health")
       (assert-ok result2.data.healthy "client-only health should also work")
       (s.close)))
 

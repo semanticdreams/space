@@ -1290,6 +1290,12 @@ void sleep_seconds(double seconds)
     std::this_thread::sleep_for(std::chrono::duration<double>(seconds));
 }
 
+double now_ms()
+{
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration<double, std::milli>(now).count();
+}
+
 } // namespace
 
 void lua_bind_sysinfo(sol::state& lua)
@@ -1326,6 +1332,7 @@ void lua_bind_sysinfo(sol::state& lua)
         module.set_function("platform", &platform_table);
         module.set_function("system", []() { return SystemHandle(); });
         module.set_function("sleep", &sleep_seconds);
+        module.set_function("now-ms", &now_ms);
         return module;
     });
 }
