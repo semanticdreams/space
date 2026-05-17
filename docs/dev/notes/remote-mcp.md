@@ -67,7 +67,7 @@ Session IDs come from the native `uuid.v4` binding. Sessions track `created` and
 - `assets/lua/mcp/tool-registry.fnl`: mutable tool registry and change listeners
 - `assets/lua/mcp/handler.fnl`: MCP initialize, tools/list, tools/call, sessions
 - `assets/lua/mcp/server-http.fnl`: HTTP/SSE transport wrapper
-- `assets/lua/tools/mcp-remote-server.fnl`: CLI server entrypoint for opencode SSE mode
+- `assets/lua/tools/mcp-remote-server.fnl`: server entrypoint for opencode SSE mode; it requires the app bootstrap-owned `app.mcp-tools` registry rather than installing stub tools
 
 ## Tests
 

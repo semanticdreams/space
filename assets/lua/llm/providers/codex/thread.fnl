@@ -90,6 +90,7 @@
   (when (not handle.finished)
     (local (kill-ok _kill-err) (pcall (fn [] (process.kill handle.process-id))))
     (when kill-ok nil)
+    (pcall (fn [] (process.wait handle.process-id)))
     (when handle.cleanup
       (local (_cleanup-ok _cleanup-err) (pcall handle.cleanup))
       (when _cleanup-ok nil))
@@ -142,7 +143,14 @@
 
 (fn handle-cancel [self]
   (when (not self.finished)
-    (process.kill self.process-id))
+    (process.kill self.process-id)
+    (pcall (fn [] (process.wait self.process-id)))
+    (when self.cleanup
+      (pcall self.cleanup))
+    (set self.finished true)
+    (set self.error "cancelled")
+    (set self.thread.active-turn nil)
+    (emit-callback self.on-error {:message "cancelled"}))
   true)
 
 (fn handle-running? [self]

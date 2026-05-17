@@ -82,6 +82,14 @@
 (local VolumeControl (require :volume-control))
 (local MenuManager (require :menu-manager))
 (local WalletManager (require :wallet-manager))
+(local AgentPresetRegistry (require :llm/presets/registry))
+(local AgentPresetManager (require :llm/presets/init))
+(local AgentToolAdapterRegistry (require :llm/presets/tool-adapters))
+(local AgentPresetMcpSync (require :llm/presets/mcp-sync))
+(local AgentBuiltinDrawing (require :llm/presets/builtins/drawing))
+(local AgentBuiltinGraph (require :llm/presets/builtins/graph))
+(local AgentBuiltinScene (require :llm/presets/builtins/scene))
+(local AgentBuiltinGeneral (require :llm/presets/builtins/general))
 (var fennel-cache-dir nil)
 (local bytecode-enabled
   (do
@@ -819,6 +827,11 @@
    :canvas-mode app.active-canvas-mode
    :canvas-visible? (= app.canvas-visible? true)})
 
+(fn agent-preset-context []
+  {:surface (or app.active-interaction-surface :scene)
+   :mode app.active-canvas-mode
+   :canvas-visible? (= app.canvas-visible? true)})
+
 (fn canvas-shell-state= [a b]
   (and a b
        (= a.interaction-surface b.interaction-surface)
@@ -1540,6 +1553,39 @@
   (app.wallet:load-active)
   (ensure-hot-reload-controller)
 
+  (when (not app.mcp-tools)
+    (local ToolRegistry (require :mcp/tool-registry))
+    (set app.mcp-tools (ToolRegistry {:namespace-prefix "space_"})))
+  (when (not app.agent-tool-adapters)
+    (set app.agent-tool-adapters (AgentToolAdapterRegistry.ToolAdapterRegistry {})))
+  (when (not app.agent-presets)
+    (set app.agent-presets
+         (AgentPresetManager.PresetManager
+           {:registry (AgentPresetRegistry.PresetRegistry {})
+            :tool-adapters app.agent-tool-adapters
+            :app app
+            :context (agent-preset-context)}))
+    (AgentBuiltinDrawing.register app.agent-presets)
+    (AgentBuiltinGraph.register app.agent-presets)
+    (AgentBuiltinScene.register app.agent-presets)
+    (AgentBuiltinGeneral.register app.agent-presets))
+  (app.agent-presets:set-context (agent-preset-context))
+  (when (and app.agent-presets (not app.agent-preset-mcp-sync))
+    (set app.agent-preset-mcp-sync
+         (AgentPresetMcpSync.PresetMcpSync {:manager app.agent-presets
+                                             :tool-registry app.mcp-tools
+                                             :owner "agent-presets"}))
+    (app.agent-preset-mcp-sync:start))
+  (when (and app.canvas-shell-changed (not app.agent-presets-canvas-handler))
+    (set app.agent-presets-canvas-handler
+         (app.canvas-shell-changed:connect
+           (fn [payload]
+             (local current payload.current)
+             (app.agent-presets:set-context
+               {:surface current.interaction-surface
+                :mode current.canvas-mode
+                :canvas-visible? current.canvas-visible?})))))
+
   (local init-end-ms (wall-now-ms))
   (logging.info
     (string.format "[space] init completed in %.2fms"
@@ -1643,6 +1689,7 @@
 
 (fn app.drop []
   (set (. package.loaded "renderers") nil)
+  (AppBootstrap.drop-states)
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)
     (set app.update-handler nil))
@@ -1690,7 +1737,8 @@
     (app.world-manager:drop)
     (set app.world-manager nil))
   (CanvasModes.clear-mode-runtime-hooks!)
-  (app.unit-manager:clear)
+  (when app.unit-manager
+    (app.unit-manager:clear))
   (set app.canvas-unit nil)
   (set app.active-world-entry nil)
   (set app.first-person-controls nil)
@@ -1759,6 +1807,12 @@
   (when (and app.kernels app.kernels.drop)
     (app.kernels:drop)
     (set app.kernels nil))
+  (when app.agent-preset-mcp-sync
+    (app.agent-preset-mcp-sync:stop)
+    (set app.agent-preset-mcp-sync nil))
+  (when (and app.agent-presets-canvas-handler app.canvas-shell-changed)
+    (app.canvas-shell-changed:disconnect app.agent-presets-canvas-handler true)
+    (set app.agent-presets-canvas-handler nil))
   (set app.next-frame-queue [])
   (set app.next-frame-pending [])
   (set app.projection nil)
