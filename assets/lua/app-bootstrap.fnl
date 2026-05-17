@@ -65,7 +65,17 @@
   (set app.icons (Icons))
   app.icons)
 
+(fn drop-states []
+  (local StateSystemBindings (require :state-system-bindings))
+  (when app.states
+    (assert app.states.drop "app.states requires drop before replacement")
+    (app.states:drop))
+  (StateSystemBindings.bind-states-host nil)
+  (set app.states nil)
+  nil)
+
 (fn init-states []
+  (drop-states)
   (local States (require :states))
   (local StateSystemBindings (require :state-system-bindings))
   (set app.states
@@ -93,4 +103,5 @@
  :init-input-systems init-input-systems
  :init-renderers init-renderers
  :init-icons init-icons
- :init-states init-states}
+ :init-states init-states
+ :drop-states drop-states}

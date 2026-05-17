@@ -81,6 +81,17 @@
     (set history [])
     nil)
 
+  (fn drop [_self]
+    (call-hook active-state :on-leave)
+    (each [_ state (pairs registry)]
+      (when (= state.states_owner self)
+        (set state.states_owner nil)))
+    (changed:clear)
+    (set active-state nil)
+    (set active-name nil)
+    (set history [])
+    nil)
+
   (fn get-hud [_self]
     (and hud-provider
          (hud-provider self)))
@@ -108,6 +119,7 @@
         :changed changed
         :get-history get-history
         :clear-history clear-history
+        :drop drop
         :get-hud get-hud
         :set-hud-provider set-hud-provider
         :get-focus-manager get-focus-manager

@@ -1,21 +1,10 @@
-(var states-provider nil)
-
-(fn assert-provider [provider]
-  (assert (or (= provider nil)
-              (= (type provider) :function))
-          "TerrainPaintManager states provider must be a function"))
+(local StateSystemRuntime (require :state-system-runtime))
 
 (fn set-states-provider [provider]
-  (assert-provider provider)
-  (set states-provider provider)
-  provider)
+  (StateSystemRuntime.set-states-provider provider))
 
 (fn require-states-host [action]
-  (local states (and states-provider
-                     (states-provider)))
-  (assert states
-          (.. "TerrainPaintManager requires a states host for " action))
-  states)
+  (StateSystemRuntime.states-host "TerrainPaintManager" action))
 
 (fn current-state-name []
   (local states (require-states-host "current-state-name"))

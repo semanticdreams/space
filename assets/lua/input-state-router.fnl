@@ -1,22 +1,11 @@
 (var active-input nil)
-(var states-provider nil)
-
-(fn assert-provider [provider]
-  (assert (or (= provider nil)
-              (= (type provider) :function))
-          "InputStateRouter states provider must be a function"))
+(local StateSystemRuntime (require :state-system-runtime))
 
 (fn states-host [action]
-  (local states (and states-provider
-                     (states-provider)))
-  (assert states
-          (.. "InputStateRouter requires a states host for " action))
-  states)
+  (StateSystemRuntime.states-host "InputStateRouter" action))
 
 (fn set-states-provider [provider]
-  (assert-provider provider)
-  (set states-provider provider)
-  provider)
+  (StateSystemRuntime.set-states-provider provider))
 
 (fn set-state [name]
   (local states (states-host "state transitions"))

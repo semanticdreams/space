@@ -1,22 +1,11 @@
 
-(var states-provider nil)
-
-(fn assert-provider [provider]
-  (assert (or (= provider nil)
-              (= (type provider) :function))
-          "TerrainRectPickManager states provider must be a function"))
+(local StateSystemRuntime (require :state-system-runtime))
 
 (fn set-states-provider [provider]
-  (assert-provider provider)
-  (set states-provider provider)
-  provider)
+  (StateSystemRuntime.set-states-provider provider))
 
 (fn require-states-host [action]
-  (local states (and states-provider
-                     (states-provider)))
-  (assert states
-          (.. "TerrainRectPickManager requires a states host for " action))
-  states)
+  (StateSystemRuntime.states-host "TerrainRectPickManager" action))
 
 (fn current-state-name []
   (local states (require-states-host "current-state-name"))
