@@ -109,52 +109,62 @@
   (assert (approx (audio:getMasterVolume) 1.0))
   (audio:setMasterVolume original))
 
+(fn with-volume-state [volume muted? f]
+  (local original-master (VolumeControl.current-master-volume))
+  (local original-stored (VolumeControl.get-stored-volume))
+  (local original-muted? (VolumeControl.get-muted?))
+  (VolumeControl.apply-settings {:volume volume :muted? muted?})
+  (local (ok result) (pcall f))
+  (VolumeControl.apply-settings {:volume (or original-stored original-master)
+                                 :muted? original-muted?})
+  (when (not ok)
+    (error result))
+  result)
+
 (fn volume-button-updates-icon-and-scrolls []
   (local audio app.engine.audio)
   (assert audio "Audio binding missing")
-  (local original (or (and audio.getMasterVolume (audio:getMasterVolume)) 1.0))
-  (audio:setMasterVolume 0.0)
-  (local icons (make-icons-stub))
-  (local ctx (make-test-ctx))
-  (set ctx.icons icons)
-  (local button ((VolumeControl.make-volume-button) ctx))
-  (assert (= (icon-name button icons) "volume_mute"))
+  (with-volume-state 0.0 false
+    (fn []
+      (local icons (make-icons-stub))
+      (local ctx (make-test-ctx))
+      (set ctx.icons icons)
+      (local button ((VolumeControl.make-volume-button) ctx))
+      (assert (= (icon-name button icons) "volume_mute"))
 
-  (button:on-mouse-wheel {:x 0 :y 1})
-  (assert (approx (audio:getMasterVolume) 0.05))
-  (assert (= (icon-name button icons) "volume_down"))
+      (button:on-mouse-wheel {:x 0 :y 1})
+      (assert (approx (audio:getMasterVolume) 0.05))
+      (assert (= (icon-name button icons) "volume_down"))
 
-  (button:on-mouse-wheel {:x 0 :y 20})
-  (assert (approx (audio:getMasterVolume) 1.0))
-  (assert (= (icon-name button icons) "volume_up"))
+      (button:on-mouse-wheel {:x 0 :y 20})
+      (assert (approx (audio:getMasterVolume) 1.0))
+      (assert (= (icon-name button icons) "volume_up"))
 
-  (when button.drop
-    (button:drop))
-  (audio:setMasterVolume original))
+      (when button.drop
+        (button:drop)))))
 
 (fn volume-button-toggle-mutes-and-restores []
   (local audio app.engine.audio)
   (assert audio "Audio binding missing")
-  (local original (or (and audio.getMasterVolume (audio:getMasterVolume)) 1.0))
-  (audio:setMasterVolume 0.4)
-  (local icons (make-icons-stub))
-  (local ctx (make-test-ctx))
-  (set ctx.icons icons)
-  (local button ((VolumeControl.make-volume-button) ctx))
-  (assert (approx (audio:getMasterVolume) 0.4))
-  (assert (= (icon-name button icons) "volume_down"))
+  (with-volume-state 0.4 false
+    (fn []
+      (local icons (make-icons-stub))
+      (local ctx (make-test-ctx))
+      (set ctx.icons icons)
+      (local button ((VolumeControl.make-volume-button) ctx))
+      (assert (approx (audio:getMasterVolume) 0.4))
+      (assert (= (icon-name button icons) "volume_down"))
 
-  (button:on-click {})
-  (assert (approx (audio:getMasterVolume) 0.0))
-  (assert (= (icon-name button icons) "volume_off"))
+      (button:on-click {})
+      (assert (approx (audio:getMasterVolume) 0.0))
+      (assert (= (icon-name button icons) "volume_off"))
 
-  (button:on-click {})
-  (assert (approx (audio:getMasterVolume) 0.4))
-  (assert (= (icon-name button icons) "volume_down"))
+      (button:on-click {})
+      (assert (approx (audio:getMasterVolume) 0.4))
+      (assert (= (icon-name button icons) "volume_down"))
 
-  (when button.drop
-    (button:drop))
-  (audio:setMasterVolume original))
+      (when button.drop
+        (button:drop)))))
 
 (fn volume-settings-roundtrip []
   (local audio app.engine.audio)

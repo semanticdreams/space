@@ -228,16 +228,14 @@
     (set app.lights (LightSystem {})))
   )
 
-(fn execute-tests [suite test-verbose test-filter traceback]
+(fn execute-test-list [suite tests test-verbose traceback]
   (local registered-tests [])
-  (each [_ test (ipairs suite.tests)]
+  (each [_ test (ipairs tests)]
     (when (not (= (type test.name) "string"))
       (error "suite test missing name"))
     (when (not (= (type test.fn) "function"))
       (error (.. "suite test " test.name " missing fn")))
-    (when (or (not test-filter)
-              (string.find test.name test-filter 1 true))
-      (table.insert registered-tests test)))
+    (table.insert registered-tests test))
 
   (var failures 0)
   (each [_ test (ipairs registered-tests)]
@@ -251,6 +249,20 @@
           (log-line (tostring err))
           (set failures (+ failures 1)))))
 
+  (values failures (# registered-tests)))
+
+(fn execute-tests [suite test-verbose test-filter traceback]
+  (local registered-tests [])
+  (each [_ test (ipairs suite.tests)]
+    (when (or (not test-filter)
+              (string.find test.name test-filter 1 true))
+      (table.insert registered-tests test)))
+
+  (local (initial-failures initial-executed)
+    (execute-test-list suite registered-tests test-verbose traceback))
+  (var failures initial-failures)
+  (local executed initial-executed)
+
   (when suite.teardown
     (local (_ok err) (protected-call traceback suite.teardown))
     (when (not _ok)
@@ -260,7 +272,7 @@
   (when (> failures 0)
     (error (.. failures " Lua test(s) failed")))
 
-  (log-line (.. "Executed " (# registered-tests) " Lua tests"))
+  (log-line (.. "Executed " executed " Lua tests"))
 
   (app.engine:shutdown)
   suite)
@@ -282,9 +294,10 @@
   (setup-test-env test-verbose)
 
   (local modules (apply-module-overrides suite.modules))
-  (local registered-tests [])
+  (var failures 0)
+  (var executed 0)
 
-  (fn collect-tests [module-name]
+  (fn run-module-tests [module-name]
     (when test-verbose
       (log-line (.. "[LOAD] " module-name)))
     (local (ok result)
@@ -296,6 +309,7 @@
       (when (not (= (type result) "table"))
         (error (.. module-name " must return a test suite")))
       (local tests (or (. result :tests) result))
+      (local registered-tests [])
       (each [_ test (ipairs tests)]
         (when (not (= (type test.name) "string"))
           (error (.. module-name " test missing name")))
@@ -303,13 +317,28 @@
           (error (.. module-name " test " test.name " missing fn")))
         (when (or (not test-filter)
                   (string.find test.name test-filter 1 true))
-          (table.insert registered-tests test)))))
+          (table.insert registered-tests test)))
+      (local (module-failures module-executed)
+        (execute-test-list {:name module-name} registered-tests test-verbose traceback))
+      (set failures (+ failures module-failures))
+      (set executed (+ executed module-executed))))
 
   (each [_ module-name (ipairs modules)]
-    (collect-tests module-name))
+    (run-module-tests module-name))
 
-  (local suite-tests {:name (or suite.name "suite") :tests registered-tests :teardown suite.teardown})
-  (execute-tests suite-tests test-verbose test-filter traceback))
+  (when suite.teardown
+    (local (_ok err) (protected-call traceback suite.teardown))
+    (when (not _ok)
+      (log-line (.. "[FAIL] teardown " (tostring err)))
+      (set failures (+ failures 1))))
+
+  (when (> failures 0)
+    (error (.. failures " Lua test(s) failed")))
+
+  (log-line (.. "Executed " executed " Lua tests"))
+
+  (app.engine:shutdown)
+  suite)
 
 {:run-modules run-modules
  :run-tests run-tests}

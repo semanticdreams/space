@@ -44,7 +44,8 @@
 (local paths-eq PathUtils.paths-eq)
 
 (fn ensure-command-hints-hud! [states]
-    (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
+    (local hud (and states states.get-hud (states:get-hud)))
+    (when (and states states.set-hud-provider (not (and hud hud.command-hints)))
         (states:set-hud-provider
             (fn [_self]
                 {:command-hints

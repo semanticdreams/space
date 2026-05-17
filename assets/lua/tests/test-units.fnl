@@ -12,6 +12,18 @@
 
 (local tests [])
 
+(fn restore-test-runner-app-services! []
+  (AppBootstrap.init-themes)
+  (AppBootstrap.init-lights)
+  (AppBootstrap.init-input-systems)
+  true)
+
+(fn drop-main-and-restore-test-fixture! []
+  (local main-mod (. package.loaded "main"))
+  (when (and main-mod (= (type main-mod.drop) :function))
+    (main-mod.drop))
+  (restore-test-runner-app-services!))
+
 (fn require-main! []
   (set (. package.loaded "main") nil)
   (require :main))
@@ -336,7 +348,7 @@
         (app.hot-reload-controller:drop)
         (set app.hot-reload-controller nil))
       (when (= (type (. (require :main) :drop)) :function)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
       (set app.hot-reload-controller original-controller)
@@ -374,9 +386,46 @@
                     "Expected drop to clear app.hot-reload-controller")
             (assert (= app.hot-reload-callback-id nil)
                     "Expected drop to clear app.hot-reload-callback-id")
+            (restore-test-runner-app-services!)
             true)))
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
+      (if ok
+          result
+          (error result)))))
+
+(fn app-init-refreshes-agent-preset-context-after-drop []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (app.agent-presets:set-context {:surface :canvas
+                                             :mode "stale-mode"
+                                             :canvas-visible? true})
+            ((. Main :drop))
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (local reset-context (app.agent-presets:get-context))
+            (assert (= reset-context.surface app.active-interaction-surface)
+                    "Expected app init to refresh preset surface from current shell state")
+            (assert (= reset-context.mode app.active-canvas-mode)
+                    "Expected app init to refresh preset mode from current shell state")
+            (assert (= reset-context.canvas-visible? (= app.canvas-visible? true))
+                    "Expected app init to refresh preset canvas visibility from current shell state")
+            (assert (not (= reset-context.mode "stale-mode"))
+                    "Expected app init to overwrite stale preset context")
+            true)))
+      (when (= (type (. (require :main) :drop)) :function)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
           (error result)))))
@@ -436,7 +485,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -512,7 +561,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -596,7 +645,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -680,7 +729,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -739,7 +788,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -808,7 +857,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -841,7 +890,7 @@
         true)))
   (when (and (= (type (. (require :main) :drop)) :function)
              app.engine)
-    ((. (require :main) :drop)))
+    (drop-main-and-restore-test-fixture!))
   (set AppBootstrap.init-renderers original-init-renderers)
   (if ok
       result
@@ -899,7 +948,7 @@
             true)))
       (when (and (= (type (. (require :main) :drop)) :function)
                  app.engine)
-        ((. (require :main) :drop)))
+        (drop-main-and-restore-test-fixture!))
       (set AppBootstrap.init-renderers original-init-renderers)
       (if ok
           result
@@ -962,6 +1011,8 @@
                      :fn full-app-root-reload-roundtrips-active-world})
 (table.insert tests {:name "drop app cleans hot reload controller and callback"
                      :fn drop-app-cleans-hot-reload-controller-and-callback})
+(table.insert tests {:name "app init refreshes agent preset context after drop"
+                     :fn app-init-refreshes-agent-preset-context-after-drop})
 (table.insert tests {:name "HUD unit reload roundtrips panel state"
                      :fn hud-unit-reload-roundtrips-panel-state})
 (table.insert tests {:name "hot reload routes hud file changes to hud unit"

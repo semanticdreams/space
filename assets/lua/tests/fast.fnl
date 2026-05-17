@@ -90,6 +90,8 @@
     :tests.test-process
     :tests.test-codex-sdk
     :tests.test-opencode-sdk
+    :tests.test-agent-presets
+    :tests.test-agent-presets-mcp
     :tests.test-mcp
     :tests.test-http-server
     :tests.test-mcp-http

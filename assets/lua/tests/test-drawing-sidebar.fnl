@@ -171,8 +171,10 @@
                    :active-canvas-mode app.active-canvas-mode
                    :canvas-mode-activate-focused app.canvas-mode-activate-focused
                    :canvas-mode-command-hints-provider app.canvas-mode-command-hints-provider
+                   :canvas-mode-context-enricher app.canvas-mode-context-enricher
                    :canvas-mode-delete-selection app.canvas-mode-delete-selection
                    :canvas-mode-drawing-enabled? app.canvas-mode-drawing-enabled?
+                   :canvas-mode-input-handlers app.canvas-mode-input-handlers
                    :canvas-mode-left-dock-builder app.canvas-mode-left-dock-builder
                    :canvas-mode-registry app.canvas-mode-registry
                    :canvas-mode-root-actions app.canvas-mode-root-actions
@@ -185,11 +187,14 @@
                    :themes app.themes})
   (set app.clickables (Clickables))
   (set app.hoverables (Hoverables))
-  (set app.canvas-shell-changed (or app.canvas-shell-changed (Signal)))
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed (Signal))
+  (set app.canvas-shell-changed (Signal))
   (set app.canvas {})
   (set app.canvas-visible? true)
   (set app.preferred-interaction-surface :canvas)
   (set app.active-interaction-surface :canvas)
+  (CanvasModes.clear-mode-runtime-hooks!)
   (ensure-built-in-canvas-modes!)
   (CanvasModes.activate-mode "graph")
   (local (ok result) (pcall body))
