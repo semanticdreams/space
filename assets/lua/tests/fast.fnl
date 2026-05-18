@@ -92,6 +92,7 @@
     :tests.test-opencode-sdk
     :tests.test-agent-presets
     :tests.test-agent-presets-mcp
+    :tests.test-agent-layer
     :tests.test-mcp
     :tests.test-http-server
     :tests.test-mcp-http

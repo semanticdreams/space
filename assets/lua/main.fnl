@@ -85,11 +85,19 @@
 (local AgentPresetRegistry (require :llm/presets/registry))
 (local AgentPresetManager (require :llm/presets/init))
 (local AgentToolAdapterRegistry (require :llm/presets/tool-adapters))
-(local AgentPresetMcpSync (require :llm/presets/mcp-sync))
 (local AgentBuiltinDrawing (require :llm/presets/builtins/drawing))
 (local AgentBuiltinGraph (require :llm/presets/builtins/graph))
 (local AgentBuiltinScene (require :llm/presets/builtins/scene))
 (local AgentBuiltinGeneral (require :llm/presets/builtins/general))
+(local AgentRegistry (require :llm/agent/registry))
+(local AgentRunner (require :llm/agent/runner))
+(local AgentToolSurface (require :llm/agent/tool-surface))
+(local AgentApprovals (require :llm/agent/approvals))
+(local AgentMcpSync (require :llm/agent/mcp-sync))
+(local AgentOpencodeMcpBridge (require :llm/agent/opencode-mcp-bridge))
+(local SpaceAgent (require :llm/agent/builtins/space-agent))
+(local PromptUtils (require :llm/agent/prompt-utils))
+(local OpencodeSdk (require :llm/providers/opencode))
 (var fennel-cache-dir nil)
 (local bytecode-enabled
   (do
@@ -1570,12 +1578,40 @@
     (AgentBuiltinScene.register app.agent-presets)
     (AgentBuiltinGeneral.register app.agent-presets))
   (app.agent-presets:set-context (agent-preset-context))
-  (when (and app.agent-presets (not app.agent-preset-mcp-sync))
-    (set app.agent-preset-mcp-sync
-         (AgentPresetMcpSync.PresetMcpSync {:manager app.agent-presets
-                                             :tool-registry app.mcp-tools
-                                             :owner "agent-presets"}))
-    (app.agent-preset-mcp-sync:start))
+
+  ;; Agent layer bootstrap
+  (when (not app.agent-registry)
+    (set app.agent-registry (AgentRegistry.AgentRegistry {:deps {:app app}})))
+  (when (not app.agent-approvals)
+    (set app.agent-approvals
+         (AgentApprovals.AgentApprovals
+           {:policy {:normal :auto
+                     :filesystem-read :ask
+                     :filesystem-write :ask
+                     :destructive :ask
+                     :shell :ask}})))
+  (when (not app.agent-tool-surface)
+    (set app.agent-tool-surface
+         (AgentToolSurface.AgentToolSurface
+           {:presets app.agent-presets
+            :mcp-tools app.mcp-tools
+            :approvals app.agent-approvals})))
+  (when app.agent-preset-mcp-sync
+    (app.agent-preset-mcp-sync:stop)
+    (set app.agent-preset-mcp-sync nil))
+  (when (and app.agent-tool-surface (not app.agent-mcp-sync))
+    (set app.agent-mcp-sync
+         (AgentMcpSync.AgentMcpSync {:surface app.agent-tool-surface
+                                     :change-source app.agent-presets
+                                     :tool-registry app.mcp-tools
+                                     :owner "agent-tools"}))
+    (app.agent-mcp-sync:start))
+  (when (not app.agent-opencode-mcp-bridge)
+    (set app.agent-opencode-mcp-bridge
+         (AgentOpencodeMcpBridge.AgentOpencodeMcpBridge
+           {:tools app.mcp-tools
+            :data-dir (fs.join-path app.user-data-dir "agent-opencode")}))
+    (app.agent-opencode-mcp-bridge:start))
   (when (and app.canvas-shell-changed (not app.agent-presets-canvas-handler))
     (set app.agent-presets-canvas-handler
          (app.canvas-shell-changed:connect
@@ -1585,6 +1621,42 @@
                {:surface current.interaction-surface
                 :mode current.canvas-mode
                 :canvas-visible? current.canvas-visible?})))))
+
+  (when (not app.agent-providers)
+    (set app.agent-providers {}))
+  (when (not (. app.agent-providers :opencode-factory))
+    (tset app.agent-providers :opencode-factory
+          (fn []
+            (local bridge (or app.agent-opencode-mcp-bridge
+                              (error "OpenCode agent provider requires app.agent-opencode-mcp-bridge")))
+            (local provider
+              (OpencodeSdk.Opencode
+                {:opencode-path (or (os.getenv "OPENCODE_PATH") "opencode")
+                 :env (bridge:opencode-env)}))
+            (tset app.agent-providers :opencode provider)
+            provider)))
+  (SpaceAgent.register app.agent-registry
+    {:app app
+     :presets app.agent-presets
+     :tools app.agent-tool-surface
+     :approvals app.agent-approvals
+     :providers app.agent-providers})
+  (PromptUtils.register-enricher
+    :active-world
+    (fn [ctx]
+      (when ctx.app.world-manager
+        "active world available")))
+  (when (not app.agent-runner)
+    (set app.agent-runner
+         (AgentRunner.AgentRunner
+           {:data-dir (fs.join-path app.user-data-dir "agent-sessions")
+            :registry app.agent-registry
+            :deps {:app app
+                   :presets app.agent-presets
+                   :tools app.agent-tool-surface
+                   :approvals app.agent-approvals
+                   :agents app.agent-registry
+                   :providers app.agent-providers}})))
 
   (local init-end-ms (wall-now-ms))
   (logging.info
@@ -1807,12 +1879,26 @@
   (when (and app.kernels app.kernels.drop)
     (app.kernels:drop)
     (set app.kernels nil))
-  (when app.agent-preset-mcp-sync
-    (app.agent-preset-mcp-sync:stop)
-    (set app.agent-preset-mcp-sync nil))
+  (when app.agent-runner
+    (app.agent-runner:drop)
+    (set app.agent-runner nil))
+  (when app.agent-providers
+    (local opencode app.agent-providers.opencode)
+    (when (and opencode opencode.close)
+      (opencode.close)))
+  (set app.agent-providers nil)
+  (when app.agent-opencode-mcp-bridge
+    (app.agent-opencode-mcp-bridge:stop)
+    (set app.agent-opencode-mcp-bridge nil))
+  (when app.agent-mcp-sync
+    (app.agent-mcp-sync:stop)
+    (set app.agent-mcp-sync nil))
   (when (and app.agent-presets-canvas-handler app.canvas-shell-changed)
     (app.canvas-shell-changed:disconnect app.agent-presets-canvas-handler true)
     (set app.agent-presets-canvas-handler nil))
+  (set app.agent-tool-surface nil)
+  (set app.agent-approvals nil)
+  (set app.agent-registry nil)
   (set app.next-frame-queue [])
   (set app.next-frame-pending [])
   (set app.projection nil)
