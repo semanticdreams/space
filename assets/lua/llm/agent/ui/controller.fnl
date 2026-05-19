@@ -85,6 +85,10 @@
         (set state.items (or session.items []))
         (self:notify))))
 
+  (fn reload-active-session [self]
+    (self:load-sessions)
+    (self:load-session-items))
+
   (fn select-agent [self agent-id]
     (set state.active-agent-id agent-id)
     (set state.active-session-id nil)
@@ -111,19 +115,19 @@
       (local handle
         (runner:run-turn state.active-session-id text
           {:on-item (fn [_item]
-                      (self:load-session-items))
-           :on-update (fn [_item-id _updates]
-                        (self:notify))
-           :on-status (fn [status-info]
-                        (set state.active-turn status-info)
-                        (self:notify))
-           :on-complete (fn [_result-info]
-                          (set state.active-turn nil)
-                          (self:load-session-items))
-           :on-error (fn [error-info]
-                       (set state.active-turn nil)
-                       (set state.last-error error-info.error)
-                       (self:load-session-items))}))
+                      (reload-active-session self))
+            :on-update (fn [_item-id _updates]
+                         (self:notify))
+            :on-status (fn [status-info]
+                         (set state.active-turn status-info)
+                         (self:load-sessions))
+            :on-complete (fn [_result-info]
+                           (set state.active-turn nil)
+                           (reload-active-session self))
+            :on-error (fn [error-info]
+                        (set state.active-turn nil)
+                        (set state.last-error error-info.error)
+                        (reload-active-session self))}))
       (when handle
         (local status (and handle.status (handle:status)))
         (if (= status :running)

@@ -54,6 +54,7 @@
                                    :role :user
                                    :content input
                                    :created-at (os.time)})
+      (set session.status :running)
       (set session.updated-at (os.time)))
     (table.insert turns {:session-id session-id :input input :callbacks callbacks})
     (when callbacks.on-status
@@ -74,11 +75,22 @@
     (table.insert cancelled session-id)
     true)
 
+  (fn complete-last-turn [self]
+    (local turn (. turns (length turns)))
+    (local session (. sessions turn.session-id))
+    (set session.status :idle)
+    (set session.updated-at (os.time))
+    (when turn.callbacks.on-complete
+      (turn.callbacks.on-complete {:session-id turn.session-id
+                                   :status :completed}))
+    true)
+
   {:create-session create-session
    :get-session get-session
    :list-sessions list-sessions
    :run-turn run-turn
-   :cancel-turn cancel-turn})
+   :cancel-turn cancel-turn
+   :complete-last-turn complete-last-turn})
 
 (fn test-controller-init []
   (local registry (AgentRegistry {:deps {}}))
@@ -139,8 +151,17 @@
           "send should refresh the appended user message")
   (assert (= (. controller.state.items 1 :content) "draw a circle")
           "send should expose the submitted content")
+  (assert (= (. controller.state.sessions 1 :status) :running)
+          "send should refresh the active session status")
+  (assert (= (. controller.state.sessions 1 :item-count) 1)
+          "send should refresh active session item count")
   (assert controller.state.active-turn
-          "send should mark the controller running immediately"))
+          "send should mark the controller running immediately")
+  (runner:complete-last-turn)
+  (assert (not controller.state.active-turn)
+          "turn completion should clear active turn")
+  (assert (= (. controller.state.sessions 1 :status) :idle)
+          "turn completion should refresh the active session status"))
 
 (fn test-controller-stop []
   (local registry (AgentRegistry {:deps {}}))
