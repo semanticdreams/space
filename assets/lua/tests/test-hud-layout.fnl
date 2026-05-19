@@ -116,10 +116,137 @@
           "status panel should lay out the info column when body column is absent")
   (panel:drop))
 
+(fn right-dock-appears-when-configured []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 30
+              :half-height 15})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 8 2 0))
+       :right-dock-builder (fixed-widget "right-dock" (glm.vec3 5 4 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 4 5 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (local right-dock entity.right-dock-root)
+  (assert right-dock "hud layout should create a right dock root when configured")
+  (entity:drop))
+
+(fn right-dock-absent-when-not-configured []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 20
+              :half-height 15})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 8 2 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 4 5 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (assert (not entity.right-dock-root) "hud layout should not create right dock when not configured")
+  (entity:drop))
+
+(fn right-dock-fills-canvas-band-height []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 30
+              :half-height 15})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 8 2 0))
+       :right-dock-builder (fixed-widget "right-dock" (glm.vec3 5 4 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 4 5 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (local right-dock entity.right-dock-root)
+  (assert (= right-dock.layout.size.y 25)
+          "right dock should span the full canvas band between status and control panels")
+  (entity:drop))
+
+(fn right-dock-coexists-with-left-dock []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 40
+              :half-height 15})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 8 2 0))
+       :left-dock-builder (fixed-widget "left-dock" (glm.vec3 6 4 0))
+       :right-dock-builder (fixed-widget "right-dock" (glm.vec3 5 4 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 4 5 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (assert entity.left-dock-root "left dock should be present")
+  (assert entity.right-dock-root "right dock should be present alongside left dock")
+  (local tiles entity.tiles-root)
+  (assert (> tiles.layout.size.x 0) "tiles should have positive width between docks")
+  (entity:drop))
+
+(fn right-dock-width-is-in-hud-units []
+  (local hud {:world-units-per-pixel 0.05
+              :margin-px 0
+              :half-width 50
+              :half-height 15})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 8 2 0))
+       :right-dock-builder (fixed-widget "right-dock" (glm.vec3 5 4 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (assert (= entity.right-dock-root.layout.size.x 42)
+          "right dock width should use stable HUD world units, not pixels")
+  (entity:drop))
+
 (table.insert tests {:name "Hud layout left dock fills canvas band height"
                      :fn left-dock-fills-canvas-band-height})
 (table.insert tests {:name "Hud layout left dock reserves width from tiles"
                      :fn left-dock-reserves-width-from-tiles})
+(table.insert tests {:name "Hud layout right dock appears when configured"
+                     :fn right-dock-appears-when-configured})
+(table.insert tests {:name "Hud layout right dock absent when not configured"
+                     :fn right-dock-absent-when-not-configured})
+(table.insert tests {:name "Hud layout right dock fills canvas band height"
+                     :fn right-dock-fills-canvas-band-height})
+(table.insert tests {:name "Hud layout right dock coexists with left dock"
+                     :fn right-dock-coexists-with-left-dock})
+(table.insert tests {:name "Hud layout right dock width is in HUD units"
+                     :fn right-dock-width-is-in-hud-units})
 (table.insert tests {:name "Status panel layout uses one gap with two columns"
                      :fn status-panel-layout-uses-single-gap-with-two-columns})
 

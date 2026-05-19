@@ -97,7 +97,9 @@
             (set self.selected next-item)
             (update-button-label)
             (when (and emit? (not (= previous next-value)))
-                (self.changed:emit next-value)))
+                (self.changed:emit next-value)
+                (when options.on-change
+                    (options.on-change self next-value))))
 
         (fn set-items [self new-items]
             (set self.items (normalize-items new-items))
@@ -283,6 +285,7 @@
         (set view.set-items set-items)
         (set view.set-selected (fn [self value] (set-selected self value true)))
         (set view.set-value (fn [self value] (set-selected self value true)))
+        (set view.sync-value (fn [self value] (set-selected self value false)))
         (set view.get-value (fn [self] (and self.selected self.selected.value)))
         (set view.get-label (fn [self] (resolve-label)))
         (set view.open (fn [self] (set-open self true)))

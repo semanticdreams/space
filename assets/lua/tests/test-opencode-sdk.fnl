@@ -7,6 +7,7 @@
 (local Global (require :llm/providers/opencode/global))
 (local Sse (require :llm/providers/opencode/sse))
 (local Client (require :llm/providers/opencode/client))
+(local Server (require :llm/providers/opencode/server))
 (local fixtures (require :tests/http-fixtures))
 (local json (require :json))
 
@@ -528,6 +529,31 @@
       (assert result.data.info "noReply prompt should have info")
       (assert result.data.parts "noReply prompt should have parts"))))
 
+(fn test-server-defaults-to-dynamic-port []
+  (var spawned-args nil)
+  (var killed? false)
+  (local fake-process
+    {:spawn (fn [spec]
+              (set spawned-args spec.args)
+              "proc-1")
+     :read (fn [_id]
+             {:stdout "Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.\nopencode server listening on http://127.0.0.1:41387\n"
+              :stderr ""
+              :finished false})
+     :poll (fn [_timeout] nil)
+     :running (fn [_id] true)
+     :kill (fn [_id]
+             (set killed? true))
+     :wait (fn [_id] nil)})
+  (local server (Server {:process fake-process}))
+  (server:start)
+  (assert (= (. spawned-args 4) "--port=0")
+          "OpenCode server should request a dynamic port by default")
+  (assert (= (server:url) "http://127.0.0.1:41387")
+          "OpenCode server should use the reported dynamic URL")
+  (server:stop)
+  (assert killed? "server stop should terminate the spawned process"))
+
 (local tests
   [{:name "client creation" :fn test-client-creation}
    {:name "opencode client factory" :fn test-opencode-client-factory}
@@ -567,7 +593,8 @@
    {:name "client stream submit" :fn test-client-stream-submit}
    {:name "file read requires path" :fn test-file-read-requires-path}
    {:name "events subscribe json parse" :fn test-events-subscribe-json-parse}
-   {:name "no-reply prompt" :fn test-no-reply-prompt}])
+   {:name "no-reply prompt" :fn test-no-reply-prompt}
+   {:name "server defaults to dynamic port" :fn test-server-defaults-to-dynamic-port}])
 
 (local main
   (fn []

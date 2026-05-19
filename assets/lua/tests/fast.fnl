@@ -93,6 +93,9 @@
     :tests.test-agent-presets
     :tests.test-agent-presets-mcp
     :tests.test-agent-layer
+    :tests.test-agent-panel
+    :tests.test-disclosure-row
+    :tests.test-status-badge
     :tests.test-mcp
     :tests.test-http-server
     :tests.test-mcp-http

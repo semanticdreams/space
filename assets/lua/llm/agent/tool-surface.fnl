@@ -50,22 +50,42 @@
       (error (.. "no active preset risk found for tool source: " source)))
     risk)
 
-  (fn risk-approved? [def risk]
-    (local state (approvals:check-risk risk {:tool def.name :source def.managed-source}))
-    (if (= state :approved)
-        true
-        (or (= state :denied) (= state :needs-approval))
-        false
-        (error (.. "unknown approval state for tool '" def.name "': " (tostring state)))))
-
-  (fn approved-tool-defs []
+  (fn active-tool-defs []
     (local risk-map (active-tool-risks))
     (local result [])
     (each [_ def (ipairs (presets:get-tool-defs))]
       (local risk (tool-risk risk-map def))
-      (when (risk-approved? def risk)
-        (table.insert result def)))
+      (table.insert result {:def def :risk risk}))
     result)
+
+  (fn copy-tool-def [def]
+    (local copy {})
+    (each [k v (pairs def)]
+      (tset copy k v))
+    copy)
+
+  (fn approval-reason [name risk]
+    (.. name " requested " (tostring risk) " access"))
+
+  (fn run-with-approval [self def risk args]
+    (var approved? false)
+    (var denied? false)
+    (local context {:tool def.name
+                    :source def.managed-source
+                    :grant-on-approve true})
+    (local reason (approval-reason def.name risk))
+    (local result
+      (approvals:request-risk risk reason
+        {:on-approved (fn [_approval] (set approved? true))
+         :on-denied (fn [_approval] (set denied? true))}
+        context))
+    (if approved?
+        (def.run (or args {}))
+        denied?
+        (error (.. "tool denied by approval policy: " def.name " (" risk ")"))
+        (= result false)
+        (error (.. "tool requires approval before execution: " def.name " (" risk ")"))
+        (error (.. "tool approval did not resolve execution state: " def.name))))
 
   (fn active-presets [self]
     (presets:get-active-presets))
@@ -74,13 +94,23 @@
     (presets:get-prompt-fragments))
 
   (fn mcp-tool-defs [self]
-    (approved-tool-defs))
+    (local result [])
+    (each [_ entry (ipairs (active-tool-defs))]
+      (local raw-def entry.def)
+      (local wrapped (copy-tool-def raw-def))
+      (set wrapped.risk entry.risk)
+      (set wrapped.run
+           (fn [args]
+             (self:call raw-def.name args)))
+      (table.insert result wrapped))
+    result)
 
   (fn openai-tools [self]
     "Convert MCP tool defs to OpenAI function tool definitions."
-    (local defs (self:mcp-tool-defs))
+    (local defs (active-tool-defs))
     (local result [])
-    (each [_ def (ipairs defs)]
+    (each [_ entry (ipairs defs)]
+      (local def entry.def)
       (when (not def.inputSchema)
         (error (.. "MCP tool def missing inputSchema: " def.name)))
       (table.insert result
@@ -92,18 +122,15 @@
 
   (fn call [self name args]
     "Execute a tool by its MCP name through the MCP tool registry."
-    (local risk-map (active-tool-risks))
     (var matched nil)
     (var matched-risk nil)
-    (each [_ def (ipairs (presets:get-tool-defs))]
-      (when (= def.name name)
-        (set matched def)
-        (set matched-risk (tool-risk risk-map def))))
+    (each [_ entry (ipairs (active-tool-defs))]
+      (when (= entry.def.name name)
+        (set matched entry.def)
+        (set matched-risk entry.risk)))
     (when (not matched)
       (error (.. "tool is not active for agent surface: " name)))
-    (when (not (risk-approved? matched matched-risk))
-      (error (.. "tool requires approval before execution: " name " (" matched-risk ")")))
-    (mcp-tools:call name (or args {})))
+    (run-with-approval self matched matched-risk args))
 
   (fn require-risk [self risk reason callbacks]
     (assert (= (type callbacks) "table") "require-risk requires callbacks table")

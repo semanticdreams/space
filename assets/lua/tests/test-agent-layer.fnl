@@ -330,6 +330,10 @@
   (reg:register "beta" (fn [d] {:id "beta" :name "Beta"}))
   (local items (reg:list))
   (assert (= (length items) 2) "should list 2 agents")
+  (assert (= (. items 1 :id) "alpha") "registry list should be sorted by id")
+  (assert (= (. items 1 :name) "Alpha") "registry list should resolve display names")
+  (assert (= (. items 2 :id) "beta") "registry list should keep deterministic order")
+  (assert (= (. items 2 :name) "Beta") "registry list should resolve later display names")
   (var found-alpha false)
   (var found-beta false)
   (each [_ item (ipairs items)]
@@ -398,13 +402,55 @@
 (fn test-approvals-request-risk-needs-approval []
   (local {: AgentApprovals} (require :llm/agent/approvals))
   (var denied-result nil)
+  (var approved-result nil)
+  (var requested-result nil)
   (local approvals (AgentApprovals {:policy {:destructive :ask}}))
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set requested-result request))))
   (local result (approvals:request-risk :destructive "delete world"
-    {:on-approved (fn [r] nil)
+    {:on-approved (fn [r] (set approved-result r))
      :on-denied (fn [r] (set denied-result r))}))
   (assert (= result false) "should return false when needs approval")
-  (assert denied-result "on-denied should be called")
-  (assert denied-result.needs-approval "should indicate needs-approval"))
+  (assert requested-result "pending request should be emitted")
+  (assert requested-result.needs-approval "should indicate needs-approval")
+  (assert (not denied-result) "on-denied should wait for explicit denial")
+  (requested-result:approve)
+  (assert approved-result "approve should resolve via on-approved"))
+
+(fn test-approvals-approve-grants-one-matching-retry []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (local context {:tool "space_app_run_bash"
+                  :source "app.run-bash"
+                  :grant-on-approve true})
+  (local first-result
+    (approvals:request-risk :shell "space_app_run_bash requested shell access"
+      {:on-approved (fn [_r] nil)
+       :on-denied (fn [_r] nil)}
+      context))
+  (assert (= first-result false) "first ask-policy request should become pending")
+  (assert (= (length (approvals:list-pending)) 1) "pending request should be listed")
+  (pending:approve)
+  (assert (= (length (approvals:list-pending)) 0) "approved request should leave pending list")
+  (var approved-count 0)
+  (approvals:request-risk :shell "space_app_run_bash requested shell access"
+    {:on-approved (fn [_r] (set approved-count (+ approved-count 1)))
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert (= approved-count 1) "approval should grant one matching retry")
+  (local third-result
+    (approvals:request-risk :shell "space_app_run_bash requested shell access"
+      {:on-approved (fn [_r] (set approved-count (+ approved-count 1)))
+       :on-denied (fn [_r] nil)}
+      context))
+  (assert (= third-result false) "approval grant should be consumed after one retry"))
 
 (fn test-approvals-unknown-risk-asserts []
   (local {: AgentApprovals} (require :llm/agent/approvals))
@@ -482,59 +528,70 @@
   (local first-def (. defs 1))
   (assert (= first-def.name "space_test") "should have correct name"))
 
-(fn test-tool-surface-call-delegates-to-mcp []
+(fn test-tool-surface-call-runs-active-tool []
   (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
   (var call-log nil)
   (local mock-def {:name "space_draw_circle"
                    :description "draw"
                    :inputSchema {}
-                   :managed-source "draw-circle"})
-  (local mock-mcp-tools
-    {:call (fn [self name args]
-             (set call-log {:name name :args args})
-             {:content [{:type "text" :text "ok"}] :isError false})})
+                   :managed-source "draw-circle"
+                   :run (fn [args]
+                          (set call-log {:name "space_draw_circle" :args args})
+                          "ok")})
   (local mock-presets
     {:get-tool-defs (fn [] [mock-def])
      :get-active-presets (fn [] [{:name "drawing" :reason :context :risk :normal :tool-ids ["draw-circle"]}])
      :get-prompt-fragments (fn [] [])})
-  (local mock-approvals {:check-risk (fn [self risk context] :approved)})
+  (local mock-approvals (AgentApprovals {:policy {:normal :auto}}))
   (local surface (AgentToolSurface {:presets mock-presets
-                                     :mcp-tools mock-mcp-tools
+                                     :mcp-tools {}
                                      :approvals mock-approvals}))
   (surface:call "space_draw_circle" {:radius 10})
   (assert call-log "call should have been dispatched")
   (assert (= call-log.name "space_draw_circle") "should call correct tool")
   (assert (= call-log.args.radius 10) "should pass args"))
 
-(fn test-tool-surface-denies-unapproved-risk []
+(fn test-tool-surface-exposes-and-gates-ask-risk []
   (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var called false)
   (local mock-def {:name "space_shell"
                    :description "shell"
                    :inputSchema {}
-                   :managed-source "shell-tool"})
-  (var called false)
-  (local mock-mcp-tools
-    {:call (fn [self name args]
-             (set called true)
-             {:content []})})
+                   :managed-source "shell-tool"
+                   :run (fn [_args]
+                          (set called true)
+                          "ran")})
   (local mock-presets
     {:get-tool-defs (fn [] [mock-def])
      :get-active-presets (fn [] [{:name "shell-preset" :reason :override :risk :shell :tool-ids ["shell-tool"]}])
      :get-prompt-fragments (fn [] [])})
-  (local mock-approvals {:check-risk (fn [self risk context] :needs-approval)})
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
   (local surface (AgentToolSurface {:presets mock-presets
-                                     :mcp-tools mock-mcp-tools
-                                     :approvals mock-approvals}))
-  (assert (= (length (surface:mcp-tool-defs)) 0) "unapproved high-risk tool should not be exposed")
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (assert (= (length (surface:mcp-tool-defs)) 1) "ask-risk tool should still be exposed")
   (local (ok err) (pcall (fn [] (surface:call "space_shell" {}))))
-  (assert (not ok) "unapproved high-risk tool call should error")
-  (assert (not called) "unapproved high-risk tool should not execute"))
+  (assert (not ok) "ask-risk tool call should error while approval is pending")
+  (assert (string.match (tostring err) "requires approval") "error should explain pending approval")
+  (assert pending "tool call should create a pending approval request")
+  (assert (not called) "pending high-risk tool should not execute")
+  (pending:approve)
+  (local retry-result (surface:call "space_shell" {}))
+  (assert (= retry-result "ran") "approved matching retry should execute")
+  (assert called "approved retry should call the underlying tool"))
 
 ;; ═══════════════════════════════════════
 ;; Agent MCP sync tests
 ;; ═══════════════════════════════════════
 
-(fn test-agent-mcp-sync-registers-approved-surface-tools []
+(fn test-agent-mcp-sync-registers-surface-tools []
   (local {: AgentMcpSync} (require :llm/agent/mcp-sync))
   (local ToolRegistry (require :mcp/tool-registry))
   (var defs [{:name "space_agent_echo"
@@ -549,7 +606,7 @@
                              :owner "test-agent"}))
   (sync:start)
   (local tools (tool-reg:list))
-  (assert (= (# tools) 1) "approved surface tool should be registered")
+  (assert (= (# tools) 1) "surface tool should be registered")
   (assert (= (. tools 1 :name) "space_agent_echo") "registered tool name should match")
   (set defs [])
   (sync:sync)
@@ -1360,15 +1417,16 @@
 (table.insert tests {:name "approvals ask default" :fn test-approvals-ask-default})
 (table.insert tests {:name "approvals request-risk auto" :fn test-approvals-request-risk-auto})
 (table.insert tests {:name "approvals request-risk needs-approval" :fn test-approvals-request-risk-needs-approval})
+(table.insert tests {:name "approvals approve grants one matching retry" :fn test-approvals-approve-grants-one-matching-retry})
 (table.insert tests {:name "approvals unknown risk asserts" :fn test-approvals-unknown-risk-asserts})
 (table.insert tests {:name "approvals record decision" :fn test-approvals-record-decision})
 
 (table.insert tests {:name "tool surface active presets" :fn test-tool-surface-active-presets})
 (table.insert tests {:name "tool surface openai tools" :fn test-tool-surface-openai-tools})
 (table.insert tests {:name "tool surface mcp defs" :fn test-tool-surface-mcp-defs})
-(table.insert tests {:name "tool surface call delegates to mcp" :fn test-tool-surface-call-delegates-to-mcp})
-(table.insert tests {:name "tool surface denies unapproved risk" :fn test-tool-surface-denies-unapproved-risk})
-(table.insert tests {:name "agent mcp sync registers approved surface tools" :fn test-agent-mcp-sync-registers-approved-surface-tools})
+(table.insert tests {:name "tool surface call runs active tool" :fn test-tool-surface-call-runs-active-tool})
+(table.insert tests {:name "tool surface exposes and gates ask risk" :fn test-tool-surface-exposes-and-gates-ask-risk})
+(table.insert tests {:name "agent mcp sync registers surface tools" :fn test-agent-mcp-sync-registers-surface-tools})
 (table.insert tests {:name "agent mcp sync does not bypass surface gating" :fn test-agent-mcp-sync-does-not_bypass_surface_gating})
 (table.insert tests {:name "opencode mcp bridge starts and writes config" :fn test-opencode-mcp-bridge-starts-and-writes-config})
 

@@ -928,6 +928,14 @@
       (set hud-opts.status-panel-opts status-panel-opts))
     (when contrib.left_dock_builder
       (set hud-opts.left-dock-builder contrib.left_dock_builder))
+    (when app.agent-runner
+      (local AgentPanel (require :llm/agent/ui/panel))
+      (set hud-opts.right-dock-builder
+           (fn [ctx]
+             ((AgentPanel.AgentPanel {:runner app.agent-runner
+                                       :registry app.agent-registry
+                                       :approvals app.agent-approvals})
+              ctx))))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)
     (when contrib.overlay
@@ -1657,6 +1665,10 @@
                    :approvals app.agent-approvals
                    :agents app.agent-registry
                    :providers app.agent-providers}})))
+
+  ;; Rebuild HUD to show agent panel now that runner is available
+  (when (and app.hud app.agent-runner)
+    (apply-active-world-hud-contrib))
 
   (local init-end-ms (wall-now-ms))
   (logging.info

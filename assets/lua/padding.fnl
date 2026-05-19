@@ -5,7 +5,7 @@
   {
    :all (fn [self v] [v v v v v v])
    :only (fn [self v] [(or v.x0 0) (or v.y0 0) (or v.z0 0)
-                  (or v.x1 0) (or v.y1 0) (or v.z1)])
+                  (or v.x1 0) (or v.y1 0) (or v.z1 0)])
    :symmetric (fn [self v] [(or v.x 0) (or v.y 0) (or v.z 0)
                        (or v.x 0) (or v.y 0) (or v.z 0)])
    :auto (fn [self v]

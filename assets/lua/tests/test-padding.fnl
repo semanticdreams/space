@@ -62,7 +62,21 @@
   (padding:drop)
   (assert child.state.drop-called))
 
+(fn padding-four-value-insets-normalize-z []
+  (local child (make-test-child))
+  (local padding ((Padding {:edge-insets [1 2 3 4]
+                            :child child.builder}) {}))
+  (padding.layout:measurer)
+  (assert (= padding.layout.measure.x 5)
+          "four-value insets should add x0 and x1")
+  (assert (= padding.layout.measure.y 9)
+          "four-value insets should add y0 and y1")
+  (assert (= padding.layout.measure.z 2)
+          "four-value insets should leave z unchanged")
+  (padding:drop))
+
 (table.insert tests {:name "Padding propagates rotation and offsets" :fn padding-propagates-rotation})
+(table.insert tests {:name "Padding four-value insets normalize z" :fn padding-four-value-insets-normalize-z})
 
 (local main
   (fn []

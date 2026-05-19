@@ -62,9 +62,12 @@
 
 (fn combo-box-selects-and-emits []
     (local ctx (make-ctx))
+    (var changed-option nil)
     (local combo
         ((ComboBox {:items ["user" "assistant" "system"]
-                    :value "assistant"})
+                    :value "assistant"
+                    :on-change (fn [_combo value]
+                                    (set changed-option value))})
          ctx))
     (assert (= (combo:get-value) "assistant"))
     (assert (= (combo:get-label) "assistant"))
@@ -75,6 +78,7 @@
     (assert (= (combo:get-value) "user"))
     (assert (= (combo:get-label) "user"))
     (assert (= emitted "user"))
+    (assert (= changed-option "user"))
     (combo.changed:disconnect handler true)
     (combo:drop))
 
@@ -110,6 +114,27 @@
     (combo:set-items ["right"])
     (assert (= (combo:get-value) nil))
     (assert (= (combo:get-label) "Pick one"))
+    (combo:drop))
+
+(fn combo-box-syncs-loaded-items-without-emitting []
+    (local ctx (make-ctx))
+    (var emitted nil)
+    (var changed-option nil)
+    (local combo
+        ((ComboBox {:items []
+                    :placeholder "Agent"
+                    :on-change (fn [_combo value]
+                                    (set changed-option value))})
+         ctx))
+    (local handler (combo.changed:connect (fn [value]
+                                              (set emitted value))))
+    (combo:set-items [{:label "General" :value "agent.general"}])
+    (combo:sync-value "agent.general")
+    (assert (= (combo:get-value) "agent.general"))
+    (assert (= (combo:get-label) "General"))
+    (assert (= emitted nil))
+    (assert (= changed-option nil))
+    (combo.changed:disconnect handler true)
     (combo:drop))
 
 (fn combo-box-closes-after-layout []
@@ -181,6 +206,8 @@
 (table.insert tests {:name "ComboBox selects and emits" :fn combo-box-selects-and-emits})
 (table.insert tests {:name "ComboBox open/close updates layout" :fn combo-box-toggle-updates-layout})
 (table.insert tests {:name "ComboBox clears selection when items change" :fn combo-box-clears-removed-selection})
+(table.insert tests {:name "ComboBox syncs loaded items without emitting"
+                     :fn combo-box-syncs-loaded-items-without-emitting})
 (table.insert tests {:name "ComboBox closes after layout" :fn combo-box-closes-after-layout})
 (table.insert tests {:name "ComboBox closes on focus loss" :fn combo-box-closes-on-focus-loss})
 (table.insert tests {:name "ComboBox closed skips list focus"

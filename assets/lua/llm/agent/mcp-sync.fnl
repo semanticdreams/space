@@ -1,5 +1,5 @@
-;; AgentMcpSync — synchronizes approved AgentToolSurface MCP defs into a ToolRegistry.
-;; This is the agent-facing MCP boundary; raw preset tools must not bypass approvals here.
+;; AgentMcpSync — synchronizes AgentToolSurface MCP defs into a ToolRegistry.
+;; This is the agent-facing MCP boundary; registered defs are approval-gated by the surface.
 
 (fn AgentMcpSync [opts]
   (local surface (or opts.surface (error "AgentMcpSync requires :surface")))

@@ -1,10 +1,10 @@
-(local process (require :process))
+(local Process (require :process))
 (local sysinfo (require :sysinfo))
 (local callbacks (require :callbacks))
 (local logging (require :logging))
 
 (local default-hostname "127.0.0.1")
-(local default-port 4096)
+(local default-port 0)
 (local default-timeout-ms 10000)
 
 (fn now-ms []
@@ -12,6 +12,7 @@
 
 (fn Server [opts]
   (local options (or opts {}))
+  (local process (or options.process Process))
   (assert process "opencode server requires the process module")
 
   (local hostname (or options.hostname default-hostname))

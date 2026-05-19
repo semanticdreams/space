@@ -2,6 +2,7 @@
 (local {: Layout} (require :layout))
 (local {: Flex : FlexChild} (require :flex))
 (local Stack (require :stack))
+(local Sized (require :sized))
 (local Tiles (require :tiles))
 (local FloatLayer (require :float-layer))
 (local ControlPanel (require :hud-control-panel))
@@ -123,6 +124,8 @@
     (set overlay.drop drop)
     overlay))
 
+(local default-right-dock-width 42)
+
 (fn make-hud-builder [opts]
   (local options (or opts {}))
   (local control-builder (or options.control-builder
@@ -138,6 +141,7 @@
   (local overlay-root (make-overlay-root))
   (local middle-overlay-root (make-overlay-root))
   (local left-dock-builder options.left-dock-builder)
+  (local right-dock-builder options.right-dock-builder)
   (local control-wrapper (FullWidth {:name "control-panel-wrapper"
                                      :child control-builder}))
   (local status-wrapper (FullWidth {:name "status-panel-wrapper"
@@ -150,11 +154,18 @@
     (local overlay (overlay-root ctx))
     (local middle-overlay (middle-overlay-root ctx))
     (local left-dock (and left-dock-builder (left-dock-builder ctx)))
+    (local right-dock (and right-dock-builder (right-dock-builder ctx)))
     (local hud (or ctx.pointer-target {}))
     (local base-children [])
     (when left-dock
       (table.insert base-children (FlexChild (fn [_ctx] left-dock))))
     (table.insert base-children (FlexChild (fn [_ctx] tiles) 1))
+    (when right-dock
+      (local right-dock-width (or options.right-dock-width default-right-dock-width))
+      (table.insert base-children
+                    (FlexChild (fn [_ctx] ((Sized {:size (glm.vec3 right-dock-width 0 0)
+                                                    :child (fn [_ctx] right-dock)})
+                                           _ctx)))))
     (local middle-base
       ((Flex {:axis 1
               :xspacing 0
@@ -218,6 +229,8 @@
         (float:update))
       (when (and left-dock left-dock.update)
         (left-dock:update))
+      (when (and right-dock right-dock.update)
+        (right-dock:update))
       (when (and overlay overlay.update)
         (overlay:update)))
 
@@ -235,6 +248,7 @@
      :tiles-root tiles
      :float-root float
      :left-dock-root left-dock
+     :right-dock-root right-dock
      :middle-overlay-root middle-overlay
      :overlay-root overlay
      :drop drop}))

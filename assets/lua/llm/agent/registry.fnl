@@ -28,9 +28,13 @@
               nil))))
 
   (fn list [self]
-    (local result [])
+    (local ids [])
     (each [id _factory (pairs factories)]
-      (local instance (. instances id))
+      (table.insert ids id))
+    (table.sort ids)
+    (local result [])
+    (each [_ id (ipairs ids)]
+      (local instance (self:get id))
       (table.insert result {:id id
                             :name (or (and instance instance.name) id)}))
     result)
