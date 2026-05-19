@@ -27,11 +27,23 @@
   (fn build [ctx]
     (local clickables (assert ctx.clickables "SessionList requires ctx.clickables"))
 
+    (local theme (and ctx ctx.theme))
+    (local list-theme (and theme theme.list-view))
+    (local selected-bg
+      (or (and list-theme list-theme.item-selected-background)
+          (glm.vec4 0.18 0.22 0.34 1)))
+    (local item-fg
+      (or (and list-theme list-theme.item-foreground)
+          theme.text.foreground
+          (glm.vec4 0.9 0.92 0.97 1)))
+    (local dim-fg
+      (or (and theme theme.text theme.text.dim-foreground)
+          (glm.vec4 0.55 0.58 0.64 1)))
+
     (fn make-row [session child-ctx]
       (local selected? (= session.id controller.state.active-session-id))
       (local bg-rect
-        ((Rectangle {:color (if selected?
-                                (glm.vec4 0.18 0.22 0.34 1)
+        ((Rectangle {:color (if selected? selected-bg
                                 (glm.vec4 0 0 0 0))})
          child-ctx))
       (local badge
@@ -42,12 +54,12 @@
          child-ctx))
       (local title-text
         ((Text {:text (session-title session)
-                :style (TextStyle {:color (glm.vec4 0.9 0.92 0.97 1)
+                :style (TextStyle {:color item-fg
                                    :scale 1.3})})
          child-ctx))
       (local time-text
         ((Text {:text (format-timestamp session.updated-at)
-                :style (TextStyle {:color (glm.vec4 0.55 0.58 0.64 1)
+                :style (TextStyle {:color dim-fg
                                    :scale 1.0})})
          child-ctx))
       (local padded

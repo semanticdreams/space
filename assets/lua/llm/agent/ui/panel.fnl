@@ -3,8 +3,7 @@
 (local glm (require :glm))
 (local {: Flex : FlexChild} (require :flex))
 (local Padding (require :padding))
-(local Rectangle (require :rectangle))
-(local Stack (require :stack))
+(local Card (require :card))
 (local Text (require :text))
 (local TextStyle (require :text-style))
 (local Button (require :button))
@@ -34,11 +33,13 @@
                              :registry opts.registry
                              :approvals opts.approvals}))
 
-    (local bg ((Rectangle {:color (glm.vec4 0.08 0.09 0.12 1)}) ctx))
+    (local dim-foreground
+      (or (and ctx ctx.theme ctx.theme.text ctx.theme.text.dim-foreground)
+          (glm.vec4 0.55 0.58 0.64 1)))
 
     (local agent-label
       ((Text {:text "Agent"
-              :style (TextStyle {:color (glm.vec4 0.55 0.58 0.64 1)
+              :style (TextStyle {:color dim-foreground
                                  :scale 1.2})})
        ctx))
     (fn current-agent-items []
@@ -79,8 +80,8 @@
        ctx))
     (local session-title-text
       ((Text {:text ""
-              :style (TextStyle {:color (glm.vec4 0.45 0.48 0.55 1)
-                                 :scale 1.1})})
+               :style (TextStyle {:color dim-foreground
+                                  :scale 1.1})})
        ctx))
     (local status-row
       ((Flex {:axis 1
@@ -209,7 +210,7 @@
        ctx))
 
     (local root
-      ((Stack {:children [(fn [_ctx] bg) (fn [_ctx] content-flex)]})
+      ((Card {:child (fn [_ctx] content-flex)})
        ctx))
 
     (fn refresh-state []

@@ -13,17 +13,14 @@
 (local json (require :json))
 (local gl (require :gl))
 
-(local user-bg (glm.vec4 0.15 0.22 0.38 0.95))
-(local assistant-bg (glm.vec4 0.12 0.13 0.17 0.95))
-(local error-bg (glm.vec4 0.28 0.1 0.12 0.95))
-(local tool-bg (glm.vec4 0.1 0.14 0.18 0.95))
-(local event-bg (glm.vec4 0.08 0.1 0.12 0.8))
+(fn resolve-transcript-role [ctx role]
+  (local theme (and ctx ctx.theme))
+  (local transcript (and theme theme.transcript))
+  (and transcript (. transcript role)))
 
-(local user-text-color (glm.vec4 0.94 0.95 1 1))
-(local assistant-text-color (glm.vec4 0.88 0.9 0.95 1))
-(local error-text-color (glm.vec4 0.98 0.75 0.72 1))
-(local tool-text-color (glm.vec4 0.82 0.85 0.9 1))
-(local event-text-color (glm.vec4 0.55 0.58 0.64 1))
+(fn dim-foreground [ctx]
+  (or (and ctx ctx.theme ctx.theme.text ctx.theme.text.dim-foreground)
+      (glm.vec4 0.55 0.58 0.64 1)))
 
 (fn code-font [ctx]
   (when (= (type ctx.theme) :table)
@@ -32,14 +29,16 @@
         theme.font)))
 
 (fn code-style [ctx color]
+  (local tool-role (resolve-transcript-role ctx :tool))
   (TextStyle {:font (code-font ctx)
-              :color (or color tool-text-color)
+              :color (or color (and tool-role tool-role.foreground) (glm.vec4 0.82 0.85 0.9 1))
               :scale 1.1}))
 
 (fn make-message-row [item controller ctx]
   (local is-user? (= item.role :user))
-  (local bg-color (if is-user? user-bg assistant-bg))
-  (local text-color (if is-user? user-text-color assistant-text-color))
+  (local role (resolve-transcript-role ctx (if is-user? :user :assistant)))
+  (local bg-color (or (and role role.background) (glm.vec4 0.12 0.13 0.17 0.95)))
+  (local text-color (or (and role role.foreground) (glm.vec4 0.88 0.9 0.95 1)))
   (local label (if is-user? "user" "assistant"))
 
   (local bg-rect ((Rectangle {:color bg-color}) ctx))
@@ -63,8 +62,8 @@
 
   (local label-text
     ((Text {:text label
-            :style (TextStyle {:color (glm.vec4 0.45 0.48 0.55 1)
-                               :scale 1.1})})
+             :style (TextStyle {:color (dim-foreground ctx)
+                                :scale 1.1})})
      ctx))
 
   (local header-row
@@ -117,7 +116,7 @@
   (fn summary-builder [summary-ctx]
     (local tool-name
       ((Text {:text (.. "▸ " (or item.name "tool"))
-              :style (code-style summary-ctx tool-text-color)})
+              :style (code-style summary-ctx)})
        summary-ctx))
     (local status
       ((StatusBadge {:text status-text :tone status-tone :scale 1.0 :padding [0.15 0.1]})
@@ -145,9 +144,9 @@
           "No details available"))
     ((Padding {:edge-insets [0.3 0.8]
                :child (fn [_ctx]
-                        ((Text {:text details-text
-                                :style (code-style details-ctx tool-text-color)})
-                         _ctx))})
+                         ((Text {:text details-text
+                                 :style (code-style details-ctx)})
+                          _ctx))})
      details-ctx))
 
   (local disclosure
@@ -158,8 +157,9 @@
                                   (controller:toggle-expanded item.id))})
      ctx))
 
+  (local tool-role (resolve-transcript-role ctx :tool))
   (local bg-rect
-    ((Rectangle {:color tool-bg}) ctx))
+    ((Rectangle {:color (or (and tool-role tool-role.background) (glm.vec4 0.1 0.14 0.18 0.95))}) ctx))
   (local padded
     ((Padding {:edge-insets [0.25 0.25]
                :child (fn [_ctx] disclosure)})
@@ -173,8 +173,9 @@
 
 (fn make-tool-result-row [item _controller ctx]
   (local is-error? item.is-error)
-  (local bg-color (if is-error? error-bg tool-bg))
-  (local text-color (if is-error? error-text-color tool-text-color))
+  (local role (resolve-transcript-role ctx (if is-error? :error :tool)))
+  (local bg-color (or (and role role.background) (glm.vec4 0.1 0.14 0.18 0.95)))
+  (local text-color (or (and role role.foreground) (glm.vec4 0.82 0.85 0.9 1)))
   (local status-text (if is-error? "tool error" "tool result"))
 
   (local bg-rect ((Rectangle {:color bg-color}) ctx))
@@ -205,10 +206,13 @@
    :type :tool-result})
 
 (fn make-error-row [item _controller ctx]
-  (local bg-rect ((Rectangle {:color error-bg}) ctx))
+  (local role (resolve-transcript-role ctx :error))
+  (local bg-color (or (and role role.background) (glm.vec4 0.28 0.1 0.12 0.95)))
+  (local text-color (or (and role role.foreground) (glm.vec4 0.98 0.75 0.72 1)))
+  (local bg-rect ((Rectangle {:color bg-color}) ctx))
   (local error-text
     ((Text {:text (.. "error: " (or item.error "unknown error"))
-            :style (TextStyle {:color error-text-color :scale 1.3})})
+            :style (TextStyle {:color text-color :scale 1.3})})
      ctx))
   (local padded
     ((Padding {:edge-insets [0.4 0.45]
@@ -222,9 +226,11 @@
    :type :error})
 
 (fn make-event-row [item _controller ctx]
+  (local role (resolve-transcript-role ctx :event))
+  (local text-color (or (and role role.foreground) (glm.vec4 0.55 0.58 0.64 1)))
   (local text
     ((Text {:text (or item.event "")
-            :style (TextStyle {:color event-text-color :scale 1.1})})
+            :style (TextStyle {:color text-color :scale 1.1})})
      ctx))
   (local padded
     ((Padding {:edge-insets [0.2 0.45]

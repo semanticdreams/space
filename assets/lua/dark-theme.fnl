@@ -24,8 +24,24 @@
    :bold-font bold-font
    :bold-italic-font bold-italic-font
    :text {:foreground text-color
+          :dim-foreground (glm.vec4 0.55 0.58 0.64 1)
           :scale 1.6}
-   :list-view {:header {:foreground text-color}}
+   :transcript {:user {:background (glm.vec4 0.15 0.22 0.38 0.95)
+                       :foreground (glm.vec4 0.94 0.95 1 1)}
+                :assistant {:background (glm.vec4 0.12 0.13 0.17 0.95)
+                            :foreground (glm.vec4 0.88 0.9 0.95 1)}
+                :tool {:background (glm.vec4 0.1 0.14 0.18 0.95)
+                       :foreground (glm.vec4 0.82 0.85 0.9 1)}
+                :error {:background (glm.vec4 0.28 0.1 0.12 0.95)
+                        :foreground (glm.vec4 0.98 0.75 0.72 1)}
+                :event {:background (glm.vec4 0.08 0.1 0.12 0.8)
+                        :foreground (glm.vec4 0.55 0.58 0.64 1)}}
+   :approval {:background (glm.vec4 0.22 0.17 0.05 1)
+              :title-foreground (glm.vec4 0.95 0.73 0.31 1)
+              :foreground (glm.vec4 0.92 0.88 0.75 1)}
+   :list-view {:header {:foreground text-color}
+               :item-selected-background (glm.vec4 0.18 0.22 0.34 1)
+               :item-foreground text-color}
    :combo-box {:items-per-page 10}
    :graph {:edge-color (glm.vec4 0.36 0.45 0.68 0.9)
            :edge-thickness 4.0

@@ -16,17 +16,22 @@
 
   (fn build [ctx]
     (local approval opts.approval)
-    (local bg ((Rectangle {:color (glm.vec4 0.22 0.17 0.05 1)}) ctx))
+    (local theme (and ctx ctx.theme))
+    (local approval-theme (and theme theme.approval))
+    (local bg-color (or (and approval-theme approval-theme.background) (glm.vec4 0.22 0.17 0.05 1)))
+    (local title-color (or (and approval-theme approval-theme.title-foreground) (glm.vec4 0.95 0.73 0.31 1)))
+    (local text-color (or (and approval-theme approval-theme.foreground) (glm.vec4 0.92 0.88 0.75 1)))
+    (local bg ((Rectangle {:color bg-color}) ctx))
 
     (local title
       ((Text {:text "Approval Needed"
-              :style (TextStyle {:color (glm.vec4 0.95 0.73 0.31 1)
+              :style (TextStyle {:color title-color
                                  :weight :bold
                                  :scale 1.3})})
        ctx))
     (local reason
       ((Text {:text (.. (or approval.reason approval.tool "tool") " · " (or approval.risk ""))
-              :style (TextStyle {:color (glm.vec4 0.92 0.88 0.75 1)
+              :style (TextStyle {:color text-color
                                  :scale 1.2})})
        ctx))
 

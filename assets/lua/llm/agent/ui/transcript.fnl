@@ -15,9 +15,13 @@
     (var item-rows [])
     (var inner-flex nil)
 
+    (local dim-foreground
+      (or (and ctx ctx.theme ctx.theme.text ctx.theme.text.dim-foreground)
+          (glm.vec4 0.45 0.48 0.55 1)))
+
     (local empty-text
       ((Text {:text "No messages yet."
-              :style (TextStyle {:color (glm.vec4 0.45 0.48 0.55 1)
+              :style (TextStyle {:color dim-foreground
                                  :scale 1.3})})
        ctx))
     (var empty-padded
@@ -75,7 +79,7 @@
              ((Padding {:edge-insets [1.0 0.5]
                         :child (fn [_ctx]
                                  ((Text {:text "No messages yet."
-                                         :style (TextStyle {:color (glm.vec4 0.45 0.48 0.55 1)
+                                         :style (TextStyle {:color dim-foreground
                                                             :scale 1.3})})
                                   _ctx))})
               ctx))))
