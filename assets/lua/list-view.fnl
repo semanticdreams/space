@@ -422,7 +422,7 @@
           (do
             (self.pagination:set-num-items (length self.items))
             (self.pagination:set-page 0 true))
-          (self:rebuild-children))
+          (self:rebuild-items-only))
       (self:reset-scroll-position)
       (self:update-scroll-viewport))
 

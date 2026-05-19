@@ -51,21 +51,12 @@
                   :on-change (fn [_box value]
                                (controller:select-agent value))})
        ctx))
-    (local new-session-btn
-      ((Button {:icon "add"
-                :variant :ghost
-                :icon-style {:scale 1.2}
-                :padding [0.2 0.2]
-                :on-click (fn [_btn _evt]
-                            (controller:new-session))})
-       ctx))
     (local agent-row
       ((Flex {:axis 1
               :xspacing 0.3
               :yalign :center
               :children [(FlexChild (fn [_ctx] agent-label))
-                         (FlexChild (fn [_ctx] combo-box) 1)
-                         (FlexChild (fn [_ctx] new-session-btn))]})
+                         (FlexChild (fn [_ctx] combo-box) 1)]})
        ctx))
     (local agent-row-padded
       ((Padding {:edge-insets [0.4 0.3 0.2 0.3]

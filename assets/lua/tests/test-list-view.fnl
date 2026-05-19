@@ -185,6 +185,21 @@
   (assert (= header-state.dropped 1))
   (list:drop))
 
+(fn list-view-set-items-keeps-header []
+  (local header-state {:built 0 :dropped 0})
+  (local states [])
+  (local builder (make-item-builder [(glm.vec3 1 1 0) (glm.vec3 1 1 0)] states))
+  (local ctx (make-test-ctx))
+  (local list ((ListView {:items [:first]
+                          :builder builder
+                          :show-head true
+                          :header-builder (make-header-builder header-state)}) ctx))
+  (assert (= header-state.built 1))
+  (list:set-items [:second])
+  (assert (= header-state.built 1) "set-items should not rebuild the header")
+  (assert (= header-state.dropped 0) "set-items should keep the existing header")
+  (list:drop))
+
 (fn list-view-update-item-keeps-focus-order []
   (local manager (FocusManager {:root-name "list-view-order"}))
   (local root (manager:get-root-scope))
@@ -439,6 +454,7 @@
 (table.insert tests {:name "ListView set-items drops previous children" :fn list-view-set-items-drops-previous-widgets})
 (table.insert tests {:name "ListView parks focus during refresh" :fn list-view-parks-focus-on-refresh})
 (table.insert tests {:name "ListView set-title rebuilds header" :fn list-view-set-title-rebuilds-header})
+(table.insert tests {:name "ListView set-items keeps header" :fn list-view-set-items-keeps-header})
 (table.insert tests {:name "ListView update-item keeps focus order" :fn list-view-update-item-keeps-focus-order})
 (table.insert tests {:name "ListView pagination builds visible page" :fn list-view-pagination-builds-current-page})
 (table.insert tests {:name "ListView enter activates focused item" :fn list-view-enter-activates-focused-item})

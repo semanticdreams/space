@@ -8,6 +8,7 @@
 (local {: Flex : FlexChild} (require :flex))
 (local Stack (require :stack))
 (local Rectangle (require :rectangle))
+(local Button (require :button))
 (local glm (require :glm))
 
 (fn status-tone [status]
@@ -26,6 +27,8 @@
 (fn AgentSessionList [controller]
   (fn build [ctx]
     (local clickables (assert ctx.clickables "SessionList requires ctx.clickables"))
+    (assert ctx.hoverables "SessionList requires ctx.hoverables")
+    (assert ctx.icons "SessionList requires ctx.icons")
 
     (local theme (and ctx ctx.theme))
     (local list-theme (and theme theme.list-view))
@@ -95,7 +98,31 @@
     (local list-view
       ((ListView {:items controller.state.sessions
                   :builder make-row
-                  :show-head? false
+                  :title "Sessions"
+                  :show-head true
+                  :header-builder (fn [header-ctx]
+                                    (local title
+                                      ((Text {:text "Sessions"
+                                              :style (TextStyle {:color dim-fg
+                                                                 :scale 1.2})})
+                                       header-ctx))
+                                    (local add-btn
+                                      ((Button {:icon "add"
+                                                :variant :ghost
+                                                :icon-style {:scale 1.1}
+                                                :padding [0.15 0.15]
+                                                :on-click (fn [_btn _evt]
+                                                            (controller:new-session))})
+                                       header-ctx))
+                                    ((Padding {:edge-insets [0.2 0.25]
+                                               :child (fn [_ctx]
+                                                        ((Flex {:axis 1
+                                                                :xspacing 0.3
+                                                                :yalign :center
+                                                                :children [(FlexChild (fn [_ctx] title) 1)
+                                                                           (FlexChild (fn [_ctx] add-btn))]})
+                                                         _ctx))})
+                                     header-ctx))
                   :item-spacing 0.1
                   :scrollbar-policy :as-needed
                   :scrollbar-width 0.4
