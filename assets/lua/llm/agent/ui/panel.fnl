@@ -126,7 +126,7 @@
     (local input-actions-flex
       ((Flex {:axis 1
               :xspacing 0.3
-              :yalign :center
+              :yalign :stretch
               :children [(FlexChild (fn [_ctx] input-widget) 1)
                          (FlexChild (fn [_ctx] retry-btn))
                          (FlexChild (fn [_ctx] stop-btn))
