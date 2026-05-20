@@ -12,6 +12,25 @@
 
 namespace {
 
+std::runtime_error sdl_error(const std::string& context)
+{
+    const char* error = SDL_GetError();
+    if (error && error[0] != '\0') {
+        return std::runtime_error(context + ": " + error);
+    }
+    return std::runtime_error(context);
+}
+
+void ensure_clipboard_video()
+{
+    if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0) {
+        SDL_ClearError();
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+            throw sdl_error("SDL video subsystem required for clipboard");
+        }
+    }
+}
+
 sol::table create_gl_table(sol::state_view lua)
 {
     sol::table gl = lua.create_table();
@@ -433,22 +452,39 @@ sol::table create_gl_table(sol::state_view lua)
     gl.set_function("glGetError", glGetError);
 
     gl.set_function("clipboard-has", []() {
-        return SDL_HasClipboardText();
+        ensure_clipboard_video();
+        SDL_ClearError();
+        bool has_text = SDL_HasClipboardText();
+        const char* error = SDL_GetError();
+        if (!has_text && error && error[0] != '\0') {
+            throw sdl_error("SDL_HasClipboardText failed");
+        }
+        return has_text;
     });
 
     gl.set_function("clipboard-get", []() {
+        ensure_clipboard_video();
+        SDL_ClearError();
         char* text = SDL_GetClipboardText();
         if (!text) {
-            throw std::runtime_error(SDL_GetError());
+            throw sdl_error("SDL_GetClipboardText failed");
         }
         std::string value(text);
         SDL_free(text);
+        if (value.empty()) {
+            const char* error = SDL_GetError();
+            if (error && error[0] != '\0') {
+                throw sdl_error("SDL_GetClipboardText failed");
+            }
+        }
         return value;
     });
 
     gl.set_function("clipboard-set", [](const std::string& value) {
-        if (SDL_SetClipboardText(value.c_str()) != 0) {
-            throw std::runtime_error(SDL_GetError());
+        ensure_clipboard_video();
+        SDL_ClearError();
+        if (!SDL_SetClipboardText(value.c_str())) {
+            throw sdl_error("SDL_SetClipboardText failed");
         }
         return true;
     });

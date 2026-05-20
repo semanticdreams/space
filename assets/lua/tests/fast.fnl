@@ -20,6 +20,7 @@
     :tests.test-aubio-pipelines
     :tests.test-aubio-stream
     :tests.test-clickables
+    :tests.test-clipboard
     :tests.test-hoverables
     :tests.test-intersectables
     :tests.test-button
