@@ -641,6 +641,11 @@
   (assert (= config.mcp.space.type "remote") "config should create remote MCP server")
   (assert (= config.mcp.space.url status.url) "config URL should match bridge URL")
   (assert (= config.mcp.space.enabled true) "config should enable MCP server")
+  (each [_ name (ipairs ["invalid" "read" "write" "edit" "grep" "glob" "list" "bash"
+                         "task" "external_directory" "todowrite" "webfetch"
+                         "websearch" "lsp" "skill" "question"])]
+    (assert (= (. config.permission name) "deny")
+            (.. "config should deny native OpenCode tool: " name)))
   (bridge:stop)
   (clean-dir dir))
 

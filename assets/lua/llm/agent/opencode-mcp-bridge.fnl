@@ -13,12 +13,31 @@
 (fn config-path [config-root]
   (fs.join-path (fs.join-path config-root "opencode") "opencode.json"))
 
+(local native-tool-permissions
+  {:invalid "deny"
+   :read "deny"
+   :write "deny"
+   :edit "deny"
+   :grep "deny"
+   :glob "deny"
+   :list "deny"
+   :bash "deny"
+   :task "deny"
+   :external_directory "deny"
+   :todowrite "deny"
+   :webfetch "deny"
+   :websearch "deny"
+   :lsp "deny"
+   :skill "deny"
+   :question "deny"})
+
 (fn write-opencode-config! [config-root url]
   (local opencode-dir (fs.join-path config-root "opencode"))
   (ensure-dir! opencode-dir)
   (JsonUtils.write-json!
     (config-path config-root)
-    {:mcp {:space {:type "remote"
+    {:permission native-tool-permissions
+     :mcp {:space {:type "remote"
                    :url url
                    :enabled true}}}))
 
