@@ -73,10 +73,12 @@
        2 (resolve-alignment opts.yalign opts.align)
        3 (resolve-alignment opts.zalign opts.align)})
 
-    (fn measurer [self]
+    (fn measure-children [self constraints]
       (set self.measure (glm.vec3 0))
       (each [i child (ipairs self.children)]
-        (child:measurer)
+        (if constraints
+            (child:measure-constrained constraints)
+            (child:measurer))
         (incf (. self.measure axis) (. child.measure axis))
         (each [_ a (ipairs cross-axes)]
           (maxf (. self.measure a) (. child.measure a))
@@ -86,6 +88,12 @@
             (* (. spacing axis)
                (math.max 0 (- (length self.children) 1))))
       )
+
+    (fn measurer [self]
+      (measure-children self nil))
+
+    (fn constrained-measurer [self constraints]
+      (measure-children self constraints))
 
     (fn layouter [self]
       (local flex-sum (accumulate [sum 0 _ x (ipairs e.children)] (+ sum x.flex)))
@@ -169,7 +177,7 @@
            {:name "flex"
             :children (icollect [_ v (ipairs e.children)]
                                 v.element.layout)
-            : measurer
+            : measurer :constrained-measurer constrained-measurer
             : layouter}))
 
     (set e.drop (fn [self]

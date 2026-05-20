@@ -31,6 +31,7 @@
     :tests.test-theme-widgets
     :tests.test-theme-switch
     :tests.test-text
+    :tests.test-wrapped-text
     :tests.test-text-ssbo-batcher
     :tests.test-dialog
     :tests.test-hud

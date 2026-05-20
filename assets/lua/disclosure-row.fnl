@@ -66,6 +66,21 @@
           (set depth details-widget.layout.measure.z)))
       (set self.measure (glm.vec3 width height depth)))
 
+    (fn measure-row [self constraints]
+      (summary-row.layout:measure-constrained constraints)
+      (local m summary-row.layout.measure)
+      (var height m.y)
+      (var width m.x)
+      (var depth m.z)
+      (when (and expanded? details-widget)
+        (details-widget.layout:measure-constrained constraints)
+        (set height (+ height details-widget.layout.measure.y))
+        (when (> details-widget.layout.measure.x width)
+          (set width details-widget.layout.measure.x))
+        (when (> details-widget.layout.measure.z depth)
+          (set depth details-widget.layout.measure.z)))
+      (set self.measure (glm.vec3 width height depth)))
+
     (fn layouter [self]
       (set summary-row.layout.size
            (glm.vec3 self.size.x summary-row.layout.measure.y self.size.z))
@@ -95,6 +110,7 @@
     (set layout
       (Layout {:name "disclosure-row"
                : measurer
+               :constrained-measurer measure-row
                : layouter
                :children (visible-children)}))
 

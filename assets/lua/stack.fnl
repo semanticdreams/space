@@ -16,6 +16,12 @@
         (for [a 1 3] (maxf (. self.measure a) (. child.measure a))))
       )
 
+    (fn constrained-measurer [self constraints]
+      (set self.measure (glm.vec3 0))
+      (each [i child (ipairs self.children)]
+        (child:measure-constrained constraints)
+        (for [a 1 3] (maxf (. self.measure a) (. child.measure a)))))
+
     (fn layouter [self]
       (each [i child (ipairs self.children)]
         (set child.size self.size)
@@ -28,7 +34,7 @@
 
     (local layout
       (Layout {:name "stack"
-               : measurer : layouter
+               : measurer :constrained-measurer constrained-measurer : layouter
                :children (icollect [_ x (ipairs children)]
                                    x.layout)}))
 

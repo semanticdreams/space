@@ -2,6 +2,7 @@
 
 (local glm (require :glm))
 (local Text (require :text))
+(local WrappedText (require :wrapped-text))
 (local TextStyle (require :text-style))
 (local Padding (require :padding))
 (local {: Flex : FlexChild} (require :flex))
@@ -43,8 +44,8 @@
 
   (local bg-rect ((Rectangle {:color bg-color}) ctx))
   (local content-text
-    ((Text {:text (or item.content "")
-            :style (TextStyle {:color text-color :scale 1.3})})
+    ((WrappedText {:text (or item.content "")
+                   :style (TextStyle {:color text-color :scale 1.3})})
      ctx))
   (local content-padded
     ((Padding {:edge-insets [0.4 0.45]
@@ -144,8 +145,8 @@
           "No details available"))
     ((Padding {:edge-insets [0.3 0.8]
                :child (fn [_ctx]
-                         ((Text {:text details-text
-                                 :style (code-style details-ctx)})
+                         ((WrappedText {:text details-text
+                                        :style (code-style details-ctx)})
                           _ctx))})
      details-ctx))
 
@@ -186,8 +187,8 @@
                    :padding [0.15 0.1]})
      ctx))
   (local name-text
-    ((Text {:text (.. (or item.name "tool") ": " (or item.output ""))
-            :style (code-style ctx text-color)})
+    ((WrappedText {:text (.. (or item.name "tool") ": " (or item.output ""))
+                   :style (code-style ctx text-color)})
      ctx))
   (local padded
     ((Padding {:edge-insets [0.3 0.45]
@@ -211,8 +212,8 @@
   (local text-color (or (and role role.foreground) (glm.vec4 0.98 0.75 0.72 1)))
   (local bg-rect ((Rectangle {:color bg-color}) ctx))
   (local error-text
-    ((Text {:text (.. "error: " (or item.error "unknown error"))
-            :style (TextStyle {:color text-color :scale 1.3})})
+    ((WrappedText {:text (.. "error: " (or item.error "unknown error"))
+                   :style (TextStyle {:color text-color :scale 1.3})})
      ctx))
   (local padded
     ((Padding {:edge-insets [0.4 0.45]
@@ -229,8 +230,8 @@
   (local role (resolve-transcript-role ctx :event))
   (local text-color (or (and role role.foreground) (glm.vec4 0.55 0.58 0.64 1)))
   (local text
-    ((Text {:text (or item.event "")
-            :style (TextStyle {:color text-color :scale 1.1})})
+    ((WrappedText {:text (or item.event "")
+                   :style (TextStyle {:color text-color :scale 1.1})})
      ctx))
   (local padded
     ((Padding {:edge-insets [0.2 0.45]

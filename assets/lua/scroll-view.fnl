@@ -1,5 +1,5 @@
 (local glm (require :glm))
-(local {: Layout : resolve-mark-flag} (require :layout))
+(local {: Layout : finite-constraint? : resolve-mark-flag} (require :layout))
 (local ScrollArea (require :scroll-area))
 (local ScrollBar (require :scroll-bar))
 (local MathUtils (require :math-utils))
@@ -274,6 +274,55 @@
           (math.min value state.viewport-height)
           value))
 
+    (fn resolve-viewport-height [content-height constraints]
+      (local max-height
+        (when (finite-constraint? constraints 2)
+          constraints.max.y))
+      (local unconstrained-height (clamp-height content-height))
+      (if max-height
+          (math.min unconstrained-height max-height)
+          unconstrained-height))
+
+    (fn initial-viewport-height [constraints]
+      (if (finite-constraint? constraints 2)
+          constraints.max.y
+          (or state.viewport-height 0)))
+
+    (fn measure-scroll-content [available-size viewport-height reserved-width]
+      (local viewport-width (math.max 0 (- available-size.x reserved-width)))
+      (local viewport-size (glm.vec3 viewport-width
+                                viewport-height
+                                available-size.z))
+      (local content-size (scroll:measure-content-for-viewport viewport-size))
+      (local content-height (or (and content-size content-size.y) 0))
+      (local needs-scroll? (> (- content-height viewport-height) scroll-epsilon))
+      {:content-size content-size
+       :viewport-size viewport-size
+       :reserved-width reserved-width
+       :needs-scroll? needs-scroll?})
+
+    (fn resolve-constrained-measure [available-size constraints]
+      (local initial-reserved-width
+        (if (= state.scrollbar-policy :always-on)
+            (math.min scrollbar-width available-size.x)
+            0))
+      (var viewport-height
+        (initial-viewport-height constraints))
+      (var resolution
+        (measure-scroll-content available-size viewport-height initial-reserved-width))
+      (local resolved-height
+        (resolve-viewport-height resolution.content-size.y constraints))
+      (when (not (approx viewport-height resolved-height))
+        (set viewport-height resolved-height)
+        (set resolution
+             (measure-scroll-content available-size viewport-height initial-reserved-width)))
+      (when (and (= state.scrollbar-policy :as-needed)
+                 resolution.needs-scroll?)
+        (local reserved-width (math.min scrollbar-width available-size.x))
+        (set resolution
+             (measure-scroll-content available-size viewport-height reserved-width)))
+      resolution)
+
     (fn measurer [self]
       (scroll.layout:measurer)
       (local content-size (or scroll.layout.measure (glm.vec3 0 0 0)))
@@ -286,22 +335,36 @@
                  (clamp-height content-size.y)
                  content-size.z)))
 
+    (fn constrained-measurer [self constraints]
+      (local max-size (and constraints constraints.max))
+      (if max-size
+          (do
+            (local resolution (resolve-constrained-measure max-size constraints))
+            (local content-size (or resolution.content-size (glm.vec3 0 0 0)))
+            (set self.measure
+                 (glm.vec3 (math.min max-size.x (+ content-size.x resolution.reserved-width))
+                           resolution.viewport-size.y
+                           content-size.z)))
+          (measurer self)))
+
     (fn layouter [self]
       (local scroll-layout scroll.layout)
       (local scrollbar-layout scrollbar.layout)
-      (local content (scroll:get-content-size))
-      (local content-height (or (and content content.y) 0))
       (local viewport-height (clamp-height self.size.y))
-      (local needs-scroll? (> (- content-height viewport-height) scroll-epsilon))
-      (local bar-visible? (scrollbar-visible? state.scrollbar-policy needs-scroll?))
-      (local reserved-width
-        (if bar-visible?
+      (local initial-reserved-width
+        (if (= state.scrollbar-policy :always-on)
             (math.min scrollbar-width self.size.x)
             0))
-      (local viewport-width (math.max 0 (- self.size.x reserved-width)))
-      (local viewport-size (glm.vec3 viewport-width
-                               viewport-height
-                               self.size.z))
+      (var viewport-resolution (measure-scroll-content self.size viewport-height initial-reserved-width))
+      (when (and (= state.scrollbar-policy :as-needed)
+                 viewport-resolution.needs-scroll?)
+        (set viewport-resolution
+             (measure-scroll-content self.size
+                                     viewport-height
+                                     (math.min scrollbar-width self.size.x))))
+      (local reserved-width viewport-resolution.reserved-width)
+      (local viewport-size viewport-resolution.viewport-size)
+      (local viewport-width viewport-size.x)
       (local y-gap (math.max 0 (- self.size.y viewport-height)))
       (local viewport-offset (glm.vec3 0 y-gap 0))
       (set scroll-layout.size viewport-size)
@@ -324,6 +387,7 @@
       (Layout {:name (or options.name "scroll-view")
                :children [scroll.layout scrollbar.layout]
                :measurer measurer
+               :constrained-measurer constrained-measurer
                :layouter layouter}))
 
     (set view.layout layout)

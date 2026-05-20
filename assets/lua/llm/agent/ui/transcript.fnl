@@ -35,6 +35,10 @@
       (active-child.layout:measurer)
       (set self.measure active-child.layout.measure))
 
+    (fn content-constrained-measurer [self constraints]
+      (active-child.layout:measure-constrained constraints)
+      (set self.measure active-child.layout.measure))
+
     (fn content-layouter [self]
       (set active-child.layout.size self.size)
       (set active-child.layout.position self.position)
@@ -47,6 +51,7 @@
       (Layout {:name "agent-transcript-content"
                :children [empty-padded.layout]
                :measurer content-measurer
+               :constrained-measurer content-constrained-measurer
                :layouter content-layouter}))
 
     (local content-root

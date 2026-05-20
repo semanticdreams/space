@@ -34,6 +34,45 @@
      :drop (fn [_self])})
   {:builder builder :state state})
 
+(fn make-width-sensitive-child []
+  (local state {:last-constraint-width nil})
+  (fn builder [_ctx]
+    (local layout
+      (Layout {:name "width-sensitive-scroll-child"
+               :measurer (fn [self]
+                           (set self.measure (glm.vec3 8 2 0)))
+               :constrained-measurer
+               (fn [self constraints]
+                 (local max-width (and constraints constraints.max constraints.max.x))
+                 (set state.last-constraint-width max-width)
+                 (if (and max-width (<= max-width 4))
+                     (set self.measure (glm.vec3 max-width 10 0))
+                     (set self.measure (glm.vec3 8 2 0))))
+               :layouter (fn [_self])}))
+    {:layout layout
+     :drop (fn [_self])})
+  {:builder builder :state state})
+
+(fn make-scrollbar-sensitive-child []
+  (local state {:constraint-widths []})
+  (fn builder [_ctx]
+    (local layout
+      (Layout {:name "scrollbar-sensitive-scroll-child"
+               :measurer (fn [self]
+                           (set self.measure (glm.vec3 4 8 0)))
+               :constrained-measurer
+               (fn [self constraints]
+                 (local max-width (and constraints constraints.max constraints.max.x))
+                 (table.insert state.constraint-widths max-width)
+                 (set self.measure
+                      (glm.vec3 (or max-width 0)
+                                (if (and max-width (<= max-width 3)) 12 8)
+                                0)))
+               :layouter (fn [_self])}))
+    {:layout layout
+     :drop (fn [_self])})
+  {:builder builder :state state})
+
 (fn make-focus-child [item-position item-size content-size]
   (local state {:focus-node nil
                 :item-layout nil})
@@ -250,6 +289,62 @@
   (assert (approx child-layout.position.y (- view.state.scroll-offset)))
   (view:drop))
 
+(fn scroll-view-uses-viewport-width-for-content-measure []
+  (local child (make-width-sensitive-child))
+  (local view ((ScrollView {:child child.builder
+                            :padding false
+                            :scrollbar-policy :always-off})
+               (make-context)))
+  (view.layout:measurer)
+  (set view.layout.size (glm.vec3 4 4 0))
+  (view.layout:layouter)
+  (assert (approx child.state.last-constraint-width 4))
+  (assert (approx view.state.max-offset 6))
+  (view:drop))
+
+(fn scroll-view-constrained-measure-uses-available-width []
+  (local child (make-width-sensitive-child))
+  (local view ((ScrollView {:child child.builder
+                            :padding false
+                            :scrollbar-policy :always-off})
+               (make-context)))
+  (view.layout:measure-constrained {:max (glm.vec3 4 4 0)})
+  (assert (approx child.state.last-constraint-width 4))
+  (assert (approx view.layout.measure.x 4))
+  (assert (approx view.layout.measure.y 4))
+  (view:drop))
+
+(fn scroll-view-as-needed-remeasures-with-scrollbar-width []
+  (local child (make-scrollbar-sensitive-child))
+  (local view ((ScrollView {:child child.builder
+                            :padding false
+                            :scrollbar-policy :as-needed
+                            :scrollbar-width 1})
+               (make-context)))
+  (view.layout:measurer)
+  (set view.layout.size (glm.vec3 4 4 0))
+  (view.layout:layouter)
+  (assert (= (length child.state.constraint-widths) 2))
+  (assert (approx (. child.state.constraint-widths 1) 4))
+  (assert (approx (. child.state.constraint-widths 2) 3))
+  (assert (approx view.state.max-offset 8))
+  (view:drop))
+
+(fn scroll-view-constrained-measure-reserves-as-needed-scrollbar []
+  (local child (make-scrollbar-sensitive-child))
+  (local view ((ScrollView {:child child.builder
+                            :padding false
+                            :scrollbar-policy :as-needed
+                            :scrollbar-width 1})
+               (make-context)))
+  (view.layout:measure-constrained {:max (glm.vec3 4 4 0)})
+  (assert (= (length child.state.constraint-widths) 2))
+  (assert (approx (. child.state.constraint-widths 1) 4))
+  (assert (approx (. child.state.constraint-widths 2) 3))
+  (assert (approx view.layout.measure.x 4))
+  (assert (approx view.layout.measure.y 4))
+  (view:drop))
+
 (fn scroll-view-scrollbar-policy-as-needed []
   (local child (make-test-child (glm.vec3 4 2 0)))
   (local view ((ScrollView {:child child.builder
@@ -369,6 +464,14 @@
 (table.insert tests {:name "ScrollView touch drag scrolls content" :fn scroll-view-touch-drag-scrolls-content})
 (table.insert tests {:name "ScrollView defaults to max offset before layout"
                      :fn scroll-view-defaults-to-max-offset-before-layout})
+(table.insert tests {:name "ScrollView uses viewport width for content measure"
+                     :fn scroll-view-uses-viewport-width-for-content-measure})
+(table.insert tests {:name "ScrollView constrained measure uses available width"
+                     :fn scroll-view-constrained-measure-uses-available-width})
+(table.insert tests {:name "ScrollView as-needed remeasures with scrollbar width"
+                     :fn scroll-view-as-needed-remeasures-with-scrollbar-width})
+(table.insert tests {:name "ScrollView constrained measure reserves as-needed scrollbar"
+                     :fn scroll-view-constrained-measure-reserves-as-needed-scrollbar})
 (table.insert tests {:name "ScrollView scrollbar policy as-needed" :fn scroll-view-scrollbar-policy-as-needed})
 (table.insert tests {:name "ScrollView scrollbar policy as-needed shows when needed"
                      :fn scroll-view-scrollbar-policy-as-needed-shows-when-needed})

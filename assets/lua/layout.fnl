@@ -54,6 +54,16 @@
       (not (not (. opts key)))
       default))
 
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn finite-constraint? [constraints axis]
+  (local max-size (and constraints constraints.max))
+  (finite-number? (and max-size (. max-size axis))))
+
 (fn within-range [value max-value]
   (local max (or max-value 0))
   (and (>= (+ value position-epsilon) 0)
@@ -185,6 +195,7 @@
   (set opts.measurer (or opts.measurer (fn [])))
   (local base-layouter (or opts.layouter (fn [])))
   (local base-measurer opts.measurer)
+  (local base-constrained-measurer opts.constrained-measurer)
   (set opts.layouter nil)
   (set opts.culled? false)
   (set opts.parent-culled? false)
@@ -240,6 +251,14 @@
     (when (and root root.measure-dirt (not skip-dirt-clear?) (not root.in-pass))
       (root.measure-dirt:remove self))
     (base-measurer self))
+
+  (fn measure-constrained [self constraints skip-dirt-clear?]
+    (local root self.root)
+    (when (and root root.measure-dirt (not skip-dirt-clear?) (not root.in-pass))
+      (root.measure-dirt:remove self))
+    (if base-constrained-measurer
+        (base-constrained-measurer self constraints)
+        (base-measurer self)))
 
   (fn run-layouter [self skip-dirt-clear?]
     (local root self.root)
@@ -373,6 +392,7 @@
             :clip-visibility opts.clip-visibility
             :last-effective-state opts.last-effective-state
             :measurer run-measurer :layouter nil
+            :measure-constrained measure-constrained
             :set-children set-children :clear-children clear-children
             :remove-child remove-child :add-children add-children
             :add-child add-child
@@ -496,4 +516,4 @@
                :stats stats :log-dirt? log-dirt? :in-pass false})
   root)
 
-{: Layout : LayoutRoot : resolve-mark-flag}
+{: Layout : LayoutRoot : resolve-mark-flag : finite-constraint?}

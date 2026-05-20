@@ -96,6 +96,12 @@
       (set state.content-size measured)
       (set self.measure measured))
 
+    (fn constrained-measurer [self constraints]
+      (child.layout:measure-constrained constraints)
+      (local measured (or child.layout.measure (glm.vec3 0 0 0)))
+      (set state.content-size measured)
+      (set self.measure measured))
+
     (fn layouter [self]
       (local clip (update-clip-region self))
       (set self.clip-region clip)
@@ -116,7 +122,7 @@
 
     (local layout
       (Layout {:name (or options.name "scroll-area")
-               : measurer : layouter
+               : measurer :constrained-measurer constrained-measurer : layouter
                :children [state.child.layout]}))
 
     (set state.layout layout)
@@ -141,11 +147,16 @@
           (and state.child state.child.layout state.child.layout.measure)
           (glm.vec3 0 0 0)))
 
+    (fn measure-content-for-viewport [self viewport-size]
+      (self.layout:measure-constrained {:max viewport-size})
+      state.content-size)
+
     {:child state.child
      :layout layout
      :drop drop
      :set-scroll-offset set-scroll-offset
      :get-scroll-offset get-scroll-offset
-     :get-content-size get-content-size}))
+     :get-content-size get-content-size
+     :measure-content-for-viewport measure-content-for-viewport}))
 
 ScrollArea

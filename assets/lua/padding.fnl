@@ -28,15 +28,25 @@
   (fn build [ctx]
     (local child (opts.child ctx))
 
+    (fn inset-size []
+      (+ (glm.vec3 (. edge-insets 1) (. edge-insets 2) (. edge-insets 3))
+         (glm.vec3 (. edge-insets 4) (. edge-insets 5) (. edge-insets 6))))
+
+    (fn child-constraints [constraints]
+      (if (and constraints constraints.max)
+          {:max (glm.vec3 (math.max 0 (- constraints.max.x (. edge-insets 1) (. edge-insets 4)))
+                          (math.max 0 (- constraints.max.y (. edge-insets 2) (. edge-insets 5)))
+                          (math.max 0 (- constraints.max.z (. edge-insets 3) (. edge-insets 6))))}
+          constraints))
 
     (fn measurer [self]
       (child.layout:measurer)
-      (set self.measure
-           (+ child.layout.measure
-              (glm.vec3 (. edge-insets 1) (. edge-insets 2) (. edge-insets 3))
-              (glm.vec3 (. edge-insets 4) (. edge-insets 5) (. edge-insets 6))
-              ))
+      (set self.measure (+ child.layout.measure (inset-size)))
       )
+
+    (fn constrained-measurer [self constraints]
+      (child.layout:measure-constrained (child-constraints constraints))
+      (set self.measure (+ child.layout.measure (inset-size))))
 
     (fn layouter [self]
       (local new-size (- self.size
@@ -53,7 +63,7 @@
       (child.layout:layouter))
 
     (local layout (Layout {:name "padding"
-                           : measurer : layouter
+                           : measurer :constrained-measurer constrained-measurer : layouter
                            :children [child.layout]}))
 
     (fn drop [self]
