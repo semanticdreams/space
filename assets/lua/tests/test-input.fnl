@@ -434,6 +434,30 @@
           (assert (approx (measure-caret) input.caret-width))
           (input:drop))))
 
+(fn input-single-line-stretched-content-centers-on-text-line []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:text "ABC"}) ctx-info.ctx))
+      (input:enter-insert-mode)
+      (input:move-caret-to 1)
+      (input.layout:measurer)
+      (set input.layout.size (glm.vec3 input.layout.measure.x (+ input.layout.measure.y 3) 0))
+      (input.layout:layouter)
+      (local inner-height (math.max 0 (- input.layout.size.y (* 2 input.padding.y))))
+      (assert (> inner-height input.line-height)
+              "Test requires a stretched single-line input")
+      (local expected-y (+ input.layout.position.y
+                           input.padding.y
+                           (/ (- inner-height input.line-height) 2)))
+      (assert (approx input.text.layout.position.y expected-y)
+              "Stretched single-line input text should center inside extra height")
+      (assert (approx input.caret.layout.size.y input.line-height)
+              "Stretched single-line input caret should stay text-line height")
+      (assert (approx input.caret.layout.position.y input.text.layout.position.y)
+              "Stretched single-line input caret should share the text line origin")
+      (input:drop))))
+
 (fn input-auto-computes-visible-lines-and-columns []
   (with-pointer-stubs
     (fn [_stubs]
@@ -714,6 +738,8 @@
 (table.insert tests {:name "Input blur via click restores normal state" :fn input-blur-via-click-restores-normal-state})
 (table.insert tests {:name "Input blur returns to normal state" :fn input-blur-returns-to-normal-state})
 (table.insert tests {:name "Input caret switches between block and bar by mode" :fn input-caret-switches-shape-with-mode})
+(table.insert tests {:name "Input single-line stretched content centers on text line"
+                     :fn input-single-line-stretched-content-centers-on-text-line})
 (table.insert tests {:name "Input auto computes visible lines and columns" :fn input-auto-computes-visible-lines-and-columns})
 (table.insert tests {:name "Input scrolls vertically to keep caret visible" :fn input-scrolls-text-vertically-when-caret-moves})
 (table.insert tests {:name "Input scrolls horizontally when exceeding columns" :fn input-scrolls-text-horizontally-when-exceeding-columns})

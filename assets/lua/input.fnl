@@ -188,7 +188,10 @@
 
     (fn text-block-offset [self inner-height]
       (local text-height (text-measure-height self inner-height))
-      (math.max 0 (- inner-height text-height)))
+      (local extra-height (math.max 0 (- inner-height text-height)))
+      (if self.multiline?
+          extra-height
+          (/ extra-height 2)))
 
     (fn caret-vertical-offset [self]
       (local relative (- (or self.model.cursor-line 0)
@@ -240,6 +243,9 @@
                       self.caret-width))
                 self.caret-width))))
 
+    (fn caret-height-for-inner [self inner-height]
+      (math.max 0.0001 (math.min self.line-height inner-height)))
+
     (fn update-caret-layout [self opts]
       (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
       (when (and self.caret self.layout self.inner-size)
@@ -253,10 +259,7 @@
         (local prefix (self:cursor-prefix-width))
         (local x-offset (+ self.padding.x prefix))
         (local caret-y (caret-vertical-offset self))
-        (local caret-height
-          (if self.multiline?
-              (math.max 0.0001 (math.min self.line-height inner-height))
-              inner-height))
+        (local caret-height (caret-height-for-inner self inner-height))
         (local caret-position (+ position (rotation:rotate (glm.vec3 x-offset caret-y 0))))
         (set self.caret.layout.size (glm.vec3 (caret-width-for-mode self) caret-height size.z))
         (set self.caret.layout.position caret-position)
@@ -432,10 +435,7 @@
         (local prefix (self:cursor-prefix-width))
         (local x-offset (+ padding.x prefix))
         (local caret-y (caret-vertical-offset self))
-        (local caret-height
-          (if self.multiline?
-              (math.max 0.0001 (math.min self.line-height inner-height))
-              inner-height))
+        (local caret-height (caret-height-for-inner self inner-height))
         (local caret-position (+ position (rotation:rotate (glm.vec3 x-offset caret-y 0))))
         (set self.caret.layout.size (glm.vec3 (caret-width-for-mode self) caret-height size.z))
         (set self.caret.layout.position caret-position)
