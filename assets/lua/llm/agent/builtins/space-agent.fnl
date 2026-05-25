@@ -3,6 +3,8 @@
 
 (local Uuid (require :uuid))
 (local json (require :json))
+(local logging (require :logging))
+(local OpencodeStream (require :llm/agent/opencode-stream))
 
 (fn new-item-id []
   (.. "itm-" (Uuid.v4)))
@@ -36,13 +38,21 @@
 
 (fn tool-call-id [message part index]
   (or part.callID
+      part.callId
       part.call_id
       part.call-id
       part.id
       (.. "opencode-tool:" (opencode-message-id message "message") ":" (tostring index))))
 
+(fn tool-call-item-id [call-id]
+  (.. "itm-tool-call-" call-id))
+
+(fn tool-result-item-id [call-id]
+  (.. "itm-tool-result-" call-id))
+
 (fn tool-arguments-json [part]
-  (local args (or part.input part.args part.arguments part.parameters {}))
+  (local state (or part.state {}))
+  (local args (or part.input part.args part.arguments part.parameters state.input {}))
   (if (= (type args) "string")
       args
       (json.dumps args)))
@@ -73,7 +83,7 @@
   (each [_ item (ipairs (or session.items []))]
     (local call-id (or item.call-id item.call_id))
     (when call-id
-      (tset existing (.. item.type ":" call-id) true)))
+      (tset existing (.. item.type ":" call-id) item.id)))
   existing)
 
 (fn append-tool-call-item [ctx existing message message-index part part-index]
@@ -81,18 +91,24 @@
   (local call-id (tool-call-id message part part-index))
   (local call-key (.. "tool-call:" call-id))
   (if (. existing call-key)
-      0
+      (do
+        (ctx.turn:update-item (. existing call-key)
+          {:arguments (tool-arguments-json part)
+           :status (and part.state part.state.status)
+           :updated-at (now)})
+        0)
       (do
         (ctx.turn:append-item
-          {:id (new-item-id)
+          {:id (tool-call-item-id call-id)
            :type "tool-call"
            :name tool-name
            :arguments (tool-arguments-json part)
            :call-id call-id
            :parent-id (opencode-message-id message (.. "opencode-message-" message-index))
            :provider "opencode"
+           :status (and part.state part.state.status)
            :created-at (now)})
-        (tset existing call-key true)
+        (tset existing call-key (tool-call-item-id call-id))
         1)))
 
 (fn append-tool-result-item [ctx existing part part-index message]
@@ -103,10 +119,15 @@
         (local call-id (tool-call-id message part part-index))
         (local result-key (.. "tool-result:" call-id))
         (if (. existing result-key)
-            0
+            (do
+              (ctx.turn:update-item (. existing result-key)
+                {:output (tool-result-output part)
+                 :is-error (not (= part.state.status "completed"))
+                 :updated-at (now)})
+              0)
             (do
               (ctx.turn:append-item
-                {:id (new-item-id)
+                {:id (tool-result-item-id call-id)
                  :type "tool-result"
                  :name tool-name
                  :output (tool-result-output part)
@@ -115,7 +136,7 @@
                  :provider "opencode"
                  :is-error (not (= part.state.status "completed"))
                  :created-at (now)})
-              (tset existing result-key true)
+              (tset existing result-key (tool-result-item-id call-id))
               1)))))
 
 (fn append-tool-audit-items [ctx session messages]
@@ -130,29 +151,248 @@
                          (append-tool-result-item ctx existing part part-index message))))))
   appended)
 
-(fn append-assistant-response [ctx turn-msg-id resp requested-model]
-  (local message (response-data resp))
-  (local info (or message.info {}))
+(fn new-stream-state []
+  {:text-parts {}
+   :text-order {}
+   :part-meta {}
+   :pending-deltas {}
+   :assistant-message-ids []})
+
+(fn ensure-subtable [root key]
+  (when (not (. root key))
+    (tset root key {}))
+  (. root key))
+
+(fn contains-value? [items value]
+  (var found false)
+  (each [_ item (ipairs (or items []))]
+    (when (= item value)
+      (set found true)))
+  found)
+
+(fn stream-part-key [message-id part-id]
+  (.. (or message-id "opencode-live-message") ":" (or part-id "part")))
+
+(fn remember-assistant-message-id [stream-state message-id]
+  (when (and message-id (not (contains-value? stream-state.assistant-message-ids message-id)))
+    (table.insert stream-state.assistant-message-ids message-id)))
+
+(fn single-streamed-assistant-message-id [stream-state]
+  (when (= (length stream-state.assistant-message-ids) 1)
+    (. stream-state.assistant-message-ids 1)))
+
+(fn ensure-text-part [stream-state message-id part-id]
+  (local message-parts (ensure-subtable stream-state.text-parts message-id))
+  (local message-order (ensure-subtable stream-state.text-order message-id))
+  (when (not (contains-value? message-order part-id))
+    (table.insert message-order part-id))
+  message-parts)
+
+(fn text-message-content [stream-state message-id]
+  (local message-parts (. stream-state.text-parts message-id))
+  (local message-order (. stream-state.text-order message-id))
+  (local chunks [])
+  (each [_ part-id (ipairs (or message-order []))]
+    (table.insert chunks (or (and message-parts (. message-parts part-id)) "")))
+  (table.concat chunks ""))
+
+(fn remember-part-kind [stream-state part-id event-type message-id item-id]
+  (tset stream-state.part-meta (stream-part-key message-id part-id)
+        {:type event-type
+         :message-id message-id
+         :item-id item-id}))
+
+(fn pop-pending-deltas [stream-state message-id part-id]
+  (local key (stream-part-key message-id part-id))
+  (local pending (. stream-state.pending-deltas key))
+  (tset stream-state.pending-deltas key nil)
+  (or pending []))
+
+(fn buffer-delta [stream-state event]
+  (local pending (ensure-subtable stream-state.pending-deltas (stream-part-key event.message-id event.part-id)))
+  (table.insert pending event))
+
+(fn upsert-assistant-message [ctx stream-state event]
+  (remember-assistant-message-id stream-state event.message-id)
+  (remember-part-kind stream-state event.part-id :assistant-message event.message-id event.item-id)
+  (local message-parts (ensure-text-part stream-state event.message-id event.part-id))
+  (when event.replace
+    (tset message-parts event.part-id event.content))
+  (each [_ delta (ipairs (pop-pending-deltas stream-state event.message-id event.part-id))]
+    (when (= delta.field "text")
+      (tset message-parts event.part-id
+            (.. (or (. message-parts event.part-id) "") delta.delta))))
+  (ctx.turn:upsert-item
+    {:id event.item-id
+     :type :message
+     :role :assistant
+     :content (text-message-content stream-state event.message-id)
+     :parent-id event.message-id
+     :provider event.provider
+     :model "opencode"
+     :stream-status event.status
+     :updated-at (now)}))
+
+(fn upsert-reasoning [ctx stream-state event]
+  (remember-part-kind stream-state event.part-id :reasoning event.message-id event.item-id)
+  (var content event.content)
+  (each [_ delta (ipairs (pop-pending-deltas stream-state event.message-id event.part-id))]
+    (when (= delta.field "text")
+      (set content (.. content delta.delta))))
+  (ctx.turn:upsert-item
+    {:id event.item-id
+     :type :reasoning
+     :content content
+     :parent-id event.message-id
+     :provider event.provider
+     :stream-status event.status
+     :updated-at (now)}))
+
+(fn apply-part-delta [ctx stream-state event]
+  (local meta (. stream-state.part-meta (stream-part-key event.message-id event.part-id)))
+  (if (not meta)
+      (buffer-delta stream-state event)
+      (= meta.type :assistant-message)
+      (do
+        (local message-parts (ensure-text-part stream-state meta.message-id event.part-id))
+        (when (= event.field "text")
+          (tset message-parts event.part-id
+                (.. (or (. message-parts event.part-id) "") event.delta))
+          (ctx.turn:update-item meta.item-id
+            {:content (text-message-content stream-state meta.message-id)
+             :stream-status :streaming
+             :updated-at (now)})))
+      (= meta.type :reasoning)
+      (when (= event.field "text")
+        (local item-id meta.item-id)
+        (var existing-content "")
+        (each [_ item (ipairs (or ctx.session.items []))]
+          (when (= item.id item-id)
+            (set existing-content (or item.content ""))))
+        (ctx.turn:update-item item-id
+          {:content (.. existing-content event.delta)
+           :stream-status :streaming
+           :updated-at (now)}))))
+
+(fn upsert-tool-call [ctx event]
+  (ctx.turn:upsert-item
+    {:id event.item-id
+     :type :tool-call
+     :name event.name
+     :arguments event.arguments
+     :call-id event.call-id
+     :parent-id event.message-id
+     :provider event.provider
+     :status event.status
+     :updated-at (now)}))
+
+(fn upsert-tool-result [ctx event]
+  (ctx.turn:upsert-item
+    {:id event.item-id
+     :type :tool-result
+     :name event.name
+     :output event.output
+     :call-id event.call-id
+     :parent-id event.call-id
+     :provider event.provider
+     :is-error event.is-error
+     :updated-at (now)}))
+
+(fn apply-stream-event [ctx stream-state event]
+  (if (= event.type :assistant-message)
+      (upsert-assistant-message ctx stream-state event)
+      (= event.type :reasoning)
+      (upsert-reasoning ctx stream-state event)
+      (= event.type :part-delta)
+      (apply-part-delta ctx stream-state event)
+      (= event.type :tool-call)
+      (upsert-tool-call ctx event)
+      (= event.type :tool-result)
+      (upsert-tool-result ctx event)))
+
+(fn handle-live-stream-event [ctx stream-state opencode-session-id event]
+  (local events (OpencodeStream.normalize event))
+  (each [_ normalized (ipairs events)]
+    (when (and (or (not normalized.session-id)
+                   (= normalized.session-id opencode-session-id))
+               (not (ctx.turn:cancelled?)))
+      (apply-stream-event ctx stream-state normalized))))
+
+(fn subscribe-live-events [opencode ctx session opencode-session-id stream-state on-fatal]
+  (when (and opencode.events opencode.events.subscribe)
+    (logging.info "[space-agent] subscribing to OpenCode live event stream")
+    (opencode.events.subscribe
+      (fn [event]
+        (local (ok err)
+          (pcall handle-live-stream-event
+                 ctx
+                 stream-state
+                 opencode-session-id
+                 event))
+        (when (not ok)
+          (on-fatal (.. "OpenCode live event handling failed: " (tostring err))))))))
+
+(fn final-response-content [message]
   (local parts (or message.parts []))
   (var content "")
   (each [_ part (ipairs parts)]
     (when (= part.type "text")
       (set content (.. content part.text))))
-  (ctx.turn:append-item
-    {:id (new-item-id)
-     :type :message
-     :role :assistant
-     :content content
-     :parent-id turn-msg-id
-     :provider :opencode
-     :model (or (and info.model info.model.modelID)
-                (and requested-model requested-model.modelID)
-                "opencode")
-     :usage (or message.usage {})
-     :created-at (now)})
+  content)
+
+(fn message-role [message]
+  (or (and message message.info message.info.role)
+      (and message message.role)))
+
+(fn assistant-message? [message]
+  (= (message-role message) "assistant"))
+
+(fn latest-assistant-message [messages]
+  (var found nil)
+  (each [_ message (ipairs (or messages []))]
+    (when (assistant-message? message)
+      (set found message)))
+  found)
+
+(fn prompt-assistant-message [resp]
+  (local message (response-data resp))
+  (when (not (= (message-role message) "user"))
+    message))
+
+(fn response-message-id [message]
+  (or (and message message.info message.info.id)
+      (and message message.id)))
+
+(fn append-assistant-response [ctx stream-state turn-msg-id message prompt-resp requested-model]
+  (local prompt-message (response-data prompt-resp))
+  (local info (or (and message message.info) (and prompt-message prompt-message.info) {}))
+  (local streamed-message-id (single-streamed-assistant-message-id stream-state))
+  (local message-id (or (response-message-id message)
+                        streamed-message-id
+                        (and message turn-msg-id)))
+  (var content (if message (final-response-content message) ""))
+  (when (and (= content "") streamed-message-id)
+    (local streamed (text-message-content stream-state streamed-message-id))
+    (when (> (length streamed) 0)
+      (set content streamed)))
+  (when message-id
+    (local item-id (.. "itm-assistant-" message-id))
+    (ctx.turn:upsert-item
+      {:id item-id
+       :type :message
+       :role :assistant
+       :content content
+       :parent-id turn-msg-id
+       :provider :opencode
+       :model (or (and info.model info.model.modelID)
+                  (and requested-model requested-model.modelID)
+                  "opencode")
+       :usage (or (and message message.usage) (and prompt-message prompt-message.usage) {})
+       :stream-status :complete
+       :updated-at (now)}))
   (ctx.turn:finish {:content content}))
 
-(fn handle-messages-response [ctx session turn-msg-id prompt-resp requested-model fail messages-resp]
+(fn handle-messages-response [ctx session stream-state turn-msg-id prompt-resp requested-model fail messages-resp]
   (if (ctx.turn:cancelled?)
       nil
       (not (and messages-resp messages-resp.ok))
@@ -161,19 +401,22 @@
       (do
         (local (ok err)
           (pcall (fn []
-                   (append-tool-audit-items ctx session (response-data messages-resp))
-                   (append-assistant-response ctx turn-msg-id prompt-resp requested-model))))
+                   (local messages (response-data messages-resp))
+                   (append-tool-audit-items ctx session messages)
+                   (local assistant-message (or (latest-assistant-message messages)
+                                                (prompt-assistant-message prompt-resp)))
+                   (append-assistant-response ctx stream-state turn-msg-id assistant-message prompt-resp requested-model))))
         (when (not ok)
           (fail (.. "OpenCode message audit persistence failed: " (tostring err)))))))
 
-(fn append-audit-then-assistant [opencode ctx session session-id turn-msg-id resp requested-model fail]
+(fn append-audit-then-assistant [opencode ctx session stream-state session-id turn-msg-id resp requested-model fail]
   (if (not opencode.session.messages)
       (fail "OpenCode provider missing session.messages for agent audit persistence")
       (do
         (local (ok err)
           (pcall opencode.session.messages session-id
                  (fn [messages-resp]
-                   (handle-messages-response ctx session turn-msg-id resp requested-model fail messages-resp))))
+                   (handle-messages-response ctx session stream-state turn-msg-id resp requested-model fail messages-resp))))
         (when (not ok)
           (fail (.. "OpenCode messages fetch submit failed: " (tostring err)))))))
 
@@ -199,6 +442,15 @@
   (fn run [self_ input session ctx]
     (local PromptUtils (require :llm/agent/prompt-utils))
     (local opencode (resolve-opencode ctx))
+    (var live-events nil)
+    (local stream-state (new-stream-state))
+
+    (fn close-live-events []
+      (when live-events
+        (when live-events.unsubscribe
+          (live-events.unsubscribe))
+        (logging.info "[space-agent] unsubscribed from OpenCode live event stream")
+        (set live-events nil)))
 
     ;; Build system prompt
     (local context-block (PromptUtils.format-context ctx))
@@ -213,6 +465,7 @@
          {:name "Capability Guidance" :content capability-guidance}]))
 
     (fn fail [message]
+      (close-live-events)
       (ctx.turn:fail message))
 
     (fn send-prompt [opencode-session]
@@ -223,11 +476,13 @@
             (local turn-msg-id (.. "oc-msg-" (Uuid.v4)))
             (ctx.turn:set-cancel
               (fn []
+                (close-live-events)
                 (opencode.session.abort session-id
                   (fn [_resp] nil))))
             (if (ctx.turn:cancelled?)
                 (fail "turn cancelled")
                 (do
+                  (set live-events (subscribe-live-events opencode ctx session session-id stream-state fail))
                   (local prompt-body {:parts [{:type "text" :text input}]
                                       :system system-prompt
                                       :messageId turn-msg-id})
@@ -240,7 +495,9 @@
                                  nil
                                  (not (and resp resp.ok))
                                  (fail (.. "OpenCode prompt failed: " (response-error resp "unknown error")))
-                                 (append-audit-then-assistant opencode ctx session session-id turn-msg-id resp model fail)))))
+                                 (do
+                                   (close-live-events)
+                                   (append-audit-then-assistant opencode ctx session stream-state session-id turn-msg-id resp model fail))))))
                   (when (not ok)
                     (fail (.. "OpenCode prompt submit failed: " (tostring err)))))))))
 

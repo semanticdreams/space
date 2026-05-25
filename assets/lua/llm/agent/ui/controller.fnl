@@ -89,6 +89,22 @@
     (self:load-sessions)
     (self:load-session-items))
 
+  (fn find-state-item [item-id]
+    (var found nil)
+    (each [_ item (ipairs (or state.items []))]
+      (when (= item.id item-id)
+        (set found item)))
+    found)
+
+  (fn apply-item-update [self item-id updates]
+    (local item (find-state-item item-id))
+    (if item
+        (do
+          (each [k v (pairs updates)]
+            (tset item k v))
+          (self:notify))
+        (reload-active-session self)))
+
   (fn select-agent [self agent-id]
     (set state.active-agent-id agent-id)
     (set state.active-session-id nil)
@@ -116,18 +132,18 @@
         (runner:run-turn state.active-session-id text
           {:on-item (fn [_item]
                       (reload-active-session self))
-            :on-update (fn [_item-id _updates]
-                         (self:notify))
-            :on-status (fn [status-info]
+           :on-update (fn [item-id updates]
+                        (self:apply-item-update item-id updates))
+           :on-status (fn [status-info]
                          (set state.active-turn status-info)
                          (self:load-sessions))
-            :on-complete (fn [_result-info]
-                           (set state.active-turn nil)
-                           (reload-active-session self))
-            :on-error (fn [error-info]
-                        (set state.active-turn nil)
-                        (set state.last-error error-info.error)
-                        (reload-active-session self))}))
+           :on-complete (fn [_result-info]
+                          (set state.active-turn nil)
+                          (reload-active-session self))
+           :on-error (fn [error-info]
+                       (set state.active-turn nil)
+                       (set state.last-error error-info.error)
+                       (reload-active-session self))}))
       (when handle
         (local status (and handle.status (handle:status)))
         (if (= status :running)
@@ -242,6 +258,7 @@
      :load-sessions load-sessions
      :ensure-first-session ensure-first-session
      :load-session-items load-session-items
+     :apply-item-update apply-item-update
      :select-agent select-agent
      :select-session select-session
      :new-session new-session

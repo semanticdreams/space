@@ -10,7 +10,7 @@
 
 (fn TurnPair [session-id callbacks]
   "Create a paired TurnHandle and TurnController.
-  callbacks: {:on-complete :on-error :on-item :on-status :persist}"
+  callbacks: {:on-complete :on-error :on-item :on-update :on-upsert :on-status :persist}"
   (var status :created)
   (var result nil)
   (var error-msg nil)
@@ -33,6 +33,10 @@
   (fn controller-update-item [self item-id updates]
     (when callbacks.on-update
       (callbacks.on-update item-id updates)))
+
+  (fn controller-upsert-item [self item]
+    (when callbacks.on-upsert
+      (callbacks.on-upsert item)))
 
   (fn controller-set-cancel [self fn-to-cancel]
     (when (= (type fn-to-cancel) "function")
@@ -123,6 +127,7 @@
      :session-id session-id
      :append-item controller-append-item
      :update-item controller-update-item
+     :upsert-item controller-upsert-item
      :set-cancel controller-set-cancel
      :finish controller-finish
      :fail controller-fail

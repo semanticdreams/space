@@ -14,6 +14,8 @@
   (fn build [ctx]
     (var item-rows [])
     (var inner-flex nil)
+    (var last-item-count 0)
+    (var current-items-signature "")
 
     (local dim-foreground
       (or (and ctx ctx.theme ctx.theme.text ctx.theme.text.dim-foreground)
@@ -89,12 +91,31 @@
                                   _ctx))})
               ctx))))
 
-    (fn build-inner []
+    (fn items-signature [items]
+      (local parts [])
+      (each [_ item (ipairs items)]
+        (table.insert parts (.. (tostring (or item.type :unknown))
+                                ":"
+                                (tostring (or item.id :missing-id)))))
+      (table.concat parts "|"))
+
+    (fn update-existing-rows [items]
+      (local visible-items (item-row.pair-tool-items items))
+      (var updated? true)
+      (if (not (= (length visible-items) (length item-rows)))
+          (set updated? false)
+          (each [index row (ipairs item-rows)]
+            (local item (. visible-items index))
+            (if (and item row.update (= row.item-id item.id))
+                (row:update item items)
+                (set updated? false))))
+      updated?)
+
+    (fn rebuild-inner [items item-count should-scroll-to-end next-signature]
       (when inner-flex
         (inner-flex:drop)
         (set inner-flex nil))
-      (local items controller.state.items)
-      (if (> (length items) 0)
+      (if (> item-count 0)
           (do
             (when (= active-child empty-padded)
               (empty-padded:drop)
@@ -112,10 +133,26 @@
             (set item-rows [])
             (drop-and-rebuild-empty)
             (set-active-child empty-padded)))
-      (when inner-flex
+      (set current-items-signature next-signature)
+      (set last-item-count item-count)
+      (when (and inner-flex should-scroll-to-end)
         (scroll-view:reset-scroll-position))
       (when scroll-view.layout
         (scroll-view.layout:mark-measure-dirty)))
+
+    (fn build-inner []
+      (local items controller.state.items)
+      (local item-count (length items))
+      (local next-signature (items-signature items))
+      (local should-scroll-to-end (> item-count last-item-count))
+      (if (and inner-flex (> item-count 0) (= next-signature current-items-signature)
+               (update-existing-rows items))
+          (do
+            (set last-item-count item-count)
+            (content-layout:mark-measure-dirty)
+            (when scroll-view.layout
+              (scroll-view.layout:mark-measure-dirty)))
+          (rebuild-inner items item-count should-scroll-to-end next-signature)))
 
     (build-inner)
 

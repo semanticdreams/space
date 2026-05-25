@@ -52,6 +52,7 @@
        :providers deps.providers
        :callbacks callbacks
        :turn nil  ;; set after TurnPair creation
+       :session session
        :session-id session.id
        :data-dir data-dir}))
 
@@ -89,7 +90,17 @@
                     (SessionMod.save-session session data-dir)
                     (when user-callbacks.on-item
                       (user-callbacks.on-item item)))
+         :on-upsert (fn [item]
+                      (local (_session stored inserted)
+                        (SessionMod.upsert-item session item))
+                      (SessionMod.save-session session data-dir)
+                      (if (and inserted user-callbacks.on-item)
+                          (user-callbacks.on-item stored)
+                          (and (not inserted) user-callbacks.on-update)
+                          (user-callbacks.on-update stored.id stored)))
          :on-update (fn [item-id updates]
+                      (SessionMod.update-item session item-id updates)
+                      (SessionMod.save-session session data-dir)
                       (when user-callbacks.on-update
                         (user-callbacks.on-update item-id updates)))
          :on-status (fn [status-info]

@@ -18,6 +18,7 @@
   (local hostname (or options.hostname default-hostname))
   (local port (or options.port default-port))
   (local timeout-ms (or options.timeout-ms default-timeout-ms))
+  (local stop-timeout-ms (or options.stop-timeout-ms 2000))
   (local opencode-path (or options.opencode-path "opencode"))
 
   (fn build-env []
@@ -81,6 +82,19 @@
     (when process-id
       (when (process.running process-id)
         (process.kill process-id)
+        (local deadline (+ (now-ms) stop-timeout-ms))
+        (var finished false)
+        (while (and (not finished) (< (now-ms) deadline))
+          (local (ok output) (pcall process.read process-id))
+          (if (not ok)
+              (set finished true)
+              (and output output.finished)
+              (set finished true)
+              (do
+                (process.poll 0)
+                (sysinfo.sleep 0.05))))
+        (when (not finished)
+          (process.kill process-id 9))
         (process.wait process-id))
       (set process-id nil)
       (set server-url nil))

@@ -85,12 +85,23 @@
                                    :status :completed}))
     true)
 
+  (fn update-last-item [self updates]
+    (local turn (. turns (length turns)))
+    (local session (. sessions turn.session-id))
+    (local item (. session.items (length session.items)))
+    (each [k v (pairs updates)]
+      (tset item k v))
+    (when turn.callbacks.on-update
+      (turn.callbacks.on-update item.id updates))
+    item)
+
   {:create-session create-session
    :get-session get-session
    :list-sessions list-sessions
    :run-turn run-turn
    :cancel-turn cancel-turn
-   :complete-last-turn complete-last-turn})
+   :complete-last-turn complete-last-turn
+   :update-last-item update-last-item})
 
 (fn test-controller-init []
   (local registry (AgentRegistry {:deps {}}))
@@ -162,6 +173,27 @@
           "turn completion should clear active turn")
   (assert (= (. controller.state.sessions 1 :status) :idle)
           "turn completion should refresh the active session status"))
+
+(fn test-controller-live-update-notifies []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local controller (AgentPanelController {:runner runner
+                                           :registry registry
+                                           :approvals approvals}))
+  (controller:init)
+  (controller:send "draw a circle")
+  (var change-count 0)
+  (controller.change-signal.connect
+    (fn [_state]
+      (set change-count (+ change-count 1))))
+  (runner:update-last-item {:content "draw a square"})
+  (assert (= (. controller.state.items 1 :content) "draw a square")
+          "live update should mutate controller-visible item state")
+  (assert (> change-count 0)
+          "live update should notify the transcript"))
 
 (fn test-controller-stop []
   (local registry (AgentRegistry {:deps {}}))
@@ -328,6 +360,8 @@
                      :fn test-controller-send-text})
 (table.insert tests {:name "controller send loads user message"
                      :fn test-controller-send-loads_user_message})
+(table.insert tests {:name "controller live update notifies"
+                     :fn test-controller-live-update-notifies})
 (table.insert tests {:name "controller stop clears active turn"
                      :fn test-controller-stop})
 (table.insert tests {:name "controller toggle expanded toggles expanded state"

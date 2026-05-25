@@ -35,6 +35,20 @@
               :color (or color (and tool-role tool-role.foreground) (glm.vec4 0.82 0.85 0.9 1))
               :scale 1.1}))
 
+(fn tool-details-text [item result]
+  (local parts [])
+  (when item.arguments
+    (table.insert parts
+      (.. "args: " (if (= (type item.arguments) :string)
+                        item.arguments
+                        (json.dumps item.arguments)))))
+  (when (and result result.output)
+    (table.insert parts
+      (.. "output: " result.output)))
+  (if (> (length parts) 0)
+      (table.concat parts "\n")
+      "No details available"))
+
 (fn make-message-row [item controller ctx]
   (local is-user? (= item.role :user))
   (local role (resolve-transcript-role ctx (if is-user? :user :assistant)))
@@ -91,7 +105,10 @@
      ctx))
 
   {:widget stack
-   :type :message})
+   :type :message
+   :item-id item.id
+   :update (fn [_self next-item _items]
+             (content-text:set-text (or next-item.content "")))})
 
 (fn find-matching-result [items call-id]
   (var result nil)
@@ -111,6 +128,9 @@
   (local status-text (if is-error? "failed"
                          is-running? "running"
                          "ok"))
+  (var summary-name-text nil)
+  (var summary-status nil)
+  (var details-text nil)
 
   (local expanded? (controller:is-expanded? item.id))
 
@@ -119,9 +139,11 @@
       ((Text {:text (.. "▸ " (or item.name "tool"))
               :style (code-style summary-ctx)})
        summary-ctx))
+    (set summary-name-text tool-name)
     (local status
       ((StatusBadge {:text status-text :tone status-tone :scale 1.0 :padding [0.15 0.1]})
        summary-ctx))
+    (set summary-status status)
     ((Flex {:axis 1
             :xspacing 0.3
             :yalign :center
@@ -130,24 +152,13 @@
      summary-ctx))
 
   (fn details-builder [details-ctx]
-    (local parts [])
-    (when item.arguments
-      (table.insert parts
-        (.. "args: " (if (= (type item.arguments) :string)
-                          item.arguments
-                          (json.dumps item.arguments)))))
-    (when (and result result.output)
-      (table.insert parts
-        (.. "output: " result.output)))
-    (local details-text
-      (if (> (length parts) 0)
-          (table.concat parts "\n")
-          "No details available"))
     ((Padding {:edge-insets [0.3 0.8]
                :child (fn [_ctx]
-                         ((WrappedText {:text details-text
-                                        :style (code-style details-ctx)})
-                          _ctx))})
+                         (set details-text
+                              ((WrappedText {:text (tool-details-text item result)
+                                             :style (code-style details-ctx)})
+                               _ctx))
+                         details-text)})
      details-ctx))
 
   (local disclosure
@@ -170,7 +181,25 @@
      ctx))
 
   {:widget stack
-   :type :tool-call})
+   :type :tool-call
+   :item-id item.id
+   :update (fn [_self next-item next-items]
+             (local next-result (find-matching-result next-items next-item.call-id))
+             (local next-error? (and next-result next-result.is-error))
+             (local next-running? (and (not next-result) controller.state.active-turn))
+             (local next-tone (if next-error? :danger
+                                  next-running? :info
+                                  :success))
+             (local next-status-text (if next-error? "failed"
+                                         next-running? "running"
+                                         "ok"))
+             (when summary-name-text
+               (summary-name-text:set-text (.. "▸ " (or next-item.name "tool"))))
+             (when summary-status
+               (summary-status:set-text next-status-text)
+               (summary-status:set-tone next-tone))
+             (when details-text
+               (details-text:set-text (tool-details-text next-item next-result))))})
 
 (fn make-tool-result-row [item _controller ctx]
   (local is-error? item.is-error)
@@ -204,7 +233,59 @@
      ctx))
 
   {:widget stack
-   :type :tool-result})
+   :type :tool-result
+   :item-id item.id
+   :update (fn [_self next-item _items]
+             (local next-error? next-item.is-error)
+             (status:set-text (if next-error? "tool error" "tool result"))
+             (status:set-tone (if next-error? :danger :neutral))
+             (name-text:set-text (.. (or next-item.name "tool") ": " (or next-item.output ""))))})
+
+(fn make-reasoning-row [item controller ctx]
+  (local role (resolve-transcript-role ctx :event))
+  (local text-color (or (and role role.foreground) (glm.vec4 0.55 0.58 0.64 1)))
+  (local expanded? (controller:is-expanded? item.id))
+  (local status-text (if (= item.stream-status :complete) "thinking" "thinking..."))
+  (var summary-text nil)
+  (var details-text nil)
+
+  (fn summary-builder [summary-ctx]
+    (set summary-text
+         ((Text {:text status-text
+                 :style (TextStyle {:color text-color :scale 1.05})})
+          summary-ctx))
+    summary-text)
+
+  (fn details-builder [details-ctx]
+    ((Padding {:edge-insets [0.25 0.65]
+               :child (fn [_ctx]
+                         (set details-text
+                              ((WrappedText {:text (or item.content "")
+                                             :style (TextStyle {:color text-color :scale 1.05})})
+                               _ctx))
+                         details-text)})
+     details-ctx))
+
+  (local disclosure
+    ((DisclosureRow {:summary summary-builder
+                     :details details-builder
+                     :expanded? expanded?
+                     :on-toggle (fn [_should-expand]
+                                  (controller:toggle-expanded item.id))})
+     ctx))
+  (local padded
+    ((Padding {:edge-insets [0.15 0.45]
+               :child (fn [_ctx] disclosure)})
+     ctx))
+
+  {:widget padded
+   :type :reasoning
+   :item-id item.id
+   :update (fn [_self next-item _items]
+             (when summary-text
+               (summary-text:set-text (if (= next-item.stream-status :complete) "thinking" "thinking...")))
+             (when details-text
+               (details-text:set-text (or next-item.content ""))))})
 
 (fn make-error-row [item _controller ctx]
   (local role (resolve-transcript-role ctx :error))
@@ -224,7 +305,10 @@
      ctx))
 
   {:widget stack
-   :type :error})
+   :type :error
+   :item-id item.id
+   :update (fn [_self next-item _items]
+             (error-text:set-text (.. "error: " (or next-item.error "unknown error"))))})
 
 (fn make-event-row [item _controller ctx]
   (local role (resolve-transcript-role ctx :event))
@@ -239,7 +323,10 @@
      ctx))
 
   {:widget padded
-   :type :event})
+   :type :event
+   :item-id item.id
+   :update (fn [_self next-item _items]
+             (text:set-text (or next-item.event "")))})
 
 (fn pair-tool-items [items]
   (local has-call {})
@@ -265,6 +352,8 @@
         (set row (make-tool-row item items controller ctx))
         (= item.type :tool-result)
         (set row (make-tool-result-row item controller ctx))
+        (= item.type :reasoning)
+        (set row (make-reasoning-row item controller ctx))
         (= item.type :error)
         (set row (make-error-row item controller ctx))
         (= item.type :event)
@@ -273,4 +362,5 @@
       (table.insert rows row)))
   rows)
 
-{:build-item-rows build-item-rows}
+{:build-item-rows build-item-rows
+ :pair-tool-items pair-tool-items}

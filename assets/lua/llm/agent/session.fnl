@@ -1,6 +1,6 @@
 ;; Agent session persistence — in-memory cache backed by JSON files.
 ;; Session shape: {:id :agent-id :status :items [] :data {} :created-at :updated-at}
-;; Item types: message, tool-call, tool-result, event, error
+;; Item types: message, tool-call, tool-result, reasoning, event, error
 
 (local fs (require :fs))
 (local json (require :json))
@@ -108,10 +108,51 @@
 
 (fn append-item [session item]
   (validate-item item)
+  (each [_ existing (ipairs (or session.items []))]
+    (when (= existing.id item.id)
+      (error (.. "session item already exists: " item.id))))
   (when (not item.created-at)
     (tset item :created-at (now)))
   (table.insert session.items item)
   session)
+
+(fn find-item [session item-id]
+  (assert (= (type session) "table") "session must be a table")
+  (assert (= (type item-id) "string") "item-id must be a string")
+  (var found nil)
+  (each [_ item (ipairs (or session.items []))]
+    (when (= item.id item-id)
+      (set found item)))
+  found)
+
+(fn update-item [session item-id updates]
+  (assert (= (type session) "table") "session must be a table")
+  (assert (= (type item-id) "string") "item-id must be a string")
+  (assert (= (type updates) "table") "updates must be a table")
+  (local item (find-item session item-id))
+  (when (not item)
+    (error (.. "session item not found for update: " item-id)))
+  (each [k v (pairs updates)]
+    (tset item k v))
+  (when (= updates.updated-at nil)
+    (tset item :updated-at (now)))
+  session)
+
+(fn upsert-item [session item]
+  (validate-item item)
+  (local existing (find-item session item.id))
+  (if existing
+      (do
+        (each [k v (pairs item)]
+          (tset existing k v))
+        (when (= item.updated-at nil)
+          (tset existing :updated-at (now)))
+        (values session existing false))
+      (do
+        (when (= item.created-at nil)
+          (tset item :created-at (now)))
+        (table.insert session.items item)
+        (values session item true))))
 
 (fn update-session [session updates]
   (each [k v (pairs (or updates {}))]
@@ -127,5 +168,8 @@
  :delete-session delete-session
  :list-sessions list-sessions
  :append-item append-item
+ :find-item find-item
+ :update-item update-item
+ :upsert-item upsert-item
  :update-session update-session
  :invalidate-cache invalidate-cache}

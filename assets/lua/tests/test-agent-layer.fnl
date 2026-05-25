@@ -183,6 +183,18 @@
   (assert (= si6.type "error"))
   (clean-dir dir))
 
+(fn test-session-upsert-item []
+  (local SessionMod (require :llm/agent/session))
+  (local dir (temp-dir))
+  (local session (SessionMod.create-session "test-agent" dir))
+  (SessionMod.upsert-item session {:id "itm-live" :type "message" :role "assistant" :content "hel"})
+  (assert (= (length session.items) 1) "upsert should append a missing item")
+  (SessionMod.upsert-item session {:id "itm-live" :type "message" :role "assistant" :content "hello"})
+  (assert (= (length session.items) 1) "upsert should update an existing item")
+  (assert (= (. session.items 1 :content) "hello") "upsert should replace fields")
+  (assert (. session.items 1 :updated-at) "upsert update should stamp updated-at")
+  (clean-dir dir))
+
 ;; ═══════════════════════════════════════
 ;; Turn lifecycle tests
 ;; ═══════════════════════════════════════
@@ -987,8 +999,8 @@
       :prompt (fn [id body on-response]
                 (table.insert prompt-calls {:id id :body body})
                 (on-response {:ok true
-                              :data {:info {:model {:modelID "claude-mock"}}
-                                     :parts [{:type "text" :text "I'll draw that for you!"}]
+                              :data {:info {:role "user" :model {:modelID "claude-mock"}}
+                                     :parts [{:type "text" :text "draw a red circle"}]
                                      :usage {:inputTokens 50 :outputTokens 30}}})
                 )
       :abort (fn [id on-response]
@@ -997,7 +1009,13 @@
       :get (fn [id on-response]
              (on-response {:ok true :data {:id id :title "existing"}}))
       :messages (fn [id on-response]
-                  (on-response {:ok true :data []}))}})
+                  (on-response
+                    {:ok true
+                     :data [{:info {:id "msg-user" :role "user"}
+                             :parts [{:type "text" :text "draw a red circle"}]}
+                            {:info {:id "msg-assistant" :role "assistant" :model {:modelID "claude-mock"}}
+                             :parts [{:type "text" :text "I'll draw that for you!"}]
+                             :usage {:inputTokens 50 :outputTokens 30}}]}))}})
 
   ;; Register SpaceAgent with mock provider
   (local reg (AgentRegistry {:deps {:app :stub}}))
@@ -1157,6 +1175,248 @@
   (assert failed-tool-result.is-error "failed tool result should be marked as error")
   (assert (string.match failed-tool-result.output "boom")
           "failed tool result should preserve error payload")
+
+  (runner:drop)
+  (clean-dir dir))
+
+(fn test-space-agent-streams-live-opencode-tool-events []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var prompt-callback nil)
+  (var event-callback nil)
+  (var unsubscribed false)
+  (var messages-called false)
+  (local mock-opencode
+    {:events
+     {:subscribe (fn [on-event]
+                   (set event-callback on-event)
+                   {:unsubscribe (fn [] (set unsubscribed true))
+                    :closed? (fn [] unsubscribed)})}
+     :session
+     {:create (fn [_body on-response]
+                (on-response {:ok true :data {:id "oc-live"}}))
+      :prompt (fn [_id _body on-response]
+                (set prompt-callback on-response))
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [id on-response]
+             (on-response {:ok true :data {:id id :title "existing"}}))
+      :messages (fn [_id on-response]
+                  (set messages-called true)
+                  (on-response
+                    {:ok true
+                     :data [{:info {:id "msg-live"}
+                             :parts [{:type "tool"
+                                      :sessionID "oc-live"
+                                      :messageID "msg-live"
+                                      :tool "space_agent_echo_token"
+                                      :callID "call-live"
+                                      :state {:status "completed"
+                                              :input {:token "abc"}
+                                              :output "abc"}}]}]}))}})
+
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers {:opencode mock-opencode}})
+
+  (local mock-presets
+    {:get-active-presets (fn [] [])
+     :get-prompt-fragments (fn [] [])
+     :get-tool-defs (fn [] [])})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets mock-presets
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers {:opencode mock-opencode}}}))
+
+  (local session (runner:create-session "space-agent"))
+  (var items-log [])
+  (var updates-log [])
+  (local handle (runner:run-turn session.id "use live tool"
+    {:on-item (fn [item] (table.insert items-log item))
+     :on-update (fn [item-id updates]
+                  (table.insert updates-log {:item-id item-id :updates updates}))}))
+  (assert (= (handle:status) :running) "turn should wait for prompt completion")
+  (assert event-callback "SpaceAgent should subscribe to OpenCode events before prompt completion")
+
+  (event-callback {:type "message.part.updated"
+                   :properties {:part {:type "tool"
+                                       :sessionID "oc-live"
+                                       :messageID "msg-live"
+                                       :tool "space_agent_echo_token"
+                                       :callID "call-live"
+                                       :state {:status "running"
+                                               :input {:token "abc"}}}}})
+  (local after-running (runner:get-session session.id))
+  (var live-call nil)
+  (each [_ item (ipairs after-running.items)]
+    (when (and (= item.type "tool-call") (= item.call-id "call-live"))
+      (set live-call item)))
+  (assert live-call "live tool-call should be persisted before prompt response")
+  (assert (= live-call.status "running") "live tool-call should record running status")
+  (assert (string.match live-call.arguments "abc") "live tool-call should record arguments")
+  (assert (= (handle:status) :running) "live tool event should not complete turn")
+
+  (event-callback {:type "message.part.updated"
+                   :properties {:part {:type "tool"
+                                       :sessionID "oc-live"
+                                       :messageID "msg-live"
+                                       :tool "space_agent_echo_token"
+                                       :callID "call-live"
+                                       :state {:status "completed"
+                                               :input {:token "abc"}
+                                               :output "abc"}}}})
+  (local after-completed (runner:get-session session.id))
+  (var live-result nil)
+  (each [_ item (ipairs after-completed.items)]
+    (when (and (= item.type "tool-result") (= item.call-id "call-live"))
+      (set live-result item)))
+  (assert live-result "live tool-result should be persisted before prompt response")
+  (assert (= live-result.output "abc") "live tool-result should preserve output")
+  (assert (> (length updates-log) 0) "live duplicate tool event should update the existing call item")
+
+  (prompt-callback {:ok true
+                    :data {:info {:model {:modelID "live-model"}}
+                           :parts [{:type "text" :text "done"}]
+                           :usage {}}})
+  (assert (= (handle:status) :completed) "turn should complete after prompt response")
+  (assert unsubscribed "live event subscription should be closed when prompt completes")
+  (assert messages-called "final audit should still reconcile OpenCode messages")
+  (local reloaded (runner:get-session session.id))
+  (var call-count 0)
+  (var result-count 0)
+  (var assistant-count 0)
+  (each [_ item (ipairs reloaded.items)]
+    (when (and (= item.type "tool-call") (= item.call-id "call-live"))
+      (set call-count (+ call-count 1)))
+    (when (and (= item.type "tool-result") (= item.call-id "call-live"))
+      (set result-count (+ result-count 1)))
+    (when (and (= item.type "message") (= item.role "assistant"))
+      (set assistant-count (+ assistant-count 1))))
+  (assert (= call-count 1) "final audit should not duplicate live tool-call")
+  (assert (= result-count 1) "final audit should not duplicate live tool-result")
+  (assert (= assistant-count 1) "assistant response should be persisted once")
+
+  (runner:drop)
+  (clean-dir dir))
+
+(fn test-space-agent-streams-live_text_and_reasoning []
+  (local SpaceAgentMod (require :llm/agent/builtins/space-agent))
+  (local {: AgentRegistry} (require :llm/agent/registry))
+  (local {: AgentRunner} (require :llm/agent/runner))
+  (local dir (temp-dir))
+  (var prompt-callback nil)
+  (var event-callback nil)
+  (local mock-opencode
+    {:events
+     {:subscribe (fn [on-event]
+                   (set event-callback on-event)
+                   {:unsubscribe (fn [] nil)
+                    :closed? (fn [] false)})}
+     :session
+     {:create (fn [_body on-response]
+                (on-response {:ok true :data {:id "oc-live-text"}}))
+      :prompt (fn [_id _body on-response]
+                (set prompt-callback on-response))
+      :abort (fn [_id on-response] (on-response true))
+      :get (fn [id on-response]
+             (on-response {:ok true :data {:id id :title "existing"}}))
+      :messages (fn [_id on-response]
+                  (on-response {:ok true :data []}))}})
+
+  (local reg (AgentRegistry {:deps {:app :stub}}))
+  (SpaceAgentMod.register reg
+    {:app :stub :presets {} :tools {} :approvals {} :providers {:opencode mock-opencode}})
+
+  (local mock-presets
+    {:get-active-presets (fn [] [])
+     :get-prompt-fragments (fn [] [])
+     :get-tool-defs (fn [] [])})
+  (local runner (AgentRunner
+    {:data-dir dir
+     :registry reg
+     :deps {:app :stub
+            :presets mock-presets
+            :tools (mock-tool-surface [])
+            :approvals {}
+            :agents reg
+            :providers {:opencode mock-opencode}}}))
+
+  (local session (runner:create-session "space-agent"))
+  (local handle (runner:run-turn session.id "stream text"
+    {:on-item (fn [_item] nil)
+     :on-update (fn [_item-id _updates] nil)}))
+  (assert event-callback "SpaceAgent should subscribe to OpenCode events")
+
+  ;; Buffer an out-of-order text delta, then provide the part metadata.
+  (event-callback {:type "message.part.delta"
+                   :properties {:sessionID "oc-live-text"
+                                :messageID "msg-assistant"
+                                :partID "part-text"
+                                :field "text"
+                                :delta "hel"}})
+  (event-callback {:type "message.part.updated"
+                   :properties {:part {:type "text"
+                                       :sessionID "oc-live-text"
+                                       :messageID "msg-assistant"
+                                       :id "part-text"
+                                       :text ""}}})
+  (event-callback {:type "message.part.delta"
+                   :properties {:sessionID "oc-live-text"
+                                :messageID "msg-assistant"
+                                :partID "part-text"
+                                :field "text"
+                                :delta "lo"}})
+
+  (event-callback {:type "message.part.updated"
+                   :properties {:part {:type "reasoning"
+                                       :sessionID "oc-live-text"
+                                       :messageID "msg-assistant"
+                                       :id "part-reason"
+                                       :text "thinking"}}})
+  (event-callback {:type "message.part.delta"
+                   :properties {:sessionID "oc-live-text"
+                                :messageID "msg-assistant"
+                                :partID "part-reason"
+                                :field "text"
+                                :delta " live"}})
+
+  (local during-stream (runner:get-session session.id))
+  (var assistant nil)
+  (var reasoning nil)
+  (each [_ item (ipairs during-stream.items)]
+    (when (and (= item.type "message") (= item.role "assistant"))
+      (set assistant item))
+    (when (= item.type "reasoning")
+      (set reasoning item)))
+  (assert assistant "assistant draft should be persisted before prompt response")
+  (assert (= assistant.content "hello") "assistant draft should include buffered and live deltas")
+  (assert (= assistant.stream-status "streaming") "assistant draft should be marked streaming")
+  (assert reasoning "reasoning row should be persisted before prompt response")
+  (assert (= reasoning.content "thinking live") "reasoning should stream deltas")
+  (assert (= (handle:status) :running) "streaming text should not complete the turn")
+
+  (prompt-callback {:ok true
+                    :data {:info {:model {:modelID "live-model"}}
+                           :parts [{:type "text" :text "hello final"}]
+                           :usage {:output 2}}})
+  (assert (= (handle:status) :completed) "turn should complete after prompt response")
+
+  (local reloaded (runner:get-session session.id))
+  (var assistant-count 0)
+  (var final-assistant nil)
+  (each [_ item (ipairs reloaded.items)]
+    (when (and (= item.type "message") (= item.role "assistant"))
+      (set assistant-count (+ assistant-count 1))
+      (set final-assistant item)))
+  (assert (= assistant-count 1) "final response should update live assistant draft")
+  (assert (= final-assistant.content "hello final") "final response should reconcile assistant content")
+  (assert (= final-assistant.stream-status "complete") "final assistant item should be complete")
 
   (runner:drop)
   (clean-dir dir))
@@ -1397,6 +1657,7 @@
 (table.insert tests {:name "session list corrupt errors" :fn test-session-list-corrupt-errors})
 (table.insert tests {:name "session append item" :fn test-session-append-item})
 (table.insert tests {:name "session append multiple item types" :fn test-session-append-multiple-item-types})
+(table.insert tests {:name "session upsert item" :fn test-session-upsert-item})
 
 (table.insert tests {:name "turn pair creation" :fn test-turn-pair-creation})
 (table.insert tests {:name "turn start and complete" :fn test-turn-start-and-complete})
@@ -1459,6 +1720,8 @@
 (table.insert tests {:name "space-agent registers with registry" :fn test-space-agent-registers-with-registry})
 (table.insert tests {:name "space-agent run with mock opencode" :fn test-space-agent-run-with-mock-opencode})
 (table.insert tests {:name "space-agent persists opencode tool audit" :fn test-space-agent-persists-opencode-tool-audit})
+(table.insert tests {:name "space-agent streams live opencode tool events" :fn test-space-agent-streams-live-opencode-tool-events})
+(table.insert tests {:name "space-agent streams live text and reasoning" :fn test-space-agent-streams-live_text_and_reasoning})
 (table.insert tests {:name "space-agent waits for async opencode callbacks" :fn test-space-agent-waits-for-async-opencode-callbacks})
 (table.insert tests {:name "space-agent reuses opencode session" :fn test-space-agent-reuses-opencode-session})
 (table.insert tests {:name "space-agent handles opencode error" :fn test-space-agent-handles-opencode-error})

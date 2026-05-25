@@ -289,6 +289,27 @@
              :contexts [{:surface :any}]
              :tool-ids ["agent.echo-token"]}}])
 
+(fn live-streaming-tool-specs [call-log]
+  [{:adapter {:id "agent.slow-echo-token"
+              :mcp-name "space_agent_slow_echo_token"
+              :description "Echo a token back after a short delay."
+              :inputSchema {:type "object"
+                            :properties {:token {:type "string" :description "The token to echo"}}
+                            :required [:token]}
+              :make-run (fn [app]
+                          (fn [args]
+                            (table.insert call-log {:name "space_agent_slow_echo_token"
+                                                    :args (or args {})
+                                                    :at (os.time)})
+                            (os.execute "sleep 2")
+                            (or args.token "")))}
+    :preset {:name "agent-test-slow-echo"
+             :default-state :auto
+             :risk :normal
+             :group "test"
+             :contexts [{:surface :any}]
+             :tool-ids ["agent.slow-echo-token"]}}])
+
 (fn sequencing-tool-specs [call-log nonce]
   [{:adapter {:id "agent.get-nonce"
               :mcp-name "space_agent_get_nonce"
@@ -441,7 +462,94 @@
               "session.data.opencode-session-id should be persisted"))))
 
 ;; ═══════════════════════════════════════
-;; Test 2: Sequencing — multi-tool call ordering
+;; Test 2: Live streaming — tool call appears before completion
+;; ═══════════════════════════════════════
+
+(fn test-live-tool-streaming []
+  (local root (fresh-root))
+  (local call-log [])
+  (var handles {})
+  (set handles.root root)
+
+  (with-cleanup handles
+    (fn []
+      (local pipeline (setup-tool-pipeline call-log (live-streaming-tool-specs call-log)))
+      (set handles.pipeline pipeline)
+
+      (local bridge (start-opencode-bridge root pipeline.tool-registry))
+      (set handles.bridge bridge)
+
+      (local {: server : config-dir : model} (start-opencode-with-fixed-model bridge))
+      (set handles.server server)
+      (set handles.config-dir config-dir)
+
+      (local {: runner} (setup-agent-runner root server model pipeline.preset-manager pipeline.surface pipeline.approvals))
+      (set handles.runner runner)
+
+      (local session (runner:create-session "space-agent"))
+      (local marker (.. "stream-live-" (os.time)))
+      (var completed nil)
+      (var handle nil)
+      (var live-call-before-complete false)
+      (var live-result-before-complete false)
+      (set handle
+        (runner:run-turn session.id
+          (.. "Call `space_space_agent_slow_echo_token` exactly once with token=\"" marker
+              "\". Then reply with exactly the tool output and no extra text.")
+          {:on-complete (fn [r] (set completed r))
+           :on-item (fn [item]
+                      (when (and (= item.type "tool-call")
+                                 (= item.name "space_space_agent_slow_echo_token")
+                                 (not completed)
+                                 (= (handle:status) :running))
+                        (set live-call-before-complete true))
+                      (when (and (= item.type "tool-result")
+                                 (= item.name "space_space_agent_slow_echo_token")
+                                 (not completed)
+                                 (= (handle:status) :running))
+                        (set live-result-before-complete true)))}))
+
+      (print "  waiting for live tool-call before turn completion...")
+      (wait-for #(and live-call-before-complete
+                      (= (handle:status) :running)
+                      (not completed))
+                90000)
+      (assert live-call-before-complete "tool-call should stream while turn is still running")
+
+      (print "  waiting for live tool-result before turn completion...")
+      (wait-for #(and live-result-before-complete
+                      (= (handle:status) :running)
+                      (not completed))
+                90000)
+      (assert live-result-before-complete "tool-result should stream while turn is still running")
+
+      (local final-status (handle:wait TEST_CONFIG.turn-timeout-ms))
+      (print (.. "  turn status: " final-status))
+      (assert (= (handle:status) :completed) "turn should complete")
+      (assert completed "on-complete should fire")
+      (assert (= (length call-log) 1)
+              (.. "slow echo should be called once, got " (length call-log)))
+      (assert (= (. call-log 1 :args :token) marker)
+              "slow echo token should match marker")
+      (assert (string.find completed.result.content marker 1 true)
+              (.. "assistant response should contain marker '" marker "'"))
+
+      (SessionMod.invalidate-cache session.id)
+      (local reloaded (runner:get-session session.id))
+      (var call-count 0)
+      (var result-count 0)
+      (each [_ item (ipairs reloaded.items)]
+        (when (and (= item.type "tool-call")
+                   (= item.name "space_space_agent_slow_echo_token"))
+          (set call-count (+ call-count 1)))
+        (when (and (= item.type "tool-result")
+                   (= item.name "space_space_agent_slow_echo_token"))
+          (set result-count (+ result-count 1))))
+      (assert (= call-count 1) "live stream plus final audit should keep one tool-call")
+      (assert (= result-count 1) "live stream plus final audit should keep one tool-result"))))
+
+;; ═══════════════════════════════════════
+;; Test 3: Sequencing — multi-tool call ordering
 ;; ═══════════════════════════════════════
 
 (fn test-sequencing []
@@ -521,25 +629,23 @@
       (set handles.pipeline pipeline)
 
       ;; The default policy setup uses {:normal :auto} only, so shell should need approval.
-      ;; Verify the tool surface reflects this: normal tool in, shell tool out.
+      ;; Ask-risk tools stay exposed so the approval path can reject execution.
 
       (local mcp-defs (pipeline.surface:mcp-tool-defs))
-      (assert (= (length mcp-defs) 1) (.. "surface should expose only 1 tool (normal), got " (length mcp-defs)))
-      (assert (= (. mcp-defs 1 :name) "space_agent_normal_safe") "only normal-safe tool should be exposed")
+      (assert (= (length mcp-defs) 2) (.. "surface should expose both tools, got " (length mcp-defs)))
 
       ;; 2. Start the bridge that owns MCP HTTP plus isolated OpenCode config
       (local bridge (start-opencode-bridge root pipeline.tool-registry))
       (set handles.bridge bridge)
 
-      ;; 3. Assert MCP server tools/list doesn't include high-risk tool
+      ;; 3. Assert MCP server tools/list includes both; shell remains approval-gated at call time.
       (local mcp-tools (pipeline.tool-registry:list))
-      (assert (= (# mcp-tools) 1) "MCP tool-registry should have only 1 approved tool")
-      (assert (= (. mcp-tools 1 :name) "space_agent_normal_safe") "only safe tool in registry")
+      (assert (= (# mcp-tools) 2) "MCP tool-registry should have both active tools")
       (var found-shell false)
       (each [_ t (ipairs mcp-tools)]
         (when (= t.name "space_agent_shell_dangerous")
           (set found-shell true)))
-      (assert (not found-shell) "shell tool should not be in MCP tools/list")
+      (assert found-shell "shell tool should be present but gated at execution")
 
       ;; 4. Start opencode and verify the SpaceAgent test model is configured
       (local {: server : config-dir : model} (start-opencode-with-fixed-model bridge))
@@ -589,6 +695,7 @@
   (math.randomseed (math.floor (now-ms)))
 
   (run-test "echo token round-trip" test-echo-token)
+  (run-test "live tool streaming" test-live-tool-streaming)
   (run-test "multi-tool sequencing" test-sequencing)
   (run-test "approval boundaries gating" test-approval-boundaries)
 
