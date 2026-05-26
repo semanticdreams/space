@@ -36,7 +36,7 @@
   (mgr:register
     {:name "graph-node-destructive-tools"
      :group "graph"
-     :default-state :off
+     :default-state :auto
      :risk :destructive
      :contexts [{:surface :canvas :mode "graph"}]
      :tool-ids ["graph.remove-nodes"]
@@ -71,11 +71,11 @@
   (mgr:register
     {:name "graph-state-tools"
      :group "graph"
-     :default-state :off
+     :default-state :auto
      :risk :destructive
      :contexts [{:surface :canvas :mode "graph"}]
      :tool-ids ["graph.get-state" "graph.restore-state"]
-     :system-prompt "Graph state operations can overwrite current data. Enable only when the user explicitly approves."}))
+     :system-prompt "Graph state operations can overwrite current data and require approval."}))
 
 (fn add-node-run [app]
   (fn [args]

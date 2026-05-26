@@ -1593,7 +1593,8 @@
   (when (not app.agent-approvals)
     (set app.agent-approvals
          (AgentApprovals.AgentApprovals
-           {:policy {:normal :auto
+           {:data-dir (fs.join-path app.user-data-dir "agent-approvals")
+            :policy {:normal :auto
                      :filesystem-read :ask
                      :filesystem-write :ask
                      :destructive :ask

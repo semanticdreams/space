@@ -4,6 +4,7 @@
 (local Rectangle (require :rectangle))
 (local Text (require :text))
 (local TextStyle (require :text-style))
+(local WrappedText (require :wrapped-text))
 (local Padding (require :padding))
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
@@ -12,6 +13,7 @@
 (fn ApprovalRow [opts]
   (assert opts.approval "ApprovalRow requires :approval")
   (local on-approve (or opts.on-approve nil))
+  (local on-approve-always (or opts.on-approve-always nil))
   (local on-deny (or opts.on-deny nil))
 
   (fn build [ctx]
@@ -21,6 +23,8 @@
     (local bg-color (or (and approval-theme approval-theme.background) (glm.vec4 0.22 0.17 0.05 1)))
     (local title-color (or (and approval-theme approval-theme.title-foreground) (glm.vec4 0.95 0.73 0.31 1)))
     (local text-color (or (and approval-theme approval-theme.foreground) (glm.vec4 0.92 0.88 0.75 1)))
+    (local exact-args? (or approval.args_hash
+                           (and approval.context approval.context.args_hash)))
     (local bg ((Rectangle {:color bg-color}) ctx))
 
     (local title
@@ -34,6 +38,13 @@
               :style (TextStyle {:color text-color
                                  :scale 1.2})})
        ctx))
+    (local details
+      ((WrappedText {:text (or approval.args_preview
+                            (and approval.context approval.context.args_preview)
+                            "")
+                     :style (TextStyle {:color text-color
+                                        :scale 1.0})})
+       ctx))
 
     (local approve-btn
       ((Button {:text "Approve once"
@@ -42,6 +53,14 @@
                 :on-click (fn [_btn _evt]
                             (when on-approve
                               (on-approve approval)))})
+       ctx))
+    (local always-btn
+      ((Button {:text "Always approve"
+                :variant :success
+                :padding [0.3 0.5]
+                :on-click (fn [_btn _evt]
+                            (when on-approve-always
+                              (on-approve-always approval)))})
        ctx))
     (local deny-btn
       ((Button {:text "Deny"
@@ -56,13 +75,17 @@
       ((Flex {:axis 2
               :yspacing 0.1
               :children [(FlexChild (fn [_ctx] title))
-                         (FlexChild (fn [_ctx] reason))]})
+                         (FlexChild (fn [_ctx] reason))
+                         (FlexChild (fn [_ctx] details))]})
        ctx))
+    (local button-children [(FlexChild (fn [_ctx] deny-btn))
+                            (FlexChild (fn [_ctx] approve-btn))])
+    (when exact-args?
+      (table.insert button-children (FlexChild (fn [_ctx] always-btn))))
     (local buttons-flex
       ((Flex {:axis 1
               :xspacing 0.3
-              :children [(FlexChild (fn [_ctx] deny-btn))
-                         (FlexChild (fn [_ctx] approve-btn))]})
+              :children button-children})
        ctx))
     (local padded
       ((Padding {:edge-insets [0.4 0.45]

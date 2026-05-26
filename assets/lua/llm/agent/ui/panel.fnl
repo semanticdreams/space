@@ -178,6 +178,8 @@
                  ((ApprovalRow {:approval request
                                 :on-approve (fn [_approval]
                                               (controller:approve-pending))
+                                :on-approve-always (fn [_approval]
+                                                     (controller:approve-pending-always))
                                 :on-deny (fn [_approval]
                                            (controller:deny-pending))})
                   ctx))

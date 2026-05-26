@@ -333,6 +333,39 @@
   (assert (not controller.state.pending-approval)
           "approve-pending should clear pending approval"))
 
+(fn test-controller_approve_pending_always []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (local runner (make-test-runner))
+  (local controller (AgentPanelController {:runner runner
+                                             :registry registry
+                                             :approvals approvals}))
+  (controller:init)
+  (local context {:tool "space_app_run_bash"
+                  :source "app.run-bash"
+                  :args_hash "hash-a"
+                  :grant-on-approve true})
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] nil)
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert controller.state.pending-approval
+          "controller should track pending approval requests")
+  (controller:approve-pending-always)
+  (var approved-count 0)
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] (set approved-count (+ approved-count 1)))
+     :on-denied (fn [_r] nil)}
+    context)
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] (set approved-count (+ approved-count 1)))
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert (= approved-count 2)
+          "approve-pending-always should grant repeated exact matches"))
+
 (fn test-controller_hydrates_existing_pending_approval []
   (local registry (AgentRegistry {:deps {}}))
   (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
@@ -380,6 +413,8 @@
                      :fn test-controller-init-selects-existing-session})
 (table.insert tests {:name "controller tracks pending approval"
                      :fn test-controller_tracks_pending_approval})
+(table.insert tests {:name "controller approve pending always"
+                     :fn test-controller_approve_pending_always})
 (table.insert tests {:name "controller hydrates existing pending approval"
                      :fn test-controller_hydrates_existing_pending_approval})
 

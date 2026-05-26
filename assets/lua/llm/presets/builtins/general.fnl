@@ -32,38 +32,38 @@
   (mgr:register
     {:name "general-world-tools"
      :group "general"
-     :default-state :off
+     :default-state :auto
      :risk :destructive
      :contexts [{:surface :any}]
      :tool-ids ["app.create-world" "app.switch-world" "app.delete-world"]
-     :system-prompt "World management operations are destructive. Enable only when the user explicitly approves."})
+     :system-prompt "World management operations are available but destructive actions require approval."})
 
   (mgr:register
     {:name "general-file-read-tools"
      :group "general"
-     :default-state :off
+     :default-state :auto
      :risk :filesystem-read
      :contexts [{:surface :any}]
      :tool-ids ["app.read-file" "app.list-files"]
-     :system-prompt "File read tools allow reading from the filesystem. Enable when the user needs file access."})
+     :system-prompt "File read tools allow reading from the filesystem and may require approval."})
 
   (mgr:register
     {:name "general-file-write-tools"
      :group "general"
-     :default-state :off
+     :default-state :auto
      :risk :filesystem-write
      :contexts [{:surface :any}]
      :tool-ids ["app.write-file"]
-     :system-prompt "File write tools allow writing to the filesystem. Enable with caution."})
+     :system-prompt "File write tools allow writing to the filesystem and require approval."})
 
   (mgr:register
     {:name "general-shell-tools"
      :group "general"
-     :default-state :off
+     :default-state :auto
      :risk :shell
      :contexts [{:surface :any}]
      :tool-ids ["app.run-bash"]
-     :system-prompt "Shell tools allow executing arbitrary commands. Only enable when explicitly approved."}))
+     :system-prompt "Shell tools allow executing arbitrary commands and require approval."}))
 
 (fn register-general-adapters [adapters]
   (local empty-schema {:type "object" :properties {}})

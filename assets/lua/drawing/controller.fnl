@@ -305,6 +305,13 @@
             "DrawingController object command requires vector layer")
     layer)
 
+  (fn vector-layer-by-id! [layer-id label]
+    (local layer (. self.state.document.layers (DrawingDocument.layer-index self.state.document layer-id)))
+    (assert layer (.. "DrawingController " label " missing layer"))
+    (assert (= layer.kind "vector")
+            (.. "DrawingController " label " requires vector layer"))
+    layer)
+
   (fn perform! [command reason]
     (local committed-command (history:perform command))
     (if committed-command
@@ -496,6 +503,64 @@
                                                 record.index))
                (DrawingDocument.set-selection! self.state previous-selection))})
 
+  (fn replace-object-by-id! [layer object-id object]
+    (local object-idx (DrawingDocument.object-index layer object-id))
+    (assert object-idx
+            (.. "DrawingController object update missing object: " object-id))
+    (set (. layer.objects object-idx)
+         (DrawingDocument.normalize-object object)))
+
+  (fn offset-point [point dx dy]
+    (glm.vec3 (+ point.x dx) (+ point.y dy) point.z))
+
+  (fn translate-object-copy [object dx dy]
+    (local copy (clone-table object))
+    (if (or (= copy.kind "rectangle")
+            (= copy.kind "ellipse"))
+        (set copy.center (offset-point copy.center dx dy))
+        (= copy.kind "line")
+        (do
+          (set copy.start (offset-point copy.start dx dy))
+          (set copy.finish (offset-point copy.finish dx dy)))
+        (= copy.kind "stroke")
+        (set copy.points
+             (icollect [_ point (ipairs (or copy.points []))]
+                       (offset-point point dx dy))))
+    copy)
+
+  (fn patch-object-style-copy [object changes]
+    (local copy (clone-table object))
+    (local next-style (clone-table (or copy.style {})))
+    (each [k v (pairs changes)]
+      (set (. next-style k) v))
+    (set copy.style next-style)
+    (DrawingDocument.normalize-object copy))
+
+  (fn update-objects-command [layer-id ids edit-fn]
+    (local layer (. self.state.document.layers (DrawingDocument.layer-index self.state.document layer-id)))
+    (assert layer "DrawingController update-objects missing layer")
+    (assert (= layer.kind "vector")
+            "DrawingController update-objects requires vector layer")
+    (local records [])
+    (each [_ object-id (ipairs ids)]
+      (local idx (DrawingDocument.object-index layer object-id))
+      (local object (and idx (. layer.objects idx)))
+      (assert object
+              (.. "DrawingController update-objects missing selected object: " object-id))
+      (table.insert records
+        {:id object-id
+         :before (clone-table object)
+         :after (edit-fn object)}))
+    {:change-payload {:reason "vector-content"}
+     :apply (fn [_cmd]
+              (local target-layer (vector-layer-by-id! layer-id "update-objects"))
+              (each [_ record (ipairs records)]
+                (replace-object-by-id! target-layer record.id (clone-table record.after))))
+     :revert (fn [_cmd]
+               (local target-layer (vector-layer-by-id! layer-id "update-objects"))
+               (each [_ record (ipairs records)]
+                 (replace-object-by-id! target-layer record.id (clone-table record.before))))})
+
   (fn set-active-tool [tool]
     (assert (can-activate-tool? tool)
             (.. "DrawingController cannot activate tool without required state: " tool))
@@ -551,6 +616,41 @@
              (<= to-index (length self.state.document.layers)))
         (perform! (reorder-layer-command layer.id from-index to-index) "layer-structure")
         false))
+
+  (fn translate-selection [dx dy]
+    (assert (= (type dx) "number") "DrawingController translate-selection requires numeric dx")
+    (assert (= (type dy) "number") "DrawingController translate-selection requires numeric dy")
+    (local layer (active-layer))
+    (assert layer "DrawingController translate-selection requires an active layer")
+    (assert (= layer.kind "vector")
+            "DrawingController translate-selection requires active vector layer")
+    (local ids (icollect [_ object-id (ipairs (selection-ids))]
+                         object-id))
+    (if (= (length ids) 0)
+        false
+        (perform! (update-objects-command
+                    layer.id
+                    ids
+                    (fn [object]
+                      (translate-object-copy object dx dy)))
+                  "vector-content")))
+
+  (fn update-selection-style [changes]
+    (assert (= (type changes) "table") "DrawingController update-selection-style requires changes table")
+    (local layer (active-layer))
+    (assert layer "DrawingController update-selection-style requires an active layer")
+    (assert (= layer.kind "vector")
+            "DrawingController update-selection-style requires active vector layer")
+    (local ids (icollect [_ object-id (ipairs (selection-ids))]
+                         object-id))
+    (if (= (length ids) 0)
+        false
+        (perform! (update-objects-command
+                    layer.id
+                    ids
+                    (fn [object]
+                      (patch-object-style-copy object changes)))
+                  "vector-content")))
 
   (fn set-active-layer [layer-id]
     (DrawingDocument.set-active-layer! self.state layer-id)
@@ -949,6 +1049,8 @@
   (set self.duplicate-active-layer (fn [_self] (duplicate-active-layer)))
   (set self.delete-active-layer (fn [_self] (delete-active-layer)))
   (set self.move-active-layer (fn [_self delta] (move-active-layer delta)))
+  (set self.translate-selection (fn [_self dx dy] (translate-selection dx dy)))
+  (set self.update-selection-style (fn [_self changes] (update-selection-style changes)))
   (set self.set-active-layer (fn [_self layer-id] (set-active-layer layer-id)))
   (set self.rename-active-layer (fn [_self value] (rename-active-layer value)))
   (set self.layer-count (fn [_self] (length self.state.document.layers)))

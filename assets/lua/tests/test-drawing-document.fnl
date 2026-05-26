@@ -935,6 +935,60 @@
       (assert (= (. object.start 1) 1))
       (assert (= (. object.finish 2) 8)))))
 
+(fn controller-translates-selection-with-undo-redo []
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 10 4 0) false)
+      (assert (controller:commit-gesture))
+      (local layer (controller:active-layer))
+      (var object (. layer.objects 1))
+      (controller:set-selection! [object.id])
+      (assert (controller:translate-selection 3 -2))
+      (set object (. layer.objects 1))
+      (assert (= object.center.x 8))
+      (assert (= object.center.y 0))
+      (assert (controller:on-undo))
+      (set object (. layer.objects 1))
+      (assert (= object.center.x 5))
+      (assert (= object.center.y 2))
+      (assert (controller:on-redo))
+      (set object (. layer.objects 1))
+      (assert (= object.center.x 8))
+      (assert (= object.center.y 0)))))
+
+(fn controller-updates-selection-style-with-undo-redo []
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "ellipse")
+      (controller:begin-gesture "ellipse" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 8 8 0) false)
+      (assert (controller:commit-gesture))
+      (local layer (controller:active-layer))
+      (var object (. layer.objects 1))
+      (controller:set-selection! [object.id])
+      (assert (controller:update-selection-style
+                {:stroke_color [1 0 0 1]
+                 :fill_color [0 1 0 1]
+                 :fill_enabled false
+                 :thickness 5
+                 :opacity 0.5}))
+      (set object (. layer.objects 1))
+      (assert (= (. object.style.stroke_color 1) 1))
+      (assert (= (. object.style.fill_color 2) 1))
+      (assert (= object.style.fill_enabled false))
+      (assert (= object.style.thickness 5))
+      (assert (= object.style.opacity 0.5))
+      (assert (controller:on-undo))
+      (set object (. layer.objects 1))
+      (assert (= (. object.style.stroke_color 1) 0.33))
+      (assert (= object.style.fill_enabled true))
+      (assert (controller:on-redo))
+      (set object (. layer.objects 1))
+      (assert (= (. object.style.fill_color 2) 1))
+      (assert (= object.style.fill_enabled false)))))
+
 (fn controller-renames-layers-with-undo-redo []
   (with-vector-controller
     (fn [controller]
@@ -1765,6 +1819,10 @@
                      :fn controller-creates-rectangle-and-supports-undo-redo})
 (table.insert tests {:name "Drawing controller snapshots serialize vector data"
                      :fn snapshot-serializes-glm-vectors})
+(table.insert tests {:name "Drawing controller translates selection with undo/redo"
+                     :fn controller-translates-selection-with-undo-redo})
+(table.insert tests {:name "Drawing controller updates selection style with undo/redo"
+                     :fn controller-updates-selection-style-with-undo-redo})
 (table.insert tests {:name "Drawing controller renames layers with undo/redo"
                      :fn controller-renames-layers-with-undo-redo})
 (table.insert tests {:name "Drawing controller rejects non-canonical runtime layer names"

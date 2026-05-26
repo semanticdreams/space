@@ -441,6 +441,7 @@
         (set pending request))))
   (local context {:tool "space_app_run_bash"
                   :source "app.run-bash"
+                  :args_hash "hash-a"
                   :grant-on-approve true})
   (local first-result
     (approvals:request-risk :shell "space_app_run_bash requested shell access"
@@ -463,6 +464,114 @@
        :on-denied (fn [_r] nil)}
       context))
   (assert (= third-result false) "approval grant should be consumed after one retry"))
+
+(fn test-approvals-exact-args-and-always-grants []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (local context-a {:tool "space_app_run_bash"
+                    :source "app.run-bash"
+                    :args_hash "hash-a"
+                    :grant-on-approve true})
+  (local context-b {:tool "space_app_run_bash"
+                    :source "app.run-bash"
+                    :args_hash "hash-b"
+                    :grant-on-approve true})
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] nil)
+     :on-denied (fn [_r] nil)}
+    context-a)
+  (assert pending "first request should create pending approval")
+  (pending:approve {:always true})
+  (var approved-a 0)
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] (set approved-a (+ approved-a 1)))
+     :on-denied (fn [_r] nil)}
+    context-a)
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] (set approved-a (+ approved-a 1)))
+     :on-denied (fn [_r] nil)}
+    context-a)
+  (assert (= approved-a 2) "always approval should allow repeated exact matches")
+  (local mismatch-result
+    (approvals:request-risk :shell "run command"
+      {:on-approved (fn [_r] (set approved-a (+ approved-a 1)))
+       :on-denied (fn [_r] nil)}
+      context-b))
+  (assert (= mismatch-result false) "different args hash should require a new approval"))
+
+(fn test-approvals-always-grants-persist []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local dir (temp-dir))
+  (local grants-path (fs.join-path dir "approval-grants.json"))
+  (local context {:tool "space_app_run_bash"
+                  :source "app.run-bash"
+                  :args_hash "hash-a"
+                  :args_canonical "{\"cmd\":\"echo hi\"}"
+                  :grant-on-approve true})
+  (local first (AgentApprovals {:policy {:shell :ask}
+                                :grants-path grants-path}))
+  (var pending nil)
+  (first.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (first:request-risk :shell "run command"
+    {:on-approved (fn [_r] nil)
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert pending "first approvals instance should create pending request")
+  (pending:approve {:always true})
+  (local second (AgentApprovals {:policy {:shell :ask}
+                                 :grants-path grants-path}))
+  (var approved-count 0)
+  (second:request-risk :shell "run command"
+    {:on-approved (fn [_r] (set approved-count (+ approved-count 1)))
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert (= approved-count 1)
+          "persistent always grant should approve matching request after reload")
+  (clean-dir dir))
+
+(fn test-approvals-denied-policy-does-not-consume-grant []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local policy {:shell :ask})
+  (local approvals (AgentApprovals {:policy policy}))
+  (local context {:tool "space_app_run_bash"
+                  :source "app.run-bash"
+                  :args_hash "hash-a"
+                  :args_canonical "{\"cmd\":\"echo hi\"}"
+                  :grant-on-approve true})
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] nil)
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert pending "request should create pending approval")
+  (pending:approve)
+  (set policy.shell :deny)
+  (var denied-count 0)
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] nil)
+     :on-denied (fn [_r] (set denied-count (+ denied-count 1)))}
+    context)
+  (assert (= denied-count 1) "deny policy should deny without consuming grant")
+  (set policy.shell :ask)
+  (var approved-count 0)
+  (approvals:request-risk :shell "run command"
+    {:on-approved (fn [_r] (set approved-count (+ approved-count 1)))
+     :on-denied (fn [_r] nil)}
+    context)
+  (assert (= approved-count 1)
+          "one-time grant should still be available after denied policy check"))
 
 (fn test-approvals-unknown-risk-asserts []
   (local {: AgentApprovals} (require :llm/agent/approvals))
@@ -516,12 +625,16 @@
                                      :mcp-tools mock-mcp-tools
                                      :approvals mock-approvals}))
   (local tools (surface:openai-tools))
-  (assert (= (length tools) 1) "should have 1 tool")
-  (local first-tool (. tools 1))
-  (assert (= first-tool.type "function") "should be function type")
-  (assert (= first-tool.name "space_test_tool") "should have correct name")
-  (assert (= first-tool.description "A test tool") "should have correct description")
-  (assert first-tool.parameters "should have parameters"))
+  (assert (= (length tools) 2) "should include approval tool plus active tool")
+  (local by-name {})
+  (each [_ tool (ipairs tools)]
+    (set (. by-name tool.name) tool))
+  (assert by-name.space_agent_request_tool_approval "approval request tool should be exposed")
+  (local target-tool by-name.space_test_tool)
+  (assert target-tool "active tool should be exposed")
+  (assert (= target-tool.type "function") "should be function type")
+  (assert (= target-tool.description "A test tool") "should have correct description")
+  (assert target-tool.parameters "should have parameters"))
 
 (fn test-tool-surface-mcp-defs []
   (local {: AgentToolSurface} (require :llm/agent/tool-surface))
@@ -536,9 +649,12 @@
                                      :mcp-tools mock-mcp-tools
                                      :approvals mock-approvals}))
   (local defs (surface:mcp-tool-defs))
-  (assert (= (length defs) 1) "should have 1 def")
-  (local first-def (. defs 1))
-  (assert (= first-def.name "space_test") "should have correct name"))
+  (assert (= (length defs) 2) "should include approval tool plus active def")
+  (local by-name {})
+  (each [_ def (ipairs defs)]
+    (set (. by-name def.name) def))
+  (assert by-name.space_agent_request_tool_approval "approval request def should be present")
+  (assert by-name.space_test "active def should be present"))
 
 (fn test-tool-surface-call-runs-active-tool []
   (local {: AgentToolSurface} (require :llm/agent/tool-surface))
@@ -588,16 +704,63 @@
   (local surface (AgentToolSurface {:presets mock-presets
                                      :mcp-tools {}
                                      :approvals approvals}))
-  (assert (= (length (surface:mcp-tool-defs)) 1) "ask-risk tool should still be exposed")
+  (assert (= (length (surface:mcp-tool-defs)) 2) "ask-risk tool and approval tool should be exposed")
   (local (ok err) (pcall (fn [] (surface:call "space_shell" {}))))
   (assert (not ok) "ask-risk tool call should error while approval is pending")
-  (assert (string.match (tostring err) "requires approval") "error should explain pending approval")
+  (assert (string.match (tostring err) "approval_required") "error should explain pending approval")
   (assert pending "tool call should create a pending approval request")
+  (assert pending.args_hash "pending approval should include exact args hash")
   (assert (not called) "pending high-risk tool should not execute")
   (pending:approve)
   (local retry-result (surface:call "space_shell" {}))
   (assert (= retry-result "ran") "approved matching retry should execute")
   (assert called "approved retry should call the underlying tool"))
+
+(fn test-tool-surface-request-approval-tool-grants-exact-call []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var call-count 0)
+  (local mock-def {:name "space_shell"
+                   :description "shell"
+                   :inputSchema {:type "object" :properties {:cmd {:type "string"}}}
+                   :managed-source "shell-tool"
+                   :run (fn [_args]
+                          (set call-count (+ call-count 1))
+                          "ran")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "shell-preset" :reason :override :risk :shell :tool-ids ["shell-tool"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (local approval-json
+    (surface:call "space_agent_request_tool_approval"
+                  {:tool "space_shell"
+                   :arguments {:cmd "echo hi"}
+                   :reason "run the requested command"}))
+  (local approval-result (json.loads approval-json))
+  (assert (= approval-result.status "approval_required")
+          "request approval tool should create an approval request")
+  (assert pending "approval request should be pending")
+  (assert (= pending.args_hash approval-result.args_hash)
+          "pending request and response should share args hash")
+  (local (direct-ok direct-err) (pcall (fn [] (surface:call "space_shell" {:cmd "echo hi"}))))
+  (assert (not direct-ok) "direct exact call should still wait for approval")
+  (assert (string.find (tostring direct-err) approval-result.request_id 1 true)
+          "direct exact call should report the existing approval request id")
+  (pending:approve)
+  (assert (= (surface:call "space_shell" {:cmd "echo hi"}) "ran")
+          "approved exact call should run")
+  (local (ok _err) (pcall (fn [] (surface:call "space_shell" {:cmd "echo bye"}))))
+  (assert (not ok) "different arguments should require a separate approval")
+  (assert (= call-count 1) "only the approved exact call should run"))
 
 ;; ═══════════════════════════════════════
 ;; Agent MCP sync tests
@@ -1684,6 +1847,9 @@
 (table.insert tests {:name "approvals request-risk auto" :fn test-approvals-request-risk-auto})
 (table.insert tests {:name "approvals request-risk needs-approval" :fn test-approvals-request-risk-needs-approval})
 (table.insert tests {:name "approvals approve grants one matching retry" :fn test-approvals-approve-grants-one-matching-retry})
+(table.insert tests {:name "approvals exact args and always grants" :fn test-approvals-exact-args-and-always-grants})
+(table.insert tests {:name "approvals always grants persist" :fn test-approvals-always-grants-persist})
+(table.insert tests {:name "approvals denied policy does not consume grant" :fn test-approvals-denied-policy-does-not-consume-grant})
 (table.insert tests {:name "approvals unknown risk asserts" :fn test-approvals-unknown-risk-asserts})
 (table.insert tests {:name "approvals record decision" :fn test-approvals-record-decision})
 
@@ -1692,6 +1858,7 @@
 (table.insert tests {:name "tool surface mcp defs" :fn test-tool-surface-mcp-defs})
 (table.insert tests {:name "tool surface call runs active tool" :fn test-tool-surface-call-runs-active-tool})
 (table.insert tests {:name "tool surface exposes and gates ask risk" :fn test-tool-surface-exposes-and-gates-ask-risk})
+(table.insert tests {:name "tool surface request approval tool grants exact call" :fn test-tool-surface-request-approval-tool-grants-exact-call})
 (table.insert tests {:name "agent mcp sync registers surface tools" :fn test-agent-mcp-sync-registers-surface-tools})
 (table.insert tests {:name "agent mcp sync does not bypass surface gating" :fn test-agent-mcp-sync-does-not_bypass_surface_gating})
 (table.insert tests {:name "opencode mcp bridge starts and writes config" :fn test-opencode-mcp-bridge-starts-and-writes-config})

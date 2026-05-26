@@ -174,17 +174,20 @@
       (when last-user-input
         (self:send last-user-input))))
 
-  (fn approve-pending [self]
+  (fn approve-pending [self opts]
     (local request state.pending-approval)
     (when request
       (if request.approve
-          (request:approve)
+          (request:approve opts)
           (when approvals.record-decision
             (approvals:record-decision {:risk request.risk
                                         :reason request.reason
                                         :decision :approved
                                         :request-id request.id})))
       (self:set-pending-approval nil)))
+
+  (fn approve-pending-always [self]
+    (self:approve-pending {:always true}))
 
   (fn deny-pending [self]
     (local request state.pending-approval)
@@ -266,6 +269,7 @@
      :stop stop
      :retry retry
      :approve-pending approve-pending
+     :approve-pending-always approve-pending-always
      :deny-pending deny-pending
      :toggle-expanded toggle-expanded
      :is-expanded? is-expanded?

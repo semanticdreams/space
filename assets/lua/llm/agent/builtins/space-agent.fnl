@@ -459,7 +459,11 @@
     (local system-prompt
       (PromptUtils.assemble-blocks
         [{:name "Instructions"
-          :content "You are Space Agent. Help with drawing, graph, scene, and app tasks using only approved available tools."}
+          :content (table.concat
+                     ["You are Space Agent. Help with drawing, graph, scene, and app tasks using only approved available tools."
+                      "For tools that may require approval, call space_agent_request_tool_approval first with the exact tool name and exact arguments you intend to use."
+                      "After approval is granted, call the approved tool with exactly those arguments. If approval is denied, do not retry that tool call."]
+                     "\n")}
          {:name "Context" :content context-block}
          {:name "Available Capabilities" :content preset-block}
          {:name "Capability Guidance" :content capability-guidance}]))

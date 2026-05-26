@@ -47,7 +47,7 @@
   (mgr:register
     {:name "scene-terrain-destructive-tools"
      :group "scene"
-     :default-state :off
+     :default-state :auto
      :risk :destructive
      :contexts [{:surface :scene}]
      :tool-ids ["scene.remove-terrain"]})
@@ -81,11 +81,11 @@
   (mgr:register
     {:name "scene-state-tools"
      :group "scene"
-     :default-state :off
+     :default-state :auto
      :risk :destructive
      :contexts [{:surface :scene}]
      :tool-ids ["scene.get-state" "scene.restore-state"]
-     :system-prompt "Scene state operations can overwrite current data. Enable only when the user explicitly approves."}))
+     :system-prompt "Scene state operations can overwrite current data and require approval."}))
 
 (fn register-scene-adapters [adapters]
   (local empty-schema {:type "object" :properties {}})

@@ -2,6 +2,10 @@
 ;; Run: SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-agent-presets:main
 
 (local tests [])
+(local fs (require :fs))
+(local glm (require :glm))
+(local json (require :json))
+(local DrawingController (require :drawing/controller))
 (local {: PresetRegistry} (require :llm/presets/registry))
 (local {: ToolAdapterRegistry} (require :llm/presets/tool-adapters))
 (local {: PresetManager} (require :llm/presets/init))
@@ -12,6 +16,22 @@
 
 (fn make-dummy-app []
   {})
+
+(local temp-root (fs.join-path "/tmp/space/tests" "agent-presets"))
+(var temp-counter 0)
+
+(fn with-temp-dir [f]
+  (set temp-counter (+ temp-counter 1))
+  (local dir (fs.join-path temp-root (.. "agent-presets-" (os.time) "-" temp-counter)))
+  (when (fs.exists dir)
+    (fs.remove-all dir))
+  (fs.create-dirs dir)
+  (local (ok result) (pcall f dir))
+  (when (fs.exists dir)
+    (fs.remove-all dir))
+  (when (not ok)
+    (error result))
+  result)
 
 (fn make-dummy-adapters []
   (ToolAdapterRegistry {}))
@@ -586,6 +606,89 @@
   (assert names.space_app_set_theme "general built-in adapter should be registered"))
 (table.insert tests {:name "agent-presets: built-ins register adapters through manager"
                      :fn test-builtins-register-adapters})
+
+(fn test-drawing-builtins-expose-generic-edit-tools []
+  (local reg (PresetRegistry {}))
+  (local adapters (ToolAdapterRegistry {}))
+  (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
+                              :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
+  (BuiltinDrawing.register mgr)
+  (local defs (mgr:get-tool-defs))
+  (local names {})
+  (each [_ def (ipairs defs)]
+    (set (. names def.name) true))
+  (assert names.space_drawing_inspect "drawing inspect should be active")
+  (assert names.space_drawing_select "generic drawing select should be active")
+  (assert names.space_drawing_transform_selection "selection transform should be active")
+  (assert names.space_drawing_update_selection_style "selection style patch should be active")
+  (assert names.space_drawing_delete_selected "delete selected should be active")
+  (assert names.space_drawing_delete_layer "delete layer should be active"))
+(table.insert tests {:name "agent-presets: drawing built-ins expose generic edit tools"
+                     :fn test-drawing-builtins-expose-generic-edit-tools})
+
+(fn test-drawing-generic-tool-adapters-run []
+  (with-temp-dir
+    (fn [dir]
+      (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 10 4 0) false)
+      (assert (controller:commit-gesture))
+      (local app {:drawing-controller controller})
+      (local reg (PresetRegistry {}))
+      (local adapters (ToolAdapterRegistry {}))
+      (local mgr (PresetManager {:registry reg :tool-adapters adapters :app app
+                                  :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
+      (BuiltinDrawing.register mgr)
+      (local defs {})
+      (each [_ def (ipairs (mgr:get-tool-defs))]
+        (set (. defs def.name) def))
+      (local inspect-result (json.loads (defs.space_drawing_inspect.run {})))
+      (assert (= (. inspect-result.active_layer.objects 1 :kind) "rectangle")
+              "inspect should return vector object properties")
+      (defs.space_drawing_select.run {:bounds {:x 10 :y 4 :width -10 :height -4}})
+      (assert (= (controller:selection-count) 1)
+              "generic select should update controller selection from bounds")
+      (defs.space_drawing_transform_selection.run {:dx 2 :dy 3})
+      (local transformed-layer (controller:active-layer))
+      (local object (. transformed-layer.objects 1))
+      (assert (= object.center.x 7) "transform tool should translate selected object x")
+      (assert (= object.center.y 5) "transform tool should translate selected object y")
+      (local (empty-style-ok empty-style-err) (pcall defs.space_drawing_update_selection_style.run {}))
+      (assert (not empty-style-ok) "style tool should reject empty style changes")
+      (assert (string.find (tostring empty-style-err) "at least one style change")
+              "empty style change error should explain missing changes")
+      (defs.space_drawing_update_selection_style.run {:stroke_color "#FF0000"
+                                                      :fill_color "#00FF00"
+                                                      :fill_enabled false
+                                                      :thickness 4})
+      (local styled-layer (controller:active-layer))
+      (local styled (. styled-layer.objects 1))
+      (assert (= (. styled.style.stroke_color 1) 1)
+              "style tool should patch stroke color")
+      (assert (= (. styled.style.fill_color 2) 1)
+              "style tool should patch fill color")
+      (assert (= styled.style.fill_enabled false)
+              "style tool should patch fill enabled")
+      (assert (= styled.style.thickness 4)
+              "style tool should patch thickness")
+      (defs.space_drawing_insert_stroke.run
+        {:points [{:x 0 :y 0} {:x 1 :y 1} {:x 2 :y 2}]})
+      (local inspect-without-points (json.loads (defs.space_drawing_inspect.run {})))
+      (local stroke-summary (. inspect-without-points.active_layer.objects 2))
+      (assert (= stroke-summary.kind "stroke") "inspect should include stroke summary")
+      (assert (= stroke-summary.point_count 3) "inspect should include stroke point count")
+      (assert (= stroke-summary.points nil) "inspect should omit stroke points by default")
+      (local inspect-with-points
+        (json.loads (defs.space_drawing_inspect.run {:include_points true :max_points 2})))
+      (local sampled-stroke (. inspect-with-points.active_layer.objects 2))
+      (assert (= (length sampled-stroke.points) 2)
+              "inspect should honor max_points when point details are requested")
+      (assert (= sampled-stroke.points_truncated true)
+              "inspect should report truncated stroke point details"))))
+(table.insert tests {:name "agent-presets: drawing generic tool adapters run"
+                     :fn test-drawing-generic-tool-adapters-run})
 
 ;; ── Built-ins: publish complete state during registration ──
 
