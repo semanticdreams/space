@@ -96,7 +96,10 @@
     (fn layouter [self]
       (set summary-row.layout.size
            (glm.vec3 self.size.x summary-row.layout.measure.y self.size.z))
-      (set summary-row.layout.position self.position)
+      (local summary-offset
+        (glm.vec3 0 (math.max 0 (- self.size.y summary-row.layout.measure.y)) 0))
+      (set summary-row.layout.position
+           (+ self.position (self.rotation:rotate summary-offset)))
       (set summary-row.layout.rotation self.rotation)
       (set summary-row.layout.depth-offset-index self.depth-offset-index)
       (set summary-row.layout.clip-region self.clip-region)
@@ -106,9 +109,7 @@
         (local detail-height (- self.size.y summary-row.layout.measure.y))
         (set details.layout.size
              (glm.vec3 self.size.x (math.max 0 detail-height) self.size.z))
-        (local offset (glm.vec3 0 summary-row.layout.measure.y 0))
-        (set details.layout.position
-             (+ self.position (self.rotation:rotate offset)))
+        (set details.layout.position self.position)
         (set details.layout.rotation self.rotation)
         (set details.layout.depth-offset-index (+ self.depth-offset-index 1))
         (set details.layout.clip-region self.clip-region)

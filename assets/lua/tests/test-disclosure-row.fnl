@@ -126,6 +126,27 @@
   (assert (> expanded.layout.measure.y ch)
           "expanded height should be greater than collapsed height"))
 
+(fn test-expanded-details-layout-below-summary []
+  (local ctx (make-test-ctx))
+  (local (summary-builder summary-state) (make-instrumented-widget "summary" {:measure (glm.vec3 4 1 0)}))
+  (local (details-builder details-state) (make-instrumented-widget "details" {:measure (glm.vec3 4 2 0)}))
+  (local instance
+    ((DisclosureRow {:summary summary-builder
+                     :details details-builder
+                     :expanded? true})
+     ctx))
+  (instance.layout:measurer)
+  (set instance.layout.size instance.layout.measure)
+  (set instance.layout.position (glm.vec3 10 20 0))
+  (instance.layout:layouter)
+  (assert (= summary-state.received-position.y 22)
+          "summary should stay at the visual top of the disclosure")
+  (assert (= details-state.received-position.y 20)
+          "details should expand visually below the summary in y-up coordinates")
+  (assert (< details-state.received-position.y summary-state.received-position.y)
+          "details y should be lower than summary y")
+  (instance:drop))
+
 (fn test-collapsed-removes-details-layout []
   (local ctx (make-test-ctx))
   (local (summary-builder _) (make-instrumented-widget "summary"))
@@ -178,6 +199,8 @@
                      :fn test-on-toggle-callback})
 (table.insert tests {:name "DisclosureRow measure expanded vs collapsed"
                      :fn test-measure-expanded-vs-collapsed})
+(table.insert tests {:name "DisclosureRow lays details below summary"
+                     :fn test-expanded-details-layout-below-summary})
 (table.insert tests {:name "DisclosureRow collapsed removes details layout"
                      :fn test-collapsed-removes-details-layout})
 (table.insert tests {:name "DisclosureRow collapse drops details widget"
