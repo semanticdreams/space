@@ -6,8 +6,45 @@
 (local AgentRegistry registry-mod.AgentRegistry)
 (local approvals-mod (require :llm/agent/approvals))
 (local AgentApprovals approvals-mod.AgentApprovals)
+(local transcript-mod (require :llm/agent/ui/transcript))
+(local AgentTranscript transcript-mod.AgentTranscript)
+(local BuildContext (require :build-context))
+(local Intersectables (require :intersectables))
+(local Clickables (require :clickables))
+(local Hoverables (require :hoverables))
+(local glm (require :glm))
 
 (local tests [])
+
+(fn make-icons-stub []
+  (local glyph {:advance 1})
+  (local font {:metadata {:metrics {:ascender 1 :descender -1}
+                          :atlas {:width 1 :height 1}}
+               :glyph-map {4242 glyph}
+               :advance 1})
+  {:font font
+   :resolve (fn [_self _name]
+              {:type :font
+               :codepoint 4242
+               :font font})
+   :get (fn [_self _name] 4242)})
+
+(fn make-widget-ctx []
+  (local intersector (Intersectables))
+  (local clickables (Clickables {:intersectables intersector}))
+  (local hoverables (Hoverables {:intersectables intersector}))
+  (BuildContext {:clickables clickables
+                 :hoverables hoverables
+                 :icons (make-icons-stub)}))
+
+(fn approx= [a b]
+  (< (math.abs (- a b)) 0.0001))
+
+(fn layout-test-transcript [transcript]
+  (transcript.layout:measure-constrained {:max (glm.vec3 12 5 0)})
+  (set transcript.layout.size (glm.vec3 12 5 0))
+  (set transcript.layout.position (glm.vec3 0 0 0))
+  (transcript.layout:layouter))
 
 (fn make-test-runner []
   (var sessions {})
@@ -194,6 +231,52 @@
           "live update should mutate controller-visible item state")
   (assert (> change-count 0)
           "live update should notify the transcript"))
+
+(fn test-transcript_auto_scrolls_only_from_live_edge []
+  (local controller
+    {:state {:items []}
+     :toggle-expanded (fn [_self _item-id] nil)
+     :item-expanded? (fn [_self _item-id] false)})
+  (for [idx 1 18]
+    (table.insert controller.state.items
+                  {:id (.. "msg-" idx)
+                   :type :message
+                   :role :assistant
+                   :content (.. "message " idx "\nline two\nline three")
+                   :stream-status :complete}))
+  (local transcript ((AgentTranscript controller) (make-widget-ctx)))
+  (layout-test-transcript transcript)
+  (assert (> transcript.scroll-view.state.max-offset 0)
+          "transcript fixture should be scrollable")
+  (assert (approx= transcript.scroll-view.state.scroll-offset 0)
+          "transcript should initially start at the live edge")
+  (transcript.scroll-view:set-scroll-offset 0.1)
+  (layout-test-transcript transcript)
+  (assert (= transcript.scroll-view.state.user-set-offset? true)
+          "manual scroll should set user scroll state")
+  (table.insert controller.state.items
+                {:id "msg-while-scrolled-up"
+                 :type :message
+                 :role :assistant
+                 :content "message while scrolled up"
+                 :stream-status :streaming})
+  (transcript:refresh)
+  (layout-test-transcript transcript)
+  (assert (approx= transcript.scroll-view.state.scroll-offset 0.1)
+          "transcript refresh should preserve even a small positive manual scroll offset")
+  (transcript.scroll-view:set-scroll-offset 0)
+  (layout-test-transcript transcript)
+  (table.insert controller.state.items
+                {:id "msg-at-live-edge"
+                 :type :message
+                 :role :assistant
+                 :content "message at live edge"
+                 :stream-status :streaming})
+  (transcript:refresh)
+  (layout-test-transcript transcript)
+  (assert (approx= transcript.scroll-view.state.scroll-offset 0)
+          "transcript should keep following once the user returns to the live edge")
+  (transcript:drop))
 
 (fn test-controller-stop []
   (local registry (AgentRegistry {:deps {}}))
@@ -425,6 +508,8 @@
                      :fn test-controller-send-loads_user_message})
 (table.insert tests {:name "controller live update notifies"
                      :fn test-controller-live-update-notifies})
+(table.insert tests {:name "transcript auto-scrolls only from live edge"
+                     :fn test-transcript_auto_scrolls_only_from_live_edge})
 (table.insert tests {:name "controller stop clears active turn"
                      :fn test-controller-stop})
 (table.insert tests {:name "controller toggle expanded toggles expanded state"

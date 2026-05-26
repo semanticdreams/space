@@ -10,6 +10,11 @@
 (local {: Layout} (require :layout))
 (local glm (require :glm))
 
+;; The transcript's newest-message edge is visual bottom, which is y=0 in the
+;; OpenGL-backed scroll space. Larger offsets move upward into older messages.
+(local live-edge-scroll-offset 0)
+(local scroll-follow-epsilon 1e-5)
+
 (fn AgentTranscript [controller]
   (fn build [ctx]
     (var item-rows [])
@@ -69,6 +74,7 @@
 
     (local scroll-view
       ((ScrollView {:child (fn [_ctx] content-root)
+                    :scroll-offset live-edge-scroll-offset
                     :scrollbar-policy :as-needed
                     :scrollbar-width 0.5
                     :name "agent-transcript"})
@@ -111,6 +117,13 @@
                 (set updated? false))))
       updated?)
 
+    (fn at-live-edge? []
+      (local state scroll-view.state)
+      (<= state.scroll-offset scroll-follow-epsilon))
+
+    (fn scroll-to-live-edge [opts]
+      (scroll-view:set-scroll-offset live-edge-scroll-offset opts))
+
     (fn rebuild-inner [items item-count should-scroll-to-end next-signature]
       (when inner-flex
         (inner-flex:drop)
@@ -136,7 +149,7 @@
       (set current-items-signature next-signature)
       (set last-item-count item-count)
       (when (and inner-flex should-scroll-to-end)
-        (scroll-view:reset-scroll-position))
+        (scroll-to-live-edge {:mark-layout-dirty? false}))
       (when scroll-view.layout
         (scroll-view.layout:mark-measure-dirty)))
 
@@ -144,12 +157,16 @@
       (local items controller.state.items)
       (local item-count (length items))
       (local next-signature (items-signature items))
-      (local should-scroll-to-end (> item-count last-item-count))
+      (local should-scroll-to-end (and (> item-count last-item-count)
+                                       (at-live-edge?)))
       (if (and inner-flex (> item-count 0) (= next-signature current-items-signature)
                (update-existing-rows items))
           (do
+            (local should-follow? (at-live-edge?))
             (set last-item-count item-count)
             (content-layout:mark-measure-dirty)
+            (when should-follow?
+              (scroll-to-live-edge {:mark-layout-dirty? false}))
             (when scroll-view.layout
               (scroll-view.layout:mark-measure-dirty)))
           (rebuild-inner items item-count should-scroll-to-end next-signature)))
