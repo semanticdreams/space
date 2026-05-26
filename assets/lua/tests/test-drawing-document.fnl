@@ -3,8 +3,13 @@
 (local fs (require :fs))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
+(local HitTest (require :drawing/hit-test))
+(local DrawingSample (require :drawing/sample))
 
 (local tests [])
+
+(fn approx= [actual expected]
+  (< (math.abs (- actual expected)) 0.0001))
 
 (local temp-root (fs.join-path "/tmp/space/tests" "drawing-raster"))
 (var temp-counter 0)
@@ -958,6 +963,82 @@
       (assert (= object.center.x 8))
       (assert (= object.center.y 0)))))
 
+(fn controller-transforms-selection-with-rotation-scale-and-undo-redo []
+  (with-vector-controller
+    (fn [controller]
+      (controller:set-active-tool "line")
+      (controller:begin-gesture "line" (glm.vec3 1 0 0))
+      (controller:update-gesture (glm.vec3 3 0 0) false)
+      (assert (controller:commit-gesture))
+      (controller:set-active-tool "rectangle")
+      (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
+      (controller:update-gesture (glm.vec3 4 2 0) false)
+      (assert (controller:commit-gesture))
+      (local layer (controller:active-layer))
+      (local line (. layer.objects 1))
+      (local rectangle (. layer.objects 2))
+      (controller:set-selection! [line.id rectangle.id])
+      (assert (controller:transform-selection
+                {:rotation (/ math.pi 2)
+                 :scale 2
+                 :origin {:x 1 :y 0}
+                 :dx 1
+                 :dy 1}))
+      (var transformed-line (. layer.objects 1))
+      (var transformed-rectangle (. layer.objects 2))
+      (assert (approx= transformed-line.start.x 2))
+      (assert (approx= transformed-line.start.y 1))
+      (assert (approx= transformed-line.finish.x 2))
+      (assert (approx= transformed-line.finish.y 5))
+      (assert (approx= transformed-rectangle.rotation (/ math.pi 2)))
+      (assert (approx= transformed-rectangle.size.x 8))
+      (assert (approx= transformed-rectangle.size.y 4))
+      (assert (controller:on-undo))
+      (set transformed-line (. layer.objects 1))
+      (set transformed-rectangle (. layer.objects 2))
+      (assert (approx= transformed-line.start.x 1))
+      (assert (approx= transformed-line.finish.x 3))
+      (assert (= transformed-rectangle.rotation nil))
+      (assert (controller:on-redo))
+      (set transformed-line (. layer.objects 1))
+      (set transformed-rectangle (. layer.objects 2))
+      (assert (approx= transformed-line.finish.y 5))
+      (assert (approx= transformed-rectangle.rotation (/ math.pi 2))))))
+
+(fn rotated-vector-hit-testing-uses-object-rotation []
+  (local object
+    {:id "object-1"
+     :kind "rectangle"
+     :center (glm.vec3 0 0 0)
+     :size (glm.vec3 4 2 0)
+     :rotation (/ math.pi 2)
+     :style {:stroke_color [1 1 1 1]
+             :fill_color [1 1 1 1]
+             :fill_enabled true
+             :thickness 0
+             :opacity 1}})
+  (assert (HitTest.hit-object? object (glm.vec3 0 1.5 0) 0.01)
+          "rotated rectangle should hit after inverse-rotating the query point")
+  (assert (not (HitTest.hit-object? object (glm.vec3 1.5 0 0) 0.01))
+          "rotated rectangle should not use axis-aligned unrotated bounds"))
+
+(fn rotated-vector-sampling-uses-object-rotation []
+  (local layer
+    {:objects
+     [{:id "object-1"
+       :kind "rectangle"
+       :center (glm.vec3 0 0 0)
+       :size (glm.vec3 4 2 0)
+       :rotation (/ math.pi 2)
+       :style {:stroke_color [0 0 0 1]
+               :fill_color [1 0 0 1]
+               :fill_enabled true
+               :thickness 0
+               :opacity 1}}]})
+  (local rgba (DrawingSample.sample-vector-layer layer (glm.vec3 0 1.5 0)))
+  (assert (> (. rgba 4) 0)
+          "rotated rectangle fill sampling should use rotated geometry"))
+
 (fn controller-updates-selection-style-with-undo-redo []
   (with-vector-controller
     (fn [controller]
@@ -1821,6 +1902,12 @@
                      :fn snapshot-serializes-glm-vectors})
 (table.insert tests {:name "Drawing controller translates selection with undo/redo"
                      :fn controller-translates-selection-with-undo-redo})
+(table.insert tests {:name "Drawing controller transforms selection with rotation/scale and undo/redo"
+                     :fn controller-transforms-selection-with-rotation-scale-and-undo-redo})
+(table.insert tests {:name "Drawing hit-testing uses vector object rotation"
+                     :fn rotated-vector-hit-testing-uses-object-rotation})
+(table.insert tests {:name "Drawing color sampling uses vector object rotation"
+                     :fn rotated-vector-sampling-uses-object-rotation})
 (table.insert tests {:name "Drawing controller updates selection style with undo/redo"
                      :fn controller-updates-selection-style-with-undo-redo})
 (table.insert tests {:name "Drawing controller renames layers with undo/redo"

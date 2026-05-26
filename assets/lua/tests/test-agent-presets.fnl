@@ -14,6 +14,9 @@
 (local BuiltinScene (require :llm/presets/builtins/scene))
 (local BuiltinGeneral (require :llm/presets/builtins/general))
 
+(fn approx= [actual expected]
+  (< (math.abs (- actual expected)) 0.0001))
+
 (fn make-dummy-app []
   {})
 
@@ -614,17 +617,75 @@
                               :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
   (BuiltinDrawing.register mgr)
   (local defs (mgr:get-tool-defs))
+  (local prompts (mgr:get-prompt-fragments))
   (local names {})
+  (var drawing-prompt nil)
+  (var transform-def nil)
   (each [_ def (ipairs defs)]
-    (set (. names def.name) true))
+    (set (. names def.name) true)
+    (when (= def.name "space_drawing_transform_selection")
+      (set transform-def def)))
+  (each [_ fragment (ipairs prompts)]
+    (when (= fragment.preset "drawing-shape-tools")
+      (set drawing-prompt fragment.prompt)))
   (assert names.space_drawing_inspect "drawing inspect should be active")
   (assert names.space_drawing_select "generic drawing select should be active")
   (assert names.space_drawing_transform_selection "selection transform should be active")
   (assert names.space_drawing_update_selection_style "selection style patch should be active")
   (assert names.space_drawing_delete_selected "delete selected should be active")
-  (assert names.space_drawing_delete_layer "delete layer should be active"))
+  (assert names.space_drawing_delete_layer "delete layer should be active")
+  (assert transform-def.inputSchema.properties.rotation_degrees
+          "transform tool should expose rotation")
+  (assert transform-def.inputSchema.properties.scale
+          "transform tool should expose scaling")
+  (assert (string.find drawing-prompt "+y moves up" 1 true)
+          "drawing prompt should explain the canvas y-up coordinate system"))
 (table.insert tests {:name "agent-presets: drawing built-ins expose generic edit tools"
                      :fn test-drawing-builtins-expose-generic-edit-tools})
+
+(fn test-drawing-tool-adapters_use_y_up_canvas_coordinates []
+  (with-temp-dir
+    (fn [dir]
+      (local controller (DrawingController {:data_dir dir}))
+      (controller:add-layer "vector")
+      (local app {:drawing-controller controller})
+      (local reg (PresetRegistry {}))
+      (local adapters (ToolAdapterRegistry {}))
+      (local mgr (PresetManager {:registry reg :tool-adapters adapters :app app
+                                  :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
+      (BuiltinDrawing.register mgr)
+      (local defs {})
+      (each [_ def (ipairs (mgr:get-tool-defs))]
+        (set (. defs def.name) def))
+      (assert (string.find defs.space_drawing_insert_shape.description "+y moves up" 1 true)
+              "insert shape description should state y-up coordinates")
+      (assert (string.find defs.space_drawing_insert_stroke.description "+y moves up" 1 true)
+              "insert stroke description should state y-up coordinates")
+      (defs.space_drawing_insert_shape.run {:shape "rectangle" :x 0 :y 0 :width 10 :height 4})
+      (defs.space_drawing_insert_line.run {:x1 0 :y1 0 :x2 0 :y2 5})
+      (defs.space_drawing_insert_stroke.run
+        {:points [{:x 0 :y 0} {:x 0 :y 5} {:x 2 :y 7}]})
+      (local inspected
+        (json.loads (defs.space_drawing_inspect.run {:include_points true :max_points 3})))
+      (local shape (. inspected.active_layer.objects 1))
+      (local line (. inspected.active_layer.objects 2))
+      (local stroke (. inspected.active_layer.objects 3))
+      (assert (= (. shape.center 1) 5)
+              "positive rectangle width should extend right")
+      (assert (= (. shape.center 2) 2)
+              "positive rectangle height should extend up")
+      (assert (= (. shape.size 2) 4)
+              "positive rectangle height should stay positive in y-up coordinates")
+      (assert (= (. line.finish 2) 5)
+              "line endpoint y should not be inverted")
+      (assert (= (. stroke.points 1 2) 0)
+              "first stroke point y should be preserved")
+      (assert (= (. stroke.points 2 2) 5)
+              "middle stroke point y should be preserved")
+      (assert (= (. stroke.points 3 2) 7)
+              "last stroke point y should be preserved"))))
+(table.insert tests {:name "agent-presets: drawing tools use y-up canvas coordinates"
+                     :fn test-drawing-tool-adapters_use_y_up_canvas_coordinates})
 
 (fn test-drawing-generic-tool-adapters-run []
   (with-temp-dir
@@ -655,6 +716,22 @@
       (local object (. transformed-layer.objects 1))
       (assert (= object.center.x 7) "transform tool should translate selected object x")
       (assert (= object.center.y 5) "transform tool should translate selected object y")
+      (defs.space_drawing_transform_selection.run {:rotation_degrees 90 :scale 0.5})
+      (local rotated (. transformed-layer.objects 1))
+      (assert (approx= rotated.rotation (/ math.pi 2))
+              "transform tool should rotate selected objects")
+      (assert (approx= rotated.size.x 5)
+              "transform tool should scale selected object width")
+      (assert (approx= rotated.size.y 2)
+              "transform tool should scale selected object height")
+      (local rotated-summary (json.loads (defs.space_drawing_inspect.run {})))
+      (local inspected-rotated (. rotated-summary.active_layer.objects 1))
+      (assert (approx= inspected-rotated.rotation_degrees 90)
+              "inspect should report shape rotation in degrees")
+      (defs.space_drawing_clear_selection.run {})
+      (defs.space_drawing_select.run {:bounds {:x 6.5 :y 7 :width 1 :height 0.4}})
+      (assert (= (controller:selection-count) 1)
+              "select by bounds should use rotated shape bounds")
       (local (empty-style-ok empty-style-err) (pcall defs.space_drawing_update_selection_style.run {}))
       (assert (not empty-style-ok) "style tool should reject empty style changes")
       (assert (string.find (tostring empty-style-err) "at least one style change")

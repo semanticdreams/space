@@ -138,6 +138,17 @@
        ctx))
 
     (var approval-widget nil)
+    (var approval-widget-key nil)
+
+    (fn approval-request-key [request]
+      (and request
+           (or request.id
+               (table.concat [(or request.tool "")
+                              (or request.source "")
+                              (or request.args_hash "")
+                              (or request.risk "")
+                              (or request.reason "")]
+                             "\n"))))
     (fn approval-measurer [self]
       (if approval-widget
           (do
@@ -168,25 +179,28 @@
                  (set approval-widget nil)))})
 
     (fn rebuild-approval []
-      (when approval-widget
-        (approval-widget:drop)
-        (set approval-widget nil))
       (local request controller.state.pending-approval)
-      (if request
-          (do
-            (set approval-widget
-                 ((ApprovalRow {:approval request
-                                :on-approve (fn [_approval]
-                                              (controller:approve-pending))
-                                :on-approve-always (fn [_approval]
-                                                     (controller:approve-pending-always))
-                                :on-deny (fn [_approval]
-                                           (controller:deny-pending))})
-                  ctx))
-            (approval-layout:set-children [approval-widget.layout]))
-          (approval-layout:set-children []))
-      (approval-layout:mark-measure-dirty)
-      (approval-layout:mark-layout-dirty))
+      (local next-key (approval-request-key request))
+      (when (not (= next-key approval-widget-key))
+        (when approval-widget
+          (approval-widget:drop)
+          (set approval-widget nil))
+        (set approval-widget-key next-key)
+        (if request
+            (do
+              (set approval-widget
+                   ((ApprovalRow {:approval request
+                                  :on-approve (fn [_approval]
+                                                (controller:approve-pending))
+                                  :on-approve-always (fn [_approval]
+                                                       (controller:approve-pending-always))
+                                  :on-deny (fn [_approval]
+                                             (controller:deny-pending))})
+                    ctx))
+              (approval-layout:set-children [approval-widget.layout]))
+            (approval-layout:set-children []))
+        (approval-layout:mark-measure-dirty)
+        (approval-layout:mark-layout-dirty)))
 
     (local sections [(FlexChild (fn [_ctx] agent-row-padded))
                      (FlexChild (fn [_ctx] status-row-padded))

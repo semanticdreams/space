@@ -333,6 +333,36 @@
   (assert (not controller.state.pending-approval)
           "approve-pending should clear pending approval"))
 
+(fn test-controller_ignores_duplicate_pending_approval []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:destructive :ask}}))
+  (local runner (make-test-runner))
+  (local controller (AgentPanelController {:runner runner
+                                             :registry registry
+                                             :approvals approvals}))
+  (controller:init)
+  (approvals:request-risk :destructive "delete world"
+    {:on-approved (fn [_r] nil)
+     :on-denied (fn [_r] nil)}
+    {:tool "space_delete_world" :grant-on-approve true})
+  (local request controller.state.pending-approval)
+  (assert request "controller should track first pending approval")
+  (var change-count 0)
+  (var approval-change-count 0)
+  (controller.change-signal.connect
+    (fn [_state]
+      (set change-count (+ change-count 1))))
+  (controller.approval-change-signal.connect
+    (fn [_request]
+      (set approval-change-count (+ approval-change-count 1))))
+  (controller:sync-pending-approval request)
+  (assert (= change-count 0)
+          "duplicate pending approval should not notify the whole panel")
+  (assert (= approval-change-count 0)
+          "duplicate pending approval should not notify approval observers"))
+
 (fn test-controller_approve_pending_always []
   (local registry (AgentRegistry {:deps {}}))
   (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
@@ -413,6 +443,8 @@
                      :fn test-controller-init-selects-existing-session})
 (table.insert tests {:name "controller tracks pending approval"
                      :fn test-controller_tracks_pending_approval})
+(table.insert tests {:name "controller ignores duplicate pending approval"
+                     :fn test-controller_ignores_duplicate_pending_approval})
 (table.insert tests {:name "controller approve pending always"
                      :fn test-controller_approve_pending_always})
 (table.insert tests {:name "controller hydrates existing pending approval"

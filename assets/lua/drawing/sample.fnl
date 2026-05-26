@@ -28,11 +28,6 @@
      (* (or (. color 3) color.z 0.0) 255)
      (* (or (. color 4) color.w 1.0) (or opacity 1.0) 255)]))
 
-(fn rect-bounds [center size]
-  (local half (* size 0.5))
-  {:min (glm.vec3 (- center.x half.x) (- center.y half.y) center.z)
-   :max (glm.vec3 (+ center.x half.x) (+ center.y half.y) center.z)})
-
 (fn point-in-polygon? [point polygon]
   (local count (length polygon))
   (var inside? false)
@@ -51,13 +46,6 @@
           (set inside? (not inside?)))))
     (set previous current))
   inside?)
-
-(fn point-in-bounds? [point bounds]
-  (and bounds
-       (>= point.x bounds.min.x)
-       (<= point.x bounds.max.x)
-       (>= point.y bounds.min.y)
-       (<= point.y bounds.max.y)))
 
 (fn distance-to-segment [point start finish]
   (local delta (- finish start))
@@ -81,8 +69,8 @@
   (local style (or object.style {}))
   (var rgba [0 0 0 0])
   (local corners (VectorGeometry.rectangle-corners object))
-  (local bounds (rect-bounds object.center object.size))
-  (when (and style.fill_enabled (point-in-bounds? point bounds))
+  (local polygon [corners.a corners.b corners.c corners.d])
+  (when (and style.fill_enabled (point-in-polygon? point polygon))
     (set rgba (blend-rgba rgba (color->rgba style.fill_color style.opacity))))
   (when (<= (distance-to-segment point corners.a corners.b)
             (* 0.5 (or style.thickness 1.0)))

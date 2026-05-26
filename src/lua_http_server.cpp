@@ -615,3 +615,17 @@ void lua_http_server_dispatch(sol::state_view lua)
         }
     }
 }
+
+void lua_http_server_shutdown_all()
+{
+    std::vector<HttpServer*> servers;
+    {
+        std::lock_guard<std::mutex> lock(g_servers_mutex);
+        servers = g_servers;
+    }
+    for (HttpServer* server : servers) {
+        if (server) {
+            server->stop();
+        }
+    }
+}

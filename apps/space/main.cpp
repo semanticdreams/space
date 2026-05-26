@@ -14,6 +14,7 @@
 #include "lua_jobs.h"
 #include "lua_keyring.h"
 #include "lua_runtime.h"
+#include "lua_http_server.h"
 #include "lua_engine.h"
 #include "log.h"
 #include "resource_manager.h"
@@ -346,6 +347,7 @@ int main(int argc, char *argv[])
     } else {
         lua_keyring_drop(lua);
         lua_jobs_clear_callbacks();
+        lua_http_server_shutdown_all();
         lua_callbacks_shutdown();
         ResourceManager::clearPending();
     }

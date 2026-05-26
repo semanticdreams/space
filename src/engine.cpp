@@ -1495,6 +1495,7 @@ void Engine::shutdown() {
     lua_jobs_clear_callbacks();
     lua_keyring_drop(*lua_state);
     lua_process_drop(*lua_state);
+    lua_http_server_shutdown_all();
     lua_callbacks_shutdown();
     video_manager.drop_all();
     video_manager.set_audio(nullptr);

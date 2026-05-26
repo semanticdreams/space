@@ -284,6 +284,7 @@ void LuaRuntime::configure_package_paths()
 
 LuaRuntime::~LuaRuntime()
 {
+    lua_http_server_shutdown_all();
     if (http) {
         http->shutdown();
         lua_http_drop(lua);

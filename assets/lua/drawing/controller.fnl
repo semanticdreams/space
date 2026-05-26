@@ -5,6 +5,7 @@
 (local DrawingHistory (require :drawing/history))
 (local HitTest (require :drawing/hit-test))
 (local DrawingSample (require :drawing/sample))
+(local VectorGeometry (require :drawing/vector-geometry))
 (local {:RasterLayerRuntime RasterLayerRuntime} (require :drawing/raster-layer))
 
 (fn clone-table [value]
@@ -510,23 +511,144 @@
     (set (. layer.objects object-idx)
          (DrawingDocument.normalize-object object)))
 
-  (fn offset-point [point dx dy]
-    (glm.vec3 (+ point.x dx) (+ point.y dy) point.z))
+  (fn finite-number? [value]
+    (and (= (type value) :number)
+         (= value value)
+         (not (= value math.huge))
+         (not (= value (- math.huge)))))
 
-  (fn translate-object-copy [object dx dy]
+  (fn number-option [value default label]
+    (if (= value nil)
+        default
+        (do
+          (assert (finite-number? value)
+                  (.. "DrawingController transform-selection " label " must be a finite number"))
+          value)))
+
+  (fn required-number-option [value label]
+    (assert (not (= value nil))
+            (.. "DrawingController transform-selection " label " is required"))
+    (number-option value nil label))
+
+  (fn positive-scale-option [value default label]
+    (local resolved (number-option value default label))
+    (assert (> resolved 0)
+            (.. "DrawingController transform-selection " label " must be greater than zero"))
+    resolved)
+
+  (fn include-bound-point! [bounds point]
+    (if bounds
+        (do
+          (set bounds.min.x (math.min bounds.min.x point.x))
+          (set bounds.min.y (math.min bounds.min.y point.y))
+          (set bounds.max.x (math.max bounds.max.x point.x))
+          (set bounds.max.y (math.max bounds.max.y point.y))
+          bounds)
+        {:min (glm.vec3 point.x point.y 0)
+         :max (glm.vec3 point.x point.y 0)}))
+
+  (fn object-bound-points [object]
+    (if (= object.kind "rectangle")
+        (do
+          (local corners (VectorGeometry.rectangle-corners object))
+          [corners.a corners.b corners.c corners.d])
+        (= object.kind "ellipse")
+        (VectorGeometry.ellipse-points object)
+        (= object.kind "line")
+        [object.start object.finish]
+        (= object.kind "stroke")
+        (or object.points [])
+        []))
+
+  (fn selection-bounds [layer ids]
+    (var bounds nil)
+    (each [_ object-id (ipairs ids)]
+      (local object-idx (DrawingDocument.object-index layer object-id))
+      (local object (and object-idx (. layer.objects object-idx)))
+      (assert object
+              (.. "DrawingController transform-selection missing selected object: " object-id))
+      (each [_ point (ipairs (object-bound-points object))]
+        (set bounds (include-bound-point! bounds point))))
+    bounds)
+
+  (fn transform-origin [layer ids options]
+    (if options.origin
+        (do
+          (assert (= (type options.origin) :table)
+                  "DrawingController transform-selection origin must be a table")
+          (glm.vec3 (required-number-option options.origin.x "origin.x")
+                    (required-number-option options.origin.y "origin.y")
+                    0))
+        (do
+          (local bounds (selection-bounds layer ids))
+          (assert bounds "DrawingController transform-selection requires bounded selected objects")
+          (glm.vec3 (* (+ bounds.min.x bounds.max.x) 0.5)
+                    (* (+ bounds.min.y bounds.max.y) 0.5)
+                    0))))
+
+  (fn identity-transform? [transform]
+    (and (= transform.dx 0)
+         (= transform.dy 0)
+         (= transform.rotation 0)
+         (= transform.scale-x 1)
+         (= transform.scale-y 1)))
+
+  (fn non-uniform-scale? [transform]
+    (not (= transform.scale-x transform.scale-y)))
+
+  (fn normalize-transform-options [layer ids opts]
+    (assert (= (type opts) :table)
+            "DrawingController transform-selection requires options table")
+    (local uniform-scale (positive-scale-option opts.scale 1 "scale"))
+    (local transform {:dx (number-option opts.dx 0 "dx")
+                      :dy (number-option opts.dy 0 "dy")
+                      :rotation (number-option opts.rotation 0 "rotation")
+                      :scale-x (positive-scale-option (. opts :scale-x) uniform-scale "scale-x")
+                      :scale-y (positive-scale-option (. opts :scale-y) uniform-scale "scale-y")
+                      :origin (transform-origin layer ids opts)})
+    (assert (not (identity-transform? transform))
+            "DrawingController transform-selection requires translation, rotation, or scaling")
+    transform)
+
+  (fn transform-point [point transform]
+    (local rel-x (* (- point.x transform.origin.x) transform.scale-x))
+    (local rel-y (* (- point.y transform.origin.y) transform.scale-y))
+    (local c (math.cos transform.rotation))
+    (local s (math.sin transform.rotation))
+    (glm.vec3 (+ transform.origin.x
+                 (- (* rel-x c) (* rel-y s))
+                 transform.dx)
+              (+ transform.origin.y
+                 (+ (* rel-x s) (* rel-y c))
+                 transform.dy)
+              point.z))
+
+  (fn transform-object-copy [object transform]
     (local copy (clone-table object))
     (if (or (= copy.kind "rectangle")
             (= copy.kind "ellipse"))
-        (set copy.center (offset-point copy.center dx dy))
+        (do
+          (assert (not (and (non-uniform-scale? transform)
+                            copy.rotation
+                            (not (= copy.rotation 0))))
+                  (.. "DrawingController transform-selection cannot non-uniformly scale rotated "
+                      copy.kind
+                      " objects because that transform is not representable in the vector shape schema"))
+          (set copy.center (transform-point copy.center transform))
+          (set copy.size
+               (glm.vec3 (* copy.size.x transform.scale-x)
+                         (* copy.size.y transform.scale-y)
+                         copy.size.z))
+          (set copy.rotation (+ (or copy.rotation 0) transform.rotation)))
         (= copy.kind "line")
         (do
-          (set copy.start (offset-point copy.start dx dy))
-          (set copy.finish (offset-point copy.finish dx dy)))
+          (set copy.start (transform-point copy.start transform))
+          (set copy.finish (transform-point copy.finish transform)))
         (= copy.kind "stroke")
         (set copy.points
              (icollect [_ point (ipairs (or copy.points []))]
-                       (offset-point point dx dy))))
-    copy)
+                       (transform-point point transform))))
+    (DrawingDocument.normalize-object copy))
 
   (fn patch-object-style-copy [object changes]
     (local copy (clone-table object))
@@ -617,23 +739,26 @@
         (perform! (reorder-layer-command layer.id from-index to-index) "layer-structure")
         false))
 
-  (fn translate-selection [dx dy]
-    (assert (= (type dx) "number") "DrawingController translate-selection requires numeric dx")
-    (assert (= (type dy) "number") "DrawingController translate-selection requires numeric dy")
+  (fn transform-selection [opts]
     (local layer (active-layer))
-    (assert layer "DrawingController translate-selection requires an active layer")
+    (assert layer "DrawingController transform-selection requires an active layer")
     (assert (= layer.kind "vector")
-            "DrawingController translate-selection requires active vector layer")
+            "DrawingController transform-selection requires active vector layer")
     (local ids (icollect [_ object-id (ipairs (selection-ids))]
                          object-id))
     (if (= (length ids) 0)
         false
-        (perform! (update-objects-command
-                    layer.id
-                    ids
-                    (fn [object]
-                      (translate-object-copy object dx dy)))
-                  "vector-content")))
+        (do
+          (local transform (normalize-transform-options layer ids opts))
+          (perform! (update-objects-command
+                      layer.id
+                      ids
+                      (fn [object]
+                        (transform-object-copy object transform)))
+                    "vector-content"))))
+
+  (fn translate-selection [dx dy]
+    (transform-selection {:dx dx :dy dy}))
 
   (fn update-selection-style [changes]
     (assert (= (type changes) "table") "DrawingController update-selection-style requires changes table")
@@ -1049,6 +1174,7 @@
   (set self.duplicate-active-layer (fn [_self] (duplicate-active-layer)))
   (set self.delete-active-layer (fn [_self] (delete-active-layer)))
   (set self.move-active-layer (fn [_self delta] (move-active-layer delta)))
+  (set self.transform-selection (fn [_self opts] (transform-selection opts)))
   (set self.translate-selection (fn [_self dx dy] (translate-selection dx dy)))
   (set self.update-selection-style (fn [_self changes] (update-selection-style changes)))
   (set self.set-active-layer (fn [_self layer-id] (set-active-layer layer-id)))

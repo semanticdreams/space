@@ -151,11 +151,13 @@
                          (append-tool-result-item ctx existing part part-index message))))))
   appended)
 
-(fn new-stream-state []
+(fn new-stream-state [input-text]
   {:text-parts {}
    :text-order {}
    :part-meta {}
    :pending-deltas {}
+   :ignored-message-ids {}
+   :input-text input-text
    :assistant-message-ids []})
 
 (fn ensure-subtable [root key]
@@ -176,6 +178,22 @@
 (fn remember-assistant-message-id [stream-state message-id]
   (when (and message-id (not (contains-value? stream-state.assistant-message-ids message-id)))
     (table.insert stream-state.assistant-message-ids message-id)))
+
+(fn ignore-message-id! [stream-state message-id]
+  (when message-id
+    (tset stream-state.ignored-message-ids message-id true)))
+
+(fn ignored-stream-event? [stream-state event]
+  (and event.message-id
+       (. stream-state.ignored-message-ids event.message-id)))
+
+(fn input-echo-stream-event? [stream-state event]
+  (and (= event.type :assistant-message)
+       (= event.content stream-state.input-text)))
+
+(fn skip-unstructured-input-echo-event? [stream-state event]
+  (and (input-echo-stream-event? stream-state event)
+       (= (length stream-state.assistant-message-ids) 0)))
 
 (fn single-streamed-assistant-message-id [stream-state]
   (when (= (length stream-state.assistant-message-ids) 1)
@@ -316,7 +334,11 @@
     (when (and (or (not normalized.session-id)
                    (= normalized.session-id opencode-session-id))
                (not (ctx.turn:cancelled?)))
-      (apply-stream-event ctx stream-state normalized))))
+      (if (ignored-stream-event? stream-state normalized)
+          nil
+          (skip-unstructured-input-echo-event? stream-state normalized)
+          nil
+          (apply-stream-event ctx stream-state normalized)))))
 
 (fn subscribe-live-events [opencode ctx session opencode-session-id stream-state on-fatal]
   (when (and opencode.events opencode.events.subscribe)
@@ -443,7 +465,7 @@
     (local PromptUtils (require :llm/agent/prompt-utils))
     (local opencode (resolve-opencode ctx))
     (var live-events nil)
-    (local stream-state (new-stream-state))
+    (local stream-state (new-stream-state input))
 
     (fn close-live-events []
       (when live-events
@@ -478,6 +500,7 @@
           (fail "OpenCode session response missing id")
           (do
             (local turn-msg-id (.. "oc-msg-" (Uuid.v4)))
+            (ignore-message-id! stream-state turn-msg-id)
             (ctx.turn:set-cancel
               (fn []
                 (close-live-events)

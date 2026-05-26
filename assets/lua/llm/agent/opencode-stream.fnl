@@ -34,6 +34,18 @@
       part.id
       fallback))
 
+(fn message-role [source]
+  (or (and source source.role)
+      (and source source.messageRole)
+      (and source source.message_role)
+      (and source source.message-role)
+      (and source source.info source.info.role)
+      (and source source.message source.message.role)
+      (and source source.message source.message.info source.message.info.role)))
+
+(fn user-message-part? [part event-role]
+  (= (or (message-role part) event-role) "user"))
+
 (fn call-id [part fallback]
   (or part.callID
       part.callId
@@ -103,17 +115,20 @@
        :is-error (not (= status "completed"))}))
   events)
 
-(fn normalize-text-part [part]
-  (local mid (message-id part "opencode-live-message"))
-  [{:type :assistant-message
-    :provider :opencode
-    :session-id (session-id part)
-    :message-id mid
-    :part-id (part-id part mid)
-    :item-id (.. "itm-assistant-" mid)
-    :content (or part.text "")
-    :status (if (part-complete? part) :complete :streaming)
-    :replace true}])
+(fn normalize-text-part [part event-role]
+  (if (user-message-part? part event-role)
+      []
+      (do
+        (local mid (message-id part "opencode-live-message"))
+        [{:type :assistant-message
+          :provider :opencode
+          :session-id (session-id part)
+          :message-id mid
+          :part-id (part-id part mid)
+          :item-id (.. "itm-assistant-" mid)
+          :content (or part.text "")
+          :status (if (part-complete? part) :complete :streaming)
+          :replace true}])))
 
 (fn normalize-reasoning-part [part]
   (local mid (message-id part "opencode-live-message"))
@@ -128,13 +143,15 @@
     :status (if (part-complete? part) :complete :streaming)
     :replace true}])
 
-(fn normalize-part-updated [part]
+(fn normalize-part-updated [props]
+  (local part (or (and props props.part) props))
+  (local event-role (message-role props))
   (if (not part)
       []
       (= part.type "tool")
       (normalize-tool-part part)
       (= part.type "text")
-      (normalize-text-part part)
+      (normalize-text-part part event-role)
       (= part.type "reasoning")
       (normalize-reasoning-part part)
       []))
@@ -156,13 +173,14 @@
   (local props (event-properties payload))
   (local typ (event-type payload))
   (if (= typ "message.part.updated")
-      (normalize-part-updated (or (and props props.part) payload.part))
+      (normalize-part-updated (or props payload))
       (= typ "message.part.delta")
       (normalize-part-delta props)
       []))
 
 {:normalize normalize
  :message-id message-id
+ :message-role message-role
  :session-id session-id
  :part-id part-id
  :call-id call-id

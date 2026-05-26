@@ -407,6 +407,19 @@
 (fn canonical-object-style [style]
   (clone-table (normalize-style (optional-table style "document object.style"))))
 
+(fn normalize-object-rotation [value label]
+  (if (= value nil)
+      nil
+      (do
+        (assert (finite-number? value)
+                (.. "DrawingDocument " label " must be a finite number"))
+        value)))
+
+(fn attach-object-rotation! [target rotation]
+  (when (and rotation (not (= rotation 0)))
+    (set target.rotation rotation))
+  target)
+
 (fn validate-layer-object-ids! [objects]
   (local seen {})
   (each [object-idx object (ipairs objects)]
@@ -421,17 +434,23 @@
   (local normalized-id (validate-id-string source.id "document object.id"))
   (local normalized-style (canonical-object-style source.style))
   (if (= source.kind "rectangle")
-      {:id normalized-id
-       :kind "rectangle"
-       :center (normalize-vec3 source.center "document object.center")
-       :size (normalize-vec3 source.size "document object.size")
-       :style normalized-style}
+      (do
+        (local out {:id normalized-id
+                    :kind "rectangle"
+                    :center (normalize-vec3 source.center "document object.center")
+                    :size (normalize-vec3 source.size "document object.size")
+                    :style normalized-style})
+        (attach-object-rotation! out
+                                 (normalize-object-rotation source.rotation "object.rotation")))
       (= source.kind "ellipse")
-      {:id normalized-id
-       :kind "ellipse"
-       :center (normalize-vec3 source.center "document object.center")
-       :size (normalize-vec3 source.size "document object.size")
-       :style normalized-style}
+      (do
+        (local out {:id normalized-id
+                    :kind "ellipse"
+                    :center (normalize-vec3 source.center "document object.center")
+                    :size (normalize-vec3 source.size "document object.size")
+                    :style normalized-style})
+        (attach-object-rotation! out
+                                 (normalize-object-rotation source.rotation "object.rotation")))
       (= source.kind "line")
       {:id normalized-id
        :kind "line"
@@ -681,17 +700,23 @@
 (fn serialize-object [object]
   (local normalized-style (canonical-object-style object.style))
   (if (= object.kind "rectangle")
-      {:id object.id
-       :kind "rectangle"
-       :center (vec3->array object.center)
-       :size (vec3->array object.size)
-       :style normalized-style}
+      (do
+        (local out {:id object.id
+                    :kind "rectangle"
+                    :center (vec3->array object.center)
+                    :size (vec3->array object.size)
+                    :style normalized-style})
+        (attach-object-rotation! out
+                                 (normalize-object-rotation object.rotation "object.rotation")))
       (= object.kind "ellipse")
-      {:id object.id
-       :kind "ellipse"
-       :center (vec3->array object.center)
-       :size (vec3->array object.size)
-       :style normalized-style}
+      (do
+        (local out {:id object.id
+                    :kind "ellipse"
+                    :center (vec3->array object.center)
+                    :size (vec3->array object.size)
+                    :style normalized-style})
+        (attach-object-rotation! out
+                                 (normalize-object-rotation object.rotation "object.rotation")))
       (= object.kind "line")
       {:id object.id
        :kind "line"

@@ -29,10 +29,15 @@
   (fn notify []
     (change-signal:emit state))
 
+  (fn same-approval? [a b]
+    (or (= a b)
+        (and a b a.id b.id (= a.id b.id))))
+
   (fn set-pending-approval [self request]
-    (set state.pending-approval request)
-    (approval-change-signal:emit request)
-    (self:notify))
+    (when (not (same-approval? state.pending-approval request))
+      (set state.pending-approval request)
+      (approval-change-signal:emit request)
+      (self:notify)))
 
   (fn sync-pending-approval [self request]
     (if request

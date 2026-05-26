@@ -1,6 +1,12 @@
 (local glm (require :glm))
 (local json (require :json))
 (local DrawingDocument (require :drawing/document))
+(local VectorGeometry (require :drawing/vector-geometry))
+
+(local canvas-coordinate-contract
+       (.. "Coordinates are canvas/world coordinates with OpenGL orientation: "
+           "+x moves right, +y moves up, and the origin is the drawing canvas origin. "
+           "Do not invert y values or use screen-space y-down coordinates."))
 
 (fn point [x y]
   (assert (= (type x) "number") "drawing point x must be a number")
@@ -45,12 +51,20 @@
     (table.insert out (DrawingDocument.vec3->array (. points i))))
   out)
 
+(fn radians->degrees [value]
+  (* value (/ 180 math.pi)))
+
 (fn object-position-summary [object opts]
   (local options (or opts {}))
   (if (or (= object.kind "rectangle")
           (= object.kind "ellipse"))
-      {:center (DrawingDocument.vec3->array object.center)
-       :size (DrawingDocument.vec3->array object.size)}
+      (do
+        (local out {:center (DrawingDocument.vec3->array object.center)
+                    :size (DrawingDocument.vec3->array object.size)})
+        (when object.rotation
+          (set out.rotation object.rotation)
+          (set out.rotation_degrees (radians->degrees object.rotation)))
+        out)
       (= object.kind "line")
       {:start (DrawingDocument.vec3->array object.start)
        :finish (DrawingDocument.vec3->array object.finish)}
@@ -138,33 +152,33 @@
           (.. "drawing gesture produced no committed object for tool " tool))
   "inserted")
 
-(fn object-bounds [object]
-  (if (or (= object.kind "rectangle")
-          (= object.kind "ellipse"))
+(fn bounds-from-points [points]
+  (var left nil)
+  (var right nil)
+  (var bottom nil)
+  (var top nil)
+  (each [_ p (ipairs points)]
+    (set left (if left (math.min left p.x) p.x))
+    (set right (if right (math.max right p.x) p.x))
+    (set bottom (if bottom (math.min bottom p.y) p.y))
+    (set top (if top (math.max top p.y) p.y)))
+  {:left (or left 0) :right (or right 0) :bottom (or bottom 0) :top (or top 0)})
+
+(fn object-bound-points [object]
+  (if (= object.kind "rectangle")
       (do
-        (local half (* object.size 0.5))
-        {:left (- object.center.x half.x)
-         :right (+ object.center.x half.x)
-         :bottom (- object.center.y half.y)
-         :top (+ object.center.y half.y)})
+        (local corners (VectorGeometry.rectangle-corners object))
+        [corners.a corners.b corners.c corners.d])
+      (= object.kind "ellipse")
+      (VectorGeometry.ellipse-points object)
       (= object.kind "line")
-      {:left (math.min object.start.x object.finish.x)
-       :right (math.max object.start.x object.finish.x)
-       :bottom (math.min object.start.y object.finish.y)
-       :top (math.max object.start.y object.finish.y)}
+      [object.start object.finish]
       (= object.kind "stroke")
-      (do
-        (var left nil)
-        (var right nil)
-        (var bottom nil)
-        (var top nil)
-        (each [_ p (ipairs (or object.points []))]
-          (set left (if left (math.min left p.x) p.x))
-          (set right (if right (math.max right p.x) p.x))
-          (set bottom (if bottom (math.min bottom p.y) p.y))
-          (set top (if top (math.max top p.y) p.y)))
-        {:left (or left 0) :right (or right 0) :bottom (or bottom 0) :top (or top 0)})
+      (or object.points [])
       (error (.. "space_drawing_select unsupported object kind: " (tostring object.kind)))))
+
+(fn object-bounds [object]
+  (bounds-from-points (object-bound-points object)))
 
 (fn normalize-bound-edges [left right bottom top]
   (assert (= (type left) "number") "drawing bounds left/x must be a number")
@@ -274,7 +288,8 @@
      :risk :normal
      :contexts [{:surface :canvas :mode "drawing"}]
      :tool-ids ["drawing.inspect" "drawing.set-tool" "drawing.insert-shape" "drawing.insert-line" "drawing.insert-stroke"]
-     :system-prompt "The user is editing vector drawing content. Use drawing tools for shape and stroke operations."})
+     :system-prompt (.. "The user is editing vector drawing content. Use drawing tools for shape and stroke operations. "
+                        canvas-coordinate-contract)})
 
   (mgr:register
     {:name "drawing-layer-tools"
@@ -331,7 +346,8 @@
   (adapters:register
     {:id "drawing.inspect"
      :mcp-name "space_drawing_inspect"
-     :description "Inspect drawing state, including layers, active layer/tool, selection, defaults, and vector objects."
+     :description (.. "Inspect drawing state, including layers, active layer/tool, selection, defaults, and vector objects. "
+                      "Returned object coordinates use canvas/world coordinates: +y is up.")
      :inputSchema {:type "object"
                    :properties {:include_objects {:type "boolean"
                                                   :description "Include vector object properties in the response (default true)"}
@@ -359,13 +375,14 @@
   (adapters:register
     {:id "drawing.insert-shape"
      :mcp-name "space_drawing_insert_shape"
-     :description "Insert a shape into the drawing."
+     :description (.. "Insert a shape into the drawing. "
+                      canvas-coordinate-contract)
      :inputSchema {:type "object"
                    :properties {:shape {:type "string" :description "Shape type (rectangle or ellipse)"}
-                                :x {:type "number" :description "X position"}
-                                :y {:type "number" :description "Y position"}
-                                :width {:type "number" :description "Shape width"}
-                                :height {:type "number" :description "Shape height"}}
+                                :x {:type "number" :description "Start x in canvas/world coordinates"}
+                                :y {:type "number" :description "Start y in canvas/world coordinates (+y is up)"}
+                                :width {:type "number" :description "Shape width; positive extends right, negative extends left"}
+                                :height {:type "number" :description "Shape height; positive extends up, negative extends down"}}
                    :required ["shape" "x" "y" "width" "height"]}
      :make-run (fn [app]
                  (fn [args]
@@ -380,10 +397,13 @@
   (adapters:register
     {:id "drawing.insert-line"
      :mcp-name "space_drawing_insert_line"
-     :description "Insert a line into the drawing."
+     :description (.. "Insert a line into the drawing. "
+                      canvas-coordinate-contract)
      :inputSchema {:type "object"
-                   :properties {:x1 {:type "number"} :y1 {:type "number"}
-                                :x2 {:type "number"} :y2 {:type "number"}}
+                   :properties {:x1 {:type "number" :description "Start x in canvas/world coordinates"}
+                                :y1 {:type "number" :description "Start y in canvas/world coordinates (+y is up)"}
+                                :x2 {:type "number" :description "End x in canvas/world coordinates"}
+                                :y2 {:type "number" :description "End y in canvas/world coordinates (+y is up)"}}
                    :required ["x1" "y1" "x2" "y2"]}
      :make-run (fn [app]
                  (fn [args]
@@ -395,11 +415,13 @@
   (adapters:register
     {:id "drawing.insert-stroke"
      :mcp-name "space_drawing_insert_stroke"
-     :description "Insert a freehand stroke into the drawing."
+     :description (.. "Insert a freehand stroke into the drawing. "
+                      canvas-coordinate-contract)
      :inputSchema {:type "object"
                    :properties {:tool {:type "string" :description "Stroke tool (pen, brush, or marker)"}
                                 :points {:type "array" :items {:type "object"
-                                                               :properties {:x {:type "number"} :y {:type "number"}}}}}
+                                                               :properties {:x {:type "number" :description "Point x in canvas/world coordinates"}
+                                                                            :y {:type "number" :description "Point y in canvas/world coordinates (+y is up)"}}}}}
                    :required ["points"]}
      :make-run (fn [app]
                  (fn [args]
@@ -500,8 +522,12 @@
   (adapters:register
     {:id "drawing.sample-color"
      :mcp-name "space_drawing_sample_color"
-     :description "Sample a color from the drawing at the given position."
-     :inputSchema {:type "object" :properties {:x {:type "number"} :y {:type "number"}} :required ["x" "y"]}
+     :description (.. "Sample a color from the drawing at the given canvas/world position. "
+                      "+y is up.")
+     :inputSchema {:type "object"
+                   :properties {:x {:type "number" :description "X position in canvas/world coordinates"}
+                                :y {:type "number" :description "Y position in canvas/world coordinates (+y is up)"}}
+                   :required ["x" "y"]}
      :make-run (fn [app]
                  (fn [args]
                    (local controller (require-controller app "space_drawing_sample_color"))
@@ -555,7 +581,8 @@
   (adapters:register
     {:id "drawing.select"
      :mcp-name "space_drawing_select"
-     :description "Select vector drawing objects by id, kind, bounds, or all objects on a layer."
+     :description (.. "Select vector drawing objects by id, kind, bounds, or all objects on a layer. "
+                      "Bounds use canvas/world coordinates: +y is up.")
      :inputSchema {:type "object"
                    :properties {:ids {:type "array" :items {:type "string"} :description "Object ids to select"}
                                 :all {:type "boolean" :description "Select all objects"}
@@ -572,18 +599,38 @@
   (adapters:register
     {:id "drawing.transform-selection"
      :mcp-name "space_drawing_transform_selection"
-     :description "Transform selected vector drawing objects. Currently supports translation by dx/dy."
+     :description (.. "Transform selected vector drawing objects by translation, rotation, and scaling in canvas/world coordinates; "
+                     "+y moves up. Positive rotation_degrees turns counterclockwise around origin, or the selection center when origin is omitted.")
      :inputSchema {:type "object"
                    :properties {:dx {:type "number" :description "X translation"}
-                                :dy {:type "number" :description "Y translation"}}
-                   :required ["dx" "dy"]}
+                                :dy {:type "number" :description "Y translation; positive moves up, negative moves down"}
+                                :rotation_degrees {:type "number" :description "Counterclockwise rotation in degrees"}
+                                :scale {:type "number" :description "Uniform scale factor greater than zero"}
+                                :scale_x {:type "number" :description "Non-uniform X scale factor greater than zero; use uniform scale for already rotated shapes"}
+                                :scale_y {:type "number" :description "Non-uniform Y scale factor greater than zero; use uniform scale for already rotated shapes"}
+                                :origin {:type "object"
+                                         :description "Optional transform origin in canvas/world coordinates"
+                                         :properties {:x {:type "number"}
+                                                      :y {:type "number"}}
+                                         :required ["x" "y"]}}
+                   :required []}
      :make-run (fn [app]
                  (fn [args]
                    (local controller (require-controller app "space_drawing_transform_selection"))
+                   (local options (or args {}))
                    (local count (length (controller:selection-ids)))
-                   (assert (controller:translate-selection args.dx args.dy)
+                   (assert (controller:transform-selection
+                             {:dx options.dx
+                              :dy options.dy
+                              :rotation (if options.rotation_degrees
+                                            (* options.rotation_degrees (/ math.pi 180))
+                                            nil)
+                              :scale options.scale
+                              :scale-x options.scale_x
+                              :scale-y options.scale_y
+                              :origin options.origin})
                            "space_drawing_transform_selection requires a non-empty vector selection")
-                   (.. "translated " count " selected objects")))})
+                   (.. "transformed " count " selected objects")))})
 
   (adapters:register
     {:id "drawing.clear-selection"

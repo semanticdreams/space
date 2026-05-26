@@ -32,7 +32,29 @@
   (assert (= (type item.type) "string") "item must have a string type")
   (assert (= (type item.id) "string") "item must have a string id"))
 
+(fn stale-input-echo-assistant-draft? [previous item]
+  (and previous
+       (= previous.type "message")
+       (= previous.role "user")
+       (= item.type "message")
+       (= item.role "assistant")
+       (= item.stream-status "streaming")
+       (= item.content previous.content)))
+
+(fn prune-stale-input-echo-drafts! [session]
+  (local pruned [])
+  (var previous-kept nil)
+  (each [_ item (ipairs (or session.items []))]
+    (if (stale-input-echo-assistant-draft? previous-kept item)
+        nil
+        (do
+          (table.insert pruned item)
+          (set previous-kept item))))
+  (set session.items pruned)
+  session)
+
 (fn save-session [session data-dir]
+  (prune-stale-input-echo-drafts! session)
   (set session.updated-at (now))
   (JsonUtils.write-json! (session-path session.id data-dir) session)
   session)
@@ -50,7 +72,7 @@
 (fn load-session [id data-dir]
   (assert (= (type id) "string") "session id must be a string")
   (if (. cache id)
-      (. cache id)
+      (prune-stale-input-echo-drafts! (. cache id))
       (do
         (local path (session-path id data-dir))
         (if (not (fs.exists path))
@@ -62,6 +84,7 @@
               (local (parse-ok session) (pcall json.loads content))
               (when (not parse-ok)
                 (error (.. "failed to parse agent session '" id "': " (tostring session))))
+              (prune-stale-input-echo-drafts! session)
               (tset cache id session)
               session)))))
 

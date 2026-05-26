@@ -36,13 +36,16 @@
 (fn make-instrumented-widget [name opts]
   (local options (or opts {}))
   (local measure (or options.measure (glm.vec3 5 2 0)))
-  (var state {:measurer-count 0
+  (var state {:builder-count 0
+              :drop-count 0
+              :measurer-count 0
               :layouter-count 0
               :dropped? false
               :received-size nil
               :received-position nil
               :received-rotation nil})
   (fn builder [_ctx]
+    (set state.builder-count (+ state.builder-count 1))
     (local layout
       (Layout {:name (.. name "-layout")
                :measurer (fn [self]
@@ -54,6 +57,7 @@
                            (set state.received-position self.position)
                            (set state.received-rotation self.rotation))}))
     (fn drop [self]
+      (set state.drop-count (+ state.drop-count 1))
       (set state.dropped? true)
       (self.layout:drop))
     {:layout layout
@@ -141,6 +145,27 @@
           "expanded disclosure should reattach details layout")
   (instance:drop))
 
+(fn test-collapse-drops-details-widget []
+  (local ctx (make-test-ctx))
+  (local (summary-builder _) (make-instrumented-widget "summary"))
+  (local (details-builder details-state) (make-instrumented-widget "details"))
+  (local instance
+    ((DisclosureRow {:summary summary-builder
+                     :details details-builder
+                     :expanded? true})
+     ctx))
+  (assert (= details-state.builder-count 1)
+          "expanded disclosure should build details")
+  (instance:set-expanded false)
+  (assert (= details-state.drop-count 1)
+          "collapsed disclosure should drop details widget")
+  (instance:set-expanded true)
+  (assert (= details-state.builder-count 2)
+          "re-expanded disclosure should rebuild details widget")
+  (instance:drop)
+  (assert (= details-state.drop-count 2)
+          "dropping re-expanded disclosure should drop current details widget"))
+
 (table.insert tests {:name "DisclosureRow requires :summary"
                      :fn test-requires-summary})
 (table.insert tests {:name "DisclosureRow constructs successfully"
@@ -155,6 +180,8 @@
                      :fn test-measure-expanded-vs-collapsed})
 (table.insert tests {:name "DisclosureRow collapsed removes details layout"
                      :fn test-collapsed-removes-details-layout})
+(table.insert tests {:name "DisclosureRow collapse drops details widget"
+                     :fn test-collapse-drops-details-widget})
 
 (fn main []
   (local runner (require :tests/runner))

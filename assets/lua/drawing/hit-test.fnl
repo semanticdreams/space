@@ -1,4 +1,5 @@
 (local glm (require :glm))
+(local VectorGeometry (require :drawing/vector-geometry))
 
 (fn color->glm-vec4 [value fallback]
   (local source (or value fallback [1 1 1 1]))
@@ -45,27 +46,23 @@
         (local projection (+ start (* delta t)))
         (glm.length (- point projection)))))
 
-(fn rect-bounds [center size]
-  (local half (* size 0.5))
-  {:min (glm.vec3 (- center.x half.x) (- center.y half.y) center.z)
-   :max (glm.vec3 (+ center.x half.x) (+ center.y half.y) center.z)})
+(fn point-to-object-local [object point]
+  (VectorGeometry.rotate-offset (- point object.center) (- (or object.rotation 0))))
 
-(fn point-in-bounds? [point bounds]
-  (and bounds
-       (>= point.x bounds.min.x)
-       (<= point.x bounds.max.x)
-       (>= point.y bounds.min.y)
-       (<= point.y bounds.max.y)))
+(fn point-in-rectangle? [object point]
+  (local half (* object.size 0.5))
+  (local local-point (point-to-object-local object point))
+  (and (>= local-point.x (- half.x))
+       (<= local-point.x half.x)
+       (>= local-point.y (- half.y))
+       (<= local-point.y half.y)))
 
-(fn distance-to-rect-outline [point bounds]
-  (local left bounds.min.x)
-  (local right bounds.max.x)
-  (local bottom bounds.min.y)
-  (local top bounds.max.y)
-  (local segments [[(glm.vec3 left bottom 0) (glm.vec3 right bottom 0)]
-                   [(glm.vec3 right bottom 0) (glm.vec3 right top 0)]
-                   [(glm.vec3 right top 0) (glm.vec3 left top 0)]
-                   [(glm.vec3 left top 0) (glm.vec3 left bottom 0)]])
+(fn distance-to-rect-outline [object point]
+  (local corners (VectorGeometry.rectangle-corners object))
+  (local segments [[corners.a corners.b]
+                   [corners.b corners.c]
+                   [corners.c corners.d]
+                   [corners.d corners.a]])
   (var best math.huge)
   (each [_ pair (ipairs segments)]
     (local candidate (distance-to-segment point (. pair 1) (. pair 2)))
@@ -74,11 +71,10 @@
   best)
 
 (fn hit-rectangle? [object point tolerance]
-  (local bounds (rect-bounds object.center object.size))
   (local style (or object.style {}))
-  (if (and style.fill_enabled (point-in-bounds? point bounds))
+  (if (and style.fill_enabled (point-in-rectangle? object point))
       true
-      (<= (distance-to-rect-outline point bounds)
+      (<= (distance-to-rect-outline object point)
           (+ tolerance (* 0.5 (or style.thickness 1.0))))))
 
 (fn hit-line? [object point tolerance]
@@ -103,13 +99,12 @@
 
 (fn hit-ellipse? [object point tolerance]
   (local radii (* object.size 0.5))
-  (local dx (- point.x object.center.x))
-  (local dy (- point.y object.center.y))
   (if (or (< radii.x 1e-6) (< radii.y 1e-6))
       false
       (do
-        (local nx (/ dx radii.x))
-        (local ny (/ dy radii.y))
+        (local local-point (point-to-object-local object point))
+        (local nx (/ local-point.x radii.x))
+        (local ny (/ local-point.y radii.y))
         (local d (+ (* nx nx) (* ny ny)))
         (if (and object.style object.style.fill_enabled (<= d 1.0))
             true

@@ -1772,8 +1772,31 @@
     (profiler.end-frame))
   )
 
+(fn drop-agent-runtime! []
+  (when app.agent-runner
+    (app.agent-runner:drop)
+    (set app.agent-runner nil))
+  (when app.agent-providers
+    (local opencode app.agent-providers.opencode)
+    (when (and opencode opencode.close)
+      (opencode.close)))
+  (set app.agent-providers nil)
+  (when app.agent-opencode-mcp-bridge
+    (app.agent-opencode-mcp-bridge:stop)
+    (set app.agent-opencode-mcp-bridge nil))
+  (when app.agent-mcp-sync
+    (app.agent-mcp-sync:stop)
+    (set app.agent-mcp-sync nil))
+  (when (and app.agent-presets-canvas-handler app.canvas-shell-changed)
+    (app.canvas-shell-changed:disconnect app.agent-presets-canvas-handler true)
+    (set app.agent-presets-canvas-handler nil))
+  (set app.agent-tool-surface nil)
+  (set app.agent-approvals nil)
+  (set app.agent-registry nil))
+
 (fn app.drop []
   (set (. package.loaded "renderers") nil)
+  (drop-agent-runtime!)
   (AppBootstrap.drop-states)
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)
@@ -1892,26 +1915,6 @@
   (when (and app.kernels app.kernels.drop)
     (app.kernels:drop)
     (set app.kernels nil))
-  (when app.agent-runner
-    (app.agent-runner:drop)
-    (set app.agent-runner nil))
-  (when app.agent-providers
-    (local opencode app.agent-providers.opencode)
-    (when (and opencode opencode.close)
-      (opencode.close)))
-  (set app.agent-providers nil)
-  (when app.agent-opencode-mcp-bridge
-    (app.agent-opencode-mcp-bridge:stop)
-    (set app.agent-opencode-mcp-bridge nil))
-  (when app.agent-mcp-sync
-    (app.agent-mcp-sync:stop)
-    (set app.agent-mcp-sync nil))
-  (when (and app.agent-presets-canvas-handler app.canvas-shell-changed)
-    (app.canvas-shell-changed:disconnect app.agent-presets-canvas-handler true)
-    (set app.agent-presets-canvas-handler nil))
-  (set app.agent-tool-surface nil)
-  (set app.agent-approvals nil)
-  (set app.agent-registry nil)
   (set app.next-frame-queue [])
   (set app.next-frame-pending [])
   (set app.projection nil)

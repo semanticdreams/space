@@ -435,6 +435,48 @@
 (table.insert tests {:name "mcp-http: SSE reconnect resends list_changed and updates status"
                      :fn test-sse-reconnect-status})
 
+(fn test-stop-removes-change-listener []
+  (local tools (ToolRegistry {:namespace-prefix "space_"}))
+  (tools:register {:name "space_ping"
+                   :description "Ping"
+                   :inputSchema {:type "object" :properties {}}
+                   :run (fn [] "pong")})
+  (local srv (MCPHTTPServer {:http-server (http-server-mod.HttpServer)
+                             :tools tools
+                             :force-sse true}))
+  (local port (srv:start "127.0.0.1" 0))
+  (var chunks [])
+
+  (http.request
+    {:method "GET"
+     :url (.. "http://127.0.0.1:" port "/mcp")
+     :headers {:Accept "text/event-stream"}
+     :stream true
+     :callback (fn [res] (table.insert chunks res))})
+  (wait-for (fn []
+              (local st (srv:status))
+              (and st.sse-connected
+                   (string.find (stream-body chunks) "event: endpoint" 1 true)))
+            5000)
+  (local connected-status (srv:status))
+  (assert (= connected-status.list-changed-count 1)
+          "connected stream should receive initial list_changed")
+
+  (srv:stop)
+  (local stopped-tool-status (tools:status))
+  (assert (= stopped-tool-status.listener-count 0)
+          "server stop should remove registry change listener")
+  (tools:register {:name "space_echo"
+                   :description "Echo"
+                   :inputSchema {:type "object" :properties {:msg {:type "string"}}}
+                   :run (fn [args] (or args.msg ""))})
+  (local stopped-status (srv:status))
+  (assert (= stopped-status.list-changed-count 1)
+          "registry changes after stop should not publish list_changed"))
+
+(table.insert tests {:name "mcp-http: stop removes change listener before tool mutations"
+                     :fn test-stop-removes-change-listener})
+
 (fn test-loopback-only []
   (local tools (ToolRegistry))
   (local srv (MCPHTTPServer {:http-server (http-server-mod.HttpServer)

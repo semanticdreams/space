@@ -153,6 +153,45 @@
   (assert (= loaded-item1.id "itm-1") "reloaded item should have correct id")
   (clean-dir dir))
 
+(fn test-session-prunes-stale-input-echo-assistant-drafts []
+  (local SessionMod (require :llm/agent/session))
+  (local dir (temp-dir))
+  (local session-id "agt-ses-stale-echo")
+  (fs.write-file (fs.join-path dir (.. session-id ".json"))
+                 (json.dumps {:id session-id
+                              :agent-id "space-agent"
+                              :status "idle"
+                              :created-at 1
+                              :updated-at 1
+                              :data {}
+                              :items [{:id "itm-user"
+                                       :type "message"
+                                       :role "user"
+                                       :content "draw a circle"}
+                                      {:id "itm-assistant-echo"
+                                       :type "message"
+                                       :role "assistant"
+                                       :content "draw a circle"
+                                       :stream-status "streaming"}
+                                      {:id "itm-assistant-real"
+                                       :type "message"
+                                       :role "assistant"
+                                       :content "done"
+                                       :stream-status "complete"}]}))
+  (local loaded (SessionMod.load-session session-id dir))
+  (assert (= (length loaded.items) 2)
+          "load should prune stale assistant echo drafts")
+  (assert (= (. loaded.items 1 :id) "itm-user")
+          "user item should remain")
+  (assert (= (. loaded.items 2 :id) "itm-assistant-real")
+          "real assistant item should remain")
+  (SessionMod.save-session loaded dir)
+  (SessionMod.invalidate-cache session-id)
+  (local reloaded (SessionMod.load-session session-id dir))
+  (assert (= (length reloaded.items) 2)
+          "save should persist the pruned transcript")
+  (clean-dir dir))
+
 (fn test-session-append-multiple-item-types []
   (local SessionMod (require :llm/agent/session))
   (local dir (temp-dir))
@@ -1474,6 +1513,7 @@
   (local {: AgentRunner} (require :llm/agent/runner))
   (local dir (temp-dir))
   (var prompt-callback nil)
+  (var prompt-body nil)
   (var event-callback nil)
   (local mock-opencode
     {:events
@@ -1484,7 +1524,8 @@
      :session
      {:create (fn [_body on-response]
                 (on-response {:ok true :data {:id "oc-live-text"}}))
-      :prompt (fn [_id _body on-response]
+      :prompt (fn [_id body on-response]
+                (set prompt-body body)
                 (set prompt-callback on-response))
       :abort (fn [_id on-response] (on-response true))
       :get (fn [id on-response]
@@ -1515,6 +1556,61 @@
     {:on-item (fn [_item] nil)
      :on-update (fn [_item-id _updates] nil)}))
   (assert event-callback "SpaceAgent should subscribe to OpenCode events")
+  (assert prompt-body "SpaceAgent should submit the prompt before waiting for live events")
+
+  ;; OpenCode may stream the submitted user message as a text part. That must not
+  ;; become an assistant draft in Space's transcript.
+  (event-callback {:type "message.part.updated"
+                   :properties {:message {:info {:role "user"}}
+                                :part {:type "text"
+                                       :sessionID "oc-live-text"
+                                       :messageID "msg-user"
+                                       :id "part-user"
+                                       :text "stream text"}}})
+  (local after-user-stream (runner:get-session session.id))
+  (var user-message-count 0)
+  (var assistant-message-count 0)
+  (each [_ item (ipairs after-user-stream.items)]
+    (when (and (= item.type "message") (= item.role "user"))
+      (set user-message-count (+ user-message-count 1)))
+    (when (and (= item.type "message") (= item.role "assistant"))
+      (set assistant-message-count (+ assistant-message-count 1))))
+  (assert (= user-message-count 1)
+          "streamed user text should leave the original user message as the only user row")
+  (assert (= assistant-message-count 0)
+          "streamed user text should not create an assistant row")
+
+  ;; Even if role metadata is missing, the prompt message id Space sent to
+  ;; OpenCode identifies the user input and must be ignored in the live stream.
+  (event-callback {:type "message.part.updated"
+                   :properties {:part {:type "text"
+                                       :sessionID "oc-live-text"
+                                       :messageID prompt-body.messageId
+                                       :id "part-user-without-role"
+                                       :text "stream text"}}})
+  (local after-user-id-stream (runner:get-session session.id))
+  (var assistant-after-input-id-count 0)
+  (each [_ item (ipairs after-user-id-stream.items)]
+    (when (and (= item.type "message") (= item.role "assistant"))
+      (set assistant-after-input-id-count (+ assistant-after-input-id-count 1))))
+  (assert (= assistant-after-input-id-count 0)
+          "streamed prompt message id should not create an assistant row")
+
+  ;; Some OpenCode builds echo the submitted user text as a separate live
+  ;; text message with no role metadata and no prompt message id.
+  (event-callback {:type "message.part.updated"
+                   :properties {:part {:type "text"
+                                       :sessionID "oc-live-text"
+                                       :messageID "msg-user-echo"
+                                       :id "part-user-echo"
+                                       :text "stream text"}}})
+  (local after-user-echo-stream (runner:get-session session.id))
+  (var assistant-after-echo-count 0)
+  (each [_ item (ipairs after-user-echo-stream.items)]
+    (when (and (= item.type "message") (= item.role "assistant"))
+      (set assistant-after-echo-count (+ assistant-after-echo-count 1))))
+  (assert (= assistant-after-echo-count 0)
+          "streamed input echo should not create an assistant row")
 
   ;; Buffer an out-of-order text delta, then provide the part metadata.
   (event-callback {:type "message.part.delta"
@@ -1819,6 +1915,8 @@
 (table.insert tests {:name "session list empty dir" :fn test-session-list-empty-dir})
 (table.insert tests {:name "session list corrupt errors" :fn test-session-list-corrupt-errors})
 (table.insert tests {:name "session append item" :fn test-session-append-item})
+(table.insert tests {:name "session prunes stale input echo assistant drafts"
+                     :fn test-session-prunes-stale-input-echo-assistant-drafts})
 (table.insert tests {:name "session append multiple item types" :fn test-session-append-multiple-item-types})
 (table.insert tests {:name "session upsert item" :fn test-session-upsert-item})
 

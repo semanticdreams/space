@@ -14,6 +14,7 @@
     (var toggle-icon nil)
     (var sync-visible-children nil)
     (var layout nil)
+    (var details-widget nil)
     (when opts.on-toggle
       (toggled.connect opts.on-toggle))
 
@@ -49,7 +50,16 @@
               :children [(FlexChild (fn [_ctx] (opts.summary ctx)) 1)
                          (FlexChild (fn [_ctx] summary-button-widget))]})
        ctx))
-    (local details-widget (and opts.details (opts.details ctx)))
+
+    (fn ensure-details-widget []
+      (when (and opts.details expanded? (not details-widget))
+        (set details-widget (opts.details ctx)))
+      details-widget)
+
+    (fn drop-details-widget []
+      (when details-widget
+        (details-widget:drop)
+        (set details-widget nil)))
 
     (fn measurer [self]
       (summary-row.layout:measurer)
@@ -57,13 +67,14 @@
       (var height m.y)
       (var width m.x)
       (var depth m.z)
-      (when (and expanded? details-widget)
-        (details-widget.layout:measurer)
-        (set height (+ height details-widget.layout.measure.y))
-        (when (> details-widget.layout.measure.x width)
-          (set width details-widget.layout.measure.x))
-        (when (> details-widget.layout.measure.z depth)
-          (set depth details-widget.layout.measure.z)))
+      (local details (ensure-details-widget))
+      (when (and expanded? details)
+        (details.layout:measurer)
+        (set height (+ height details.layout.measure.y))
+        (when (> details.layout.measure.x width)
+          (set width details.layout.measure.x))
+        (when (> details.layout.measure.z depth)
+          (set depth details.layout.measure.z)))
       (set self.measure (glm.vec3 width height depth)))
 
     (fn measure-row [self constraints]
@@ -72,13 +83,14 @@
       (var height m.y)
       (var width m.x)
       (var depth m.z)
-      (when (and expanded? details-widget)
-        (details-widget.layout:measure-constrained constraints)
-        (set height (+ height details-widget.layout.measure.y))
-        (when (> details-widget.layout.measure.x width)
-          (set width details-widget.layout.measure.x))
-        (when (> details-widget.layout.measure.z depth)
-          (set depth details-widget.layout.measure.z)))
+      (local details (ensure-details-widget))
+      (when (and expanded? details)
+        (details.layout:measure-constrained constraints)
+        (set height (+ height details.layout.measure.y))
+        (when (> details.layout.measure.x width)
+          (set width details.layout.measure.x))
+        (when (> details.layout.measure.z depth)
+          (set depth details.layout.measure.z)))
       (set self.measure (glm.vec3 width height depth)))
 
     (fn layouter [self]
@@ -89,22 +101,24 @@
       (set summary-row.layout.depth-offset-index self.depth-offset-index)
       (set summary-row.layout.clip-region self.clip-region)
       (summary-row.layout:layouter)
-      (when (and expanded? details-widget)
+      (local details (ensure-details-widget))
+      (when (and expanded? details)
         (local detail-height (- self.size.y summary-row.layout.measure.y))
-        (set details-widget.layout.size
+        (set details.layout.size
              (glm.vec3 self.size.x (math.max 0 detail-height) self.size.z))
         (local offset (glm.vec3 0 summary-row.layout.measure.y 0))
-        (set details-widget.layout.position
+        (set details.layout.position
              (+ self.position (self.rotation:rotate offset)))
-        (set details-widget.layout.rotation self.rotation)
-        (set details-widget.layout.depth-offset-index (+ self.depth-offset-index 1))
-        (set details-widget.layout.clip-region self.clip-region)
-        (details-widget.layout:layouter)))
+        (set details.layout.rotation self.rotation)
+        (set details.layout.depth-offset-index (+ self.depth-offset-index 1))
+        (set details.layout.clip-region self.clip-region)
+        (details.layout:layouter)))
 
     (fn visible-children []
       (local children [summary-row.layout])
-      (when (and expanded? details-widget)
-        (table.insert children details-widget.layout))
+      (local details (ensure-details-widget))
+      (when (and expanded? details)
+        (table.insert children details.layout))
       children)
 
     (set layout
@@ -116,6 +130,8 @@
 
     (set sync-visible-children
          (fn []
+           (when (not expanded?)
+             (drop-details-widget))
            (layout:set-children (visible-children))))
 
     (fn on-toggle-visible [self should-expand]
@@ -129,8 +145,7 @@
     (fn drop [self]
       (self.layout:drop)
       (summary-row:drop)
-      (when details-widget
-        (details-widget:drop)))
+      (drop-details-widget))
 
     (local instance
       {:layout layout
