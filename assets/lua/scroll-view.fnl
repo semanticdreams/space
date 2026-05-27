@@ -5,8 +5,20 @@
 (local MathUtils (require :math-utils))
 (local BoundsUtils (require :bounds-utils))
 (local Padding (require :padding))
+(local RuntimeUpdates (require :runtime-updates))
 
 (local scroll-epsilon 1e-5)
+(local kinetic-friction-per-ms 0.006)
+(local kinetic-release-window-ms 80)
+(local kinetic-carry-window-ms 250)
+(local kinetic-min-velocity 0.001)
+(local kinetic-min-frame-delta 0.01)
+(local kinetic-max-frame-ms 64)
+(local kinetic-carry-factor 0.5)
+(local touch-drag-threshold 3)
+(local wheel-kinetic-frame-ms 16)
+(local wheel-event-window-ms 120)
+(local wheel-kinetic-carry-factor 0.35)
 
 (fn clamp [value min-value max-value]
   (math.max min-value (math.min max-value value)))
@@ -42,6 +54,15 @@
 
 (fn payload-finger-id [payload]
   (and payload (rawget payload "finger-id")))
+
+(fn current-time-ms []
+  (assert (and app app.engine app.engine.now-ms)
+          "ScrollView touch kinetic scrolling requires app.engine.now-ms")
+  (app.engine:now-ms))
+
+(fn payload-timestamp-ms [payload]
+  (or (and payload payload.timestamp)
+      (current-time-ms)))
 
 (fn ScrollView [opts]
   (local options (or opts {}))
@@ -83,6 +104,9 @@
                   :viewport-size (glm.vec3 0 0 0)
                   :viewport-height (sanitize-height options.viewport-height)
                   :touch-drag nil
+                  :kinetic nil
+                  :pending-kinetic nil
+                  :wheel-scroll nil
                   :initialized? false
                   :pending-reset? false
                   :user-set-offset? (not (= options.scroll-offset nil))})
@@ -92,6 +116,7 @@
                  :state state
                  :pointer-target pointer-target
                  :focus-manager focus-manager})
+    (var kinetic-subscription nil)
 
     (fn sync-scrollbar [opts]
       (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
@@ -123,6 +148,87 @@
         (scroll:set-scroll-offset (glm.vec3 0 desired 0)
                                   {:mark-layout-dirty? mark-layout-dirty?}))
       (sync-scrollbar {:mark-layout-dirty? mark-layout-dirty?}))
+
+    (fn stop-kinetic! []
+      (set state.kinetic nil)
+      (when kinetic-subscription
+        (kinetic-subscription:drop)
+        (set kinetic-subscription nil)))
+
+    (fn take-kinetic-velocity! []
+      (local velocity (or (and state.kinetic state.kinetic.velocity) 0))
+      (stop-kinetic!)
+      velocity)
+
+    (fn clear-pending-kinetic! []
+      (set state.pending-kinetic nil))
+
+    (fn clear-wheel-scroll! []
+      (set state.wheel-scroll nil))
+
+    (fn pending-kinetic-matches? [pending payload]
+      (and pending
+           payload
+           (= (rawget pending "touch-id") (payload-touch-id payload))
+           (= (rawget pending "finger-id") (payload-finger-id payload))))
+
+    (fn take-pending-kinetic-velocity! [payload]
+      (local pending state.pending-kinetic)
+      (local timestamp (payload-timestamp-ms payload))
+      (local velocity
+        (if (and (pending-kinetic-matches? pending payload)
+                 (<= (- timestamp (or pending.timestamp timestamp))
+                     kinetic-carry-window-ms))
+            (or pending.velocity 0)
+            0))
+      (clear-pending-kinetic!)
+      velocity)
+
+    (fn should-stop-at-scroll-bound? [velocity]
+      (or (and (< velocity 0)
+               (<= state.scroll-offset scroll-epsilon))
+          (and (> velocity 0)
+               (>= state.scroll-offset (- state.max-offset scroll-epsilon)))))
+
+    (fn on-kinetic-frame [delta-ms]
+      (local kinetic state.kinetic)
+      (if (not kinetic)
+          (stop-kinetic!)
+          (do
+            (local elapsed-ms (math.max (or delta-ms 0) 0))
+            (local frame-ms (clamp elapsed-ms 0 kinetic-max-frame-ms))
+            (local velocity kinetic.velocity)
+            (if (or (<= elapsed-ms 0)
+                    (< (math.abs velocity) kinetic-min-velocity)
+                    (should-stop-at-scroll-bound? velocity))
+                (stop-kinetic!)
+                (do
+                  (local frame-velocity
+                    (* velocity (math.exp (* -1 kinetic-friction-per-ms frame-ms))))
+                  (local next-velocity
+                    (* velocity (math.exp (* -1 kinetic-friction-per-ms elapsed-ms))))
+                  (local frame-delta
+                    (/ (- velocity frame-velocity) kinetic-friction-per-ms))
+                  (local previous-offset state.scroll-offset)
+                  (if (< (math.abs frame-delta) kinetic-min-frame-delta)
+                      (stop-kinetic!)
+                      (do
+                        (set-scroll-offset-value (+ state.scroll-offset frame-delta))
+                        (set kinetic.velocity next-velocity)
+                        (when (or (approx previous-offset state.scroll-offset)
+                                  (< (math.abs next-velocity) kinetic-min-velocity)
+                                  (should-stop-at-scroll-bound? next-velocity))
+                          (stop-kinetic!)))))))))
+
+    (fn start-kinetic! [velocity]
+      (stop-kinetic!)
+      (when (and state.scroll-enabled?
+                 (> (math.abs velocity) kinetic-min-velocity)
+                 (not (should-stop-at-scroll-bound? velocity)))
+        (set state.kinetic {:velocity velocity})
+        (set kinetic-subscription
+             (RuntimeUpdates.FrameSubscription {:callback on-kinetic-frame}))
+        (kinetic-subscription:start)))
 
     (fn node-in-scroll? [node]
       (local layout (and node node.layout))
@@ -156,6 +262,8 @@
               (set-scroll-offset-value (+ state.scroll-offset delta-y)))))))
 
     (fn apply-normalized-value [normalized opts]
+      (stop-kinetic!)
+      (clear-wheel-scroll!)
       (local clamped (clamp (or normalized 0) 0 1))
       (local max-offset state.max-offset)
       (if (> max-offset 0)
@@ -203,6 +311,36 @@
           (math.max 0.25 (* height 0.25))
           1.0))
 
+    (fn wheel-integer-differs? [value integer-value]
+      (and (not (= integer-value nil))
+           (not (approx (or value 0) integer-value))))
+
+    (fn continuous-wheel? [payload]
+      (and payload
+           (or (wheel-integer-differs? payload.x (rawget payload "integer-x"))
+               (wheel-integer-differs? payload.y (rawget payload "integer-y")))))
+
+    (fn wheel-event-velocity [scroll-delta payload]
+      (local timestamp (payload-timestamp-ms payload))
+      (local previous-timestamp (and state.wheel-scroll state.wheel-scroll.timestamp))
+      (local recent-previous?
+        (and previous-timestamp
+             (<= (- timestamp previous-timestamp) wheel-event-window-ms)))
+      (local elapsed-ms
+        (if recent-previous?
+            (math.max 1 (- timestamp previous-timestamp))
+            wheel-kinetic-frame-ms))
+      (set state.wheel-scroll {:timestamp timestamp})
+      (/ scroll-delta elapsed-ms))
+
+    (fn combine-wheel-velocity [event-velocity carry-velocity]
+      (local event (or event-velocity 0))
+      (local carry (or carry-velocity 0))
+      (if (and (> (math.abs carry) kinetic-min-velocity)
+               (> (* event carry) 0))
+          (+ event (* carry wheel-kinetic-carry-factor))
+          event))
+
     (fn on-mouse-wheel [_self payload]
       (if (not state.scroll-enabled?)
           false
@@ -212,7 +350,21 @@
                 false
                 (do
                   (local step (wheel-step))
-                  (set-scroll-offset-value (+ state.scroll-offset (* delta-y step)))
+                  (local scroll-delta (* delta-y step))
+                  (local continuous? (continuous-wheel? payload))
+                  (local carry-velocity
+                    (if continuous?
+                        (take-kinetic-velocity!)
+                        (do
+                          (stop-kinetic!)
+                          0)))
+                  (when (not continuous?)
+                    (clear-wheel-scroll!))
+                  (set-scroll-offset-value (+ state.scroll-offset scroll-delta))
+                  (when continuous?
+                    (local event-velocity (wheel-event-velocity scroll-delta payload))
+                    (start-kinetic!
+                      (combine-wheel-velocity event-velocity carry-velocity)))
                   true)))))
 
     (fn active-touch-drag-matches? [payload]
@@ -225,11 +377,98 @@
     (fn clear-touch-drag! []
       (set (. state "touch-drag") nil))
 
+    (fn combine-release-velocity [drag-velocity carry-velocity]
+      (local drag (or drag-velocity 0))
+      (local carry (or carry-velocity 0))
+      (if (> (math.abs drag) kinetic-min-velocity)
+          (if (and (> (math.abs carry) kinetic-min-velocity)
+                   (> (* drag carry) 0))
+              (+ drag (* carry kinetic-carry-factor))
+              drag)
+          0))
+
+    (fn pointer-from-payload [payload]
+      {:x (or (and payload payload.x) 0)
+       :y (or (and payload payload.y) 0)})
+
+    (fn ray-for-touch-payload [payload]
+      (local pointer (pointer-from-payload payload))
+      (if (and pointer-target pointer-target.screen-pos-ray)
+          (pointer-target:screen-pos-ray pointer)
+          (do
+            (assert app.screen-pos-ray
+                    "ScrollView touch drag requires app.screen-pos-ray or pointer-target.screen-pos-ray")
+            (app.screen-pos-ray pointer))))
+
+    (fn touch-local-y [payload]
+      (local ray (assert (ray-for-touch-payload payload)
+                         "ScrollView touch drag requires a pointer ray"))
+      (local layout scroll.layout)
+      (local normal (layout.rotation:rotate (glm.vec3 0 0 1)))
+      (local denom (glm.dot ray.direction normal))
+      (assert (> (math.abs denom) scroll-epsilon)
+              "ScrollView touch drag ray is parallel to scroll plane")
+      (local distance (/ (glm.dot (- layout.position ray.origin) normal)
+                         denom))
+      (local point (+ ray.origin (* ray.direction distance)))
+      (local inverse (layout.rotation:inverse))
+      (local local-point (inverse:rotate (- point layout.position)))
+      local-point.y)
+
+    (fn touch-start-payload [payload]
+      (if (and payload (not (= payload.start-x nil)) (not (= payload.start-y nil)))
+          {:x payload.start-x :y payload.start-y}
+          payload))
+
+    (fn record-touch-drag! [touch-drag payload]
+      (local current-local-y (touch-local-y payload))
+      (local dy (- current-local-y (or (. touch-drag :last-local-y) current-local-y)))
+      (local timestamp (payload-timestamp-ms payload))
+      (local elapsed-ms (math.max 1 (- timestamp (or touch-drag.last-timestamp-ms timestamp))))
+      (local previous-offset state.scroll-offset)
+      (set (. touch-drag :last-local-y) current-local-y)
+      (set-scroll-offset-value (- state.scroll-offset dy))
+      (local actual-delta (- state.scroll-offset previous-offset))
+      (if (> (math.abs actual-delta) scroll-epsilon)
+          (do
+            (set touch-drag.velocity (/ actual-delta elapsed-ms))
+            (set touch-drag.last-movement-timestamp-ms timestamp))
+          (when (>= elapsed-ms kinetic-release-window-ms)
+            (set touch-drag.velocity 0)))
+      (set touch-drag.last-timestamp-ms timestamp)
+      actual-delta)
+
+    (fn on-touch-drag-candidate-start [_self payload]
+      (local velocity (take-kinetic-velocity!))
+      (if (> (math.abs velocity) kinetic-min-velocity)
+          (do
+            (local pending {:velocity velocity
+                            :timestamp (payload-timestamp-ms payload)})
+            (tset pending "touch-id" (payload-touch-id payload))
+            (tset pending "finger-id" (payload-finger-id payload))
+            (set state.pending-kinetic pending))
+          (clear-pending-kinetic!))
+      true)
+
+    (fn on-touch-drag-candidate-end [_self _payload]
+      (clear-pending-kinetic!)
+      true)
+
     (fn on-touch-drag-start [_self payload]
       (if (not state.scroll-enabled?)
           false
           (do
-            (local touch-drag {:last-y (or (and payload payload.y) 0)})
+            (local pending-velocity (take-pending-kinetic-velocity! payload))
+            (local carry-velocity
+              (if (> (math.abs pending-velocity) kinetic-min-velocity)
+                  pending-velocity
+                  (take-kinetic-velocity!)))
+            (local timestamp (payload-timestamp-ms payload))
+            (local touch-drag {:last-local-y (touch-local-y (touch-start-payload payload))
+                               :last-timestamp-ms timestamp
+                               :last-movement-timestamp-ms timestamp
+                               :velocity 0
+                               :carry-velocity carry-velocity})
             (tset touch-drag "touch-id" (payload-touch-id payload))
             (tset touch-drag "finger-id" (payload-finger-id payload))
             (set (. state "touch-drag") touch-drag)
@@ -241,16 +480,23 @@
           (do
             (set state.user-set-offset? true)
             (local touch-drag (. state "touch-drag"))
-            (local current-y (or (and payload payload.y) (. touch-drag :last-y) 0))
-            (local dy (- current-y (or (. touch-drag :last-y) current-y)))
-            (set (. touch-drag :last-y) current-y)
-            (set-scroll-offset-value (- state.scroll-offset dy))
+            (record-touch-drag! touch-drag payload)
             true)))
 
     (fn on-touch-drag-end [_self payload]
       (if (active-touch-drag-matches? payload)
           (do
+            (local touch-drag (. state "touch-drag"))
+            (local timestamp (payload-timestamp-ms payload))
+            (local idle-ms (- timestamp (or touch-drag.last-movement-timestamp-ms timestamp)))
+            (local velocity
+              (if (<= idle-ms kinetic-release-window-ms)
+                  (combine-release-velocity touch-drag.velocity touch-drag.carry-velocity)
+                  0))
             (clear-touch-drag!)
+            (clear-pending-kinetic!)
+            (clear-wheel-scroll!)
+            (start-kinetic! velocity)
             true)
           false))
 
@@ -258,6 +504,9 @@
       (if (active-touch-drag-matches? payload)
           (do
             (clear-touch-drag!)
+            (clear-pending-kinetic!)
+            (clear-wheel-scroll!)
+            (stop-kinetic!)
             true)
           false))
 
@@ -394,8 +643,15 @@
     (local touch-target
       {:pointer-target pointer-target
        :layout scroll.layout
+       :touch-drag-threshold touch-drag-threshold
        :intersect (fn [_self ray]
                     (scroll.layout:intersect ray))
+       :on-touch-drag-candidate-start (fn [_self payload]
+                                        (view:on-touch-drag-candidate-start payload))
+       :on-touch-drag-candidate-end (fn [_self payload]
+                                      (view:on-touch-drag-candidate-end payload))
+       :on-touch-drag-candidate-cancel (fn [_self payload]
+                                         (view:on-touch-drag-candidate-end payload))
        :on-touch-drag-start (fn [_self payload]
                               (view:on-touch-drag-start payload))
        :on-touch-drag (fn [_self payload]
@@ -434,6 +690,7 @@
                  (ensure-node-visible current))))))
 
     (fn drop [_self]
+      (stop-kinetic!)
       (unregister-hoverables)
       (unregister-touch-target)
       (when view.__focus-listener
@@ -446,6 +703,8 @@
       (scrollbar:drop))
 
     (fn set-scroll-offset [_self offset opts]
+      (stop-kinetic!)
+      (clear-wheel-scroll!)
       (set state.user-set-offset? true)
       (set state.pending-reset? false)
       (set-scroll-offset-value (or offset 0) opts))
@@ -454,6 +713,8 @@
       state.scroll-offset)
 
     (fn reset-scroll-position [_self opts]
+      (stop-kinetic!)
+      (clear-wheel-scroll!)
       (set state.user-set-offset? false)
       (set state.pending-reset? true)
       (set-scroll-offset-value state.max-offset opts))
@@ -477,6 +738,8 @@
     (set view.reset-scroll-position reset-scroll-position)
     (set view.set-viewport-height set-viewport-height)
     (set view.on-mouse-wheel on-mouse-wheel)
+    (set view.on-touch-drag-candidate-start on-touch-drag-candidate-start)
+    (set view.on-touch-drag-candidate-end on-touch-drag-candidate-end)
     (set view.on-touch-drag-start on-touch-drag-start)
     (set view.on-touch-drag on-touch-drag)
     (set view.on-touch-drag-end on-touch-drag-end)

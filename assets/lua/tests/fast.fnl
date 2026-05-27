@@ -8,6 +8,7 @@
     :tests.test-zmq
     :tests.test-signal
     :tests.test-touch-session
+    :tests.test-touch-router
     :tests.test-remote-control
     :tests.test-render-capture
     :tests.test-next-frame

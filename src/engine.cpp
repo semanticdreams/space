@@ -887,9 +887,13 @@ void Engine::run() {
                 }
                 float wheel_x = event.wheel.x;
                 float wheel_y = event.wheel.y;
+                int wheel_integer_x = event.wheel.integer_x;
+                int wheel_integer_y = event.wheel.integer_y;
                 if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
                     wheel_x = -wheel_x;
                     wheel_y = -wheel_y;
+                    wheel_integer_x = -wheel_integer_x;
+                    wheel_integer_y = -wheel_integer_y;
                 }
                 inputState.mouseState.add_wheel(wheel_x, wheel_y);
                 sol::table payload = lua_state->create_table();
@@ -897,6 +901,10 @@ void Engine::run() {
                 payload["y"] = wheel_y;
                 payload["direction"] = static_cast<int>(event.wheel.direction);
                 payload["which"] = static_cast<int>(event.wheel.which);
+                payload["mouse-x"] = event.wheel.mouse_x;
+                payload["mouse-y"] = event.wheel.mouse_y;
+                payload["integer-x"] = wheel_integer_x;
+                payload["integer-y"] = wheel_integer_y;
                 payload["mod"] = static_cast<int>(SDL_GetModState());
                 payload["timestamp"] = ns_to_ms(event.common.timestamp);
                 emit_engine_event("mouse-wheel", payload);

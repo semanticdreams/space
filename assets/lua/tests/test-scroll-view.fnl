@@ -1,6 +1,9 @@
 (local glm (require :glm))
 (local ScrollView (require :scroll-view))
 (local Hoverables (require :hoverables))
+(local Intersectables (require :intersectables))
+(local TouchGestureTargets (require :touch-gesture-targets))
+(local TouchRouter (require :touch-router))
 (local Runtime (require :state-runtime))
 (local BuildContext (require :build-context))
 (local MathUtils (require :math-utils))
@@ -18,6 +21,39 @@
   (BuildContext {:hoverables (assert app.hoverables "test requires app.hoverables")
                  :focus-manager manager
                  :focus-scope scope}))
+
+(fn with-inverted-screen-y-ray [body]
+  (local original app.screen-pos-ray)
+  (set app.screen-pos-ray
+       (fn [pointer]
+         {:origin (glm.vec3 (or pointer.x 0) (- (or pointer.y 0)) 1)
+          :direction (glm.vec3 0 0 -1)}))
+  (local (ok result) (pcall body))
+  (set app.screen-pos-ray original)
+  (when (not ok)
+    (error result))
+  result)
+
+(fn with-direct-screen-y-ray [body]
+  (local original app.screen-pos-ray)
+  (set app.screen-pos-ray
+       (fn [pointer]
+         {:origin (glm.vec3 (or pointer.x 0) (or pointer.y 0) 1)
+          :direction (glm.vec3 0 0 -1)}))
+  (local (ok result) (pcall body))
+  (set app.screen-pos-ray original)
+  (when (not ok)
+    (error result))
+  result)
+
+(fn with-touch-gesture-targets [targets body]
+  (local original app.touch-gesture-targets)
+  (set app.touch-gesture-targets targets)
+  (local (ok result) (pcall body))
+  (set app.touch-gesture-targets original)
+  (when (not ok)
+    (error result))
+  result)
 
 (fn make-test-child [size]
   (local state {:last-position nil
@@ -251,30 +287,498 @@
   (assert (approx view.state.scroll-offset 0))
   (view:drop))
 
-(fn scroll-view-touch-drag-scrolls-content []
-  (local child (make-test-child (glm.vec3 3 10 0)))
+(fn scroll-view-continuous-wheel-keeps-moving []
+  (local child (make-test-child (glm.vec3 3 20 0)))
   (local view ((ScrollView {:child child.builder
                             :padding false}) (make-context)))
   (view.layout:measurer)
   (set view.layout.size (glm.vec3 4 4 0))
   (view.layout:layouter)
-  (view:set-scroll-offset 4)
+  (view:set-scroll-offset 2)
   (view.layout:layouter)
-  (assert (view:on-touch-drag-start {:touch-id 1
-                                     :finger-id 2
-                                     :x 1
-                                     :y 10}))
-  (assert (view:on-touch-drag {:touch-id 1
-                               :finger-id 2
-                               :x 1
-                               :y 12}))
+  (assert (view:on-mouse-wheel {:x 0
+                                :y 0.5
+                                :integer-y 0
+                                :direction 0
+                                :timestamp 100}))
+  (local after-wheel view.state.scroll-offset)
+  (assert view.state.kinetic)
+  (app.engine.events.updated:emit 16)
+  (assert (> view.state.scroll-offset after-wheel)
+          "Continuous wheel input should continue briefly after release")
+  (view:drop))
+
+(fn scroll-view-discrete-wheel-does-not-start-kinetic []
+  (local child (make-test-child (glm.vec3 3 20 0)))
+  (local view ((ScrollView {:child child.builder
+                            :padding false}) (make-context)))
+  (view.layout:measurer)
+  (set view.layout.size (glm.vec3 4 4 0))
   (view.layout:layouter)
-  (assert (approx view.state.scroll-offset 2))
-  (assert (view:on-touch-drag-end {:touch-id 1
+  (assert (view:on-mouse-wheel {:x 0
+                                :y 1
+                                :integer-y 1
+                                :direction 0
+                                :timestamp 100}))
+  (assert (= view.state.kinetic nil)
+          "Discrete mouse wheels should remain stepped, not kinetic")
+  (view:drop))
+
+(fn scroll-view-flipped-discrete-wheel-does-not-start-kinetic []
+  (local child (make-test-child (glm.vec3 3 20 0)))
+  (local view ((ScrollView {:child child.builder
+                            :padding false}) (make-context)))
+  (view.layout:measurer)
+  (set view.layout.size (glm.vec3 4 4 0))
+  (view.layout:layouter)
+  (view:set-scroll-offset 2)
+  (assert (view:on-mouse-wheel {:x 0
+                                :y -1
+                                :integer-y -1
+                                :direction 1
+                                :timestamp 100}))
+  (assert (= view.state.kinetic nil)
+          "Natural/flipped discrete wheels should not be treated as continuous input")
+  (view:drop))
+
+(fn scroll-view-continuous-wheel-idle-gap-uses-fresh-velocity []
+  (local child (make-test-child (glm.vec3 3 40 0)))
+  (local view ((ScrollView {:child child.builder
+                            :padding false}) (make-context)))
+  (view.layout:measurer)
+  (set view.layout.size (glm.vec3 4 4 0))
+  (view.layout:layouter)
+  (view:set-scroll-offset 2)
+  (assert (view:on-mouse-wheel {:x 0
+                                :y 0.5
+                                :integer-y 0
+                                :direction 0
+                                :timestamp 100}))
+  (local first-velocity (and view.state.kinetic view.state.kinetic.velocity))
+  (assert first-velocity)
+  (while view.state.kinetic
+    (app.engine.events.updated:emit 64))
+  (assert (view:on-mouse-wheel {:x 0
+                                :y 0.5
+                                :integer-y 0
+                                :direction 0
+                                :timestamp 2000}))
+  (assert view.state.kinetic
+          "Continuous wheel after an idle gap should still get kinetic velocity")
+  (assert (approx view.state.kinetic.velocity first-velocity)
+          "Idle gap should not dilute the next continuous wheel event velocity")
+  (view:drop))
+
+(fn scroll-view-touch-drag-scrolls-content []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 10 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 4)
+      (view.layout:layouter)
+      (local initial-content-y (+ -10 view.state.scroll-offset))
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
                                    :finger-id 2
                                    :x 1
-                                   :y 12}))
-  (view:drop))
+                                   :y 12
+                                   :timestamp 116}))
+      (view.layout:layouter)
+      (assert (approx view.state.scroll-offset 6))
+      (assert (approx (+ -12 view.state.scroll-offset) initial-content-y))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (view:drop))))
+
+(fn scroll-view-touch-router-captures-with-scroll-threshold []
+  (with-direct-screen-y-ray
+    (fn []
+      (local intersector (Intersectables))
+      (local touch-targets (TouchGestureTargets {:intersectables intersector}))
+      (with-touch-gesture-targets
+        touch-targets
+        (fn []
+          (local child (make-test-child (glm.vec3 3 10 0)))
+          (local ctx (BuildContext {:hoverables (assert app.hoverables "test requires app.hoverables")
+                                    :touch-gesture-targets touch-targets}))
+          (local view ((ScrollView {:child child.builder
+                                    :padding false})
+                       ctx))
+          (local router (TouchRouter {:drag-threshold 20}))
+          (local down {:x 1 :y 1 :timestamp 100 :pressure 1.0})
+          (local move-under-threshold {:x 1 :y 3 :timestamp 116 :pressure 1.0})
+          (local move-at-scroll-threshold {:x 1 :y 4 :timestamp 132 :pressure 1.0})
+          (local up {:x 1 :y 4 :timestamp 140 :pressure 1.0})
+          (tset down "touch-id" 1)
+          (tset down "finger-id" 2)
+          (tset move-under-threshold "touch-id" 1)
+          (tset move-under-threshold "finger-id" 2)
+          (tset move-at-scroll-threshold "touch-id" 1)
+          (tset move-at-scroll-threshold "finger-id" 2)
+          (tset up "touch-id" 1)
+          (tset up "finger-id" 2)
+          (view.layout:measurer)
+          (set view.layout.size (glm.vec3 4 4 0))
+          (view.layout:layouter)
+          (view:set-scroll-offset 4)
+          (view.layout:layouter)
+          (assert (router:on-touch-down {} down))
+          (assert (not (router:on-touch-motion {} move-under-threshold)))
+          (assert (router:on-touch-motion {} move-at-scroll-threshold))
+          (view.layout:layouter)
+          (assert (approx view.state.scroll-offset 1))
+          (assert (router:on-touch-up {} up))
+          (view:drop))))))
+
+(fn scroll-view-touch-release-keeps-moving-and-slows []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (view.layout:layouter)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (local release-offset view.state.scroll-offset)
+      (local release-velocity view.state.kinetic.velocity)
+      (app.engine.events.updated:emit 16)
+      (assert (> view.state.scroll-offset release-offset)
+              "Kinetic touch scrolling should continue after a moving release")
+      (assert (< view.state.kinetic.velocity release-velocity)
+              "Kinetic touch scrolling should decay velocity after each frame")
+      (view:drop))))
+
+(fn scroll-view-touch-release-after-stop-stays-put []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (view.layout:layouter)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 216}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 216}))
+      (assert (= view.state.kinetic nil)
+              "Touch release after stopping should not start kinetic scrolling")
+      (local release-offset view.state.scroll-offset)
+      (app.engine.events.updated:emit 16)
+      (assert (approx view.state.scroll-offset release-offset))
+      (view:drop))))
+
+(fn scroll-view-touch-release-jitter-after-stop-is-ignored []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (view.layout:layouter)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 216}))
+      (local stopped-offset view.state.scroll-offset)
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 13
+                                       :timestamp 220}))
+      (assert (= view.state.kinetic nil)
+              "Touch-up jitter after stopping should not start kinetic scrolling")
+      (assert (approx view.state.scroll-offset stopped-offset)
+              "Touch-up jitter should not move the scroll offset")
+      (view:drop))))
+
+(fn scroll-view-kinetic-stops-without-tail-impulse []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (while view.state.kinetic
+        (app.engine.events.updated:emit 64))
+      (local stopped-offset view.state.scroll-offset)
+      (app.engine.events.updated:emit 500)
+      (app.engine.events.updated:emit 16)
+      (assert (approx view.state.scroll-offset stopped-offset)
+              "Stopped kinetic scroll should not move again on later frames")
+      (view:drop))))
+
+(fn scroll-view-touch-candidate-carries-kinetic-into-next-swipe []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (assert view.state.kinetic)
+      (local first-velocity view.state.kinetic.velocity)
+      (assert (view:on-touch-drag-candidate-start {:touch-id 1
+                                                   :finger-id 3
+                                                   :x 1
+                                                   :y 12
+                                                   :timestamp 140}))
+      (assert (= view.state.kinetic nil)
+              "Touching a kinetic scroll view should catch the moving content")
+      (assert view.state.pending-kinetic)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 3
+                                         :x 1
+                                         :y 12
+                                         :start-x 1
+                                         :start-y 12
+                                         :timestamp 140}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 3
+                                   :x 1
+                                   :y 14
+                                   :timestamp 156}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 3
+                                       :x 1
+                                       :y 14
+                                       :timestamp 156}))
+      (assert view.state.kinetic)
+      (assert (> view.state.kinetic.velocity first-velocity)
+              "Repeating a same-direction swipe should carry existing kinetic velocity")
+      (view:drop))))
+
+(fn scroll-view-kinetic-long-frame-does-not-catch-up []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (local release-offset view.state.scroll-offset)
+      (app.engine.events.updated:emit 500)
+      (assert (< (- view.state.scroll-offset release-offset) 10)
+              "Long frames should not move by the full elapsed kinetic distance")
+      (assert (< view.state.kinetic.velocity 0.01)
+              "Long frames should still age kinetic velocity by elapsed time")
+      (view:drop))))
+
+(fn scroll-view-pending-kinetic-carries-through-next-swipe-threshold []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (assert (view:on-touch-drag-candidate-start {:touch-id 1
+                                                   :finger-id 3
+                                                   :x 1
+                                                   :y 12
+                                                   :timestamp 140}))
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 3
+                                         :x 1
+                                         :y 12
+                                         :start-x 1
+                                         :start-y 12
+                                         :timestamp 260}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 3
+                                   :x 1
+                                   :y 14
+                                   :timestamp 276}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 3
+                                       :x 1
+                                       :y 14
+                                       :timestamp 276}))
+      (assert view.state.kinetic)
+      (assert (> view.state.kinetic.velocity 0.13)
+              "A repeated swipe should carry kinetic velocity while crossing the drag threshold")
+      (view:drop))))
+
+(fn scroll-view-pending-kinetic-expires-before-late-drag []
+  (with-inverted-screen-y-ray
+    (fn []
+      (local child (make-test-child (glm.vec3 3 100 0)))
+      (local view ((ScrollView {:child child.builder
+                                :padding false}) (make-context)))
+      (view.layout:measurer)
+      (set view.layout.size (glm.vec3 4 4 0))
+      (view.layout:layouter)
+      (view:set-scroll-offset 20)
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 2
+                                         :x 1
+                                         :y 10
+                                         :timestamp 100}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 2
+                                   :x 1
+                                   :y 12
+                                   :timestamp 116}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 2
+                                       :x 1
+                                       :y 12
+                                       :timestamp 116}))
+      (assert (view:on-touch-drag-candidate-start {:touch-id 1
+                                                   :finger-id 3
+                                                   :x 1
+                                                   :y 12
+                                                   :timestamp 140}))
+      (assert (view:on-touch-drag-start {:touch-id 1
+                                         :finger-id 3
+                                         :x 1
+                                         :y 12
+                                         :start-x 1
+                                         :start-y 12
+                                         :timestamp 420}))
+      (assert (view:on-touch-drag {:touch-id 1
+                                   :finger-id 3
+                                   :x 1
+                                   :y 14
+                                   :timestamp 436}))
+      (assert (view:on-touch-drag-end {:touch-id 1
+                                       :finger-id 3
+                                       :x 1
+                                       :y 14
+                                       :timestamp 436}))
+      (assert view.state.kinetic)
+      (assert (< view.state.kinetic.velocity 0.13)
+              "A held touch should not carry stale kinetic velocity into a later drag")
+      (view:drop))))
 
 (fn scroll-view-defaults-to-max-offset-before-layout []
   (local child (make-test-child (glm.vec3 3 12 0)))
@@ -461,7 +965,32 @@
 (table.insert tests {:name "ScrollView updates scrollbar value" :fn scroll-view-updates-scrollbar-value})
 (table.insert tests {:name "ScrollView mouse wheel scrolls when hovered" :fn scroll-view-mouse-wheel-scrolls-when-hovered})
 (table.insert tests {:name "ScrollView wheel clamps at top" :fn scroll-view-wheel-clamps-top})
+(table.insert tests {:name "ScrollView continuous wheel keeps moving" :fn scroll-view-continuous-wheel-keeps-moving})
+(table.insert tests {:name "ScrollView discrete wheel does not start kinetic"
+                     :fn scroll-view-discrete-wheel-does-not-start-kinetic})
+(table.insert tests {:name "ScrollView flipped discrete wheel does not start kinetic"
+                     :fn scroll-view-flipped-discrete-wheel-does-not-start-kinetic})
+(table.insert tests {:name "ScrollView continuous wheel idle gap uses fresh velocity"
+                     :fn scroll-view-continuous-wheel-idle-gap-uses-fresh-velocity})
 (table.insert tests {:name "ScrollView touch drag scrolls content" :fn scroll-view-touch-drag-scrolls-content})
+(table.insert tests {:name "ScrollView touch router captures with scroll threshold"
+                     :fn scroll-view-touch-router-captures-with-scroll-threshold})
+(table.insert tests {:name "ScrollView touch release keeps moving and slows"
+                     :fn scroll-view-touch-release-keeps-moving-and-slows})
+(table.insert tests {:name "ScrollView touch release after stop stays put"
+                     :fn scroll-view-touch-release-after-stop-stays-put})
+(table.insert tests {:name "ScrollView touch release jitter after stop is ignored"
+                     :fn scroll-view-touch-release-jitter-after-stop-is-ignored})
+(table.insert tests {:name "ScrollView kinetic stops without tail impulse"
+                     :fn scroll-view-kinetic-stops-without-tail-impulse})
+(table.insert tests {:name "ScrollView touch candidate carries kinetic into next swipe"
+                     :fn scroll-view-touch-candidate-carries-kinetic-into-next-swipe})
+(table.insert tests {:name "ScrollView kinetic long frame does not catch up"
+                     :fn scroll-view-kinetic-long-frame-does-not-catch-up})
+(table.insert tests {:name "ScrollView pending kinetic carries through next swipe threshold"
+                     :fn scroll-view-pending-kinetic-carries-through-next-swipe-threshold})
+(table.insert tests {:name "ScrollView pending kinetic expires before late drag"
+                     :fn scroll-view-pending-kinetic-expires-before-late-drag})
 (table.insert tests {:name "ScrollView defaults to max offset before layout"
                      :fn scroll-view-defaults-to-max-offset-before-layout})
 (table.insert tests {:name "ScrollView uses viewport width for content measure"

@@ -40,6 +40,8 @@
 (fn payload-from-contact [contact payload]
   (local out {:x (or (and contact contact.x) (and payload payload.x) 0)
               :y (or (and contact contact.y) (and payload payload.y) 0)
+              :start-x (or (and contact contact.start-x) (and payload payload.start-x))
+              :start-y (or (and contact contact.start-y) (and payload payload.start-y))
               :xrel (or (and contact contact.xrel) (and payload payload.xrel) 0)
               :yrel (or (and contact contact.yrel) (and payload payload.yrel) 0)
               :timestamp (or (and payload payload.timestamp) (and contact contact.timestamp))
@@ -74,6 +76,20 @@
           (and target target.on-touch-drag-end))
       (and target target.on-touch-drag-end)))
 
+(fn finite-number? [value]
+  (and (= (type value) :number)
+       (= value value)
+       (not (= value math.huge))
+       (not (= value (- math.huge)))))
+
+(fn target-drag-threshold [target fallback]
+  (local value (and target target.touch-drag-threshold))
+  (if (= value nil)
+      fallback
+      (if (and (finite-number? value) (>= value 0))
+          value
+          (error "touch-drag-threshold must be a non-negative finite number"))))
+
 (fn TouchRouter [opts]
   (local options (or opts {}))
   (local session (TouchSession))
@@ -95,9 +111,19 @@
   (fn primary-contact []
     (and primary-key (session:get primary-key)))
 
+  (fn active-contact [contact]
+    (or contact (primary-contact)))
+
+  (fn notify-drag-candidate! [method-name payload contact]
+    (when drag-candidate
+      (local handler (. drag-candidate method-name))
+      (when handler
+        (handler drag-candidate (payload-from-contact (active-contact contact) payload)))))
+
   (fn set-primary! [ctx payload]
     (set primary-key (session:key-from-payload payload))
     (set drag-candidate (select-drag-candidate ctx payload session))
+    (notify-drag-candidate! :on-touch-drag-candidate-start payload nil)
     (set mouse-active? false)
     (set mouse-deferred? false)
     (if (and drag-candidate defer-mouse-when-drag-candidate?)
@@ -135,9 +161,9 @@
         (tset base k v)))
     (logging.debug base "[touch-router] state"))
 
-  (fn release-mouse! [payload opts]
+  (fn release-mouse! [payload opts contact]
     (when mouse-active?
-      (local resolved (payload-from-contact (primary-contact) payload))
+      (local resolved (payload-from-contact (active-contact contact) payload))
       (when (and opts opts.suppress-click?)
         (set resolved.suppress-click? true))
       (when (and opts opts.canceled?)
@@ -145,37 +171,40 @@
       (emit-mouse-button-up resolved)
       (set mouse-active? false)))
 
-  (fn dispatch-deferred-click! [payload]
-    (local resolved (payload-from-contact (primary-contact) payload))
+  (fn dispatch-deferred-click! [payload contact]
+    (local resolved (payload-from-contact (active-contact contact) payload))
     (emit-mouse-button-down resolved)
     (emit-mouse-button-up resolved)
     (set mouse-deferred? false))
 
-  (fn finish-captured! [payload canceled?]
+  (fn finish-captured! [payload canceled? contact]
     (when captured-target
       (local handler (touch-end-method captured-target canceled?))
       (when handler
-        (handler captured-target (payload-from-contact (primary-contact) payload)))
+        (handler captured-target (payload-from-contact (active-contact contact) payload)))
       (set captured-target nil)
       (set drag-candidate nil)))
 
   (fn cancel-single! [payload]
-    (finish-captured! payload true)
+    (finish-captured! payload true nil)
+    (notify-drag-candidate! :on-touch-drag-candidate-cancel payload nil)
     (release-mouse! payload {:suppress-click? true
-                             :canceled? true})
+                             :canceled? true}
+                    nil)
     (set mouse-deferred? false))
 
   (fn try-start-capture! [payload]
     (local contact (primary-contact))
     (if (and drag-candidate
              contact
-             (>= (session:movement-distance contact) drag-threshold))
+             (>= (session:movement-distance contact)
+                 (target-drag-threshold drag-candidate drag-threshold)))
         (do
           (local handler (. drag-candidate :on-touch-drag-start))
           (local resolved (payload-from-contact contact payload))
           (if (and handler (drag-candidate:on-touch-drag-start resolved))
               (do
-                (release-mouse! resolved {:suppress-click? true})
+                (release-mouse! resolved {:suppress-click? true} contact)
                 (set mouse-deferred? false)
                 (set captured-target drag-candidate)
                 (set drag-candidate nil)
@@ -305,17 +334,25 @@
                   (handle-active-multitouch-motion ctx)
                   (handle-single-touch-motion payload))))))
 
-  (fn complete-single! [payload canceled?]
+  (fn complete-single! [payload canceled? contact]
     (if captured-target
-        (finish-captured! payload canceled?)
-        (if canceled?
-            (do
-              (release-mouse! payload {:suppress-click? true
-                                       :canceled? true})
-              (set mouse-deferred? false))
-            (if mouse-deferred?
-                (dispatch-deferred-click! payload)
-                (release-mouse! payload)))))
+        (finish-captured! payload canceled? contact)
+        (do
+          (notify-drag-candidate!
+            (if canceled?
+                :on-touch-drag-candidate-cancel
+                :on-touch-drag-candidate-end)
+            payload
+            contact)
+          (if canceled?
+              (do
+                (release-mouse! payload {:suppress-click? true
+                                         :canceled? true}
+                                contact)
+                (set mouse-deferred? false))
+              (if mouse-deferred?
+                  (dispatch-deferred-click! payload contact)
+                  (release-mouse! payload nil contact))))))
 
   (fn handle-active-multitouch-finished [ctx canceled?]
     (when (< (session:count) 2)
@@ -325,7 +362,7 @@
           (set blocked-multitouch? false)))
     true)
 
-  (fn handle-single-touch-finished [payload canceled? primary?]
+  (fn handle-single-touch-finished [payload canceled? primary? contact]
     (if blocked-multitouch?
         (do
           (when (and primary? (<= (session:count) 0))
@@ -334,7 +371,7 @@
           true)
         (if primary?
             (do
-              (complete-single! payload canceled?)
+              (complete-single! payload canceled? contact)
               (clear-single!)
               (when (> (session:count) 0)
                 (set blocked-multitouch? true))
@@ -356,13 +393,13 @@
             (do
               (local key (session:key-from-payload payload))
               (local primary? (= key primary-key))
-              (session:on-touch-up payload)
+              (local contact (session:on-touch-up payload))
               (trace (if canceled? "touch-canceled" "touch-up")
                      payload
                      {:primary primary?})
               (if multitouch-active?
                   (handle-active-multitouch-finished ctx canceled?)
-                  (handle-single-touch-finished payload canceled? primary?))))))
+                  (handle-single-touch-finished payload canceled? primary? contact))))))
 
   (fn on-touch-up [self ctx payload]
     (on-touch-finished self ctx payload false))
