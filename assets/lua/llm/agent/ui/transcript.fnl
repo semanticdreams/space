@@ -75,6 +75,7 @@
     (local scroll-view
       ((ScrollView {:child (fn [_ctx] content-root)
                     :scroll-offset live-edge-scroll-offset
+                    :growth-anchor :bottom
                     :scrollbar-policy :as-needed
                     :scrollbar-width 0.5
                     :name "agent-transcript"})

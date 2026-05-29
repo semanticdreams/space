@@ -10,9 +10,12 @@
 (local Input (require :input))
 (local ComboBox (require :combo-box))
 (local StatusBadge (require :status-badge))
+(local Sized (require :sized))
 (local {: Layout} (require :layout))
 (local agent-ui-controller (require :llm/agent/ui/controller))
 (local AgentPanelController agent-ui-controller.AgentPanelController)
+(local preset-list-mod (require :llm/agent/ui/preset-list))
+(local AgentPresetList preset-list-mod.AgentPresetList)
 (local session-list-mod (require :llm/agent/ui/session-list))
 (local AgentSessionList session-list-mod.AgentSessionList)
 (local transcript-mod (require :llm/agent/ui/transcript))
@@ -23,6 +26,7 @@
   (assert opts.runner "AgentPanel requires :runner")
   (assert opts.registry "AgentPanel requires :registry")
   (assert opts.approvals "AgentPanel requires :approvals")
+  (assert opts.presets "AgentPanel requires :presets")
 
   (fn build [ctx]
     (assert ctx.clickables "AgentPanel requires ctx.clickables")
@@ -31,7 +35,8 @@
     (local controller
       (AgentPanelController {:runner opts.runner
                              :registry opts.registry
-                             :approvals opts.approvals}))
+                             :approvals opts.approvals
+                             :presets opts.presets}))
 
     (local dim-foreground
       (or (and ctx ctx.theme ctx.theme.text ctx.theme.text.dim-foreground)
@@ -86,8 +91,19 @@
                  :child (fn [_ctx] status-row)})
        ctx))
 
+    (local preset-list (AgentPresetList controller))
+    (local preset-list-raw (preset-list ctx))
+    (local preset-list-widget
+      ((Sized {:size (glm.vec3 0 12 0)
+               :child (fn [_ctx] preset-list-raw)})
+       ctx))
+
     (local session-list (AgentSessionList controller))
-    (local session-list-widget (session-list ctx))
+    (local session-list-raw (session-list ctx))
+    (local session-list-widget
+      ((Sized {:size (glm.vec3 0 15 0)
+               :child (fn [_ctx] session-list-raw)})
+       ctx))
 
     (local transcript (AgentTranscript controller))
     (local transcript-widget (transcript ctx))
@@ -204,6 +220,7 @@
 
     (local sections [(FlexChild (fn [_ctx] agent-row-padded))
                      (FlexChild (fn [_ctx] status-row-padded))
+                     (FlexChild (fn [_ctx] preset-list-widget) 0)
                      (FlexChild (fn [_ctx] session-list-widget) 0)
                      (FlexChild (fn [_ctx] transcript-widget) 1)
                      (FlexChild (fn [_ctx] approval-slot))
@@ -239,7 +256,8 @@
         (if session
             (.. "Session: " (session.id:sub 1 16))
             ""))
-      (session-list-widget:refresh)
+      (preset-list-raw:refresh)
+      (session-list-raw:refresh)
       (transcript-widget:refresh)
       (rebuild-approval)
       (local is-running? (not (not controller.state.active-turn)))

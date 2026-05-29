@@ -7,10 +7,12 @@
   (assert opts.runner "AgentPanelController requires :runner")
   (assert opts.registry "AgentPanelController requires :registry")
   (assert opts.approvals "AgentPanelController requires :approvals")
+  (assert opts.presets "AgentPanelController requires :presets")
 
   (local runner opts.runner)
   (local registry opts.registry)
   (local approvals opts.approvals)
+  (local presets opts.presets)
 
   (var state {:agents []
               :active-agent-id nil
@@ -20,11 +22,17 @@
               :active-turn nil
               :expanded-items {}
               :pending-approval nil
-              :last-error nil})
+              :last-error nil
+              :preset-rows []
+              :preset-groups []
+              :expanded-preset-groups {}
+              :expanded-presets {}})
 
   (var change-signal (Signal))
   (var approval-change-signal (Signal))
   (var approval-request-listener nil)
+  (var preset-change-listener nil)
+  (var preset-registry-listener nil)
 
   (fn notify []
     (change-signal:emit state))
@@ -215,6 +223,95 @@
   (fn is-expanded? [self item-id]
     (not (not (. state.expanded-items item-id))))
 
+  (fn load-presets [self]
+    (local all-presets (presets.registry:list))
+    (local active-presets (presets:get-active-presets))
+    (local overrides (presets:get-overrides))
+
+    (local active-by-name {})
+    (each [_ ap (ipairs active-presets)]
+      (tset active-by-name ap.name {:active? true :reason ap.reason}))
+
+    (local rows [])
+    (local group-names {})
+    (each [_ preset (ipairs all-presets)]
+      (local group (or preset.group "other"))
+      (tset group-names group true)
+      (local override (. overrides preset.name))
+      (local override-state (or (and override override.state) :auto))
+      (local active-info (. active-by-name preset.name))
+      (local active? (and active-info active-info.active?))
+      (local active-reason (and active-info active-info.reason))
+      (table.insert rows
+        {:name preset.name
+         :group group
+         :risk preset.risk
+         :default-state preset.default-state
+         :contexts preset.contexts
+         :tool-ids preset.tool-ids
+         :tool-count (length preset.tool-ids)
+         :override-state override-state
+         :active? active?
+         :active-reason active-reason}))
+
+    (local groups [])
+    (each [group-name _ (pairs group-names)]
+      (table.insert groups group-name))
+    (table.sort groups)
+    (table.sort rows (fn [a b] (< a.name b.name)))
+    (set state.preset-rows rows)
+    (set state.preset-groups groups)
+    (self:notify))
+
+  (fn set-preset-override [self name state]
+    (presets:set-override name state)
+    (self:load-presets))
+
+  (fn reset-preset-overrides [self]
+    (each [name _override (pairs (presets:get-overrides))]
+      (presets:set-override name :auto))
+    (self:load-presets))
+
+  (fn get-preset-group-override-state [self group-name]
+    (var group-state nil)
+    (each [_ row (ipairs state.preset-rows)]
+      (when (= row.group group-name)
+        (if (= group-state nil)
+            (set group-state row.override-state)
+            (when (not (= group-state row.override-state))
+              (set group-state :mixed)))))
+    (or group-state :auto))
+
+  (fn toggle-group-override [self group-name]
+    (local all-presets (presets.registry:list))
+    (local target-state
+      (let [current (self:get-preset-group-override-state group-name)]
+        (if (= current :auto) :on
+            (= current :on) :off
+            :auto)))
+    (each [_ preset (ipairs all-presets)]
+      (when (= (or preset.group "other") group-name)
+        (presets:set-override preset.name target-state)))
+    (self:load-presets))
+
+  (fn toggle-preset-group-expanded [self group-name]
+    (if (. state.expanded-preset-groups group-name)
+        (tset state.expanded-preset-groups group-name nil)
+        (tset state.expanded-preset-groups group-name true))
+    (self:notify))
+
+  (fn is-preset-group-expanded? [self group-name]
+    (not (not (. state.expanded-preset-groups group-name))))
+
+  (fn toggle-preset-expanded [self preset-name]
+    (if (. state.expanded-presets preset-name)
+        (tset state.expanded-presets preset-name nil)
+        (tset state.expanded-presets preset-name true))
+    (self:notify))
+
+  (fn is-preset-expanded? [self preset-name]
+    (not (not (. state.expanded-presets preset-name))))
+
   (fn get-active-agent [self]
     (var found nil)
     (each [_ a (ipairs state.agents)]
@@ -234,6 +331,12 @@
       (when (and approvals approvals.requested)
         (approvals.requested:disconnect approval-request-listener true))
       (set approval-request-listener nil))
+    (when preset-change-listener
+      (presets:remove-on-change preset-change-listener)
+      (set preset-change-listener nil))
+    (when preset-registry-listener
+      (presets.registry:remove-on-change preset-registry-listener)
+      (set preset-registry-listener nil))
     (set state {:agents []
                 :active-agent-id nil
                 :sessions []
@@ -242,16 +345,31 @@
                 :active-turn nil
                 :expanded-items {}
                 :pending-approval nil
-                :last-error nil})
+                :last-error nil
+                :preset-rows []
+                :preset-groups []
+                :expanded-preset-groups {}
+                :expanded-presets {}})
     (change-signal:clear)
     (approval-change-signal:clear))
 
   (fn init [self]
     (self:attach-approval-listener)
+    (when (not preset-change-listener)
+      (set preset-change-listener
+           (presets:add-on-change
+             (fn []
+               (self:load-presets)))))
+    (when (not preset-registry-listener)
+      (set preset-registry-listener
+           (presets.registry:add-on-change
+             (fn []
+               (self:load-presets)))))
     (self:load-agents)
     (self:load-sessions)
     (self:ensure-first-session)
-    (self:sync-pending-approval nil))
+    (self:sync-pending-approval nil)
+    (self:load-presets))
 
   (local controller
     {:init init
@@ -278,6 +396,15 @@
      :deny-pending deny-pending
      :toggle-expanded toggle-expanded
      :is-expanded? is-expanded?
+     :load-presets load-presets
+     :set-preset-override set-preset-override
+     :reset-preset-overrides reset-preset-overrides
+     :toggle-group-override toggle-group-override
+     :get-preset-group-override-state get-preset-group-override-state
+     :toggle-preset-group-expanded toggle-preset-group-expanded
+     :is-preset-group-expanded? is-preset-group-expanded?
+     :toggle-preset-expanded toggle-preset-expanded
+     :is-preset-expanded? is-preset-expanded?
      :get-active-agent get-active-agent
      :get-active-session get-active-session
      :drop drop})

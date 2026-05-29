@@ -37,7 +37,7 @@
           (glm.vec4 0.18 0.22 0.34 1)))
     (local item-fg
       (or (and list-theme list-theme.item-foreground)
-          theme.text.foreground
+          (and theme theme.text theme.text.foreground)
           (glm.vec4 0.9 0.92 0.97 1)))
     (local dim-fg
       (or (and theme theme.text theme.text.dim-foreground)

@@ -934,7 +934,8 @@
            (fn [ctx]
              ((AgentPanel.AgentPanel {:runner app.agent-runner
                                        :registry app.agent-registry
-                                       :approvals app.agent-approvals})
+                                       :approvals app.agent-approvals
+                                       :presets app.agent-presets})
               ctx))))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)

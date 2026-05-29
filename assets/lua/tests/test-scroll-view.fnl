@@ -780,17 +780,18 @@
               "A held touch should not carry stale kinetic velocity into a later drag")
       (view:drop))))
 
-(fn scroll-view-defaults-to-max-offset-before-layout []
+(fn scroll-view-bottom-anchor-starts-at-zero []
   (local child (make-test-child (glm.vec3 3 12 0)))
   (local view ((ScrollView {:child child.builder
-                            :padding false}) (make-context)))
+                             :padding false
+                             :growth-anchor :bottom}) (make-context)))
   (view.layout:measurer)
   (set view.layout.size (glm.vec3 4 4 0))
   (view.layout:layouter)
-  (assert (approx view.state.scroll-offset view.state.max-offset))
+  (assert (approx view.state.scroll-offset 0))
   (local child-layout (. view.scroll.layout.children 1))
   (assert child-layout)
-  (assert (approx child-layout.position.y (- view.state.scroll-offset)))
+  (assert (approx child-layout.position.y 0))
   (view:drop))
 
 (fn scroll-view-uses-viewport-width-for-content-measure []
@@ -960,6 +961,155 @@
 
 
 (table.insert tests {:name "ScrollView defaults to padding" :fn scroll-view-default-padding-insets-content})
+(fn make-mutable-size-child [initial-size]
+  (local state {:size initial-size
+                :last-position nil
+                :last-size nil
+                :layout nil})
+  (fn builder [_ctx]
+    (local layout
+      (Layout {:name "mutable-scroll-child"
+               :measurer (fn [self]
+                           (set self.measure state.size))
+               :layouter (fn [self]
+                           (set state.last-position self.position)
+                           (set state.last-size self.size))}))
+    (set state.layout layout)
+    {:layout layout
+     :drop (fn [_self])})
+  {:builder builder :state state})
+
+(fn scroll-view-growth-anchor-preserves-position-on-expand-and-collapse []
+  (local child (make-mutable-size-child (glm.vec3 4 14 0)))
+  (local view ((ScrollView {:child child.builder
+                             :padding false
+                             :growth-anchor :top}) (make-context)))
+  (set view.layout.size (glm.vec3 5 6 0))
+  (set view.layout.position (glm.vec3 0 0 0))
+  (view.layout:layouter)
+
+  (view:set-scroll-offset 4)
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset 4)
+          "initial scroll offset should be 4")
+  (local distance-to-bottom (- view.state.max-offset view.state.scroll-offset))
+
+  ;; Expand content — same content relative to top should stay visible
+  (set child.state.size (glm.vec3 4 25 0))
+  (view.layout:mark-measure-dirty)
+  (view.layout:layouter)
+  (assert (approx (- view.state.max-offset view.state.scroll-offset)
+                  distance-to-bottom)
+          "distance from top should be preserved after expand")
+  (assert (> view.state.scroll-offset 4)
+          "scroll offset should increase after expand (content grew below)")
+
+  ;; Collapse back — should return to original position
+  (local offset-after-expand view.state.scroll-offset)
+  (set child.state.size (glm.vec3 4 14 0))
+  (view.layout:mark-measure-dirty)
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset 4)
+          (.. "scroll offset should return to 4 after collapse, got "
+              (tostring view.state.scroll-offset)))
+
+  (view:drop))
+
+(fn scroll-view-growth-anchor-top-starts-at-top []
+  (local child (make-mutable-size-child (glm.vec3 4 14 0)))
+  (local view ((ScrollView {:child child.builder
+                             :padding false
+                             :growth-anchor :top}) (make-context)))
+  (set view.layout.size (glm.vec3 5 6 0))
+  (set view.layout.position (glm.vec3 0 0 0))
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset view.state.max-offset)
+          (.. "growth-anchor :top should start at max-offset (top of content), got "
+              (tostring view.state.scroll-offset)))
+  (view:drop))
+
+(fn scroll-view-growth-anchor-top-resets-to-top []
+  (local child (make-mutable-size-child (glm.vec3 4 14 0)))
+  (local view ((ScrollView {:child child.builder
+                             :padding false
+                             :growth-anchor :top}) (make-context)))
+  (set view.layout.size (glm.vec3 5 6 0))
+  (set view.layout.position (glm.vec3 0 0 0))
+  (view.layout:layouter)
+  (view:set-scroll-offset 4)
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset 4)
+          "should scroll to 4")
+  (view:reset-scroll-position)
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset view.state.max-offset)
+          (.. "reset-scroll-position with :top anchor should reset to max-offset, got "
+              (tostring view.state.scroll-offset)))
+  (view:drop))
+
+(fn scroll-view-default-anchor-starts-at-top []
+  (local child (make-mutable-size-child (glm.vec3 4 14 0)))
+  (local view ((ScrollView {:child child.builder
+                             :padding false}) (make-context)))
+  (set view.layout.size (glm.vec3 5 6 0))
+  (set view.layout.position (glm.vec3 0 0 0))
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset view.state.max-offset)
+          (.. "default anchor should start at max-offset (top of content), got "
+              (tostring view.state.scroll-offset)))
+  (view:set-scroll-offset 4)
+  (view.layout:layouter)
+  (view:reset-scroll-position)
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset view.state.max-offset)
+          (.. "default anchor reset should go to max-offset, got "
+              (tostring view.state.scroll-offset)))
+  (view:drop))
+
+(fn scroll-view-growth-anchor-bottom-starts-at-bottom []
+  (local child (make-mutable-size-child (glm.vec3 4 14 0)))
+  (local view ((ScrollView {:child child.builder
+                             :padding false
+                             :growth-anchor :bottom}) (make-context)))
+  (set view.layout.size (glm.vec3 5 6 0))
+  (set view.layout.position (glm.vec3 0 0 0))
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset 0)
+          (.. ":bottom anchor should start at offset 0 (bottom), got "
+              (tostring view.state.scroll-offset)))
+  (view:set-scroll-offset 4)
+  (view.layout:layouter)
+  (view:reset-scroll-position)
+  (view.layout:layouter)
+  (assert (approx view.state.scroll-offset 0)
+          (.. ":bottom anchor reset should go to offset 0, got "
+              (tostring view.state.scroll-offset)))
+  (view:drop))
+
+(fn scroll-view-growth-anchor-clamps-minimally-on-shrink []
+  (local child (make-mutable-size-child (glm.vec3 4 14 0)))
+  (local view ((ScrollView {:child child.builder
+                             :padding false
+                             :growth-anchor :top}) (make-context)))
+  (set view.layout.size (glm.vec3 5 6 0))
+  (set view.layout.position (glm.vec3 0 0 0))
+  (view.layout:layouter)
+
+  (view:set-scroll-offset 4)
+  (view.layout:layouter)
+
+  ;; Shrink content so it fits in viewport — offset should become 0 not 4
+  (set child.state.size (glm.vec3 4 4 0))
+  (view.layout:mark-measure-dirty)
+  (view.layout:layouter)
+  (assert (= view.state.max-offset 0)
+          "content fits viewport after shrink, max-offset should be 0")
+  (assert (approx view.state.scroll-offset 0)
+          (.. "scroll offset should be 0 when content fits, got "
+              (tostring view.state.scroll-offset)))
+
+  (view:drop))
+
 (table.insert tests {:name "ScrollView clamps scroll offset" :fn scroll-view-clamps-scroll-offset})
 (table.insert tests {:name "ScrollView disables scrollbar when content fits" :fn scroll-view-disables-scrollbar-when-content-fits})
 (table.insert tests {:name "ScrollView updates scrollbar value" :fn scroll-view-updates-scrollbar-value})
@@ -991,8 +1141,8 @@
                      :fn scroll-view-pending-kinetic-carries-through-next-swipe-threshold})
 (table.insert tests {:name "ScrollView pending kinetic expires before late drag"
                      :fn scroll-view-pending-kinetic-expires-before-late-drag})
-(table.insert tests {:name "ScrollView defaults to max offset before layout"
-                     :fn scroll-view-defaults-to-max-offset-before-layout})
+(table.insert tests {:name "ScrollView bottom-anchor starts at zero"
+                     :fn scroll-view-bottom-anchor-starts-at-zero})
 (table.insert tests {:name "ScrollView uses viewport width for content measure"
                      :fn scroll-view-uses-viewport-width-for-content-measure})
 (table.insert tests {:name "ScrollView constrained measure uses available width"
@@ -1010,6 +1160,18 @@
                      :fn scroll-view-scrolls-focused-item-into-view})
 (table.insert tests {:name "ScrollView directional focus scrolls multiple items"
                      :fn scroll-view-directional-focus-scrolls-multiple-items})
+(table.insert tests {:name "ScrollView growth-anchor preserves position on expand and collapse"
+                     :fn scroll-view-growth-anchor-preserves-position-on-expand-and-collapse})
+(table.insert tests {:name "ScrollView growth-anchor top starts at top"
+                     :fn scroll-view-growth-anchor-top-starts-at-top})
+(table.insert tests {:name "ScrollView growth-anchor top resets to top"
+                     :fn scroll-view-growth-anchor-top-resets-to-top})
+(table.insert tests {:name "ScrollView default anchor starts at top and resets to top"
+                     :fn scroll-view-default-anchor-starts-at-top})
+(table.insert tests {:name "ScrollView growth-anchor bottom starts at bottom and resets to bottom"
+                     :fn scroll-view-growth-anchor-bottom-starts-at-bottom})
+(table.insert tests {:name "ScrollView growth-anchor clamps minimally on shrink"
+                     :fn scroll-view-growth-anchor-clamps-minimally-on-shrink})
 
 (local main
   (fn []

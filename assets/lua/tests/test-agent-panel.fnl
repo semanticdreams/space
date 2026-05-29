@@ -1,11 +1,23 @@
 ;; Agent panel tests
 
+(local panel-mod (require :llm/agent/ui/panel))
+(local AgentPanel panel-mod.AgentPanel)
 (local controller-mod (require :llm/agent/ui/controller))
 (local AgentPanelController controller-mod.AgentPanelController)
+(local preset-list-mod (require :llm/agent/ui/preset-list))
+(local AgentPresetList preset-list-mod.AgentPresetList)
+(local session-list-mod (require :llm/agent/ui/session-list))
+(local AgentSessionList session-list-mod.AgentSessionList)
 (local registry-mod (require :llm/agent/registry))
 (local AgentRegistry registry-mod.AgentRegistry)
 (local approvals-mod (require :llm/agent/approvals))
 (local AgentApprovals approvals-mod.AgentApprovals)
+(local preset-registry-mod (require :llm/presets/registry))
+(local PresetRegistry preset-registry-mod.PresetRegistry)
+(local preset-manager-mod (require :llm/presets/init))
+(local PresetManager preset-manager-mod.PresetManager)
+(local tool-adapters-mod (require :llm/presets/tool-adapters))
+(local ToolAdapterRegistry tool-adapters-mod.ToolAdapterRegistry)
 (local transcript-mod (require :llm/agent/ui/transcript))
 (local AgentTranscript transcript-mod.AgentTranscript)
 (local BuildContext (require :build-context))
@@ -15,6 +27,22 @@
 (local glm (require :glm))
 
 (local tests [])
+
+(fn make-real-presets [opts]
+  (local registry (PresetRegistry {}))
+  (each [_ preset (ipairs (or opts.presets []))]
+    (registry:register preset))
+  (PresetManager {:registry registry
+                  :tool-adapters (ToolAdapterRegistry {})
+                  :app {}
+                  :context (or opts.context
+                               {:surface "canvas"
+                                :mode "drawing"
+                                :canvas-visible? true})
+                  :overrides opts.overrides}))
+
+(fn make-presets-stub []
+  (make-real-presets {:presets []}))
 
 (fn make-icons-stub []
   (local glyph {:advance 1})
@@ -140,15 +168,17 @@
    :complete-last-turn complete-last-turn
    :update-last-item update-last-item})
 
-(fn test-controller-init []
+  (fn test-controller-init []
   (local registry (AgentRegistry {:deps {}}))
   (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
-                                             :registry registry
-                                             :approvals approvals}))
+                                              :registry registry
+                                              :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (assert (not (not controller.state.active-agent-id))
           "controller should have active agent after init")
@@ -157,29 +187,33 @@
   (assert (not (not controller.state.active-session-id))
           "should have active session"))
 
-(fn test-controller-select-agent []
+  (fn test-controller-select-agent []
   (local registry (AgentRegistry {:deps {}}))
   (registry:register "agent-a" (fn [_deps] {:id "agent-a" :name "Agent A" :run (fn [] nil)}))
   (registry:register "agent-b" (fn [_deps] {:id "agent-b" :name "Agent B" :run (fn [] nil)}))
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
-                                             :registry registry
-                                             :approvals approvals}))
+                                              :registry registry
+                                              :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (assert (not (not controller.state.active-agent-id)) "should auto-select first agent")
   (controller:select-agent "agent-b")
   (assert (= controller.state.active-agent-id "agent-b") "should switch"))
 
-(fn test-controller-send-text []
+  (fn test-controller-send-text []
   (local registry (AgentRegistry {:deps {}}))
   (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
-                                             :registry registry
-                                             :approvals approvals}))
+                                              :registry registry
+                                              :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (local handle (controller:send "draw a circle"))
   (assert handle "send should return a turn handle"))
@@ -190,9 +224,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (controller:send "draw a circle")
   (assert (= (length controller.state.items) 1)
@@ -217,9 +253,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                            :registry registry
-                                           :approvals approvals}))
+                                           :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (controller:send "draw a circle")
   (var change-count 0)
@@ -284,9 +322,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (controller:stop)
   (assert (not controller.state.active-turn) "stop should clear active turn"))
@@ -297,9 +337,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (controller:toggle-expanded "item-1")
   (assert (controller:is-expanded? "item-1") "should expand")
@@ -312,9 +354,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (local agent (controller:get-active-agent))
   (assert agent "should return active agent")
@@ -326,9 +370,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (local session (controller:get-active-session))
   (assert session "should return active session"))
@@ -339,9 +385,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (local session-count (length controller.state.sessions))
   (controller:new-session)
@@ -354,9 +402,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (var signaled? false)
   (controller.change-signal.connect (fn [] (set signaled? true)))
@@ -371,9 +421,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (assert (= (length controller.state.items) 0) "new session should have no items"))
 
@@ -382,13 +434,15 @@
   (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local presets (make-presets-stub))
   (local runner (make-test-runner))
   ;; Pre-create a session with items so load-sessions finds it before ensure-first-session.
   (local existing-session (runner:create-session "test-agent"))
   (table.insert existing-session.items {:id "item-1" :type :message :role :user :content "hello" :created-at (os.time)})
   (local controller (AgentPanelController {:runner runner
-                                             :registry registry
-                                             :approvals approvals}))
+                                              :registry registry
+                                              :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (assert (= controller.state.active-session-id existing-session.id)
           "ensure-first-session should select the first existing session instead of creating a new one")
@@ -401,9 +455,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:destructive :ask}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (var approved-result nil)
   (approvals:request-risk :destructive "delete world"
@@ -422,9 +478,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:destructive :ask}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (approvals:request-risk :destructive "delete world"
     {:on-approved (fn [_r] nil)
@@ -452,9 +510,11 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:shell :ask}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (local controller (AgentPanelController {:runner runner
                                              :registry registry
-                                             :approvals approvals}))
+                                             :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (local context {:tool "space_app_run_bash"
                   :source "app.run-bash"
@@ -485,18 +545,338 @@
   (registry:register "test-agent" make-agent)
   (local approvals (AgentApprovals {:policy {:destructive :ask}}))
   (local runner (make-test-runner))
+  (local presets (make-presets-stub))
   (approvals:request-risk :destructive "delete world"
     {:on-approved (fn [_r] nil)
      :on-denied (fn [_r] nil)}
     {:tool "space_delete_world" :grant-on-approve true})
   (local controller (AgentPanelController {:runner runner
-                                             :registry registry
-                                             :approvals approvals}))
+                                              :registry registry
+                                              :approvals approvals
+                                              :presets presets}))
   (controller:init)
   (assert controller.state.pending-approval
           "controller should hydrate approval that existed before listener attach")
   (assert (= controller.state.pending-approval.reason "delete world")
-          "hydrated approval should be the pending request"))
+           "hydrated approval should be the pending request"))
+
+(fn test-controller-requires-presets []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local (ok? err) (pcall (fn []
+                             (AgentPanelController {:runner runner
+                                                     :registry registry
+                                                     :approvals approvals}))))
+  (assert (not ok?)
+          "controller should assert when :presets is missing"))
+
+(fn test-load-presets-includes-inactive []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "drawing" :group "drawing" :risk :normal
+                  :default-state :auto
+                  :contexts [{:surface :canvas :mode :drawing}]
+                  :tool-ids ["drawing.inspect"]}
+                 {:name "shell" :group "general" :risk :shell
+                  :default-state :off
+                  :contexts [{:surface :canvas}]
+                  :tool-ids ["shell.run"]}]}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (assert (= (length controller.state.preset-rows) 2)
+          "should include both active and inactive presets")
+  (var drawing-row nil)
+  (var shell-row nil)
+  (each [_ row (ipairs controller.state.preset-rows)]
+    (if (= row.name "drawing") (set drawing-row row))
+    (if (= row.name "shell") (set shell-row row)))
+  (assert drawing-row "should include drawing preset")
+  (assert shell-row "should include shell preset")
+  (assert drawing-row.active? "drawing should be active when context matches")
+  (assert (= drawing-row.active-reason :context)
+          "drawing should be active due to context")
+  (assert (not shell-row.active?)
+          "shell should be inactive when default-state is off and no override"))
+
+(fn test-set-preset-override-activates-mismatched []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "shell" :group "general" :risk :shell
+                  :default-state :off
+                  :contexts [{:surface :canvas}]
+                  :tool-ids ["shell.run"]}]}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (controller:set-preset-override "shell" :on)
+  (var shell-row nil)
+  (each [_ row (ipairs controller.state.preset-rows)]
+    (if (= row.name "shell") (set shell-row row)))
+  (assert shell-row "should include shell row")
+  (assert (= shell-row.override-state :on)
+          "override state should be :on after set-preset-override :on")
+  (assert shell-row.active?
+          "override :on should activate a default-off preset")
+  (assert (= shell-row.active-reason :override)
+          "override :on should report override activation reason"))
+
+(fn test-set-preset-override-off-deactivates []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "drawing" :group "drawing" :risk :normal
+                  :default-state :auto
+                  :contexts [{:surface :canvas :mode :drawing}]
+                  :tool-ids ["drawing.inspect"]}]}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (controller:set-preset-override "drawing" :off)
+  (var drawing-row nil)
+  (each [_ row (ipairs controller.state.preset-rows)]
+    (if (= row.name "drawing") (set drawing-row row)))
+  (assert drawing-row "should include drawing row")
+  (assert (= drawing-row.override-state :off)
+          "override state should be :off")
+  (assert (not drawing-row.active?)
+          "override :off should deactivate a context-matched preset"))
+
+(fn test-set-preset-override-auto-restores-context []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "shell" :group "general" :risk :shell
+                  :default-state :off
+                  :contexts [{:surface :canvas}]
+                  :tool-ids ["shell.run"]}]
+       :overrides {:shell {:state :on}}}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (controller:set-preset-override "shell" :auto)
+  (var shell-row nil)
+  (each [_ row (ipairs controller.state.preset-rows)]
+    (if (= row.name "shell") (set shell-row row)))
+  (assert shell-row "should include shell row")
+  (assert (= shell-row.override-state :auto)
+          "override state should be :auto after reset")
+  (assert (not shell-row.active?)
+          "auto should restore default-off inactive behavior"))
+
+(fn test-reset-preset-overrides []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "drawing" :group "drawing" :risk :normal
+                  :default-state :auto
+                  :contexts [{:surface :canvas :mode :drawing}]
+                  :tool-ids ["drawing.inspect"]}
+                 {:name "shell" :group "general" :risk :shell
+                  :default-state :off
+                  :contexts [{:surface :canvas}]
+                  :tool-ids ["shell.run"]}]
+       :overrides {:drawing {:state :on} :shell {:state :off}}}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (controller:reset-preset-overrides)
+  (each [_ row (ipairs controller.state.preset-rows)]
+    (assert (= row.override-state :auto)
+            (.. row.name " override should be :auto after reset"))))
+
+(fn test-registry-change-refreshes-controller []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "drawing" :group "drawing" :risk :normal
+                  :default-state :auto
+                  :contexts [{:surface :canvas :mode :drawing}]
+                  :tool-ids ["drawing.inspect"]}]}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (assert (= (length controller.state.preset-rows) 1)
+          "should have 1 preset after init")
+  (var change-count 0)
+  (controller.change-signal.connect (fn [] (set change-count (+ change-count 1))))
+  (presets.registry:register {:name "new-tools" :group "general" :risk :normal
+                               :default-state :auto
+                               :contexts [{:surface :canvas}]
+                               :tool-ids ["new.tool"]})
+  (assert (> change-count 0)
+          "registry change should trigger controller refresh")
+  (assert (= (length controller.state.preset-rows) 2)
+          "should have 2 presets after register"))
+
+(fn test-manager-override-change-refreshes-controller []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "drawing" :group "drawing" :risk :normal
+                  :default-state :auto
+                  :contexts [{:surface :canvas :mode :drawing}]
+                  :tool-ids ["drawing.inspect"]}]}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  (var change-count 0)
+  (controller.change-signal.connect (fn [] (set change-count (+ change-count 1))))
+  (presets:set-override "drawing" :on)
+  (assert (> change-count 0)
+          "override change should trigger controller refresh"))
+
+(fn test-drop-removes-all-preset-listeners []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps] {:id "test-agent" :name "Test Agent" :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets
+    (make-real-presets
+      {:presets [{:name "drawing" :group "drawing" :risk :normal
+                  :default-state :auto
+                  :contexts [{:surface :canvas :mode :drawing}]
+                  :tool-ids ["drawing.inspect"]}]}))
+  (local controller (AgentPanelController {:runner runner
+                                            :registry registry
+                                            :approvals approvals
+                                            :presets presets}))
+  (controller:init)
+  ;; Registry listener should be registered
+  (local registry-status-after-init (presets.registry:status))
+  (assert (> registry-status-after-init.listener-count 0)
+          "should have registry listener after init")
+  (controller:drop)
+  ;; After drop, no listeners should remain
+  (local registry-status-after-drop (presets.registry:status))
+  (assert (= registry-status-after-drop.listener-count 0)
+          "should remove all registry listeners on drop")
+  ;; After drop, changes should not trigger any notification
+  (var change-count 0)
+  (controller.change-signal.connect (fn [] (set change-count (+ change-count 1))))
+  (presets.registry:register {:name "new-tools" :group "general" :risk :normal
+                               :default-state :auto
+                               :contexts [{:surface :canvas}]
+                               :tool-ids ["new.tool"]})
+  (presets:set-override "drawing" :on)
+  (assert (= change-count 0)
+          "no change signal should fire after drop"))
+
+(fn test-session-list-builds-has-refresh []
+  (local controller
+    {:state {:sessions [{:id "test-session-1"
+                         :status :idle
+                         :title "Test Session"
+                         :updated-at (os.time)}]
+             :active-session-id "test-session-1"}
+     :select-session (fn [_self _id] nil)})
+  (local widget ((AgentSessionList controller) (make-widget-ctx)))
+  (assert (= (type widget.refresh) :function)
+          "session list widget should have a refresh method")
+  (assert (= (type widget.drop) :function)
+          "session list widget should have a drop method")
+  (widget:refresh)
+  (widget:drop))
+
+(fn test-panel-refresh-does-not-crash []
+  (local registry (AgentRegistry {:deps {}}))
+  (fn make-agent [_deps]
+    {:id "test-agent"
+     :name "Test Agent"
+     :run (fn [] nil)})
+  (registry:register "test-agent" make-agent)
+  (local approvals (AgentApprovals {:policy {:normal :auto}}))
+  (local runner (make-test-runner))
+  (local presets (make-presets-stub))
+  (local panel-fn (AgentPanel {:runner runner
+                                :registry registry
+                                :approvals approvals
+                                :presets presets}))
+  (local ctx (make-widget-ctx))
+  (local panel (panel-fn ctx))
+  (panel.controller:init)
+  (assert (not (not panel.controller.state.active-agent-id))
+          "controller should have active agent after init")
+  (panel:drop))
+
+(fn test-preset-list-builds-expanded-row []
+  (local controller
+    {:state {:preset-groups ["general"]
+             :preset-rows [{:name "shell"
+                            :group "general"
+                            :risk :shell
+                            :default-state :off
+                            :contexts [{:surface :canvas}]
+                            :tool-ids ["shell.run"]
+                            :tool-count 1
+                            :override-state :auto
+                            :active? false
+                            :active-reason nil}]}
+     :set-preset-override (fn [_self _name _state] nil)
+     :reset-preset-overrides (fn [_self] nil)
+      :toggle-group-override (fn [_self _group-name] nil)
+      :get-preset-group-override-state (fn [self group-name]
+                                         (var s nil)
+                                         (each [_ row (ipairs self.state.preset-rows)]
+                                           (when (= row.group group-name)
+                                             (if (= s nil) (set s row.override-state)
+                                                 (not (= s row.override-state)) (set s :mixed))))
+                                         (or s :auto))
+     :toggle-preset-group-expanded (fn [_self _group-name] nil)
+     :is-preset-group-expanded? (fn [_self _group-name] true)
+     :toggle-preset-expanded (fn [_self _preset-name] nil)
+     :is-preset-expanded? (fn [_self _preset-name] true)})
+  (local widget ((AgentPresetList controller) (make-widget-ctx)))
+  (widget:refresh)
+  (widget:drop))
 
 (table.insert tests {:name "controller init creates first session"
                      :fn test-controller-init})
@@ -534,6 +914,30 @@
                      :fn test-controller_approve_pending_always})
 (table.insert tests {:name "controller hydrates existing pending approval"
                      :fn test-controller_hydrates_existing_pending_approval})
+(table.insert tests {:name "controller requires presets"
+                     :fn test-controller-requires-presets})
+(table.insert tests {:name "load-presets includes inactive presets"
+                     :fn test-load-presets-includes-inactive})
+(table.insert tests {:name "set-preset-override :on activates mismatched"
+                     :fn test-set-preset-override-activates-mismatched})
+(table.insert tests {:name "set-preset-override :off deactivates"
+                     :fn test-set-preset-override-off-deactivates})
+(table.insert tests {:name "set-preset-override :auto restores context behavior"
+                     :fn test-set-preset-override-auto-restores-context})
+(table.insert tests {:name "reset-preset-overrides returns all to auto"
+                     :fn test-reset-preset-overrides})
+(table.insert tests {:name "registry change refreshes controller"
+                     :fn test-registry-change-refreshes-controller})
+(table.insert tests {:name "manager override change refreshes controller"
+                     :fn test-manager-override-change-refreshes-controller})
+(table.insert tests {:name "drop removes all preset listeners"
+                     :fn test-drop-removes-all-preset-listeners})
+(table.insert tests {:name "preset list builds expanded row"
+                     :fn test-preset-list-builds-expanded-row})
+(table.insert tests {:name "session list builds has refresh"
+                     :fn test-session-list-builds-has-refresh})
+(table.insert tests {:name "panel refresh does not crash"
+                     :fn test-panel-refresh-does-not-crash})
 
 (fn main []
   (local runner (require :tests/runner))
