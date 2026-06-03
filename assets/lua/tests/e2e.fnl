@@ -37,6 +37,7 @@
 (local InputCursorAlignmentTest (require :tests.e2e.test-input-cursor-alignment))
 (local TerminalRendererTransformTest (require :tests.e2e.test-terminal-renderer-transform))
 (local HoverRectLifecycleTest (require :tests.e2e.test-hover-rect-lifecycle))
+(local RenderSmokeTest (require :tests.e2e.test-render-smoke))
 
 (fn run-all []
   (ButtonTest.main)
@@ -76,6 +77,7 @@
   (InputCursorAlignmentTest.main)
   (TerminalRendererTransformTest.main)
   (HoverRectLifecycleTest.main)
+  (RenderSmokeTest.main)
   (RenderCaptureTest.main))
 
 (fn main []

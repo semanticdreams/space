@@ -38,6 +38,7 @@ bool log_should_log(const std::string& name, LogLevel level);
 void log_write(LogLevel level, const std::string& message);
 void log_write_named(const std::string& name, LogLevel level, const std::string& message);
 void log_write_named_fields(const std::string& name, LogLevel level, const std::string& fields, const std::string& message);
+void log_write_file_only(const std::string& name, LogLevel level, const std::string& message);
 void log_flush();
 void log_set_frame_id_provider(const std::atomic<uint64_t>* provider);
 void log_set_output_path(const std::string& path);

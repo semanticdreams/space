@@ -301,6 +301,7 @@ int main(int argc, char *argv[])
         )");
         }
         catch (const sol::error &e) {
+            log_write_file_only("lua", Error, std::string("REPL startup error: ") + e.what());
             std::cerr << "REPL startup error: " << e.what() << "\n";
             return 1;
         }
@@ -313,6 +314,7 @@ int main(int argc, char *argv[])
             runtime.execute_fennel(source);
         }
         catch (const sol::error &e) {
+            log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
             std::cerr << "Lua error: " << e.what() << "\n";
             return 1;
         }
@@ -325,6 +327,7 @@ int main(int argc, char *argv[])
             }
         }
         catch (const sol::error &e) {
+            log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
             std::cerr << "Lua error: " << e.what() << "\n";
             return 1;
         }
@@ -337,6 +340,7 @@ int main(int argc, char *argv[])
             }
         }
         catch (const sol::error &e) {
+            log_write_file_only("lua", Error, std::string("Lua error: ") + e.what());
             std::cerr << "Lua error: " << e.what() << "\n";
             return 1;
         }

@@ -17,11 +17,18 @@
     (assert (= (type id) :string) "UnitManager.unregister requires a string id")
     (local unit (. units-by-id id))
     (when unit
-      (tset units-by-id id nil)
-      (for [i (length unit-order) 1 -1]
-        (when (= (. unit-order i) unit)
-          (table.remove unit-order i)))
-      (unit:unload {}))
+      (if (unit:loaded?)
+          (do
+            (unit:unload {})
+            (tset units-by-id id nil)
+            (for [i (length unit-order) 1 -1]
+              (when (= (. unit-order i) unit)
+                (table.remove unit-order i))))
+          (do
+            (tset units-by-id id nil)
+            (for [i (length unit-order) 1 -1]
+              (when (= (. unit-order i) unit)
+                (table.remove unit-order i))))))
     unit)
 
   (fn get [self id]

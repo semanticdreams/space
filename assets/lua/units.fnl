@@ -21,13 +21,30 @@
   (local unload-fn (assert-fn spec :unload))
   (local snapshot-fn (or spec.snapshot noop-snapshot))
   (local restore-fn (or spec.restore noop-restore))
+  (var loaded? false)
+  (var connected-signals {})
+
+  (fn disconnect-all-signals []
+    (each [name conn (pairs connected-signals)]
+      (conn.signal:disconnect conn.wrapped-handler true)
+      (tset connected-signals name nil)))
+
   {:id id
+   :module-name (or spec.module-name id)
    :parent-id spec.parent-id
+   :source (or spec.source :user)
    :owned-paths (clone-list spec.owned-paths)
-   :load (fn [_self ctx]
-           (load-fn ctx))
-   :unload (fn [_self ctx]
-             (unload-fn ctx))
+   :loaded? (fn [_self] loaded?)
+   :load (fn [self ctx]
+           (load-fn ctx)
+           (set loaded? true))
+   :unload (fn [self ctx]
+             (disconnect-all-signals)
+             (local (ok err) (pcall unload-fn ctx))
+             (when ok
+               (set loaded? false))
+             (when (not ok)
+               (error err)))
    :snapshot (fn [_self ctx]
                (snapshot-fn ctx))
    :restore (fn [_self state ctx]
@@ -36,36 +53,141 @@
              (local state (self:snapshot ctx))
              (self:unload ctx)
              (self:load ctx)
-             (self:restore state ctx))})
+             (self:restore state ctx))
+   :connect-signal (fn [self name signal handler]
+                     (when (. connected-signals name)
+                       (error (.. "Signal " name " already connected on unit " id)))
+                     (local wrapped (fn [payload] (handler payload)))
+                     (signal:connect wrapped)
+                     (tset connected-signals name {:signal signal :wrapped-handler wrapped})
+                     true)
+   :disconnect-signal (fn [self name]
+                        (local conn (. connected-signals name))
+                        (when (not conn)
+                          (error (.. "Signal " name " not connected on unit " id)))
+                        (conn.signal:disconnect conn.wrapped-handler true)
+                        (tset connected-signals name nil)
+                        true)})
 
 (fn ModuleUnit [opts]
   (local options (or opts {}))
-  (local module-name (or options.module-name options.module_name))
+  (local module-name options.module-name)
   (assert (= (type module-name) :string)
           "ModuleUnit requires string :module-name")
   (local load-export (or options.load-export "init"))
   (local unload-export (or options.unload-export "drop"))
+  (local explicit-snapshot? (not= (. options :snapshot-export) nil))
+  (local explicit-restore? (not= (. options :restore-export) nil))
   (local snapshot-export (or options.snapshot-export "snapshot"))
   (local restore-export (or options.restore-export "restore"))
   (local suppress-run-main? (not (= options.suppress-run-main? false)))
   (local module-paths options.module-paths)
+  (var owned-module-roots nil)
+  (var loaded-owned-modules {})
 
-  (fn require-module []
-    (local previous (and app app.__suppress-main-run?))
-    (when app
-      (set app.__suppress-main-run? suppress-run-main?))
-    (local fennel (require :fennel))
+  (fn loaded-or-required [name]
+    (or (. package.loaded name)
+        (require name)))
+
+  (fn module-root-from-pattern [pattern]
+    (if (string.match pattern "/%?%.fnl$")
+        (string.sub pattern 1 (- (# pattern) 6))
+        (string.match pattern "/%?/init%.fnl$")
+        (string.sub pattern 1 (- (# pattern) 11))
+        nil))
+
+  (fn path-under? [path root]
+    (and path root
+         (do
+           (local path-len (# path))
+           (local root-len (# root))
+           (and (>= path-len root-len)
+                (= (string.sub path 1 root-len) root)
+                (or (= path-len root-len)
+                    (= (string.sub path (+ root-len 1) (+ root-len 1)) "/"))))))
+
+  (fn module-roots []
+    (when (= owned-module-roots nil)
+      (set owned-module-roots [])
+      (when module-paths
+        (local fs (loaded-or-required :fs))
+        (each [pattern (string.gmatch module-paths "[^;]+")]
+          (local root (module-root-from-pattern pattern))
+          (when root
+            (table.insert owned-module-roots (fs.absolute root))))))
+    owned-module-roots)
+
+  (fn owned-module-path? [path]
+    (when path
+      (local fs (loaded-or-required :fs))
+      (local abs-path (fs.absolute path))
+      (var matched? false)
+      (each [_ root (ipairs (module-roots)) &until matched?]
+        (when (path-under? abs-path root)
+          (set matched? true)))
+      matched?))
+
+  (fn module-source-path [name]
+    (local fennel (loaded-or-required :fennel))
     (local old-fennel-path fennel.path)
     (when module-paths
       (set fennel.path (.. module-paths ";" fennel.path)))
-    (local (ok result) (pcall require module-name))
+    (local (ok path) (pcall fennel.search-module name))
     (when module-paths
       (set fennel.path old-fennel-path))
+    (if ok path nil))
+
+  (fn remember-owned-module! [name]
+    (when (and (= (type name) :string)
+               (owned-module-path? (module-source-path name)))
+      (tset loaded-owned-modules name true)))
+
+  (fn clear-owned-loaded-modules! []
+    (each [name _ (pairs loaded-owned-modules)]
+      (tset package.loaded name nil)
+      (tset loaded-owned-modules name nil)))
+
+  (fn with-module-paths [f]
+    (local fennel (loaded-or-required :fennel))
+    (local old-fennel-path fennel.path)
+    (local original-require _G.require)
+    (when module-paths
+      (set fennel.path (.. module-paths ";" fennel.path)))
+    (when module-paths
+      (set _G.require
+           (fn [name]
+             (local result (original-require name))
+             (remember-owned-module! name)
+             result)))
+    (local (ok result) (pcall f))
+    (when module-paths
+      (set _G.require original-require))
+    (when module-paths
+      (set fennel.path old-fennel-path))
+    (if ok result (error result)))
+
+  (fn require-module []
+    (loaded-or-required :fs)
+    (local previous (and app app.__suppress-main-run?))
+    (when app
+      (set app.__suppress-main-run? suppress-run-main?))
+    (local (ok result) (pcall with-module-paths #(require module-name)))
     (when app
       (set app.__suppress-main-run? previous))
     (if ok
-        result
+        (do
+          (remember-owned-module! module-name)
+          result)
         (error result)))
+
+  (fn call-handler [handler-name handler args]
+    (local (ok result)
+      (pcall
+        (fn []
+          (with-module-paths #(if (= args nil) (handler) (handler args))))))
+    (when (not ok)
+      (error (.. "Unit module " module-name " export " handler-name " error: " result)))
+    result)
 
   (fn call-export [export-name args]
     (local module (require-module))
@@ -74,21 +196,39 @@
     (local handler (. module export-name))
     (assert (= (type handler) :function)
             (.. "Unit module " module-name " missing function " export-name))
-    (if (= args nil)
-        (handler)
-        (handler args)))
+    (call-handler export-name handler args))
 
-  (Unit {:id (or options.id module-name)
-         :parent-id options.parent-id
-         :owned-paths options.owned-paths
-         :load (fn [_ctx]
-                 (call-export load-export nil))
-         :unload (fn [_ctx]
-                   (call-export unload-export nil))
-         :snapshot (fn [_ctx]
-                     (call-export snapshot-export nil))
-         :restore (fn [state _ctx]
-                    (call-export restore-export state))}))
+  (fn call-optional-export [export-name args]
+    (when export-name
+      (local module (require-module))
+      (local handler (. module export-name))
+      (when (= (type handler) "function")
+        (call-handler export-name handler args))))
+
+  (local self (Unit {:id (or options.id module-name)
+                      :module-name module-name
+                      :parent-id options.parent-id
+                      :source options.source
+                      :owned-paths options.owned-paths
+                      :load (fn [_ctx]
+                               (call-export load-export nil))
+                      :unload (fn [_ctx]
+                                (call-export unload-export nil)
+                                (clear-owned-loaded-modules!))
+                      :snapshot (fn [_ctx]
+                                  (if explicit-snapshot?
+                                      (call-export snapshot-export nil)
+                                      (do
+                                        (local result (call-optional-export snapshot-export nil))
+                                        (if (= result nil) nil result))))
+                      :restore (fn [state _ctx]
+                                 (if explicit-restore?
+                                     (call-export restore-export state)
+                                     (do
+                                       (local result (call-optional-export restore-export state))
+                                       (if (= result nil) true result))))}))
+  (tset self :force-purge-module-cache! (fn [_self] (clear-owned-loaded-modules!)))
+  self)
 
 (fn SourceUnit [opts]
   (local options (or opts {}))
@@ -139,21 +279,24 @@
           (handler)
           (handler args))))
 
-  (Unit {:id id
-         :parent-id options.parent-id
-         :owned-paths (clone-list options.owned-paths)
-         :load (fn [_ctx]
-                 (call-export load-export nil))
-         :unload (fn [_ctx]
-                   (call-export unload-export nil)
-                   (clear-module))
-         :snapshot (fn [_ctx]
-                     (when snapshot-export
-                       (call-export snapshot-export nil)))
-         :restore (fn [state _ctx]
-                    (when restore-export
-                      (call-export restore-export state))
-                    true)}))
+  (local self (Unit {:id id
+                      :parent-id options.parent-id
+                      :source (or options.source-type :user)
+                      :owned-paths (clone-list options.owned-paths)
+                      :load (fn [_ctx]
+                              (call-export load-export nil))
+                      :unload (fn [_ctx]
+                                (call-export unload-export nil)
+                                (clear-module))
+                      :snapshot (fn [_ctx]
+                                  (when snapshot-export
+                                    (call-export snapshot-export nil)))
+                      :restore (fn [state _ctx]
+                                 (when restore-export
+                                   (call-export restore-export state))
+                                 true)}))
+  (tset self :force-purge-module-cache! (fn [_self] (clear-module)))
+  self)
 
 {:Unit Unit
  :ModuleUnit ModuleUnit

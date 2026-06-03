@@ -89,6 +89,7 @@
 (local AgentBuiltinGraph (require :llm/presets/builtins/graph))
 (local AgentBuiltinScene (require :llm/presets/builtins/scene))
 (local AgentBuiltinGeneral (require :llm/presets/builtins/general))
+(local AgentBuiltinUnits (require :llm/presets/builtins/units))
 (local AgentRegistry (require :llm/agent/registry))
 (local AgentRunner (require :llm/agent/runner))
 (local AgentToolSurface (require :llm/agent/tool-surface))
@@ -1130,6 +1131,7 @@
     (set app.hud-unit
          (Units.ModuleUnit {:id "hud"
                             :parent-id "app-root"
+                            :source :builtin
                             :module-name "hud-unit"
                             :owned-paths ((. HudUnitModule :hud-owned-paths))
                             :load-export "load-hud!"
@@ -1145,6 +1147,7 @@
     (set app.canvas-unit
          (Units.ModuleUnit {:id "canvas"
                             :parent-id "app-root"
+                            :source :builtin
                             :module-name "canvas-unit"
                             :owned-paths ((. CanvasUnitModule :canvas-owned-paths))
                             :load-export "load-canvas!"
@@ -1186,6 +1189,7 @@
         (local unit
           (Units.ModuleUnit {:id unit-spec.unit-id
                              :parent-id "app-root"
+                             :source :builtin
                              :module-name unit-spec.module-name
                              :owned-paths ((. ModeUnitModule unit-spec.owned-paths-export))
                              :load-export unit-spec.load-export
@@ -1222,6 +1226,7 @@
         (local unit
           (Units.ModuleUnit {:id (.. "user-" candidate.name)
                              :parent-id "app-root"
+                             :source :user
                              :module-name candidate.name
                              :module-paths module-paths
                              :owned-paths [candidate.path]}))
@@ -1585,7 +1590,8 @@
     (AgentBuiltinDrawing.register app.agent-presets)
     (AgentBuiltinGraph.register app.agent-presets)
     (AgentBuiltinScene.register app.agent-presets)
-    (AgentBuiltinGeneral.register app.agent-presets))
+    (AgentBuiltinGeneral.register app.agent-presets)
+    (AgentBuiltinUnits.register app.agent-presets))
   (app.agent-presets:set-context (agent-preset-context))
 
   ;; Agent layer bootstrap
@@ -1656,6 +1662,57 @@
     (fn [ctx]
       (when ctx.app.world-manager
         "active world available")))
+  (PromptUtils.register-enricher
+    :unit-context
+    (fn [ctx]
+      (when ctx.app.unit-manager
+        (local units (ctx.app.unit-manager:list))
+        (when (> (length units) 0)
+          (local parts [(.. "Registered units (" (length units) "):")])
+          (each [_ unit (ipairs units)]
+            (table.insert parts
+              (.. "- " unit.id
+                 " (source:" (or unit.source :user) ")"
+                 (if (unit:loaded?) " [loaded]" " [unloaded]"))))
+          (table.insert parts
+            (.. "Code directory: " (or ctx.app.code-dir "N/A")))
+          (local log-path (logging.get-output-path))
+          (table.insert parts (.. "Log file: " log-path))
+          (table.insert parts
+            "Available signals on app: canvas-shell-changed, canvas-modes-changed")
+          (table.insert parts
+            "Use space_unit_read_log to check for runtime errors after unit operations.")
+          ;; Scan for existing test modules
+          (when (and ctx.app.code-dir (fs.exists ctx.app.code-dir))
+            (var test-summary [])
+            (fn add-test-lines! [unit unit-dir]
+              (when (and unit-dir (fs.exists unit-dir))
+                (local entries (fs.list-dir unit-dir))
+                (each [_ entry (ipairs entries)]
+                  (local entry-name (or entry.name entry))
+                  (when (string.match entry-name "^test%-.*%.fnl$")
+                    (table.insert test-summary
+                      (.. "  " unit.id "/" entry-name " -> run: space_unit_run_tests "
+                          "{id \"" unit.id "\" test-name \""
+                          (string.match entry-name "^test%-(.*)%.fnl$") "\"}"))))))
+            (each [_ unit (ipairs units)]
+              (when (not (= unit.source :builtin))
+                (var scanned-dirs {})
+                (fn scan-dir! [unit-dir]
+                  (when (and unit-dir (not (. scanned-dirs unit-dir)))
+                    (tset scanned-dirs unit-dir true)
+                    (add-test-lines! unit unit-dir)))
+                (scan-dir! (fs.join-path ctx.app.code-dir (or unit.module-name unit.id)))
+                (var unit-dir nil)
+                (each [_ path (ipairs (or unit.owned-paths []))]
+                  (when (not unit-dir)
+                    (set unit-dir (fs.parent path))))
+                (scan-dir! unit-dir)))
+            (when (> (length test-summary) 0)
+              (table.insert parts "Existing test modules:")
+              (each [_ line (ipairs test-summary)]
+                (table.insert parts line))))
+          (table.concat parts "\n")))))
   (when (not app.agent-runner)
     (set app.agent-runner
          (AgentRunner.AgentRunner
@@ -1793,7 +1850,9 @@
     (set app.agent-presets-canvas-handler nil))
   (set app.agent-tool-surface nil)
   (set app.agent-approvals nil)
-  (set app.agent-registry nil))
+  (set app.agent-registry nil)
+  (set app.agent-presets nil)
+  (set app.agent-tool-adapters nil))
 
 (fn app.drop []
   (set (. package.loaded "renderers") nil)

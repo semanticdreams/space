@@ -17,6 +17,7 @@
 #include "lua_webbrowser.h"
 #include "lua_gccjit.h"
 #include "lua_xapian.h"
+#include "log.h"
 #if defined(SPACE_ENABLE_WALLET_CORE)
 #include "lua_wallet_core.h"
 #endif
@@ -180,11 +181,17 @@ void LuaRuntime::install_fatal_traceback()
 
             sol::state_view lua(ts);
 
-            std::string errstr = err.as<std::string>();
+            std::string errstr;
+            try {
+                errstr = err.as<std::string>();
+            } catch (...) {
+                errstr = "Lua fatal error (non-string error object)";
+            }
 
             sol::function tb = lua["debug"]["traceback"];
             std::string traced = tb(errstr, 2);
 
+            log_write_file_only("lua", Error, traced);
             std::cerr << traced << "\n";
 
             std::abort();

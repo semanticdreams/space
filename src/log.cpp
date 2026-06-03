@@ -16,6 +16,7 @@ namespace {
 std::mutex log_mutex;
 std::shared_ptr<spdlog::logger> async_logger;
 std::vector<spdlog::sink_ptr> log_sinks;
+spdlog::sink_ptr log_file_sink;
 bool log_ready = false;
 std::atomic<const std::atomic<uint64_t>*> frame_id_provider { nullptr };
 std::string log_output_path = std::string(GL_LOG_FILE);
@@ -250,6 +251,7 @@ void log_init(const LogConfig& config)
     log_sinks.clear();
     log_sinks.push_back(stdout_sink);
     log_sinks.push_back(file_sink);
+    log_file_sink = file_sink;
 
     spdlog::init_thread_pool(8192, 1);
     LOG_CONFIG.reporting_level = config.reporting_level;
@@ -289,6 +291,7 @@ void log_shutdown()
     spdlog::shutdown();
     async_logger.reset();
     log_sinks.clear();
+    log_file_sink.reset();
     log_ready = false;
 }
 
@@ -324,6 +327,29 @@ void log_write_named_fields(const std::string& name, LogLevel level, const std::
 {
     auto logger = log_get_logger(name);
     logger->log(to_spd_level(level), build_payload(fields, message));
+}
+
+void log_write_file_only(const std::string& name, LogLevel level, const std::string& message)
+{
+    try {
+        spdlog::sink_ptr file_sink;
+        {
+            std::lock_guard<std::mutex> lock(log_mutex);
+            if (!log_ready || !log_file_sink) {
+                return;
+            }
+            file_sink = log_file_sink;
+        }
+
+        spdlog::logger logger(name, file_sink);
+        logger.set_level(spdlog::level::trace);
+        std::string payload = message.find('\n') == std::string::npos ? message : "\n" + message;
+        logger.log(to_spd_level(level), payload);
+        logger.flush();
+    }
+    catch (...) {
+        // Preserve the original stderr path even if crash-path logging fails.
+    }
 }
 
 void log_flush()
