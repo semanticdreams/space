@@ -740,6 +740,99 @@
 
 (table.insert tests {:name "agent-units: space_unit_edit rejects builtin" :fn test-space-unit-edit-rejects-builtin})
 
+(fn test-space-unit-edit-missing-drop []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local file-path (fs.join-path dir "init-drop.fnl"))
+          (fs.write-file file-path
+                         (.. "(fn init [] (set app.__nodrop-val :init) true)\n"
+                             "(fn drop [] (set app.__nodrop-val nil) true)\n"
+                             "{:init init :drop drop}"))
+          (local unit (Units.ModuleUnit {:id "init-drop"
+                                          :module-name "init-drop"
+                                          :module-paths (.. dir "/?.fnl")
+                                          :source :user
+                                          :owned-paths [file-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+          (assert (= app.__nodrop-val :init) "initial load should set val")
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.edit" app))
+
+          (local no-drop-source
+            (.. "(fn init [] (set app.__nodrop-val :v2) true)\n"
+                "{:init init}"))
+          (local (ok err) (pcall def.run {:id "init-drop" :source no-drop-source}))
+          (assert (not ok) "edit should fail when new source has no drop")
+          (local errstr (tostring err))
+          (assert (string.find errstr "module exports invalid") "error should mention exports")
+
+          (assert (= app.__nodrop-val :init) "old source restored, init re-ran during recovery")
+          (assert (unit:loaded?) "unit should still be loaded after recovery")
+          (unit:unload {})
+          (assert (not (unit:loaded?)) "unload should succeed with old drop")
+          (assert (= app.__nodrop-val nil) "drop should have cleared val")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit missing drop" :fn test-space-unit-edit-missing-drop})
+
+(fn test-space-unit-edit-custom-exports []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local file-path (fs.join-path dir "custom-exp.fnl"))
+          (fs.write-file file-path
+                         (.. "(fn start [] (set app.__cust-val :boot) true)\n"
+                             "(fn stop [] (set app.__cust-val nil) true)\n"
+                             "{:start start :stop stop}"))
+          (local unit (Units.ModuleUnit {:id "custom-exp"
+                                          :module-name "custom-exp"
+                                          :module-paths (.. dir "/?.fnl")
+                                          :source :user
+                                          :owned-paths [file-path]
+                                          :load-export "start"
+                                          :unload-export "stop"
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+          (assert (= app.__cust-val :boot) "custom load should set val")
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.edit" app))
+
+          (local v2-source
+            (.. "(fn start [] (set app.__cust-val :v2) true)\n"
+                "(fn stop [] (set app.__cust-val :cleaned) true)\n"
+                "{:start start :stop stop}"))
+          (local result (json.loads (def.run {:id "custom-exp" :source v2-source})))
+          (assert result.reloaded "edit with custom exports should succeed")
+          (assert (= app.__cust-val :v2) "custom load export should have run")
+
+          (local no-stop-source
+            (.. "(fn start [] (set app.__cust-val :bad) true)\n"
+                "{:start start}"))
+          (local (ok err) (pcall def.run {:id "custom-exp" :source no-stop-source}))
+          (assert (not ok) "edit should fail when new source missing custom unload export")
+          (local errstr (tostring err))
+          (assert (string.find errstr "module exports invalid") "error should mention exports")
+          (assert (string.find errstr "stop") "error should name the missing export")
+          (assert (= app.__cust-val :v2) "old source restored, v2 init re-ran during recovery")
+          (assert (unit:loaded?) "unit should still be loaded after recovery")
+          (unit:unload {})
+          (assert (= app.__cust-val :cleaned) "old stop export should have run")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit custom exports" :fn test-space-unit-edit-custom-exports})
+
 ;; ── Tool adapters: unit.reload ──
 
 (fn test-space-unit-reload []
@@ -1412,6 +1505,88 @@
           (app.unit-manager:clear))))))
 
 (table.insert tests {:name "agent-units: space_unit_register submodule cache cleared on failure" :fn test-space-unit-register-submodule-cache-cleared})
+
+(fn test-space-unit-register-loaded-existing []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local init-path (fs.join-path dir "re-exist" "init.fnl"))
+          (fs.create-dirs (fs.join-path dir "re-exist"))
+          (fs.write-file init-path (.. "(fn init [] (set app.__re-exist-val :exists) true)\n"
+                                       "(fn drop [] (set app.__re-exist-val nil) true)\n"
+                                       "{:init init :drop drop}"))
+
+          (set app.__re-exist-val nil)
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.register" app))
+
+          (local r1 (json.loads (def.run {:id "re-exist"})))
+          (assert (= r1.id "user-re-exist") "first register should create user-re-exist")
+          (assert r1.loaded "first register should load unit")
+          (assert (= app.__re-exist-val :exists) "init should have run")
+
+          (local r2 (json.loads (def.run {:id "user-re-exist"})))
+          (assert r2.already-registered "register with user- prefix should return already-registered")
+          (assert r2.loaded "loaded unit should still be loaded")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_register loaded existing user- prefix" :fn test-space-unit-register-loaded-existing})
+
+(fn test-space-unit-register-unloaded-existing []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local init-path (fs.join-path dir "re-unload" "init.fnl"))
+          (fs.create-dirs (fs.join-path dir "re-unload"))
+          (fs.write-file init-path (.. "(fn init [] (set app.__re-unload-val :loaded) true)\n"
+                                       "(fn drop [] (set app.__re-unload-val nil) true)\n"
+                                       "{:init init :drop drop}"))
+
+          (set app.__re-unload-val nil)
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.register" app))
+
+          (local r1 (json.loads (def.run {:id "re-unload"})))
+          (assert (= r1.id "user-re-unload"))
+          (assert r1.loaded)
+          (assert (= app.__re-unload-val :loaded))
+
+          (local unit (app.unit-manager:get "user-re-unload"))
+          (unit:unload {})
+          (assert (not (unit:loaded?)) "unit should be unloaded")
+
+          (set app.__re-unload-val nil)
+          (local r2 (json.loads (def.run {:id "user-re-unload"})))
+          (assert r2.reloaded "register with user- prefix on unloaded unit should reload")
+          (assert r2.loaded "unit should be loaded after reload")
+          (assert (= app.__re-unload-val :loaded) "init should have run after reload")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_register unloaded existing user- prefix" :fn test-space-unit-register-unloaded-existing})
+
+(fn test-space-unit-register-rejects-empty-source-dir []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.register" app))
+          (local (ok err) (pcall def.run {:id "user-"}))
+          (assert (not ok) "id 'user-' should be rejected")
+          (local errstr (tostring err))
+          (assert (string.find errstr "source directory name" 1 true)
+                  (.. "error should mention source directory, got: " errstr))
+          (assert (= (app.unit-manager:count) 0) "no unit should be registered")
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_register rejects empty source dir" :fn test-space-unit-register-rejects-empty-source-dir})
 
 (fn test-space-unit-delete-directory []
   (with-temp-dir

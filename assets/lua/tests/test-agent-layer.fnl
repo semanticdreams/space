@@ -801,6 +801,346 @@
   (assert (not ok) "different arguments should require a separate approval")
   (assert (= call-count 1) "only the approved exact call should run"))
 
+(fn test-tool-surface-call-async-immediate []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var called false)
+  (local mock-def {:name "space_normal"
+                   :description "normal"
+                   :inputSchema {}
+                   :managed-source "normal-tool"
+                   :run (fn [_args]
+                          (set called true)
+                          "done")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "normal-preset" :risk :normal :tool-ids ["normal-tool"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals {}))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (var captured nil)
+  (local status (surface:call-async "space_normal" {}
+                                    (fn [result] (set captured result))))
+  (assert (= status :completed) "normal risk should complete synchronously")
+  (assert captured "on-result should have been called")
+  (assert (= captured.type :success) "immediate tool should succeed")
+  (assert (= captured.value "done") "immediate tool should return value")
+  (assert called "tool should have executed"))
+
+(table.insert tests {:name "tool surface call-async immediate" :fn test-tool-surface-call-async-immediate})
+
+(fn test-tool-surface-call-async-pending-approval []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var called false)
+  (local mock-def {:name "space_shell"
+                   :description "shell"
+                   :inputSchema {}
+                   :managed-source "shell-tool"
+                   :run (fn [_args]
+                          (set called true)
+                          "ran")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "shell-preset" :risk :shell :tool-ids ["shell-tool"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (var captured nil)
+  (local status (surface:call-async "space_shell" {}
+                                    (fn [result] (set captured result))))
+  (assert (= status.pending true) "ask risk should return pending")
+  (assert pending "tool call should create a pending approval request")
+  (assert (not called) "pending high-risk tool should not execute")
+  (assert (= captured nil) "on-result should not be called yet")
+  (pending:approve)
+  (assert captured "on-result should be called after approve")
+  (assert (= captured.type :success) "approved async tool should succeed")
+  (assert (= captured.value "ran") "approved async tool should return value")
+  (assert called "tool should execute after approve"))
+
+(table.insert tests {:name "tool surface call-async pending approval" :fn test-tool-surface-call-async-pending-approval})
+
+(fn test-tool-surface-call-async-cancelled-before-approval []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var called false)
+  (local mock-def {:name "space_shell"
+                   :description "shell"
+                   :inputSchema {}
+                   :managed-source "shell-tool"
+                   :run (fn [_args]
+                          (set called true)
+                          "ran")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "shell-preset" :risk :shell :tool-ids ["shell-tool"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (var captured nil)
+  (var cancelled false)
+  (local cancelled? (fn [] cancelled))
+  (local status (surface:call-async "space_shell" {}
+                                    (fn [result] (set captured result))
+                                    cancelled?))
+  (assert (= status.pending true) "ask risk should return pending")
+  (assert pending "tool call should create a pending approval request")
+  (assert (not called) "pending high-risk tool should not execute")
+  ;; Simulate SSE disconnect before approval
+  (set cancelled true)
+  ;; User approves (but stream is gone)
+  (pending:approve)
+  (assert (not called) "cancelled tool should not execute after approval")
+  (assert captured "on-result should have been called")
+  (assert (= captured.type :error) "cancelled tool should return error to on-result")
+  (assert (string.find (or captured.message "") "cancelled") "error should mention cancelled"))
+
+(table.insert tests {:name "tool surface call-async cancelled before approval" :fn test-tool-surface-call-async-cancelled-before-approval})
+
+(fn test-tool-surface-call-async-denied []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var called false)
+  (local mock-def {:name "space_shell"
+                   :description "shell"
+                   :inputSchema {}
+                   :managed-source "shell-tool"
+                   :run (fn [_args]
+                          (set called true)
+                          "ran")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "shell-preset" :risk :shell :tool-ids ["shell-tool"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals {:policy {:shell :deny}}))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (var captured nil)
+  (local status (surface:call-async "space_shell" {}
+                                    (fn [result] (set captured result))))
+  (assert (= status :completed) "deny policy should complete synchronously")
+  (assert captured "on-result should have been called")
+  (assert (= captured.type :error) "denied tool should return error")
+  (assert (string.find captured.message "denied") "error should mention denied")
+  (assert (not called) "denied tool should not execute"))
+
+(table.insert tests {:name "tool surface call-async denied" :fn test-tool-surface-call-async-denied})
+
+(fn test-tool-registry-call-async-delegates-to-run-async []
+  (local ToolRegistry (require :mcp/tool-registry))
+  (local registry (ToolRegistry))
+  (var async-called false)
+  (registry:register {:name "test-async"
+                      :description "async tool"
+                      :inputSchema {:type "object" :properties {}}
+                      :run (fn [] "sync-result")
+                      :run-async (fn [args on-result]
+                                   (set async-called true)
+                                   (on-result {:type :success :value "async-result"})
+                                   :completed)})
+  (var captured nil)
+  (local status (registry:call-async "test-async" {}
+                                     (fn [result] (set captured result))))
+  (assert (= status :completed))
+  (assert async-called "should use run-async when available")
+  (assert (= captured.type :success))
+  (assert (= captured.value "async-result")))
+
+(table.insert tests {:name "tool registry call-async delegates to run-async" :fn test-tool-registry-call-async-delegates-to-run-async})
+
+(fn test-tool-registry-call-async-unknown-tool []
+  (local ToolRegistry (require :mcp/tool-registry))
+  (local registry (ToolRegistry))
+  (var captured nil)
+  (local status (registry:call-async "nonexistent" {}
+                                     (fn [result] (set captured result))))
+  (assert (= status :completed) "unknown tool should complete synchronously with error")
+  (assert captured "on-result should have been called")
+  (assert (= captured.type :error) "unknown tool should return error")
+  (assert (string.find (or captured.message "") "Unknown tool") "error should mention unknown"))
+
+(table.insert tests {:name "tool registry call-async unknown tool" :fn test-tool-registry-call-async-unknown-tool})
+
+(fn test-mcp-handler-async-tool-call-pending []
+  (local ToolRegistry (require :mcp/tool-registry))
+  (local MCPHTTPHandler (require :mcp/handler))
+  (local protocol (require :mcp/protocol))
+  (local json (require :json))
+  (var captured-on-result nil)
+  (var sse-messages [])
+  (local tools (ToolRegistry))
+  (tools:register
+    {:name "test-async"
+     :description "async"
+     :inputSchema {:type "object" :properties {}}
+     :run (fn [] "sync-fallback")
+     :run-async (fn [args on-result]
+                  (set captured-on-result on-result)
+                  {:pending true})})
+  (local handler (MCPHTTPHandler {:tools tools}))
+  ;; Initialize MCP session
+  (local init-req
+    {:body (json.dumps {:jsonrpc "2.0" :id 1 :method "initialize"
+                        :params {:protocolVersion "2025-03-26"
+                                 :capabilities {}
+                                 :clientInfo {:name "test" :version "1.0"}}})
+     :headers {}
+     :query_params {}})
+  (local init-resp (handler.handle-post init-req))
+  (local session-id-header (. (or init-resp.headers {}) :mcp-session-id))
+  (assert session-id-header "initialize should return session id")
+  ;; Call async tool
+  (local mock-stream
+    {:send (fn [_self data] (table.insert sse-messages data))
+     :close (fn [])})
+  (local req
+    {:body (json.dumps {:jsonrpc "2.0" :id 42 :method "tools/call"
+                        :params {:name "test-async" :arguments {:x 1}}})
+     :headers {:mcp-session-id session-id-header}
+     :query_params {}})
+  (local resp (handler.handle-post req mock-stream))
+  (assert (= resp.status 202) "handler should return accepted")
+  (assert (= resp.body "") "accepted body should be empty")
+  (assert resp.on-disconnect "pending call should have on-disconnect callback")
+  (assert (not (not captured-on-result)) "should have captured on-result callback")
+  (assert (= (# sse-messages) 0) "SSE should not have been sent yet")
+  (captured-on-result {:type :success :value "approved"})
+  (assert (= (# sse-messages) 1) "SSE should have been sent after callback")
+  (local sse-text (. sse-messages 1))
+  (local json-start (+ (string.find sse-text "data: ") 5))
+  (local json-end (string.find sse-text "\n\n" json-start))
+  (local json-body (string.sub sse-text json-start (- json-end 1)))
+  (local parsed (json.loads json-body))
+  (assert (= parsed.jsonrpc "2.0"))
+  (assert (= parsed.id 42))
+  (assert (not parsed.result.isError))
+  (local content-item (. (. parsed.result :content) 1))
+  (assert (= (. content-item :text) "approved"))
+  (pcall captured-on-result {:type :success :value "double"})
+  (assert (= (# sse-messages) 1) "deliver should be idempotent, no extra SSE messages"))
+
+(table.insert tests {:name "mcp handler async tool call pending" :fn test-mcp-handler-async-tool-call-pending})
+
+(fn test-mcp-handler-async-tool-call-cancelled []
+  (local ToolRegistry (require :mcp/tool-registry))
+  (local MCPHTTPHandler (require :mcp/handler))
+  (local json (require :json))
+  (var captured-on-result nil)
+  (var sse-messages [])
+  (local tools (ToolRegistry))
+  (tools:register
+    {:name "test-cancel"
+     :description "cancellable"
+     :inputSchema {:type "object" :properties {}}
+     :run (fn [] "sync")
+     :run-async (fn [args on-result]
+                  (set captured-on-result on-result)
+                  {:pending true})})
+  (local handler (MCPHTTPHandler {:tools tools}))
+  ;; Initialize MCP session
+  (local init-req
+    {:body (json.dumps {:jsonrpc "2.0" :id 1 :method "initialize"
+                        :params {:protocolVersion "2025-03-26"
+                                 :capabilities {}
+                                 :clientInfo {:name "test" :version "1.0"}}})
+     :headers {}
+     :query_params {}})
+  (local init-resp (handler.handle-post init-req))
+  (local session-id-header (. (or init-resp.headers {}) :mcp-session-id))
+  (assert session-id-header "initialize should return session id")
+  ;; Call async tool
+  (local mock-stream
+    {:send (fn [_self data] (table.insert sse-messages data))
+     :close (fn [])})
+  (local req
+    {:body (json.dumps {:jsonrpc "2.0" :id 1 :method "tools/call"
+                        :params {:name "test-cancel" :arguments {}}})
+     :headers {:mcp-session-id session-id-header}
+     :query_params {}})
+  (local resp (handler.handle-post req mock-stream))
+  (assert resp.on-disconnect "pending call should have on-disconnect")
+  (resp.on-disconnect)
+  (captured-on-result {:type :success :value "should-not-appear"})
+  (assert (= (# sse-messages) 0) "SSE should not be sent after disconnect"))
+
+(table.insert tests {:name "mcp handler async tool call cancelled" :fn test-mcp-handler-async-tool-call-cancelled})
+
+(fn test-mcp-handler-async-tool-call-cleanup-on-complete []
+  (local ToolRegistry (require :mcp/tool-registry))
+  (local MCPHTTPHandler (require :mcp/handler))
+  (local json (require :json))
+  (var captured-on-result nil)
+  (var sse-messages [])
+  (local tools (ToolRegistry))
+  (tools:register
+    {:name "test-cleanup"
+     :description "cleanup"
+     :inputSchema {:type "object" :properties {}}
+     :run (fn [] "sync")
+     :run-async (fn [args on-result]
+                  (set captured-on-result on-result)
+                  {:pending true})})
+  (local handler (MCPHTTPHandler {:tools tools}))
+  ;; Initialize MCP session
+  (local init-req
+    {:body (json.dumps {:jsonrpc "2.0" :id 1 :method "initialize"
+                        :params {:protocolVersion "2025-03-26"
+                                 :capabilities {}
+                                 :clientInfo {:name "test" :version "1.0"}}})
+     :headers {}
+     :query_params {}})
+  (local init-resp (handler.handle-post init-req))
+  (local session-id-header (. (or init-resp.headers {}) :mcp-session-id))
+  (assert session-id-header "initialize should return session id")
+  ;; Call async tool
+  (local mock-stream
+    {:send (fn [_self data] (table.insert sse-messages data))
+     :close (fn [])})
+  (local req
+    {:body (json.dumps {:jsonrpc "2.0" :id 1 :method "tools/call"
+                        :params {:name "test-cleanup" :arguments {}}})
+     :headers {:mcp-session-id session-id-header}
+     :query_params {}})
+  (local resp (handler.handle-post req mock-stream))
+  (assert resp.on-disconnect "pending call should have on-disconnect callback")
+  (assert resp.on-complete "pending call should have on-complete callback")
+  ;; Simulate server wrapping: store cleanup in a table
+  (var pending-callbacks {})
+  (local cancel-fn resp.on-disconnect)
+  (local cleanup
+    (fn []
+      (set pending-callbacks {})
+      (cancel-fn)))
+  (set pending-callbacks.cleanup cleanup)
+  (tset resp :on-disconnect cleanup)
+  (tset resp :on-complete cleanup)
+  ;; Deliver result (normal completion)
+  (captured-on-result {:type :success :value "cleanup-test"})
+  (assert (= (# sse-messages) 1) "SSE should have been sent")
+  ;; Server-style pending-callbacks table should be empty after cleanup
+  (assert (not (. pending-callbacks :cleanup))
+          "cleanup callback should self-remove after normal completion"))
+
+(table.insert tests {:name "mcp handler async tool call cleanup on complete" :fn test-mcp-handler-async-tool-call-cleanup-on-complete})
+
 ;; ═══════════════════════════════════════
 ;; Agent MCP sync tests
 ;; ═══════════════════════════════════════

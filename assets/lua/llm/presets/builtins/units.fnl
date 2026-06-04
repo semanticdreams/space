@@ -199,34 +199,50 @@
      :inputSchema {:type "object"
                    :properties {:id {:type "string" :description "Unit module name (subdirectory name under code-dir)"}}
                    :required ["id"]}
-     :make-run (fn [app]
-                 (fn [args]
-                   (require-unit-manager app "space_unit_register")
-                   (assert app.code-dir "space_unit_register requires app.code-dir")
-                   (assert (string.match args.id "^[%w_-]+$")
-                           "unit id must be alphanumeric with underscores and hyphens")
-                   (local init-path (fs.join-path app.code-dir args.id "init.fnl"))
-                   (assert (fs.exists init-path)
-                           (.. "init.fnl not found at " init-path ". Create the directory and init.fnl first."))
-                   (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
-                   (local unit
-                     (Units.ModuleUnit {:id (.. "user-" args.id)
-                                        :module-name args.id
-                                        :module-paths module-paths
-                                        :source :user
-                                        :owned-paths [init-path]}))
-                     (app.unit-manager:register unit)
-                     (local (load-ok load-err) (pcall #(unit:load)))
-                     (when (not load-ok)
-                        (local (unload-ok unload-err) (pcall #(unit:unload {})))
-                        (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
-                        (app.unit-manager:unregister unit.id)
-                        (error
-                          (..
-                            "register failed: " (tostring load-err)
-                            (if (not unload-ok) (.. " (cleanup also failed: " (tostring unload-err) ")") "")
-                            (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") ""))))
-                    (json.dumps {:id unit.id :module-name unit.module-name :loaded (unit:loaded?)})))})
+      :make-run (fn [app]
+                  (fn [args]
+                    (require-unit-manager app "space_unit_register")
+                    (assert app.code-dir "space_unit_register requires app.code-dir")
+                    (assert (string.match args.id "^[%w_-]+$")
+                            "unit id must be alphanumeric with underscores and hyphens")
+                    (local has-user-prefix (string.match args.id "^user%-"))
+                    (local unit-id (if has-user-prefix args.id (.. "user-" args.id)))
+                    (local source-dir-name (if has-user-prefix (string.sub args.id 6) args.id))
+                    (assert (not= source-dir-name "") "unit id must provide a source directory name")
+                    (local existing (app.unit-manager:get unit-id))
+                    (if existing
+                        (if (not (existing:loaded?))
+                            (do
+                              (existing:load {})
+                              (json.dumps {:id existing.id :module-name existing.module-name
+                                           :loaded (existing:loaded?) :reloaded true}))
+                            (json.dumps {:id existing.id :module-name existing.module-name
+                                         :loaded true :already-registered true}))
+                        (do
+                          (local init-path (fs.join-path app.code-dir source-dir-name "init.fnl"))
+                          (assert (fs.exists init-path)
+                                  (.. "init.fnl not found at " init-path
+                                      ". Create the directory and init.fnl first."))
+                          (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+                          (local unit
+                            (Units.ModuleUnit {:id unit-id
+                                               :module-name source-dir-name
+                                               :module-paths module-paths
+                                               :source :user
+                                               :owned-paths [init-path]}))
+                          (app.unit-manager:register unit)
+                          (local (load-ok load-err) (pcall #(unit:load)))
+                          (when (not load-ok)
+                            (local (unload-ok unload-err) (pcall #(unit:unload {})))
+                            (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+                            (app.unit-manager:unregister unit.id)
+                            (error
+                              (..
+                                "register failed: " (tostring load-err)
+                                (if (not unload-ok) (.. " (cleanup also failed: " (tostring unload-err) ")") "")
+                                (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") ""))))
+                          (json.dumps {:id unit.id :module-name unit.module-name
+                                       :loaded (unit:loaded?)})))))})
 
   (adapters:register
     {:id "unit.edit"
@@ -236,26 +252,51 @@
                    :properties {:id {:type "string" :description "Unit ID to edit"}
                                 :source {:type "string" :description "New Fennel source code"}}
                    :required ["id" "source"]}
-       :make-run (fn [app]
-                   (fn [args]
-                     (assert app.code-dir "space_unit_edit requires app.code-dir")
-                     (local unit (assert-user-unit app args.id "space_unit_edit"))
-                     (local file (unit-source-file app unit))
-                     (assert file (.. "unit " args.id " has no source file to edit"))
-                     (assert (path-under? file app.code-dir)
-                             (.. "unit " args.id " source file outside code directory"))
-                     (local old-source (fs.read-file file))
-                     (fs.write-file file args.source)
-                     (local (ok err) (pcall #(app.unit-manager:reload-unit args.id {:source :agent-edit})))
-                     (if ok
-                         (json.dumps {:id args.id :file file :reloaded true})
-                         (do
-                           (fs.write-file file old-source)
-                           ;; Attempt to recover runtime state from the old source.
-                           (pcall #(app.unit-manager:reload-unit args.id {:source :agent-edit-recover}))
-                           (error (.. "edit failed, source restored: " (tostring err)))))))})
+        :make-run (fn [app]
+                    (fn [args]
+                      (assert app.code-dir "space_unit_edit requires app.code-dir")
+                      (local unit (assert-user-unit app args.id "space_unit_edit"))
+                      (local file (unit-source-file app unit))
+                      (assert file (.. "unit " args.id " has no source file to edit"))
+                      (assert (path-under? file app.code-dir)
+                              (.. "unit " args.id " source file outside code directory"))
+                      (local fennel (require :fennel))
+                      (local (compile-ok compile-err) (pcall fennel.compile-string args.source
+                                                             {:filename file}))
+                      (assert compile-ok (.. "source does not compile: " (tostring compile-err)))
+                      (local old-source (fs.read-file file))
+                      (fs.write-file file args.source)
+                      (local (ok err) (pcall #(app.unit-manager:reload-unit args.id {:source :agent-edit})))
+                       (if ok
+                           (do
+                             (local load-key (or unit.load-export "init"))
+                             (local unload-key (or unit.unload-export "drop"))
+                             (local mod (. package.loaded unit.module-name))
+                             (if (and mod
+                                      (= (type (. mod load-key)) :function)
+                                      (= (type (. mod unload-key)) :function))
+                                 (json.dumps {:id args.id :file file :reloaded true})
+                                 (do
+                                   (local missing (if (or (not mod) (not= (type (. mod load-key)) :function))
+                                                      load-key unload-key))
+                                   (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+                                   (fs.write-file file old-source)
+                                   (local (recover-ok recover-err) (pcall #(unit:reload {})))
+                                   (error (.. "edit failed, module exports invalid: missing " missing
+                                              (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
+                                              (if (not recover-ok) (.. " (recovery reload also failed: " (tostring recover-err) ")") ""))))))
+                           (do
+                            (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+                            (fs.write-file file old-source)
+                            (local (recover-ok recover-err)
+                              (pcall #(if (unit:loaded?)
+                                          (app.unit-manager:reload-unit args.id {:source :agent-edit-recover})
+                                          (unit:load {}))))
+                            (error (.. "edit failed, source restored: " (tostring err)
+                                       (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
+                                       (if (not recover-ok) (.. " (recovery also failed: " (tostring recover-err) ")") "")))))))})
 
-  (adapters:register
+(adapters:register
     {:id "unit.reload"
      :mcp-name "space_unit_reload"
      :description "Trigger a hot reload of a specific unit."

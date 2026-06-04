@@ -2,6 +2,8 @@
 ;; Supports runtime register/unregister, emits on-change for list_changed notifications.
 ;; Multiple listeners via add-on-change / remove-on-change.
 
+(local logging (require :logging))
+
 (fn starts-with? [value prefix]
   (= (string.sub value 1 (# prefix)) prefix))
 
@@ -88,8 +90,45 @@
                                             result-or-err
                                             (tostring result-or-err))}]
          :isError false}
-        {:content [{:type "text" :text (.. "Tool execution error: " (tostring result-or-err))}]
-         :isError true}))
+        (do
+          (local err-text (tostring result-or-err))
+          (when (not (or (string.match err-text "^approval_required ")
+                         (string.match err-text "^tool denied by approval policy: ")
+                         (string.match err-text "^tool approval did not resolve execution state: ")))
+            (logging.error (.. "[mcp] tool " name " error: " err-text)))
+          {:content [{:type "text" :text (.. "Tool execution error: " err-text)}]
+           :isError true})))
+
+  (fn call-async [self name args on-result cancelled?]
+    "Execute a tool asynchronously. on-result is called with {:type :success|:error ...}.
+    Returns :completed if on-result was called synchronously, {:pending true} if waiting for approval."
+    (local tool (. tools name))
+    (if (not tool)
+        (do
+          (on-result {:type :error :message (.. "Unknown tool: " name)})
+          :completed)
+        tool.run-async
+        (do
+          (local (ok result-or-err) (pcall tool.run-async (or args {}) on-result cancelled?))
+          (if ok
+              result-or-err
+              (do
+                (local err-text (tostring result-or-err))
+                (logging.error (.. "[mcp] tool " name " error: " err-text))
+                (on-result {:type :error :message (.. "Tool execution error: " err-text)})
+                :completed)))
+        (do
+          (local (ok result-or-err) (pcall tool.run (or args {})))
+          (if ok
+              (on-result {:type :success :value result-or-err})
+              (do
+                (local err-text (tostring result-or-err))
+                (when (not (or (string.match err-text "^approval_required ")
+                               (string.match err-text "^tool denied by approval policy: ")
+                               (string.match err-text "^tool approval did not resolve execution state: ")))
+                  (logging.error (.. "[mcp] tool " name " error: " err-text)))
+                (on-result {:type :error :message err-text})))
+          :completed)))
 
   (fn add-on-change [self callback]
     "Add a listener that fires when tools are registered or unregistered.
@@ -114,6 +153,7 @@
    :unregister unregister
    :list list
    :call call
+   :call-async call-async
    :add-on-change add-on-change
    :remove-on-change remove-on-change
    :status status})

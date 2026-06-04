@@ -228,6 +228,10 @@
                                        (local result (call-optional-export restore-export state))
                                        (if (= result nil) true result))))}))
   (tset self :force-purge-module-cache! (fn [_self] (clear-owned-loaded-modules!)))
+  (tset self :load-export load-export)
+  (tset self :unload-export unload-export)
+  (tset self :snapshot-export snapshot-export)
+  (tset self :restore-export restore-export)
   self)
 
 (fn SourceUnit [opts]

@@ -131,6 +131,27 @@
                      (json.dumps (approval-required-payload request risk reason context)))))
         (error (.. "tool approval did not resolve execution state: " def.name))))
 
+  (fn run-with-approval-async [self def risk args on-result cancelled?]
+    (local tool-args (or args {}))
+    (local context (approval-context def tool-args))
+    (local reason (approval-reason def.name risk))
+    (local callbacks
+      {:on-approved (fn [_approval]
+                      (if (and cancelled? (cancelled?))
+                          (on-result {:type :error :message (.. "tool cancelled: " def.name)})
+                          (do
+                            (local (ok result) (pcall #(def.run tool-args)))
+                            (if ok
+                                (on-result {:type :success :value result})
+                                (on-result {:type :error :message (.. "tool execution failed: " (tostring result))})))))
+       :on-denied (fn [_approval]
+                    (on-result {:type :error
+                                :message (.. "tool denied by approval policy: " def.name " (" risk ")")}))})
+    (local result (approvals:request-risk risk reason callbacks context))
+    (if (= result false)
+        {:pending true}
+        :completed))
+
   (fn request-tool-approval [self args]
     (local request-args (or args {}))
     (local tool-name (assert request-args.tool
@@ -169,6 +190,26 @@
           (json.dumps (approval-required-payload request target.risk reason context)))
         (error "space_agent_request_tool_approval did not resolve approval state")))
 
+  (fn call-async [self name args on-result cancelled?]
+    (if (= name "space_agent_request_tool_approval")
+        (do
+          (local (ok result) (pcall #(request-tool-approval self args)))
+          (if ok
+              (on-result {:type :success :value result})
+              (on-result {:type :error :message (.. "approval request failed: " (tostring result))}))
+          :completed)
+        (do
+          (local (ok result)
+            (pcall (fn []
+                     (local matched (active-tool-entry name))
+                     (when (not matched)
+                       (error (.. "tool is not active: " name)))
+                     (run-with-approval-async self matched.def matched.risk args on-result cancelled?))))
+          (if ok result
+              (do
+                (on-result {:type :error :message (tostring result)})
+                :completed)))))
+
   (fn approval-tool-def [self]
     {:name "space_agent_request_tool_approval"
      :description "Request user approval for one exact Space tool call before running it."
@@ -183,7 +224,8 @@
                                          :description "Why this tool call is needed"}}
                    :required ["tool" "arguments"]}
      :risk :normal
-     :run (fn [args] (self:request-tool-approval args))})
+     :run (fn [args] (self:request-tool-approval args))
+     :run-async (fn [args on-result cancelled?] (self:call-async "space_agent_request_tool_approval" args on-result cancelled?))})
 
   (fn active-presets [self]
     (presets:get-active-presets))
@@ -200,6 +242,9 @@
       (set wrapped.run
            (fn [args]
              (self:call raw-def.name args)))
+      (set wrapped.run-async
+           (fn [args on-result cancelled?]
+             (self:call-async raw-def.name args on-result cancelled?)))
       (table.insert result wrapped))
     result)
 
@@ -238,6 +283,7 @@
    :mcp-tool-defs mcp-tool-defs
    :openai-tools openai-tools
    :call call
+   :call-async call-async
    :request-tool-approval request-tool-approval
    :require-risk require-risk})
 

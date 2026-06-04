@@ -65,8 +65,37 @@
             (tostring result-or-err)))
         {:mcp-session-id session-id})))
 
-(fn handle-tools-call [msg tool-registry session-id]
-  "Execute a tool call and return the result."
+(fn push-sse-message [stream body]
+  (stream:send (.. "event: message\ndata: " body "\n\n")))
+
+(fn tool-result-response [msg-id value is-error]
+  (protocol.format-message
+    (protocol.response msg-id
+      {:content [{:type "text" :text (if (= (type value) "string")
+                                          value
+                                          (tostring value))}]
+       :isError (not (not is-error))})))
+
+(fn call-tool-response-async [msg tool-registry session-id tool-name params stream]
+  (var response-pushed false)
+  (var cancelled false)
+  (local cancelled? (fn [] cancelled))
+  (local resp (accepted {:mcp-session-id session-id}))
+  (fn deliver [result]
+    (when (and (not response-pushed) (not cancelled))
+      (set response-pushed true)
+      (if (= result.type :success)
+          (push-sse-message stream (tool-result-response msg.id result.value false))
+          (push-sse-message stream (tool-result-response msg.id result.message true)))
+      (pcall resp.on-complete)))
+  (local status (tool-registry:call-async tool-name (or params.arguments {}) deliver cancelled?))
+  (when (= (. status :pending) true)
+    (tset resp :on-disconnect (fn [] (set cancelled true)))
+    (tset resp :on-complete (fn [] nil)))
+  resp)
+
+(fn handle-tools-call [msg tool-registry session-id stream]
+  "Execute a tool call and return the result. If stream is provided, uses async path for SSE."
   (local params (or msg.params {}))
   (local tool-name params.name)
   (if (not tool-name)
@@ -75,6 +104,8 @@
           (protocol.error-response msg.id protocol.error-codes.INVALID_PARAMS
             "Missing required parameter: name"))
         {:mcp-session-id session-id})
+      stream
+      (call-tool-response-async msg tool-registry session-id tool-name params stream)
       (call-tool-response msg tool-registry session-id tool-name params)))
 
 (fn extract-session-id [req]
@@ -86,7 +117,7 @@
         (set result v))))
   (or result (extract-query-session-id req)))
 
-(fn handle-authenticated-request [msg tool-registry sessions req]
+(fn handle-authenticated-request [msg tool-registry sessions req stream]
   "Route a post-initialize request that has a valid session."
   (local session-id (extract-session-id req))
   (local session (and session-id (. sessions session-id)))
@@ -105,7 +136,7 @@
       (= msg.method "tools/call")
       (do
         (tset session :last-seen (os.time))
-        (handle-tools-call msg tool-registry session-id))
+        (handle-tools-call msg tool-registry session-id stream))
       (protocol.is-notification msg)
       (do
         (tset session :last-seen (os.time))
@@ -127,7 +158,7 @@
   (local session-ttl-seconds (or opts.session-ttl-seconds 3600))
   (var sessions {})
 
-  (fn handle-post [req]
+  (fn handle-post [req stream]
     (prune-sessions! sessions session-ttl-seconds (os.time))
     (local body (or req.body ""))
     (local (msg parse-err) (protocol.parse-message body))
@@ -138,7 +169,7 @@
               (or parse-err "Parse error"))))
         (= msg.method "initialize")
         (handle-initialize msg tool-registry sessions req)
-        (handle-authenticated-request msg tool-registry sessions req)))
+        (handle-authenticated-request msg tool-registry sessions req stream)))
 
   (fn cleanup-session [session-id]
     (tset sessions session-id nil))

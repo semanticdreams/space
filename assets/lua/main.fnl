@@ -1690,7 +1690,8 @@
                 (local entries (fs.list-dir unit-dir))
                 (each [_ entry (ipairs entries)]
                   (local entry-name (or entry.name entry))
-                  (when (string.match entry-name "^test%-.*%.fnl$")
+                  (when (and (= (type entry-name) :string)
+                             (string.match entry-name "^test%-.*%.fnl$"))
                     (table.insert test-summary
                       (.. "  " unit.id "/" entry-name " -> run: space_unit_run_tests "
                           "{id \"" unit.id "\" test-name \""

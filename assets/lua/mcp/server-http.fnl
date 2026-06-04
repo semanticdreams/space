@@ -35,6 +35,8 @@
   (var running false)
   (var active-stream nil)
   (var change-token nil)
+  (var pending-stream-callbacks {})
+  (var next-callback-id 0)
   (local force-sse (if (= opts.force-sse nil) false opts.force-sse))
   (local status {:running false
                  :hostname nil
@@ -64,6 +66,14 @@
       (log.info {:event "list_changed" :count status.list-changed-count}
                 "sent MCP tools/list_changed")))
 
+  (fn cancel-pending-stream-callbacks! []
+    (local fns [])
+    (each [_ cancel-fn (pairs pending-stream-callbacks)]
+      (table.insert fns cancel-fn))
+    (set pending-stream-callbacks {})
+    (each [_ cancel-fn (ipairs fns)]
+      (pcall cancel-fn)))
+
   (fn clear-active-stream [stream session-id]
     (when (= active-stream stream)
       (set active-stream nil)
@@ -72,6 +82,7 @@
       (when change-token
         (tools:remove-on-change change-token)
         (set change-token nil))
+      (cancel-pending-stream-callbacks!)
       (log.info {:event "sse_disconnected" :session-id session-id}
                 "MCP SSE disconnected")))
 
@@ -97,7 +108,18 @@
                 (tset status :tools-call-count (+ status.tools-call-count 1)))
             (log.info {:event "post" :method (or method "unknown") :sse (not= active-stream nil)}
                       "handling MCP POST")
-            (local result (handler.handle-post req))
+            (local result (handler.handle-post req active-stream))
+            (when result.on-disconnect
+              (set next-callback-id (+ next-callback-id 1))
+              (local cb-id next-callback-id)
+              (local disconnect-fn result.on-disconnect)
+              (local cleanup
+                (fn []
+                  (tset pending-stream-callbacks cb-id nil)
+                  (disconnect-fn)))
+              (tset pending-stream-callbacks cb-id cleanup)
+              (tset result :on-disconnect cleanup)
+              (tset result :on-complete cleanup))
             (if (>= (or result.status 200) 400)
                 (tset status :last-error result.body)
                 (tset status :last-error nil))
@@ -117,6 +139,7 @@
           (tools:remove-on-change change-token)
           (set change-token nil))
         (when active-stream
+          (cancel-pending-stream-callbacks!)
           (pcall active-stream.close active-stream))
         (local session-id (Uuid.v4))
         (stream:on-close
@@ -160,6 +183,7 @@
       (when change-token
         (tools:remove-on-change change-token)
         (set change-token nil))
+      (cancel-pending-stream-callbacks!)
       (when active-stream
         (pcall active-stream.close active-stream)
         (set active-stream nil))
