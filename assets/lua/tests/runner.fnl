@@ -17,6 +17,54 @@
 (fn env-enabled? [name]
   (= (os.getenv name) "1"))
 
+(fn configured-test-timeout-seconds []
+  (local raw (os.getenv "SPACE_TEST_CASE_TIMEOUT_SECONDS"))
+  (if (and raw (> (# raw) 0))
+      (do
+        (local parsed (tonumber raw))
+        (assert parsed "SPACE_TEST_CASE_TIMEOUT_SECONDS must be numeric")
+        (assert (>= parsed 0) "SPACE_TEST_CASE_TIMEOUT_SECONDS must be non-negative")
+        parsed)
+      120))
+
+(fn restore-debug-hook! [debug-lib old-hook old-mask old-count]
+  (if old-hook
+      (debug-lib.sethook old-hook old-mask old-count)
+      (debug-lib.sethook nil "" 0)))
+
+(fn make-now-ms []
+  (local (ok sysinfo) (pcall (fn []
+                               (require :sysinfo))))
+  (if (and ok sysinfo sysinfo.now-ms)
+      sysinfo.now-ms
+      (fn [] (* (os.clock) 1000))))
+
+(fn protected-call-with-timeout [traceback test timeout-seconds]
+  (local debug-lib _G.debug)
+  (if (or (= timeout-seconds 0)
+          (not debug-lib)
+          (not debug-lib.sethook)
+          (not debug-lib.gethook))
+      (protected-call traceback test.fn)
+      (do
+        (local now-ms (make-now-ms))
+        (local started-at (now-ms))
+        (local timeout-ms (* timeout-seconds 1000))
+        (var timed-out? false)
+        (var timeout-message nil)
+        (local (old-hook old-mask old-count) (debug-lib.gethook))
+        (fn timeout-hook []
+          (when (>= (- (now-ms) started-at) timeout-ms)
+            (set timed-out? true)
+            (set timeout-message (.. "test timed out after " timeout-seconds "s: " test.name))
+            (error timeout-message 2)))
+        (debug-lib.sethook timeout-hook "" 10000)
+        (local (ok err) (protected-call traceback test.fn))
+        (restore-debug-hook! debug-lib old-hook old-mask old-count)
+        (if timed-out?
+            (values false timeout-message)
+            (values ok err)))))
+
 (local windows-default-skip-modules
   {:tests.test-terminal true
    :tests.test-terminal-widget true
@@ -228,7 +276,7 @@
     (set app.lights (LightSystem {})))
   )
 
-(fn execute-test-list [suite tests test-verbose traceback]
+(fn execute-test-list [suite tests test-verbose traceback timeout-seconds]
   (local registered-tests [])
   (each [_ test (ipairs tests)]
     (when (not (= (type test.name) "string"))
@@ -241,7 +289,7 @@
   (each [_ test (ipairs registered-tests)]
     (when test-verbose
       (log-line (.. "[RUN] " test.name)))
-    (local (ok err) (protected-call traceback test.fn))
+    (local (ok err) (protected-call-with-timeout traceback test timeout-seconds))
     (if ok
         (log-line (.. "[PASS] " test.name))
         (do
@@ -251,7 +299,7 @@
 
   (values failures (# registered-tests)))
 
-(fn execute-tests [suite test-verbose test-filter traceback]
+(fn execute-tests [suite test-verbose test-filter traceback timeout-seconds]
   (local registered-tests [])
   (each [_ test (ipairs suite.tests)]
     (when (or (not test-filter)
@@ -259,7 +307,7 @@
       (table.insert registered-tests test)))
 
   (local (initial-failures initial-executed)
-    (execute-test-list suite registered-tests test-verbose traceback))
+    (execute-test-list suite registered-tests test-verbose traceback timeout-seconds))
   (var failures initial-failures)
   (local executed initial-executed)
 
@@ -282,15 +330,17 @@
   (local test-verbose (os.getenv "TEST_VERBOSE"))
   (local test-filter (os.getenv "TEST_FILTER"))
   (local traceback (and _G.debug _G.debug.traceback))
+  (local timeout-seconds (configured-test-timeout-seconds))
   (setup-test-env test-verbose)
 
-  (execute-tests suite test-verbose test-filter traceback))
+  (execute-tests suite test-verbose test-filter traceback timeout-seconds))
 
 (fn run-modules [suite]
   (assert (and suite suite.modules) "tests.runner: suite missing modules")
   (local test-verbose (os.getenv "TEST_VERBOSE"))
   (local test-filter (os.getenv "TEST_FILTER"))
   (local traceback (and _G.debug _G.debug.traceback))
+  (local timeout-seconds (configured-test-timeout-seconds))
   (setup-test-env test-verbose)
 
   (local modules (apply-module-overrides suite.modules))
@@ -319,7 +369,7 @@
                   (string.find test.name test-filter 1 true))
           (table.insert registered-tests test)))
       (local (module-failures module-executed)
-        (execute-test-list {:name module-name} registered-tests test-verbose traceback))
+        (execute-test-list {:name module-name} registered-tests test-verbose traceback timeout-seconds))
       (set failures (+ failures module-failures))
       (set executed (+ executed module-executed))))
 
