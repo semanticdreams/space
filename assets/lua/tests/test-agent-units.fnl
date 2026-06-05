@@ -11,6 +11,7 @@
 (local {: PresetRegistry} (require :llm/presets/registry))
 (local {: PresetManager} (require :llm/presets/init))
 (local BuiltinUnits (require :llm/presets/builtins/units))
+(local BuiltinGeneral (require :llm/presets/builtins/general))
 (local tempfile (require :tempfile))
 
 (fn with-temp-dir [f]
@@ -283,7 +284,8 @@
   (local adapters (ToolAdapterRegistry {}))
   (local (ok err) (pcall BuiltinUnits.register {:tool-adapters adapters}))
   (assert ok (.. "registration should succeed: " (tostring err)))
-  (local tool-ids [:unit.list :unit.inspect :unit.create :unit.register :unit.edit :unit.reload
+  (local tool-ids [:unit.list :unit.inspect :unit.create :unit.register :unit.edit
+                   :unit.edit-file :unit.apply-patch :unit.reload
                    :unit.delete :unit.eval :unit.snapshot :unit.restore
                    :unit.connect-signal :unit.disconnect-signal
                    :unit.read-log :unit.create-test :unit.run-tests])
@@ -292,6 +294,32 @@
     (assert adapter (.. "adapter " id " should be registered"))))
 
 (table.insert tests {:name "agent-units: tool adapters register" :fn test-unit-tool-adapters-register})
+
+(fn test-space-app-list-files-returns-entries []
+  (with-temp-dir
+    (fn [dir]
+      (fs.write-file (fs.join-path dir "alpha.fnl") "{:ok true}")
+      (fs.create-dirs (fs.join-path dir "subdir"))
+      (local adapters (ToolAdapterRegistry {}))
+      (BuiltinGeneral.register {:tool-adapters adapters})
+      (local def (adapters:resolve "app.list-files" app))
+      (local result (json.loads (def.run {:path dir})))
+      (assert (= (length result) 2) "list-files should return entries, not just a count")
+      (var alpha nil)
+      (var subdir nil)
+      (each [_ entry (ipairs result)]
+        (when (= entry.name "alpha.fnl")
+          (set alpha entry))
+        (when (= entry.name "subdir")
+          (set subdir entry)))
+      (assert alpha "list-files should include file name")
+      (assert alpha.is-file "file entry should mark is-file")
+      (assert (= alpha.path (fs.join-path dir "alpha.fnl")) "file entry should include path")
+      (assert subdir "list-files should include directory name")
+      (assert subdir.is-dir "directory entry should mark is-dir"))))
+
+(table.insert tests {:name "agent-units: space_app_list_files returns entries"
+                     :fn test-space-app-list-files-returns-entries})
 
 ;; ── Tool adapters: unit.list ──
 
@@ -712,6 +740,166 @@
           (app.unit-manager:clear))))))
 
 (table.insert tests {:name "agent-units: space_unit_edit" :fn test-space-unit-edit})
+
+(fn test-space-unit-edit-file-for-directory-unit []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-dir (fs.join-path dir "multi"))
+          (fs.create-dirs unit-dir)
+          (local init-path (fs.join-path unit-dir "init.fnl"))
+          (local controller-path (fs.join-path unit-dir "controller.fnl"))
+          (fs.write-file controller-path
+                         "(fn value [] :v1)\n{:value value}")
+          (fs.write-file init-path
+                         (.. "(local {: value} (require :multi/controller))\n"
+                             "(fn init [] (set app.__multi-val (value)) true)\n"
+                             "(fn drop [] (set app.__multi-val nil) true)\n"
+                             "{:init init :drop drop}"))
+          (local unit (Units.ModuleUnit {:id "user-multi"
+                                          :module-name "multi"
+                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                          :source :user
+                                          :owned-paths [init-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+          (assert (= app.__multi-val :v1) "initial directory unit should load controller v1")
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.edit-file" app))
+          (local result
+            (json.loads
+              (def.run {:id "user-multi"
+                        :path "controller.fnl"
+                        :source "(fn value [] :v2)\n{:value value}"})))
+          (assert result.reloaded "edit-file should trigger reload")
+          (assert (= app.__multi-val :v2) "reload should use edited controller")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit_file directory unit"
+                     :fn test-space-unit-edit-file-for-directory-unit})
+
+(fn test-space-unit-apply-patch-for-directory-unit []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-dir (fs.join-path dir "patchy"))
+          (fs.create-dirs unit-dir)
+          (local init-path (fs.join-path unit-dir "init.fnl"))
+          (local controller-path (fs.join-path unit-dir "controller.fnl"))
+          (fs.write-file controller-path
+                         "(fn value [] :slow)\n{:value value}")
+          (fs.write-file init-path
+                         (.. "(local {: value} (require :patchy/controller))\n"
+                             "(fn init [] (set app.__patch-val (value)) true)\n"
+                             "(fn drop [] (set app.__patch-val nil) true)\n"
+                             "{:init init :drop drop}"))
+          (local unit (Units.ModuleUnit {:id "user-patchy"
+                                          :module-name "patchy"
+                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                          :source :user
+                                          :owned-paths [init-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+          (assert (= app.__patch-val :slow) "initial directory unit should load slow value")
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.apply-patch" app))
+          (local result
+            (json.loads
+              (def.run {:id "user-patchy"
+                        :path "controller.fnl"
+                        :old ":slow"
+                        :new ":slower"})))
+          (assert result.reloaded "apply-patch should trigger reload")
+          (assert (= app.__patch-val :slower) "reload should use patched controller")
+          (local patch-result
+            (json.loads
+              (def.run {:id "user-patchy"
+                        :path "controller.fnl"
+                        :patch (.. "*** Begin Patch\n"
+                                   "*** Update File: controller.fnl\n"
+                                   "@@ -1,2 +1,2 @@\n"
+                                   "-(fn value [] :slower)\n"
+                                   "+(fn value [] :slowest)\n"
+                                   " {:value value}\n"
+                                   "*** End Patch\n")})))
+          (assert patch-result.reloaded "unified patch should trigger reload")
+          (assert (= app.__patch-val :slowest) "reload should use unified-patched controller")
+          (local restored-source (fs.read-file controller-path))
+          (local (delegated-ok delegated-err)
+            (pcall def.run {:id "user-patchy"
+                            :path "controller.fnl"
+                            :patch (.. "*** Begin Patch\n"
+                                       "*** Update File: controller.fnl\n"
+                                       "@@ -1,2 +1,2 @@\n"
+                                       "-(fn value [] :missing-context)\n"
+                                       "+(fn value [] :never)\n"
+                                       " {:value value}\n"
+                                       "*** End Patch\n")}))
+          (assert (not delegated-ok) "delegated patch failure should fail")
+          (assert (string.find (tostring delegated-err) "source restored")
+                  "delegated patch failure should mention restore")
+          (assert (= (fs.read-file controller-path) restored-source)
+                  "delegated patch failure should keep previous file content")
+          (assert (= app.__patch-val :slowest)
+                  "delegated patch failure should keep previous runtime")
+          (local (invalid-ok invalid-err)
+            (pcall def.run {:id "user-patchy"
+                            :path "controller.fnl"
+                            :patch (.. "*** Begin Patch\n"
+                                       "*** Update File: controller.fnl\n"
+                                       "@@ -1,2 +1,2 @@\n"
+                                       "-(fn value [] :slowest)\n"
+                                       "+(fn value []\n"
+                                       " {:value value}\n"
+                                       "*** End Patch\n")}))
+          (assert (not invalid-ok) "invalid patched Fennel should fail")
+          (assert (string.find (tostring invalid-err) "source restored")
+                  "invalid patch error should mention restore")
+          (assert (= (fs.read-file controller-path) restored-source)
+                  "invalid patch should restore previous file content")
+          (assert (= app.__patch-val :slowest) "invalid patch recovery should keep previous runtime")
+          (local (ambiguous-ok ambiguous-err)
+            (pcall def.run {:id "user-patchy"
+                            :path "controller.fnl"
+                            :patch (.. "*** Begin Patch\n"
+                                       "*** Update File: controller.fnl\n"
+                                       "@@ -1,2 +1,2 @@\n"
+                                       "-(fn value [] :slowest)\n"
+                                       "+(fn value [] :fast)\n"
+                                       " {:value value}\n"
+                                       "*** End Patch\n")
+                            :old ":slowest"
+                            :new ":fast"}))
+          (assert (not ambiguous-ok) "patch plus old/new should fail")
+          (assert (string.find (tostring ambiguous-err) "not both")
+                  "ambiguous mode error should mention not both")
+          (local (missing-mode-ok missing-mode-err)
+            (pcall def.run {:id "user-patchy" :path "controller.fnl"}))
+          (assert (not missing-mode-ok) "missing patch mode should fail")
+          (assert (string.find (tostring missing-mode-err) "requires either")
+                  "missing mode error should mention required modes")
+          (local (ok err)
+            (pcall def.run {:id "user-patchy"
+                            :path "controller.fnl"
+                            :old ":missing"
+                            :new ":never"}))
+          (assert (not ok) "missing old text should fail")
+          (assert (string.find (tostring err) "old text was not found")
+                  "error should mention missing old text")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_apply_patch directory unit"
+                     :fn test-space-unit-apply-patch-for-directory-unit})
 
 (fn test-space-unit-edit-rejects-builtin []
   (with-temp-dir
@@ -1931,9 +2119,11 @@
   (BuiltinUnits.register mgr)
   (local discover (reg:get "units-discover-tools"))
   (local runtime-preset (reg:get "units-runtime-tools"))
+  (local signal-preset (reg:get "units-signal-tools"))
   (local edit-preset (reg:get "units-edit-tools"))
   (assert (= discover.risk :normal) "discover tools should remain normal risk")
-  (assert (= runtime-preset.risk :shell) "runtime tools should require shell approval")
+  (assert (= runtime-preset.risk :normal) "runtime tools should not require approval")
+  (assert (= signal-preset.risk :shell) "signal tools should require shell approval")
   (assert (= edit-preset.risk :filesystem-write)
           "test-file creation tools should require filesystem-write approval")
   (fn contains? [items value]
@@ -1942,18 +2132,22 @@
       (when (= item value)
         (set found? true)))
     found?)
-  (each [_ tool-id (ipairs ["unit.edit" "unit.register" "unit.reload"
-                            "unit.connect-signal" "unit.disconnect-signal"
-                            "unit.run-tests" "unit.snapshot"])]
+  (each [_ tool-id (ipairs ["unit.edit" "unit.edit-file" "unit.apply-patch"
+                            "unit.register" "unit.reload"
+                            "unit.disconnect-signal" "unit.run-tests" "unit.snapshot"])]
     (assert (not (contains? discover.tool-ids tool-id))
-            (.. tool-id " must not be normal risk"))
+            (.. tool-id " must not be in discover tools"))
     (assert (not (contains? edit-preset.tool-ids tool-id))
             (.. tool-id " must not be filesystem-write risk"))
     (assert (contains? runtime-preset.tool-ids tool-id)
-            (.. tool-id " should be in runtime shell preset"))))
+            (.. tool-id " should be in runtime normal preset")))
+  (assert (contains? signal-preset.tool-ids "unit.connect-signal")
+          "unit.connect-signal should be in signal shell preset")
+  (assert (not (contains? runtime-preset.tool-ids "unit.connect-signal"))
+          "unit.connect-signal should not be in runtime normal preset"))
 
-(table.insert tests {:name "agent-units: risky unit tools are shell-gated"
-                     :fn test-unit-tool-risk-presets})
+(table.insert tests {:name "agent-units: scoped runtime unit tools are normal risk"
+                      :fn test-unit-tool-risk-presets})
 
 (local main
   (fn []

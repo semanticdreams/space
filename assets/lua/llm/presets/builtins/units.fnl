@@ -9,6 +9,9 @@
       (set file path)))
   file)
 
+(fn path-basename [path]
+  (string.match path "([^/]+)$"))
+
 (fn assert-user-unit [app unit-id tool-name]
   (local unit (app.unit-manager:get unit-id))
   (assert unit (.. tool-name ": unit not found: " unit-id))
@@ -36,6 +39,122 @@
             (when ok
               (set current (fs.parent current))))
           ok))))
+
+(fn unit-root-dir [app unit tool-name]
+  (local fs (require :fs))
+  (local file (unit-source-file app unit))
+  (assert file (.. tool-name ": unit " unit.id " has no source file"))
+  (local parent (fs.parent file))
+  (local name (path-basename file))
+  (if (and (= name "init.fnl")
+           parent
+           (not= (fs.absolute parent) (fs.absolute app.code-dir)))
+      parent
+      (fs.parent file)))
+
+(fn resolve-unit-file [app unit relative-path tool-name]
+  (local fs (require :fs))
+  (assert (= (type relative-path) "string")
+          (.. tool-name " requires a relative string :path"))
+  (assert (> (# relative-path) 0) (.. tool-name " :path must not be empty"))
+  (assert (not (string.match relative-path "^/"))
+          (.. tool-name " :path must be relative to the unit directory"))
+  (assert (not (string.find relative-path "\0" 1 true))
+          (.. tool-name " :path contains a NUL byte"))
+  (local root (unit-root-dir app unit tool-name))
+  (local file (fs.join-path root relative-path))
+  (assert (path-under? file root)
+          (.. tool-name " :path escapes the unit directory"))
+  (assert (path-under? file app.code-dir)
+          (.. tool-name " :path escapes the user code directory"))
+  (local source-file (unit-source-file app unit))
+  (when (= (fs.absolute root) (fs.absolute app.code-dir))
+    (assert (= (fs.absolute file) (fs.absolute source-file))
+            (.. tool-name " cannot edit sibling unit files")))
+  (assert (fs.exists file) (.. tool-name " file not found: " file))
+  file)
+
+(fn validate-fennel-source [file source tool-name]
+  (when (string.match file "%.fnl$")
+    (local fennel (require :fennel))
+    (local (compile-ok compile-err) (pcall fennel.compile-string source
+                                           {:filename file}))
+    (assert compile-ok (.. tool-name " source does not compile: " (tostring compile-err)))))
+
+(fn validate-unit-exports [unit]
+  (local load-key (or unit.load-export "init"))
+  (local unload-key (or unit.unload-export "drop"))
+  (local mod (. package.loaded unit.module-name))
+  (if (and mod
+           (= (type (. mod load-key)) :function)
+           (= (type (. mod unload-key)) :function))
+      nil
+      (if (or (not mod) (not= (type (. mod load-key)) :function))
+          load-key
+          unload-key)))
+
+(fn reload-unit-with-rollback! [app unit file old-source tool-name]
+  (local fs (require :fs))
+  (local json (require :json))
+  (local source (fs.read-file file))
+  (local (ok err)
+    (pcall
+      (fn []
+        (validate-fennel-source file source tool-name)
+        (app.unit-manager:reload-unit unit.id {:source :agent-edit}))))
+  (if ok
+      (do
+        (local missing (validate-unit-exports unit))
+        (if (not missing)
+            (json.dumps {:id unit.id :file file :reloaded true})
+            (do
+              (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+              (fs.write-file file old-source)
+              (local (recover-ok recover-err) (pcall #(unit:reload {})))
+              (error (.. tool-name " failed, module exports invalid: missing " missing
+                         (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
+                         (if (not recover-ok) (.. " (recovery reload also failed: " (tostring recover-err) ")") ""))))))
+      (do
+        (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+        (fs.write-file file old-source)
+        (local (recover-ok recover-err)
+          (pcall #(if (unit:loaded?)
+                      (app.unit-manager:reload-unit unit.id {:source :agent-edit-recover})
+                      (unit:load {}))))
+        (error (.. tool-name " failed, source restored: " (tostring err)
+                   (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
+                   (if (not recover-ok) (.. " (recovery also failed: " (tostring recover-err) ")") ""))))))
+
+(fn write-unit-file-and-reload! [app unit file source tool-name]
+  (local fs (require :fs))
+  (validate-fennel-source file source tool-name)
+  (local old-source (fs.read-file file))
+  (fs.write-file file source)
+  (reload-unit-with-rollback! app unit file old-source tool-name))
+
+(fn replace-exact-text [source old new]
+  (assert (= (type old) "string") "space_unit_apply_patch requires string :old")
+  (assert (= (type new) "string") "space_unit_apply_patch requires string :new")
+  (assert (> (# old) 0) "space_unit_apply_patch :old must not be empty")
+  (local (start-pos end-pos) (string.find source old 1 true))
+  (assert start-pos "space_unit_apply_patch :old text was not found")
+  (local (next-pos) (string.find source old (+ end-pos 1) true))
+  (assert (not next-pos) "space_unit_apply_patch :old text matched more than once")
+  (.. (string.sub source 1 (- start-pos 1))
+      new
+      (string.sub source (+ end-pos 1))))
+
+(fn patch-mode [args]
+  (local has-patch (not= args.patch nil))
+  (local has-old (not= args.old nil))
+  (local has-new (not= args.new nil))
+  (assert (not (and has-patch (or has-old has-new)))
+          "space_unit_apply_patch requires either :patch or :old/:new, not both")
+  (assert (or has-patch (and has-old has-new))
+          "space_unit_apply_patch requires either :patch or both :old and :new")
+  (assert (or has-patch (= has-old has-new))
+          "space_unit_apply_patch requires both :old and :new for exact replacement")
+  (if has-patch :patch :replace))
 
 (fn handle-unit-create-test [app args]
    (local unit (assert-user-unit app args.id "space_unit_create_test"))
@@ -195,7 +314,7 @@
      :mcp-name "space_unit_register"
      :description (.. "Register a directory-style unit that already exists on disk. "
                       "The unit must have an init.fnl in its subdirectory under the code dir. "
-                      "Use this after creating a multi-file unit with space_app_run_bash and space_app_write_file.")
+                       "Use this after the unit directory and init.fnl already exist.")
      :inputSchema {:type "object"
                    :properties {:id {:type "string" :description "Unit module name (subdirectory name under code-dir)"}}
                    :required ["id"]}
@@ -247,54 +366,80 @@
   (adapters:register
     {:id "unit.edit"
      :mcp-name "space_unit_edit"
-     :description "Edit a user unit's source file and trigger a hot reload. Cannot modify built-in units."
+     :description "Edit a user unit's primary source file and trigger a hot reload. Cannot modify built-in units."
+     :inputSchema {:type "object"
+                    :properties {:id {:type "string" :description "Unit ID to edit"}
+                                 :source {:type "string" :description "New Fennel source code"}}
+                    :required ["id" "source"]}
+         :make-run (fn [app]
+                     (fn [args]
+                       (assert app.code-dir "space_unit_edit requires app.code-dir")
+                       (local unit (assert-user-unit app args.id "space_unit_edit"))
+                       (local file (unit-source-file app unit))
+                       (assert file (.. "unit " args.id " has no source file to edit"))
+                       (assert (path-under? file app.code-dir)
+                               (.. "unit " args.id " source file outside code directory"))
+                       (write-unit-file-and-reload! app unit file args.source "space_unit_edit")))})
+
+  (adapters:register
+    {:id "unit.edit-file"
+     :mcp-name "space_unit_edit_file"
+     :description (.. "Edit one existing file inside a user unit directory and hot reload the unit. "
+                      "The path must be relative to the unit directory; use this for multi-file units.")
      :inputSchema {:type "object"
                    :properties {:id {:type "string" :description "Unit ID to edit"}
-                                :source {:type "string" :description "New Fennel source code"}}
-                   :required ["id" "source"]}
-        :make-run (fn [app]
-                    (fn [args]
-                      (assert app.code-dir "space_unit_edit requires app.code-dir")
-                      (local unit (assert-user-unit app args.id "space_unit_edit"))
-                      (local file (unit-source-file app unit))
-                      (assert file (.. "unit " args.id " has no source file to edit"))
-                      (assert (path-under? file app.code-dir)
-                              (.. "unit " args.id " source file outside code directory"))
-                      (local fennel (require :fennel))
-                      (local (compile-ok compile-err) (pcall fennel.compile-string args.source
-                                                             {:filename file}))
-                      (assert compile-ok (.. "source does not compile: " (tostring compile-err)))
-                      (local old-source (fs.read-file file))
-                      (fs.write-file file args.source)
-                      (local (ok err) (pcall #(app.unit-manager:reload-unit args.id {:source :agent-edit})))
-                       (if ok
-                           (do
-                             (local load-key (or unit.load-export "init"))
-                             (local unload-key (or unit.unload-export "drop"))
-                             (local mod (. package.loaded unit.module-name))
-                             (if (and mod
-                                      (= (type (. mod load-key)) :function)
-                                      (= (type (. mod unload-key)) :function))
-                                 (json.dumps {:id args.id :file file :reloaded true})
-                                 (do
-                                   (local missing (if (or (not mod) (not= (type (. mod load-key)) :function))
-                                                      load-key unload-key))
-                                   (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
-                                   (fs.write-file file old-source)
-                                   (local (recover-ok recover-err) (pcall #(unit:reload {})))
-                                   (error (.. "edit failed, module exports invalid: missing " missing
-                                              (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
-                                              (if (not recover-ok) (.. " (recovery reload also failed: " (tostring recover-err) ")") ""))))))
-                           (do
-                            (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
-                            (fs.write-file file old-source)
-                            (local (recover-ok recover-err)
-                              (pcall #(if (unit:loaded?)
-                                          (app.unit-manager:reload-unit args.id {:source :agent-edit-recover})
-                                          (unit:load {}))))
-                            (error (.. "edit failed, source restored: " (tostring err)
-                                       (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
-                                       (if (not recover-ok) (.. " (recovery also failed: " (tostring recover-err) ")") "")))))))})
+                                :path {:type "string" :description "Relative path inside the unit directory"}
+                                :source {:type "string" :description "New file content"}}
+                   :required ["id" "path" "source"]}
+     :make-run (fn [app]
+                 (fn [args]
+                   (assert app.code-dir "space_unit_edit_file requires app.code-dir")
+                   (local unit (assert-user-unit app args.id "space_unit_edit_file"))
+                   (local file (resolve-unit-file app unit args.path "space_unit_edit_file"))
+                   (write-unit-file-and-reload! app unit file args.source "space_unit_edit_file")))})
+
+  (adapters:register
+    {:id "unit.apply-patch"
+     :mcp-name "space_unit_apply_patch"
+     :description (.. "Apply a unified diff patch, or one exact old/new text replacement, to an "
+                      "existing file inside a user unit directory; then hot reload the unit. "
+                      "Pass exactly one mode: patch, or old plus new.")
+     :inputSchema {:type "object"
+                    :properties {:id {:type "string" :description "Unit ID to edit"}
+                                 :path {:type "string" :description "Relative path inside the unit directory"}
+                                 :patch {:type "string" :description "Unified diff patch targeting path; do not combine with old/new"}
+                                 :old {:type "string" :description "Exact old text to replace; requires new and no patch"}
+                                 :new {:type "string" :description "Replacement text; requires old and no patch"}}
+                   :required ["id" "path"]}
+     :make-run (fn [app]
+                 (fn [args]
+                   (assert app.code-dir "space_unit_apply_patch requires app.code-dir")
+                   (local unit (assert-user-unit app args.id "space_unit_apply_patch"))
+                   (local file (resolve-unit-file app unit args.path "space_unit_apply_patch"))
+                   (local root (unit-root-dir app unit "space_unit_apply_patch"))
+                   (local old-source (fs.read-file file))
+                   (if (= (patch-mode args) :patch)
+                       (do
+                          (assert (= (type args.patch) "string")
+                                  "space_unit_apply_patch :patch must be a string")
+                          (local ApplyPatch (require :llm/tools/apply-patch))
+                          (local (patch-ok patch-err)
+                            (pcall ApplyPatch.call
+                                   {:path args.path :patch args.patch :allow_create false}
+                                   {:cwd root}))
+                          (when (not patch-ok)
+                            (local (restore-ok restore-err)
+                              (pcall fs.write-file file old-source))
+                            (error (.. "space_unit_apply_patch failed, source restored: "
+                                       (tostring patch-err)
+                                       (if (not restore-ok)
+                                           (.. " (restore also failed: " (tostring restore-err) ")")
+                                           ""))))
+                          (reload-unit-with-rollback! app unit file old-source "space_unit_apply_patch"))
+                       (do
+                         (local current-source old-source)
+                         (local next-source (replace-exact-text current-source args.old args.new))
+                         (write-unit-file-and-reload! app unit file next-source "space_unit_apply_patch")))))})
 
 (adapters:register
     {:id "unit.reload"
@@ -635,16 +780,19 @@
          "\n"
          "For textures: ctx:get-image-batch(texture) returns batch with .vector (10 floats/vert).\n"
          "Read drawing/render.fnl for the full DynamicTriangleBuffer + DrawingRender code.\n"
-         "\n{:: Multi-file units ::}\n"
-         "For complex units, use subdirectories:\n"
+          "\n{:: Multi-file units ::}\n"
+          "For complex units, use subdirectories:\n"
          "  <code-dir>/<name>/init.fnl     -- main module (exports load/unload/snapshot/restore)\n"
          "  <code-dir>/<name>/render.fnl   -- custom renderer (exports factory)\n"
          "  <code-dir>/<name>/input.fnl    -- input handlers\n"
          "  <code-dir>/<name>/controller.fnl -- business logic / state\n"
-         "\n"
-          "Create dirs with space_app_run_bash (mkdir -p). Write files with space_app_write_file.\n"
-          "After writing all files, call space_unit_register {id \"<name>\"} to load the unit.\n"
-         "Submodules use (require :name/render) (slash syntax);\n"
+          "\n"
+          "For existing multi-file units, edit files with space_unit_apply_patch for small exact\n"
+          "replacements, or space_unit_edit_file for full-file rewrites. Avoid shell/perl/sed\n"
+          "for unit edits; these tools hot reload automatically. To load a new directory-style\n"
+          "unit after its directory and init.fnl already exist, call space_unit_register\n"
+          "{id \"<name>\"}.\n"
+          "Submodules use (require :name/render) (slash syntax);\n"
           "Fennel converts slashes to dots internally, matching module paths.\n"
          "\n{:: Idempotency ::}\n"
          "Before creating, call space_unit_list to check for existing units. Skip creation\n"
@@ -747,7 +895,7 @@
            "  1. Create test: space_unit_create_test {id \"user-bubbles\" test-name \"init\" source \"...\"}\n"
            "  2. Run tests:  space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
            "  3. Check log:  space_unit_read_log {grep \"bubbles\"}  -- if tests failed\n"
-           "  4. Fix source: space_unit_edit {id \"user-bubbles\" source \"...\"}\n"
+           "  4. Fix source: space_unit_apply_patch {id \"user-bubbles\" path \"controller.fnl\" old \"...\" new \"...\"}\n"
            "  5. Re-run:     space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
           "  6. Repeat 3-5 until all tests pass\n"
           "\n{:: Unit code style (from AGENTS.md) ::}\n"
@@ -770,10 +918,18 @@
     {:name "units-runtime-tools"
      :group "units"
      :default-state :auto
+     :risk :normal
+     :contexts [{:surface :any}]
+       :tool-ids ["unit.edit" "unit.edit-file" "unit.apply-patch" "unit.register" "unit.reload"
+                  "unit.disconnect-signal" "unit.run-tests" "unit.snapshot"]})
+
+  (mgr:register
+    {:name "units-signal-tools"
+     :group "units"
+     :default-state :auto
      :risk :shell
      :contexts [{:surface :any}]
-      :tool-ids ["unit.edit" "unit.register" "unit.reload" "unit.connect-signal"
-                 "unit.disconnect-signal" "unit.run-tests" "unit.snapshot"]})
+     :tool-ids ["unit.connect-signal"]})
 
    (mgr:register
      {:name "units-edit-tools"

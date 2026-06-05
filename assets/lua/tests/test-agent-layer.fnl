@@ -801,6 +801,38 @@
   (assert (not ok) "different arguments should require a separate approval")
   (assert (= call-count 1) "only the approved exact call should run"))
 
+(fn test-tool-surface-request-approval-normalizes-opencode-prefix []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local mock-def {:name "space_shell"
+                   :description "shell"
+                   :inputSchema {:type "object" :properties {:cmd {:type "string"}}}
+                   :managed-source "shell-tool"
+                   :run (fn [_args] "ran")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "shell-preset" :reason :override :risk :shell :tool-ids ["shell-tool"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals {:policy {:shell :ask}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request]
+      (when request
+        (set pending request))))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (local approval-json
+    (surface:call "space_agent_request_tool_approval"
+                  {:tool "space_space_shell"
+                   :arguments {:cmd "echo hi"}
+                   :reason "run the requested command"}))
+  (local approval-result (json.loads approval-json))
+  (assert (= approval-result.status "approval_required")
+          "request approval tool should create an approval request")
+  (assert pending "approval request should be pending")
+  (assert (= pending.tool "space_shell") "pending approval should use raw tool name"))
+
 (fn test-tool-surface-call-async-immediate []
   (local {: AgentToolSurface} (require :llm/agent/tool-surface))
   (local {: AgentApprovals} (require :llm/agent/approvals))
@@ -857,15 +889,20 @@
                                      :approvals approvals}))
   (var captured nil)
   (local status (surface:call-async "space_shell" {}
-                                    (fn [result] (set captured result))))
-  (assert (= status.pending true) "ask risk should return pending")
+                                     (fn [result] (set captured result))))
+  (assert (= status :completed) "ask risk should return approval_required immediately")
   (assert pending "tool call should create a pending approval request")
   (assert (not called) "pending high-risk tool should not execute")
-  (assert (= captured nil) "on-result should not be called yet")
+  (assert captured "on-result should be called immediately")
+  (assert (= captured.type :error) "approval-required direct call should be an error result")
+  (assert (string.find captured.message "approval_required") "result should mention approval_required")
   (pending:approve)
-  (assert captured "on-result should be called after approve")
-  (assert (= captured.type :success) "approved async tool should succeed")
-  (assert (= captured.value "ran") "approved async tool should return value")
+  (set captured nil)
+  (local retry-status (surface:call-async "space_shell" {}
+                                          (fn [result] (set captured result))))
+  (assert (= retry-status :completed) "approved retry should complete synchronously")
+  (assert (= captured.type :success) "approved retry should succeed")
+  (assert (= captured.value "ran") "approved retry should return value")
   (assert called "tool should execute after approve"))
 
 (table.insert tests {:name "tool surface call-async pending approval" :fn test-tool-surface-call-async-pending-approval})
@@ -900,17 +937,18 @@
   (local status (surface:call-async "space_shell" {}
                                     (fn [result] (set captured result))
                                     cancelled?))
-  (assert (= status.pending true) "ask risk should return pending")
+  (assert (= status :completed) "ask risk should return approval_required immediately")
   (assert pending "tool call should create a pending approval request")
   (assert (not called) "pending high-risk tool should not execute")
-  ;; Simulate SSE disconnect before approval
+  (assert captured "on-result should have been called immediately")
+  (assert (= captured.type :error) "direct pending approval should return an error result")
+  (assert (string.find captured.message "approval_required") "error should mention approval_required")
+  ;; Simulate SSE disconnect before approval. The original request has already completed,
+  ;; so approval only grants a future retry and must not run the old call.
   (set cancelled true)
-  ;; User approves (but stream is gone)
   (pending:approve)
   (assert (not called) "cancelled tool should not execute after approval")
-  (assert captured "on-result should have been called")
-  (assert (= captured.type :error) "cancelled tool should return error to on-result")
-  (assert (string.find (or captured.message "") "cancelled") "error should mention cancelled"))
+  (assert (= captured.type :error) "original request should remain approval_required"))
 
 (table.insert tests {:name "tool surface call-async cancelled before approval" :fn test-tool-surface-call-async-cancelled-before-approval})
 
@@ -2297,6 +2335,8 @@
 (table.insert tests {:name "tool surface call runs active tool" :fn test-tool-surface-call-runs-active-tool})
 (table.insert tests {:name "tool surface exposes and gates ask risk" :fn test-tool-surface-exposes-and-gates-ask-risk})
 (table.insert tests {:name "tool surface request approval tool grants exact call" :fn test-tool-surface-request-approval-tool-grants-exact-call})
+(table.insert tests {:name "tool surface request approval normalizes opencode prefix"
+                     :fn test-tool-surface-request-approval-normalizes-opencode-prefix})
 (table.insert tests {:name "agent mcp sync registers surface tools" :fn test-agent-mcp-sync-registers-surface-tools})
 (table.insert tests {:name "agent mcp sync does not bypass surface gating" :fn test-agent-mcp-sync-does-not_bypass_surface_gating})
 (table.insert tests {:name "opencode mcp bridge starts and writes config" :fn test-opencode-mcp-bridge-starts-and-writes-config})

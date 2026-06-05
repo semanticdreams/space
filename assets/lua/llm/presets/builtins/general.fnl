@@ -171,10 +171,18 @@
      :description "List files in a directory."
      :inputSchema {:type "object" :properties {:path {:type "string" :description "Directory path"}} :required ["path"]}
      :make-run (fn [_app]
-                 (fn [args]
-                   (local fs (require :fs))
-                   (local entries (fs.list-dir args.path))
-                   (.. "found " (# entries) " entries")))})
+                  (fn [args]
+                    (local fs (require :fs))
+                    (local json (require :json))
+                    (local entries (fs.list-dir args.path))
+                    (local result [])
+                    (each [_ entry (ipairs entries)]
+                      (table.insert result
+                        {:name entry.name
+                         :path (fs.join-path args.path entry.name)
+                         :is-file entry.is-file
+                         :is-dir entry.is-dir}))
+                    (json.dumps result)))})
 
   (adapters:register
     {:id "app.write-file"
@@ -209,7 +217,8 @@
   (local adapters (. mgr :tool-adapters))
   (when adapters
     (register-general-adapters adapters))
-  (register-general-presets mgr)
+  (when (and (= (type mgr) :table) (. mgr :register))
+    (register-general-presets mgr))
   true)
 
 {:register register}

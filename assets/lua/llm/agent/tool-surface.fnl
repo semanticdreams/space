@@ -61,10 +61,17 @@
       (table.insert result {:def def :risk risk}))
     result)
 
+  (fn normalize-tool-name [name]
+    (if (and (= (type name) "string")
+             (string.match name "^space_space_"))
+        (string.sub name 7)
+        name))
+
   (fn active-tool-entry [name]
+    (local normalized (normalize-tool-name name))
     (var matched nil)
     (each [_ entry (ipairs (active-tool-defs))]
-      (when (= entry.def.name name)
+      (when (= entry.def.name normalized)
         (set matched entry)))
     matched)
 
@@ -135,27 +142,43 @@
     (local tool-args (or args {}))
     (local context (approval-context def tool-args))
     (local reason (approval-reason def.name risk))
+    (var approved? false)
+    (var denied? false)
     (local callbacks
-      {:on-approved (fn [_approval]
-                      (if (and cancelled? (cancelled?))
-                          (on-result {:type :error :message (.. "tool cancelled: " def.name)})
-                          (do
-                            (local (ok result) (pcall #(def.run tool-args)))
-                            (if ok
-                                (on-result {:type :success :value result})
-                                (on-result {:type :error :message (.. "tool execution failed: " (tostring result))})))))
-       :on-denied (fn [_approval]
-                    (on-result {:type :error
-                                :message (.. "tool denied by approval policy: " def.name " (" risk ")")}))})
+      {:on-approved (fn [_approval] (set approved? true))
+       :on-denied (fn [_approval] (set denied? true))})
     (local result (approvals:request-risk risk reason callbacks context))
-    (if (= result false)
-        {:pending true}
-        :completed))
+    (if approved?
+        (do
+          (if (and cancelled? (cancelled?))
+              (on-result {:type :error :message (.. "tool cancelled: " def.name)})
+              (do
+                (local (ok run-result) (pcall #(def.run tool-args)))
+                (if ok
+                    (on-result {:type :success :value run-result})
+                    (on-result {:type :error :message (.. "tool execution failed: " (tostring run-result))}))))
+          :completed)
+        denied?
+        (do
+          (on-result {:type :error
+                      :message (.. "tool denied by approval policy: " def.name " (" risk ")")})
+          :completed)
+        (= result false)
+        (do
+          (local request (matching-request risk context))
+          (on-result {:type :error
+                      :message (.. "approval_required "
+                                   (json.dumps (approval-required-payload request risk reason context)))})
+          :completed)
+        (do
+          (on-result {:type :error
+                      :message (.. "tool approval did not resolve execution state: " def.name)})
+          :completed)))
 
   (fn request-tool-approval [self args]
     (local request-args (or args {}))
     (local tool-name (assert request-args.tool
-                             "space_agent_request_tool_approval requires :tool"))
+                              "space_agent_request_tool_approval requires :tool"))
     (assert (= (type tool-name) "string")
             "space_agent_request_tool_approval :tool must be a string")
     (local target (active-tool-entry tool-name))
@@ -191,7 +214,8 @@
         (error "space_agent_request_tool_approval did not resolve approval state")))
 
   (fn call-async [self name args on-result cancelled?]
-    (if (= name "space_agent_request_tool_approval")
+    (local normalized (normalize-tool-name name))
+    (if (= normalized "space_agent_request_tool_approval")
         (do
           (local (ok result) (pcall #(request-tool-approval self args)))
           (if ok
@@ -201,9 +225,9 @@
         (do
           (local (ok result)
             (pcall (fn []
-                     (local matched (active-tool-entry name))
+                     (local matched (active-tool-entry normalized))
                      (when (not matched)
-                       (error (.. "tool is not active: " name)))
+                       (error (.. "tool is not active: " normalized)))
                      (run-with-approval-async self matched.def matched.risk args on-result cancelled?))))
           (if ok result
               (do
@@ -264,12 +288,13 @@
 
   (fn call [self name args]
     "Execute a tool by its MCP name through the MCP tool registry."
-    (if (= name "space_agent_request_tool_approval")
+    (local normalized (normalize-tool-name name))
+    (if (= normalized "space_agent_request_tool_approval")
         (request-tool-approval self args)
         (do
-          (local matched (active-tool-entry name))
+          (local matched (active-tool-entry normalized))
           (when (not matched)
-            (error (.. "tool is not active for agent surface: " name)))
+            (error (.. "tool is not active for agent surface: " normalized)))
           (run-with-approval self matched.def matched.risk args))))
 
   (fn require-risk [self risk reason callbacks]
