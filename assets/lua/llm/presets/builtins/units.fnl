@@ -74,6 +74,31 @@
   (assert (fs.exists file) (.. tool-name " file not found: " file))
   file)
 
+(fn resolve-readable-unit-file [app unit relative-path tool-name]
+  (local fs (require :fs))
+  (assert (= (type relative-path) "string")
+          (.. tool-name " requires a relative string :path"))
+  (assert (> (# relative-path) 0) (.. tool-name " :path must not be empty"))
+  (assert (not (string.match relative-path "^/"))
+          (.. tool-name " :path must be relative to the unit directory"))
+  (assert (not (string.find relative-path "\0" 1 true))
+          (.. tool-name " :path contains a NUL byte"))
+  (local root (unit-root-dir app unit tool-name))
+  (local file (fs.join-path root relative-path))
+  (assert (path-under? file app.code-dir)
+          (.. tool-name " :path escapes the user code directory"))
+  (local source-file (unit-source-file app unit))
+  (if (= (fs.absolute root) (fs.absolute app.code-dir))
+      (do
+        (local module-dir (fs.join-path app.code-dir (or unit.module-name unit.id)))
+        (assert (or (= (fs.absolute file) (fs.absolute source-file))
+                    (path-under? file module-dir))
+                (.. tool-name " cannot read sibling unit files")))
+      (assert (path-under? file root)
+              (.. tool-name " :path escapes the unit directory")))
+  (assert (fs.exists file) (.. tool-name " file not found: " file))
+  file)
+
 (fn validate-fennel-source [file source tool-name]
   (when (string.match file "%.fnl$")
     (local fennel (require :fennel))
@@ -173,6 +198,12 @@
    (.. "created test " test-path " (run with space_unit_run_tests "
        "{id \"" args.id "\" test-name \"" args.test-name "\"})"))
 
+ (fn handle-unit-read-file [app args]
+   (local unit (assert-user-unit app args.id "space_unit_read_file"))
+   (local file (resolve-readable-unit-file app unit args.path "space_unit_read_file"))
+   (local fs (require :fs))
+   (fs.read-file file))
+
  (fn handle-unit-run-tests [app args]
    (local unit (app.unit-manager:get args.id))
    (assert unit (.. "unit not found: " args.id))
@@ -267,6 +298,18 @@
                       :owned-paths unit.owned-paths
                       :source-file file
                       :source-code source})))})
+
+   (adapters:register
+     {:id "unit.read-file"
+      :mcp-name "space_unit_read_file"
+      :description (.. "Read one existing file inside a user unit directory. "
+                       "The path must be relative to the unit directory; use this instead of "
+                       "space_app_read_file for unit source and test files.")
+      :inputSchema {:type "object"
+                    :properties {:id {:type "string" :description "Unit ID to read from"}
+                                 :path {:type "string" :description "Relative path inside the unit directory"}}
+                    :required ["id" "path"]}
+      :make-run (fn [app] (fn [args] (handle-unit-read-file app args)))})
 
   (adapters:register
     {:id "unit.create"
@@ -658,15 +701,15 @@
   (adapters:register
     {:id "unit.create-test"
      :mcp-name "space_unit_create_test"
-     :description (.. "Create a test module for a user unit. The test module must return a table "
-                      "with {:tests [{:name \"description\" :fn (fn [] ...)}]}. Tests run in a "
-                      "headless engine with mock OpenGL. The global `app` is available.")
+     :description (.. "Create a test module for a user unit. The test module must export "
+                      "{:main main :tests tests}; main should usually call tests/runner. "
+                      "Tests run in a headless engine with mock OpenGL. The global `app` is available.")
      :inputSchema {:type "object"
                    :properties {:id {:type "string" :description "Unit ID to create a test for"}
                                 :test-name {:type "string"
                                             :description "Short name for the test aspect (e.g. init, render, integration)"}
                                 :source {:type "string"
-                                         :description "Fennel source code for the test module. Must return {:tests [...]}"}}
+                                         :description "Fennel source code for the test module. Must return {:main main :tests tests}."}}
                    :required ["id" "test-name" "source"]}
      :make-run (fn [app] (fn [args] (handle-unit-create-test app args)))})
 
@@ -689,7 +732,7 @@
      :default-state :auto
      :risk :normal
      :contexts [{:surface :any}]
-      :tool-ids ["unit.list" "unit.inspect" "unit.read-log"]
+      :tool-ids ["unit.list" "unit.inspect" "unit.read-file" "unit.read-log"]
      :system-prompt
      (.. "{:: Unit Tools ::}\n"
          "You can create, edit, reload, and wire Fennel runtime modules called \"units\".\n"
@@ -730,6 +773,9 @@
          "  :deactivate -- (fn [ctx session] -> ...) called on deactivation\n"
          "  :snapshot   -- optional (fn [ctx session] -> state) for state capture\n"
          "  :restore    -- optional (fn [ctx session state] -> bool) for state restore\n"
+         "\n"
+         "Use CanvasModes.mode-registered? to check existence. CanvasModes.resolve returns\n"
+         "the canonical mode id string; use CanvasModes.spec to inspect label/icon/buttons.\n"
          "\n"
          "Inside activate(ctx), call these setters to wire up the mode:\n"
          "  ctx:set-root-actions!(fn)       -- context menu: (fn [context]) -> [action-entries]\n"
@@ -844,14 +890,16 @@
           "\n"
           "Test module structure:\n"
           "  ;; test-init.fnl\n"
-          "  {:tests [{:name \"description of what is tested\"\n"
-          "            :fn (fn []\n"
-          "                  ;; setup: load the unit, init state\n"
-          "                  ;; action: trigger behavior\n"
-          "                  ;; assert: verify expected result\n"
-          "                  (assert (= expected actual) \"failure message\"))}\n"
-          "           {:name \"second test\"\n"
-          "            :fn (fn [] ...)}]}\n"
+          "  (local runner (require :tests/runner))\n"
+          "  (local tests [])\n"
+          "  (table.insert tests {:name \"description of what is tested\"\n"
+          "                       :fn (fn []\n"
+          "                             ;; setup: load the unit, init state\n"
+          "                             ;; action: trigger behavior\n"
+          "                             ;; assert: verify expected result\n"
+          "                             (assert (= expected actual) \"failure message\"))})\n"
+          "  (fn main [] (runner.run-tests {:name \"unit init\" :tests tests}))\n"
+          "  {:main main :tests tests}\n"
           "\n"
           "Test environment (available without require):\n"
           "  app, app.engine          -- headless engine with mock OpenGL\n"
@@ -895,9 +943,10 @@
            "  1. Create test: space_unit_create_test {id \"user-bubbles\" test-name \"init\" source \"...\"}\n"
            "  2. Run tests:  space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
            "  3. Check log:  space_unit_read_log {grep \"bubbles\"}  -- if tests failed\n"
-           "  4. Fix source: space_unit_apply_patch {id \"user-bubbles\" path \"controller.fnl\" old \"...\" new \"...\"}\n"
-           "  5. Re-run:     space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
-          "  6. Repeat 3-5 until all tests pass\n"
+           "  4. Read source/test files with space_unit_read_file when needed.\n"
+           "  5. Fix source: space_unit_apply_patch {id \"user-bubbles\" path \"controller.fnl\" old \"...\" new \"...\"}\n"
+           "  6. Re-run:     space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
+          "  7. Repeat 3-6 until all tests pass\n"
           "\n{:: Unit code style (from AGENTS.md) ::}\n"
          "- Four-space indentation, no trailing whitespace\n"
          "- Declare locals at top: (local fs (require :fs))\n"

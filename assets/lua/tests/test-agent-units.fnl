@@ -1568,6 +1568,102 @@
 
 (table.insert tests {:name "agent-units: space_unit_create_test invalid test-name" :fn test-space-unit-create-test-invalid-name})
 
+;; ── Tool adapters: unit.read-file ──
+
+(fn test-space-unit-read-file []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-dir (fs.join-path dir "reader"))
+          (fs.create-dirs unit-dir)
+          (local init-path (fs.join-path unit-dir "init.fnl"))
+          (local helper-path (fs.join-path unit-dir "helper.fnl"))
+          (fs.write-file init-path "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
+          (fs.write-file helper-path "helper-content")
+          (local unit (Units.ModuleUnit {:id "user-reader"
+                                          :module-name "reader"
+                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                          :source :user
+                                          :owned-paths [init-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.read-file" app))
+
+          (local result (def.run {:id "user-reader" :path "helper.fnl"}))
+          (assert (= result "helper-content") "read-file should return unit file content")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_read_file" :fn test-space-unit-read-file})
+
+(fn test-space-unit-read-file-flat-unit-test-file []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-path (fs.join-path dir "flat.fnl"))
+          (local test-dir (fs.join-path dir "flat"))
+          (fs.write-file unit-path "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
+          (fs.create-dirs test-dir)
+          (fs.write-file (fs.join-path test-dir "test-init.fnl") "flat-test-content")
+          (local unit (Units.ModuleUnit {:id "user-flat"
+                                          :module-name "flat"
+                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                          :source :user
+                                          :owned-paths [unit-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.read-file" app))
+
+          (local source-result (def.run {:id "user-flat" :path "flat.fnl"}))
+          (local test-result (def.run {:id "user-flat" :path "flat/test-init.fnl"}))
+          (assert (string.find source-result "fn init" 1 true) "read-file should read flat unit source")
+          (assert (= test-result "flat-test-content") "read-file should read flat unit test file")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_read_file flat unit test file" :fn test-space-unit-read-file-flat-unit-test-file})
+
+(fn test-space-unit-read-file-rejects-escape []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-dir (fs.join-path dir "reader"))
+          (fs.create-dirs unit-dir)
+          (local init-path (fs.join-path unit-dir "init.fnl"))
+          (fs.write-file init-path "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
+          (fs.write-file (fs.join-path dir "secret.fnl") "secret")
+          (local unit (Units.ModuleUnit {:id "user-reader"
+                                          :module-name "reader"
+                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                          :source :user
+                                          :owned-paths [init-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.read-file" app))
+
+          (local (ok err) (pcall def.run {:id "user-reader" :path "../secret.fnl"}))
+          (assert (not ok) "read-file should reject paths outside the unit directory")
+          (assert (string.find (tostring err) "escapes") "error should mention escaping")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_read_file rejects escape" :fn test-space-unit-read-file-rejects-escape})
+
 ;; ── Tool adapters: unit.register ──
 
 (fn test-space-unit-register []
