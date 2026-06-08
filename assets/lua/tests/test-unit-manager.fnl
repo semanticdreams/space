@@ -300,7 +300,7 @@
 (table.insert tests {:name "unit registry survives clear and reuse"
                      :fn unit-registry-survives-clear-and-reuse})
 (table.insert tests {:name "unit-manager list returns insertion order"
-                      :fn unit-manager-list-returns-insertion-order})
+                     :fn unit-manager-list-returns-insertion-order})
 
 (fn user-code-directory-scanner-loads-top-level-and-subdir-init-fnl []
   (with-temp-dir

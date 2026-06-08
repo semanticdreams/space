@@ -403,10 +403,10 @@
 
       (assert (string.find init-src "CanvasModes.register-mode" 1 true)
               "init.fnl should call CanvasModes.register-mode")
-      (assert (string.find init-src "init init" 1 true) "init.fnl should export init")
-      (assert (string.find init-src "drop drop" 1 true) "init.fnl should export drop")
-      (assert (string.find init-src "snapshot snapshot" 1 true) "init.fnl should export snapshot")
-      (assert (string.find init-src "restore restore" 1 true) "init.fnl should export restore")
+      (assert (string.find init-src ":init" 1 true) "init.fnl should export :init")
+      (assert (string.find init-src ":drop" 1 true) "init.fnl should export :drop")
+      (assert (string.find init-src ":snapshot" 1 true) "init.fnl should export :snapshot")
+      (assert (string.find init-src ":restore" 1 true) "init.fnl should export :restore")
       (print "  [verify] init.fnl structure: OK")
 
       (print (.. "  --- bubbles/render.fnl (" (# render-src) " bytes) ---"))
