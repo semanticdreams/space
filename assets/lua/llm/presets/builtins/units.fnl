@@ -272,32 +272,54 @@
                          :owned-paths unit.owned-paths}))
                    (json.dumps result)))})
 
-  (adapters:register
-    {:id "unit.inspect"
-     :mcp-name "space_unit_inspect"
-     :description "Inspect a unit by ID. Returns metadata and source code if available."
-     :inputSchema {:type "object"
-                   :properties {:id {:type "string" :description "Unit ID"}}
-                   :required ["id"]}
-     :make-run (fn [app]
-                 (fn [args]
-                   (require-unit-manager app "space_unit_inspect")
-                   (local unit (app.unit-manager:get args.id))
-                   (assert unit (.. "unit not found: " args.id))
-                    (local file (unit-source-file app unit))
-                    (var source nil)
-                    (when (and file (fs.exists file))
-                      (local (ok content) (pcall fs.read-file file))
-                      (when ok
-                        (set source content)))
-                   (json.dumps
-                     {:id unit.id
-                      :parent-id unit.parent-id
-                      :source unit.source
-                      :loaded (unit:loaded?)
-                      :owned-paths unit.owned-paths
-                      :source-file file
-                      :source-code source})))})
+   (adapters:register
+     {:id "unit.inspect"
+      :mcp-name "space_unit_inspect"
+      :description "Inspect a unit by ID. Returns metadata and source code if available."
+      :inputSchema {:type "object"
+                    :properties {:id {:type "string" :description "Unit ID"}}
+                    :required ["id"]}
+      :make-run (fn [app]
+                  (fn [args]
+                    (require-unit-manager app "space_unit_inspect")
+                    (local unit (app.unit-manager:get args.id))
+                    (assert unit (.. "unit not found: " args.id))
+                     (local file (unit-source-file app unit))
+                     (var source nil)
+                     (when (and file (fs.exists file))
+                       (local (ok content) (pcall fs.read-file file))
+                       (when ok
+                         (set source content)))
+                     (local submodules [])
+                     (when file
+                       (local parent-dir (fs.parent file))
+                       (when (and parent-dir
+                                  (not= (fs.absolute parent-dir) (fs.absolute (or app.code-dir "")))
+                                  (fs.exists parent-dir))
+                         (local entries (fs.list-dir parent-dir))
+                         (when entries
+                           (each [_ entry (ipairs entries)]
+                             (when (and (not= entry.name "init.fnl")
+                                        entry.is-file
+                                        (string.match entry.name "%.fnl$"))
+                               (table.insert submodules
+                                             {:name entry.name
+                                              :path entry.path}))))))
+                    (json.dumps
+                      {:id unit.id
+                       :module-name unit.module-name
+                       :parent-id unit.parent-id
+                       :source unit.source
+                       :loaded (unit:loaded?)
+                       :owned-paths unit.owned-paths
+                       :source-file file
+                       :source-code source
+                       :load-export (or unit.load-export "init")
+                       :unload-export (or unit.unload-export "drop")
+                       :snapshot-export (or unit.snapshot-export "snapshot")
+                       :restore-export (or unit.restore-export "restore")
+                       :submodules submodules})))})
+
 
    (adapters:register
      {:id "unit.read-file"

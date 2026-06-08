@@ -400,6 +400,140 @@
 
 (table.insert tests {:name "agent-units: space_unit_inspect" :fn test-space-unit-inspect})
 
+(fn test-space-unit-inspect-directory-submodules []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-dir (fs.join-path dir "inspect-dir"))
+          (fs.create-dirs unit-dir)
+          (local init-path (fs.join-path unit-dir "init.fnl"))
+          (local render-path (fs.join-path unit-dir "render.fnl"))
+          (local controller-path (fs.join-path unit-dir "controller.fnl"))
+          (fs.write-file init-path
+                         (.. "(fn init [] true)\n"
+                             "(fn drop [] true)\n"
+                             "{:init init :drop drop}"))
+          (fs.write-file render-path "{:value :render}")
+          (fs.write-file controller-path "{:value :controller}")
+          (local unit (Units.ModuleUnit {:id "user-inspect-dir"
+                                          :module-name "inspect-dir"
+                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                          :source :user
+                                          :owned-paths [init-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.inspect" app))
+          (local result (json.loads (def.run {:id "user-inspect-dir"})))
+
+          (assert (= result.id "user-inspect-dir") "should return id")
+          (assert (= result.module-name "inspect-dir") "should return module-name")
+          (assert (= result.source :user))
+          (assert (= result.source-file init-path) "source-file should be init.fnl")
+          (assert result.source-code "should return source code")
+          (assert (= result.load-export "init") "default load-export should be init")
+          (assert (= result.unload-export "drop") "default unload-export should be drop")
+          (assert (string.find result.snapshot-export "snapshot") "should report snapshot-export")
+          (assert (string.find result.restore-export "restore") "should report restore-export")
+          (assert (= (type result.submodules) :table) "submodules should be a table")
+          (assert (>= (# result.submodules) 2) "directory unit should list submodule files")
+          (var found-render false)
+          (var found-controller false)
+          (each [_ sm (ipairs result.submodules)]
+            (when (= sm.name "render.fnl") (set found-render true))
+            (when (= sm.name "controller.fnl") (set found-controller true)))
+          (assert found-render "submodules should include render.fnl")
+          (assert found-controller "submodules should include controller.fnl")
+          (assert (not (string.find result.source-code "render.fnl" 1 true))
+                  "source-code should be init.fnl content, not all submodules")
+
+          (unit:unload {})
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_inspect directory submodules"
+                     :fn test-space-unit-inspect-directory-submodules})
+
+(fn test-space-unit-inspect-custom-exports []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local file-path (fs.join-path dir "custom-exp.fnl"))
+          (fs.write-file file-path
+                         (.. "(fn start [] true)\n"
+                             "(fn stop [] true)\n"
+                             "{:start start :stop stop}"))
+          (local unit (Units.ModuleUnit {:id "custom-exp"
+                                          :module-name "custom-exp"
+                                          :module-paths (.. dir "/?.fnl")
+                                          :source :user
+                                          :owned-paths [file-path]
+                                          :load-export "start"
+                                          :unload-export "stop"
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.inspect" app))
+          (local result (json.loads (def.run {:id "custom-exp"})))
+
+          (assert (= result.load-export "start") "should report load-export")
+          (assert (= result.unload-export "stop") "should report unload-export")
+          (assert (= result.snapshot-export "snapshot") "default snapshot-export should be snapshot")
+          (assert (= result.restore-export "restore") "default restore-export should be restore")
+          (assert (= (# result.submodules) 0) "flat unit should have no submodules")
+
+          (unit:unload {})
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_inspect custom exports"
+                     :fn test-space-unit-inspect-custom-exports})
+
+(fn test-space-unit-inspect-snapshot-restore-exports []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local file-path (fs.join-path dir "snap-unit.fnl"))
+          (fs.write-file file-path
+                         (.. "(fn init [] true)\n"
+                             "(fn drop [] true)\n"
+                             "(fn snapshot [] app.__snap-state)\n"
+                             "(fn restore [state] (set app.__snap-state state) true)\n"
+                             "{:init init :drop drop :snapshot snapshot :restore restore}"))
+          (local unit (Units.ModuleUnit {:id "snap-unit"
+                                          :module-name "snap-unit"
+                                          :module-paths (.. dir "/?.fnl")
+                                          :source :user
+                                          :owned-paths [file-path]
+                                          :suppress-run-main? false}))
+          (app.unit-manager:register unit)
+          (unit:load {})
+
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.inspect" app))
+          (local result (json.loads (def.run {:id "snap-unit"})))
+
+          ;; Using default exports, snapshot/restore are present implicitly
+          (assert (= result.load-export "init"))
+          (assert (= result.unload-export "drop"))
+          (assert (string.find result.snapshot-export "snapshot") "should report snapshot-export")
+          (assert (string.find result.restore-export "restore") "should report restore-export")
+          (assert (= result.module-name "snap-unit"))
+
+          (unit:unload {})
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_inspect snapshot/restore exports"
+                     :fn test-space-unit-inspect-snapshot-restore-exports})
+
 ;; ── Tool adapters: unit.create ──
 
 (fn test-space-unit-create []
