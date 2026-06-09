@@ -17,7 +17,9 @@
     (or opts.color
         (get-theme-text-color ctx)
         (glm.vec4 1 0 0 1)))
-  (or opts.style (TextStyle {:color default-color})))
+  (or opts.style (TextStyle {:color default-color
+                             :scale opts.scale
+                             :theme (and ctx ctx.theme)})))
 
 (fn fallback-glyph [font codepoint]
   (or (. font.glyph-map codepoint)

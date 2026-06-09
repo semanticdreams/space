@@ -38,13 +38,10 @@
     (assert ctx.hoverables "PresetList requires ctx.hoverables")
     (assert ctx.icons "PresetList requires ctx.icons")
 
-    (local theme (and ctx ctx.theme))
-    (local dim-fg
-      (or (and theme theme.text theme.text.dim-foreground)
-          (glm.vec4 0.55 0.58 0.64 1)))
-    (local item-fg
-      (or (and theme theme.text theme.text.foreground)
-          (glm.vec4 0.9 0.92 0.97 1)))
+    (assert ctx.theme "PresetList requires ctx.theme")
+    (local theme ctx.theme)
+    (local dim-fg (assert (and theme.text theme.text.dim-foreground) "PresetList requires ctx.theme.text.dim-foreground"))
+    (assert (and theme.list-view theme.list-view.item-selected-background) "PresetList requires ctx.theme.list-view.item-selected-background")
 
     (var inner-flex nil)
     (var last-rows-signature "")
@@ -191,7 +188,7 @@
     (fn make-row [row child-ctx]
       (local preset-expanded? (controller:is-preset-expanded? row.name))
       (local row-bg-color
-        (if row.active? (glm.vec4 0.15 0.20 0.32 0.9)
+        (if row.active? theme.list-view.item-selected-background
             (glm.vec4 0 0 0 0)))
       (local bg-rect
         ((Rectangle {:color row-bg-color})
@@ -211,8 +208,7 @@
          child-ctx))
       (local name-text
         ((Text {:text row.name
-                :style (TextStyle {:color item-fg
-                                   :scale 1.2})})
+                :scale 1.2})
          child-ctx))
       (local tool-count-text
         ((Text {:text (.. (tostring row.tool-count) " tools")
@@ -270,9 +266,6 @@
 
     (fn make-group-header [group-name child-ctx]
       (local group-expanded? (controller:is-preset-group-expanded? group-name))
-      (local bg-rect
-        ((Rectangle {:color (glm.vec4 0.1 0.12 0.18 1)})
-         child-ctx))
       (local indicator
         ((Icon {:icon (if group-expanded? "expand_more" "chevron_right")
                 :color dim-fg
@@ -285,7 +278,7 @@
          child-ctx))
       (local group-override-state (controller:get-preset-group-override-state group-name))
       (local toggle-all-btn
-        ((Button {                  :text (if (= group-override-state :mixed) "Mixed" group-override-state)
+        ((Button {:text (if (= group-override-state :mixed) "Mixed" group-override-state)
                   :variant (if (= group-override-state :on) :primary :ghost)
                   :scale 0.85
                   :padding [0.15 0.3]
@@ -304,12 +297,9 @@
         ((Padding {:edge-insets [0.25 0.25]
                    :child (fn [_ctx] header-inner)})
          child-ctx))
-      (local stack
-        ((Stack {:children [(fn [_ctx] bg-rect) (fn [_ctx] padded)]})
-         child-ctx))
 
       (local header-widget
-        {:layout stack.layout
+        {:layout padded.layout
          :pointer-target (and child-ctx child-ctx.pointer-target)})
       (set header-widget.intersect
            (fn [self ray]
@@ -320,7 +310,7 @@
       (set header-widget.drop
            (fn [self]
              (clickables:unregister self)
-             (stack:drop)))
+             (padded:drop)))
       (clickables:register header-widget)
       header-widget)
 

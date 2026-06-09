@@ -81,9 +81,68 @@
   (assert (color= colors.foreground theme.qr-code.foreground))
   (assert (color= colors.background theme.qr-code.background)))
 
+(fn text-supports-scale-without-style []
+  (local theme {:text {:foreground (glm.vec4 0.3 0.35 0.4 1)}})
+  (local ctx (make-test-ctx {:theme theme}))
+  (local span ((Text {:text "hello" :scale 0.5}) ctx))
+  (assert (color= span.style.color theme.text.foreground)
+          "text scale should resolve foreground from ctx.theme")
+  (assert (approx span.style.scale 0.5)
+          "text scale should use provided scale value")
+  (span:drop))
+
+(fn text-style-prefers-provided-theme []
+  (local previous app.themes)
+  (local global-theme {:font {:name :global}
+                       :text {:foreground (glm.vec4 0.9 0.2 0.2 1)
+                              :scale 2.0}})
+  (set app.themes {:get-active-theme (fn [] global-theme)})
+  (local local-theme {:font {:name :local}
+                      :text {:foreground (glm.vec4 0.2 0.65 0.2 1)
+                             :scale 1.2}})
+  (local style (TextStyle {:theme local-theme}))
+  (assert (color= style.color local-theme.text.foreground)
+          "TextStyle should use local theme foreground")
+  (assert (approx style.scale local-theme.text.scale)
+          "TextStyle should use local theme scale")
+  (assert (= style.font local-theme.font)
+          "TextStyle should use local theme font")
+  (set app.themes previous))
+
+(fn text-style-falls-back-on-partial-theme []
+  (local previous app.themes)
+  (local global-theme {:font {:name :global}
+                       :text {:foreground (glm.vec4 0.9 0.2 0.2 1)
+                              :scale 2.0}})
+  (set app.themes {:get-active-theme (fn [] global-theme)})
+  (local partial-theme {:text {:foreground (glm.vec4 0.2 0.65 0.2 1)}})
+  (local style (TextStyle {:theme partial-theme}))
+  (assert (color= style.color partial-theme.text.foreground)
+          "should use local text foreground")
+  (assert (approx style.scale global-theme.text.scale)
+          "should fall back to global scale when local theme has none")
+  (assert style.font
+          "should fall back to global font when local theme has none")
+  (set app.themes previous))
+
+(fn text-defaults-scale-from-ctx-theme []
+  (local theme {:text {:foreground (glm.vec4 0.3 0.35 0.4 1)
+                       :scale 3.0}})
+  (local ctx (make-test-ctx {:theme theme}))
+  (local span ((Text {:text "hello"}) ctx))
+  (assert (color= span.style.color theme.text.foreground)
+          "should resolve foreground from ctx.theme")
+  (assert (approx span.style.scale 3.0)
+          "should resolve default scale from ctx.theme.text.scale")
+  (span:drop))
+
 (table.insert tests {:name "Card pulls colors from theme" :fn card-defaults-to-theme-colors})
 (table.insert tests {:name "Text defaults to theme foreground color" :fn text-defaults-to-theme-color})
+(table.insert tests {:name "Text supports :scale without explicit TextStyle" :fn text-supports-scale-without-style})
+(table.insert tests {:name "Text defaults scale from ctx.theme" :fn text-defaults-scale-from-ctx-theme})
 (table.insert tests {:name "TextStyle resolves bold/italic fonts from theme" :fn text-style-picks-theme-font-variants})
+(table.insert tests {:name "TextStyle prefers provided :theme over global" :fn text-style-prefers-provided-theme})
+(table.insert tests {:name "TextStyle falls back on partial theme" :fn text-style-falls-back-on-partial-theme})
 (table.insert tests {:name "QR colors default to theme values" :fn qr-colors-default-to-theme})
 
 (local main

@@ -11,14 +11,23 @@
 (fn resolve-theme-text-color [theme]
   (and theme theme.text (or theme.text.foreground theme.text.color)))
 
-(fn resolve-fonts [opts theme]
+(fn resolve-fonts [opts theme fallback-theme]
   (local options (or opts {}))
-  (local base (or options.font (resolve-theme-font theme :font)))
-  (local italic (or options.italic-font (resolve-theme-font theme :italic-font) base))
-  (local bold (or options.bold-font (resolve-theme-font theme :bold-font) base))
+  (local base (or options.font
+                  (resolve-theme-font theme :font)
+                  (resolve-theme-font fallback-theme :font)))
+  (local italic (or options.italic-font
+                    (resolve-theme-font theme :italic-font)
+                    (resolve-theme-font fallback-theme :italic-font)
+                    base))
+  (local bold (or options.bold-font
+                  (resolve-theme-font theme :bold-font)
+                  (resolve-theme-font fallback-theme :bold-font)
+                  base))
   (local bold-italic
     (or options.bold-italic-font
         (resolve-theme-font theme :bold-italic-font)
+        (resolve-theme-font fallback-theme :bold-italic-font)
         bold
         italic
         base))
@@ -41,12 +50,16 @@
 
 (fn TextStyle [opts]
   (local options (or opts {}))
-  (local theme (resolve-active-theme))
-  (local fonts (resolve-fonts options theme))
-  (local theme-color (resolve-theme-text-color theme))
-  (local theme-text (and theme theme.text))
+  (local local-theme options.theme)
+  (local global-theme (resolve-active-theme))
+  (local fonts (resolve-fonts options local-theme global-theme))
+  (local theme-color (or (resolve-theme-text-color local-theme)
+                         (resolve-theme-text-color global-theme)))
   {:color (or options.color theme-color (glm.vec4 1 0 0 1))
-   :scale (or options.scale (and theme-text theme-text.scale) 1.6)
+   :scale (or options.scale
+              (and local-theme local-theme.text local-theme.text.scale)
+              (and global-theme global-theme.text global-theme.text.scale)
+              1.6)
    :font fonts.font
    :italic-font fonts.italic-font
    :bold-font fonts.bold-font

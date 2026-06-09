@@ -63,7 +63,8 @@
   (local hoverables (Hoverables {:intersectables intersector}))
   (BuildContext {:clickables clickables
                  :hoverables hoverables
-                 :icons (make-icons-stub)}))
+                 :icons (make-icons-stub)
+                 :theme (app.themes.get-active-theme)}))
 
 (fn approx= [a b]
   (< (math.abs (- a b)) 0.0001))
