@@ -75,7 +75,7 @@
                    :metadata (or options.metadata {})})
     (set (. cache id) entity)
     (write-entity entity)
-    (link-entity-created:emit entity)
+    (pcall (fn [] (link-entity-created:emit entity)))
     entity)
 
   (fn update-entity [_self id updates]
@@ -92,7 +92,9 @@
     (when entity
       (local path (entity-path id))
       (when (and path fs fs.remove (fs.exists path))
-        (pcall (fn [] (fs.remove path))))
+        (local (rm-ok _rm-err) (pcall (fn [] (fs.remove path))))
+        (when (not rm-ok)
+          (error (.. "link entity delete failed to remove file: " (tostring path)))))
       (set (. cache (tostring id)) nil)
       (link-entity-deleted:emit entity))
     entity)

@@ -708,6 +708,13 @@ set_tests_properties(${PROJECT_NAME}_fnl_tests PROPERTIES
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
+add_test(NAME ${PROJECT_NAME}_fnl_tests_integration
+    COMMAND space -m tests.integration:main
+)
+set_tests_properties(${PROJECT_NAME}_fnl_tests_integration PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
 add_executable(test_vector_buffer
     tests/test_vector_buffer.cpp
 )

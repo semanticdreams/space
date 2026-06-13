@@ -74,6 +74,8 @@
    :physics {:containment default-containment-config}
    :graph {:graph {:nodes []
                    :edges []}}
+   :board {:items []
+           :connectors []}
    :scene {:panels []
            :terrains []
            :skybox (SkyboxState.default-state)
@@ -543,8 +545,13 @@
       (set world.state.graph
            (merge-preserved-graph-state
              graph
-             world.state.graph
-             (graph:capture-state))))
+              world.state.graph
+              (graph:capture-state))))
+    (when runtime
+      (if (and runtime.board-view runtime.board-view.capture-state)
+          (set world.state.board (runtime.board-view:capture-state))
+          (when runtime.board-state
+            (set world.state.board (clone-table runtime.board-state)))))
     (when (and scene scene.capture-state)
       (local captured-scene (scene:capture-state))
       (local existing-scene (or world.state.scene {}))
@@ -669,6 +676,7 @@
       (apply-runtime-containment! world {:scene scene}))
     (local runtime
       {:camera camera
+       :world-dir world.dir
        :canvas-camera canvas-camera
        :focus-manager ctx.focus-manager
        :focus-root ctx.focus-root
@@ -686,9 +694,10 @@
        :requested-canvas-mode-known? true
        :preferred-interaction-surface
        (resolve-runtime-interaction-surface canvas-state.preferred_interaction_surface)
-       :pending-canvas-state (clone-table world.state.canvas)
-       :pending-hud-state (clone-table world.state.hud)
-       :hydration {:phase "scene-panels"
+        :pending-canvas-state (clone-table world.state.canvas)
+        :pending-hud-state (clone-table world.state.hud)
+        :board-state (clone-table (or world.state.board {:items [] :connectors []}))
+        :hydration {:phase "scene-panels"
                    :ready? false
                    :started? false
                    :completed? false
@@ -720,8 +729,8 @@
              (hud:restore-state rt.pending-hud-state)
              (set rt.pending-hud-state nil))))
     (runtime:load-canvas-runtime)
-    (when graph-state
-      (runtime.graph-view:restore-graph-state graph-state))
+    (when (and graph-state graph graph.restore-state)
+      (graph:restore-state graph-state))
     runtime)
 
   (fn clear-runtime [world ctx reason]
@@ -823,11 +832,9 @@
                        world.active?))
     (when (and active? runtime runtime.hydration)
       (update-runtime-hydration! world runtime))
-    (when (and active? runtime runtime.graph-view)
-      (runtime.graph-view:update delta))
     (when (and active?
-               runtime
-               app.canvas-mode-update)
+                runtime
+                app.canvas-mode-update)
       (app.canvas-mode-update {:world world
                                :runtime runtime
                                :delta delta}))

@@ -777,6 +777,8 @@
 (set app.canvas-interactive? false)
 (set app.canvas-visible? false)
 (set app.graph-view nil)
+(set app.board nil)
+(set app.board-view nil)
 (set app.tray-manager nil)
 (set app.menu-manager nil)
 (set app.notify nil)
@@ -1080,6 +1082,11 @@
           true)))
 
 (fn bind-active-world-runtime [entry runtime]
+  (local previous-runtime app.active-world-runtime)
+  (local previous-shell (canvas-shell-state))
+  (when (and previous-runtime
+             (not (= previous-runtime runtime)))
+    (CanvasModes.deactivate-active-mode))
   (set app.active-world-entry entry)
   (set app.active-world-runtime runtime)
   (set app.camera (and runtime runtime.camera))
@@ -1096,6 +1103,8 @@
   (set app.terrain-paint-previous-state nil)
   (set app.graph (and runtime runtime.graph))
   (set app.graph-view (and runtime runtime.graph-view))
+  (set app.board (and runtime runtime.board))
+  (set app.board-view (and runtime runtime.board-view))
   (set app.drawing-controller (and runtime runtime.drawing-controller))
   (set app.drawing-render (and runtime runtime.drawing-render))
   (set app.layout-root (and app.scene app.scene.layout-root))
@@ -1113,17 +1122,28 @@
     (if (and runtime runtime.requested-canvas-mode-known?)
         runtime.requested-canvas-mode-id
         (and runtime runtime.active-canvas-mode)))
-  (if (CanvasModes.mode-registered? requested-mode-id)
-      (app.set-active-canvas-mode requested-mode-id)
+  (var mode-emitted? false)
+  (if (and app.canvas
+           (CanvasModes.mode-registered? requested-mode-id))
+      (do
+        (app.set-active-canvas-mode requested-mode-id)
+        (set mode-emitted? true))
       (do
         (CanvasModes.activate-mode nil)
         (set app.active-canvas-mode nil)
         (when runtime
+          (set runtime.requested-canvas-mode-id requested-mode-id)
           (set runtime.requested-canvas-mode-known? true)
           (set runtime.active-canvas-mode nil))))
   (app.set-active-interaction-surface (or (and runtime runtime.preferred-interaction-surface)
                                           app.preferred-interaction-surface)
-                                      {:sync-canvas-visibility true}))
+                                      {:sync-canvas-visibility true})
+  (when (and app.canvas-shell-changed
+             (not mode-emitted?)
+             (not (canvas-shell-state= previous-shell (canvas-shell-state))))
+    (app.canvas-shell-changed:emit {:reason "bind-runtime"
+                                    :previous previous-shell
+                                    :current (canvas-shell-state)})))
 
 (fn ensure-hud-unit []
   (when (not app.hud-unit)
@@ -1173,7 +1193,15 @@
     :load-export "load-drawing-canvas-mode!"
     :unload-export "unload-drawing-canvas-mode!"
     :snapshot-export "snapshot-drawing-canvas-mode!"
-    :restore-export "restore-drawing-canvas-mode!"}])
+    :restore-export "restore-drawing-canvas-mode!"}
+   {:mode-id "board"
+    :unit-id "board-canvas-mode"
+    :module-name "board-canvas-mode-unit"
+    :owned-paths-export "board-mode-owned-paths"
+    :load-export "load-board-canvas-mode!"
+    :unload-export "unload-board-canvas-mode!"
+    :snapshot-export "snapshot-board-canvas-mode!"
+    :restore-export "restore-board-canvas-mode!"}])
 
 (fn ensure-canvas-mode-units []
   (set app.canvas-mode-units (or app.canvas-mode-units {}))
@@ -1520,6 +1548,8 @@
   (set app.canvas-visible? false)
   (set app.graph nil)
   (set app.graph-view nil)
+  (set app.board nil)
+  (set app.board-view nil)
   (set app.object-selector nil)
   (set app.terrain-rect-pick-session nil)
   (set app.terrain-rect-pick-previous-state nil)
@@ -1916,6 +1946,8 @@
   (set app.camera nil)
   (set app.graph nil)
   (set app.graph-view nil)
+  (set app.board nil)
+  (set app.board-view nil)
   (set app.object-selector nil)
   (set app.terrain-rect-pick-session nil)
   (set app.terrain-rect-pick-previous-state nil)

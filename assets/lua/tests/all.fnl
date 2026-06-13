@@ -6,12 +6,16 @@
     (table.insert merged item))
   merged)
 
+;; All Lua modules that can safely run in a single process.
+;; Slow tests (C-IR, GCCJIT, hot-reload integration) must run separately
+;; because their full-app bootstrap conflicts with prior suite state.
+;; Use `make test-all-lua` to run fast+integration+slow in sequence.
 (local fast-suite (require :tests/fast))
-(local slow-suite (require :tests/slow))
+(local integration-suite (require :tests/integration))
 
 (local suite
   {:name "all"
-   :modules (concat-modules fast-suite.modules slow-suite.modules)})
+   :modules (concat-modules fast-suite.modules integration-suite.modules)})
 
 (local main
   (fn []

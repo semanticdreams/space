@@ -4,10 +4,10 @@
 (local BuildContext (require :build-context))
 (local ControlPanel (require :hud-control-panel))
 (local Icons (require :icons))
-(local PanelUtils (require :target-panel-utils))
 (local PhysicsContainment (require :physics-containment))
 (local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
+(local CanvasModes (require :canvas-modes))
 
 (fn with-settings [value f]
   (local previous app.settings)
@@ -119,7 +119,7 @@
   (set app.themes previous-themes)
   true)
 
-(fn apply-theme-restores-graph-node-view-panels-on-target []
+(fn apply-theme-does-not-create-graph-view-outside-graph-mode []
   (local original-graph-view app.graph-view)
   (local original-graph app.graph)
   (local original-canvas app.canvas)
@@ -130,35 +130,16 @@
   (local original-themes app.themes)
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
-  (local original-graph-view-module (. package.loaded "graph/view"))
-  (var drop-calls 0)
+  (local original-registry app.canvas-mode-registry)
+  (local original-modes-changed app.canvas-modes-changed)
   (var hud-rebuild-calls 0)
-  (var graph-view-theme nil)
-  (local restored-states [])
-  (local rebuilt-selections [])
-  (local node {:key "node-a"})
-  (local panel-element {:layout {}})
-  (local panel-metadata {:element panel-element
-                         :persistence {:kind "graph-node-view"
-                                       :node-key node.key}})
-  (local canvas {:build-context {:theme {:name :dark}
-                                 :set-theme (fn [self theme]
-                                              (set self.theme theme))}
-                 :float {:children [panel-metadata]}
-                 :capture-panel-element-state
-                 (fn [_self element]
-                   (when (= element panel-element)
-                     {:layer "float"
-                      :position [1 2 3]
-                      :rotation [1 0 0 0]
-                      :size [7 8 9]}))
-                 :restore-state (fn [_self state]
-                                  (table.insert restored-states state)
-                                  true)})
   (local themes {:set-theme (fn [_theme] true)
-                 :get-active-theme (fn [] {:name :light})})
+                  :get-active-theme (fn [] {:name :light})})
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
   (set app.graph {})
-  (set app.canvas canvas)
+  (set app.graph-view nil)
+  (set app.canvas {:build-context {}})
   (set app.scene {:build-default (fn [_self] true)})
   (set app.hud {})
   (set app.apply-active-world-hud-contrib
@@ -167,45 +148,18 @@
          true))
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.settings {:set-value (fn [_key _value _opts] true)
-                     :save (fn [] true)})
+                      :save (fn [] true)})
   (set app.themes themes)
   (set app.active-world-entry {:world {:runtime {}
-                                       :state {:scene {:terrains []}}}})
-  (assert (= (length (PanelUtils.persistent-panels canvas {:kind "graph-node-view"})) 1)
-          "test setup should expose one persisted graph node view panel on the canvas")
-  (set app.graph-view
-       {:selection {:selected-nodes [node]}
-        :drop (fn [_self]
-                (set drop-calls (+ drop-calls 1))
-                (set canvas.float.children []))})
-  (set (. package.loaded "graph/view")
-       (fn [_opts]
-         (set graph-view-theme (and _opts.ctx _opts.ctx.theme _opts.ctx.theme.name))
-         {:selection {:set-selection (fn [_self selected]
-                                       (table.insert rebuilt-selections selected))}}))
+                                        :state {:scene {:terrains []}}}})
   (local (ok err)
     (pcall
       (fn []
         (ThemeActions.apply-theme :light)
         (assert (= hud-rebuild-calls 1)
                 "apply-theme should rebuild the HUD through the active-world HUD helper")
-        (assert (= drop-calls 1)
-                "apply-theme should rebuild the graph view")
-        (assert (= (length restored-states) 1)
-                "apply-theme should restore graph node view panels through the target")
-        (local restored (. restored-states 1))
-        (assert (= (length (or restored.panels [])) 1)
-                "apply-theme should restore the captured graph node view panel")
-        (assert (= (and (. restored.panels 1) (. (. restored.panels 1) :node-key))
-                   node.key)
-                "apply-theme should restore the same node-key")
-        (assert (= (and (. restored.panels 1) (. (. restored.panels 1) :layer))
-                   "float")
-                "apply-theme should restore the captured panel placement")
-        (assert (= graph-view-theme :light)
-                "apply-theme should rebuild graph view with the active theme on the build context")
-        (assert (= (length rebuilt-selections) 1)
-                "apply-theme should restore graph selection on the rebuilt view"))))
+        (assert (not app.graph-view)
+                "apply-theme should not create a graph view outside graph mode"))))
   (set app.graph-view original-graph-view)
   (set app.graph original-graph)
   (set app.canvas original-canvas)
@@ -216,12 +170,13 @@
   (set app.themes original-themes)
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
-  (set (. package.loaded "graph/view") original-graph-view-module)
+  (set app.canvas-mode-registry original-registry)
+  (set app.canvas-modes-changed original-modes-changed)
   (when (not ok)
     (error err))
   true)
 
-(fn apply-theme-drops-graph-view-before-target-rebuild []
+(fn apply-theme-rebuilds-active-graph-mode-through-mode-lifecycle []
   (local original-graph-view app.graph-view)
   (local original-graph app.graph)
   (local original-canvas app.canvas)
@@ -233,100 +188,69 @@
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
   (local original-active-world-runtime app.active-world-runtime)
-  (local original-graph-view-module (. package.loaded "graph/view"))
-  (var panel-dropped? false)
-  (var graph-drop-calls 0)
+  (local original-registry app.canvas-mode-registry)
+  (local original-modes-changed app.canvas-modes-changed)
+  (local original-active-canvas-mode app.active-canvas-mode)
+  (var activate-calls 0)
+  (var deactivate-calls 0)
   (var hud-rebuild-calls 0)
-  (var old-graph-view nil)
-  (local node {:key "node-a"})
-  (local panel-element
-    {:layout {}
-     :drop (fn [_self]
-             (assert (not panel-dropped?) "graph node view panel dropped twice")
-             (set panel-dropped? true))})
-  (local panel-metadata {:element panel-element
-                         :persistence {:kind "graph-node-view"
-                                       :node-key node.key}})
-  (local ctx {:theme {:name :dark}
-              :set-theme (fn [self theme]
-                           (set self.theme theme))})
-  (local hud {:build-context ctx
-              :tiles {:children [panel-metadata]}
-              :capture-panel-element-state
-              (fn [_self element]
-                (when (= element panel-element)
-                  {:layer "tiles"
-                   :align-x :center
-                   :align-y :start}))
-              :remove-panel-child
-              (fn [self element]
-                (var removed false)
-                (local kept [])
-                (each [_ metadata (ipairs self.tiles.children)]
-                  (if (and (not removed) (= metadata.element element))
-                      (do
-                        (set removed true)
-                        (when (and element element.drop)
-                          (element:drop)))
-                      (table.insert kept metadata)))
-                (set self.tiles.children kept)
-                removed)
-              :build-default
-              (fn [self]
-                (set hud-rebuild-calls (+ hud-rebuild-calls 1))
-                (assert (not app.active-world-runtime.graph-view)
-                        "old graph view teardown should clear app.active-world-runtime.graph-view before HUD rebuild")
-                (assert (not app.active-world-entry.world.runtime.graph-view)
-                        "old graph view teardown should clear active world runtime graph-view before HUD rebuild")
-                (each [_ metadata (ipairs self.tiles.children)]
-                  (local element (and metadata metadata.element))
-                  (when (and element element.drop)
-                    (element:drop)))
-                true)
-              :restore-state
-              (fn [_self _state] true)})
+  (var canvas-theme nil)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (local runtime {})
   (set app.graph {})
-  (set app.canvas nil)
-  (set app.scene {:build-context ctx
+  (set app.canvas {:build-context {:theme {:name :dark}
+                                    :set-theme (fn [self theme]
+                                                 (set self.theme theme)
+                                                 (set canvas-theme theme))}})
+  (set app.scene {:build-context {}
                   :build-default (fn [_self _payload] true)})
-  (set app.hud hud)
+  (set app.hud {:build-default
+                (fn [_self]
+                  (set hud-rebuild-calls (+ hud-rebuild-calls 1))
+                  (assert (not app.active-world-runtime.graph-view)
+                          "graph mode should be deactivated before HUD rebuild"))})
   (set app.apply-active-world-hud-contrib
-       (fn []
-         (hud:build-default)))
+        (fn []
+          (app.hud:build-default)))
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.settings {:set-value (fn [_key _value _opts] true)
-                     :save (fn [] true)})
+                      :save (fn [] true)})
   (set app.themes {:set-theme (fn [_theme] true)
                    :get-active-theme (fn [] {:name :light})})
-  (set app.graph-view
-       {:selection {:selected-nodes [node]}
-        :drop (fn [_self]
-                (set graph-drop-calls (+ graph-drop-calls 1))
-                (app.hud:remove-panel-child panel-element))})
-  (set old-graph-view app.graph-view)
-  (local runtime {:graph-view old-graph-view})
   (set app.active-world-runtime runtime)
   (set app.active-world-entry {:world {:runtime runtime
-                                       :state {:scene {:terrains []}}}})
-  (set (. package.loaded "graph/view")
-       (fn [_opts]
-         {:selection {:set-selection (fn [_self _selected] true)}}))
+                                        :state {:scene {:terrains []}}}})
+  (CanvasModes.register-mode
+    {:id "graph"
+     :label "Graph"
+     :activate (fn [_ctx]
+                 (set activate-calls (+ activate-calls 1))
+                 (set runtime.graph-view {:mode-owned? true})
+                 (set app.graph-view runtime.graph-view)
+                 {:graph-view runtime.graph-view})
+     :deactivate (fn [_ctx _session]
+                   (set deactivate-calls (+ deactivate-calls 1))
+                   (set runtime.graph-view nil)
+                   (set app.graph-view nil)
+                   true)})
+  (CanvasModes.activate-mode "graph")
+  (set activate-calls 0)
+  (set deactivate-calls 0)
   (local (ok err)
     (pcall
       (fn []
         (ThemeActions.apply-theme :light)
-        (assert (= graph-drop-calls 1)
-                "apply-theme should drop the old graph view exactly once")
+        (assert (= deactivate-calls 1)
+                "apply-theme should deactivate active graph mode")
+        (assert (= activate-calls 1)
+                "apply-theme should reactivate active graph mode")
         (assert (= hud-rebuild-calls 1)
-                "apply-theme should rebuild the HUD after graph view teardown")
-        (assert panel-dropped?
-                "graph view panel should be dropped during old graph view teardown")
-        (assert (= (length hud.tiles.children) 0)
-                "old graph view teardown should detach graph node view panels before HUD rebuild")
+                "apply-theme should rebuild the HUD while graph mode is inactive")
+        (assert (= (and canvas-theme canvas-theme.name) :light)
+                "apply-theme should update canvas build context before graph mode rebuild")
         (assert app.active-world-runtime.graph-view
-                "apply-theme should install the rebuilt graph view on the active runtime")
-        (assert (not (= app.active-world-runtime.graph-view old-graph-view))
-                "apply-theme should not leave the dropped graph view on the active runtime"))))
+                "apply-theme should restore the mode-owned graph view on the active runtime"))))
   (set app.graph-view original-graph-view)
   (set app.graph original-graph)
   (set app.canvas original-canvas)
@@ -338,7 +262,9 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
   (set app.active-world-runtime original-active-world-runtime)
-  (set (. package.loaded "graph/view") original-graph-view-module)
+  (set app.canvas-mode-registry original-registry)
+  (set app.canvas-modes-changed original-modes-changed)
+  (set app.active-canvas-mode original-active-canvas-mode)
   (when (not ok)
     (error err))
   true)
@@ -370,6 +296,51 @@
   (ThemeActions.apply-theme :solarized)
   (assert (= saved-key "solarized")
           "apply-theme should persist the exact theme key string")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  true)
+
+(fn apply-theme-updates-scene-and-hud-build-contexts-without-canvas []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (var scene-theme nil)
+  (var hud-theme nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  (set app.scene {:build-context {:set-theme (fn [_self theme]
+                                                (set scene-theme theme))}
+                  :build-default (fn [_self _payload] true)})
+  (set app.hud {:build-context {:set-theme (fn [_self theme]
+                                             (set hud-theme theme))}
+                :build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_theme] true)
+                   :get-active-theme (fn [] {:name :dark})})
+  (ThemeActions.apply-theme :dark)
+  (assert scene-theme "apply-theme should update scene build context theme")
+  (assert (= (and scene-theme scene-theme.name) :dark)
+          "apply-theme should set scene build context theme name")
+  (assert hud-theme "apply-theme should update hud build context theme")
+  (assert (= (and hud-theme hud-theme.name) :dark)
+          "apply-theme should set hud build context theme name")
   (set app.settings original-settings)
   (set app.themes original-themes)
   (set app.scene original-scene)
@@ -539,24 +510,265 @@
           "apply-theme should report that active world scene terrains are required")
   true)
 
+(fn apply-theme-rebuilds-active-board-mode-through-mode-lifecycle []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-active-world-runtime app.active-world-runtime)
+  (local original-registry app.canvas-mode-registry)
+  (local original-modes-changed app.canvas-modes-changed)
+  (local original-active-canvas-mode app.active-canvas-mode)
+  (local original-board-view app.board-view)
+  (local original-board app.board)
+  (var activate-calls 0)
+  (var deactivate-calls 0)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (set app.graph {})
+  (set app.graph-view nil)
+  (set app.canvas {:build-context {:theme {:name :dark}
+                                    :set-theme (fn [self theme]
+                                                 (set self.theme theme))}})
+  (set app.scene {:build-context {}
+                  :build-default (fn [_self _payload] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_theme] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (local runtime {})
+  (set app.active-world-runtime runtime)
+  (set app.active-world-entry {:world {:runtime runtime
+                                        :state {:scene {:terrains []}}}})
+  (CanvasModes.register-mode
+    {:id "board"
+     :label "Board"
+     :activate (fn [_ctx]
+                 (set activate-calls (+ activate-calls 1))
+                 (set runtime.board-view {:mode-owned? true})
+                 (set app.board-view runtime.board-view)
+                 {:board-view runtime.board-view})
+     :deactivate (fn [_ctx _session]
+                   (set deactivate-calls (+ deactivate-calls 1))
+                   (set runtime.board-view nil)
+                   (set app.board-view nil)
+                   true)})
+  (CanvasModes.activate-mode "board")
+  (set activate-calls 0)
+  (set deactivate-calls 0)
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light)
+        (assert (= deactivate-calls 1)
+                "apply-theme should deactivate active board mode")
+        (assert (= activate-calls 1)
+                "apply-theme should reactivate active board mode")
+        (assert app.board-view
+                "apply-theme should restore the mode-owned board view on the active runtime"))))
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.active-world-runtime original-active-world-runtime)
+  (set app.canvas-mode-registry original-registry)
+  (set app.canvas-modes-changed original-modes-changed)
+  (set app.active-canvas-mode original-active-canvas-mode)
+  (set app.board-view original-board-view)
+  (set app.board original-board)
+  (when (not ok)
+    (error err))
+  true)
+
 (table.insert tests {:name "Init themes uses stored UI theme" :fn init-themes-reads-settings})
 (table.insert tests {:name "Init themes falls back for unknown stored UI theme"
                      :fn init-themes-falls-back-for-unknown-stored-theme})
 (table.insert tests {:name "Themes set-theme resolves string key"
                      :fn themes-set-theme-resolves-string-key})
 (table.insert tests {:name "Control panel toggles theme" :fn control-panel-toggles-theme})
-(table.insert tests {:name "Apply theme restores graph node view panels on their target"
-                     :fn apply-theme-restores-graph-node-view-panels-on-target})
-(table.insert tests {:name "Apply theme drops graph view before target rebuild"
-                     :fn apply-theme-drops-graph-view-before-target-rebuild})
+(table.insert tests {:name "Apply theme does not create graph view outside graph mode"
+                     :fn apply-theme-does-not-create-graph-view-outside-graph-mode})
+(table.insert tests {:name "Apply theme rebuilds active graph mode through mode lifecycle"
+                     :fn apply-theme-rebuilds-active-graph-mode-through-mode-lifecycle})
 (table.insert tests {:name "Apply theme saves exact theme key"
-                     :fn apply-theme-saves-exact-theme-key})
+                      :fn apply-theme-saves-exact-theme-key})
+(table.insert tests {:name "Apply theme updates scene and HUD build contexts without canvas"
+                      :fn apply-theme-updates-scene-and-hud-build-contexts-without-canvas})
 (table.insert tests {:name "Apply theme refreshes physics containment visualization"
                      :fn apply-theme-refreshes-physics-containment-visualization})
 (table.insert tests {:name "Apply theme preserves active world terrains"
                      :fn apply-theme-preserves-active-world-terrains})
 (table.insert tests {:name "Apply theme requires active world terrain state"
                      :fn apply-theme-requires-active-world-terrain-state})
+(table.insert tests {:name "Apply theme rebuilds active board mode through mode lifecycle"
+                     :fn apply-theme-rebuilds-active-board-mode-through-mode-lifecycle})
+
+(fn apply-theme-fails-when-reactivation-fails-despite-successful-theme []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-active-world-runtime app.active-world-runtime)
+  (local original-registry app.canvas-mode-registry)
+  (local original-modes-changed app.canvas-modes-changed)
+  (local original-active-canvas-mode app.active-canvas-mode)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (set app.graph {})
+  (set app.graph-view nil)
+  (set app.canvas {:build-context {:theme {:name :dark}
+                                    :set-theme (fn [self theme]
+                                                 (set self.theme theme))}})
+  (set app.scene {:build-context {}
+                  :build-default (fn [_self _payload] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (local runtime {})
+  (set app.active-world-runtime runtime)
+  (set app.active-world-entry {:world {:runtime runtime
+                                        :state {:scene {:terrains []}}}})
+  (var activate-fails? false)
+  (CanvasModes.register-mode
+    {:id "graph"
+     :label "Graph"
+     :activate (fn [_ctx]
+                 (if activate-fails?
+                     (error "reactivation failed")
+                     {:mode-owned? true}))
+     :deactivate (fn [_ctx _session] true)})
+  (CanvasModes.activate-mode "graph")
+  (set activate-fails? true)
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light))))
+  (CanvasModes.unregister-mode "graph")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.active-world-runtime original-active-world-runtime)
+  (set app.canvas-mode-registry original-registry)
+  (set app.canvas-modes-changed original-modes-changed)
+  (set app.active-canvas-mode original-active-canvas-mode)
+  (assert (not ok)
+          "apply-theme should surface reactivation failure even when theme rebuild succeeds")
+  (assert (and err (string.find err "Failed to reactivate canvas mode" 1 true))
+          "apply-theme should report reactivation failure when theme succeeds")
+  (assert (not (string.find (tostring err) "theme rebuild" 1 true))
+          "apply-theme should not report a theme rebuild failure when theme succeeded")
+  true)
+
+(table.insert tests {:name "Apply theme fails when reactivation fails despite successful theme"
+                     :fn apply-theme-fails-when-reactivation-fails-despite-successful-theme})
+
+(fn apply-theme-surfaces-reactivation-failure []
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-active-world-runtime app.active-world-runtime)
+  (local original-registry app.canvas-mode-registry)
+  (local original-modes-changed app.canvas-modes-changed)
+  (local original-active-canvas-mode app.active-canvas-mode)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (set app.graph {})
+  (set app.graph-view nil)
+  (set app.canvas {:build-context {:theme {:name :dark}
+                                    :set-theme (fn [self theme]
+                                                 (set self.theme theme))}})
+  (set app.scene {:build-context {}
+                  :build-default (fn [_self _payload] true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] (error "theme rebuild failed"))
+                   :get-active-theme (fn [] {:name :light})})
+  (local runtime {})
+  (set app.active-world-runtime runtime)
+  (set app.active-world-entry {:world {:runtime runtime
+                                        :state {:scene {:terrains []}}}})
+  (var activate-fails? false)
+  (CanvasModes.register-mode
+    {:id "graph"
+     :label "Graph"
+     :activate (fn [_ctx]
+                 (if activate-fails?
+                     (error "reactivation failed")
+                     {:mode-owned? true}))
+     :deactivate (fn [_ctx _session] true)})
+  (CanvasModes.activate-mode "graph")
+  (set activate-fails? true)
+  (local (ok err)
+    (pcall
+      (fn []
+        (ThemeActions.apply-theme :light))))
+  (CanvasModes.unregister-mode "graph")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.active-world-runtime original-active-world-runtime)
+  (set app.canvas-mode-registry original-registry)
+  (set app.canvas-modes-changed original-modes-changed)
+  (set app.active-canvas-mode original-active-canvas-mode)
+  (assert (not ok)
+          "apply-theme should surface original error when mode reactivation also fails")
+  (assert (and err (string.find err "theme rebuild failed" 1 true))
+          "apply-theme should report the original theme error")
+  (assert (and err (string.find err "reactivation failed" 1 true))
+          "apply-theme should also report the mode reactivation error")
+  true)
+
+(table.insert tests {:name "Apply theme surfaces reactivation failure alongside original error"
+                     :fn apply-theme-surfaces-reactivation-failure})
 
 (local main
   (fn []

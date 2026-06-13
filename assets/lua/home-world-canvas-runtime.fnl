@@ -1,7 +1,6 @@
 (local glm (require :glm))
 (local Canvas (require :canvas))
 (local CanvasControls (require :canvas-controls))
-(local GraphView (require :graph/view))
 (local ObjectSelector (require :object-selector))
 (local {:DrawingRender DrawingRender} (require :drawing/render))
 (local CanvasModes (require :canvas-modes))
@@ -49,6 +48,8 @@
   true)
 
 (fn drop-runtime-canvas-surface! [runtime]
+  (when (= app.active-world-runtime runtime)
+    (CanvasModes.deactivate-active-mode))
   (when runtime.drawing-render
     (runtime.drawing-render:drop)
     (set runtime.drawing-render nil))
@@ -87,25 +88,11 @@
   (local canvas-controls
     (CanvasControls {:canvas canvas
                      :camera runtime.canvas-camera}))
-  (local graph-canvas-target
-    {:interaction-surface :canvas
-     :canvas-target-kind :graph-view
-     :screen-pos-ray (fn [_self pos opts]
-                       (canvas:screen-pos-ray pos opts))})
   (local object-selector
     (ObjectSelector {:ctx (and canvas canvas.build-context)
-                     :project (fn [position opts]
-                                (project-canvas-position canvas position opts))
-                     :enabled? true}))
-  (local graph-view
-    (GraphView {:graph runtime.graph
-                :ctx (and canvas canvas.build-context)
-                :movables runtime.movables
-                :selector object-selector
-                :view-target canvas
-                :camera runtime.canvas-camera
-                :pointer-target graph-canvas-target
-                :data-dir world.dir}))
+                      :project (fn [position opts]
+                                 (project-canvas-position canvas position opts))
+                      :enabled? true}))
   (local drawing-render
     (DrawingRender {:ctx (and canvas canvas.build-context)
                     :controller runtime.drawing-controller
@@ -114,7 +101,7 @@
   (set runtime.canvas-controls canvas-controls)
   (set runtime.canvas-scope canvas.focus-scope)
   (set runtime.object-selector object-selector)
-  (set runtime.graph-view graph-view)
+  (set runtime.graph-view nil)
   (set runtime.drawing-render drawing-render)
   (bind-runtime-canvas-selector! runtime)
   true)

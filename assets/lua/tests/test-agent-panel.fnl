@@ -28,6 +28,27 @@
 
 (local tests [])
 
+(fn make-test-theme []
+  (local active (app.themes.get-active-theme))
+  (local active-text (or active.text {}))
+  (local active-list-view (or active.list-view {}))
+  {:font active.font
+   :code-font (or active.code-font active.font)
+   :text {:foreground (or active-text.foreground
+                         (glm.vec4 0.9 0.9 0.9 1))
+          :dim-foreground (or active-text.dim-foreground
+                              active-text.foreground
+                              (glm.vec4 0.7 0.7 0.7 1))
+          :scale (or active-text.scale 1)}
+   :list-view {:item-selected-background
+               (or active-list-view.item-selected-background
+                   (glm.vec4 0.2 0.2 0.25 1))
+               :item-foreground (or active-list-view.item-foreground
+                                    active-text.foreground
+                                    (glm.vec4 0.9 0.9 0.9 1))}
+   :approval (or active.approval {})
+   :transcript (or active.transcript {})})
+
 (fn make-real-presets [opts]
   (local registry (PresetRegistry {}))
   (each [_ preset (ipairs (or opts.presets []))]
@@ -64,7 +85,7 @@
   (BuildContext {:clickables clickables
                  :hoverables hoverables
                  :icons (make-icons-stub)
-                 :theme (app.themes.get-active-theme)}))
+                 :theme (make-test-theme)}))
 
 (fn approx= [a b]
   (< (math.abs (- a b)) 0.0001))

@@ -77,7 +77,13 @@
 (fn snapshot-drawing-canvas-mode! []
   {:active? (= (CanvasModes.active-mode-id) "drawing")})
 
-(fn restore-drawing-canvas-mode! [state]
+(fn restore-state-arg [first _session maybe-state]
+  (if (and first (. first :mode))
+      maybe-state
+      first))
+
+(fn restore-drawing-canvas-mode! [first session maybe-state]
+  (local state (restore-state-arg first session maybe-state))
   (when (and state state.active?)
     (CanvasModes.activate-mode "drawing"))
   true)

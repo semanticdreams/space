@@ -5,21 +5,14 @@
     :tests.test-layout
     :tests.test-cli-args
     :tests.test-ray-box
-    :tests.test-zmq
     :tests.test-signal
     :tests.test-touch-session
     :tests.test-touch-router
-    :tests.test-remote-control
     :tests.test-render-capture
     :tests.test-next-frame
     :tests.test-runtime-timers
     :tests.test-runtime-updates
     :tests.test-layout-stats-view
-    :tests.test-audio-input
-    :tests.test-aubio
-    :tests.test-aubio-helpers
-    :tests.test-aubio-pipelines
-    :tests.test-aubio-stream
     :tests.test-clickables
     :tests.test-clipboard
     :tests.test-hoverables
@@ -71,10 +64,10 @@
     :tests.test-main-events
     :tests.test-states
     :tests.test-canvas-controls
+    :tests.test-board
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
     :tests.test-terrain-query
-    :tests.test-physics-containment
     :tests.test-movables
     :tests.test-resizables
     :tests.test-scene-drag
@@ -82,41 +75,38 @@
     :tests.test-search-view
     :tests.test-fennel-interpreter-view
     :tests.test-launchables
-    :tests.test-fs
-    :tests.test-xapian
     :tests.test-random
-    :tests.test-fs-view
     :tests.test-tempfile
-    :tests.test-external-editor
-    :tests.test-ripgrep
-    :tests.test-ripgrep-view
-    :tests.test-process
-    :tests.test-codex-sdk
-    :tests.test-opencode-sdk
-    :tests.test-agent-presets
-    :tests.test-agent-presets-mcp
-    :tests.test-agent-layer
-    :tests.test-agent-panel
-    :tests.test-disclosure-row
-    :tests.test-status-badge
-    :tests.test-mcp
-    :tests.test-http-server
-    :tests.test-mcp-http
+    :tests.test-graph-loaders
     :tests.test-sysinfo
     :tests.test-flamegraph
     :tests.test-units
     :tests.test-unit-manager
-    :tests.test-agent-units
-    :tests.test-vector-buffer
-    :tests.test-points
-    :tests.test-layered-point
-    :tests.test-force-layout
-    :tests.test-physics
-    :tests.test-polyhedron-meshes
-    :tests.test-ball
-    :tests.test-light-ball
-    :tests.test-soccer-ball-visual
-    :tests.test-renderers
+    :tests.test-selection
+    :tests.test-callbacks
+    :tests.test-logging
+    :tests.test-http
+    :tests.test-settings
+    :tests.test-runtime-performance
+    :tests.test-glm
+    :tests.test-colors
+    :tests.test-colorspacious
+    :tests.test-toml
+    :tests.test-sql-builder
+    :tests.test-string-utils
+    :tests.test-string-entities
+    :tests.test-code-entities
+    :tests.test-identity-entities
+    :tests.test-link-entities
+    :tests.test-list-entities
+    :tests.test-notebooks
+    :tests.test-link-entity-crash
+    :tests.test-morphs
+    :tests.test-world-nodes
+    :tests.test-world-skybox-node
+    :tests.test-world-background-node
+    :tests.test-flat-terrain-theme
+    :tests.test-perlin-terrain
     :tests.test-focus
     :tests.test-input-model
     :tests.test-dial-type
@@ -125,89 +115,49 @@
     :tests.test-quit-binding
     :tests.test-input-state-binding
     :tests.test-mouse-state-binding
-    :tests.test-colors
-    :tests.test-colorspacious
-    :tests.test-graph-view
-    :tests.test-graph-core
-    :tests.test-graph-edge-batch
-    :tests.test-graph-view-registry
-    :tests.test-graph-view-labels
-    :tests.test-llm-graph
-    :tests.test-llm-store
-    :tests.test-llm-chat-view
-    :tests.test-llm-conversation-messages-view
-    :tests.test-graph-view-control-view
-    :tests.test-hackernews-story-list-view
-    :tests.test-hackernews-story-view
-    :tests.test-hackernews-user-view
-    :tests.test-hackernews-offline
-    :tests.test-hackernews-graph-view-node-views
-    :tests.test-chart
-    :tests.test-car
-    :tests.test-demo-car
-    :tests.test-car-state
-    :tests.test-demo-browser
-    :tests.test-layout-physics-bodies
-    :tests.test-widget-cuboid
-    :tests.test-radial
-    :tests.test-glm
-    :tests.test-volume
-    :tests.test-settings
-    :tests.test-runtime-performance
-    :tests.test-world-manager
-    :tests.test-world-tabs-widget
-    :tests.test-flat-terrain-theme
-    :tests.test-heightfield-terrain
-    :tests.test-perlin-terrain
-    :tests.test-selection
-    :tests.test-terminal
-    :tests.test-terminal-widget
-    :tests.test-terminal-renderer
-    :tests.test-terminal-scrollback
-    :tests.test-jobs
-    :tests.test-video
-    :tests.test-video-widget
-    :tests.test-jpeg-texture-decode
-    :tests.test-callbacks
-    :tests.test-logging
-    :tests.test-http
-    :tests.test-keyring
-    :tests.test-wallet
-    :tests.test-wallet-manager
-    :tests.test-wallet-store
-    :tests.test-wallet-recover-dialog
-    :tests.test-wallet-view
-    :tests.test-wallet-send-dialog
-    :tests.test-qr-code
-    :tests.test-wallet-rpc
-    :tests.test-wallet-core
     :tests.test-rate-limiter
     :tests.test-realtime-offline
     :tests.test-openai-offline
     :tests.test-openai-tools-offline
     :tests.test-llm-tools
-    :tests.test-toml
-    :tests.test-sql-builder
+    :tests.test-agent-presets
+    :tests.test-agent-presets-mcp
+    :tests.test-agent-layer
+    :tests.test-agent-panel
+    :tests.test-agent-units
+    :tests.test-disclosure-row
+    :tests.test-status-badge
     :tests.test-cgltf
-    :tests.test-string-utils
-    :tests.test-xdg-icon-browser
-    :tests.test-string-entities
-    :tests.test-code-entities
+    :tests.test-graph-core
+    :tests.test-graph-edge-batch
+    :tests.test-graph-view-registry
+    :tests.test-graph-view-labels
+    :tests.test-vector-buffer
+    :tests.test-points
+    :tests.test-layered-point
+    :tests.test-renderers
+    :tests.test-widget-cuboid
+    :tests.test-radial
+    :tests.test-volume
     :tests.test-kernels
-    :tests.test-identity-entities
-    :tests.test-link-entities
-    :tests.test-list-entities
-    :tests.test-notebooks
-    :tests.test-morphs
-   :tests.test-link-entity-crash
-    :tests.test-graph-loaders
-    :tests.test-world-nodes
-    :tests.test-world-skybox-node
-    :tests.test-world-background-node
-    :tests.test-drawing-document
-    :tests.test-drawing-input
-    :tests.test-drawing-render
-    :tests.test-drawing-sidebar]})
+    :tests.test-physics-containment
+    :tests.test-layout-physics-bodies
+    :tests.test-physics
+    :tests.test-polyhedron-meshes
+    :tests.test-force-layout
+    :tests.test-ball
+    :tests.test-light-ball
+    :tests.test-soccer-ball-visual
+    :tests.test-car
+    :tests.test-demo-car
+    :tests.test-car-state
+    :tests.test-heightfield-terrain
+    :tests.test-graph-view
+    :tests.test-graph-view-control-view
+    :tests.test-world-manager
+    :tests.test-world-tabs-widget
+    :tests.test-demo-browser
+    :tests.test-chart]})
 
 (local main
   (fn []

@@ -1,0 +1,1045 @@
+(local AppBootstrap (require :app-bootstrap))
+(local fennel (require :fennel))
+(local fs (require :fs))
+(local tempfile (require :tempfile))
+(local HotReload (require :hot-reload))
+(local LauncherLaunchable (require :launchables/launcher))
+(local runtime (require :runtime))
+(local CanvasModes (require :canvas-modes))
+(local Units (require :units))
+
+(local tests [])
+
+(fn restore-test-runner-app-services! []
+  (AppBootstrap.init-themes)
+  (AppBootstrap.init-lights)
+  (AppBootstrap.init-input-systems)
+  true)
+
+(fn drop-main-and-restore-test-fixture! []
+  (local main-mod (. package.loaded "main"))
+  (when (and main-mod (= (type main-mod.drop) :function))
+    (main-mod.drop))
+  (restore-test-runner-app-services!))
+
+(fn require-main! []
+  (set (. package.loaded "main") nil)
+  (require :main))
+
+(fn install-renderer-stub! []
+  (var skybox-state {})
+  (var background-state {})
+  (set app.renderers {:skybox {:set-state (fn [_self state]
+                                            (set skybox-state state)
+                                            true)
+                               :get-state (fn [_self]
+                                            skybox-state)}
+                      :set-background-state (fn [_self state]
+                                              (set background-state state)
+                                              true)
+                      :get-background-state (fn [_self]
+                                               background-state)
+                      :apply-theme (fn [_self _theme] true)
+                      :prerender-sub-apps (fn [_self] true)
+                      :draw-target (fn [_self _target _opts] true)
+                      :update (fn [_self] true)
+                      :on-viewport-changed (fn [_self _viewport] true)
+                      :drop (fn [_self] true)})
+  app.renderers)
+
+(fn with-temp-dir [f]
+  (local handle (tempfile.TemporaryDirectory {:prefix "units-test-"}))
+  (local path handle.path)
+  (local (ok result) (pcall f path))
+  (handle:drop)
+  (if ok
+      result
+      (error result)))
+
+(fn count-searcher-occurrences [target]
+  (var count 0)
+  (each [_ searcher (ipairs package.searchers)]
+    (when (= searcher target)
+      (set count (+ count 1))))
+  count)
+
+(fn canvas-mode-unit [mode-id]
+  (and app.canvas-mode-units
+       (. app.canvas-mode-units mode-id)))
+
+;; Slow full-app / hot-reload integration tests moved from tests.test-units.
+
+(fn full-app-root-reload-roundtrips-active-world []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local DebugLog (require :debug-log))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-config app.hot-reload-config)
+      (local original-controller app.hot-reload-controller)
+      (local original-worlds-dir app.worlds-dir)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (set app.hot-reload-controller nil)
+      (set app.hot-reload-config {:enabled true
+                                  :watch-paths [watch-root]
+                                  :preserve-modules ["app-bootstrap"
+                                                     "hot-reload"
+                                                     "tests.test-hot-reload-integration"
+                                                     "units"]})
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (DebugLog.log "test" "root reload marker")
+            (local before-debug-log (fs.read-file DebugLog.log-path))
+            (assert (string.find before-debug-log "root reload marker" 1 true)
+                    "Expected debug log marker before root reload")
+            (assert package.__space_fennel_cache_searcher
+                    "Expected installed fennel cache searcher before root reload")
+            (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
+                    "Expected exactly one installed fennel cache searcher before root reload")
+            (local created-world
+              (app.world-manager:create-home-world {:activate? false}))
+            (local before-id created-world.id)
+            (assert (app.world-manager:activate-world-id before-id)
+                    "Expected to activate created world before reload")
+            (local controller
+              (or app.hot-reload-controller
+                  (HotReload.AppRootController {:watch-paths [watch-root]
+                                                :preserve-modules ["app-bootstrap"
+                                                                   "hot-reload"
+                                                                   "tests.test-hot-reload-integration"
+                                                                   "units"]})))
+            (assert (controller:reload-now! {:changes [{:path (fs.join-path runtime.assets-path "lua" "main.fnl")
+                                                        :action "modified"}]})
+                    "Expected root hot reload to succeed")
+            (assert app.world-manager "Expected app.world-manager after reload")
+            (assert (= (app.world-manager:active-world-id) before-id)
+                    "Expected active world id to roundtrip through full-app reload")
+            (local after-debug-log (fs.read-file DebugLog.log-path))
+            (assert (string.find after-debug-log "root reload marker" 1 true)
+                    "Expected root reload to preserve debug.log history")
+            (assert package.__space_fennel_cache_searcher
+                    "Expected installed fennel cache searcher after root reload")
+            (assert (= (count-searcher-occurrences package.__space_fennel_cache_searcher) 1)
+                    "Expected exactly one installed fennel cache searcher after root reload")
+            (when (and controller controller.drop)
+              (controller:drop))
+            (set app.hot-reload-controller nil)
+            true)))
+      (when app.hot-reload-controller
+        (app.hot-reload-controller:drop)
+        (set app.hot-reload-controller nil))
+      (when (= (type (. (require :main) :drop)) :function)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (set app.hot-reload-config original-config)
+      (set app.hot-reload-controller original-controller)
+      (set app.worlds-dir original-worlds-dir)
+      (if ok
+          result
+          (error result)))))
+
+(fn drop-app-cleans-hot-reload-controller-and-callback []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local original-config app.hot-reload-config)
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (set app.hot-reload-config {:enabled true
+                                  :watch-paths [(fs.join-path runtime.assets-path "lua")]
+                                  :preserve-modules ["app-bootstrap"
+                                                     "hot-reload"
+                                                     "tests.test-hot-reload-integration"
+                                                     "units"]})
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert app.hot-reload-controller
+                    "Expected app.hot-reload-controller after init")
+            (assert app.hot-reload-callback-id
+                    "Expected app.hot-reload-callback-id after init")
+            ((. Main :drop))
+            (assert (= app.hot-reload-controller nil)
+                    "Expected drop to clear app.hot-reload-controller")
+            (assert (= app.hot-reload-callback-id nil)
+                    "Expected drop to clear app.hot-reload-callback-id")
+            true)))
+      (when (and (= (type Main.drop) :function)
+                 app.engine)
+        (pcall (fn [] (Main.drop)))
+        (restore-test-runner-app-services!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (set app.hot-reload-config original-config)
+      (if ok
+          result
+          (error result)))))
+
+(fn app-init-refreshes-agent-preset-context-after-drop []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (app.agent-presets:set-context {:surface :canvas
+                                             :mode "stale-mode"
+                                             :canvas-visible? true})
+            ((. Main :drop))
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (local reset-context (app.agent-presets:get-context))
+            (assert (= reset-context.surface app.active-interaction-surface)
+                    "Expected app init to refresh preset surface from current shell state")
+            (assert (= reset-context.mode app.active-canvas-mode)
+                    "Expected app init to refresh preset mode from current shell state")
+            (assert (= reset-context.canvas-visible? (= app.canvas-visible? true))
+                    "Expected app init to refresh preset canvas visibility from current shell state")
+            (assert (not (= reset-context.mode "stale-mode"))
+                    "Expected app init to overwrite stale preset context")
+            true)))
+      (when (= (type (. (require :main) :drop)) :function)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hud-unit-reload-roundtrips-panel-state []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert app.hud-unit "Expected app.hud-unit after app init")
+            (assert app.hud "Expected app.hud after app init")
+            (local old-hud app.hud)
+            (local old-scope app.hud-focus-scope)
+            (LauncherLaunchable.open-panel
+              {:hud app.hud
+               :panel {:layer "float"
+                       :position [2 3 0]
+                       :rotation [1 0 0 0]
+                       :size [12 8 0]}})
+            (app.hud:update)
+            (local before-state (app.hud:capture-state))
+            (local before-panel (. before-state.panels 1))
+            (assert before-panel "Expected HUD panel before reload")
+            (assert (app.hud-unit:reload {})
+                    "Expected HUD unit reload to succeed")
+            (assert app.hud "Expected app.hud after HUD unit reload")
+            (assert (not (= app.hud old-hud))
+                    "HUD unit reload should replace the HUD instance")
+            (assert (not (= app.hud-focus-scope old-scope))
+                    "HUD unit reload should replace the HUD focus scope")
+            (app.hud:update)
+            (local after-state (app.hud:capture-state))
+            (local after-panel (. after-state.panels 1))
+            (assert after-panel "Expected HUD panel after reload")
+            (assert (= (length (or after-state.panels []))
+                       (length (or before-state.panels [])))
+                    "Expected HUD unit reload to preserve panel count")
+            (assert (= after-panel.kind before-panel.kind)
+                    "Expected HUD unit reload to preserve panel kind")
+            (assert (= after-panel.layer before-panel.layer)
+                    "Expected HUD unit reload to preserve panel layer")
+            (assert (= after-panel.restorer-module before-panel.restorer-module)
+                    "Expected HUD unit reload to preserve panel restorer module")
+            (assert (= (fennel.view after-panel.relative-size)
+                       (fennel.view before-panel.relative-size))
+                    "Expected HUD unit reload to preserve panel size")
+            (assert after-panel.relative-position
+                    "Expected HUD unit reload to preserve panel position state")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hot-reload-routes-hud-file-changes-to-hud-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert app.hud-unit "Expected app.hud-unit after app init")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.hud-unit])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (local old-hud app.hud)
+            (local old-scope app.hud-focus-scope)
+            (local old-world-manager app.world-manager)
+            (LauncherLaunchable.open-panel
+              {:hud app.hud
+               :panel {:layer "float"
+                       :position [4 5 0]
+                       :rotation [1 0 0 0]
+                       :size [14 9 0]}})
+            (app.hud:update)
+            (local before-state (app.hud:capture-state))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root "hud.fnl")
+                                  :action "modified"}]})
+                    "Expected HUD file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "hud")
+                    "Expected HUD file change to target hud unit")
+            (assert app.hud "Expected app.hud after routed reload")
+            (assert (not (= app.hud old-hud))
+                    "Expected routed HUD reload to replace app.hud")
+            (assert (not (= app.hud-focus-scope old-scope))
+                    "Expected routed HUD reload to replace HUD focus scope")
+            (assert (= app.world-manager old-world-manager)
+                    "Expected routed HUD reload to avoid reloading app root")
+            (app.hud:update)
+            (local after-state (app.hud:capture-state))
+            (assert (= (length (or after-state.panels []))
+                       (length (or before-state.panels [])))
+                    "Expected routed HUD reload to preserve panel count")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn canvas-unit-reload-roundtrips-surface-state []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert app.canvas-unit "Expected app.canvas-unit after app init")
+            (assert app.canvas "Expected app.canvas after app init")
+            (assert app.canvas-controls "Expected app.canvas-controls after app init")
+            (assert (not app.graph-view)
+                    "Graph view should not exist before graph mode is active")
+            (assert app.object-selector "Expected app.object-selector after app init")
+            (local old-canvas app.canvas)
+            (local old-scope app.canvas-focus-scope)
+            (local old-controls app.canvas-controls)
+            (local old-object-selector app.object-selector)
+            (local old-graph app.graph)
+            (local old-drawing-controller app.drawing-controller)
+            (local old-world-manager app.world-manager)
+            (LauncherLaunchable.open-panel
+              {:target app.canvas
+               :panel {:layer "float"
+                       :position [6 7 0]
+                       :rotation [1 0 0 0]
+                       :size [16 10 0]}})
+            (app.set-active-canvas-mode "drawing")
+            (app.set-active-interaction-surface :canvas
+                                                {:sync-canvas-visibility true})
+            (app.canvas:update)
+            (local before-state (app.canvas:capture-state))
+            (local before-panel (. before-state.panels 1))
+            (assert before-panel "Expected canvas panel before reload")
+            (assert (app.canvas-unit:reload {})
+                    "Expected canvas unit reload to succeed")
+            (assert app.canvas "Expected app.canvas after canvas unit reload")
+            (assert (not (= app.canvas old-canvas))
+                    "Canvas unit reload should replace the canvas instance")
+            (assert (not (= app.canvas-focus-scope old-scope))
+                    "Canvas unit reload should replace the canvas focus scope")
+            (assert (not (= app.canvas-controls old-controls))
+                    "Canvas unit reload should replace canvas controls")
+            (assert (not app.graph-view)
+                    "Canvas unit reload should not create graph view while drawing mode is active")
+            (assert (not (= app.object-selector old-object-selector))
+                    "Canvas unit reload should replace object selector")
+            (assert (= app.graph old-graph)
+                    "Canvas unit reload should preserve graph state owner")
+            (assert (= app.drawing-controller old-drawing-controller)
+                    "Canvas unit reload should preserve drawing controller")
+            (assert (= app.world-manager old-world-manager)
+                    "Canvas unit reload should avoid reloading world manager")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Canvas unit reload should preserve active canvas mode")
+            (assert (= app.active-interaction-surface :canvas)
+                    "Canvas unit reload should preserve active interaction surface")
+            (assert (= app.canvas-visible? true)
+                    "Canvas unit reload should preserve canvas visibility")
+            (app.canvas:update)
+            (local after-state (app.canvas:capture-state))
+            (local after-panel (. after-state.panels 1))
+            (assert after-panel "Expected canvas panel after reload")
+            (assert (= (length (or after-state.panels []))
+                       (length (or before-state.panels [])))
+                    "Expected canvas unit reload to preserve panel count")
+            (assert (= after-panel.kind before-panel.kind)
+                    "Expected canvas unit reload to preserve panel kind")
+            (assert (= after-panel.restorer-module before-panel.restorer-module)
+                    "Expected canvas unit reload to preserve panel restorer module")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hot-reload-routes-canvas-file-changes-to-canvas-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert app.canvas-unit "Expected app.canvas-unit after app init")
+            (assert app.hud-unit "Expected app.hud-unit after app init")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit app.hud-unit])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (local old-canvas app.canvas)
+            (local old-world-manager app.world-manager)
+            (local old-graph app.graph)
+            (LauncherLaunchable.open-panel
+              {:target app.canvas
+               :panel {:layer "float"
+                       :position [8 9 0]
+                       :rotation [1 0 0 0]
+                       :size [18 11 0]}})
+            (app.set-active-canvas-mode "drawing")
+            (app.set-active-interaction-surface :canvas
+                                                {:sync-canvas-visibility true})
+            (app.canvas:update)
+            (local before-state (app.canvas:capture-state))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root "canvas.fnl")
+                                  :action "modified"}]})
+                    "Expected canvas file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "canvas")
+                    "Expected canvas file change to target canvas unit")
+            (assert app.canvas "Expected app.canvas after routed canvas reload")
+            (assert (not (= app.canvas old-canvas))
+                    "Expected routed canvas reload to replace app.canvas")
+            (assert (= app.world-manager old-world-manager)
+                    "Expected routed canvas reload to avoid reloading app root")
+            (assert (= app.graph old-graph)
+                    "Expected routed canvas reload to preserve graph owner")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Expected routed canvas reload to preserve active canvas mode")
+            (assert (= app.active-interaction-surface :canvas)
+                    "Expected routed canvas reload to preserve interaction surface")
+            (app.canvas:update)
+            (local after-state (app.canvas:capture-state))
+            (assert (= (length (or after-state.panels []))
+                       (length (or before-state.panels [])))
+                    "Expected routed canvas reload to preserve panel count")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hot-reload-routes-canvas-shell-state-file-changes-to-canvas-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert app.canvas-unit "Expected app.canvas-unit after app init")
+            (assert app.hud-unit "Expected app.hud-unit after app init")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit app.hud-unit])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (local old-canvas app.canvas)
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "home-world-canvas-shell-state.fnl")
+                                  :action "modified"}]})
+                    "Expected canvas shell state change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "canvas")
+                    "Expected canvas shell state change to target canvas unit")
+            (assert app.canvas "Expected app.canvas after routed canvas helper reload")
+            (assert (not (= app.canvas old-canvas))
+                    "Expected routed canvas helper reload to replace app.canvas")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hot-reload-routes-shared-triangle-line-to-canvas-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (app.set-active-canvas-mode "graph")
+            (assert app.graph-view "Expected graph mode to create graph view before shared renderer reload")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "graph")
+                              (canvas-mode-unit "board")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root "triangle-line.fnl")
+                                  :action "modified"}]})
+                    "Expected shared triangle-line change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "canvas")
+                    "Shared triangle-line changes should target the canvas shell unit")
+            (assert (= app.active-canvas-mode "graph")
+                    "Canvas shell reload should preserve active graph mode for shared triangle-line changes")
+            (assert app.graph-view
+                    "Canvas shell reload should recreate graph view for shared triangle-line changes")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hot-reload-routes-drawing-mode-file-changes-to-drawing-mode-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert (canvas-mode-unit "drawing")
+                    "Expected drawing canvas mode unit after app init")
+            (app.set-active-canvas-mode "drawing")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Expected drawing mode to become active before routed reload")
+            (assert (= app.canvas-mode-drawing-enabled? true)
+                    "Expected drawing mode hooks before routed reload")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "drawing")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "drawing"
+                                                      "input.fnl")
+                                  :action "modified"}]})
+                    "Expected drawing mode file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "drawing-canvas-mode")
+                    "Expected drawing mode file change to target drawing mode unit")
+            (assert (= app.active-canvas-mode "drawing")
+                    "Expected drawing mode unit reload to preserve active mode")
+            (assert (= app.canvas-mode-drawing-enabled? true)
+                    "Expected drawing mode unit reload to restore drawing hooks")
+            (assert app.canvas-mode-command-hints-provider
+                    "Expected drawing mode unit reload to restore command hints hook")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+           (error result)))))
+
+(fn hot-reload-routes-graph-view-file-changes-to-graph-mode-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert (canvas-mode-unit "graph")
+                    "Expected graph canvas mode unit after app init")
+            (app.set-active-canvas-mode "graph")
+            (assert app.graph-view "Expected graph mode to create graph view")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "graph")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "graph"
+                                                      "view"
+                                                      "init.fnl")
+                                  :action "modified"}]})
+                    "Expected graph view file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "graph-canvas-mode")
+                    "Expected graph view file change to target graph mode unit")
+            (assert (= app.active-canvas-mode "graph")
+                    "Expected graph mode unit reload to preserve active mode")
+            (assert app.graph-view
+                    "Expected graph mode unit reload to restore graph view")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn graph-mode-registers-active-mode-snapshot-hooks []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (app.set-active-canvas-mode "graph")
+            (assert app.graph-view "Expected graph mode to create graph view")
+            (local snapshot (CanvasModes.snapshot-active-mode))
+            (assert (and snapshot snapshot.active?)
+                    "Graph mode snapshot should report active graph mode")
+            (assert (and snapshot.graph-view-state snapshot.graph-view-state.views)
+                    "Graph mode snapshot should include graph-view state")
+            (CanvasModes.restore-active-mode snapshot)
+            (assert app.graph-view
+                    "Graph mode restore-active-mode should keep graph view active")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn hot-reload-routes-board-file-changes-to-board-mode-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert (canvas-mode-unit "board")
+                    "Expected board canvas mode unit after app init")
+            (app.set-active-canvas-mode "board")
+            (assert app.board-view "Expected board mode to create board view")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "board")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "board"
+                                                      "view.fnl")
+                                  :action "modified"}]})
+                    "Expected board file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "board-canvas-mode")
+                    "Expected board file change to target board mode unit")
+            (assert (= app.active-canvas-mode "board")
+                    "Expected board mode unit reload to preserve active mode")
+            (assert app.board-view
+                    "Expected board mode unit reload to restore board view")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(fn unloading-active-drawing-mode-updates-shell-state []
+  (local Main (require-main!))
+  (local original-init-renderers AppBootstrap.init-renderers)
+  (set AppBootstrap.init-renderers
+       (fn [_opts]
+         (install-renderer-stub!)))
+  (local (ok result)
+    (pcall
+      (fn []
+        ((. Main :install-app-shell!))
+        ((. Main :init))
+        (assert (canvas-mode-unit "drawing")
+                "Expected drawing canvas mode unit after app init")
+        (app.set-active-canvas-mode "drawing")
+        (assert (= app.active-canvas-mode "drawing")
+                "Expected drawing mode active before unloading its unit")
+        (local drawing-mode-unit (canvas-mode-unit "drawing"))
+        (drawing-mode-unit:unload)
+        (assert (= app.active-canvas-mode nil)
+                "Expected unloading active drawing mode to clear the active mode")
+        (assert (= (CanvasModes.active-mode-id) nil)
+                "Expected CanvasModes registry to clear the active mode on unload")
+        (assert (not (= app.canvas-mode-drawing-enabled? true))
+                "Expected drawing-only hooks to clear after unloading drawing mode")
+        true)))
+  (when (and (= (type (. (require :main) :drop)) :function)
+             app.engine)
+    (drop-main-and-restore-test-fixture!))
+  (set AppBootstrap.init-renderers original-init-renderers)
+  (if ok
+      result
+      (error result)))
+
+(fn hot-reload-routes-drawing-mode-actions-file-changes-to-drawing-mode-unit []
+  (with-temp-dir
+    (fn [_dir]
+      (local Main (require-main!))
+      (local original-init-renderers AppBootstrap.init-renderers)
+      (local watch-root (fs.join-path runtime.assets-path "lua"))
+      (set AppBootstrap.init-renderers
+           (fn [_opts]
+             (install-renderer-stub!)))
+      (var controller nil)
+      (local (ok result)
+        (pcall
+          (fn []
+            ((. Main :install-app-shell!))
+            ((. Main :init))
+            (assert (canvas-mode-unit "drawing")
+                    "Expected drawing canvas mode unit after app init")
+            (app.set-active-canvas-mode "drawing")
+            (local root-unit
+              (Units.ModuleUnit
+                {:id "app-root"
+                 :owned-paths [watch-root]
+                 :module-name "main"
+                 :suppress-run-main? true
+                 :load-export "init"
+                 :unload-export "drop"
+                 :snapshot-export "snapshot"
+                 :restore-export "restore"}))
+            (set controller
+              (HotReload.HotReloadController
+                {:unit root-unit
+                 :units-fn (fn [_root-unit]
+                             [app.canvas-unit
+                              app.hud-unit
+                              (canvas-mode-unit "drawing")])
+                 :root-unit-id "app-root"
+                 :watch-paths [watch-root]
+                 :preserve-modules ["app-bootstrap"
+                                    "hot-reload"
+                                    "tests.test-hot-reload-integration"
+                                    "units"]}))
+            (assert (controller:reload-now!
+                      {:changes [{:path (fs.join-path watch-root
+                                                      "drawing-canvas-mode-actions.fnl")
+                                  :action "modified"}]})
+                    "Expected drawing mode actions file change to reload successfully")
+            (local debug-state (controller:debug-state))
+            (assert (= debug-state.last-target-unit-id "drawing-canvas-mode")
+                    "Expected drawing mode actions file change to target drawing mode unit")
+            true)))
+      (when controller
+        (controller:drop)
+        (set controller nil))
+      (when (and (= (type (. (require :main) :drop)) :function)
+                 app.engine)
+        (drop-main-and-restore-test-fixture!))
+      (set AppBootstrap.init-renderers original-init-renderers)
+      (if ok
+          result
+          (error result)))))
+
+(table.insert tests {:name "full app root reload roundtrips active world"
+                     :fn full-app-root-reload-roundtrips-active-world})
+(table.insert tests {:name "drop app cleans hot reload controller and callback"
+                     :fn drop-app-cleans-hot-reload-controller-and-callback})
+(table.insert tests {:name "app init refreshes agent preset context after drop"
+                     :fn app-init-refreshes-agent-preset-context-after-drop})
+(table.insert tests {:name "HUD unit reload roundtrips panel state"
+                     :fn hud-unit-reload-roundtrips-panel-state})
+(table.insert tests {:name "hot reload routes hud file changes to hud unit"
+                     :fn hot-reload-routes-hud-file-changes-to-hud-unit})
+(table.insert tests {:name "canvas unit reload roundtrips surface state"
+                     :fn canvas-unit-reload-roundtrips-surface-state})
+(table.insert tests {:name "hot reload routes canvas file changes to canvas unit"
+                     :fn hot-reload-routes-canvas-file-changes-to-canvas-unit})
+(table.insert tests {:name "hot reload routes canvas shell state file changes to canvas unit"
+                     :fn hot-reload-routes-canvas-shell-state-file-changes-to-canvas-unit})
+(table.insert tests {:name "hot reload routes shared triangle-line to canvas unit"
+                     :fn hot-reload-routes-shared-triangle-line-to-canvas-unit})
+(table.insert tests {:name "hot reload routes drawing mode file changes to drawing mode unit"
+                     :fn hot-reload-routes-drawing-mode-file-changes-to-drawing-mode-unit})
+(table.insert tests {:name "hot reload routes graph view file changes to graph mode unit"
+                     :fn hot-reload-routes-graph-view-file-changes-to-graph-mode-unit})
+(table.insert tests {:name "graph mode registers active mode snapshot hooks"
+                     :fn graph-mode-registers-active-mode-snapshot-hooks})
+(table.insert tests {:name "hot reload routes board file changes to board mode unit"
+                     :fn hot-reload-routes-board-file-changes-to-board-mode-unit})
+(table.insert tests {:name "unloading active drawing mode updates shell state"
+                     :fn unloading-active-drawing-mode-updates-shell-state})
+(table.insert tests {:name "hot reload routes drawing mode actions file changes to drawing mode unit"
+                     :fn hot-reload-routes-drawing-mode-actions-file-changes-to-drawing-mode-unit})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "hot-reload-integration"
+                       :tests tests})))
+
+{:name "hot-reload-integration"
+ :tests tests
+ :main main}

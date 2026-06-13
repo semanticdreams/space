@@ -341,11 +341,15 @@
   (local test-filter (os.getenv "TEST_FILTER"))
   (local traceback (and _G.debug _G.debug.traceback))
   (local timeout-seconds (configured-test-timeout-seconds))
+  (local print-timings (or (os.getenv "SPACE_TEST_TIMINGS")
+                           (os.getenv "TEST_VERBOSE")))
   (setup-test-env test-verbose)
 
   (local modules (apply-module-overrides suite.modules))
+  (local now-ms (make-now-ms))
   (var failures 0)
   (var executed 0)
+  (local suite-start (now-ms))
 
   (fn run-module-tests [module-name]
     (when test-verbose
@@ -374,13 +378,19 @@
       (set executed (+ executed module-executed))))
 
   (each [_ module-name (ipairs modules)]
-    (run-module-tests module-name))
+    (local module-start (now-ms))
+    (run-module-tests module-name)
+    (when print-timings
+      (log-line (.. "[TIME] " module-name " " (string.format "%.3f" (- (now-ms) module-start)) "ms"))))
 
   (when suite.teardown
     (local (_ok err) (protected-call traceback suite.teardown))
     (when (not _ok)
       (log-line (.. "[FAIL] teardown " (tostring err)))
       (set failures (+ failures 1))))
+
+  (when print-timings
+    (log-line (.. "[TIME] total suite " (string.format "%.3f" (- (now-ms) suite-start)) "ms")))
 
   (when (> failures 0)
     (error (.. failures " Lua test(s) failed")))

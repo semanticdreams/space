@@ -46,6 +46,9 @@
    :active-world-hud-overlay
    :active-world-runtime
    :bind-active-world-runtime
+   :board
+   :board-registry
+   :board-view
    :camera
    :canvas
    :canvas-controls
@@ -269,6 +272,74 @@
               "bind-active-world-runtime should clear stale runtime active mode when requested mode is nil")
       true)))
 
+(fn bind-active-world-runtime-defers-canvas-mode-without-canvas []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.canvas-mode-registry nil)
+      (CanvasModes.clear-mode-runtime-hooks!)
+      (var activated? false)
+      (CanvasModes.register-mode
+        {:id "graph"
+         :label "Graph"
+         :icon "account_tree"
+         :button-name "graph-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [_ctx]
+                     (set activated? true)
+                     (assert (and app.active-world-runtime app.active-world-runtime.canvas)
+                             "test graph mode requires runtime.canvas"))})
+      (local runtime {:requested-canvas-mode-id "graph"
+                      :requested-canvas-mode-known? true
+                      :active-canvas-mode "graph"
+                      :preferred-interaction-surface :canvas
+                      :restore-surface-state (fn [_self _canvas _hud] true)})
+      (app.bind-active-world-runtime {:id "test-world"} runtime)
+      (assert (not activated?)
+              "bind-active-world-runtime should not activate canvas modes without runtime.canvas")
+      (assert (= app.active-canvas-mode nil)
+              "bind-active-world-runtime should clear active mode while canvas is absent")
+      (assert (= runtime.active-canvas-mode nil)
+              "bind-active-world-runtime should clear stale runtime active mode while canvas is absent")
+      (assert (= runtime.requested-canvas-mode-id "graph")
+               "bind-active-world-runtime should preserve requested mode for later canvas reload")
+      true)))
+
+(fn bind-active-world-runtime-preserves-active-canvas-mode-as-requested []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.canvas-mode-registry nil)
+      (CanvasModes.clear-mode-runtime-hooks!)
+      (var activated? false)
+      (CanvasModes.register-mode
+        {:id "graph"
+         :label "Graph"
+         :icon "account_tree"
+         :button-name "graph-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [_ctx]
+                     (set activated? true)
+                     (assert (and app.active-world-runtime app.active-world-runtime.canvas)
+                             "test graph mode requires runtime.canvas"))})
+      (local runtime {:active-canvas-mode "graph"
+                      :preferred-interaction-surface :canvas
+                      :restore-surface-state (fn [_self _canvas _hud] true)})
+      (app.bind-active-world-runtime {:id "test-world"} runtime)
+      (assert (not activated?)
+              "bind-active-world-runtime should not activate canvas modes without runtime.canvas")
+      (assert (= app.active-canvas-mode nil)
+              "bind-active-world-runtime should clear active mode while canvas is absent")
+      (assert (= runtime.active-canvas-mode nil)
+              "bind-active-world-runtime should clear stale runtime active mode while canvas is absent")
+      (assert (= runtime.requested-canvas-mode-id "graph")
+              "bind-active-world-runtime should promote active-canvas-mode to requested-mode-id")
+      (assert (= runtime.requested-canvas-mode-known? true)
+              "bind-active-world-runtime should mark requested mode as known when preserving it")
+      true)))
+
 (fn set-active-canvas-mode-rejects-unknown-mode []
   (with-restored-app-fields bind-state-keys
     (fn []
@@ -380,6 +451,10 @@
                      :fn bind-active-world-runtime-restores-runtime-interaction-surface})
 (table.insert tests {:name "bind-active-world-runtime preserves explicit nil canvas mode"
                      :fn bind-active-world-runtime-preserves-explicit-nil-canvas-mode})
+(table.insert tests {:name "bind-active-world-runtime defers canvas mode without canvas"
+                      :fn bind-active-world-runtime-defers-canvas-mode-without-canvas})
+(table.insert tests {:name "bind-active-world-runtime promotes active-canvas-mode to requested"
+                      :fn bind-active-world-runtime-preserves-active-canvas-mode-as-requested})
 (table.insert tests {:name "set-active-canvas-mode rejects unknown modes"
                      :fn set-active-canvas-mode-rejects-unknown-mode})
 (table.insert tests {:name "Canvas modes ordered specs preserve registration order"

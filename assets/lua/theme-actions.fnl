@@ -1,89 +1,7 @@
 (local PanelUtils (require :target-panel-utils))
 (local SkyboxState (require :skybox-state))
 (local PhysicsContainment (require :physics-containment))
-
-(fn copy-list [items]
-  (local result [])
-  (when items
-    (each [_ item (ipairs items)]
-      (table.insert result item)))
-  result)
-
-(fn capture-target-panel-state [target kind]
-  (local panels [])
-  (when (and target
-             target.capture-panel-element-state)
-    (each [_ record (ipairs (PanelUtils.persistent-panels target {:kind kind}))]
-      (local panel-state (target:capture-panel-element-state record.element))
-      (when panel-state
-        (local panel-record (PanelUtils.clone-table record.persistence))
-        (each [key value (pairs panel-state)]
-          (set (. panel-record key) value))
-        (table.insert panels panel-record))))
-  {:target target
-   :panels panels})
-
-(fn capture-graph-node-view-panel-states []
-  (local seen {})
-  (local captured [])
-  (each [_ target (ipairs [app.scene app.canvas app.hud])]
-    (when (and target (not (. seen target)))
-      (set (. seen target) true)
-      (table.insert captured
-                    (capture-target-panel-state target "graph-node-view"))))
-  captured)
-
-(fn restore-panel-state [snapshot]
-  (when (and snapshot
-             snapshot.target
-             snapshot.target.restore-state
-             (> (length (or snapshot.panels [])) 0))
-    (snapshot.target:restore-state {:panels snapshot.panels})))
-
-(fn drop-current-graph-view []
-  (local current app.graph-view)
-  (when current
-    (current:drop)
-    (when (= app.graph-view current)
-      (set app.graph-view nil))
-    (when (and app.active-world-runtime
-               (= app.active-world-runtime.graph-view current))
-      (set app.active-world-runtime.graph-view nil))
-    (local runtime (and app.active-world-entry
-                        app.active-world-entry.world
-                        app.active-world-entry.world.runtime))
-    (when (and runtime (= runtime.graph-view current))
-      (set runtime.graph-view nil))))
-
-(fn rebuild-graph-view [selected panel-states]
-  (drop-current-graph-view)
-  (when (and app.graph (or app.canvas app.scene) app.hud)
-    (local GraphView (require :graph/view))
-    (local ctx (or (and app.canvas app.canvas.build-context)
-                   (and app.scene app.scene.build-context)))
-    (local active-theme
-      (and app.themes app.themes.get-active-theme
-           (app.themes.get-active-theme)))
-    (when (and ctx ctx.set-theme active-theme)
-      (ctx:set-theme active-theme))
-    (local view-target (or app.canvas app.hud))
-    (local pointer-target (or app.canvas app.scene))
-    (local camera (or (and app.canvas app.canvas.camera) app.camera))
-    (set app.graph-view (GraphView {:graph app.graph
-                                    :ctx ctx
-                                    :movables app.movables
-                                    :selector app.object-selector
-                                    :view-target view-target
-                                    :camera camera
-                                    :pointer-target pointer-target}))
-    (when (and app.active-world-entry
-               app.active-world-entry.world
-               app.active-world-entry.world.runtime)
-      (set (. app.active-world-entry.world.runtime :graph-view) app.graph-view))
-    (when (and selected app.graph-view.selection)
-      (app.graph-view.selection:set-selection selected))
-    (each [_ snapshot (ipairs (or panel-states []))]
-      (restore-panel-state snapshot))))
+(local CanvasModes (require :canvas-modes))
 
 (fn reapply-active-world-skybox [theme-name]
   (local entry (and app app.active-world-entry))
@@ -116,34 +34,103 @@
       nil
       {:terrains (PanelUtils.clone-table scene-state.terrains)}))
 
+(fn apply-active-theme-to-build-contexts []
+  (local active-theme (and app.themes app.themes.get-active-theme
+                           (app.themes.get-active-theme)))
+  (local canvas-ctx (and app.canvas app.canvas.build-context))
+  (when (and canvas-ctx canvas-ctx.set-theme)
+    (canvas-ctx:set-theme active-theme))
+  (local scene-ctx (and app.scene app.scene.build-context))
+  (when (and scene-ctx scene-ctx.set-theme)
+    (scene-ctx:set-theme active-theme))
+  (local hud-ctx (and app.hud app.hud.build-context))
+  (when (and hud-ctx hud-ctx.set-theme)
+    (hud-ctx:set-theme active-theme))
+  active-theme)
+
 (fn apply-theme [theme-name]
-  (local previous-selected
-    (and app.graph-view app.graph-view.selection
-         (copy-list app.graph-view.selection.selected-nodes)))
-  (local graph-node-view-panels
-    (capture-graph-node-view-panel-states))
-  (drop-current-graph-view)
-  (local themes app.themes)
-  (when (and themes themes.set-theme)
-    (themes.set-theme theme-name))
-  (when (and app.settings app.settings.set-value app.settings.save)
-    (app.settings.set-value "ui.theme"
-                            (tostring theme-name)
-                            {:save? false})
-    (app.settings.save))
-  (when (and app.scene app.scene.build-default)
-    (app.scene:build-default (active-world-scene-build-payload)))
-  (if app.apply-active-world-hud-contrib
-      (app.apply-active-world-hud-contrib)
-      (when (and app.hud app.hud.build-default)
-        (app.hud:build-default)))
-  (when (and app.renderers app.renderers.apply-theme)
-    (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
-  (PhysicsContainment.refresh-visualization
-    {:scene app.physics-containment-scene
-     :config app.physics-containment-config})
-  (reapply-active-world-skybox theme-name)
-  (rebuild-graph-view previous-selected graph-node-view-panels))
+  (local graph-active? (= (CanvasModes.active-mode-id) "graph"))
+  (local board-active? (= (CanvasModes.active-mode-id) "board"))
+  (local previous-shell-state (when (or graph-active? board-active?)
+                                {:interaction-surface app.active-interaction-surface
+                                 :canvas-mode app.active-canvas-mode
+                                 :canvas-visible? (= app.canvas-visible? true)}))
+  (when (or graph-active? board-active?)
+    (CanvasModes.deactivate-active-mode))
+  (local (ok err)
+    (pcall
+      (fn []
+        (local themes app.themes)
+        (when (and themes themes.set-theme)
+          (themes.set-theme theme-name))
+        (apply-active-theme-to-build-contexts)
+        (when (and app.scene app.scene.build-default)
+          (app.scene:build-default (active-world-scene-build-payload)))
+        (if app.apply-active-world-hud-contrib
+            (app.apply-active-world-hud-contrib)
+            (when (and app.hud app.hud.build-default)
+              (app.hud:build-default)))
+        (when (and app.renderers app.renderers.apply-theme)
+          (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
+        (PhysicsContainment.refresh-visualization
+          {:scene app.physics-containment-scene
+           :config app.physics-containment-config})
+        (reapply-active-world-skybox theme-name)
+        (when (and app.settings app.settings.set-value app.settings.save)
+          (app.settings.set-value "ui.theme"
+                                  (tostring theme-name)
+                                  {:save? false})
+          (app.settings.save)))))
+  (local (reactivate-ok reactivate-err)
+    (pcall
+      (fn []
+        (when board-active?
+          (CanvasModes.activate-mode "board"))
+        (when graph-active?
+          (CanvasModes.activate-mode "graph")))))
+  (when reactivate-ok
+    (when (or graph-active? board-active?)
+      (local current {:interaction-surface app.active-interaction-surface
+                      :canvas-mode app.active-canvas-mode
+                      :canvas-visible? (= app.canvas-visible? true)})
+      (local previous (or previous-shell-state {}))
+      (when (and app.canvas-shell-changed
+                 (not (and (= previous.interaction-surface current.interaction-surface)
+                          (= previous.canvas-mode current.canvas-mode)
+                          (= previous.canvas-visible? current.canvas-visible?))))
+        (app.canvas-shell-changed:emit {:reason "canvas-mode"
+                                        :previous previous
+                                        :current current}))
+      (when app.mark-active-world-hud-dirty
+        (app.mark-active-world-hud-dirty))))
+  (if (not ok)
+      (if reactivate-ok
+          (error err)
+          (do
+            (when (and app.canvas-shell-changed (or graph-active? board-active?))
+              (app.canvas-shell-changed:emit {:reason "canvas-mode"
+                                              :previous (or previous-shell-state {})
+                                              :current {:interaction-surface app.active-interaction-surface
+                                                        :canvas-mode app.active-canvas-mode
+                                                        :canvas-visible? (= app.canvas-visible? true)}}))
+            (error (.. (tostring err)
+                       " (also failed to reactivate canvas mode: "
+                       (tostring reactivate-err) ")"))))
+      (not reactivate-ok)
+      (do
+        (local current {:interaction-surface app.active-interaction-surface
+                        :canvas-mode app.active-canvas-mode
+                        :canvas-visible? (= app.canvas-visible? true)})
+        (local previous (or previous-shell-state {}))
+        (when (and app.canvas-shell-changed
+                   (not (and (= previous.interaction-surface current.interaction-surface)
+                            (= previous.canvas-mode current.canvas-mode)
+                            (= previous.canvas-visible? current.canvas-visible?))))
+          (app.canvas-shell-changed:emit {:reason "canvas-mode"
+                                          :previous previous
+                                          :current current}))
+        (error (.. "Failed to reactivate canvas mode after theme change: "
+                   (tostring reactivate-err))))))
 
 (fn request-theme [theme-name]
   (if app.request-theme-change

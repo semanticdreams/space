@@ -1,7 +1,8 @@
 (local suite
   {:name "slow"
    :modules [:tests.test-c-ir
-             :tests.test-gccjit]})
+             :tests.test-gccjit
+             :tests.test-hot-reload-integration]})
 
 (local main
   (fn []

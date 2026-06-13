@@ -821,11 +821,9 @@
     (set view.capture-state
          (fn [_self]
              (assert-not-dropped "capture-state")
-             (local graph-state
-                 (if (and graph graph.capture-state)
-                     (graph:capture-state)
-                     {:nodes [] :edges []}))
-             {:graph graph-state}))
+             {:views (and views views.capture-state (views:capture-state))
+              :selected-node-keys (icollect [_ node (ipairs selected-nodes)]
+                                   (and node node.key))}))
     (set view.restore-graph-state
          (fn [self state]
              (assert-not-dropped "restore-graph-state")
@@ -844,12 +842,16 @@
          (fn [self state]
              (assert-not-dropped "restore-state")
              (local payload (or state {}))
-             (if payload.graph
-                 (self:restore-graph-state payload.graph)
-                 (self:restore-graph-state payload))
              (if payload.views
                  (self:restore-views-state payload.views)
                  (self:restore-views-state {}))
+             (when payload.selected-node-keys
+                 (local restored-selection [])
+                 (each [_ key (ipairs payload.selected-node-keys)]
+                     (local node (and graph graph.lookup (graph:lookup key)))
+                     (when node
+                         (table.insert restored-selection node)))
+                 (selection:set-selection restored-selection))
              true))
     (set view.drop
          (fn [_self]

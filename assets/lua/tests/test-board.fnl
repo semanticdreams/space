@@ -1,0 +1,1139 @@
+(local glm (require :glm))
+(local {: Layout : LayoutRoot} (require :layout))
+(local BuildContext (require :build-context))
+(local tempfile (require :tempfile))
+(local runner (require :tests/runner))
+(local {:Board Board} (require :board/core))
+(local BoardRegistry (require :board/registry))
+(local BoardView (require :board/view))
+(local LinkEntityStore (require :entities/link))
+(local StringEntityStore (require :entities/string))
+(local StringEntityBoardWidget (require :board/string-entity-widget))
+(local CanvasModes (require :canvas-modes))
+(local BoardModeUnit (require :board-canvas-mode-unit))
+(local BuiltinStringEntity (require :board/builtin-string-entity))
+
+(local tests [])
+
+(fn dummy-widget [_item]
+  (fn [_ctx]
+    (local layout (Layout {:name "board-test-item"
+                           :measurer (fn [self]
+                                       (set self.measure (glm.vec3 8 4 0)))
+                           :layouter (fn [_self] nil)}))
+    {:layout layout
+     :drop (fn [_self] nil)}))
+
+(fn with-temp-dir [f]
+  (local handle (tempfile.TemporaryDirectory {:prefix "board-test-"}))
+  (local (ok result) (pcall f handle.path))
+  (handle:drop)
+  (if ok result (error result)))
+
+(fn board-view-connects-items-with-semantic-link []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (local board (Board {}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local view (BoardView {:board board
+                              :canvas canvas
+                              :ctx ctx
+                              :link-store link-store}))
+      (local source (view:add-item {:type "test-item"
+                                    :subject-key "string-entity:source"
+                                    :position (glm.vec3 1 2 0)
+                                    :size (glm.vec3 8 4 0)}))
+      (local target (view:add-item {:type "test-item"
+                                    :subject-key "string-entity:target"
+                                    :position (glm.vec3 20 30 0)
+                                    :size (glm.vec3 8 4 0)}))
+      (local retarget (view:add-item {:type "test-item"
+                                      :subject-key "string-entity:retarget"
+                                      :position (glm.vec3 40 50 0)
+                                      :size (glm.vec3 8 4 0)}))
+      (local connector (view:connect-items source target))
+      (assert connector "BoardView.connect-items should return a connector")
+      (assert (= (length board.connectors-in-order) 1)
+              "Board should record connector")
+      (local link (link-store:get-entity connector.semantic-link-id))
+      (assert link "Board connector should reference persisted link entity")
+      (assert (= link.source-key "string-entity:source")
+              "Link entity should store source subject key")
+      (assert (= link.target-key "string-entity:target")
+              "Link entity should store target subject key")
+      (assert (. view.connector-records connector.id)
+              "BoardView should render connector record")
+      (link-store:update-entity connector.semantic-link-id
+                                {:target-key "string-entity:retarget"})
+      (assert (= connector.target-item-id retarget.id)
+              "Board connector should follow semantic link retargets")
+      (assert (. view.connector-records connector.id)
+              "BoardView should retain connector render record after retarget")
+      (link-store:delete-entity connector.semantic-link-id)
+      (assert (= (length board.connectors-in-order) 0)
+              "Board should remove connector when semantic link is deleted")
+      (assert (not (. view.connector-records connector.id))
+              "BoardView should remove connector render record after link deletion")
+      (board:update-item-transform source.id {:position (glm.vec3 5 6 0)})
+      (local state (view:capture-state))
+      (assert (= (length state.items) 3) "Board state should capture items")
+      (assert (= (length state.connectors) 0) "Board state should omit deleted connectors")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(table.insert tests {:name "BoardView connects items with semantic link"
+                     :fn board-view-connects-items-with-semantic-link})
+
+(fn board-view-hydrates-existing-items-with-view-context []
+  (local owner {})
+  (var saw-view? false)
+  (BoardRegistry.register-item-type {:id "hydrate-item"
+                                     :label "Hydrate"
+                                     :builder (fn [_item view]
+                                                (set saw-view? (not (= view nil)))
+                                                (dummy-widget _item))}
+                                    owner)
+  (local board (Board {:state {:items [{:id "existing"
+                                        :type "hydrate-item"
+                                        :position [0 0 0]
+                                        :rotation [1 0 0 0]
+                                        :size [4 4 0]}]}}))
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local view (BoardView {:board board
+                          :canvas {:layout-root root :build-context ctx}
+                          :ctx ctx}))
+  (assert saw-view? "BoardView should pass self to builders during initial hydration")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-rejects-invalid-transforms []
+  (local board (Board {}))
+  (local (bad-add-ok _bad-add-err)
+    (pcall (fn []
+             (board:add-item {:type "anything"
+                              :position [math.huge 0 0]}))))
+  (assert (not bad-add-ok) "Board should reject invalid persisted positions")
+  (local item (board:add-item {:type "anything"}))
+  (local (bad-update-ok _bad-update-err)
+    (pcall (fn []
+             (board:update-item-transform item.id {:position (glm.vec3 math.huge 0 0)}))))
+  (assert (not bad-update-ok) "Board should reject invalid runtime positions")
+  true)
+
+(fn board-update-transform-is-atomic []
+  (local board (Board {}))
+  (local item (board:add-item {:type "anything"
+                               :position (glm.vec3 1 2 0)
+                               :size (glm.vec3 4 5 0)}))
+  (local (bad-size-ok _bad-size-err)
+    (pcall
+      (fn []
+        (board:update-item-transform item.id {:position (glm.vec3 9 10 0)
+                                              :size (glm.vec3 math.huge 1 0)}))))
+  (assert (not bad-size-ok)
+          "Board.update-item-transform should fail on invalid size")
+  (assert (= item.position.x 1)
+          "Board.update-item-transform should not keep earlier field changes after validation failure")
+  (local handler
+    (board.item-updated:connect
+      (fn [_item]
+        (error "view update failed"))))
+  (local (listener-ok _listener-err)
+    (pcall
+      (fn []
+        (board:update-item-transform item.id {:position (glm.vec3 11 12 0)}))))
+  (board.item-updated:disconnect handler true)
+  (assert (not listener-ok)
+          "Board.update-item-transform should fail when item-updated handlers fail")
+  (assert (= item.position.x 1)
+          "Board.update-item-transform should roll back after item-updated handler failure")
+  true)
+
+(fn board-auto-ids-skip-restored-sparse-ids []
+  (local board
+    (Board {:state {:items [{:id "item-1" :type "anything"}
+                            {:id "item-3" :type "anything"}]
+                    :connectors [{:id "connector-2"
+                                  :source-item-id "item-1"
+                                  :target-item-id "item-3"}]}}))
+  (local item (board:add-item {:type "anything"}))
+  (assert (= item.id "item-4")
+          "Board should advance auto item ids beyond restored sparse ids")
+  (local connector (board:add-connector {:source-item-id "item-1"
+                                         :target-item-id item.id}))
+  (assert (= connector.id "connector-3")
+          "Board should advance auto connector ids beyond restored sparse ids")
+  true)
+
+(fn board-restore-resets-auto-id-sequences []
+  (local board (Board {:state {:items [{:id "item-50" :type "anything"}]}}))
+  (board:restore-state {:items [] :connectors []})
+  (local item (board:add-item {:type "anything"}))
+  (assert (= item.id "item-1")
+          "Board.restore-state should reset auto item ids to the restored state")
+  true)
+
+(fn string-entity-widget-requires-existing-entity []
+  (with-temp-dir
+    (fn [dir]
+      (local store (StringEntityStore.StringEntityStore {:base-dir dir}))
+      (local widget
+        (StringEntityBoardWidget {:item {:id "item-1"}
+                                  :store store
+                                  :entity-id "missing"}))
+      (local (ok err)
+        (pcall (fn [] (widget {}))))
+      (assert (not ok)
+              "StringEntityBoardWidget should fail when its entity is missing")
+      (assert (and err (string.find err "missing entity"))
+              "StringEntityBoardWidget should report missing entity clearly")
+      true)))
+
+(fn string-entity-create-rolls-back-on-board-failure []
+  (with-temp-dir
+    (fn [dir]
+      (local board (Board {}))
+      (local default-store (StringEntityStore.get-default))
+      (local previous-count (length (default-store:list-entities)))
+      (local (ok _err)
+        (pcall
+          (fn []
+            (BuiltinStringEntity.create-string-entity
+              board
+              {:position [math.huge 0 0]}))))
+      (assert (not ok)
+              "String entity board create should fail on invalid board transform")
+      (assert (= (length (default-store:list-entities)) previous-count)
+              "String entity board create should delete the new entity when board:add-item fails")
+      true)))
+
+(fn string-entity-create-rolls-back-after-item-added-failure []
+  (with-temp-dir
+    (fn [dir]
+      (local board (Board {}))
+      (local default-store (StringEntityStore.get-default))
+      (local previous-count (length (default-store:list-entities)))
+      (local handler
+        (board.item-added:connect
+          (fn [_item]
+            (error "render failed"))))
+      (local (ok _err)
+        (pcall
+          (fn []
+            (BuiltinStringEntity.create-string-entity board {}))))
+      (board.item-added:disconnect handler true)
+      (assert (not ok)
+              "String entity board create should fail when item-added handlers fail")
+      (assert (= (length board.items-in-order) 0)
+              "String entity board create should remove the inserted board item after item-added failure")
+      (assert (= (length (default-store:list-entities)) previous-count)
+              "String entity board create should delete the new entity after item-added failure")
+      true)))
+
+(fn board-view-add-item-cleans-up-partial-attachment-on-view-failure []
+  (local previous-movables app.movables)
+  (local owner {})
+  (var drop-count 0)
+  (var unregister-count 0)
+  (BoardRegistry.unregister-item-type "partial-item" owner)
+  (BoardRegistry.register-item-type
+    {:id "partial-item"
+     :label "Partial"
+     :builder (fn [_item]
+                (fn [_ctx]
+                  (local layout (Layout {:name "partial-board-item"
+                                         :measurer (fn [self]
+                                                     (set self.measure (glm.vec3 8 4 0)))
+                                         :layouter (fn [_self] nil)}))
+                  {:layout layout
+                   :drop (fn [_self]
+                           (set drop-count (+ drop-count 1)))}))}
+    owner)
+  (set app.movables {:register (fn [_self _element _opts]
+                                 (error "movable registration failed"))
+                     :unregister (fn [_self _element]
+                                   (set unregister-count (+ unregister-count 1)))})
+  (local (ok result)
+    (pcall
+      (fn []
+        (local root (LayoutRoot))
+        (local ctx (BuildContext {:layout-root root}))
+        (local board (Board {}))
+        (local view (BoardView {:board board
+                                :canvas {:layout-root root :build-context ctx}
+                                :ctx ctx}))
+        (local (add-ok _add-err)
+          (pcall (fn []
+                   (view:add-item {:type "partial-item"}))))
+        (assert (not add-ok)
+                "BoardView add-item should fail when view-side registration fails")
+        (assert (= (length board.items-in-order) 0)
+                "Board model should roll back item insertion after view failure")
+        (assert (= (length view.layer.children) 0)
+                "BoardView should detach partially attached item views after failure")
+        (assert (= drop-count 1)
+                "BoardView should drop the partially attached item view exactly once")
+        (assert (= unregister-count 1)
+                "BoardView should unregister partial movables during cleanup")
+        (view:drop)
+        true)))
+  (set app.movables previous-movables)
+  (BoardRegistry.unregister-owner owner)
+  (if ok result (error result)))
+
+(fn board-view-connect-rolls-back-new-link-on-board-failure []
+  (with-temp-dir
+    (fn [dir]
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local owner {})
+      (BoardRegistry.register-item-type {:id "anything"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local board (Board {}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local source (board:add-item {:type "anything" :subject-key "string-entity:source"}))
+      (local target (board:add-item {:type "anything" :subject-key "string-entity:target"}))
+      (local view (BoardView {:board board
+                              :canvas {:layout-root root :build-context ctx}
+                              :ctx ctx
+                              :link-store link-store}))
+      ;; Make board:add-connector fail so the link-creation rollback path is exercised
+      (local failing-handler
+        (board.connector-added:connect
+          (fn [_connector]
+            (error "connector render failed"))))
+      (local (ok _err)
+        (pcall
+          (fn []
+            (view:connect-items source target))))
+      (board.connector-added:disconnect failing-handler)
+      (assert (not ok)
+              "BoardView.connect-items should fail when board:add-connector fails")
+      (assert (= (length (link-store:list-entities)) 0)
+              "BoardView.connect-items should delete a newly-created semantic link when board:add-connector fails")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(fn board-add-connector-rolls-back-after-listener-failure []
+  (local board (Board {}))
+  (local source (board:add-item {:type "anything"}))
+  (local target (board:add-item {:type "anything"}))
+  (local handler
+    (board.connector-added:connect
+      (fn [_connector]
+        (error "connector render failed"))))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:add-connector {:source-item-id source.id
+                              :target-item-id target.id}))))
+  (board.connector-added:disconnect handler true)
+  (assert (not ok)
+          "Board.add-connector should fail when connector-added handlers fail")
+  (assert (= (length board.connectors-in-order) 0)
+          "Board.add-connector should roll back inserted connector after listener failure")
+  (local connector (board:add-connector {:source-item-id source.id
+                                         :target-item-id target.id
+                                         :kind "visual"}))
+  (assert (= connector.id "connector-1")
+          "Board.add-connector should restore id sequence after listener failure")
+  true)
+
+(fn board-add-item-rolls-back-side-effects-after-later-listener-failure []
+  (local board (Board {}))
+  (local owner {})
+  (BoardRegistry.unregister-item-type "late-fail-item" owner)
+  (BoardRegistry.register-item-type {:id "late-fail-item"
+                                     :label "LateFail"
+                                     :builder dummy-widget}
+                                    owner)
+  (var viewed-added-ids [])
+  (var viewed-removed-ids [])
+  (local view (BoardView {:board board
+                          :canvas {:layout-root (LayoutRoot)
+                                   :build-context (BuildContext {:layout-root (LayoutRoot)})}
+                          :ctx (BuildContext {:layout-root (LayoutRoot)})}))
+  (board.item-added:connect
+    (fn [item]
+      (table.insert viewed-added-ids item.id)))
+  (board.item-removed:connect
+    (fn [item]
+      (table.insert viewed-removed-ids item.id)))
+  (local failing-handler
+    (board.item-added:connect
+      (fn [_item]
+        (error "later listener failed"))))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:add-item {:type "late-fail-item"}))))
+  (board.item-added:disconnect failing-handler true)
+  (assert (not ok)
+          "Board.add-item should fail when later listener fails")
+  (assert (= (length board.items-in-order) 0)
+          "Board should roll back model after later listener failure")
+  (assert (= (length viewed-added-ids) 1)
+          "Board should have emitted item-added before later listener failure")
+  (assert (= (length viewed-removed-ids) 1)
+          "Board should emit item-removed to clean up side effects after rollback")
+  (assert (= (. viewed-removed-ids 1) (. viewed-added-ids 1))
+          "Board should emit item-removed for the rolled-back item")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-update-transform-rolls-back-after-later-listener-failure []
+  (local board (Board {}))
+  (local item (board:add-item {:type "anything"
+                               :position (glm.vec3 1 2 0)}))
+  (var viewed-updates [])
+  (var viewed-rollback-updates [])
+  (var current-pos (. item.position))
+  (local first-handler
+    (board.item-updated:connect
+      (fn [it]
+        (table.insert viewed-updates {:x it.position.x :y it.position.y :z it.position.z})
+        (set current-pos it.position))))
+  (local failing-handler
+    (board.item-updated:connect
+      (fn [_it]
+        (error "later transform listener failed"))))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:update-item-transform item.id {:position (glm.vec3 50 60 0)}))))
+  (board.item-updated:disconnect failing-handler true)
+  (assert (not ok)
+          "Board.update-item-transform should fail when later listener fails")
+  (assert (= item.position.x 1)
+          "Board should roll back position after later listener failure")
+  (assert (>= (length viewed-updates) 2)
+          "Board should emit item-updated for the first listener and again for rollback")
+  (assert (= (. (. viewed-updates (length viewed-updates)) :x) 1)
+          "Board should emit item-updated with rolled-back position")
+  (board.item-updated:disconnect first-handler true)
+  true)
+
+(fn board-add-connector-rolls-back-side-effects-after-later-listener-failure []
+  (local board (Board {}))
+  (local source (board:add-item {:type "anything"}))
+  (local target (board:add-item {:type "anything"}))
+  (var viewed-added-ids [])
+  (var viewed-removed-ids [])
+  (board.connector-added:connect
+    (fn [c]
+      (table.insert viewed-added-ids c.id)))
+  (board.connector-removed:connect
+    (fn [c]
+      (table.insert viewed-removed-ids c.id)))
+  (local failing-handler
+    (board.connector-added:connect
+      (fn [_c]
+        (error "later connector listener failed"))))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:add-connector {:source-item-id source.id
+                              :target-item-id target.id}))))
+  (board.connector-added:disconnect failing-handler true)
+  (assert (not ok)
+          "Board.add-connector should fail when later listener fails")
+  (assert (= (length board.connectors-in-order) 0)
+          "Board should roll back connector after later listener failure")
+  (assert (= (length viewed-added-ids) 1)
+          "Board should have emitted connector-added before later listener failure")
+  (assert (= (length viewed-removed-ids) 1)
+          "Board should emit connector-removed to clean up after rollback")
+  (assert (= (. viewed-removed-ids 1) (. viewed-added-ids 1))
+          "Board should emit connector-removed for the rolled-back connector")
+  true)
+
+(fn board-remove-connector-rolls-back-after-listener-failure []
+  (local board (Board {}))
+  (local source (board:add-item {:type "anything"}))
+  (local target (board:add-item {:type "anything"}))
+  (local connector (board:add-connector {:source-item-id source.id
+                                         :target-item-id target.id}))
+  (var removed-called? false)
+  (board.connector-removed:connect
+    (fn [_c]
+      (set removed-called? true)
+      (error "connector-removed listener failed")))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:remove-connector connector.id))))
+  (assert (not ok)
+          "Board.remove-connector should fail when connector-removed listener fails")
+  (assert (. board.connectors connector.id)
+          "Board should roll back connector removal after listener failure")
+  (assert (= (length board.connectors-in-order) 1)
+          "Board should not lose ordered connector after listener failure")
+  true)
+
+(fn board-remove-item-rolls-back-after-listener-failure []
+  (local board (Board {}))
+  (local item (board:add-item {:type "anything"}))
+  (var removed-called? false)
+  (board.item-removed:connect
+    (fn [_item]
+      (set removed-called? true)
+      (error "item-removed listener failed")))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:remove-item item.id))))
+  (assert (not ok)
+          "Board.remove-item should fail when item-removed listener fails")
+  (assert (. board.items item.id)
+          "Board should roll back item removal after listener failure")
+  (assert (= (length board.items-in-order) 1)
+          "Board should not lose ordered item after listener failure")
+  true)
+
+(fn board-remove-item-rolls-back-connectors-after-item-removed-listener-failure []
+  (local board (Board {}))
+  (local source (board:add-item {:type "anything"}))
+  (local target (board:add-item {:type "anything"}))
+  (local connector (board:add-connector {:source-item-id source.id
+                                          :target-item-id target.id}))
+  (var added-on-rollback-ids [])
+  (board.connector-added:connect
+    (fn [c]
+      (table.insert added-on-rollback-ids c.id)))
+  (board.item-removed:connect
+    (fn [_item]
+      (error "item-removed listener failed")))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:remove-item source.id))))
+  (assert (not ok)
+          "Board.remove-item should fail when item-removed listener fails")
+  (assert (. board.items source.id)
+          "Board should roll back source item removal")
+  (assert (. board.connectors connector.id)
+          "Board should roll back dependent connector removal after item-removed listener failure")
+  (assert (= (length added-on-rollback-ids) 1)
+          "Board should emit connector-added for the rolled-back connector")
+  (assert (= (. added-on-rollback-ids 1) connector.id)
+          "Board should emit connector-added for the specific rolled-back connector")
+  true)
+
+(fn board-remove-item-rolls-back-connected-connectors-after-mid-removal-failure []
+  (local board (Board {}))
+  (local source (board:add-item {:type "anything"}))
+  (local target1 (board:add-item {:type "anything"}))
+  (local target2 (board:add-item {:type "anything"}))
+  (local connector1 (board:add-connector {:source-item-id source.id
+                                          :target-item-id target1.id}))
+  (local connector2 (board:add-connector {:source-item-id source.id
+                                          :target-item-id target2.id}))
+  (var added-on-rollback-ids [])
+  (board.connector-added:connect
+    (fn [c]
+      (table.insert added-on-rollback-ids c.id)))
+  (board.connector-removed:connect
+    (fn [c]
+      (when (= c.id connector2.id)
+        (error "connector2 removal listener failed"))))
+  (local (ok _err)
+    (pcall
+      (fn []
+        (board:remove-item source.id))))
+  (assert (not ok)
+          "Board.remove-item should fail when dependent connector removal fails")
+  (assert (. board.items source.id)
+          "Board should roll back source item after dependent connector removal failure")
+  (assert (. board.connectors connector1.id)
+          "Board should roll back first dependent connector after second one fails")
+  (assert (. board.connectors connector2.id)
+          "Board should roll back the failing connector")
+  (assert (>= (length added-on-rollback-ids) 1)
+          "Board should emit connector-added for rolled-back connectors")
+  true)
+
+(fn board-view-rejects-missing-semantic-link-on-hydration []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                          :label "Test"
+                                          :builder dummy-widget}
+                                         owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local board (Board {:state {:items [{:id "source"
+                                             :type "test-item"
+                                             :subject-key "string-entity:source"}
+                                            {:id "target"
+                                             :type "test-item"
+                                             :subject-key "string-entity:target"}]
+                                     :connectors [{:id "connector-1"
+                                                   :source-item-id "source"
+                                                   :target-item-id "target"
+                                                   :kind "semantic-link"
+                                                   :semantic-link-id "deleted-link"}]}}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local (ok err)
+        (pcall
+          (fn []
+            (BoardView {:board board
+                        :canvas {:layout-root root :build-context ctx}
+                        :ctx ctx
+                        :link-store link-store}))))
+      (BoardRegistry.unregister-owner owner)
+      (assert (not ok)
+              "BoardView should reject semantic connectors whose link entity is missing")
+      (assert (and err (string.find err "missing link entity" 1 true))
+              "BoardView should report missing semantic link entity")
+      true)))
+
+(fn board-view-hydration-failure-disconnects-handlers []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (local post-owner {})
+      (var build-count 0)
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                          :label "Test"
+                                          :builder (fn [item]
+                                                     (fn [ctx]
+                                                       (set build-count (+ build-count 1))
+                                                       ((dummy-widget item) ctx)))}
+                                         owner)
+      (BoardRegistry.unregister-item-type "post-drop-item" post-owner)
+      (BoardRegistry.register-item-type {:id "post-drop-item"
+                                          :label "PostDrop"
+                                          :builder dummy-widget}
+                                         post-owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local board (Board {:state {:items [{:id "source"
+                                             :type "test-item"
+                                             :subject-key "string-entity:source"}
+                                            {:id "target"
+                                             :type "test-item"
+                                             :subject-key "string-entity:target"}]
+                                     :connectors [{:id "connector-1"
+                                                   :source-item-id "source"
+                                                   :target-item-id "target"
+                                                   :kind "semantic-link"
+                                                   :semantic-link-id "deleted-link"}]}}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local (ok _err)
+        (pcall
+          (fn []
+            (BoardView {:board board
+                        :canvas {:layout-root root :build-context ctx}
+                        :ctx ctx
+                        :link-store link-store}))))
+      (BoardRegistry.unregister-owner owner)
+      (assert (not ok)
+              "test setup should fail BoardView hydration")
+      (assert (= build-count 2)
+              "test setup should build existing items before connector hydration fails")
+      (board:add-item {:type "post-drop-item"})
+      (assert (= build-count 2)
+              "BoardView should disconnect item handlers when initial hydration fails")
+      (BoardRegistry.unregister-owner post-owner)
+      true)))
+
+(fn string-entity-create-returns-board-item []
+  (local board (Board {}))
+  (local default-store (StringEntityStore.get-default))
+  (local item (BuiltinStringEntity.create-string-entity board {}))
+  (assert item "String entity create should return the board item")
+  (assert (= item.type BuiltinStringEntity.item-type)
+          "String entity create should return the created string board item")
+  (local entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
+  (when entity-id
+    (default-store:delete-entity entity-id))
+  (board:remove-item item.id)
+  true)
+
+(fn board-view-transform-update-dirties-layer-layout []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local board (Board {}))
+  (local view (BoardView {:board board
+                          :canvas {:layout-root root :build-context ctx}
+                          :ctx ctx}))
+  (local item (view:add-item {:type "test-item"}))
+  (board:update-item-transform item.id {:position (glm.vec3 12 13 0)})
+  (root:update)
+  (local record (. view.item-records item.id))
+  (assert (= record.element.layout.position.x 12)
+          "BoardView should move item layout after external x transform updates")
+  (assert (= record.element.layout.position.y 13)
+          "BoardView should move item layout after external y transform updates")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-root-action-uses-root-event-position []
+  (local previous-active-world-runtime app.active-world-runtime)
+  (local previous-canvas app.canvas)
+  (local previous-board app.board)
+  (local previous-board-view app.board-view)
+  (local previous-registry app.canvas-mode-registry)
+  (local previous-modes-changed app.canvas-modes-changed)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root
+                            :clickables app.clickables
+                            :hoverables app.hoverables
+                            :system-cursors app.system-cursors}))
+  (var ray-event nil)
+  (local canvas {:layout-root root
+                 :build-context ctx
+                 :screen-pos-ray (fn [_self event]
+                                   (set ray-event event)
+                                   {:origin (glm.vec3 (or event.x 0) (or event.y 0) 30)
+                                    :direction (glm.vec3 2 4 -10)})})
+  (set app.active-world-runtime {:canvas canvas
+                                 :board-state {:items [] :connectors []}})
+  (set app.canvas canvas)
+  (BoardModeUnit.load-board-canvas-mode!)
+  (CanvasModes.activate-mode "board")
+  (local actions (app.canvas-mode-root-actions {:event {:x 10 :y 20}}))
+  ((. (. actions 1) :fn) nil {:x 90 :y 100})
+  (assert (= ray-event.x 10)
+          "Board root action should place items from the root context-menu event")
+  (assert (= ray-event.y 20)
+          "Board root action should ignore the later menu button event for placement")
+  (local item (. app.board.items-in-order 1))
+  (assert (= item.position.x 16)
+          "Board root action should place items at the ray intersection with the z=0 plane")
+  (assert (= item.position.y 32)
+          "Board root action should use the ray direction when placing board items")
+  (BoardModeUnit.unload-board-canvas-mode!)
+  (set app.active-world-runtime previous-active-world-runtime)
+  (set app.canvas previous-canvas)
+  (set app.board previous-board)
+  (set app.board-view previous-board-view)
+  (set app.canvas-mode-registry previous-registry)
+  (set app.canvas-modes-changed previous-modes-changed)
+  true)
+
+(table.insert tests {:name "BoardView hydrates existing items with view context"
+                     :fn board-view-hydrates-existing-items-with-view-context})
+(table.insert tests {:name "Board rejects invalid transforms"
+                     :fn board-rejects-invalid-transforms})
+(table.insert tests {:name "Board update transform is atomic"
+                     :fn board-update-transform-is-atomic})
+(table.insert tests {:name "Board auto ids skip restored sparse ids"
+                     :fn board-auto-ids-skip-restored-sparse-ids})
+(table.insert tests {:name "Board restore resets auto id sequences"
+                     :fn board-restore-resets-auto-id-sequences})
+(table.insert tests {:name "String entity widget requires existing entity"
+                     :fn string-entity-widget-requires-existing-entity})
+(table.insert tests {:name "String entity create rolls back on board failure"
+                     :fn string-entity-create-rolls-back-on-board-failure})
+(table.insert tests {:name "String entity create rolls back after item-added failure"
+                     :fn string-entity-create-rolls-back-after-item-added-failure})
+(table.insert tests {:name "BoardView add-item cleans up partial attachment on view failure"
+                     :fn board-view-add-item-cleans-up-partial-attachment-on-view-failure})
+(table.insert tests {:name "BoardView connect rolls back new link on board failure"
+                     :fn board-view-connect-rolls-back-new-link-on-board-failure})
+(table.insert tests {:name "Board add connector rolls back after listener failure"
+                     :fn board-add-connector-rolls-back-after-listener-failure})
+(table.insert tests {:name "Board add-item rolls back side effects after later listener failure"
+                     :fn board-add-item-rolls-back-side-effects-after-later-listener-failure})
+(table.insert tests {:name "Board update transform rolls back after later listener failure"
+                     :fn board-update-transform-rolls-back-after-later-listener-failure})
+(table.insert tests {:name "Board add connector rolls back side effects after later listener failure"
+                      :fn board-add-connector-rolls-back-side-effects-after-later-listener-failure})
+(table.insert tests {:name "Board remove connector rolls back after listener failure"
+                      :fn board-remove-connector-rolls-back-after-listener-failure})
+(table.insert tests {:name "Board remove item rolls back after listener failure"
+                      :fn board-remove-item-rolls-back-after-listener-failure})
+(table.insert tests {:name "Board remove item rolls back connectors after item-removed listener failure"
+                      :fn board-remove-item-rolls-back-connectors-after-item-removed-listener-failure})
+(table.insert tests {:name "Board remove item rolls back connected connectors after mid-removal failure"
+                      :fn board-remove-item-rolls-back-connected-connectors-after-mid-removal-failure})
+(table.insert tests {:name "BoardView rejects missing semantic link on hydration"
+                     :fn board-view-rejects-missing-semantic-link-on-hydration})
+(table.insert tests {:name "BoardView hydration failure disconnects handlers"
+                     :fn board-view-hydration-failure-disconnects-handlers})
+(table.insert tests {:name "String entity create returns board item"
+                     :fn string-entity-create-returns-board-item})
+(table.insert tests {:name "BoardView transform update dirties layer layout"
+                     :fn board-view-transform-update-dirties-layer-layout})
+(table.insert tests {:name "Board root action uses root event position"
+                     :fn board-root-action-uses-root-event-position})
+
+(fn board-canvas-mode-drops-view-on-restore-failure []
+  (with-temp-dir
+    (fn [dir]
+      (local previous-active-world-runtime app.active-world-runtime)
+      (local previous-active-world-entry app.active-world-entry)
+      (local previous-canvas app.canvas)
+      (local previous-board app.board)
+      (local previous-board-view app.board-view)
+      (local previous-registry app.canvas-mode-registry)
+      (local previous-modes-changed app.canvas-modes-changed)
+      (set app.canvas-mode-registry nil)
+      (set app.canvas-modes-changed nil)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (local runtime {:canvas canvas
+                      :board-state {:items [{:id "bad"
+                                             :type "missing-board-item-type"}]
+                                    :connectors []}})
+      (set app.active-world-entry {:dir dir})
+      (set app.active-world-runtime runtime)
+      (set app.canvas canvas)
+      (BoardModeUnit.load-board-canvas-mode!)
+      (local (ok _err)
+        (pcall (fn []
+                 (CanvasModes.activate-mode "board"))))
+      (assert (not ok)
+              "Board mode activation should fail when restored item type is unknown")
+      (assert (not app.board-view)
+              "Board mode activation failure should clear app.board-view")
+      (assert (not runtime.board-view)
+              "Board mode activation failure should clear runtime.board-view")
+      (BoardModeUnit.unload-board-canvas-mode!)
+      (set app.active-world-runtime previous-active-world-runtime)
+      (set app.active-world-entry previous-active-world-entry)
+      (set app.canvas previous-canvas)
+      (set app.board previous-board)
+      (set app.board-view previous-board-view)
+      (set app.canvas-mode-registry previous-registry)
+      (set app.canvas-modes-changed previous-modes-changed)
+      true)))
+
+(table.insert tests {:name "Board canvas mode drops view on restore failure"
+                     :fn board-canvas-mode-drops-view-on-restore-failure})
+
+(fn board-canvas-mode-owns-board-view-lifecycle []
+  (with-temp-dir
+    (fn [dir]
+      (local previous-active-world-runtime app.active-world-runtime)
+      (local previous-active-world-entry app.active-world-entry)
+      (local previous-canvas app.canvas)
+      (local previous-board app.board)
+      (local previous-board-view app.board-view)
+      (local previous-registry app.canvas-mode-registry)
+      (local previous-modes-changed app.canvas-modes-changed)
+      (set app.canvas-mode-registry nil)
+      (set app.canvas-modes-changed nil)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (set app.active-world-entry {:dir dir})
+      (set app.active-world-runtime {:canvas canvas
+                                     :board-state {:items [] :connectors []}})
+      (set app.canvas canvas)
+      (BoardModeUnit.load-board-canvas-mode!)
+      (CanvasModes.activate-mode "board")
+      (assert app.board-view "Board mode activation should create app.board-view")
+      (assert app.active-world-runtime.board-view
+              "Board mode activation should bind runtime.board-view")
+      (CanvasModes.deactivate-active-mode)
+      (assert (not app.board-view) "Board mode deactivation should clear app.board-view")
+      (assert (not app.active-world-runtime.board-view)
+              "Board mode deactivation should clear runtime.board-view")
+      (BoardModeUnit.unload-board-canvas-mode!)
+      (set app.active-world-runtime previous-active-world-runtime)
+      (set app.active-world-entry previous-active-world-entry)
+      (set app.canvas previous-canvas)
+      (set app.board previous-board)
+      (set app.board-view previous-board-view)
+      (set app.canvas-mode-registry previous-registry)
+      (set app.canvas-modes-changed previous-modes-changed)
+      true)))
+
+(table.insert tests {:name "Board canvas mode owns board view lifecycle"
+                     :fn board-canvas-mode-owns-board-view-lifecycle})
+
+(fn board-canvas-mode-restore-active-mode-uses-snapshot-state []
+  (with-temp-dir
+    (fn [dir]
+      (local previous-active-world-runtime app.active-world-runtime)
+      (local previous-active-world-entry app.active-world-entry)
+      (local previous-canvas app.canvas)
+      (local previous-board app.board)
+      (local previous-board-view app.board-view)
+      (local previous-registry app.canvas-mode-registry)
+      (local previous-modes-changed app.canvas-modes-changed)
+      (set app.canvas-mode-registry nil)
+      (set app.canvas-modes-changed nil)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root
+                                :clickables app.clickables
+                                :hoverables app.hoverables
+                                :system-cursors app.system-cursors}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (set app.active-world-entry {:dir dir})
+      (set app.active-world-runtime {:canvas canvas
+                                     :board-state {:items [] :connectors []}})
+      (set app.canvas canvas)
+      (BoardModeUnit.load-board-canvas-mode!)
+      (CanvasModes.activate-mode "board")
+      (app.board-view:add-string-entity {})
+      (local snapshot (CanvasModes.snapshot-active-mode))
+      (app.board-view:add-string-entity {})
+      (assert (= (length app.board.items-in-order) 2)
+              "test setup should have two live board items before restore")
+      (CanvasModes.restore-active-mode snapshot)
+      (assert (= (length app.board.items-in-order) 1)
+              "CanvasModes.restore-active-mode should pass snapshot state to board mode restore")
+      (BoardModeUnit.unload-board-canvas-mode!)
+      (set app.active-world-runtime previous-active-world-runtime)
+      (set app.active-world-entry previous-active-world-entry)
+      (set app.canvas previous-canvas)
+      (set app.board previous-board)
+      (set app.board-view previous-board-view)
+      (set app.canvas-mode-registry previous-registry)
+      (set app.canvas-modes-changed previous-modes-changed)
+      true)))
+
+(table.insert tests {:name "Board canvas mode restore-active-mode uses snapshot state"
+                     :fn board-canvas-mode-restore-active-mode-uses-snapshot-state})
+
+(fn board-view-hydration-retargets-stale-connectors []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local board (Board {:state
+        {:items [{:id "source" :type "test-item" :subject-key "sk:src"
+                  :position [0 0 0] :rotation [1 0 0 0] :size [8 4 0]}
+                 {:id "old-target" :type "test-item" :subject-key "sk:old"
+                  :position [10 0 0] :rotation [1 0 0 0] :size [8 4 0]}
+                 {:id "new-target" :type "test-item" :subject-key "sk:new"
+                  :position [20 0 0] :rotation [1 0 0 0] :size [8 4 0]}]
+         :connectors [{:id "c1"
+                       :source-item-id "source"
+                       :target-item-id "old-target"
+                       :kind "semantic-link"
+                       :semantic-link-id "link-1"}]}}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (link-store:create-entity {:id "link-1"
+                                 :source-key "sk:src"
+                                 :target-key "sk:new"})
+      (local view (BoardView {:board board
+                              :canvas {:layout-root root :build-context ctx}
+                              :ctx ctx
+                              :link-store link-store}))
+      (local connector (. board.connectors "c1"))
+      (assert connector
+              "BoardView should retain connector when link keys match board items")
+      (assert (= connector.target-item-id "new-target")
+              "BoardView should retarget stale connector endpoints during hydration")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(table.insert tests {:name "BoardView hydration retargets stale connectors"
+                     :fn board-view-hydration-retargets-stale-connectors})
+
+(fn board-view-hydration-removes-untargetable-connectors []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local board (Board {:state
+        {:items [{:id "source" :type "test-item" :subject-key "sk:src"
+                  :position [0 0 0] :rotation [1 0 0 0] :size [8 4 0]}
+                 {:id "target" :type "test-item" :subject-key "sk:tgt"
+                  :position [10 0 0] :rotation [1 0 0 0] :size [8 4 0]}]
+         :connectors [{:id "c1"
+                       :source-item-id "source"
+                       :target-item-id "target"
+                       :kind "semantic-link"
+                       :semantic-link-id "link-1"}]}}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (link-store:create-entity {:id "link-1"
+                                 :source-key "sk:missing-src"
+                                 :target-key "sk:missing-tgt"})
+      (local view (BoardView {:board board
+                              :canvas {:layout-root root :build-context ctx}
+                              :ctx ctx
+                              :link-store link-store}))
+      (assert (not (. board.connectors "c1"))
+              "BoardView should remove connector when link keys match no board items")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(table.insert tests {:name "BoardView hydration removes untargetable connectors"
+                     :fn board-view-hydration-removes-untargetable-connectors})
+
+(fn board-view-connect-items-rejects-mismatched-link []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local board (Board {}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local view (BoardView {:board board
+                              :canvas {:layout-root root :build-context ctx}
+                              :ctx ctx
+                              :link-store link-store}))
+      (local bad-link (link-store:create-entity {:source-key "sk:wrong-src"
+                                                  :target-key "sk:wrong-tgt"}))
+      (local source (view:add-item {:type "test-item"
+                                    :subject-key "sk:src"
+                                    :position (glm.vec3 0 0 0)}))
+      (local target (view:add-item {:type "test-item"
+                                    :subject-key "sk:tgt"
+                                    :position (glm.vec3 10 0 0)}))
+      (local (ok err)
+        (pcall
+          (fn []
+            (view:connect-items source target {:link bad-link}))))
+      (assert (not ok)
+              "BoardView.connect-items should reject mismatched link keys")
+      (assert (and err (string.find err "source-key does not match source item" 1 true))
+              "BoardView.connect-items should report mismatched source-key")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(table.insert tests {:name "BoardView connect-items rejects mismatched link keys"
+                     :fn board-view-connect-items-rejects-mismatched-link})
+
+(fn board-view-connect-items-rejects-empty-subject-key []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                          :label "Test"
+                                          :builder dummy-widget}
+                                         owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local board (Board {}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local view (BoardView {:board board
+                              :canvas {:layout-root root :build-context ctx}
+                              :ctx ctx
+                              :link-store link-store}))
+      (local source (view:add-item {:type "test-item"
+                                    :subject-key ""
+                                    :position (glm.vec3 0 0 0)}))
+      (local target (view:add-item {:type "test-item"
+                                    :subject-key "sk:tgt"
+                                    :position (glm.vec3 10 0 0)}))
+      (local (ok err)
+        (pcall
+          (fn []
+            (view:connect-items source target))))
+      (assert (not ok)
+              "BoardView.connect-items should reject empty source subject-key")
+      (assert (and err (string.find err "non-empty subject-key" 1 true))
+              "BoardView.connect-items should require non-empty subject-key")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(table.insert tests {:name "BoardView connect-items rejects empty subject-key"
+                     :fn board-view-connect-items-rejects-empty-subject-key})
+
+(fn board-restore-state-reconciles-stale-semantic-connectors-on-live-view []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (link-store:create-entity {:id "link-1"
+                                 :source-key "sk:src"
+                                 :target-key "sk:tgt"})
+      (local board (Board {:state
+        {:items [{:id "source" :type "test-item" :subject-key "sk:src"
+                  :position [0 0 0] :rotation [1 0 0 0] :size [8 4 0]}
+                 {:id "target" :type "test-item" :subject-key "sk:tgt"
+                  :position [10 0 0] :rotation [1 0 0 0] :size [8 4 0]}]
+         :connectors [{:id "c1"
+                       :source-item-id "source"
+                       :target-item-id "target"
+                       :kind "semantic-link"
+                       :semantic-link-id "link-1"}]}}))
+      (local view (BoardView {:board board
+                              :canvas {:layout-root root :build-context ctx}
+                              :ctx ctx
+                              :link-store link-store}))
+      (assert (. board.connectors "c1")
+              "test setup should have live connector before link retarget")
+      (link-store:update-entity "link-1" {:source-key "sk:src"
+                                          :target-key "sk:gone"})
+      (board:restore-state {:items [{:id "source2" :type "test-item" :subject-key "sk:src"
+                                      :position [0 0 0] :rotation [1 0 0 0] :size [8 4 0]}]
+                             :connectors [{:id "c2"
+                                           :source-item-id "source2"
+                                           :target-item-id "source2"
+                                           :kind "semantic-link"
+                                           :semantic-link-id "link-1"}]})
+      (assert (not (. board.connectors "c2"))
+              "board restore should remove connector when link keys match no board items")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(table.insert tests {:name "board restore-state reconciles stale semantic connectors on live view"
+                     :fn board-restore-state-reconciles-stale-semantic-connectors-on-live-view})
+
+(fn main []
+  (runner.run-tests {:name "board"
+                     :tests tests}))
+
+{:name "board"
+ :tests tests
+ :main main}
