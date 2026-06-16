@@ -50,7 +50,7 @@ jobs:
       - name: Run test suite
         env:
           SPACE_ASSETS_PATH: ${{ github.workspace }}/assets
-        run: ctest --test-dir build --output-on-failure -V
+        run: xvfb-run -a ctest --test-dir build --output-on-failure -V
 
       - name: Run e2e test suite
         run: make test-e2e
