@@ -424,11 +424,12 @@
                           "[hot-reload] unload target=%s"
                           target-unit.id))
           (target-unit:unload reload-ctx)
-          (logging.info (string.format
-                          "[hot-reload] clear-modules target=%s count=%d"
-                          target-unit.id
-                          (length module-names)))
-          (clear-loaded-modules! module-names)
+           (logging.info (string.format
+                           "[hot-reload] clear-modules target=%s count=%d names=%s"
+                           target-unit.id
+                           (length module-names)
+                           (table.concat module-names ", ")))
+           (clear-loaded-modules! module-names)
           (logging.info (string.format
                           "[hot-reload] load target=%s"
                           target-unit.id))
