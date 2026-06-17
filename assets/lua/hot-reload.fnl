@@ -26,11 +26,14 @@
   (icollect [_ item (ipairs (or items []))]
     item))
 
+(fn path-separator? [c]
+  (or (= c "/") (= c "\\")))
+
 (fn path-under-root? [path root]
   (and path root
        (= (string.sub path 1 (# root)) root)
        (or (= (# path) (# root))
-           (= (string.sub path (+ (# root) 1) (+ (# root) 1)) "/"))))
+           (path-separator? (string.sub path (+ (# root) 1) (+ (# root) 1))))))
 
 (fn path-under-any-root? [path roots]
   (var matched false)
