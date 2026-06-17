@@ -223,17 +223,18 @@
    (fn resolve-space-bin []
      (if (os.getenv "SPACE_BIN")
          (os.getenv "SPACE_BIN")
-         (do
-           (local cwd (fs.cwd))
-           (local candidates [(fs.join-path cwd "build" "space")
-                              (fs.join-path cwd "space")
-                              (fs.join-path cwd ".." "build" "space")])
-           (var resolved nil)
-           (each [_ candidate (ipairs candidates) &until resolved]
-             (when (fs.exists candidate)
-               (set resolved candidate)))
-           (assert resolved
-                   (.. "space_unit_run_tests could not locate space binary from cwd " cwd))
+          (do
+            (local cwd (fs.cwd))
+            (local candidates [(fs.join-path cwd "build" "space")
+                               (fs.join-path cwd "build" "dist" "windows" "space")
+                               (fs.join-path cwd "space")
+                               (fs.join-path cwd ".." "build" "space")])
+            (var resolved nil)
+            (each [_ candidate (ipairs candidates) &until resolved]
+              (when (fs.exists candidate)
+                (set resolved candidate)))
+            (assert resolved
+                    (.. "space_unit_run_tests could not locate space binary from cwd " cwd))
            resolved)))
    (local space-bin (resolve-space-bin))
    (local unit-fennel-path (.. (fs.join-path app.code-dir "?.fnl")
