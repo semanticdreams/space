@@ -42,6 +42,7 @@ fi
 
 if [ ! -d "${VCPKG_ROOT}" ]; then
     git clone https://github.com/microsoft/vcpkg "${VCPKG_ROOT}"
+    git -C "${VCPKG_ROOT}" checkout 2025.01.14
 fi
 
 if [ ! -x "${VCPKG_ROOT}/vcpkg" ]; then
