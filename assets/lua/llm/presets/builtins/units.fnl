@@ -19,6 +19,9 @@
           (.. tool-name ": cannot modify built-in unit: " unit-id))
   unit)
 
+(fn path-separator? [c]
+  (or (= c "/") (= c "\\")))
+
 (fn path-under? [path parent-dir]
   (local fs (require :fs))
   (if (not (and path parent-dir))
@@ -29,7 +32,7 @@
         (when (and (>= (# normalized) parent-len)
                    (= (string.sub normalized 1 parent-len) normalized-parent)
                    (or (= (# normalized) parent-len)
-                       (= (string.sub normalized (+ parent-len 1) (+ parent-len 1)) "/")))
+                       (path-separator? (string.sub normalized (+ parent-len 1) (+ parent-len 1)))))
           (var current normalized)
           (var ok true)
           (while (and ok (>= (# current) (# normalized-parent)))
