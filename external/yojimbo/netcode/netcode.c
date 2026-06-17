@@ -470,13 +470,8 @@ void netcode_socket_destroy( struct netcode_socket_t * socket )
 #include <wininet.h>
 #include <iphlpapi.h>
 
-#ifdef __MINGW32__
-typedef ULONG  QOS_FLOWID, *PQOS_FLOWID;
-#define QOS_NON_ADAPTIVE_FLOW 0x00000002
-#endif
-
+#ifndef __MINGW32__
 #include <qos2.h>
-
 #pragma comment( lib, "Qwave.lib" )
 
 static int netcode_set_socket_codepoint( SOCKET socket, QOS_TRAFFIC_TYPE trafficType, QOS_FLOWID flowId, PSOCKADDR addr ) 
@@ -493,6 +488,12 @@ static int netcode_set_socket_codepoint( SOCKET socket, QOS_TRAFFIC_TYPE traffic
     }
     return 0;
 }
+#else
+static int netcode_set_socket_codepoint( SOCKET, int, unsigned long, PSOCKADDR )
+{
+    return 0;
+}
+#endif
 
 #endif // #if NETCODE_PLATFORM == NETCODE_PLATFORM_WINDOWS && NETCODE_PACKET_TAGGING
 
