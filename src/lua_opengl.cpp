@@ -31,6 +31,23 @@ void ensure_clipboard_video()
     }
 }
 
+std::string normalize_clipboard_text(const std::string& raw)
+{
+    std::string result;
+    result.reserve(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == '\r') {
+            if (i + 1 < raw.size() && raw[i + 1] == '\n') {
+                ++i;
+            }
+            result.push_back('\n');
+        } else {
+            result.push_back(raw[i]);
+        }
+    }
+    return result;
+}
+
 sol::table create_gl_table(sol::state_view lua)
 {
     sol::table gl = lua.create_table();
@@ -469,7 +486,7 @@ sol::table create_gl_table(sol::state_view lua)
         if (!text) {
             throw sdl_error("SDL_GetClipboardText failed");
         }
-        std::string value(text);
+        std::string value = normalize_clipboard_text(text);
         SDL_free(text);
         if (value.empty()) {
             const char* error = SDL_GetError();
