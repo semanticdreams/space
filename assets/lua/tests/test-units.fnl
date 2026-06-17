@@ -26,9 +26,19 @@
   (local package-prefix (.. dir "/?.lua"))
   (set fennel.path (.. fennel-prefix ";" original-fennel-path))
   (set package.path (.. package-prefix ";" original-package-path))
+  (local cache-searcher package.__space_fennel_cache_searcher)
+  (var cache-index nil)
+  (when cache-searcher
+    (each [i searcher (ipairs package.searchers) &until cache-index]
+      (when (= searcher cache-searcher)
+        (set cache-index i)))
+    (when cache-index
+      (table.remove package.searchers cache-index)))
   (local (ok result) (pcall f))
   (set fennel.path original-fennel-path)
   (set package.path original-package-path)
+  (when cache-index
+    (table.insert package.searchers cache-index cache-searcher))
   (if ok
       result
       (error result)))
@@ -89,19 +99,19 @@
           (clear-loaded-modules! module-names)
           (fs.write-file (fs.join-path dir "tmp_reload_impl.fnl")
                          "{:version \"v1\"}\n")
-          (fs.write-file (fs.join-path dir "tmp_reload_unit.fnl")
-                         (.. "(local TempImpl (require :tmp_reload_impl))\n"
-                             "(fn load-child! []\n"
-                             "  (set app.__tmp-reload-version TempImpl.version)\n"
-                             "  true)\n"
-                             "(fn unload-child! [] true)\n"
-                             "(fn snapshot-child! [] app.__tmp-reload-version)\n"
-                             "(fn restore-child! [state]\n"
-                             "  (set app.__tmp-reload-restored state)\n"
-                             "  true)\n"
-                             "{:load-child! load-child!\n"
-                             " :unload-child! unload-child!\n"
-                             " :snapshot-child! snapshot-child!\n"
+           (fs.write-file (fs.join-path dir "tmp_reload_unit.fnl")
+                          (.. "(local TempImpl (require :tmp_reload_impl))\n"
+                              "(fn load-child! []\n"
+                              "  (set app.__tmp-reload-version TempImpl.version)\n"
+                              "  true)\n"
+                              "(fn unload-child! [] true)\n"
+                              "(fn snapshot-child! [] app.__tmp-reload-version)\n"
+                              "(fn restore-child! [state]\n"
+                              "  (set app.__tmp-reload-restored state)\n"
+                              "  true)\n"
+                              "{:load-child! load-child!\n"
+                              " :unload-child! unload-child!\n"
+                              " :snapshot-child! snapshot-child!\n"
                              " :restore-child! restore-child!}\n"))
           (local previous-engine (and app app.engine))
           (set app.engine {:now-ms (fn [_self]
@@ -122,14 +132,14 @@
                :preserve-modules ["hot-reload" "tests.test-units" "units"]}))
           (local (ok result)
             (pcall
-              (fn []
+               (fn []
                 (unit:load)
                 (assert (= app.__tmp-reload-version "v1")
                         "Expected initial module unit load to use v1")
-                (fs.write-file (fs.join-path dir "tmp_reload_impl.fnl")
-                               "{:version \"v2\"}\n")
+                (local impl-path (fs.join-path dir "tmp_reload_impl.fnl"))
+                (fs.write-file impl-path "{:version \"v2\"}\n")
                 (assert (controller:reload-now!
-                          {:changes [{:path (fs.join-path dir "tmp_reload_impl.fnl")
+                          {:changes [{:path impl-path
                                       :action "modified"}]})
                         "Expected module unit reload to succeed")
                 (assert (= app.__tmp-reload-version "v2")

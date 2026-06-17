@@ -198,6 +198,15 @@
   (write-bytecode-cache bytecode-cache loader)
   (loader))
 
+(fn clear-fennel-module-cache! [module-name module-path]
+  (when (and fennel-cache-dir module-name module-path)
+    (local source-cache (cache-path-source module-path module-name))
+    (local bytecode-cache (cache-path-bytecode module-path module-name))
+    (when source-cache
+      (pcall os.remove source-cache))
+    (when bytecode-cache
+      (pcall os.remove bytecode-cache))))
+
 (fn load-fennel-module [module-name module-path]
   (local source-cache (cache-path-source module-path module-name))
   (local bytecode-cache (cache-path-bytecode module-path module-name))
@@ -2067,6 +2076,7 @@
  :install-app-shell! install-app-shell!
  :bind-active-world-runtime installable-bind-active-world-runtime
  :ensure-user-code-units! ensure-user-code-units!
+ :clear-fennel-module-cache! clear-fennel-module-cache!
  :drop app.drop
  :snapshot app.snapshot-app-state
  :restore app.restore-app-state}

@@ -141,14 +141,20 @@
     (if ok path nil))
 
   (fn remember-owned-module! [name]
-    (when (and (= (type name) :string)
-               (owned-module-path? (module-source-path name)))
-      (tset loaded-owned-modules name true)))
+    (when (and (= (type name) :string))
+      (local source-path (module-source-path name))
+      (when (owned-module-path? source-path)
+        (tset loaded-owned-modules name source-path))))
 
   (fn clear-owned-loaded-modules! []
-    (each [name _ (pairs loaded-owned-modules)]
+    (each [name source-path (pairs loaded-owned-modules)]
       (tset package.loaded name nil)
-      (tset loaded-owned-modules name nil)))
+      (when source-path
+        (local (ok-main main-mod) (pcall require :main))
+        (when (and ok-main main-mod main-mod.clear-fennel-module-cache!)
+          (pcall main-mod.clear-fennel-module-cache! name source-path)))
+      (tset loaded-owned-modules name nil))
+    true)
 
   (fn with-module-paths [f]
     (local fennel (loaded-or-required :fennel))

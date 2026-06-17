@@ -430,15 +430,21 @@
                            (length module-names)
                            (table.concat module-names ", ")))
            (clear-loaded-modules! module-names)
-          (logging.info (string.format
+           (each [_ module-name (ipairs module-names)]
+             (local source-path (. known-module-paths module-name))
+             (when source-path
+               (local (ok-main main-mod) (pcall require :main))
+               (when (and ok-main main-mod main-mod.clear-fennel-module-cache!)
+                 (pcall main-mod.clear-fennel-module-cache! module-name source-path))))
+           (logging.info (string.format
                           "[hot-reload] load target=%s"
                           target-unit.id))
           (when (= target-unit.id "app-root")
             (set _G.__space_debug_log_session_started true))
-          (target-unit:load reload-ctx)
-          (logging.info (string.format
-                          "[hot-reload] restore target=%s"
-                          target-unit.id))
+           (target-unit:load reload-ctx)
+           (logging.info (string.format
+                           "[hot-reload] restore target=%s"
+                           target-unit.id))
           (target-unit:restore snapshot reload-ctx))))
     (when app
       (set app.__hot-reload-ctx previous-reload-ctx))
