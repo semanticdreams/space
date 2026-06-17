@@ -469,6 +469,12 @@ void netcode_socket_destroy( struct netcode_socket_t * socket )
 #include <ws2ipdef.h>
 #include <wininet.h>
 #include <iphlpapi.h>
+
+#ifdef __MINGW32__
+typedef ULONG  QOS_FLOWID, *PQOS_FLOWID;
+#define QOS_NON_ADAPTIVE_FLOW 0x00000002
+#endif
+
 #include <qos2.h>
 
 #pragma comment( lib, "Qwave.lib" )

@@ -442,7 +442,6 @@ target_include_directories(space_yojimbo_sodium SYSTEM PUBLIC ${CMAKE_CURRENT_SO
 target_link_libraries(space_yojimbo PUBLIC space_yojimbo_sodium)
 if(WIN32)
     target_link_libraries(space_yojimbo PRIVATE ws2_32 iphlpapi)
-    target_compile_definitions(space_yojimbo PRIVATE NETCODE_PACKET_TAGGING=0)
 endif()
 target_compile_definitions(${PROJECT_NAME}_lib PUBLIC GLM_ENABLE_EXPERIMENTAL=1)
 if(SPACE_HAS_VTERM)
