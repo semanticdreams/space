@@ -96,6 +96,9 @@
         (string.sub pattern 1 (- (# pattern) 11))
         nil))
 
+  (fn path-separator? [c]
+    (or (= c "/") (= c "\\")))
+
   (fn path-under? [path root]
     (and path root
          (do
@@ -104,7 +107,7 @@
            (and (>= path-len root-len)
                 (= (string.sub path 1 root-len) root)
                 (or (= path-len root-len)
-                    (= (string.sub path (+ root-len 1) (+ root-len 1)) "/"))))))
+                    (path-separator? (string.sub path (+ root-len 1) (+ root-len 1))))))))
 
   (fn module-roots []
     (when (= owned-module-roots nil)
