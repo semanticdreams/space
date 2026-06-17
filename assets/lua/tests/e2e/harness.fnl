@@ -67,6 +67,18 @@
   (gl.glViewport 0 0 width height)
   viewport)
 
+(fn ensure-canvas-modes! []
+  (local CanvasModes (require :canvas-modes))
+  (when (not (CanvasModes.mode-registered? "graph"))
+    (local graph-unit (require :graph-canvas-mode-unit))
+    (graph-unit.load-graph-canvas-mode!))
+  (when (not (CanvasModes.mode-registered? "drawing"))
+    (local drawing-unit (require :drawing-canvas-mode-unit))
+    (drawing-unit.load-drawing-canvas-mode!))
+  (when (not (CanvasModes.mode-registered? "board"))
+    (local board-unit (require :board-canvas-mode-unit))
+    (board-unit.load-board-canvas-mode!)))
+
 (fn init-test-app [width height]
   (global app {})
   (set app.testing true)
@@ -86,7 +98,8 @@
   (set app.set-viewport AppViewport.set-viewport)
   (set app.create-default-projection AppProjection.create-default-projection)
   (configure-viewport width height)
-  (AppBootstrap.init-renderers {:viewport app.viewport}))
+  (AppBootstrap.init-renderers {:viewport app.viewport})
+  (ensure-canvas-modes!))
 
 (fn assert-font-ready [label]
   (local theme (app.themes.get-active-theme))
