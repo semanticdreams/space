@@ -41,8 +41,7 @@ if ! command -v x86_64-w64-mingw32-gcc-posix >/dev/null 2>&1 \
 fi
 
 if [ ! -d "${VCPKG_ROOT}" ]; then
-    git clone https://github.com/microsoft/vcpkg "${VCPKG_ROOT}"
-    git -C "${VCPKG_ROOT}" checkout 2025.01.14
+    git clone --branch 2025.01.13 https://github.com/microsoft/vcpkg "${VCPKG_ROOT}"
 fi
 
 if [ ! -x "${VCPKG_ROOT}/vcpkg" ]; then
