@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "paths.h"
 
@@ -324,6 +325,11 @@ uintmax_t fs_remove_all(const std::string& path)
 {
     std::error_code ec;
     auto count = fs::remove_all(path, ec);
+    for (int retry = 0; ec && retry < 10; ++retry) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ec.clear();
+        count = fs::remove_all(path, ec);
+    }
     throw_with_message("fs.remove_all", ec);
     return count;
 }
