@@ -2105,16 +2105,17 @@
           (unit:load {})
 
           (local test-source
-            (.. "(local runner (require :tests/runner))\n"
-                "(local Flex (require :flex))\n"
-                "(fn main []\n"
-                "  (local fs (require :fs))\n"
-                "  (assert Flex \"repo module with macros should load\")\n"
-                "  (fs.write-file \"" dir "/runner-ran\" \"1\")\n"
-                "  (runner.run-tests\n"
-                "    {:name \"htest\"\n"
-                "     :tests [{:name \"pass\" :fn (fn [] true)}]}))\n"
-                "{:main main :tests [{:name \"pass\" :fn (fn [] true)}]}"))
+            (let [escaped-dir (string.gsub dir "\\" "\\\\")]
+              (.. "(local runner (require :tests/runner))\n"
+                  "(local Flex (require :flex))\n"
+                  "(fn main []\n"
+                  "  (local fs (require :fs))\n"
+                  "  (assert Flex \"repo module with macros should load\")\n"
+                  "  (fs.write-file \"" escaped-dir "/runner-ran\" \"1\")\n"
+                  "  (runner.run-tests\n"
+                  "    {:name \"htest\"\n"
+                  "     :tests [{:name \"pass\" :fn (fn [] true)}]}))\n"
+                  "{:main main :tests [{:name \"pass\" :fn (fn [] true)}]}")))
           (local test-dir (fs.join-path dir "htest"))
           (fs.create-dirs test-dir)
           (local test-path (fs.join-path test-dir "test-init.fnl"))

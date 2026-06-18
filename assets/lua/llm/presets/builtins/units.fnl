@@ -255,11 +255,7 @@
                     :timeout 30}))
     (if (not (= result.exit-code 0))
         (.. "TESTS FAILED (exit " result.exit-code ")\n"
-            "bin=" (tostring space-bin) "\n"
-            "fennel-path=" (tostring fennel-path) "\n"
-            "assets-path=" (tostring assets-path) "\n"
-            "stdout=" (or (tostring result.stdout) "<nil>") "\n"
-            "stderr=" (or (tostring result.stderr) "<nil>"))
+            (or result.stdout "") (or result.stderr ""))
         (.. "TESTS PASSED\n" (or result.stdout ""))))
 
  (fn register-units-adapters [adapters]
