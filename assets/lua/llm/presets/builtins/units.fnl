@@ -10,7 +10,7 @@
   file)
 
 (fn path-basename [path]
-  (string.match path "([^/]+)$"))
+  (string.match path "([^\\/]+)$"))
 
 (fn assert-user-unit [app unit-id tool-name]
   (local unit (app.unit-manager:get unit-id))
@@ -60,7 +60,8 @@
   (assert (= (type relative-path) "string")
           (.. tool-name " requires a relative string :path"))
   (assert (> (# relative-path) 0) (.. tool-name " :path must not be empty"))
-  (assert (not (string.match relative-path "^/"))
+  (assert (not (or (string.match relative-path "^/")
+                  (string.match relative-path "^%a:[\\/]")))
           (.. tool-name " :path must be relative to the unit directory"))
   (assert (not (string.find relative-path "\0" 1 true))
           (.. tool-name " :path contains a NUL byte"))
@@ -82,7 +83,8 @@
   (assert (= (type relative-path) "string")
           (.. tool-name " requires a relative string :path"))
   (assert (> (# relative-path) 0) (.. tool-name " :path must not be empty"))
-  (assert (not (string.match relative-path "^/"))
+  (assert (not (or (string.match relative-path "^/")
+                  (string.match relative-path "^%a:[\\/]")))
           (.. tool-name " :path must be relative to the unit directory"))
   (assert (not (string.find relative-path "\0" 1 true))
           (.. tool-name " :path contains a NUL byte"))
@@ -542,16 +544,16 @@
                        (when file
                          (assert (path-under? file app.code-dir)
                                  (.. "unit " args.id " source file outside code directory"))
-                         (local unit-name (string.match file "/([^/]+)$"))
-                         (local unit-dir (fs.parent file))
-                         (when (and (= unit-name "init.fnl")
-                                    unit-dir
-                                    (not= (fs.absolute unit-dir) (fs.absolute app.code-dir)))
-                           (assert (path-under? unit-dir app.code-dir)
-                                   (.. "unit " args.id " directory outside code directory"))))
-                       (app.unit-manager:unregister args.id)
-                        (when file
-                          (local unit-name (string.match file "/([^/]+)$"))
+                        (local unit-name (string.match file "[\\/]([^\\/]+)$"))
+                        (local unit-dir (fs.parent file))
+                        (when (and (= unit-name "init.fnl")
+                                   unit-dir
+                                   (not= (fs.absolute unit-dir) (fs.absolute app.code-dir)))
+                          (assert (path-under? unit-dir app.code-dir)
+                                  (.. "unit " args.id " directory outside code directory"))))
+                      (app.unit-manager:unregister args.id)
+                       (when file
+                         (local unit-name (string.match file "[\\/]([^\\/]+)$"))
                           (local unit-dir (fs.parent file))
                           (if (and (= unit-name "init.fnl")
                                    unit-dir
