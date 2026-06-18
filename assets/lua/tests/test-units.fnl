@@ -300,6 +300,24 @@
 (table.insert tests {:name "canvas modes require registration before activation"
                      :fn canvas-modes-require-registration-before-activation})
 
+(fn path-separator-rejects-backslash-on-posix []
+  (local path-utils (require :path-utils))
+  (local windows? (= (string.sub (or package.config "") 1 1) "\\"))
+  (if windows?
+      (do
+        (assert (path-utils.path-separator? "\\")
+                "backslash should be separator on Windows")
+        (assert (path-utils.path-separator? "/")
+                "forward slash should be separator on all platforms"))
+      (do
+        (assert (path-utils.path-separator? "/")
+                "forward slash should be separator on POSIX")
+        (assert (not (path-utils.path-separator? "\\"))
+                "backslash must NOT be a separator on POSIX — it is a valid filename character"))))
+
+(table.insert tests {:name "path separator rejects backslash on POSIX"
+                     :fn path-separator-rejects-backslash-on-posix})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

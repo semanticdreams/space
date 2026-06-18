@@ -84,6 +84,8 @@
   (local module-paths options.module-paths)
   (var owned-module-roots nil)
   (var loaded-owned-modules {})
+  (local fennel-cache (require :fennel-cache))
+  (local path-utils (require :path-utils))
 
   (fn loaded-or-required [name]
     (or (. package.loaded name)
@@ -97,7 +99,7 @@
         nil))
 
   (fn path-separator? [c]
-    (or (= c "/") (= c "\\")))
+    (path-utils.path-separator? c))
 
   (fn path-under? [path root]
     (and path root
@@ -150,9 +152,7 @@
     (each [name source-path (pairs loaded-owned-modules)]
       (tset package.loaded name nil)
       (when source-path
-        (local (ok-main main-mod) (pcall require :main))
-        (when (and ok-main main-mod main-mod.clear-fennel-module-cache!)
-          (pcall main-mod.clear-fennel-module-cache! name source-path)))
+        (fennel-cache.clear-fennel-module-cache! name source-path))
       (tset loaded-owned-modules name nil))
     true)
 

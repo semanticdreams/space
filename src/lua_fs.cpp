@@ -324,14 +324,31 @@ bool fs_remove(const std::string& path)
 uintmax_t fs_remove_all(const std::string& path)
 {
     std::error_code ec;
+    uintmax_t total = 0;
     auto count = fs::remove_all(path, ec);
+    if (count != static_cast<uintmax_t>(-1)) {
+        total += count;
+    }
     for (int retry = 0; ec && retry < 10; ++retry) {
+#ifdef _WIN32
+        if (!(ec.category() == std::system_category()
+              && (ec.value() == 32   // ERROR_SHARING_VIOLATION
+                  || ec.value() == 33))) // ERROR_LOCK_VIOLATION
+            break;
+#else
+        if (!(ec == std::errc::device_or_resource_busy   // EBUSY
+              || ec == std::errc::resource_unavailable_try_again)) // EAGAIN
+            break;
+#endif
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         ec.clear();
         count = fs::remove_all(path, ec);
+        if (count != static_cast<uintmax_t>(-1)) {
+            total += count;
+        }
     }
     throw_with_message("fs.remove_all", ec);
-    return count;
+    return total;
 }
 
 void fs_rename(const std::string& from, const std::string& to)

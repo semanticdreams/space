@@ -1,8 +1,11 @@
 (local fs (require :fs))
 (local fennel (require :fennel))
+(local fennel-cache (require :fennel-cache))
 (local logging (require :logging))
 (local FileWatch (require :file-watch))
 (local Units (require :units))
+(local path-utils (require :path-utils))
+(local path-separator? path-utils.path-separator?)
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -25,9 +28,6 @@
 (fn clone-list [items]
   (icollect [_ item (ipairs (or items []))]
     item))
-
-(fn path-separator? [c]
-  (or (= c "/") (= c "\\")))
 
 (fn path-under-root? [path root]
   (and path root
@@ -433,9 +433,7 @@
            (each [_ module-name (ipairs module-names)]
              (local source-path (. known-module-paths module-name))
              (when source-path
-               (local (ok-main main-mod) (pcall require :main))
-               (when (and ok-main main-mod main-mod.clear-fennel-module-cache!)
-                 (pcall main-mod.clear-fennel-module-cache! module-name source-path))))
+               (fennel-cache.clear-fennel-module-cache! module-name source-path)))
            (logging.info (string.format
                           "[hot-reload] load target=%s"
                           target-unit.id))

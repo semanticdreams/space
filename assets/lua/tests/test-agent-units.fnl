@@ -1564,14 +1564,23 @@
   (with-temp-dir
     (fn [dir]
       (local log-path (fs.join-path dir "test.log"))
-      (with-log-path log-path
-        (fn []
-          (pcall fs.remove-all log-path)
-          (local (ok err) (pcall def.run {}))
-          (assert (not ok) "should error on missing file")
-          (assert (or (string.find (tostring err) "not found")
-                      (string.find (tostring err) "empty"))
-                  (.. "error should mention not found or empty, got: " (tostring err))))))))
+      (local saved-path (logging.get-output-path))
+      (var body-ok nil)
+      (var body-err nil)
+      (set (body-ok body-err)
+           (pcall (fn []
+                    (logging.init {:path log-path})
+                    (logging.shutdown)
+                    (fs.remove-all log-path)
+                    (assert (not (fs.exists log-path))
+                            "log file must not exist before testing not-found branch")
+                    (local (ok err) (pcall def.run {}))
+                    (assert (not ok) "should error on missing file")
+                    (assert (string.find (tostring err) "not found")
+                            (.. "error should mention not found, got: " (tostring err))))))
+      (logging.init {:path saved-path})
+      (when (not body-ok)
+        (error body-err)))))
 
 (table.insert tests {:name "agent-units: space_unit_read_log file not found" :fn test-space-unit-read-log-file-not-found})
 
@@ -2133,6 +2142,70 @@
           (app.unit-manager:clear))))))
 
 (table.insert tests {:name "agent-units: space_unit_run_tests happy-path" :fn test-space-unit-run-tests-happy})
+
+(fn test-posix-backslash-not-path-separator-for-read-file []
+  (local windows? (= (string.sub (or package.config "") 1 1) "\\"))
+  (if windows?
+      :skip
+      (with-temp-dir
+        (fn [dir]
+          (with-test-unit-mgr dir
+            (fn []
+              (local unit-dir (fs.join-path dir "posix-unit"))
+              (fs.create-dirs unit-dir)
+              (fs.write-file (fs.join-path unit-dir "init.fnl")
+                             "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
+              (local unit (Units.ModuleUnit {:id "user-posix-esc"
+                                              :module-name "posix-unit"
+                                              :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                              :source :user
+                                              :owned-paths [(fs.join-path unit-dir "init.fnl")]
+                                              :suppress-run-main? false}))
+              (app.unit-manager:register unit)
+              (unit:load {})
+              (local adapters (ToolAdapterRegistry {}))
+              (BuiltinUnits.register {:tool-adapters adapters})
+              (local def (adapters:resolve "unit.read-file" app))
+              (local (ok err) (pcall def.run {:id "user-posix-esc" :path "sub\\file.fnl"}))
+              (assert (not ok) "read-file should reject backslash-containing path")
+              (app.unit-manager:clear)))))))
+
+(table.insert tests {:name "agent-units: read-file rejects missing backslash-containing relative path"
+                     :fn test-posix-backslash-not-path-separator-for-read-file})
+
+(fn test-posix-backslash-in-filename-does-not-become-directory-unit []
+  (local windows? (= (string.sub (or package.config "") 1 1) "\\"))
+  (if windows?
+      :skip
+      (with-temp-dir
+        (fn [dir]
+          (with-test-unit-mgr dir
+            (fn []
+              (local unit-subdir (fs.join-path dir "subdir"))
+              (fs.create-dirs unit-subdir)
+              (local unit-file (fs.join-path unit-subdir "foo\\init.fnl"))
+              (local sibling (fs.join-path unit-subdir "helper.fnl"))
+              (fs.write-file unit-file "content")
+              (fs.write-file sibling "{}")
+              (local unit (Units.Unit {:id "user-flat-bs"
+                                       :source :user
+                                       :owned-paths [unit-file]
+                                       :load (fn [_ctx] true)
+                                       :unload (fn [_ctx] true)}))
+              (app.unit-manager:register unit)
+              (unit:load {})
+              (local adapters (ToolAdapterRegistry {}))
+              (BuiltinUnits.register {:tool-adapters adapters})
+              (local def (adapters:resolve "unit.delete" app))
+              (def.run {:id "user-flat-bs"})
+              (assert (= (app.unit-manager:get "user-flat-bs") nil) "unit should be gone")
+              (assert (not (fs.exists unit-file)) "flat unit file should be removed")
+              (assert (fs.exists sibling) "sibling file in subdir must survive")
+              (assert (fs.exists unit-subdir) "subdir must survive — not treated as directory unit")
+              (app.unit-manager:clear)))))))
+
+(table.insert tests {:name "agent-units: POSIX backslash in filename not directory unit"
+                     :fn test-posix-backslash-in-filename-does-not-become-directory-unit})
 
 ;; ── Missing error-path tests for existing tools ──
 

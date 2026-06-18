@@ -1,3 +1,8 @@
+(local path-utils (require :path-utils))
+(local path-separator? path-utils.path-separator?)
+(local windows? (= (string.sub (or package.config "") 1 1) "\\"))
+(local sep-cc (if windows? "\\\\/" "/"))   ;; regex character class for path separator
+
 (fn require-unit-manager [app tool-name]
   (assert app.unit-manager (.. tool-name " requires app.unit-manager"))
   app.unit-manager)
@@ -10,7 +15,7 @@
   file)
 
 (fn path-basename [path]
-  (string.match path "([^\\/]+)$"))
+  (string.match path (.. "[^" sep-cc "]+$")))
 
 (fn assert-user-unit [app unit-id tool-name]
   (local unit (app.unit-manager:get unit-id))
@@ -19,8 +24,6 @@
           (.. tool-name ": cannot modify built-in unit: " unit-id))
   unit)
 
-(fn path-separator? [c]
-  (or (= c "/") (= c "\\")))
 
 (fn path-under? [path parent-dir]
   (local fs (require :fs))
@@ -540,11 +543,11 @@
                     (fn [args]
                       (assert app.code-dir "space_unit_delete requires app.code-dir")
                       (local unit (assert-user-unit app args.id "space_unit_delete"))
-                       (local file (unit-source-file app unit))
+                      (local file (unit-source-file app unit))
                        (when file
                          (assert (path-under? file app.code-dir)
                                  (.. "unit " args.id " source file outside code directory"))
-                        (local unit-name (string.match file "[\\/]([^\\/]+)$"))
+                        (local unit-name (string.match file (.. "[" sep-cc "]([^" sep-cc "]+)$")))
                         (local unit-dir (fs.parent file))
                         (when (and (= unit-name "init.fnl")
                                    unit-dir
@@ -552,8 +555,8 @@
                           (assert (path-under? unit-dir app.code-dir)
                                   (.. "unit " args.id " directory outside code directory"))))
                       (app.unit-manager:unregister args.id)
-                       (when file
-                         (local unit-name (string.match file "[\\/]([^\\/]+)$"))
+                      (when file
+                         (local unit-name (string.match file (.. "[" sep-cc "]([^" sep-cc "]+)$")))
                           (local unit-dir (fs.parent file))
                           (if (and (= unit-name "init.fnl")
                                    unit-dir
