@@ -75,6 +75,14 @@
           (when (and target target.mark-layout-dirty)
             (target:mark-layout-dirty))))))
 
+(fn apply-target-transform [target transform]
+  (when transform
+    (if (and target target.set-transform)
+        (target:set-transform transform)
+        (do
+          (apply-target-position target transform.position)
+          (apply-target-size target transform.size)))))
+
 (fn edge-sign [value size]
   (if (< (math.abs value) (math.abs (- size value)))
       -1
@@ -266,8 +274,8 @@
         (local size (glm.vec3 size-x size-y (. drag.size 3)))
         (local offset (glm.vec3 offset-x offset-y 0))
         (local world-position (+ drag.position (rotation:rotate offset)))
-        (apply-target-position drag.entry.target world-position)
-        (apply-target-size drag.entry.target size))))
+        (apply-target-transform drag.entry.target {:position world-position
+                                                   :size size}))))
 
   (fn end-resize [self]
     (when self.drag

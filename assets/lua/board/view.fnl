@@ -77,15 +77,36 @@
                 (set connector.target-item-id next-target.id))
               (board:remove-connector connector.id))))))
 
+  (fn ensure-board-transform-target [item metadata]
+    (when metadata
+      (local target (layer:ensure-transform-target metadata))
+      (when (and target (not target.__board_transform_target))
+        (local original-set-position target.set-position)
+        (local original-set-size target.set-size)
+        (set target.__board_transform_target true)
+        (set target.set-position
+             (fn [self position]
+               (board:update-item-transform item.id {:position position})
+               (original-set-position self position)
+               self))
+        (set target.set-size
+             (fn [self size]
+               (board:update-item-transform item.id {:size size})
+               (original-set-size self size)
+               self))
+        (set target.set-transform
+             (fn [self transform]
+               (board:update-item-transform item.id transform)
+               (when transform.position
+                 (original-set-position self transform.position))
+               (when transform.size
+                 (original-set-size self transform.size))
+               self)))
+      target))
+
   (fn register-movable [item metadata]
     (when (and app.movables metadata)
-      (local target (layer:ensure-movable-target metadata))
-      (local original-set-position target.set-position)
-      (set target.set-position
-           (fn [self position]
-             (original-set-position self position)
-             (board:update-item-transform item.id {:position position})
-             self))
+      (local target (ensure-board-transform-target item metadata))
       (app.movables:register metadata.element {:target target
                                                :handle metadata.element.layout
                                                :key metadata.element
@@ -94,6 +115,23 @@
   (fn unregister-movable [record]
     (when (and app.movables record record.element)
       (app.movables:unregister record.element)))
+
+  (fn register-resizable [item metadata]
+    (when (and app.resizables metadata)
+      (local target (ensure-board-transform-target item metadata))
+      (app.resizables:register metadata.element {:target target
+                                                 :handle metadata.element.layout
+                                                 :key metadata.element
+                                                 :min-size metadata.element.layout.min-size
+                                                 :pointer-target canvas})))
+
+  (fn unregister-resizable [record]
+    (when (and app.resizables record record.element)
+      (app.resizables:unregister record.element)))
+
+  (fn unregister-interactions [record]
+    (unregister-movable record)
+    (unregister-resizable record))
 
   (fn add-item-view [item]
     (assert-not-dropped "add-item-view")
@@ -115,6 +153,7 @@
                                                      :rotation item.rotation
                                                      :size item.size}))
           (register-movable item metadata)
+          (register-resizable item metadata)
           (set (. item-records item.id) {:item item
                                          :element element
                                          :metadata metadata})
@@ -123,7 +162,7 @@
     (when (not ok)
       (if metadata
           (do
-            (unregister-movable {:element element})
+            (unregister-interactions {:element element})
             (layer:remove-child element))
           (when (and element element.drop)
             (element:drop)))
@@ -133,7 +172,7 @@
   (fn remove-item-view [item]
     (local record (and item (. item-records item.id)))
     (when record
-      (unregister-movable record)
+      (unregister-interactions record)
       (layer:remove-child record.element)
       (set (. item-records item.id) nil)))
 
@@ -300,7 +339,7 @@
       (when record.line
         (record.line:drop)))
     (each [_ record (pairs item-records)]
-      (unregister-movable record))
+      (unregister-interactions record))
     (layer:drop))
 
   (set self {:board board

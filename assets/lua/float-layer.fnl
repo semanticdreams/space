@@ -156,14 +156,24 @@
                      (set metadata.size size)
                      (set layout.size size)
                      (layout:mark-layout-dirty)))
+              (set target.set-transform
+                   (fn [self transform]
+                     (when transform.position
+                       (self:set-position transform.position))
+                     (when transform.size
+                       (self:set-size transform.size))
+                     self))
               (set metadata.target target)
               target))))
 
-    (fn ensure-movable-target [self metadata]
+    (fn ensure-transform-target [self metadata]
       (ensure-target self metadata))
 
+    (fn ensure-movable-target [self metadata]
+      (ensure-transform-target self metadata))
+
     (fn ensure-resize-target [self metadata]
-      (ensure-target self metadata))
+      (ensure-transform-target self metadata))
 
     (fn drop [self]
       (self.layout:drop)
@@ -177,6 +187,7 @@
     (set layer.attach-child attach-child)
     (set layer.detach-child detach-child)
     (set layer.remove-child remove-child)
+    (set layer.ensure-transform-target ensure-transform-target)
     (set layer.ensure-movable-target ensure-movable-target)
     (set layer.ensure-resize-target ensure-resize-target)
     (set layer.drop drop)

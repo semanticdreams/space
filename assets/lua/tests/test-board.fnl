@@ -695,6 +695,169 @@
   (BoardRegistry.unregister-owner owner)
   true)
 
+(fn board-view-resizable-target-updates-board-transform []
+  (local previous-movables app.movables)
+  (local previous-resizables app.resizables)
+  (local owner {})
+  (local registered [])
+  (var unregister-count 0)
+  (BoardRegistry.unregister-item-type "resize-item" owner)
+  (BoardRegistry.register-item-type {:id "resize-item"
+                                     :label "Resize"
+                                     :builder dummy-widget}
+                                    owner)
+  (set app.movables nil)
+  (set app.resizables {:register (fn [_self element opts]
+                                   (table.insert registered {:element element
+                                                             :opts opts})
+                                   opts)
+                       :unregister (fn [_self _element]
+                                     (set unregister-count (+ unregister-count 1)))})
+  (local (ok result)
+    (pcall
+      (fn []
+        (local root (LayoutRoot))
+        (local ctx (BuildContext {:layout-root root}))
+        (local canvas {:layout-root root
+                       :build-context ctx})
+        (local board (Board {}))
+        (local view (BoardView {:board board
+                                :canvas canvas
+                                :ctx ctx}))
+        (local item (view:add-item {:type "resize-item"
+                                    :position (glm.vec3 1 2 0)
+                                    :size (glm.vec3 8 4 0)}))
+        (assert (= (length registered) 1)
+                "BoardView should register board items with resizables")
+        (local entry (. registered 1))
+        (local target (assert entry.opts.target
+                              "BoardView resizable registration requires a target"))
+        (assert (= entry.opts.pointer-target canvas)
+                "BoardView resizable registration should target the board canvas")
+        (target:set-position (glm.vec3 9 10 0))
+        (target:set-size (glm.vec3 20 12 0))
+        (assert (= item.position.x 9)
+                "BoardView resizable target should persist x position updates")
+        (assert (= item.position.y 10)
+                "BoardView resizable target should persist y position updates")
+        (assert (= item.size.x 20)
+                "BoardView resizable target should persist width updates")
+        (assert (= item.size.y 12)
+                "BoardView resizable target should persist height updates")
+        (root:update)
+        (local record (. view.item-records item.id))
+        (assert (= record.element.layout.size.x 20)
+                "BoardView should apply resized width to the item layout")
+        (assert (= record.element.layout.size.y 12)
+                "BoardView should apply resized height to the item layout")
+        (var update-count 0)
+        (local update-handler
+          (board.item-updated:connect
+            (fn [_updated]
+              (set update-count (+ update-count 1)))))
+        (target:set-transform {:position (glm.vec3 30 31 0)
+                               :size (glm.vec3 40 41 0)})
+        (assert (= update-count 1)
+                "BoardView target transform should emit exactly one board update")
+        (assert (= item.position.x 30)
+                "BoardView target transform should persist combined x position")
+        (assert (= item.size.x 40)
+                "BoardView target transform should persist combined width")
+        (board.item-updated:disconnect update-handler true)
+        (view:drop)
+        (assert (= unregister-count 1)
+                "BoardView should unregister board item resizables on drop")
+        true)))
+  (set app.movables previous-movables)
+  (set app.resizables previous-resizables)
+  (BoardRegistry.unregister-owner owner)
+  (if ok result (error result)))
+
+(fn board-view-transform-target-rolls-back-after-board-failure []
+  (local previous-movables app.movables)
+  (local previous-resizables app.resizables)
+  (local owner {})
+  (local registered [])
+  (BoardRegistry.unregister-item-type "rollback-item" owner)
+  (BoardRegistry.register-item-type {:id "rollback-item"
+                                     :label "Rollback"
+                                     :builder dummy-widget}
+                                    owner)
+  (set app.movables nil)
+  (set app.resizables {:register (fn [_self element opts]
+                                   (table.insert registered {:element element
+                                                             :opts opts})
+                                   opts)
+                       :unregister (fn [_self _element] nil)})
+  (local (ok result)
+    (pcall
+      (fn []
+        (local root (LayoutRoot))
+        (local ctx (BuildContext {:layout-root root}))
+        (local canvas {:layout-root root
+                       :build-context ctx})
+        (local board (Board {}))
+        (local view (BoardView {:board board
+                                :canvas canvas
+                                :ctx ctx}))
+        (local item (view:add-item {:type "rollback-item"
+                                    :position (glm.vec3 1 2 0)
+                                    :size (glm.vec3 8 4 0)}))
+        (root:update)
+        (local record (. view.item-records item.id))
+        (local entry (. registered 1))
+        (local target (assert entry.opts.target
+                              "BoardView resizable registration requires a target"))
+        (local handler
+          (board.item-updated:connect
+            (fn [updated]
+              (when (or (= updated.position.x 99)
+                        (= updated.size.x 99))
+                (error "reject transform")))))
+        (local (position-ok _position-err)
+          (pcall (fn []
+                   (target:set-position (glm.vec3 99 10 0)))))
+        (assert (not position-ok)
+                "BoardView target position update should fail when board transform fails")
+        (assert (= item.position.x 1)
+                "Board item x position should roll back after rejected target position")
+        (assert (= target.position.x 1)
+                "Board target x position should not pre-mutate before rejected board position")
+        (assert (= record.metadata.world-position.x 1)
+                "Board metadata x position should roll back after rejected target position")
+        (local (size-ok _size-err)
+          (pcall (fn []
+                   (target:set-size (glm.vec3 99 12 0)))))
+        (assert (not size-ok)
+                "BoardView target size update should fail when board transform fails")
+        (assert (= item.size.x 8)
+                "Board item width should roll back after rejected target size")
+        (assert (= target.size.x 8)
+                "Board target width should not pre-mutate before rejected board size")
+        (assert (= record.element.layout.size.x 8)
+                "Board item layout width should roll back after rejected target size")
+        (local (transform-ok _transform-err)
+          (pcall (fn []
+                   (target:set-transform {:position (glm.vec3 50 10 0)
+                                          :size (glm.vec3 99 12 0)}))))
+        (assert (not transform-ok)
+                "BoardView target transform update should fail when combined board transform fails")
+        (assert (= item.position.x 1)
+                "Board item x position should roll back after rejected combined target transform")
+        (assert (= item.size.x 8)
+                "Board item width should roll back after rejected combined target transform")
+        (assert (= target.position.x 1)
+                "Board target x position should not pre-mutate before rejected combined transform")
+        (assert (= target.size.x 8)
+                "Board target width should not pre-mutate before rejected combined transform")
+        (board.item-updated:disconnect handler true)
+        (view:drop)
+        true)))
+  (set app.movables previous-movables)
+  (set app.resizables previous-resizables)
+  (BoardRegistry.unregister-owner owner)
+  (if ok result (error result)))
+
 (fn board-root-action-uses-root-event-position []
   (local previous-active-world-runtime app.active-world-runtime)
   (local previous-canvas app.canvas)
@@ -785,6 +948,10 @@
                      :fn string-entity-create-returns-board-item})
 (table.insert tests {:name "BoardView transform update dirties layer layout"
                      :fn board-view-transform-update-dirties-layer-layout})
+(table.insert tests {:name "BoardView resizable target updates board transform"
+                     :fn board-view-resizable-target-updates-board-transform})
+(table.insert tests {:name "BoardView transform target rolls back after board failure"
+                     :fn board-view-transform-target-rolls-back-after-board-failure})
 (table.insert tests {:name "Board root action uses root event position"
                      :fn board-root-action-uses-root-event-position})
 

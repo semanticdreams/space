@@ -136,6 +136,40 @@
   (assert (> layout.size.x 10) "Resize should update size with intersectables")
   (assert (> layout.size.y 10) "Resize should update size with intersectables"))
 
+(fn resizable-prefers-atomic-transform-target []
+  (local intersector (make-intersector))
+  (local resizables (Resizables {:intersectables intersector
+                                 :drag-threshold 0}))
+  (local layout (make-layout (glm.vec3 10 10 0)))
+  (local target {:position (glm.vec3 0 0 0)
+                 :size (glm.vec3 10 10 0)
+                 :rotation (glm.quat 1 0 0 0)
+                 :set-position (fn [_self _position]
+                                 (error "Resizables should not split atomic transform position"))
+                 :set-size (fn [_self _size]
+                             (error "Resizables should not split atomic transform size"))})
+  (var transform-count 0)
+  (set target.set-transform
+       (fn [self transform]
+         (set transform-count (+ transform-count 1))
+         (set self.position transform.position)
+         (set self.size transform.size)
+         self))
+  (resizables:register layout {:target target
+                               :handle layout
+                               :min-size (glm.vec3 0 0 0)})
+  (set intersector.selection-point (glm.vec3 9 4 0))
+  (resizables:on-mouse-button-down {:button 3 :x 0 :y 0})
+  (set intersector.next-ray {:origin (glm.vec3 14 4 5)
+                             :direction (glm.vec3 0 0 -1)})
+  (resizables:on-mouse-motion {:x 14 :y 0})
+  (assert (= transform-count 1)
+          "Resizables should apply position and size through one target transform")
+  (assert (approx target.size.x 14)
+          "Atomic resize should update target width")
+  (assert (approx target.position.x 0)
+          "Atomic resize should keep fixed edge position"))
+
 (fn scene-resizables-use-own-scene-pointer-target-during-registration []
   (local original-scene app.scene)
   (local original-intersectables app.intersectables)
@@ -213,6 +247,8 @@
 (table.insert tests {:name "Resizables clamp to min size" :fn resizable-respects-min-size})
 (table.insert tests {:name "Resizables fire hooks" :fn resizable-fires-hooks})
 (table.insert tests {:name "Resizables integrate with intersectables" :fn resizable-works-with-intersectables})
+(table.insert tests {:name "Resizables prefer atomic transform target"
+                     :fn resizable-prefers-atomic-transform-target})
 (table.insert tests {:name "Scene resizables bind pointer target to their own scene"
                      :fn scene-resizables-use-own-scene-pointer-target-during-registration})
 (table.insert tests {:name "Default state forwards alt resize" :fn default-state-dispatches-alt-resize})
