@@ -1564,16 +1564,14 @@
   (with-temp-dir
     (fn [dir]
       (local log-path (fs.join-path dir "test.log"))
-      (local saved-output (logging.get-output-path))
-      (logging.init {:path log-path})
-      (logging.init {:path saved-output})
-      (fs.remove-all log-path)
-      (logging.init {:path log-path})
-      (local (ok err) (pcall def.run {}))
-      (assert (not ok) "should error on missing file")
-      (assert (or (string.find (tostring err) "not found")
-                  (string.find (tostring err) "empty"))
-              (.. "error should mention not found or empty, got: " (tostring err))))))
+      (with-log-path log-path
+        (fn []
+          (pcall fs.remove-all log-path)
+          (local (ok err) (pcall def.run {}))
+          (assert (not ok) "should error on missing file")
+          (assert (or (string.find (tostring err) "not found")
+                      (string.find (tostring err) "empty"))
+                  (.. "error should mention not found or empty, got: " (tostring err))))))))
 
 (table.insert tests {:name "agent-units: space_unit_read_log file not found" :fn test-space-unit-read-log-file-not-found})
 
