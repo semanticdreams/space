@@ -363,7 +363,8 @@ jobs:
                 libgl-dev \
                 libxkbcommon-dev \
                 libxi-dev \
-                libpng-dev
+                libpng-dev \
+                libfreetype-dev
               git config --global --add safe.directory /work
               scripts/build-linux.sh \
                 --profile "${PROFILE}" \
