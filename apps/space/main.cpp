@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 #include <SDL3/SDL_main.h>
 
@@ -96,11 +97,47 @@ std::string read_stdin()
 
 std::string sibling_path(const std::string& file_path, const std::string& sibling_name)
 {
-    if (file_path.empty()) {
+    std::filesystem::path executable_path;
+#if defined(__linux__)
+    std::error_code proc_error;
+    executable_path = std::filesystem::read_symlink("/proc/self/exe", proc_error);
+    if (proc_error) {
+        executable_path.clear();
+    }
+#endif
+
+    if (executable_path.empty() && !file_path.empty()) {
+        std::filesystem::path argv_path(file_path);
+        if (argv_path.is_absolute() || argv_path.has_parent_path()) {
+            executable_path = std::filesystem::absolute(argv_path);
+        } else if (const char* path_env = std::getenv("PATH")) {
+            std::string search_path(path_env);
+            size_t start = 0;
+            while (start <= search_path.size()) {
+                size_t end = search_path.find(':', start);
+                std::string dir = search_path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+                if (dir.empty()) {
+                    dir = ".";
+                }
+                std::filesystem::path candidate = std::filesystem::path(dir) / argv_path;
+                if (std::filesystem::exists(candidate)) {
+                    executable_path = std::filesystem::absolute(candidate);
+                    break;
+                }
+                if (end == std::string::npos) {
+                    break;
+                }
+                start = end + 1;
+            }
+        }
+    }
+
+    if (executable_path.empty()) {
         return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
     }
-    std::filesystem::path path = std::filesystem::absolute(std::filesystem::path(file_path));
-    std::filesystem::path parent = path.parent_path();
+    std::error_code canonical_error;
+    executable_path = std::filesystem::weakly_canonical(executable_path, canonical_error);
+    std::filesystem::path parent = executable_path.parent_path();
     if (parent.empty()) {
         return std::filesystem::absolute(std::filesystem::path(sibling_name)).string();
     }

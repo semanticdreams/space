@@ -17,18 +17,27 @@ Direct downloads:
 - Windows installer (.exe): [space-windows-setup.exe](https://github.com/semanticdreams/space/releases/latest/download/space-windows-setup.exe)
 - Windows (.zip): [space-windows.zip](https://github.com/semanticdreams/space/releases/latest/download/space-windows.zip)
 - AppImage: [space-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.AppImage)
-- Debian/Ubuntu (.deb): [space-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-amd64.deb)
-- Fedora/RHEL/openSUSE (.rpm): [space-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-linux-x86_64.rpm)
+- Ubuntu 22.04 (.deb): [space-linux-ubuntu-22.04-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-ubuntu-22.04-amd64.deb)
+- Ubuntu 24.04 (.deb): [space-linux-ubuntu-24.04-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-ubuntu-24.04-amd64.deb)
+- Debian 12 (.deb): [space-linux-debian-12-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-debian-12-amd64.deb)
+- Debian 13 (.deb): [space-linux-debian-13-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-linux-debian-13-amd64.deb)
+- Fedora (.rpm): [space-linux-fedora-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-linux-fedora-x86_64.rpm)
+- openSUSE Tumbleweed (.rpm): [space-linux-opensuse-tumbleweed-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-linux-opensuse-tumbleweed-x86_64.rpm)
 - Minimal AppImage: [space-minimal-linux-x86_64.AppImage](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.AppImage)
-- Minimal Debian/Ubuntu (.deb): [space-minimal-linux-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-amd64.deb)
-- Minimal Fedora/RHEL/openSUSE (.rpm): [space-minimal-linux-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-x86_64.rpm)
+- Minimal Ubuntu 22.04 (.deb): [space-minimal-linux-ubuntu-22.04-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-ubuntu-22.04-amd64.deb)
+- Minimal Ubuntu 24.04 (.deb): [space-minimal-linux-ubuntu-24.04-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-ubuntu-24.04-amd64.deb)
+- Minimal Debian 12 (.deb): [space-minimal-linux-debian-12-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-debian-12-amd64.deb)
+- Minimal Debian 13 (.deb): [space-minimal-linux-debian-13-amd64.deb](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-debian-13-amd64.deb)
+- Minimal Fedora (.rpm): [space-minimal-linux-fedora-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-fedora-x86_64.rpm)
+- Minimal openSUSE Tumbleweed (.rpm): [space-minimal-linux-opensuse-tumbleweed-x86_64.rpm](https://github.com/semanticdreams/space/releases/latest/download/space-minimal-linux-opensuse-tumbleweed-x86_64.rpm)
 
 Install guidance:
 - Windows installer: run `space-windows-setup.exe` and follow the installer.
 - Windows: extract `space-windows.zip` and run `space.exe`.
 - AppImage: mark executable and run it (`chmod +x <file>.AppImage`, then `./<file>.AppImage`).
-- Debian/Ubuntu: install the downloaded `.deb` with your standard package workflow (`apt`/`dpkg`).
-- Fedora/RHEL/openSUSE: install the downloaded `.rpm` with your standard package workflow (`dnf`/`yum`/`zypper`/`rpm`).
+- Debian/Ubuntu: install the downloaded `.deb` that matches your distro/version with your standard package workflow (`apt`/`dpkg`).
+- Fedora/openSUSE Tumbleweed: install the downloaded `.rpm` that matches your distro with your standard package workflow (`dnf`/`zypper`).
+- RHEL/Rocky/openSUSE Leap: use the AppImage for now; full-feature RPMs need runtime libraries that are not available from their default repositories.
 
 ### Build from source
 
@@ -38,7 +47,7 @@ Ubuntu/Pop!_OS:
 
 <!-- CI_DEPS_START -->
 ```bash
-sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pil python3-zmq cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev libwayland-dev libegl1-mesa-dev libxkbcommon-dev libxi-dev xvfb
+sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pil python3-zmq cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev libsecret-1-dev libwayland-dev libegl1-mesa-dev libxkbcommon-dev libxi-dev xvfb
 ```
 <!-- CI_DEPS_END -->
 
@@ -73,8 +82,57 @@ sudo dnf install \
   libdecor-devel \
   wayland-devel \
   mesa-libEGL-devel \
+  mesa-libGL-devel \
   libxkbcommon-devel \
-  libXi-devel
+  libXi-devel \
+  libpng-devel
+```
+
+openSUSE Tumbleweed:
+
+```bash
+sudo zypper install \
+  cmake \
+  gcc-c++ \
+  make \
+  git \
+  pkgconf \
+  rpm-build \
+  ccache \
+  bzip2 \
+  tar \
+  libbullet-devel \
+  glm-devel \
+  openal-soft-devel \
+  libepoxy-devel \
+  portaudio-devel \
+  libvterm-devel \
+  libnotify-devel \
+  libcurl-devel \
+  zeromq-devel \
+  python3 \
+  python3-Pillow \
+  python3-pyzmq \
+  cargo \
+  libaubio-devel \
+  boost-devel \
+  libxapian-devel \
+  libtorrent-rasterbar-devel \
+  ripgrep \
+  ffmpeg-7-libavcodec-devel \
+  ffmpeg-7-libavformat-devel \
+  ffmpeg-7-libavutil-devel \
+  ffmpeg-7-libswscale-devel \
+  ffmpeg-7-libswresample-devel \
+  libgccjit-devel \
+  libsecret-devel \
+  libdecor-devel \
+  wayland-devel \
+  Mesa-libEGL-devel \
+  Mesa-libGL-devel \
+  libxkbcommon-devel \
+  libXi-devel \
+  libpng16-devel
 ```
 
 Build and run:
@@ -122,11 +180,18 @@ scripts/build-linux.sh --profile full
 
 # minimal profile (currently disables CEF; extend via SPACE_MINIMAL_DISABLED_OPTIONS)
 scripts/build-linux.sh --profile minimal
+
+# distro-specific DEB example
+scripts/build-linux.sh --profile full --package-mode deb --deb-flavor ubuntu-24.04
+
+# distro-specific RPM example
+scripts/build-linux.sh --profile full --package-mode rpm --rpm-flavor fedora
 ```
 
 Stable outputs are written as:
-- Full: `build/space-linux-x86_64.AppImage`, `build/space-linux-amd64.deb`, `build/space-linux-x86_64.rpm`
-- Minimal: `build/space-minimal-linux-x86_64.AppImage`, `build/space-minimal-linux-amd64.deb`, `build/space-minimal-linux-x86_64.rpm`
+- Full default names: `build/space-linux-x86_64.AppImage`, `build/space-linux-amd64.deb`, and `build/space-linux-x86_64.rpm`
+- Minimal default names: `build/space-minimal-linux-x86_64.AppImage`, `build/space-minimal-linux-amd64.deb`, and `build/space-minimal-linux-x86_64.rpm`
+- Distro-flavored outputs use the selected flavor, such as `build/space-linux-ubuntu-24.04-amd64.deb` or `build/space-linux-fedora-x86_64.rpm`
 
 Windows release builds currently publish:
 - `space-windows-setup.exe`

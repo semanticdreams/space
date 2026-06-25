@@ -1,9 +1,11 @@
 #include "cef_runtime.h"
 
 #include <concepts>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <mutex>
+#include <system_error>
 
 #if defined(SPACE_ENABLE_CEF)
 #include "include/cef_app.h"
@@ -34,6 +36,62 @@ std::mutex g_cef_mutex;
 bool g_cef_initialized = false;
 cef_runtime::Config g_cef_config {};
 bool g_cef_has_config = false;
+
+std::filesystem::path executable_dir_from_args(char** argv)
+{
+#if defined(__linux__)
+    std::error_code proc_error;
+    std::filesystem::path proc_exe = std::filesystem::read_symlink("/proc/self/exe", proc_error);
+    if (!proc_error && !proc_exe.empty()) {
+        return proc_exe.parent_path();
+    }
+#endif
+
+    if (!argv || !argv[0] || argv[0][0] == '\0') {
+        return std::filesystem::current_path();
+    }
+    std::filesystem::path argv_path(argv[0]);
+    if (argv_path.is_absolute() || argv_path.has_parent_path()) {
+        return std::filesystem::absolute(argv_path).parent_path();
+    }
+    if (const char* path_env = std::getenv("PATH")) {
+        std::string search_path(path_env);
+        size_t start = 0;
+        while (start <= search_path.size()) {
+            size_t end = search_path.find(':', start);
+            std::string dir = search_path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            if (dir.empty()) {
+                dir = ".";
+            }
+            std::filesystem::path candidate = std::filesystem::path(dir) / argv_path;
+            if (std::filesystem::exists(candidate)) {
+                return std::filesystem::absolute(candidate).parent_path();
+            }
+            if (end == std::string::npos) {
+                break;
+            }
+            start = end + 1;
+        }
+    }
+    return std::filesystem::absolute(argv_path).parent_path();
+}
+
+std::filesystem::path cef_resource_dir_for_executable(char** argv)
+{
+    std::filesystem::path exe_dir = executable_dir_from_args(argv);
+    std::filesystem::path installed_resource_dir = exe_dir / ".." / "lib" / "space" / "cef";
+    if (std::filesystem::exists(installed_resource_dir / "resources.pak")) {
+        return std::filesystem::weakly_canonical(installed_resource_dir);
+    }
+    return exe_dir;
+}
+
+void configure_resource_paths(CefSettings& settings, char** argv)
+{
+    std::filesystem::path resource_dir = cef_resource_dir_for_executable(argv);
+    CefString(&settings.resources_dir_path) = resource_dir.string();
+    CefString(&settings.locales_dir_path) = (resource_dir / "locales").string();
+}
 
 } // namespace
 #endif
@@ -81,12 +139,7 @@ bool initialize_browser_process(const Config& config)
     settings.multi_threaded_message_loop = false;
 
 #if defined(__linux__)
-    if (config.argv && config.argv[0] && config.argv[0][0] != '\0') {
-        std::filesystem::path exe_path = std::filesystem::absolute(std::filesystem::path(config.argv[0]));
-        std::filesystem::path exe_dir = exe_path.parent_path();
-        CefString(&settings.resources_dir_path) = exe_dir.string();
-        CefString(&settings.locales_dir_path) = (exe_dir / "locales").string();
-    }
+    configure_resource_paths(settings, config.argv);
 #endif
     {
         std::filesystem::path cache_root = std::filesystem::temp_directory_path() / "space" / "cef-cache";
@@ -132,12 +185,7 @@ bool ensure_initialized()
     settings.multi_threaded_message_loop = false;
 
 #if defined(__linux__)
-    if (g_cef_config.argv && g_cef_config.argv[0] && g_cef_config.argv[0][0] != '\0') {
-        std::filesystem::path exe_path = std::filesystem::absolute(std::filesystem::path(g_cef_config.argv[0]));
-        std::filesystem::path exe_dir = exe_path.parent_path();
-        CefString(&settings.resources_dir_path) = exe_dir.string();
-        CefString(&settings.locales_dir_path) = (exe_dir / "locales").string();
-    }
+    configure_resource_paths(settings, g_cef_config.argv);
 #endif
     {
         std::filesystem::path cache_root = std::filesystem::temp_directory_path() / "space" / "cef-cache";

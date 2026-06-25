@@ -209,6 +209,7 @@ function(space_setup_cef_for_target_linux target_name)
         message(FATAL_ERROR "Failed to locate extracted CEF directory in ${SPACE_CEF_DOWNLOAD_DIR}")
     endif()
     list(GET _cef_root_candidates 0 SPACE_CEF_ROOT)
+    set(SPACE_CEF_ROOT "${SPACE_CEF_ROOT}" CACHE PATH "Resolved CEF root directory" FORCE)
     if(NOT EXISTS "${_cef_extract_stamp}")
         file(WRITE "${_cef_extract_stamp}" "${SPACE_CEF_VERSION}\n")
     endif()
@@ -246,6 +247,28 @@ function(space_setup_cef_for_target_linux target_name)
         file(COPY "${_cef_resource_dir}/locales" DESTINATION "${_cef_release_dir}")
     endif()
 
+    set(_cef_required_runtime_files
+        "${SPACE_CEF_ROOT}/Release/libcef.so"
+        "${SPACE_CEF_ROOT}/Release/libEGL.so"
+        "${SPACE_CEF_ROOT}/Release/libGLESv2.so"
+        "${SPACE_CEF_ROOT}/Release/libvk_swiftshader.so"
+        "${SPACE_CEF_ROOT}/Release/libvulkan.so.1"
+        "${SPACE_CEF_ROOT}/Release/vk_swiftshader_icd.json"
+        "${SPACE_CEF_ROOT}/Release/chrome_100_percent.pak"
+        "${SPACE_CEF_ROOT}/Release/chrome_200_percent.pak"
+        "${SPACE_CEF_ROOT}/Release/icudtl.dat"
+        "${SPACE_CEF_ROOT}/Release/resources.pak"
+        "${SPACE_CEF_ROOT}/Release/v8_context_snapshot.bin"
+    )
+    foreach(_cef_required_file IN LISTS _cef_required_runtime_files)
+        if(NOT EXISTS "${_cef_required_file}")
+            message(FATAL_ERROR "Required CEF runtime file not found: ${_cef_required_file}")
+        endif()
+    endforeach()
+    if(NOT EXISTS "${SPACE_CEF_ROOT}/Release/locales")
+        message(FATAL_ERROR "Required CEF locales directory not found: ${SPACE_CEF_ROOT}/Release/locales")
+    endif()
+
     if(NOT TARGET space_cef_linux)
         add_library(space_cef_linux SHARED IMPORTED GLOBAL)
     endif()
@@ -267,37 +290,39 @@ function(space_setup_cef_for_target_linux target_name)
     target_link_libraries(${target_name} libcef_dll_wrapper space_cef_linux)
 
     set_property(TARGET ${target_name} APPEND PROPERTY BUILD_RPATH "${SPACE_CEF_ROOT}/Release")
-    set_property(TARGET ${target_name} APPEND PROPERTY INSTALL_RPATH "\$ORIGIN/../lib")
+    set_property(TARGET ${target_name} APPEND PROPERTY INSTALL_RPATH "\$ORIGIN/../lib/space/cef")
 
-    set(_cef_runtime_files
-        "${SPACE_CEF_ROOT}/Release/libcef.so"
-        "${SPACE_CEF_ROOT}/Resources/chrome_100_percent.pak"
-        "${SPACE_CEF_ROOT}/Resources/chrome_200_percent.pak"
-        "${SPACE_CEF_ROOT}/Resources/icudtl.dat"
-        "${SPACE_CEF_ROOT}/Resources/resources.pak"
-        "${SPACE_CEF_ROOT}/Resources/v8_context_snapshot.bin"
-        "${SPACE_CEF_ROOT}/Resources/snapshot_blob.bin"
-    )
+    if(NOT TARGET space_cef_runtime)
+        add_custom_target(space_cef_runtime)
 
-    foreach(_cef_file IN LISTS _cef_runtime_files)
-        if(EXISTS "${_cef_file}")
+        foreach(_cef_file IN LISTS _cef_required_runtime_files)
             add_custom_command(
-                TARGET ${target_name} POST_BUILD
+                TARGET space_cef_runtime POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${_cef_file}"
-                        "$<TARGET_FILE_DIR:${target_name}>"
+                        "${CMAKE_BINARY_DIR}"
+                VERBATIM
+            )
+        endforeach()
+
+        if(EXISTS "${SPACE_CEF_ROOT}/Release/snapshot_blob.bin")
+            add_custom_command(
+                TARGET space_cef_runtime POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${SPACE_CEF_ROOT}/Release/snapshot_blob.bin"
+                        "${CMAKE_BINARY_DIR}"
                 VERBATIM
             )
         endif()
-    endforeach()
 
-    if(EXISTS "${SPACE_CEF_ROOT}/Resources/locales")
         add_custom_command(
-            TARGET ${target_name} POST_BUILD
+            TARGET space_cef_runtime POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory
-                    "${SPACE_CEF_ROOT}/Resources/locales"
-                    "$<TARGET_FILE_DIR:${target_name}>/locales"
+                    "${SPACE_CEF_ROOT}/Release/locales"
+                    "${CMAKE_BINARY_DIR}/locales"
             VERBATIM
         )
     endif()
+
+    add_dependencies(${target_name} space_cef_runtime)
 endfunction()

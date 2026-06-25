@@ -652,6 +652,9 @@ endif()
 
 add_executable(${PROJECT_NAME} apps/space/main.cpp)
 target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    INSTALL_RPATH "\$ORIGIN/../lib"
+)
 target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE ${CMAKE_CURRENT_LIST_DIR}/external/CLI11/include)
 if(WIN32)
     set(SPACE_WINDOWS_ICON_PNG "${CMAKE_CURRENT_SOURCE_DIR}/assets/pics/space.png")
@@ -930,10 +933,7 @@ if(SPACE_BUILD_MATRIX)
         if(MATRIX_RUST_TARGET)
             set(MATRIX_BUILD_RPATH "\$ORIGIN/../ffi/matrix/target/${MATRIX_RUST_TARGET}/release")
         endif()
-        set_target_properties(${PROJECT_NAME} PROPERTIES
-            BUILD_RPATH "${MATRIX_BUILD_RPATH}"
-            INSTALL_RPATH "\$ORIGIN/../lib"
-        )
+        set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY BUILD_RPATH "${MATRIX_BUILD_RPATH}")
         install(FILES ${MATRIX_OUTPUT} DESTINATION lib)
     else()
         message(WARNING "cargo not found; matrix build disabled.")
@@ -966,23 +966,37 @@ if(TARGET SDL3-shared)
     )
 endif()
 
-if(SPACE_ENABLE_CEF AND DEFINED SPACE_CEF_ROOT)
-    set(_space_cef_runtime_files
-        "${SPACE_CEF_ROOT}/Release/libcef.so"
-        "${SPACE_CEF_ROOT}/Resources/chrome_100_percent.pak"
-        "${SPACE_CEF_ROOT}/Resources/chrome_200_percent.pak"
-        "${SPACE_CEF_ROOT}/Resources/icudtl.dat"
-        "${SPACE_CEF_ROOT}/Resources/resources.pak"
-        "${SPACE_CEF_ROOT}/Resources/v8_context_snapshot.bin"
-        "${SPACE_CEF_ROOT}/Resources/snapshot_blob.bin"
+if(SPACE_ENABLE_CEF)
+    install(TARGETS space_cef_helper
+        RUNTIME DESTINATION bin
     )
-    foreach(_space_cef_file IN LISTS _space_cef_runtime_files)
-        if(EXISTS "${_space_cef_file}")
-            install(FILES "${_space_cef_file}" DESTINATION lib)
+
+    set(_space_cef_required_runtime_files
+        "${SPACE_CEF_ROOT}/Release/libcef.so"
+        "${SPACE_CEF_ROOT}/Release/libEGL.so"
+        "${SPACE_CEF_ROOT}/Release/libGLESv2.so"
+        "${SPACE_CEF_ROOT}/Release/libvk_swiftshader.so"
+        "${SPACE_CEF_ROOT}/Release/libvulkan.so.1"
+        "${SPACE_CEF_ROOT}/Release/vk_swiftshader_icd.json"
+        "${SPACE_CEF_ROOT}/Release/chrome_100_percent.pak"
+        "${SPACE_CEF_ROOT}/Release/chrome_200_percent.pak"
+        "${SPACE_CEF_ROOT}/Release/icudtl.dat"
+        "${SPACE_CEF_ROOT}/Release/resources.pak"
+        "${SPACE_CEF_ROOT}/Release/v8_context_snapshot.bin"
+    )
+    foreach(_space_cef_file IN LISTS _space_cef_required_runtime_files)
+        if(NOT EXISTS "${_space_cef_file}")
+            message(FATAL_ERROR "Required CEF runtime file not found: ${_space_cef_file}")
         endif()
+        install(FILES "${_space_cef_file}" DESTINATION lib/space/cef)
     endforeach()
-    if(EXISTS "${SPACE_CEF_ROOT}/Resources/locales")
-        install(DIRECTORY "${SPACE_CEF_ROOT}/Resources/locales" DESTINATION lib)
+    if(EXISTS "${SPACE_CEF_ROOT}/Release/snapshot_blob.bin")
+        install(FILES "${SPACE_CEF_ROOT}/Release/snapshot_blob.bin" DESTINATION lib/space/cef)
+    endif()
+    if(EXISTS "${SPACE_CEF_ROOT}/Release/locales")
+        install(DIRECTORY "${SPACE_CEF_ROOT}/Release/locales" DESTINATION lib/space/cef)
+    else()
+        message(FATAL_ERROR "Required CEF locales directory not found: ${SPACE_CEF_ROOT}/Release/locales")
     endif()
 endif()
 
@@ -1009,10 +1023,11 @@ install(FILES ${DESKTOP_FILE} DESTINATION share/applications)
 install(FILES assets/pics/space.png DESTINATION share/icons/hicolor/256x256/apps)
 
 set(CPACK_GENERATOR "DEB;RPM")
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "space")
 set(CPACK_DEBIAN_PACKAGE_VERSION ${SPACE_PACKAGE_VERSION})
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "/usr/lib")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS "usr/lib/space/cef")
 #set(CPACK_DEBIAN_PACKAGE_DEPENDS
 #"libsdl3-0, libepoxy0, libbullet-dev, libopenal1"
 #)
@@ -1023,5 +1038,6 @@ set(CPACK_RPM_PACKAGE_LICENSE "GPLv3")
 set(CPACK_RPM_PACKAGE_RELEASE "1")
 set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
 set(CPACK_RPM_PACKAGE_DESCRIPTION ${SPACE_PACKAGE_DESCRIPTION})
+set(CPACK_RPM_PACKAGE_AUTOPROV "0")
 
 include(CPack)

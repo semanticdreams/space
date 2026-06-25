@@ -6,6 +6,7 @@ BUILD_DIR="${SPACE_BUILD_DIR:-${ROOT_DIR}/build}"
 if [[ "${BUILD_DIR}" != /* ]]; then
     BUILD_DIR="${ROOT_DIR}/${BUILD_DIR}"
 fi
+INSTALL_PREFIX="${SPACE_INSTALL_PREFIX:-}"
 APPIMAGE_WORK_DIR="${BUILD_DIR}/appimage"
 APPDIR="${APPIMAGE_WORK_DIR}/AppDir"
 TOOLS_DIR="${APPIMAGE_WORK_DIR}/tools"
@@ -13,32 +14,58 @@ APPIMAGE_BASENAME="${SPACE_APPIMAGE_BASENAME:-space}"
 LINUXDEPLOY_URL="${LINUXDEPLOY_URL:-https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20240109-1/linuxdeploy-x86_64.AppImage}"
 APPIMAGETOOL_URL="${APPIMAGETOOL_URL:-https://github.com/AppImage/AppImageKit/releases/download/12/appimagetool-x86_64.AppImage}"
 
-if [[ ! -f "${BUILD_DIR}/space" ]]; then
+USE_INSTALL_TREE=false
+if [[ -n "${INSTALL_PREFIX}" && -d "${INSTALL_PREFIX}/bin" ]]; then
+    USE_INSTALL_TREE=true
+fi
+
+if [[ "${USE_INSTALL_TREE}" == false && ! -f "${BUILD_DIR}/space" ]]; then
     echo "error: ${BUILD_DIR}/space not found; run make build first" >&2
     exit 1
 fi
 
+rm -rf "${APPDIR}"
 mkdir -p "${APPDIR}/usr/bin" \
          "${APPDIR}/usr/lib" \
-         "${APPDIR}/usr/share/space" \
-         "${APPDIR}/usr/share/applications" \
-         "${APPDIR}/usr/share/icons/hicolor/256x256/apps" \
+         "${APPDIR}/usr/share" \
          "${TOOLS_DIR}"
 
-rm -rf "${APPDIR}/usr/bin/space" \
-       "${APPDIR}/usr/share/space/assets" \
-       "${APPDIR}/usr/share/applications/space.desktop" \
-       "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png" \
-       "${APPDIR}/usr/lib/locales"
-
-cp "${BUILD_DIR}/space" "${APPDIR}/usr/bin/space"
-cp -r "${ROOT_DIR}/assets" "${APPDIR}/usr/share/space/assets"
-cp "${ROOT_DIR}/assets/pics/space.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
-
-if [[ -f "${BUILD_DIR}/space.desktop" ]]; then
-    cp "${BUILD_DIR}/space.desktop" "${APPDIR}/usr/share/applications/space.desktop"
+if [[ "${USE_INSTALL_TREE}" == true ]]; then
+    cp -a "${INSTALL_PREFIX}/bin" "${APPDIR}/usr/"
+    if [[ -d "${INSTALL_PREFIX}/lib" ]]; then
+        cp -a "${INSTALL_PREFIX}/lib" "${APPDIR}/usr/"
+    fi
+    cp -a "${INSTALL_PREFIX}/share" "${APPDIR}/usr/"
 else
-    cat > "${APPDIR}/usr/share/applications/space.desktop" <<'DESKTOP'
+    copy_if_exists() {
+        local src="$1"
+        local dst="$2"
+        if [[ -e "${src}" ]]; then
+            cp -a "${src}" "${dst}"
+        fi
+    }
+
+    copy_required() {
+        local src="$1"
+        local dst="$2"
+        if [[ ! -e "${src}" ]]; then
+            echo "error: required AppImage input missing: ${src}" >&2
+            exit 1
+        fi
+        cp -a "${src}" "${dst}"
+    }
+
+    cp "${BUILD_DIR}/space" "${APPDIR}/usr/bin/space"
+    mkdir -p "${APPDIR}/usr/share/space"
+    cp -r "${ROOT_DIR}/assets" "${APPDIR}/usr/share/space/assets"
+    mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+    cp "${ROOT_DIR}/assets/pics/space.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/space.png"
+
+    mkdir -p "${APPDIR}/usr/share/applications"
+    if [[ -f "${BUILD_DIR}/space.desktop" ]]; then
+        cp "${BUILD_DIR}/space.desktop" "${APPDIR}/usr/share/applications/space.desktop"
+    else
+        cat > "${APPDIR}/usr/share/applications/space.desktop" <<'DESKTOP'
 [Desktop Entry]
 Name=space
 Comment=space
@@ -48,15 +75,38 @@ Terminal=false
 Type=Application
 Categories=Game;
 DESKTOP
-fi
-
-copy_if_exists() {
-    local src="$1"
-    local dst="$2"
-    if [[ -e "${src}" ]]; then
-        cp -a "${src}" "${dst}"
     fi
-}
+
+    CEF_ENABLED=false
+    if [[ -f "${BUILD_DIR}/CMakeCache.txt" ]] && grep -Eq '^SPACE_ENABLE_CEF:BOOL=(ON|TRUE|1)$' "${BUILD_DIR}/CMakeCache.txt"; then
+        CEF_ENABLED=true
+    fi
+
+    if [[ "${CEF_ENABLED}" == true ]]; then
+        cef_dst="${APPDIR}/usr/lib/space/cef"
+        mkdir -p "${cef_dst}"
+        copy_required "${BUILD_DIR}/space_cef_helper" "${APPDIR}/usr/bin/"
+        copy_required "${BUILD_DIR}/libcef.so" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/libEGL.so" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/libGLESv2.so" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/libvk_swiftshader.so" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/libvulkan.so.1" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/vk_swiftshader_icd.json" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/resources.pak" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/icudtl.dat" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/v8_context_snapshot.bin" "${cef_dst}/"
+        copy_if_exists "${BUILD_DIR}/snapshot_blob.bin" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/chrome_100_percent.pak" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/chrome_200_percent.pak" "${cef_dst}/"
+        copy_required "${BUILD_DIR}/locales" "${cef_dst}/"
+    fi
+
+    if compgen -G "${BUILD_DIR}/external/sdl/libSDL3.so*" > /dev/null; then
+        cp -a ${BUILD_DIR}/external/sdl/libSDL3.so* "${APPDIR}/usr/lib/"
+    fi
+
+    copy_if_exists "${ROOT_DIR}/ffi/matrix/target/release/libmatrix.so" "${APPDIR}/usr/lib/"
+fi
 
 download_with_retry() {
     local url="$1"
@@ -91,21 +141,6 @@ ensure_tool() {
     fi
 }
 
-copy_if_exists "${BUILD_DIR}/libcef.so" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/resources.pak" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/icudtl.dat" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/v8_context_snapshot.bin" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/snapshot_blob.bin" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/chrome_100_percent.pak" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/chrome_200_percent.pak" "${APPDIR}/usr/lib/"
-copy_if_exists "${BUILD_DIR}/locales" "${APPDIR}/usr/lib/"
-
-if compgen -G "${BUILD_DIR}/external/sdl/libSDL3.so*" > /dev/null; then
-    cp -a ${BUILD_DIR}/external/sdl/libSDL3.so* "${APPDIR}/usr/lib/"
-fi
-
-copy_if_exists "${ROOT_DIR}/ffi/matrix/target/release/libmatrix.so" "${APPDIR}/usr/lib/"
-
 cat > "${APPDIR}/AppRun" <<'APP_RUN'
 #!/bin/sh
 set -eu
@@ -113,6 +148,9 @@ HERE="$(dirname "$(readlink -f "$0")")"
 export SPACE_ASSETS_PATH="$HERE/usr/share/space/assets"
 if [ -d "$HERE/usr/lib" ]; then
     export LD_LIBRARY_PATH="$HERE/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+if [ -d "$HERE/usr/lib/space/cef" ]; then
+    export LD_LIBRARY_PATH="$HERE/usr/lib/space/cef${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
 exec "$HERE/usr/bin/space" "$@"
 APP_RUN
