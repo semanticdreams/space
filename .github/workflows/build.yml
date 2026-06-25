@@ -59,19 +59,8 @@ jobs:
           test -n "${appimage}"
           test -f "${appimage}"
           chmod +x "${appimage}"
-          if [[ "${{ matrix.profile }}" == "full" ]]; then
-            Xvfb :99 -screen 0 1024x768x24 >/tmp/space-xvfb.log 2>&1 &
-            xvfb_pid="$!"
-            trap 'kill "${xvfb_pid}"' EXIT
-            sleep 1
-            timeout 30s env DISPLAY=:99 SPACE_DISABLE_AUDIO=1 APPIMAGE_EXTRACT_AND_RUN=1 \
-              "${appimage}" -m "${SPACE_RELEASE_CEF_SMOKE_MODULE}"
-            kill "${xvfb_pid}"
-            trap - EXIT
-          else
-            timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 APPIMAGE_EXTRACT_AND_RUN=1 \
-              "${appimage}" -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
-          fi
+          timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 APPIMAGE_EXTRACT_AND_RUN=1 \
+            "${appimage}" -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
           rm -rf /tmp/space-appimage-smoke
           mkdir -p /tmp/space-appimage-smoke
           (
@@ -126,21 +115,13 @@ jobs:
             test -f /tmp/space-tarball-smoke/lib/space/cef/resources.pak
             test -f /tmp/space-tarball-smoke/lib/space/cef/v8_context_snapshot.bin
             test -d /tmp/space-tarball-smoke/lib/space/cef/locales
-            Xvfb :99 -screen 0 1024x768x24 >/tmp/space-xvfb.log 2>&1 &
-            xvfb_pid="$!"
-            trap 'kill "${xvfb_pid}"' EXIT
-            sleep 1
-            timeout 30s env DISPLAY=:99 SPACE_DISABLE_AUDIO=1 \
-              /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_CEF_SMOKE_MODULE}"
-            kill "${xvfb_pid}"
-            trap - EXIT
           else
             test ! -e /tmp/space-tarball-smoke/bin/space_cef_helper
             test ! -e /tmp/space-tarball-smoke/lib/space/cef
             test ! -e /tmp/space-tarball-smoke/lib/libcef.so
-            timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
-              /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
           fi
+          timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
+            /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
 
       - name: Smoke test AppImage (Linux distros)
         run: |
@@ -370,7 +351,8 @@ jobs:
                 --profile "${PROFILE}" \
                 --build-dir "build/deb-${DEB_FLAVOR}-${PROFILE}" \
                 --package-mode deb \
-                --deb-flavor "${DEB_FLAVOR}"
+                --deb-flavor "${DEB_FLAVOR}" \
+                --no-matrix
               ccache -s
               chown -R "${HOST_UID}:${HOST_GID}" "build/deb-${DEB_FLAVOR}-${PROFILE}" "${CCACHE_DIR}"
             '
@@ -714,7 +696,8 @@ jobs:
                 --profile "${PROFILE}" \
                 --build-dir "build/rpm-${RPM_FLAVOR}-${PROFILE}" \
                 --package-mode rpm \
-                --rpm-flavor "${RPM_FLAVOR}"
+                --rpm-flavor "${RPM_FLAVOR}" \
+                --no-matrix
               ccache -s
               chown -R "${HOST_UID}:${HOST_GID}" "build/rpm-${RPM_FLAVOR}-${PROFILE}" "${CCACHE_DIR}"
             '

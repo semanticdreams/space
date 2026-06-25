@@ -6,6 +6,7 @@ BUILD_DIR="build"
 PACKAGE_MODE="all"
 DEB_FLAVOR=""
 RPM_FLAVOR=""
+NO_MATRIX=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -29,9 +30,13 @@ while [[ $# -gt 0 ]]; do
             RPM_FLAVOR="${2:-}"
             shift 2
             ;;
+        --no-matrix)
+            NO_MATRIX=true
+            shift
+            ;;
         *)
             echo "error: unknown argument: $1" >&2
-            echo "usage: $0 [--profile full|minimal] [--build-dir <path>] [--package-mode all|deb-appimage|deb|appimage|rpm] [--deb-flavor <name>] [--rpm-flavor <name>]" >&2
+            echo "usage: $0 [--profile full|minimal] [--build-dir <path>] [--package-mode all|deb-appimage|deb|appimage|rpm] [--deb-flavor <name>] [--rpm-flavor <name>] [--no-matrix]" >&2
             exit 1
             ;;
     esac
@@ -75,6 +80,9 @@ if [[ "${PROFILE}" == "minimal" ]]; then
     CMAKE_ARGS+=(-DSPACE_ENABLE_CEF=OFF)
 else
     CMAKE_ARGS+=(-DSPACE_ENABLE_CEF=ON)
+fi
+if [[ "${NO_MATRIX}" == true ]]; then
+    CMAKE_ARGS+=(-DSPACE_BUILD_MATRIX=OFF)
 fi
 
 cmake -B "${BUILD_DIR}" "${CMAKE_ARGS[@]}"
