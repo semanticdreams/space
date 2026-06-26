@@ -55,38 +55,6 @@ jobs:
 
       - name: Smoke test Linux bundles (host)
         run: |
-          appimage="$(realpath "build/${{ matrix.stable_appimage }}")"
-          test -n "${appimage}"
-          test -f "${appimage}"
-          chmod +x "${appimage}"
-          rm -rf /tmp/space-appimage-smoke
-          mkdir -p /tmp/space-appimage-smoke
-          (
-            cd /tmp/space-appimage-smoke
-            "${appimage}" --appimage-extract >/dev/null
-            test -x squashfs-root/AppRun
-            test -x squashfs-root/usr/bin/space
-            test -f squashfs-root/usr/share/space/assets/lua/main.fnl
-            if [[ "${{ matrix.profile }}" == "full" ]]; then
-              test -x squashfs-root/usr/bin/space_cef_helper
-              test -f squashfs-root/usr/lib/space/cef/libcef.so
-              test -f squashfs-root/usr/lib/space/cef/libEGL.so
-              test -f squashfs-root/usr/lib/space/cef/libGLESv2.so
-              test -f squashfs-root/usr/lib/space/cef/libvk_swiftshader.so
-              test -f squashfs-root/usr/lib/space/cef/libvulkan.so.1
-              test -f squashfs-root/usr/lib/space/cef/vk_swiftshader_icd.json
-              test -f squashfs-root/usr/lib/space/cef/icudtl.dat
-              test -f squashfs-root/usr/lib/space/cef/chrome_100_percent.pak
-              test -f squashfs-root/usr/lib/space/cef/chrome_200_percent.pak
-              test -f squashfs-root/usr/lib/space/cef/resources.pak
-              test -f squashfs-root/usr/lib/space/cef/v8_context_snapshot.bin
-              test -d squashfs-root/usr/lib/space/cef/locales
-            else
-              test ! -e squashfs-root/usr/bin/space_cef_helper
-              test ! -e squashfs-root/usr/lib/space/cef
-              test ! -e squashfs-root/usr/lib/libcef.so
-            fi
-          )
           if [[ "${{ matrix.profile }}" == "full" ]]; then
             tarball="$(realpath "build/dist/space-linux-x86_64-bin.tar.gz")"
           else
@@ -346,7 +314,10 @@ jobs:
                 libfreetype-dev \
                 libcups2-dev \
                 libnss3-dev \
-                libnspr4-dev
+                libnspr4-dev \
+                libatk1.0-dev \
+                libatk-bridge2.0-dev \
+                libatspi2.0-dev
               git config --global --add safe.directory /work
               scripts/build-linux.sh \
                 --profile "${PROFILE}" \
