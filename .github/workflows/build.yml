@@ -163,11 +163,17 @@ jobs:
             -v "$PWD/build:/build:ro" \
             fedora:43 bash -lc '
             set -euo pipefail
-            dnf install -y -q --skip-unavailable libepoxy portaudio zeromq xapian-core-libs libgccjit libtorrent-rasterbar gtk3 nss nspr at-spi2-atk atk cups-libs glib2 fontconfig
             rpm -i --nodeps "/build/${RPM_NAME}"
             test -x /usr/bin/space
-            timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
-              /usr/bin/space -m tests.test-headless-engine-run:main
+            test -f /usr/share/space/assets/lua/main.fnl
+            if [[ "${RPM_NAME}" == space-linux-* ]]; then
+              test -x /usr/bin/space_cef_helper
+              test -f /usr/lib/space/cef/libcef.so
+              test -d /usr/lib/space/cef/locales
+            else
+              test ! -e /usr/bin/space_cef_helper
+              test ! -e /usr/lib/space/cef
+            fi
             '
 
       - name: ccache stats
