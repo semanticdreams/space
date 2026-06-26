@@ -163,7 +163,8 @@ jobs:
             -v "$PWD/build:/build:ro" \
             fedora:43 bash -lc '
             set -euo pipefail
-            dnf install -y -q "/build/${RPM_NAME}"
+            dnf install -y -q libepoxy portaudio zeromq xapian-core-libs libgccjit libtorrent-rasterbar gtk3 nss nspr at-spi2-atk atk cups-libs glib2 fontconfig
+            rpm -i --nodeps "/build/${RPM_NAME}"
             test -x /usr/bin/space
             timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
               /usr/bin/space -m tests.test-headless-engine-run:main
