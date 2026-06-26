@@ -88,6 +88,11 @@ jobs:
           fi
           timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
             /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
+          if [[ "${{ matrix.profile }}" == "full" ]]; then
+            timeout 60s env SPACE_DISABLE_AUDIO=1 \
+              xvfb-run --auto-servernum --server-args="-screen 0 128x128x24 +extension GLX +render" \
+              /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_CEF_SMOKE_MODULE}"
+          fi
 
       - name: Smoke test Linux bundles (Linux distros)
         run: |
@@ -130,6 +135,39 @@ jobs:
               fi
             '
           done
+
+      - name: Smoke test DEB package (Ubuntu)
+        env:
+          DEB_NAME: ${{ matrix.profile == 'full' && 'space-linux-amd64.deb' || 'space-minimal-linux-amd64.deb' }}
+        run: |
+          test -f "build/${DEB_NAME}"
+          docker run --rm \
+            -e DEB_NAME="${DEB_NAME}" \
+            -v "$PWD/build:/build:ro" \
+            ubuntu:22.04 bash -lc '
+            set -euo pipefail
+            apt-get update -qq
+            apt-get install -y -qq "/build/${DEB_NAME}"
+            test -x /usr/bin/space
+            timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
+              /usr/bin/space -m tests.test-headless-engine-run:main
+            '
+
+      - name: Smoke test RPM package (Fedora)
+        env:
+          RPM_NAME: ${{ matrix.profile == 'full' && 'space-linux-x86_64.rpm' || 'space-minimal-linux-x86_64.rpm' }}
+        run: |
+          test -f "build/${RPM_NAME}"
+          docker run --rm \
+            -e RPM_NAME="${RPM_NAME}" \
+            -v "$PWD/build:/build:ro" \
+            fedora:43 bash -lc '
+            set -euo pipefail
+            dnf install -y -q "/build/${RPM_NAME}"
+            test -x /usr/bin/space
+            timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
+              /usr/bin/space -m tests.test-headless-engine-run:main
+            '
 
       - name: ccache stats
         run: ccache -s
