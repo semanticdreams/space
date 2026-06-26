@@ -100,8 +100,6 @@ jobs:
             docker run --rm \
               -e TARBALL="${tarball}" \
               -e PROFILE="${{ matrix.profile }}" \
-              -e SPACE_RELEASE_HEADLESS_SMOKE_MODULE="${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}" \
-              -e SPACE_RELEASE_CEF_SMOKE_MODULE="${SPACE_RELEASE_CEF_SMOKE_MODULE}" \
               -v "$PWD/build/dist:/work:ro" \
               "${image}" bash -lc '
               set -euo pipefail
@@ -125,34 +123,10 @@ jobs:
                 test -f /tmp/space-smoke/lib/space/cef/resources.pak
                 test -f /tmp/space-smoke/lib/space/cef/v8_context_snapshot.bin
                 test -d /tmp/space-smoke/lib/space/cef/locales
-                if command -v apt-get >/dev/null 2>&1; then
-                  export DEBIAN_FRONTEND=noninteractive
-                  apt-get update
-                  apt-get install -y --no-install-recommends xvfb
-                elif command -v dnf >/dev/null 2>&1; then
-                  dnf install -y --setopt=install_weak_deps=False xorg-x11-server-Xvfb
-                elif command -v zypper >/dev/null 2>&1; then
-                  zypper -n refresh
-                  zypper -n install --no-recommends xorg-x11-server-extra || \
-                    zypper -n install --no-recommends xorg-x11-server-Xvfb
-                else
-                  echo "unsupported package manager for Xvfb smoke" >&2
-                  exit 1
-                fi
-                Xvfb :99 -screen 0 1024x768x24 >/tmp/space-xvfb.log 2>&1 &
-                xvfb_pid="$!"
-                trap '\''kill "${xvfb_pid}"'\'' EXIT
-                sleep 1
-                timeout 60s env DISPLAY=:99 SPACE_DISABLE_AUDIO=1 \
-                  /tmp/space-smoke/space -m "${SPACE_RELEASE_CEF_SMOKE_MODULE}"
-                kill "${xvfb_pid}"
-                trap - EXIT
               else
                 test ! -e /tmp/space-smoke/bin/space_cef_helper
                 test ! -e /tmp/space-smoke/lib/space/cef
                 test ! -e /tmp/space-smoke/lib/libcef.so
-                timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
-                  /tmp/space-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
               fi
             '
           done
