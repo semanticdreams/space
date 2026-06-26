@@ -19,9 +19,7 @@ jobs:
       matrix:
         include:
           - profile: full
-            stable_appimage: space-linux-x86_64.AppImage
           - profile: minimal
-            stable_appimage: space-minimal-linux-x86_64.AppImage
     env:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
@@ -65,27 +63,7 @@ jobs:
           mkdir -p /tmp/space-tarball-smoke
           tar -xzf "${tarball}" -C /tmp/space-tarball-smoke
           test -x /tmp/space-tarball-smoke/space
-          test -x /tmp/space-tarball-smoke/bin/space
-          test -f /tmp/space-tarball-smoke/share/space/assets/lua/main.fnl
-          if [[ "${{ matrix.profile }}" == "full" ]]; then
-            test -x /tmp/space-tarball-smoke/bin/space_cef_helper
-            test -f /tmp/space-tarball-smoke/lib/space/cef/libcef.so
-            test -f /tmp/space-tarball-smoke/lib/space/cef/libEGL.so
-            test -f /tmp/space-tarball-smoke/lib/space/cef/libGLESv2.so
-            test -f /tmp/space-tarball-smoke/lib/space/cef/libvk_swiftshader.so
-            test -f /tmp/space-tarball-smoke/lib/space/cef/libvulkan.so.1
-            test -f /tmp/space-tarball-smoke/lib/space/cef/vk_swiftshader_icd.json
-            test -f /tmp/space-tarball-smoke/lib/space/cef/icudtl.dat
-            test -f /tmp/space-tarball-smoke/lib/space/cef/chrome_100_percent.pak
-            test -f /tmp/space-tarball-smoke/lib/space/cef/chrome_200_percent.pak
-            test -f /tmp/space-tarball-smoke/lib/space/cef/resources.pak
-            test -f /tmp/space-tarball-smoke/lib/space/cef/v8_context_snapshot.bin
-            test -d /tmp/space-tarball-smoke/lib/space/cef/locales
-          else
-            test ! -e /tmp/space-tarball-smoke/bin/space_cef_helper
-            test ! -e /tmp/space-tarball-smoke/lib/space/cef
-            test ! -e /tmp/space-tarball-smoke/lib/libcef.so
-          fi
+          scripts/verify-linux-package-layout.sh --root /tmp/space-tarball-smoke --profile "${{ matrix.profile }}"
           timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
             /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
           if [[ "${{ matrix.profile }}" == "full" ]]; then
@@ -106,33 +84,14 @@ jobs:
               -e TARBALL="${tarball}" \
               -e PROFILE="${{ matrix.profile }}" \
               -v "$PWD/build/dist:/work:ro" \
+              -v "$PWD/scripts/verify-linux-package-layout.sh:/scripts/verify-linux-package-layout.sh:ro" \
               "${image}" bash -lc '
               set -euo pipefail
               rm -rf /tmp/space-smoke
               mkdir -p /tmp/space-smoke
               tar -xzf "/work/${TARBALL}" -C /tmp/space-smoke
               test -x /tmp/space-smoke/space
-              test -x /tmp/space-smoke/bin/space
-              test -f /tmp/space-smoke/share/space/assets/lua/main.fnl
-              if [[ "${PROFILE}" == "full" ]]; then
-                test -x /tmp/space-smoke/bin/space_cef_helper
-                test -f /tmp/space-smoke/lib/space/cef/libcef.so
-                test -f /tmp/space-smoke/lib/space/cef/libEGL.so
-                test -f /tmp/space-smoke/lib/space/cef/libGLESv2.so
-                test -f /tmp/space-smoke/lib/space/cef/libvk_swiftshader.so
-                test -f /tmp/space-smoke/lib/space/cef/libvulkan.so.1
-                test -f /tmp/space-smoke/lib/space/cef/vk_swiftshader_icd.json
-                test -f /tmp/space-smoke/lib/space/cef/icudtl.dat
-                test -f /tmp/space-smoke/lib/space/cef/chrome_100_percent.pak
-                test -f /tmp/space-smoke/lib/space/cef/chrome_200_percent.pak
-                test -f /tmp/space-smoke/lib/space/cef/resources.pak
-                test -f /tmp/space-smoke/lib/space/cef/v8_context_snapshot.bin
-                test -d /tmp/space-smoke/lib/space/cef/locales
-              else
-                test ! -e /tmp/space-smoke/bin/space_cef_helper
-                test ! -e /tmp/space-smoke/lib/space/cef
-                test ! -e /tmp/space-smoke/lib/libcef.so
-              fi
+              /scripts/verify-linux-package-layout.sh --root /tmp/space-smoke --profile "${PROFILE}"
             '
           done
 
@@ -143,12 +102,14 @@ jobs:
           test -f "build/${DEB_NAME}"
           docker run --rm \
             -e DEB_NAME="${DEB_NAME}" \
+            -e PROFILE="${{ matrix.profile }}" \
             -v "$PWD/build:/build:ro" \
+            -v "$PWD/scripts/verify-linux-package-layout.sh:/scripts/verify-linux-package-layout.sh:ro" \
             ubuntu:22.04 bash -lc '
             set -euo pipefail
             apt-get update -qq
             apt-get install -y -qq "/build/${DEB_NAME}"
-            test -x /usr/bin/space
+            /scripts/verify-linux-package-layout.sh --root /usr --profile "${PROFILE}"
             timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
               /usr/bin/space -m tests.test-headless-engine-run:main
             '
@@ -160,20 +121,13 @@ jobs:
           test -f "build/${RPM_NAME}"
           docker run --rm \
             -e RPM_NAME="${RPM_NAME}" \
+            -e PROFILE="${{ matrix.profile }}" \
             -v "$PWD/build:/build:ro" \
+            -v "$PWD/scripts/verify-linux-package-layout.sh:/scripts/verify-linux-package-layout.sh:ro" \
             fedora:43 bash -lc '
             set -euo pipefail
-            rpm -i --nodeps "/build/${RPM_NAME}"
-            test -x /usr/bin/space
-            test -f /usr/share/space/assets/lua/main.fnl
-            if [[ "${RPM_NAME}" == space-linux-* ]]; then
-              test -x /usr/bin/space_cef_helper
-              test -f /usr/lib/space/cef/libcef.so
-              test -d /usr/lib/space/cef/locales
-            else
-              test ! -e /usr/bin/space_cef_helper
-              test ! -e /usr/lib/space/cef
-            fi
+            rpm -i "/build/${RPM_NAME}"
+            /scripts/verify-linux-package-layout.sh --root /usr --profile "${PROFILE}"
             '
 
       - name: ccache stats
