@@ -89,19 +89,42 @@ jobs:
           timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
             /tmp/space-tarball-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
 
-      - name: Smoke test AppImage (Linux distros)
+      - name: Smoke test Linux bundles (Linux distros)
         run: |
-          appimage="${{ matrix.stable_appimage }}"
+          if [[ "${{ matrix.profile }}" == "full" ]]; then
+            tarball="space-linux-x86_64-bin.tar.gz"
+          else
+            tarball="space-minimal-linux-x86_64-bin.tar.gz"
+          fi
           for image in ubuntu:22.04 ubuntu:24.04 debian:12 debian:13 fedora:43 fedora:44 opensuse/tumbleweed; do
             docker run --rm \
-              -e APPIMAGE_NAME="${appimage}" \
+              -e TARBALL="${tarball}" \
               -e PROFILE="${{ matrix.profile }}" \
               -e SPACE_RELEASE_HEADLESS_SMOKE_MODULE="${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}" \
               -e SPACE_RELEASE_CEF_SMOKE_MODULE="${SPACE_RELEASE_CEF_SMOKE_MODULE}" \
-              -v "$PWD/build:/work" \
+              -v "$PWD/build/dist:/work:ro" \
               "${image}" bash -lc '
               set -euo pipefail
+              rm -rf /tmp/space-smoke
+              mkdir -p /tmp/space-smoke
+              tar -xzf "/work/${TARBALL}" -C /tmp/space-smoke
+              test -x /tmp/space-smoke/space
+              test -x /tmp/space-smoke/bin/space
+              test -f /tmp/space-smoke/share/space/assets/lua/main.fnl
               if [[ "${PROFILE}" == "full" ]]; then
+                test -x /tmp/space-smoke/bin/space_cef_helper
+                test -f /tmp/space-smoke/lib/space/cef/libcef.so
+                test -f /tmp/space-smoke/lib/space/cef/libEGL.so
+                test -f /tmp/space-smoke/lib/space/cef/libGLESv2.so
+                test -f /tmp/space-smoke/lib/space/cef/libvk_swiftshader.so
+                test -f /tmp/space-smoke/lib/space/cef/libvulkan.so.1
+                test -f /tmp/space-smoke/lib/space/cef/vk_swiftshader_icd.json
+                test -f /tmp/space-smoke/lib/space/cef/icudtl.dat
+                test -f /tmp/space-smoke/lib/space/cef/chrome_100_percent.pak
+                test -f /tmp/space-smoke/lib/space/cef/chrome_200_percent.pak
+                test -f /tmp/space-smoke/lib/space/cef/resources.pak
+                test -f /tmp/space-smoke/lib/space/cef/v8_context_snapshot.bin
+                test -d /tmp/space-smoke/lib/space/cef/locales
                 if command -v apt-get >/dev/null 2>&1; then
                   export DEBIAN_FRONTEND=noninteractive
                   apt-get update
@@ -120,39 +143,16 @@ jobs:
                 xvfb_pid="$!"
                 trap '\''kill "${xvfb_pid}"'\'' EXIT
                 sleep 1
-                timeout 30s env DISPLAY=:99 SPACE_DISABLE_AUDIO=1 APPIMAGE_EXTRACT_AND_RUN=1 \
-                  "/work/${APPIMAGE_NAME}" -m "${SPACE_RELEASE_CEF_SMOKE_MODULE}"
+                timeout 60s env DISPLAY=:99 SPACE_DISABLE_AUDIO=1 \
+                  /tmp/space-smoke/space -m "${SPACE_RELEASE_CEF_SMOKE_MODULE}"
                 kill "${xvfb_pid}"
                 trap - EXIT
               else
-                timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 APPIMAGE_EXTRACT_AND_RUN=1 \
-                  "/work/${APPIMAGE_NAME}" -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
-              fi
-              rm -rf /tmp/appimage-check
-              mkdir -p /tmp/appimage-check
-              cd /tmp/appimage-check
-              "/work/${APPIMAGE_NAME}" --appimage-extract >/dev/null
-              test -x squashfs-root/AppRun
-              test -x squashfs-root/usr/bin/space
-              test -f squashfs-root/usr/share/space/assets/lua/main.fnl
-              if [[ "${PROFILE}" == "full" ]]; then
-                test -x squashfs-root/usr/bin/space_cef_helper
-                test -f squashfs-root/usr/lib/space/cef/libcef.so
-                test -f squashfs-root/usr/lib/space/cef/libEGL.so
-                test -f squashfs-root/usr/lib/space/cef/libGLESv2.so
-                test -f squashfs-root/usr/lib/space/cef/libvk_swiftshader.so
-                test -f squashfs-root/usr/lib/space/cef/libvulkan.so.1
-                test -f squashfs-root/usr/lib/space/cef/vk_swiftshader_icd.json
-                test -f squashfs-root/usr/lib/space/cef/icudtl.dat
-                test -f squashfs-root/usr/lib/space/cef/chrome_100_percent.pak
-                test -f squashfs-root/usr/lib/space/cef/chrome_200_percent.pak
-                test -f squashfs-root/usr/lib/space/cef/resources.pak
-                test -f squashfs-root/usr/lib/space/cef/v8_context_snapshot.bin
-                test -d squashfs-root/usr/lib/space/cef/locales
-              else
-                test ! -e squashfs-root/usr/bin/space_cef_helper
-                test ! -e squashfs-root/usr/lib/space/cef
-                test ! -e squashfs-root/usr/lib/libcef.so
+                test ! -e /tmp/space-smoke/bin/space_cef_helper
+                test ! -e /tmp/space-smoke/lib/space/cef
+                test ! -e /tmp/space-smoke/lib/libcef.so
+                timeout 30s env SPACE_DISABLE_AUDIO=1 SPACE_SKIP_CEF=1 \
+                  /tmp/space-smoke/space -m "${SPACE_RELEASE_HEADLESS_SMOKE_MODULE}"
               fi
             '
           done
@@ -317,7 +317,24 @@ jobs:
                 libnspr4-dev \
                 libatk1.0-dev \
                 libatk-bridge2.0-dev \
-                libatspi2.0-dev
+                libatspi2.0-dev \
+                libx11-dev \
+                libxcomposite-dev \
+                libxdamage-dev \
+                libxext-dev \
+                libxfixes-dev \
+                libxrandr-dev \
+                libxrender-dev \
+                libxtst-dev \
+                libpango1.0-dev \
+                libcairo2-dev \
+                libasound2-dev \
+                libdrm-dev \
+                libgbm-dev \
+                libdbus-1-dev \
+                libexpat1-dev \
+                libpci-dev \
+                libudev-dev
               git config --global --add safe.directory /work
               scripts/build-linux.sh \
                 --profile "${PROFILE}" \
@@ -614,7 +631,27 @@ jobs:
                     libpng-devel \
                     cups-devel \
                     nss-devel \
-                    nspr-devel
+                    nspr-devel \
+                    atk-devel \
+                    at-spi2-core-devel \
+                    at-spi2-atk-devel \
+                    libX11-devel \
+                    libXcomposite-devel \
+                    libXdamage-devel \
+                    libXext-devel \
+                    libXfixes-devel \
+                    libXrandr-devel \
+                    libXrender-devel \
+                    libXtst-devel \
+                    pango-devel \
+                    cairo-devel \
+                    alsa-lib-devel \
+                    libdrm-devel \
+                    mesa-libgbm-devel \
+                    dbus-devel \
+                    expat-devel \
+                    pciutils-devel \
+                    systemd-devel
                   ;;
                 opensuse-tumbleweed)
                   zypper -n refresh
@@ -662,7 +699,27 @@ jobs:
                     libpng16-devel \
                     cups-devel \
                     mozilla-nss-devel \
-                    mozilla-nspr-devel
+                    mozilla-nspr-devel \
+                    atk-devel \
+                    at-spi2-core-devel \
+                    at-spi2-atk-devel \
+                    libX11-devel \
+                    libXcomposite-devel \
+                    libXdamage-devel \
+                    libXext-devel \
+                    libXfixes-devel \
+                    libXrandr-devel \
+                    libXrender-devel \
+                    libXtst-devel \
+                    pango-devel \
+                    cairo-devel \
+                    alsa-devel \
+                    libdrm-devel \
+                    libgbm-devel \
+                    dbus-1-devel \
+                    libexpat-devel \
+                    pciutils-devel \
+                    libudev-devel
                   ;;
                 *)
                   echo "unknown RPM flavor: ${RPM_FLAVOR}" >&2
