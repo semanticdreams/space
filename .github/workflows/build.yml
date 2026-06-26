@@ -114,7 +114,7 @@ jobs:
               /usr/bin/space -m tests.test-headless-engine-run:main
             '
 
-      - name: Smoke test RPM package (Fedora)
+      - name: Verify RPM package layout (Fedora)
         env:
           RPM_NAME: ${{ matrix.profile == 'full' && 'space-linux-x86_64.rpm' || 'space-minimal-linux-x86_64.rpm' }}
         run: |
