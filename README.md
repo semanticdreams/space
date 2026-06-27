@@ -31,8 +31,20 @@ Install guidance:
 - AppImage: mark executable and run it (`chmod +x <file>.AppImage`, then `./<file>.AppImage`).
 - Tarball: extract and run `./space`.
 - Debian/Ubuntu: install the downloaded `.deb` with `sudo apt install ./space-*.deb` (or `sudo dpkg -i`).
-- Fedora/openSUSE Tumbleweed: install the downloaded `.rpm` with `sudo dnf install ./space-*.rpm` (or `sudo rpm -i`). The RPM does not declare automatic dependencies; install the runtime libraries listed under your distro in Build from source below before running.
+- Fedora/openSUSE Tumbleweed: install the downloaded `.rpm` with `sudo dnf install ./space-*.rpm` (or `sudo rpm -i`). The RPM does not declare automatic dependencies; install the runtime libraries below first.
 - RHEL/Rocky/openSUSE Leap: use the AppImage for now; full-feature RPMs need runtime libraries that are not available from their default repositories.
+
+RPM runtime dependencies (install before running the RPM):
+
+Fedora:
+```bash
+sudo dnf install bullet openal-soft libepoxy portaudio libvterm libnotify libcurl zeromq aubio xapian-core-libs rb_libtorrent ffmpeg-free libgccjit libsecret gdk-pixbuf2-modules
+```
+
+openSUSE Tumbleweed:
+```bash
+sudo zypper install libbullet3 libopenal1 libepoxy0 libportaudio2 libvterm0 libnotify4 libcurl4 libzmq5 libaubio5 libxapian30 libtorrent-rasterbar2_0 ffmpeg-7-libavcodec61 libgccjit0 libsecret-1-0 typelib-1_0-GdkPixbuf-2_0
+```
 
 ### Build from source
 
