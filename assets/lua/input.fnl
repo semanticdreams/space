@@ -6,9 +6,10 @@
 (local Signal (require :signal))
 (local colors (require :colors))
 (local gl (require :gl))
-(local {: Layout : resolve-mark-flag} (require :layout))
+(local {: Layout : resolve-mark-flag : finite-constraint?} (require :layout))
 (local {: fallback-glyph
-        : line-height} (require :text-utils))
+        : line-height
+        : newline-codepoint} (require :text-utils))
 (local InputState (require :input-state-router))
 (local ExternalEditor (require :external-editor))
 (local {: resolve-input-colors
@@ -40,6 +41,11 @@
   (local min-height (or options.min-height 1.6))
   (local placeholder-text (or options.placeholder ""))
   (local multiline? (and (= options.multiline? true)))
+  (local line-wrap? (if (= options.line-wrap? nil)
+                       (and multiline? true)
+                       (and (= options.line-wrap? true))))
+  (when (and line-wrap? (not multiline?))
+    (error "line-wrap? requires multiline? to be enabled"))
   (local explicit-line-count (if multiline?
                                options.line-count
                                1))
@@ -127,9 +133,115 @@
 
   (fn mark-virtual-dirty [self opts]
     (set self.virtual-dirty? true)
+    (set self.visual-rows-dirty? true)
     (local mark-measure-dirty? (resolve-mark-flag opts :mark-measure-dirty? true))
     (when (and mark-measure-dirty? self.text self.text.layout)
       (self.text.layout:mark-measure-dirty)))
+
+    ;; ---- line-wrap helpers ----
+
+    (fn compute-visual-rows [self max-width]
+      (local style self.text.style)
+      (local visual-rows [])
+      (local total-lines (length self.model.lines))
+      (for [li 0 (- total-lines 1)]
+        (local line (. self.model.lines (+ li 1)))
+        (local codepoints (or line.codepoints []))
+        (local len (length codepoints))
+        (var col 0)
+        (var row-start 0)
+        (var row-width 0.0)
+        (while (< col len)
+          (local cp (. codepoints (+ col 1)))
+          (local advance (glyph-advance style cp))
+          (when (and (> max-width 0.0) (> col row-start) (> (+ row-width advance) max-width))
+            (table.insert visual-rows {:line-index li :start-col row-start :end-col col})
+            (set row-start col)
+            (set row-width 0.0))
+          (set row-width (+ row-width advance))
+          (set col (+ col 1)))
+        (table.insert visual-rows {:line-index li :start-col row-start :end-col col}))
+      visual-rows)
+
+    (fn ensure-visual-rows [self]
+      (when (and self.line-wrap? self.visual-rows-dirty?)
+        (set self.visual-rows-dirty? false)
+        (local max-width (or (and self.inner-size self.inner-size.x) 0))
+        (set self.visual-rows (compute-visual-rows self max-width))))
+
+    (fn caret-visual-row-index [self]
+      (local visual-rows (or self.visual-rows []))
+      (local cursor-line self.model.cursor-line)
+      (local cursor-column self.model.cursor-column)
+      (var first nil)
+      (var last nil)
+      (for [i 0 (- (length visual-rows) 1)]
+        (local vr (. visual-rows (+ i 1)))
+        (when (= vr.line-index cursor-line)
+          (when (not first) (set first i))
+          (set last i)))
+      (if (not first)
+          0
+          (do
+            (local line (. self.model.lines (+ cursor-line 1)))
+            (local line-len (length (or line.codepoints [])))
+            (if (>= cursor-column line-len)
+                last
+                (do
+                  (var found first)
+                  (for [i first last]
+                    (local vr (. visual-rows (+ i 1)))
+                    (when (and (>= cursor-column vr.start-col)
+                               (< cursor-column vr.end-col))
+                      (set found i)))
+                  found)))))
+
+    (fn wrapped-visible-codepoints [self]
+      (ensure-visual-rows self)
+      (local visual-rows self.visual-rows)
+      (local viewport-lines (math.max 1 (or self.visible-line-count 0)))
+      (local newline newline-codepoint)
+      (var buffer [])
+      (var drawn 0)
+      (local start-row (math.max 0 (or self.scroll.line 0)))
+      (var vi start-row)
+      (while (and (< drawn viewport-lines) (< vi (length visual-rows)))
+        (when (> drawn 0)
+          (table.insert buffer newline))
+        (local vr (. visual-rows (+ vi 1)))
+        (when vr
+          (local line (. self.model.lines (+ vr.line-index 1)))
+          (when (and line line.codepoints)
+            (for [col vr.start-col (- vr.end-col 1)]
+              (local cp (. line.codepoints (+ col 1)))
+              (when cp
+                (table.insert buffer cp)))))
+        (set vi (+ vi 1))
+        (set drawn (+ drawn 1)))
+      buffer)
+
+    (fn caret-x-offset-in-wrapped-line [self]
+      (ensure-visual-rows self)
+      (local vr-index (caret-visual-row-index self))
+      (local visual-rows self.visual-rows)
+      (local vr (. visual-rows (+ vr-index 1)))
+      (if (not vr)
+          0
+          (do
+            (local line (. self.model.lines (+ vr.line-index 1)))
+            (if (not (and line line.codepoints))
+                0
+                (do
+                  (local cursor-column self.model.cursor-column)
+                  (var width 0.0)
+                  (local style self.text.style)
+                  (for [col vr.start-col (- (math.min cursor-column (length line.codepoints)) 1)]
+                    (local cp (. line.codepoints (+ col 1)))
+                    (when cp
+                      (set width (+ width (glyph-advance style cp)))))
+                  width)))))
+
+    ;; ---- end line-wrap helpers ----
 
     (fn sync-viewport-state [self]
       (set self.lines self.model.lines)
@@ -137,17 +249,39 @@
       (set self.cursor-column self.model.cursor-column)
       (when (not self.scroll)
         (set self.scroll {:line 0 :column 0}))
-      (set self.scroll.line self.model.scroll-line)
-      (set self.scroll.column self.model.scroll-column)
+      (if self.line-wrap?
+          (do
+            (set self.scroll.column 0)
+            (ensure-visual-rows self)
+            (local visual-rows self.visual-rows)
+            (local total-visual (length visual-rows))
+            (local viewport-lines (math.max 1 self.model.viewport-lines))
+            (set self.scroll.line (math.max 0 (math.min (or self.scroll.line 0) (math.max 0 (- total-visual viewport-lines)))))
+            (local caret-vr (caret-visual-row-index self))
+            (when (not self.explicit-scroll?)
+              (when (< caret-vr self.scroll.line)
+                (set self.scroll.line caret-vr))
+              (when (>= caret-vr (+ self.scroll.line viewport-lines))
+                (set self.scroll.line (math.max 0 (- caret-vr (- viewport-lines 1))))))
+            (set self.prev-cursor-line self.cursor-line)
+            (set self.prev-cursor-column self.cursor-column)
+            (local vr (. visual-rows (+ self.scroll.line 1)))
+            (when vr
+              (set self.model.scroll-line vr.line-index)))
+          (do
+            (set self.scroll.line self.model.scroll-line)
+            (set self.scroll.column self.model.scroll-column)))
       (set self.visible-line-count self.model.viewport-lines)
       (set self.visible-column-count self.model.viewport-columns))
 
     (fn refresh-virtual-text [self force?]
       (when (and self.text (or self.virtual-dirty? force?))
         (set self.virtual-dirty? false)
-        (self.text:set-codepoints
-          (self.model:get-visible-codepoints)
-          {:mark-measure-dirty? false})
+        (local codepoints
+          (if self.line-wrap?
+              (wrapped-visible-codepoints self)
+              (self.model:get-visible-codepoints)))
+        (self.text:set-codepoints codepoints {:mark-measure-dirty? false})
         true))
 
     (fn resolve-line-count [self inner-height]
@@ -172,14 +306,16 @@
 
     (fn apply-viewport [self inner-size]
       (local next-lines (resolve-line-count self inner-size.y))
-      (local next-columns (resolve-column-count self inner-size.x))
+      (local next-columns
+        (if self.line-wrap?
+            (or self.model.longest-line-length (length self.model.codepoints) 1)
+            (resolve-column-count self inner-size.x)))
       (var changed? false)
       (when (self.model:set-viewport-lines next-lines)
         (set changed? true))
       (when (self.model:set-viewport-columns next-columns)
         (set changed? true))
       (when changed?
-        (sync-viewport-state self)
         (mark-virtual-dirty self {:mark-measure-dirty? false})))
 
     (fn text-measure-height [self fallback]
@@ -194,35 +330,50 @@
           (/ extra-height 2)))
 
     (fn caret-vertical-offset [self]
-      (local relative (- (or self.model.cursor-line 0)
-                         (or self.model.scroll-line 0)))
-      (local inner-height (or (and self.inner-size self.inner-size.y) 0))
-      (local line-height (math.max 0 (or self.line-height 0)))
-      (local text-height (text-measure-height self inner-height))
-      (local offset-top (+ self.padding.y
-                           (text-block-offset self inner-height)
-                           (math.max 0 (- text-height line-height))))
-      (- offset-top (* (math.max 0 relative) line-height)))
+      (if self.line-wrap?
+          (do
+            (ensure-visual-rows self)
+            (local caret-vr (caret-visual-row-index self))
+            (local relative (- caret-vr (or self.scroll.line 0)))
+            (local inner-height (or (and self.inner-size self.inner-size.y) 0))
+            (local lh (math.max 0 (or self.line-height 0)))
+            (local text-height (text-measure-height self inner-height))
+            (local offset-top (+ self.padding.y
+                                 (text-block-offset self inner-height)
+                                 (math.max 0 (- text-height lh))))
+            (- offset-top (* relative lh)))
+          (do
+            (local relative (- (or self.model.cursor-line 0)
+                               (or self.model.scroll-line 0)))
+            (local inner-height (or (and self.inner-size self.inner-size.y) 0))
+            (local lh (math.max 0 (or self.line-height 0)))
+            (local text-height (text-measure-height self inner-height))
+            (local offset-top (+ self.padding.y
+                                  (text-block-offset self inner-height)
+                                  (math.max 0 (- text-height lh))))
+            (- offset-top (* (math.max 0 relative) lh)))))
 
     (fn cursor-prefix-width [self]
-      (local lines (or self.model.lines []))
-      (local line (. lines (+ self.model.cursor-line 1)))
-      (if (not (and line line.codepoints))
-          0
-          (let [start (math.max 0 (or self.model.scroll-column 0))
-                stop (math.max 0 (or self.model.cursor-column 0))]
-            (if (< stop start)
+      (if self.line-wrap?
+          (caret-x-offset-in-wrapped-line self)
+          (let [lines (or self.model.lines [])
+                line (. lines (+ self.model.cursor-line 1))]
+            (if (not (and line line.codepoints))
                 0
-                (do
-                  (var width 0)
-                  (var column start)
-                  (local style self.text.style)
-                  (while (< column stop)
-                    (local codepoint (. line.codepoints (+ column 1)))
-                    (when codepoint
-                      (set width (+ width (glyph-advance style codepoint))))
-                    (set column (+ column 1)))
-                  width)))))
+                (let [start (math.max 0 (or self.model.scroll-column 0))
+                      stop (math.max 0 (or self.model.cursor-column 0))]
+                  (if (< stop start)
+                      0
+                      (do
+                        (var width 0)
+                        (var column start)
+                        (local style self.text.style)
+                        (while (< column stop)
+                          (local codepoint (. line.codepoints (+ column 1)))
+                          (when codepoint
+                            (set width (+ width (glyph-advance style codepoint))))
+                          (set column (+ column 1)))
+                        width)))))))
 
     (fn caret-width-for-mode [self]
       (if (= self.mode :insert)
@@ -281,6 +432,7 @@
                                       })))
 
     (fn sync-from-model [self]
+      (set self.explicit-scroll? false)
       (set self.codepoints model.codepoints)
       (set self.cursor-index model.cursor-index)
       (set self.mode model.mode)
@@ -290,6 +442,9 @@
     (fn apply-text-change [self notify? opts]
       (local mark-measure-dirty? (resolve-mark-flag opts :mark-measure-dirty? true))
       (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
+      (when notify?
+        (set self.caret-explicitly-positioned? true))
+      (set self.visual-rows-dirty? true)
       (sync-from-model self)
       (mark-virtual-dirty self {:mark-measure-dirty? mark-measure-dirty?})
       (update-placeholder self {:mark-measure-dirty? mark-measure-dirty?})
@@ -302,6 +457,7 @@
         (options.on-change self (self:get-text))))
 
     (fn apply-caret-change [self opts]
+      (set self.caret-explicitly-positioned? true)
       (local mark-layout-dirty? (resolve-mark-flag opts :mark-layout-dirty? true))
       (local mark-measure-dirty? (resolve-mark-flag opts :mark-measure-dirty? false))
       (local prev-scroll-line (or (and self.scroll self.scroll.line) 0))
@@ -374,10 +530,15 @@
       (local placeholder-measure self.placeholder.layout.measure)
       (local min-column-width (* self.column-width self.min-columns))
       (local min-line-height (* self.line-height self.min-lines))
-      (local inner-width (math.max (or options.content-min-width 0)
-                                   text-measure.x
-                                   placeholder-measure.x
-                                   min-column-width))
+      (local inner-width
+        (if self.line-wrap?
+            (math.max (or options.content-min-width 0)
+                      min-column-width
+                      placeholder-measure.x)
+            (math.max (or options.content-min-width 0)
+                      text-measure.x
+                      placeholder-measure.x
+                      min-column-width)))
       (local inner-height (math.max text-measure.y
                                     placeholder-measure.y
                                     min-line-height))
@@ -387,6 +548,36 @@
       (local clamped-width (math.max min-width total-width))
       (local clamped-height (math.max min-height total-height))
       (set layout.measure (glm.vec3 clamped-width clamped-height 0)))
+
+    (fn measure-constrained-input [self layout constraints]
+      (local max-x (and (finite-constraint? constraints 1) constraints.max.x))
+      (if (and self.line-wrap? max-x)
+          (do
+            (local constrained-inner-width (math.max 0 (- max-x (* 2 padding.x))))
+            ;; Use a minimal positive width for wrapping so zero-width constraints
+            ;; still produce visual rows instead of one oversized row.
+            (local wrap-width (math.max constrained-inner-width 0.001))
+            (local visual-rows (compute-visual-rows self wrap-width))
+            (local viewport-lines (math.max 1 self.max-lines))
+            (local drawn-lines (math.min (length visual-rows) viewport-lines))
+            (local wrapped-height (* drawn-lines self.line-height))
+            (self.placeholder.layout:measurer)
+            (local placeholder-measure self.placeholder.layout.measure)
+            (local min-column-width (* self.column-width self.min-columns))
+            (local min-line-height (* self.line-height self.min-lines))
+            (local inner-width (math.max constrained-inner-width
+                                         (or options.content-min-width 0)
+                                         min-column-width
+                                         placeholder-measure.x))
+            (local inner-height (math.max wrapped-height
+                                          placeholder-measure.y
+                                          min-line-height))
+            (local total-width (+ (* 2 padding.x) inner-width))
+            (local total-height (+ (* 2 padding.y) inner-height))
+            (local clamped-width (math.max min-width total-width))
+            (local clamped-height (math.max min-height total-height))
+            (set layout.measure (glm.vec3 clamped-width clamped-height 0)))
+          (measure-input self layout)))
 
     (fn layouter-input [self layout]
       (local rotation (or layout.rotation (glm.quat 1 0 0 0)))
@@ -398,7 +589,11 @@
       (local inner-height (math.max 0 (- size.y (* 2 padding.y))))
       (local inner-size (glm.vec3 inner-width inner-height size.z))
       (set self.inner-size inner-size)
+      (when self.line-wrap?
+        (set self.visual-rows-dirty? true)
+        (set self.virtual-dirty? true))
       (apply-viewport self inner-size)
+      (sync-viewport-state self)
       (local refreshed? (refresh-virtual-text self))
       (when refreshed?
         (self.text.layout:measurer))
@@ -442,7 +637,8 @@
         (set self.caret.layout.rotation rotation)
         (set self.caret.layout.depth-offset-index caret-depth)
         (set self.caret.layout.clip-region clip)
-        (self.caret.layout:layouter)))
+        (self.caret.layout:layouter))
+      (set self.layout-happened? true))
 
     (fn connect-to-state [self]
       (when (and (not self.connected?) InputState)
@@ -458,6 +654,8 @@
          (Layout {:name (or options.name "input")
                   :measurer (fn [layout-self]
                               (measure-input input layout-self))
+                  :constrained-measurer (fn [layout-self constraints]
+                                         (measure-constrained-input input layout-self constraints))
                   :layouter (fn [layout-self]
                               (layouter-input input layout-self))
                   :children [focus-outline.layout
@@ -502,6 +700,14 @@
           :line-height computed-line-height
           :column-width computed-column-width
           :virtual-dirty? true
+          :visual-rows-dirty? true
+          :line-wrap? line-wrap?
+          :visual-rows []
+          :prev-cursor-line nil
+          :prev-cursor-column nil
+          :layout-happened? false
+          :explicit-scroll? false
+          :caret-explicitly-positioned? false
           :colors colors
           :pointer-target pointer-target
           :changed model.changed
@@ -560,32 +766,78 @@
     (set input.cursor-prefix-width cursor-prefix-width)
     (set input.caret-width-for-mode caret-width-for-mode)
     (set input.scroll-lines
-         (fn [self delta]
-           (if (self.model:scroll-lines delta)
-               (do
-                 (sync-viewport-state self)
-                 (mark-virtual-dirty self)
-                 (refresh-virtual-text self true)
-                 true)
-               false)))
+          (fn [self delta]
+            (if self.line-wrap?
+                (do
+                  (ensure-visual-rows self)
+                  (local visual-rows self.visual-rows)
+                  (local viewport-lines (math.max 1 (or self.visible-line-count 1)))
+                  (local total-visual (length visual-rows))
+                  (local max-scroll (math.max 0 (- total-visual viewport-lines)))
+                  (local next (math.max 0 (math.min (+ (or self.scroll.line 0) delta) max-scroll)))
+                  (if (= next (or self.scroll.line 0))
+                      false
+                      (do
+                        (set self.scroll.line next)
+                        (set self.explicit-scroll? true)
+                        (local vr (. visual-rows (+ next 1)))
+                        (when vr
+                          (set self.model.scroll-line vr.line-index))
+                        (mark-virtual-dirty self)
+                        (refresh-virtual-text self true)
+                        true)))
+                (if (self.model:scroll-lines delta)
+                    (do
+                      (sync-viewport-state self)
+                      (mark-virtual-dirty self)
+                      (refresh-virtual-text self true)
+                      true)
+                    false))))
     (set input.scroll-columns
-         (fn [self delta]
-           (if (self.model:scroll-columns delta)
-               (do
-                 (sync-viewport-state self)
-                 (mark-virtual-dirty self)
-                 (refresh-virtual-text self true)
-                 true)
-               false)))
+          (fn [self delta]
+            (assert (not self.line-wrap?)
+                    "horizontal scroll is not available when line-wrap? is enabled")
+            (if (self.model:scroll-columns delta)
+                (do
+                  (sync-viewport-state self)
+                  (mark-virtual-dirty self)
+                  (refresh-virtual-text self true)
+                  true)
+                false)))
     (set input.set-scroll-position
-         (fn [self opts]
-           (if (self.model:set-scroll-position (or opts {}))
-               (do
-                 (sync-viewport-state self)
-                 (mark-virtual-dirty self)
-                 (refresh-virtual-text self true)
-                 true)
-               false)))
+          (fn [self opts]
+            (local opts-table (or opts {}))
+            (if self.line-wrap?
+                (do
+                  (assert (= (or opts-table.column 0) 0)
+                          "cannot set horizontal scroll position when line-wrap? is enabled")
+                  (ensure-visual-rows self)
+                  (local visual-rows self.visual-rows)
+                  (local viewport-lines (math.max 1 (or self.visible-line-count 1)))
+                  (local total-visual (length visual-rows))
+                  (local max-scroll (math.max 0 (- total-visual viewport-lines)))
+                  (local target-line (if (= opts-table.line nil)
+                                        (or self.scroll.line 0)
+                                        (math.floor (math.max 0 (or opts-table.line 0)))))
+                  (local clamped (math.max 0 (math.min target-line max-scroll)))
+                  (if (= clamped (or self.scroll.line 0))
+                      false
+                      (do
+                        (set self.scroll.line clamped)
+                        (set self.explicit-scroll? true)
+                        (local vr (. visual-rows (+ clamped 1)))
+                        (when vr
+                          (set self.model.scroll-line vr.line-index))
+                        (mark-virtual-dirty self)
+                        (refresh-virtual-text self true)
+                        true)))
+                (if (self.model:set-scroll-position opts-table)
+                    (do
+                      (sync-viewport-state self)
+                      (mark-virtual-dirty self)
+                      (refresh-virtual-text self true)
+                      true)
+                    false))))
     (set input.refresh-virtual-text
          (fn [self]
            (refresh-virtual-text self true)))

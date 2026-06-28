@@ -84,7 +84,7 @@
         ((Input {:text ""
                  :multiline? true
                  :min-lines (or entry.line-count 1)
-                 :max-lines (or entry.line-count 1)
+                 :max-lines math.huge
                  :min-columns 12
                  :max-columns (or options.output-max-columns 64)})
          child-ctx))

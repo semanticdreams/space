@@ -32,6 +32,45 @@
     child)
   {:builder builder :state state})
 
+(fn make-constrained-child [measure clamp-axis]
+  "Creates a child that reports `measure` and clamps its constrained result on
+`clamp-axis` (1=X, 2=Y, 3=Z). Defaults to axis 1 (X) for backward compat."
+  (local axis (or clamp-axis 1))
+  (local state {:measure-calls 0
+                :layouter-calls 0
+                :dropped false
+                :last-size nil
+                :last-position nil
+                :last-rotation nil
+                :last-constraint nil})
+  (fn builder [_ctx]
+    (local layout
+      (Layout {:name "test-flex-constrained-child"
+               :measurer (fn [self]
+                           (set state.measure-calls (+ state.measure-calls 1))
+                           (set self.measure measure))
+               :constrained-measurer (fn [self constraints]
+                                       (set state.measure-calls (+ state.measure-calls 1))
+                                       (set state.last-constraint constraints)
+                                       (local max-axis (and constraints constraints.max (. constraints.max axis)))
+                                       (if max-axis
+                                           (let [clamped (math.min (. measure axis) max-axis)
+                                                 result (glm.vec3 measure.x measure.y measure.z)]
+                                             (tset result axis clamped)
+                                             (set self.measure result))
+                                           (set self.measure measure)))
+               :layouter (fn [self]
+                           (set state.layouter-calls (+ state.layouter-calls 1))
+                           (set state.last-size self.size)
+                           (set state.last-position self.position)
+                           (set state.last-rotation self.rotation))}))
+    (local child {:layout layout})
+    (set child.drop (fn [_self]
+                      (set state.dropped true)))
+    (set state.layout layout)
+    child)
+  {:builder builder :state state})
+
 (fn flex-measurer-respects-axis-and-spacing []
   (local child-a (make-test-child (glm.vec3 1 2 3)))
   (local child-b (make-test-child (glm.vec3 2 4 1)))
@@ -200,6 +239,67 @@
 
   (flex:drop))
 
+(fn flex-constrained-measure-respects-fixed-siblings []
+  (local fixed (make-constrained-child (glm.vec3 4 1 1)))
+  (local flex-a (make-constrained-child (glm.vec3 5 1 1)))
+  (local flex-b (make-constrained-child (glm.vec3 5 1 1)))
+  (local flex ((Flex {:axis :x
+                      :spacing 0.5
+                      :children [(FlexChild fixed.builder 0)
+                                 (FlexChild flex-a.builder 1)
+                                 (FlexChild flex-b.builder 1)]}) {}))
+  (flex.layout:measure-constrained {:max (glm.vec3 10 5 0)})
+  ;; Fixed child gets full constraint width, so its measure stays at 4
+  (assert (approx fixed.state.layout.measure.x 4)
+          (.. "Fixed child should get full width, got " (tostring fixed.state.layout.measure.x)))
+  ;; Flex children share remaining: remaining = 10 - 4 - 2*0.5 = 5
+  ;; Each flex child weight 1 out of 2 total: share = 5 * 1/2 = 2.5
+  (assert (approx flex-a.state.layout.measure.x 2.5)
+          (.. "Flex child a should get ~2.5 width, got " (tostring flex-a.state.layout.measure.x)))
+  (assert (approx flex-b.state.layout.measure.x 2.5)
+          (.. "Flex child b should get ~2.5 width, got " (tostring flex-b.state.layout.measure.x)))
+  (flex:drop))
+
+(fn flex-constrained-measure-falls-back-when-no-constraint []
+  (local child-a (make-constrained-child (glm.vec3 2 3 1)))
+  (local child-b (make-constrained-child (glm.vec3 4 2 1)))
+  (local flex ((Flex {:axis :x
+                      :spacing 1
+                      :children [(FlexChild child-a.builder 0)
+                                 (FlexChild child-b.builder 1)]}) {}))
+  ;; Pass nil for constraints: flex falls back to unconstrained child measurement
+  (flex.layout:measure-constrained nil)
+  (assert (approx flex.layout.measure.x 7)
+          (.. "Nil constraint should sum unconstrained child measures: got " (tostring flex.layout.measure.x)))
+  (assert (approx child-a.state.layout.measure.x 2)
+          "Nil constraint: child a should keep natural width")
+  (assert (approx child-b.state.layout.measure.x 4)
+          "Nil constraint: child b should keep natural width")
+  (flex:drop))
+
+(fn flex-constrained-measure-uses-axis-not-hardcoded-x []
+  (local fixed (make-constrained-child (glm.vec3 2 4 1) 2))
+  (local flex-c (make-constrained-child (glm.vec3 2 6 1) 2))
+  (local flex ((Flex {:axis :y
+                      :spacing 0.5
+                      :children [(FlexChild fixed.builder 0)
+                                 (FlexChild flex-c.builder 1)]}) {}))
+  (flex.layout:measure-constrained {:max (glm.vec3 10 12 5)})
+  ;; Fixed child gets full constraint, keeps natural Y = 4
+  (assert (approx fixed.state.layout.measure.y 4)
+          (.. "Fixed child Y should stay 4, got " (tostring fixed.state.layout.measure.y)))
+  ;; Flex child share: remaining = 12 - 4 - 0.5 = 7.5, weight=1 sum=1 -> Y share = 7.5
+  ;; The helper now clamps axis 2 (Y), so measure.y = min(6, 7.5) = 6
+  (assert (approx flex-c.state.layout.measure.y 6)
+          (.. "Flex child Y should be clamped to natural 6, got " (tostring flex-c.state.layout.measure.y)))
+  ;; Flex layout total Y = 4 + 6 + 0.5 = 10.5
+  (assert (approx flex.layout.measure.y 10.5)
+          (.. "Flex Y should be 10.5 (4 + 6 + 0.5), got " (tostring flex.layout.measure.y)))
+  ;; Cross-axis (X) should NOT have been applied as primary axis
+  (assert (approx flex.layout.measure.x 2)
+          (.. "Flex X (cross axis) should be max of children' X = 2, got " (tostring flex.layout.measure.x)))
+  (flex:drop))
+
 (table.insert tests {:name "Flex measurer respects axis and spacing" :fn flex-measurer-respects-axis-and-spacing})
 (table.insert tests {:name "Flex layouter distributes flex space" :fn flex-layouter-distributes-flex-space})
 (table.insert tests {:name "Flex stretch alignment stretches cross axes" :fn flex-stretch-align-stretches-cross-axes})
@@ -207,6 +307,9 @@
 (table.insert tests {:name "Flex propagates rotation to offsets" :fn flex-propagates-rotation-to-offsets})
 (table.insert tests {:name "Flex keeps non-flex child sizes when engine is constrained" :fn flex-keeps-non-flex-child-sizes-when-constrained})
 (table.insert tests {:name "Flex prefers shrinking flex children" :fn flex-prefers-shrinking-flex-children})
+(table.insert tests {:name "Flex constrained measure respects fixed siblings" :fn flex-constrained-measure-respects-fixed-siblings})
+(table.insert tests {:name "Flex constrained measure falls back when no axis constraint" :fn flex-constrained-measure-falls-back-when-no-constraint})
+(table.insert tests {:name "Flex constrained measure uses axis not hardcoded X" :fn flex-constrained-measure-uses-axis-not-hardcoded-x})
 
 (local main
   (fn []

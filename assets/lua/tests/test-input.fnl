@@ -462,7 +462,7 @@
   (with-pointer-stubs
     (fn [_stubs]
       (local ctx-info (make-focus-build-ctx _stubs))
-      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (local input ((Input {:multiline? true :line-wrap? false}) ctx-info.ctx))
       (input.layout:measurer)
       (set input.layout.size (glm.vec3 12 6 0))
       (input.layout:layouter)
@@ -490,6 +490,7 @@
     (fn [_stubs]
       (local ctx-info (make-focus-build-ctx _stubs))
       (local input ((Input {:multiline? true
+                            :line-wrap? false
                             :line-count 2
                             :column-count 8}) ctx-info.ctx))
       (input:set-text "alpha\nbeta\ngamma")
@@ -724,6 +725,559 @@
         (set-app-states! original-states)
         (when (not ok)
           (error result))))))
+
+(fn input-line-wrap-defaults-on-for-multiline []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local multiline ((Input {:multiline? true}) ctx-info.ctx))
+      (assert (= multiline.line-wrap? true)
+              "Multiline input should enable line-wrap by default")
+      (multiline:drop)
+      (local single-line ((Input {}) ctx-info.ctx))
+      (assert (= single-line.line-wrap? false)
+              "Single-line input should disable line-wrap by default")
+      (single-line:drop))))
+
+(fn input-line-wrap-explicit-opt-out []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :line-wrap? false}) ctx-info.ctx))
+      (assert (= input.line-wrap? false)
+              "Explicit :line-wrap? false should disable wrapping")
+      (input:drop))))
+
+(fn input-line-wrap-horizontal-scroll-errors []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
+      (input.layout:layouter)
+      (local (ok err) (pcall (fn [] (input:scroll-columns 1))))
+      (assert (not ok) "scroll-columns should error when line-wrap is enabled")
+      (assert (string.find (tostring err) "not available") "error message should mention line-wrap")
+      (input:drop))))
+
+(fn input-line-wrap-set-scroll-position-errors []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
+      (input.layout:layouter)
+      (local (ok err) (pcall (fn [] (input:set-scroll-position {:line 0 :column 1}))))
+      (assert (not ok) "set-scroll-position with column should error when line-wrap is enabled")
+      (assert (string.find (tostring err) "horizontal") "error message should mention horizontal")
+      ;; Setting scroll line without column should still work
+      (local moved (input:set-scroll-position {:line 0 :column 0}))
+      (assert (= moved false) "setting to same position reports no change")
+      (input:drop))))
+
+(fn input-line-wrap-produces-soft-newlines []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 5}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJ")
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 4 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      (local text-codepoints (input.text:get-codepoints))
+      (local newline-cp 10)
+      (var newline-count 0)
+      (each [_ cp (ipairs text-codepoints)]
+        (when (= cp newline-cp)
+          (set newline-count (+ newline-count 1))))
+      (assert (> newline-count 0)
+              (.. "Wrapped text should contain soft newlines, got " (tostring newline-count) " from width=" (tostring narrow-w)))
+      (input:drop))))
+
+(fn input-line-wrap-content-preserved []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 5}) ctx-info.ctx))
+      (input:set-text "ABCDEFG")
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 4 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      (local text-codepoints (input.text:get-codepoints))
+      (local newline-cp 10)
+      (var chars [])
+      (each [_ cp (ipairs text-codepoints)]
+        (when (not (= cp newline-cp))
+          (table.insert chars cp)))
+      (assert (= (length chars) 7) "All original characters preserved")
+      (var ok true)
+      (for [i 1 7]
+        (local expected (string.byte (string.sub "ABCDEFG" i i)))
+        (local actual (. chars i))
+        (when (not (= actual expected))
+          (set ok false)))
+      (assert ok "Characters should match original text")
+      (input:drop))))
+
+(fn input-line-wrap-logical-caret-stable []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 5}) ctx-info.ctx))
+      (input:set-text "ABCDEFGH")
+      (input:move-caret-to 6)
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
+      (input.layout:layouter)
+      (assert (= input.model.cursor-line 0)
+              "Cursor logical line should be 0 (same line)")
+      (assert (= input.model.cursor-column 6)
+              "Cursor logical column should be 6 (unchanged by wrapping)")
+      (assert (= input.cursor-line 0))
+      (assert (= input.cursor-column 6))
+      (input:drop))))
+
+(fn input-line-wrap-caret-visual-y-offset []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 5}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNO")
+      (input:move-caret-to 0)
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 5 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      (local y0 input.caret.layout.position.y)
+      (input:move-caret-to 10)
+      (input.layout:layouter)
+      (local y10 input.caret.layout.position.y)
+      (assert (and input.line-height (> input.line-height 0))
+              "test requires valid line-height")
+      (assert (> (math.abs (- y10 y0)) (* input.line-height 0.5))
+              (.. "Caret at pos 10 should be on different visual row; y0=" (tostring y0) " y10=" (tostring y10)))
+      (input:drop))))
+
+(fn input-line-wrap-empty-text-no-crash []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
+      (let [(ok result) (pcall (fn [] (input.layout:layouter)))]
+        (assert ok (.. "Empty text with line-wrap should not crash: " (tostring result))))
+      (input:drop))))
+
+(fn input-line-wrap-single-line-disabled []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:column-count 5}) ctx-info.ctx))
+      (assert (= input.line-wrap? false)
+              "Single-line input should have line-wrap disabled by default")
+      (input:set-text "ABCDEFGH")
+      (input.layout:measurer)
+      (set input.layout.size input.layout.measure)
+      (input.layout:layouter)
+      (local text-codepoints (input.text:get-codepoints))
+      (local newline-cp 10)
+      (var newline-count 0)
+      (each [_ cp (ipairs text-codepoints)]
+        (when (= cp newline-cp)
+          (set newline-count (+ newline-count 1))))
+      (assert (= newline-count 0)
+              "Single-line input should not have soft newlines even with long text")
+      (input:drop))))
+
+(fn input-line-wrap-scroll-lines-still-works []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (input:set-text "a\nb\nc\nd\ne")
+      (input:move-caret-to 0)
+      (input.layout:measurer)
+      (set input.layout.size (glm.vec3 10 (* 2 (or input.line-height 1)) 0))
+      (input.layout:layouter)
+      (local scroll-before input.scroll.line)
+      (local moved (input:scroll-lines 1))
+      (assert moved "scroll-lines should work in wrapped mode")
+      (assert (> input.scroll.line scroll-before)
+              (.. "Scroll should advance in wrapped mode; before=" (tostring scroll-before) " after=" (tostring input.scroll.line)))
+      (input:drop))))
+
+(fn input-line-wrap-scroll-lines-in-single-long-line []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "AAAAAAAAAABBBBBBBBBBCCCCCCCCCC")
+      (input:move-caret-to 0)
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 5 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w (* 3 (or input.line-height 1)) 0))
+      (input.layout:layouter)
+      (local scroll-before input.scroll.line)
+      ;; Visual rows should exist for the single wrapped line
+      (assert (> (length input.visual-rows) 1)
+              (.. "Single long line should produce multiple visual rows, got " (tostring (length input.visual-rows))))
+      ;; Scroll by one visual row
+      (local moved (input:scroll-lines 1))
+      (assert moved "scroll-lines should move within a single wrapped line")
+      (assert (> input.scroll.line scroll-before)
+              (.. "Scroll should advance within wrapped line; before=" (tostring scroll-before) " after=" (tostring input.scroll.line)))
+      (input:drop))))
+
+(fn input-line-wrap-resize-repositions-caret []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      (input:move-caret-to 25)
+      (input.layout:measurer)
+      (local wide-w 50)
+      (set input.layout.size (glm.vec3 wide-w 10 0))
+      (input.layout:layouter)
+      (local scroll-before input.scroll.line)
+      ;; Narrow the width — caret should stay visible after resize
+      (local narrow-w (math.max 1 (* 3 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      ;; Compute caret visual row inline from input.visual-rows and model state
+      (var caret-vr 0)
+      (local cursor-line input.model.cursor-line)
+      (local cursor-column input.model.cursor-column)
+      (each [i vr (ipairs input.visual-rows)]
+        (when (= vr.line-index cursor-line)
+          (if (>= cursor-column vr.end-col)
+              (set caret-vr (- i 1))
+              (when (and (>= cursor-column vr.start-col) (< cursor-column vr.end-col))
+                (set caret-vr (- i 1))))))
+      (local viewport-lines (math.max 1 input.visible-line-count))
+      (assert (>= caret-vr input.scroll.line)
+              (.. "Caret visual row " (tostring caret-vr) " should be >= scroll " (tostring input.scroll.line)))
+      (assert (< caret-vr (+ input.scroll.line viewport-lines))
+              (.. "Caret visual row " (tostring caret-vr) " should be visible"))
+      (input:drop))))
+
+(fn input-line-wrap-set-scroll-position-values []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "AAA\nBBB\nCCC\nDDD\nEEE\nFFF")
+      (input:move-caret-to 0)
+      (input.layout:measurer)
+      (set input.layout.size (glm.vec3 15 (* 2 (or input.line-height 1)) 0))
+      (input.layout:layouter)
+      ;; set-scroll-position with :line in wrapped mode means visual row
+      (local moved (input:set-scroll-position {:line 1 :column 0}))
+      (assert moved "set-scroll-position should move scroll in wrapped mode")
+      (assert (= input.scroll.line 1)
+              (.. "scroll.line should be set to 1, got " (tostring input.scroll.line)))
+      ;; Setting to same position returns false
+      (local same (input:set-scroll-position {:line 1 :column 0}))
+      (assert (= same false) "Setting to same position should return false")
+      ;; Setting beyond max should clamp and move
+      (local big (input:set-scroll-position {:line 999 :column 0}))
+      (assert big "Setting beyond max should still return true (clamped)")
+      (assert (< input.scroll.line 999)
+              "Scroll should be clamped, not set to 999")
+      (input:drop))))
+
+(fn input-line-wrap-single-line-with-wrap-errors []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local (ok err) (pcall (fn [] ((Input {:line-wrap? true}) ctx-info.ctx))))
+      (assert (not ok) "Single-line input with :line-wrap? true should error")
+      (assert (string.find (tostring err) "multiline")
+              "Error message should mention multiline"))))
+
+(fn input-line-wrap-multiple-logical-lines []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "AAA\nBBBBBBBBB\nCC")
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 4 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      ;; Visual rows should exist for all three logical lines
+      (assert (> (length input.visual-rows) 2)
+              (.. "Should have visual rows for multiple logical lines, got " (tostring (length input.visual-rows))))
+      ;; First visual row of line 1 should be after line 0's visual rows
+      (var line0-rows 0)
+      (var line1-start -1)
+      (each [i vr (ipairs input.visual-rows)]
+        (when (= vr.line-index 0)  ;; using 0-based from ensure-visual-rows
+          (set line0-rows (+ line0-rows 1)))
+        (when (and (= vr.line-index 1) (= line1-start -1))
+          (set line1-start (- i 1))))
+      (assert (>= line1-start line0-rows)
+              "First visual row of logical line 1 should come after line 0 visual rows")
+      (input:drop))))
+
+(fn input-line-wrap-edit-after-layout []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "short")
+      (input:move-caret-to 0)
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 4 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      (local rows-before (length input.visual-rows))
+      ;; Replace with long text that wraps
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      (input.layout:layouter)
+      (local rows-after (length input.visual-rows))
+      (assert (> rows-after rows-before)
+              (.. "Longer text should produce more visual rows; before=" (tostring rows-before) " after=" (tostring rows-after)))
+      (input:drop))))
+
+(fn input-line-wrap-caret-visible-after-edit []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 5}) ctx-info.ctx))
+      (input:set-text "AAAAA")
+      (input:move-caret-to 5)
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 3 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      ;; Append more text — caret at end of long line, should stay visible
+      (input:insert-text "BBBBBCCCCCDDDDDEEEEE")
+      (input.layout:layouter)
+      ;; Caret y should be within or very close to the text vertical range
+      (local caret-y input.caret.layout.position.y)
+      (local text-y input.text.layout.position.y)
+      (local text-h (or input.text.layout.measure.y input.text.layout.size.y 0))
+      (local text-bottom (- text-y text-h))
+      (assert (>= caret-y (- text-bottom 0.01))
+              (.. "Caret y=" (tostring caret-y) " should be near text bottom=" (tostring text-bottom)))
+      (assert (<= caret-y (+ text-y 0.01))
+              (.. "Caret y=" (tostring caret-y) " should be near text top=" (tostring text-y)))
+      (input:drop))))
+
+(fn input-line-wrap-resize-updates-rows []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNO")
+      (input.layout:measurer)
+      (local wide-w 30)
+      (set input.layout.size (glm.vec3 wide-w 10 0))
+      (input.layout:layouter)
+      (local rows-wide (length input.visual-rows))
+      ;; Narrow the width significantly — wrapping should increase
+      (local narrow-w (math.max 1 (* 2 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      (local rows-narrow (length input.visual-rows))
+      (assert (> rows-narrow rows-wide)
+              (.. "Narrower width should increase visual rows; wide=" (tostring rows-wide) " narrow=" (tostring rows-narrow)))
+      (input:drop))))
+
+(fn input-line-wrap-prefers-min-width []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :min-columns 8}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      (input.layout:measurer)
+      ;; Preferred width should be based on min-columns, not unwrapped text
+      (local min-expected (* input.column-width 8))
+      (local inner-width (- input.layout.measure.x (* 2 input.padding.x)))
+      (assert (< inner-width (* input.column-width 26))
+              (.. "Wrapped input preferred width should not grow to full text; inner=" (tostring inner-width) " min-expected~" (tostring min-expected)))
+      (input:drop))))
+
+(fn input-line-wrap-cursor-at-end-of-line-visible []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 5}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNO")
+      (input:move-caret-to 15)
+      (input.layout:measurer)
+      (local narrow-w (math.max 1 (* 3 (or input.column-width 0.5))))
+      (set input.layout.size (glm.vec3 narrow-w 10 0))
+      (input.layout:layouter)
+      ;; Cursor at end of line (col 15) should map to the last visual row of logical line 0
+      (var last-for-line0 -1)
+      (each [i vr (ipairs input.visual-rows)]
+        (when (= vr.line-index 0)
+          (set last-for-line0 (- i 1))))
+      (assert (>= last-for-line0 0)
+              "Should have visual rows for logical line 0")
+      ;; The cursor at end of line should be on the last visual row; scroll should make it visible
+      (local scroll input.scroll.line)
+      (local viewport-lines (math.max 1 input.visible-line-count))
+      (assert (>= last-for-line0 scroll)
+              (.. "Last visual row " (tostring last-for-line0) " should be >= scroll " (tostring scroll)))
+      (assert (< last-for-line0 (+ scroll viewport-lines))
+              (.. "Last visual row " (tostring last-for-line0) " should be visible (scroll=" (tostring scroll) " viewport=" (tostring viewport-lines) ")"))
+      (input:drop))))
+
+(fn input-line-wrap-constrained-measure-height []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      (input.layout:measurer)
+      (local unconstrained-height input.layout.measure.y)
+      ;; Narrow constraint should produce taller measurement
+      (input.layout:measure-constrained {:max (glm.vec3 3 100 0)})
+      (local narrow-height input.layout.measure.y)
+      (assert (> narrow-height unconstrained-height)
+              (.. "Narrow constrained should be taller; unconstrained=" (tostring unconstrained-height) " narrow=" (tostring narrow-height)))
+      ;; Wider constraint should produce shorter measurement than narrow
+      (input.layout:measure-constrained {:max (glm.vec3 30 100 0)})
+      (local wide-height input.layout.measure.y)
+      (assert (< wide-height narrow-height)
+              (.. "Wide constrained should be shorter than narrow; narrow=" (tostring narrow-height) " wide=" (tostring wide-height)))
+      (input:drop))))
+
+(fn input-line-wrap-caret-offscreen-after-manual-scroll []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :column-count 10}) ctx-info.ctx))
+      (input:set-text "line0\nline1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9")
+      (input:move-caret-to 0)
+      (input.layout:measurer)
+      (set input.layout.size (glm.vec3 15 (* 3 (or input.line-height 1)) 0))
+      (input.layout:layouter)
+      ;; Scroll to the bottom so caret at top is above the viewport
+      (input:set-scroll-position {:line 99 :column 0})
+      (input.layout:layouter)
+      (local caret-y input.caret.layout.position.y)
+      (local text-y input.text.layout.position.y)
+      ;; Caret at row 0 should be drawn above the visible text position
+      (assert (> caret-y text-y)
+              (.. "Caret should be drawn above viewport when scrolled past it; caret-y=" (tostring caret-y) " text-y=" (tostring text-y)))
+      (input:drop))))
+
+(fn input-line-wrap-constrained-measure-max-lines []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :max-lines 3}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      ;; Constrained narrow measurement should be capped by max-lines
+      (input.layout:measure-constrained {:max (glm.vec3 3 100 0)})
+      (local capped-height input.layout.measure.y)
+      (local max-line-height (* input.max-lines (math.max 0.01 input.line-height)))
+      (assert (<= capped-height (+ max-line-height (* 2 input.padding.y) 0.5))
+              (.. "Constrained measurement should respect max-lines; capped-height=" (tostring capped-height) " max=" (tostring max-line-height) " padding=" (tostring (* 2 input.padding.y))))
+      (input:drop))))
+
+(fn input-line-wrap-constrained-measure-scroll-independent []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true}) ctx-info.ctx))
+      (input:set-text "line0\nline1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9")
+      ;; Lay out with narrow width and scroll halfway down
+      (input.layout:measurer)
+      (set input.layout.size (glm.vec3 15 (* 4 (or input.line-height 1)) 0))
+      (input.layout:layouter)
+      (input:set-scroll-position {:line 3 :column 0})
+      (input.layout:layouter)
+      (assert (> input.scroll.line 0) "scroll should be > 0 for meaningful test")
+      ;; Measure constrained — height should reflect full content, not just from scroll
+      (input.layout:measure-constrained {:max (glm.vec3 3 100 0)})
+      (local scroll-independent-height input.layout.measure.y)
+      ;; Now reset scroll and measure again — should be same height
+      (input:set-scroll-position {:line 0 :column 0})
+      (input.layout:layouter)
+      (input.layout:measure-constrained {:max (glm.vec3 3 100 0)})
+      (local scroll-zero-height input.layout.measure.y)
+      (assert (< (math.abs (- scroll-independent-height scroll-zero-height)) 0.01)
+              (.. "Constrained measurement should not depend on scroll position; scrolled=" (tostring scroll-independent-height) " top=" (tostring scroll-zero-height)))
+      (input:drop))))
+
+(fn input-line-wrap-layout-fits-constrained-measure []
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      (local input ((Input {:multiline? true :min-columns 2}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      ;; Measure constrained narrow, lay out at reported size, verify no cliff
+      (input.layout:measure-constrained {:max (glm.vec3 8 100 0)})
+      (local measured input.layout.measure)
+      (assert (> measured.x 0) "Measured width should be positive")
+      (assert (> measured.y 0) "Measured height should be positive")
+      (set input.layout.size measured)
+      (input.layout:layouter)
+      (local visual-rows input.visual-rows)
+      (local viewport-lines (math.max 1 input.visible-line-count))
+      (assert (>= viewport-lines (length visual-rows))
+              (.. "Viewport " (tostring viewport-lines) " should fit all " (tostring (length visual-rows)) " visual rows after layout at measured size"))
+      (input:drop))))
+
+(fn input-line-wrap-zero-width-still-wraps []
+  "Constrained measurement with max.x <= 2*padding must still produce wrapping rows."
+  (with-pointer-stubs
+    (fn [_stubs]
+      (local ctx-info (make-focus-build-ctx _stubs))
+      ;; Neutralize min-height and min-lines so height comes purely from wrapping
+      (local input ((Input {:multiline? true
+                            :min-height 0
+                            :min-lines 1}) ctx-info.ctx))
+      (input:set-text "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+      ;; max.x = 0.5 with default padding 0.35 gives constrained-inner-width = 0
+      ;; wrap-width fallback of 0.001 ensures wrapping still occurs (~1 char per row)
+      (input.layout:measure-constrained {:max (glm.vec3 0.5 100 0)})
+      ;; Inner height should be at least 26 * line-height (one row per character)
+      (local inner-height (- input.layout.measure.y (* 2 input.padding.y)))
+      (local expected-min (* 26 input.line-height))
+      (assert (> inner-height (* 0.5 expected-min))
+              (.. "Zero-width constraint should wrap; inner-height=" (tostring inner-height)
+                  " expected-min~" (tostring expected-min)))
+      (input:drop))))
+
+(table.insert tests {:name "Input line-wrap single-line with wrap errors" :fn input-line-wrap-single-line-with-wrap-errors})
+(table.insert tests {:name "Input line-wrap handles multiple logical lines" :fn input-line-wrap-multiple-logical-lines})
+(table.insert tests {:name "Input line-wrap updates visual rows after text edit" :fn input-line-wrap-edit-after-layout})
+(table.insert tests {:name "Input line-wrap caret stays visible after edit" :fn input-line-wrap-caret-visible-after-edit})
+(table.insert tests {:name "Input line-wrap rebuilds rows on resize" :fn input-line-wrap-resize-updates-rows})
+(table.insert tests {:name "Input line-wrap prefers min-width over unwrapped text" :fn input-line-wrap-prefers-min-width})
+(table.insert tests {:name "Input line-wrap cursor at end of line maps to last visual row" :fn input-line-wrap-cursor-at-end-of-line-visible})
+(table.insert tests {:name "Input line-wrap constrained measure grows height when narrow" :fn input-line-wrap-constrained-measure-height})
+(table.insert tests {:name "Input line-wrap layout fits constrained measured size" :fn input-line-wrap-layout-fits-constrained-measure})
+(table.insert tests {:name "Input line-wrap zero-width constraint still wraps" :fn input-line-wrap-zero-width-still-wraps})
+(table.insert tests {:name "Input line-wrap constrained measure respects max-lines" :fn input-line-wrap-constrained-measure-max-lines})
+(table.insert tests {:name "Input line-wrap constrained measure is scroll-independent" :fn input-line-wrap-constrained-measure-scroll-independent})
+(table.insert tests {:name "Input line-wrap caret drawn offscreen after manual scroll past" :fn input-line-wrap-caret-offscreen-after-manual-scroll})
+
+(table.insert tests {:name "Input wraps lines by default for multiline inputs" :fn input-line-wrap-defaults-on-for-multiline})
+(table.insert tests {:name "Input line-wrap can be explicitly disabled" :fn input-line-wrap-explicit-opt-out})
+(table.insert tests {:name "Input line-wrap horizontal scroll errors" :fn input-line-wrap-horizontal-scroll-errors})
+(table.insert tests {:name "Input line-wrap set-scroll-position column errors" :fn input-line-wrap-set-scroll-position-errors})
+(table.insert tests {:name "Input line-wrap produces soft newlines in visible text" :fn input-line-wrap-produces-soft-newlines})
+(table.insert tests {:name "Input line-wrap preserves all content characters" :fn input-line-wrap-content-preserved})
+(table.insert tests {:name "Input line-wrap keeps logical caret coordinates stable" :fn input-line-wrap-logical-caret-stable})
+(table.insert tests {:name "Input line-wrap caret moves to lower visual row on long line" :fn input-line-wrap-caret-visual-y-offset})
+(table.insert tests {:name "Input line-wrap empty text does not crash" :fn input-line-wrap-empty-text-no-crash})
+(table.insert tests {:name "Input single-line line-wrap disabled by default" :fn input-line-wrap-single-line-disabled})
+(table.insert tests {:name "Input line-wrap scroll-lines still works" :fn input-line-wrap-scroll-lines-still-works})
+(table.insert tests {:name "Input line-wrap scroll-lines works within a single wrapped line" :fn input-line-wrap-scroll-lines-in-single-long-line})
+(table.insert tests {:name "Input line-wrap resize repositions caret into view" :fn input-line-wrap-resize-repositions-caret})
+(table.insert tests {:name "Input line-wrap set-scroll-position uses visual row line" :fn input-line-wrap-set-scroll-position-values})
 
 (table.insert tests {:name "Input hides placeholder after text entry" :fn input-placeholder-updates})
 (table.insert tests {:name "Input context menu default actions" :fn input-context-menu-default-actions})
