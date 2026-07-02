@@ -43,9 +43,11 @@
     (set world-runtime.board-view nil))
   (BuiltinStringEntity.register owner)
   (local board (Board {}))
+  (local selector (and world-runtime world-runtime.object-selector))
   (local view (BoardView {:board board
                            :canvas canvas
-                           :ctx canvas.build-context}))
+                           :ctx canvas.build-context
+                           :selector selector}))
   (set world-runtime.board board)
   (set world-runtime.board-view view)
   (set app.board board)
@@ -97,9 +99,31 @@
            (local view (assert app.board-view "Create String Entity requires app.board-view"))
            (view:add-string-entity {:position (screen-world-position (or root-event event))}))}])
 
+(fn connectable? [item]
+  (and item item.subject-key
+       (not (= (tostring item.subject-key) ""))))
+
+(fn board-selection-actions [context]
+  (local view (or (and context context.board context.board.view)
+                  app.board-view))
+  (local selected (or (and view view.selected-items) []))
+  (if (and (= (length selected) 2)
+           (connectable? (. selected 1))
+           (connectable? (. selected 2)))
+      (let [source (. selected 1)
+            target (. selected 2)]
+        [{:name "Connect Items"
+          :icon "link"
+          :fn (fn [_button _event]
+                (view:connect-items source target))}])
+      []))
+
 (fn enrich-board-context! [context]
+  (local view (or app.board-view
+                  (and context context.board context.board.view)))
   (set context.board {:board app.board
-                      :view app.board-view})
+                      :view app.board-view
+                      :selected-items (if view view.selected-items [])})
   context)
 
 (fn board-target-enabled? [target]
@@ -111,7 +135,7 @@
   (ctx:defer-cleanup! drop-board-view!)
   (local view (create-board-view!))
   (ctx:set-root-actions! board-root-actions)
-  (ctx:set-selection-actions! nil)
+  (ctx:set-selection-actions! board-selection-actions)
   (ctx:set-command-hints-provider! (fn [_payload] []))
   (ctx:set-context-enricher! enrich-board-context!)
   (ctx:set-target-enabled! board-target-enabled?)

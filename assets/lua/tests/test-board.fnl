@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local {: Layout : LayoutRoot} (require :layout))
 (local BuildContext (require :build-context))
+(local Signal (require :signal))
 (local tempfile (require :tempfile))
 (local runner (require :tests/runner))
 (local {:Board Board} (require :board/core))
@@ -1296,6 +1297,519 @@
 
 (table.insert tests {:name "board restore-state reconciles stale semantic connectors on live view"
                      :fn board-restore-state-reconciles-stale-semantic-connectors-on-live-view})
+
+(fn with-board-mode-runtime [body opts]
+  (local options (or opts {}))
+  (local previous-surface app.active-interaction-surface)
+  (local previous-mode app.active-canvas-mode)
+  (local previous-registry app.canvas-mode-registry)
+  (local previous-modes-changed app.canvas-modes-changed)
+  (local previous-root app.canvas-mode-root-actions)
+  (local previous-selection app.canvas-mode-selection-actions)
+  (local previous-enricher app.canvas-mode-context-enricher)
+  (local previous-target-enabled app.canvas-mode-target-enabled?)
+  (local previous-mode-update app.canvas-mode-update)
+  (local previous-canvas app.canvas)
+  (local previous-active-world-runtime app.active-world-runtime)
+  (local previous-active-world-entry app.active-world-entry)
+  (local previous-board app.board)
+  (local previous-board-view app.board-view)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local canvas {:layout-root root
+                 :build-context ctx})
+  (set app.canvas canvas)
+  (set app.active-interaction-surface :canvas)
+  (local runtime {:canvas canvas
+                  :board-state (or options.board-state {:items [] :connectors []})})
+  (when options.object-selector
+    (set runtime.object-selector options.object-selector))
+  (set app.active-world-runtime runtime)
+  (when options.dir
+    (set app.active-world-entry {:dir options.dir}))
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (BoardModeUnit.load-board-canvas-mode!)
+  (CanvasModes.activate-mode "board")
+  (local (ok err)
+    (pcall (fn []
+             (body {:board-view app.board-view
+                    :canvas canvas
+                    :ctx ctx
+                    :root root}))))
+  (BoardModeUnit.unload-board-canvas-mode!)
+  (set app.active-interaction-surface previous-surface)
+  (set app.active-canvas-mode previous-mode)
+  (set app.canvas-mode-registry previous-registry)
+  (set app.canvas-modes-changed previous-modes-changed)
+  (set app.canvas-mode-root-actions previous-root)
+  (set app.canvas-mode-selection-actions previous-selection)
+  (set app.canvas-mode-context-enricher previous-enricher)
+  (set app.canvas-mode-target-enabled? previous-target-enabled)
+  (set app.canvas-mode-update previous-mode-update)
+  (set app.canvas previous-canvas)
+  (set app.active-world-runtime previous-active-world-runtime)
+  (set app.board previous-board)
+  (set app.board-view previous-board-view)
+  (set app.active-world-entry previous-active-world-entry)
+  (BoardRegistry.unregister-owner owner)
+  (when (not ok)
+    (error err))
+  true)
+
+(fn mock-selector []
+  (local changed (Signal))
+  (local self {:selectables []
+               :changed changed})
+  (set self.add-selectables
+       (fn [self items]
+         (each [_ item (ipairs items)]
+           (table.insert self.selectables item))))
+  (set self.remove-selectables
+       (fn [self items]
+         (local keep [])
+         (each [_ s (ipairs self.selectables)]
+           (var remove? false)
+           (each [_ r (ipairs items)]
+             (when (= s r)
+               (set remove? true)))
+           (when (not remove?)
+             (table.insert keep s)))
+         (set self.selectables keep)))
+  self)
+
+(fn board-view-registers-selectables-with-selector []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local selector (mock-selector))
+  (local board (Board {}))
+  (local view (BoardView {:board board
+                          :canvas {:layout-root root :build-context ctx}
+                          :ctx ctx
+                          :selector selector}))
+  (assert (= (length selector.selectables) 0)
+          "BoardView should not register selectables before items are added")
+  (local item (view:add-item {:type "test-item"
+                              :subject-key "sk:src"
+                              :position (glm.vec3 1 2 0)
+                              :size (glm.vec3 8 4 0)}))
+  (assert (= (length selector.selectables) 1)
+          "BoardView should register a selectable when an item is added")
+  (local selectable (. selector.selectables 1))
+  (assert (= selectable.item item)
+          "Selectable should reference the board item")
+  (assert (= selectable.position.x 5)
+          "Selectable position.x should be item center x")
+  (assert (= selectable.position.y 4)
+          "Selectable position.y should be item center y")
+  (board:remove-item item.id)
+  (assert (= (length selector.selectables) 0)
+          "BoardView should unregister selectable when item is removed")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-view-selection-tracks-selected-items []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local selector (mock-selector))
+  (local board (Board {}))
+  (local view (BoardView {:board board
+                          :canvas {:layout-root root :build-context ctx}
+                          :ctx ctx
+                          :selector selector}))
+  (local item-a (view:add-item {:type "test-item"
+                                :subject-key "sk:a"
+                                :position (glm.vec3 0 0 0)
+                                :size (glm.vec3 8 4 0)}))
+  (local item-b (view:add-item {:type "test-item"
+                                :subject-key "sk:b"
+                                :position (glm.vec3 10 0 0)
+                                :size (glm.vec3 8 4 0)}))
+  (assert (= (length view.selected-items) 0)
+          "BoardView should start with empty selected-items")
+  (local selectables selector.selectables)
+  (selector.changed:emit selectables)
+  (assert (= (length view.selected-items) 2)
+          "BoardView should track selected items after selector changed")
+  (assert (= (. view.selected-items 1) item-a)
+          "BoardView selected-items first entry should be item-a")
+  (assert (= (. view.selected-items 2) item-b)
+          "BoardView selected-items second entry should be item-b")
+  (var emitted-count 0)
+  (var emitted-items nil)
+  (view.selected-items-changed:connect
+    (fn [items]
+      (set emitted-count (+ emitted-count 1))
+      (set emitted-items items)))
+  (selector.changed:emit [(. selector.selectables 1)])
+  (assert (= emitted-count 1)
+          "BoardView selected-items-changed should fire when selector changes")
+  (assert (= (length emitted-items) 1)
+          "BoardView selected-items-changed should emit only the selected item")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-view-selectable-position-updates-on-transform []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local selector (mock-selector))
+  (local board (Board {}))
+  (local view (BoardView {:board board
+                          :canvas {:layout-root root :build-context ctx}
+                          :ctx ctx
+                          :selector selector}))
+  (local item (view:add-item {:type "test-item"
+                              :subject-key "sk:src"
+                              :position (glm.vec3 1 2 0)
+                              :size (glm.vec3 8 4 0)}))
+  (local selectable (. selector.selectables 1))
+  (board:update-item-transform item.id {:position (glm.vec3 20 30 0)})
+  (assert (= selectable.position.x 24)
+          "Selectable position.x should update after board item moves")
+  (assert (= selectable.position.y 32)
+          "Selectable position.y should update after board item moves")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-view-drop-cleans-up-selectables []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local selector (mock-selector))
+  (local board (Board {}))
+  (local view (BoardView {:board board
+                          :canvas {:layout-root root :build-context ctx}
+                          :ctx ctx
+                          :selector selector}))
+  (view:add-item {:type "test-item"
+                  :subject-key "sk:a"})
+  (assert (= (length selector.selectables) 1)
+          "test setup should register selectable")
+  (view:drop)
+  (assert (= (length selector.selectables) 0)
+          "BoardView drop should remove all selectables from selector")
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-selection-action-shows-connect-for-two-connectable-items []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (local board (Board {:state {:items [{:id "a" :type "test-item" :subject-key "sk:a"}
+                                            {:id "b" :type "test-item" :subject-key "sk:b"}]
+                                    :connectors []}}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local view (BoardView {:board board
+                              :canvas canvas
+                              :ctx ctx
+                              :link-store link-store}))
+      (local item-a (. board.items "a"))
+      (local item-b (. board.items "b"))
+      (assert (= (length board.connectors-in-order) 0)
+              "Board should have no connectors before connecting")
+      (view:connect-items item-a item-b)
+      (assert (= (length board.connectors-in-order) 1)
+              "connect-items should create a board connector when exactly two connectable items are given")
+      (local connector (. board.connectors-in-order 1))
+      (assert (= connector.kind "semantic-link")
+              "connect-items should create a semantic-link connector")
+      (assert (= connector.source-item-id "a")
+              "connect-items should use first item as source")
+      (assert (= connector.target-item-id "b")
+              "connect-items should use second item as target")
+      (local link (link-store:get-entity connector.semantic-link-id))
+      (assert link "connect-items should create a persisted link entity")
+      (assert (= link.source-key "sk:a")
+              "Link entity should store source subject key from first item")
+      (assert (= link.target-key "sk:b")
+              "Link entity should store target subject key from second item")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(fn board-view-connect-items-is-idempotent []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (local board (Board {}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local view (BoardView {:board board
+                              :canvas canvas
+                              :ctx ctx
+                              :link-store link-store}))
+      (local source (view:add-item {:type "test-item"
+                                    :subject-key "sk:src"
+                                    :position (glm.vec3 0 0 0)}))
+      (local target (view:add-item {:type "test-item"
+                                    :subject-key "sk:tgt"
+                                    :position (glm.vec3 20 0 0)}))
+      (local connector1 (view:connect-items source target))
+      (assert (= (length board.connectors-in-order) 1)
+              "First connect should create one connector")
+      (local connector2 (view:connect-items source target))
+      (assert (= connector2 connector1)
+              "Second connect-items call should return existing connector")
+      (assert (= (length board.connectors-in-order) 1)
+              "Second connect should not create a duplicate connector")
+      (assert (= (length (link-store:list-entities)) 1)
+              "Second connect should not create a duplicate link entity")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(fn board-view-connects-items-preserves-direction []
+  (with-temp-dir
+    (fn [dir]
+      (local owner {})
+      (BoardRegistry.unregister-item-type "test-item" owner)
+      (BoardRegistry.register-item-type {:id "test-item"
+                                         :label "Test"
+                                         :builder dummy-widget}
+                                        owner)
+      (local root (LayoutRoot))
+      (local ctx (BuildContext {:layout-root root}))
+      (local canvas {:layout-root root
+                     :build-context ctx})
+      (local board (Board {}))
+      (local link-store (LinkEntityStore.LinkEntityStore {:base-dir dir}))
+      (local view (BoardView {:board board
+                              :canvas canvas
+                              :ctx ctx
+                              :link-store link-store}))
+      (local source (view:add-item {:type "test-item"
+                                    :subject-key "sk:src"
+                                    :position (glm.vec3 0 0 0)}))
+      (local target (view:add-item {:type "test-item"
+                                    :subject-key "sk:tgt"
+                                    :position (glm.vec3 20 0 0)}))
+      (local connector (view:connect-items source target))
+      (local link (link-store:get-entity connector.semantic-link-id))
+      (assert (= link.source-key "sk:src")
+              "connect-items should set source-key from first argument")
+      (assert (= link.target-key "sk:tgt")
+              "connect-items should set target-key from second argument")
+      (assert (= connector.source-item-id source.id)
+              "Board connector source-item-id should match first argument")
+      (assert (= connector.target-item-id target.id)
+              "Board connector target-item-id should match second argument")
+      (view:drop)
+      (BoardRegistry.unregister-owner owner)
+      true)))
+
+(fn board-view-connector-renders-triangle-line-from-source-to-target []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "test-item" owner)
+  (BoardRegistry.register-item-type {:id "test-item"
+                                     :label "Test"
+                                     :builder dummy-widget}
+                                    owner)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root}))
+  (local canvas {:layout-root root
+                 :build-context ctx})
+  (local board (Board {}))
+  (local view (BoardView {:board board
+                          :canvas canvas
+                          :ctx ctx}))
+  (local source (view:add-item {:type "test-item"
+                                :subject-key "sk:src"
+                                :position (glm.vec3 0 0 0)
+                                :size (glm.vec3 8 4 0)}))
+  (local target (view:add-item {:type "test-item"
+                                :subject-key "sk:tgt"
+                                :position (glm.vec3 20 10 0)
+                                :size (glm.vec3 8 4 0)}))
+  (local connector (view:connect-items source target))
+  (local record (. view.connector-records connector.id))
+  (assert record.line "BoardView connector should render a TriangleLine")
+  (assert record.line.start "BoardView connector line should track start position")
+  (assert record.line.finish "BoardView connector line should track end position")
+  (assert (= record.line.start.x 4)
+          "BoardView connector line start should be source item center x")
+  (assert (= record.line.start.y 2)
+          "BoardView connector line start should be source item center y")
+  (assert (= record.line.finish.x 24)
+          "BoardView connector line end should be target item center x")
+  (assert (= record.line.finish.y 12)
+          "BoardView connector line end should be target item center y")
+  (view:drop)
+  (BoardRegistry.unregister-owner owner)
+  true)
+
+(fn board-selection-action-through-canvas-mode-hooks []
+  (with-temp-dir
+    (fn [dir]
+      (with-board-mode-runtime
+        (fn [env]
+          (local item-a (env.board-view:add-item {:type "test-item"
+                                                   :subject-key "sk:a"
+                                                   :position (glm.vec3 0 0 0)}))
+          (local item-b (env.board-view:add-item {:type "test-item"
+                                                   :subject-key "sk:b"
+                                                   :position (glm.vec3 10 0 0)}))
+          (set app.board-view.selected-items [item-a item-b])
+          (local actions (app.canvas-mode-selection-actions
+                           {:surface :canvas
+                            :canvas-mode "board"}))
+          (assert (= (length actions) 1)
+                  "canvas-mode-selection-actions should return Connect Items for two connectable items")
+          (assert (= (. actions 1 :name) "Connect Items")
+                  "selection action should be Connect Items")
+          (assert (= (length app.board.connectors-in-order) 0)
+                  "Board should start with no connectors")
+          ((. actions 1 :fn) nil nil)
+          (assert (= (length app.board.connectors-in-order) 1)
+                  "Connect Items action should create a board connector")
+          (local connector (. app.board.connectors-in-order 1))
+          (assert (= connector.source-item-id item-a.id)
+                  "Connector source should be first selected item")
+          (assert (= connector.target-item-id item-b.id)
+                  "Connector target should be second selected item"))
+        {:dir dir}))))
+
+(fn board-selection-action-shows-connect-even-when-already-connected []
+  (with-temp-dir
+    (fn [dir]
+      (with-board-mode-runtime
+        (fn [env]
+          (local item-a (env.board-view:add-item {:type "test-item"
+                                                   :subject-key "sk:a"
+                                                   :position (glm.vec3 0 0 0)}))
+          (local item-b (env.board-view:add-item {:type "test-item"
+                                                   :subject-key "sk:b"
+                                                   :position (glm.vec3 10 0 0)}))
+          (app.board-view:connect-items item-a item-b)
+          (assert (= (length app.board.connectors-in-order) 1)
+                  "First connect should create one connector")
+          (set app.board-view.selected-items [item-a item-b])
+          (local actions (app.canvas-mode-selection-actions
+                           {:surface :canvas
+                            :canvas-mode "board"}))
+          (assert (= (length actions) 1)
+                  "selection action should show Connect Items even when already connected (idempotent)")
+          (assert (= (. actions 1 :name) "Connect Items")
+                  "selection action should be Connect Items")
+          ((. actions 1 :fn) nil nil)
+          (assert (= (length app.board.connectors-in-order) 1)
+                  "Connect Items on already-connected items should not create a duplicate connector"))
+        {:dir dir}))))
+
+(fn board-selection-action-enriches-context-with-selected-items []
+  (with-board-mode-runtime
+    (fn [env]
+      (local context {})
+      (when app.canvas-mode-context-enricher
+        (app.canvas-mode-context-enricher context))
+      (assert context.board "Board context enricher should set context.board")
+      (assert (= (length context.board.selected-items) 0)
+              "Board context should initialize selected-items to empty list")
+      (assert context.board.board "Board context should include board")
+      (assert context.board.view "Board context should include board view"))))
+
+(fn board-selection-action-uses-selector-wiring-through-runtime []
+  (with-temp-dir
+    (fn [dir]
+      (local selector (mock-selector))
+      (with-board-mode-runtime
+        (fn [env]
+          (local item-a (env.board-view:add-item {:type "test-item"
+                                                   :subject-key "sk:a"
+                                                   :position (glm.vec3 0 0 0)}))
+          (local item-b (env.board-view:add-item {:type "test-item"
+                                                   :subject-key "sk:b"
+                                                   :position (glm.vec3 10 0 0)}))
+          (assert (= (length selector.selectables) 2)
+                  "BoardView should register selectables via runtime.object-selector")
+          (assert (= (length app.board-view.selected-items) 0)
+                  "BoardView should have no selected items before selector change")
+          (selector.changed:emit selector.selectables)
+          (assert (= (length app.board-view.selected-items) 2)
+                  "BoardView should track selected items after selector.changed emit")
+          (local actions (app.canvas-mode-selection-actions
+                           {:surface :canvas
+                            :canvas-mode "board"}))
+          (assert (= (length actions) 1)
+                  "selection actions should appear for two selected connectable items")
+          (assert (= (. actions 1 :name) "Connect Items"))
+          ((. actions 1 :fn) nil nil)
+          (assert (= (length app.board.connectors-in-order) 1)
+                  "clicking Connect Items via selector wiring should create a connector"))
+        {:dir dir :object-selector selector}))))
+
+(table.insert tests {:name "BoardView registers selectables with selector"
+                     :fn board-view-registers-selectables-with-selector})
+(table.insert tests {:name "BoardView selection tracks selected items"
+                     :fn board-view-selection-tracks-selected-items})
+(table.insert tests {:name "BoardView selectable position updates on transform"
+                     :fn board-view-selectable-position-updates-on-transform})
+(table.insert tests {:name "BoardView drop cleans up selectables"
+                     :fn board-view-drop-cleans-up-selectables})
+(table.insert tests {:name "BoardView connects two connectable items"
+                     :fn board-selection-action-shows-connect-for-two-connectable-items})
+(table.insert tests {:name "BoardView connect-items is idempotent"
+                     :fn board-view-connect-items-is-idempotent})
+(table.insert tests {:name "BoardView connects items preserves direction"
+                     :fn board-view-connects-items-preserves-direction})
+(table.insert tests {:name "BoardView connector renders triangle line from source to target"
+                     :fn board-view-connector-renders-triangle-line-from-source-to-target})
+(table.insert tests {:name "Board selection action through canvas mode hooks"
+                     :fn board-selection-action-through-canvas-mode-hooks})
+(table.insert tests {:name "Board selection action always shows connect (idempotent)"
+                     :fn board-selection-action-shows-connect-even-when-already-connected})
+(table.insert tests {:name "Board context enricher sets selected-items"
+                     :fn board-selection-action-enriches-context-with-selected-items})
+(table.insert tests {:name "Board selection action uses selector wiring through runtime"
+                     :fn board-selection-action-uses-selector-wiring-through-runtime})
 
 (fn main []
   (runner.run-tests {:name "board"
