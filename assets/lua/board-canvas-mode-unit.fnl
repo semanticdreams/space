@@ -23,7 +23,14 @@
 (fn screen-world-position [event]
   (local canvas (assert app.canvas "Board screen-world-position requires app.canvas"))
   (assert event "Board screen-world-position requires pointer event")
-  (local ray (canvas:screen-pos-ray event))
+  (local pointer (or event.screen
+                     (and event.x event.y event)))
+  (local ray
+    (or event.ray
+        (do
+          (assert pointer
+                  "Board screen-world-position requires event.ray, event.screen, or a pointer {x y}")
+          (canvas:screen-pos-ray pointer))))
   (assert (and ray ray.origin ray.direction)
           "Board screen-world-position requires a ray with origin and direction")
   (local dz ray.direction.z)

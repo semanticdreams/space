@@ -885,17 +885,65 @@
   (set app.canvas canvas)
   (BoardModeUnit.load-board-canvas-mode!)
   (CanvasModes.activate-mode "board")
-  (local actions (app.canvas-mode-root-actions {:event {:x 10 :y 20}}))
+  (local actions (app.canvas-mode-root-actions {:event {:screen {:x 10 :y 20}}}))
   ((. (. actions 1) :fn) nil {:x 90 :y 100})
   (assert (= ray-event.x 10)
-          "Board root action should place items from the root context-menu event")
+          "Board root action should extract pointer from context-menu event.screen")
   (assert (= ray-event.y 20)
-          "Board root action should ignore the later menu button event for placement")
+          "Board root action should use event.screen coordinates for placement")
+  (assert (not ray-event.screen)
+          "Board root action should unwrap event.screen before passing to canvas screen-pos-ray")
   (local item (. app.board.items-in-order 1))
   (assert (= item.position.x 16)
           "Board root action should place items at the ray intersection with the z=0 plane")
   (assert (= item.position.y 32)
           "Board root action should use the ray direction when placing board items")
+  (BoardModeUnit.unload-board-canvas-mode!)
+  (set app.active-world-runtime previous-active-world-runtime)
+  (set app.canvas previous-canvas)
+  (set app.board previous-board)
+  (set app.board-view previous-board-view)
+  (set app.canvas-mode-registry previous-registry)
+  (set app.canvas-modes-changed previous-modes-changed)
+  true)
+
+(fn board-root-action-uses-explicit-event-ray []
+  (local previous-active-world-runtime app.active-world-runtime)
+  (local previous-canvas app.canvas)
+  (local previous-board app.board)
+  (local previous-board-view app.board-view)
+  (local previous-registry app.canvas-mode-registry)
+  (local previous-modes-changed app.canvas-modes-changed)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root
+                            :clickables app.clickables
+                            :hoverables app.hoverables
+                            :system-cursors app.system-cursors}))
+  (var screen-pos-ray-calls 0)
+  (local canvas {:layout-root root
+                 :build-context ctx
+                 :screen-pos-ray (fn [_self _event]
+                                   (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
+                                   (error "screen-pos-ray should not be called when event.ray is present"))})
+  (set app.active-world-runtime {:canvas canvas
+                                 :board-state {:items [] :connectors []}})
+  (set app.canvas canvas)
+  (BoardModeUnit.load-board-canvas-mode!)
+  (CanvasModes.activate-mode "board")
+  (local explicit-ray {:origin (glm.vec3 50 60 30)
+                       :direction (glm.vec3 2 4 -10)})
+  (local actions (app.canvas-mode-root-actions {:event {:ray explicit-ray
+                                                         :screen {:x 10 :y 20}}}))
+  ((. (. actions 1) :fn) nil {:x 90 :y 100})
+  (assert (= screen-pos-ray-calls 0)
+          "Board root action should prefer event.ray and skip canvas.screen-pos-ray")
+  (local item (. app.board.items-in-order 1))
+  (assert (= item.position.x 56)
+          "Board root action should place item from event.ray origin and direction")
+  (assert (= item.position.y 72)
+          "Board root action should compute z=0 plane intersection from the explicit ray")
   (BoardModeUnit.unload-board-canvas-mode!)
   (set app.active-world-runtime previous-active-world-runtime)
   (set app.canvas previous-canvas)
@@ -955,6 +1003,103 @@
                      :fn board-view-transform-target-rolls-back-after-board-failure})
 (table.insert tests {:name "Board root action uses root event position"
                      :fn board-root-action-uses-root-event-position})
+(table.insert tests {:name "Board root action uses explicit event.ray"
+                     :fn board-root-action-uses-explicit-event-ray})
+
+(fn board-root-action-uses-ray-only-event []
+  (local previous-active-world-runtime app.active-world-runtime)
+  (local previous-canvas app.canvas)
+  (local previous-board app.board)
+  (local previous-board-view app.board-view)
+  (local previous-registry app.canvas-mode-registry)
+  (local previous-modes-changed app.canvas-modes-changed)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root
+                            :clickables app.clickables
+                            :hoverables app.hoverables
+                            :system-cursors app.system-cursors}))
+  (var screen-pos-ray-calls 0)
+  (local canvas {:layout-root root
+                 :build-context ctx
+                 :screen-pos-ray (fn [_self _event]
+                                   (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
+                                   (error "screen-pos-ray should not be called when event.ray is present"))})
+  (set app.active-world-runtime {:canvas canvas
+                                 :board-state {:items [] :connectors []}})
+  (set app.canvas canvas)
+  (BoardModeUnit.load-board-canvas-mode!)
+  (CanvasModes.activate-mode "board")
+  (local explicit-ray {:origin (glm.vec3 50 60 30)
+                       :direction (glm.vec3 2 4 -10)})
+  (local actions (app.canvas-mode-root-actions {:event {:ray explicit-ray}}))
+  ((. (. actions 1) :fn) nil nil)
+  (assert (= screen-pos-ray-calls 0)
+          "Board root action should prefer event.ray without event.screen present")
+  (local item (. app.board.items-in-order 1))
+  (assert (= item.position.x 56)
+          "Board root action should place item from event.ray when only :ray is present")
+  (assert (= item.position.y 72)
+          "Board root action should compute z=0 plane intersection from ray-only event")
+  (BoardModeUnit.unload-board-canvas-mode!)
+  (set app.active-world-runtime previous-active-world-runtime)
+  (set app.canvas previous-canvas)
+  (set app.board previous-board)
+  (set app.board-view previous-board-view)
+  (set app.canvas-mode-registry previous-registry)
+  (set app.canvas-modes-changed previous-modes-changed)
+  true)
+
+(table.insert tests {:name "Board root action uses ray-only event"
+                     :fn board-root-action-uses-ray-only-event})
+
+(fn board-placement-rejects-malformed-event []
+  (local previous-active-world-runtime app.active-world-runtime)
+  (local previous-canvas app.canvas)
+  (local previous-board app.board)
+  (local previous-board-view app.board-view)
+  (local previous-registry app.canvas-mode-registry)
+  (local previous-modes-changed app.canvas-modes-changed)
+  (set app.canvas-mode-registry nil)
+  (set app.canvas-modes-changed nil)
+  (local root (LayoutRoot))
+  (local ctx (BuildContext {:layout-root root
+                            :clickables app.clickables
+                            :hoverables app.hoverables
+                            :system-cursors app.system-cursors}))
+  (var screen-pos-ray-calls 0)
+  (local canvas {:layout-root root
+                 :build-context ctx
+                 :screen-pos-ray (fn [_self _event]
+                                   (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
+                                   {:origin (glm.vec3 0 0 0)
+                                    :direction (glm.vec3 0 0 1)})})
+  (set app.active-world-runtime {:canvas canvas
+                                 :board-state {:items [] :connectors []}})
+  (set app.canvas canvas)
+  (BoardModeUnit.load-board-canvas-mode!)
+  (CanvasModes.activate-mode "board")
+  (local actions (app.canvas-mode-root-actions {:event {}}))
+  (local (ok err) (pcall (fn []
+                           ((. (. actions 1) :fn) nil nil))))
+  (assert (not ok)
+          "Board placement should reject malformed event without ray, screen, or x/y")
+  (assert (and err (string.find err "requires event.ray" 1 true))
+          "Board placement should explain what event shape is required")
+  (assert (= screen-pos-ray-calls 0)
+          "Board placement should not call canvas.screen-pos-ray with malformed event")
+  (BoardModeUnit.unload-board-canvas-mode!)
+  (set app.active-world-runtime previous-active-world-runtime)
+  (set app.canvas previous-canvas)
+  (set app.board previous-board)
+  (set app.board-view previous-board-view)
+  (set app.canvas-mode-registry previous-registry)
+  (set app.canvas-modes-changed previous-modes-changed)
+  true)
+
+(table.insert tests {:name "Board placement rejects malformed event"
+                     :fn board-placement-rejects-malformed-event})
 
 (fn board-canvas-mode-drops-view-on-restore-failure []
   (with-temp-dir
