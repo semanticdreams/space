@@ -219,7 +219,102 @@
           (assert (= position.x 12) "canvas placement should use camera x")
           (assert (= position.y 34) "canvas placement should use camera y")
           (assert (= position.z 0) "canvas placement should use graph plane z")
-          (views:drop-all))}])
+          (views:drop-all))}
+  {:name "graph-node-view panel restorer module compiles and exports restore"
+   :fn (fn []
+           (local restorer (require :graph/view/node-view-panel-restorer))
+           (assert (= (type restorer) :table)
+                   "node-view-panel-restorer should export a table")
+           (assert (= (type restorer.restore) :function)
+                   "node-view-panel-restorer should export a restore function")
+           true)}
+  {:name "graph-node-view panel restorer adds child, preserves persistence, close removes child"
+   :fn (fn []
+           (local RestorerModule (require :graph/view/node-view-panel-restorer))
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
+           (local node {:key "test-node"
+                        :label "Test"
+                        :view (fn [_node]
+                                  (fn [_builder-ctx _builder-opts]
+                                      (make-simple-view)))})
+           (local saved-graph app.graph)
+           (local saved-runtime app.active-world-runtime)
+           (local graph
+             {:lookup (fn [_self key]
+                        (when (= key "test-node") node))
+              :nodes {"test-node" node}})
+           (set app.graph graph)
+           (set app.active-world-runtime {:graph graph})
+           (local (ok result)
+             (pcall
+               (fn []
+                 (RestorerModule.restore {:hud target
+                                           :panel {:kind "graph-node-view"
+                                                   :node-key "test-node"
+                                                   :layer "tiles"
+                                                   :align-x :start}})
+                 (assert (= (length target.children) 1)
+                         "module restorer should add one child")
+                 (local child (. target.children 1))
+                 (assert (and child child.layout)
+                         "module restorer child should have a layout")
+                 (assert (= (and target.last-add-panel-opts
+                                 target.last-add-panel-opts.persistence
+                                 target.last-add-panel-opts.persistence.kind)
+                            "graph-node-view")
+                         "module restorer should set persistence kind")
+                 (assert (= (and target.last-add-panel-opts
+                                 target.last-add-panel-opts.persistence
+                                 target.last-add-panel-opts.persistence.node-key)
+                            "test-node")
+                         "module restorer should set persistence node-key")
+                 (target:remove-panel-child child)
+                 (assert (= (length target.children) 0)
+                         "module restorer close should remove the panel child")
+                 true)))
+           (set app.graph saved-graph)
+           (set app.active-world-runtime saved-runtime)
+           (when (not ok)
+             (error result))
+           true)}
+  {:name "graph-node-view panel restorer unwraps nested builders"
+   :fn (fn []
+           (local RestorerModule (require :graph/view/node-view-panel-restorer))
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
+           (local node {:key "nested"
+                        :label "Nested"
+                        :view (fn [_node]
+                                  (fn [_builder-ctx _builder-opts]
+                                      (fn [_inner-ctx _inner-opts]
+                                          (make-simple-view))))})
+           (local saved-graph app.graph)
+           (local saved-runtime app.active-world-runtime)
+           (local graph {:lookup (fn [_self key] (when (= key "nested") node))
+                         :nodes {"nested" node}})
+           (set app.graph graph)
+           (set app.active-world-runtime {:graph graph})
+           (local (ok result)
+             (pcall
+               (fn []
+                 (RestorerModule.restore {:hud target
+                                           :panel {:kind "graph-node-view"
+                                                   :node-key "nested"
+                                                   :layer "float"
+                                                   :position [1 2 3]
+                                                   :size [4 5 6]}})
+                 (assert (= (length target.children) 1)
+                         "module restorer should unwrap nested builders and add a child")
+                 (local child (. target.children 1))
+                 (assert (and child child.layout)
+                         "module restorer nested child should have a layout")
+                 true)))
+           (set app.graph saved-graph)
+           (set app.active-world-runtime saved-runtime)
+           (when (not ok)
+             (error result))
+           true)}])
 
 (local main
   (fn []

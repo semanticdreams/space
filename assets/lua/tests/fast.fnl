@@ -154,6 +154,7 @@
     :tests.test-heightfield-terrain
     :tests.test-graph-view
     :tests.test-graph-view-control-view
+    :tests.test-hackernews-graph-view-node-views
     :tests.test-world-manager
     :tests.test-world-tabs-widget
     :tests.test-demo-browser

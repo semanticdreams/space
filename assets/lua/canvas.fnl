@@ -268,7 +268,7 @@
                       :target self
                       :panel payload})))))
 
-  (fn restore-state [_canvas state]
+  (fn restore-shell-state [self state]
     (local payload (or state {}))
     (local camera-state (or payload.camera {}))
     (local (ok position) (pcall array->vec3 camera-state.position))
@@ -281,6 +281,11 @@
         (self:set-scale-factor scale-factor)
         (when (not (= scale-factor nil))
           (logging.warn "[canvas] invalid persisted scale factor; keeping current value")))
+    true)
+
+  (fn restore-state [_canvas state]
+    (self:restore-shell-state state)
+    (local payload (or state {}))
     (local panels (or payload.panels []))
     (assert (= (type panels) :table) "Canvas.restore-state requires :panels table")
     (each [_ panel (ipairs panels)]
@@ -421,6 +426,7 @@
   (set self.capture-panel-element-state capture-panel-element-state)
   (set self.capture-state capture-state)
   (set self.restore-state restore-state)
+  (set self.restore-shell-state restore-shell-state)
   (set self.screen-pos-ray screen-pos-ray)
   (set self.update-projection update-projection)
   (set self.set-scale-factor set-scale-factor)

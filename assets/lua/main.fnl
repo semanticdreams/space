@@ -1100,8 +1100,8 @@
   (when (and app.scene app.scene.build-context)
     (set app.scene.build-context.object-selector app.object-selector)
     (set app.scene.build-context.layout-root app.layout-root))
-  (when (and runtime runtime.restore-surface-state)
-    (runtime:restore-surface-state app.canvas app.hud))
+  (when (and runtime runtime.restore-canvas-shell-state)
+    (runtime:restore-canvas-shell-state app.canvas))
   (local requested-mode-id
     (if (and runtime runtime.requested-canvas-mode-known?)
         runtime.requested-canvas-mode-id
@@ -1119,6 +1119,8 @@
           (set runtime.requested-canvas-mode-id requested-mode-id)
           (set runtime.requested-canvas-mode-known? true)
           (set runtime.active-canvas-mode nil))))
+  (when (and runtime runtime.restore-surface-state)
+    (runtime:restore-surface-state app.canvas app.hud))
   (app.set-active-interaction-surface (or (and runtime runtime.preferred-interaction-surface)
                                           app.preferred-interaction-surface)
                                       {:sync-canvas-visibility true})
