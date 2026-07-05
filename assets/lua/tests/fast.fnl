@@ -158,7 +158,15 @@
     :tests.test-world-manager
     :tests.test-world-tabs-widget
     :tests.test-demo-browser
-    :tests.test-chart]})
+    :tests.test-chart
+    :tests.test-repo-sha256
+    :tests.test-repo-remote
+    :tests.test-repo-git
+    :tests.test-repo-path-policy
+    :tests.test-repo-workspace
+    :tests.test-repo-store
+    :tests.test-repo-checks
+    :tests.test-repo-presets]})
 
 (local main
   (fn []

@@ -64,6 +64,7 @@
 (local TerrainIssueLog (require :terrain-issue-log))
 (TerrainIssueLog.start-session! "space startup")
 (local fs (require :fs))
+(local json (require :json))
 (local appdirs (require :appdirs))
 (local log-dir
   (or (os.getenv "SPACE_LOG_DIR")
@@ -90,6 +91,7 @@
 (local AgentBuiltinScene (require :llm/presets/builtins/scene))
 (local AgentBuiltinGeneral (require :llm/presets/builtins/general))
 (local AgentBuiltinUnits (require :llm/presets/builtins/units))
+(local AgentBuiltinRepo (require :llm/presets/builtins/repo))
 (local AgentRegistry (require :llm/agent/registry))
 (local AgentRunner (require :llm/agent/runner))
 (local AgentToolSurface (require :llm/agent/tool-surface))
@@ -823,9 +825,18 @@
    :canvas-visible? (= app.canvas-visible? true)})
 
 (fn agent-preset-context []
+  (fn repos-available?* []
+    (local store-path (and app.user-data-dir
+                           (fs.join-path app.user-data-dir "repositories" "registry.json")))
+    (when store-path
+      (when (fs.exists store-path)
+        (local parsed (json.loads (fs.read-file store-path)))
+        (when (= (type parsed) :table)
+          (not= (next parsed) nil)))))
   {:surface (or app.active-interaction-surface :scene)
    :mode app.active-canvas-mode
-   :canvas-visible? (= app.canvas-visible? true)})
+   :canvas-visible? (= app.canvas-visible? true)
+   :repos-available? (= (repos-available?*) true)})
 
 (fn canvas-shell-state= [a b]
   (and a b
@@ -1607,7 +1618,8 @@
     (AgentBuiltinGraph.register app.agent-presets)
     (AgentBuiltinScene.register app.agent-presets)
     (AgentBuiltinGeneral.register app.agent-presets)
-    (AgentBuiltinUnits.register app.agent-presets))
+    (AgentBuiltinUnits.register app.agent-presets)
+    (AgentBuiltinRepo.register app.agent-presets))
   (app.agent-presets:set-context (agent-preset-context))
 
   ;; Agent layer bootstrap
@@ -1647,12 +1659,8 @@
   (when (and app.canvas-shell-changed (not app.agent-presets-canvas-handler))
     (set app.agent-presets-canvas-handler
          (app.canvas-shell-changed:connect
-           (fn [payload]
-             (local current payload.current)
-             (app.agent-presets:set-context
-               {:surface current.interaction-surface
-                :mode current.canvas-mode
-                :canvas-visible? current.canvas-visible?})))))
+           (fn [_payload]
+             (app.agent-presets:set-context (agent-preset-context))))))
 
   (when (not app.agent-providers)
     (set app.agent-providers {}))
