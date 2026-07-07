@@ -6,6 +6,7 @@
 (local Profiles (require :repo/profiles))
 (local Checks (require :repo/checks))
 (local CountMap (require :count-map))
+(local Display (require :repo/display))
 
 (fn ensure-workspace [app]
   (when (not app.repo-workspace)
@@ -21,15 +22,6 @@
     (app.agent-presets:set-context old-ctx)))
 
 (fn register-repo-adapters [adapters]
-  (fn safe-display-url [repo]
-    (each [_ field (ipairs [:host-raw :owner :name])]
-      (local v (. repo field))
-      (assert (= (type v) "string") (.. "repo." field " must be a string"))
-      (assert (not (string.find v "@" 1 true)) (.. "repo." field " must not contain @: " v))
-      (assert (not (string.find v "?" 1 true)) (.. "repo." field " must not contain a query string: " v))
-      (assert (not (string.find v "#" 1 true)) (.. "repo." field " must not contain a fragment: " v)))
-    (.. "https://" repo.host-raw "/" repo.owner "/" repo.name ".git"))
-
   (adapters:register
     {:id "repo.clone"
      :mcp-name "space_repo_clone"
@@ -42,14 +34,7 @@
                     (local ws (ensure-workspace app))
                     (local repo (ws:clone-repo args.url))
                     (repo-available! app)
-                    (json.dumps {:id repo.id
-                                :remote-url (safe-display-url repo)
-                                :host repo.host
-                                :owner repo.owner
-                                :name repo.name
-                                :default-branch repo.default-branch
-                                :profile repo.profile
-                                :created-at repo.created-at})))
+                    (json.dumps (Display.safe-repo-summary repo))))
      :managed-source "repo.clone"})
 
   (adapters:register
@@ -63,15 +48,7 @@
                     (local repos (ws:list-repos))
                     (local safe-repos [])
                     (each [_ repo (ipairs repos)]
-                       (table.insert safe-repos
-                        {:id repo.id
-                         :remote-url (safe-display-url repo)
-                         :host repo.host
-                        :owner repo.owner
-                        :name repo.name
-                        :default-branch repo.default-branch
-                        :profile repo.profile
-                        :created-at repo.created-at}))
+                       (table.insert safe-repos (Display.safe-repo-summary repo)))
                     (json.dumps safe-repos)))
      :managed-source "repo.list"})
 

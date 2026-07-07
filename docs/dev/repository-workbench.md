@@ -4,8 +4,8 @@ A general system for cloning, editing, testing, and opening pull requests agains
 remote Git repositories from inside Space. Space edits Space by being one repo
 profile, not a special case.
 
-This document is a design and implementation plan. It reflects decisions made as
-of 2026-06-18 during architecture discussions. No code has been written yet.
+This document describes the design and current implementation of the Repository
+Workbench feature.
 
 ## Motivation
 
@@ -82,6 +82,9 @@ Everything lives under Space's user data directory:
 | `repo/path-policy.fnl` | Validate repo-relative paths; reject escapes, symlinks, `.git/`. |
 | `repo/checks.fnl` | Profile check definitions and subprocess execution. |
 | `repo/profiles.fnl` | Generic profile plus Space-specific profile. |
+| `repo/display.fnl` | Shared safe display URL construction and repo summary. |
+| `repo/workbench-view.fnl` | User-facing Repository Workbench panel widget. |
+| `launchables/repository-workbench.fnl` | Launcher entry point; opens the workbench panel on the HUD. |
 | `llm/presets/builtins/repo.fnl` | MCP tool adapters, preset registrations, agent prompt fragments. |
 
 ### Key objects
@@ -290,6 +293,23 @@ closure.
 
 Security: No `space_repo_run_shell` in V1. The only subprocess execution is
 through profile-defined checks with fixed argv arrays.
+
+## User-facing access
+
+A Repository Workbench panel is available from the Launcher (HUD Apps button
+or leader-mode `p`). The panel provides:
+
+- **Clone Remote Repo** — enter a URL and click Clone.
+- **Repository list** — shows all registered repos; click to select.
+- **Selected repo details** — owner/name, default branch, profile.
+- **Task list** — shows tasks for the selected repo.
+- **Create task** — enter a prompt and optional base branch.
+
+The panel directly uses the workspace module (same backing store as the MCP
+tools). Clone and task creation are immediate.
+
+The launchable is defined in `launchables/repository-workbench.fnl` and uses
+HUD panel persistence, same as the Chat and Launcher panels.
 
 ## Agent integration
 

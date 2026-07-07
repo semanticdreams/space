@@ -166,7 +166,8 @@
     :tests.test-repo-workspace
     :tests.test-repo-store
     :tests.test-repo-checks
-    :tests.test-repo-presets]})
+    :tests.test-repo-presets
+    :tests.test-repo-display]})
 
 (local main
   (fn []

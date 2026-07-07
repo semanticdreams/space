@@ -47,9 +47,21 @@
       (registry:run "Alpha")
       (assert (= app.test-launcher-ran :alpha)))))
 
+(fn repo-workbench-launchable-has-interface []
+  (local launchable (require :launchables/repository-workbench))
+  (assert (= (type launchable.name) "string") "launchable must have :name")
+  (assert (= (type launchable.run) "function") "launchable must have :run")
+  (assert (= (type launchable.open-panel) "function") "launchable must have :open-panel")
+  (assert (= (type launchable.restore) "function") "launchable must have :restore")
+  (assert (= (type launchable.kind) "string") "launchable must have :kind")
+  (assert (= (type launchable.restorer-module) "string") "launchable must have :restorer-module")
+  (assert (= launchable.name "Repository Workbench")
+          (.. "expected 'Repository Workbench' got " (tostring launchable.name))))
+
 (table.insert tests {:name "Launchables registers, lists, searches" :fn launchables-register-list-search})
 (table.insert tests {:name "Launchables duplicate register errors" :fn launchables-duplicate-register-errors})
 (table.insert tests {:name "Launcher run dispatches entry" :fn launcher-run-dispatches-entry})
+(table.insert tests {:name "Repository Workbench launchable interface" :fn repo-workbench-launchable-has-interface})
 
 (local main
   (fn []
