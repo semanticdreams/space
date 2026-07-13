@@ -3,6 +3,15 @@ gl.log
 .env
 /prof
 
+.agent-workflow/runs/
+.agent-workflow/STATE.json
+.agent-workflow/*.raw.txt
+.agent-workflow/*.stderr.*
+.agent-workflow/*.limit-input.txt
+.agent-workflow/*.limit-classifier.*
+.agent-workflow/SUPERVISOR.*.md
+.agent-workflow/*.tmp
+
 # Python
 __pycache__/
 *.py[cod]
