@@ -167,7 +167,8 @@
     :tests.test-repo-store
     :tests.test-repo-checks
     :tests.test-repo-presets
-    :tests.test-repo-display]})
+    :tests.test-repo-display
+    :tests.test-panel-transfer]})
 
 (local main
   (fn []

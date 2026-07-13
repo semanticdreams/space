@@ -264,14 +264,10 @@
     (local base-runtime-opts (copy-table incoming))
     (set base-runtime-opts.on-close nil)
     (set base-runtime-opts.actions nil)
-    (local parent-target ctx.pointer-target)
+    (local parent-target (or ctx.panel-target ctx.pointer-target))
 
     (fn resolve-target [target]
-      (if (and app.hud (= target app.hud))
-          app.hud
-          (if (and app.scene (= target app.scene))
-              app.scene
-              (if target target nil))))
+      (if target target nil))
 
     (fn resolve-destination [current]
       (if (and current (= current app.hud))
@@ -291,13 +287,6 @@
       (when (and (not removed) dialog dialog.drop)
         (dialog:drop))
       removed)
-
-    (fn attach-to-target [target]
-      (when (and target target.add-panel-child)
-        (target:add-panel-child {:builder (DeepDialog options)
-                                 :builder-options (copy-table base-runtime-opts)
-                                 :skip-cuboid true
-                                 :persistence options.persistence})))
 
     (each [key value (pairs options)]
       (when (and (not (= key :actions))
@@ -323,19 +312,47 @@
         (when (and (not user-on-close) dialog)
           (dialog:drop))))
 
-    (fn handle-toggle [_button _event]
+    (fn do-transfer [destination]
+      (when (and (not closed?) dialog)
+        (local pt (and app app.panel-transfer))
+        (local payload {:builder (DeepDialog options)
+                        :builder-options (copy-table base-runtime-opts)
+                        :skip-cuboid true
+                        :persistence options.persistence})
+        (if pt
+            (set dialog (pt:transfer-panel destination destination.current dialog payload))
+            (do
+              (local new-dialog (and destination.target destination.target.add-panel-child
+                                     (destination.target:add-panel-child payload)))
+              (if new-dialog
+                  (do
+                    (detach-from-target destination.current)
+                    (set dialog new-dialog))
+                  (error "Failed to transfer panel to target"))))))
+
+    (fn handle-toggle [_button event]
       (when (and (not closed?) dialog)
         (local current (or (resolve-target dialog.__parent_target)
                            (resolve-target parent-target)
                            app.scene
                            app.hud))
-        (local destination (resolve-destination current))
-        (when destination
-          (detach-from-target current)
-          (set dialog (attach-to-target destination)))))
+        (local pt (and app app.panel-transfer))
+        (if pt
+            (pt:show-move-menu
+              {:current-target current
+               :event event
+               :on-transfer (fn [receiver]
+                              (do-transfer {:current current
+                                            :target receiver.target
+                                            :receive receiver.receive
+                                            :rollback receiver.rollback}))})
+            (do
+              (local destination (resolve-destination current))
+              (when destination
+                (do-transfer {:current current :target destination}))))))
 
     (table.insert combined-actions
-                  {:name "toggle scene-hud"
+                  {:name "move panel"
                    :icon "move_item"
                    :on-click handle-toggle})
     (table.insert combined-actions {:name "close"

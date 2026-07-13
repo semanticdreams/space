@@ -82,6 +82,7 @@
 (local RuntimePerformance (require :runtime-performance))
 (local VolumeControl (require :volume-control))
 (local MenuManager (require :menu-manager))
+(local PanelTransfer (require :panel-transfer))
 (local WalletManager (require :wallet-manager))
 (local AgentPresetRegistry (require :llm/presets/registry))
 (local AgentPresetManager (require :llm/presets/init))
@@ -767,6 +768,7 @@
 (set app.board-view nil)
 (set app.tray-manager nil)
 (set app.menu-manager nil)
+(set app.panel-transfer nil)
 (set app.notify nil)
 (set app.kernels nil)
 (set app.settings nil)
@@ -1581,6 +1583,42 @@
     (set app.menu-manager nil))
   (set app.menu-manager (MenuManager))
 
+  (when app.panel-transfer
+    (set app.panel-transfer nil))
+  (set app.panel-transfer (PanelTransfer))
+  (app.panel-transfer:register-receiver
+    {:id :hud
+     :label "HUD"
+     :icon "dashboard"
+     :target-fn (fn [] app.hud)
+     :rollback (fn [_r el]
+                 (var removed false)
+                 (when (and app.hud app.hud.remove-panel-child)
+                   (set removed (app.hud:remove-panel-child el)))
+                 (when (and removed el el.drop)
+                   (el:drop))
+                 removed)})
+  (app.panel-transfer:register-receiver
+    {:id :scene
+     :label "Scene"
+     :icon "view_in_ar"
+     :target-fn (fn [] app.scene)
+     :rollback (fn [_r el]
+                 (when (and app.scene app.scene.remove-panel-child)
+                   (app.scene:remove-panel-child el)))})
+  (app.panel-transfer:register-receiver
+    {:id :canvas
+     :label "Canvas"
+     :icon "space_dashboard"
+     :target-fn (fn [] app.canvas)
+     :rollback (fn [_r el]
+                 (var removed false)
+                 (when (and app.canvas app.canvas.remove-panel-child)
+                   (set removed (app.canvas:remove-panel-child el)))
+                 (when (and removed el el.drop)
+                   (el:drop))
+                 removed)})
+
   (when app.system-cursors
     (app.system-cursors:reset))
   (if (and (app-root-reload-in-progress?)
@@ -1984,6 +2022,8 @@
   (when app.menu-manager
     (app.menu-manager:drop)
     (set app.menu-manager nil))
+  (when app.panel-transfer
+    (set app.panel-transfer nil))
   (when (and app.focus-void-callback app.clickables)
     (app.clickables:unregister-left-click-void-callback app.focus-void-callback)
     (set app.focus-void-callback nil))
