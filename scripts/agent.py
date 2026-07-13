@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -76,9 +78,12 @@ def die(message: str, code: int = 1) -> "NoReturn":
 
 
 def load_config() -> dict[str, Any]:
-    if not CONFIG_PATH.exists():
-        die(f"missing {CONFIG_PATH}")
-    with CONFIG_PATH.open("rb") as handle:
+    path = Path(os.environ.get("SPACE_AGENT_CONFIG", str(CONFIG_PATH)))
+    if not path.is_absolute():
+        path = ROOT / path
+    if not path.exists():
+        die(f"missing {path}")
+    with path.open("rb") as handle:
         return tomllib.load(handle)
 
 
@@ -113,6 +118,17 @@ def save_workflow_state(config: dict[str, Any], state: dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def workflow_path_value(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def update_workflow_state(config: dict[str, Any], **updates: Any) -> None:
@@ -210,7 +226,7 @@ def acquire_task_text(
         return task_text
 
     if allow_reuse and task_path.exists() and read_yes_no(
-        f"Reuse the existing task from {task_path.relative_to(ROOT)}?",
+        f"Reuse the existing task from {workflow_path_value(task_path)}?",
         default=True,
         stdin=stdin,
         stdout=stdout,
@@ -314,7 +330,7 @@ def workflow_artifact_paths(config: dict[str, Any]) -> set[str]:
         state_dir / "PLAN.proposed.md",
     }
     return {
-        str(path.relative_to(ROOT))
+        workflow_path_value(path)
         for path in candidates
     }
 
@@ -334,7 +350,26 @@ def reset_task_derived_artifacts(config: dict[str, Any]) -> None:
 
 
 def save_task_ready_state(config: dict[str, Any], task: Path) -> None:
-    save_workflow_state(config, {"phase": "task_ready", "task_file": str(task.relative_to(ROOT))})
+    save_workflow_state(config, {"phase": "task_ready", "task_file": workflow_path_value(task)})
+
+
+ROUTE_STATE_KEYS = {
+    "task_intent",
+    "recommended_next_step",
+    "route_reason",
+    "route_question",
+    "route_task_sha256",
+}
+
+
+def route_state_fields(state: dict[str, Any]) -> dict[str, Any]:
+    return {key: state[key] for key in ROUTE_STATE_KEYS if key in state}
+
+
+def save_without_route_fields(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {key: value for key, value in state.items() if key not in ROUTE_STATE_KEYS and key != "updated_at"}
+    save_workflow_state(config, cleaned)
+    return load_workflow_state(config)
 
 
 def proposed_plan_path(config: dict[str, Any]) -> Path:
@@ -417,6 +452,31 @@ def opencode_stderr_path(output: Path) -> Path:
     return output.with_name(f"{output.name}.stderr.txt")
 
 
+def file_excerpt(path: Path, *, max_lines: int = 20, max_chars: int = 3000) -> str:
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+    lines = text.splitlines()
+    excerpt = "\n".join(lines[:max_lines]).strip()
+    if len(lines) > max_lines or len(text) >= max_chars:
+        excerpt += "\n..."
+    return excerpt
+
+
+def stage_progress_message(title: str) -> str:
+    messages = {
+        "Supervisor route task": "I am figuring out what kind of help you need.",
+        "Supervisor route conversation": "I am deciding the next useful action from your message.",
+        "Explore task": "I am inspecting the repository for the relevant code, tests, and behavior.",
+        "Answer research task": "I am using the repository context to answer you.",
+        "Respond to conversation": "I am using the current context to respond.",
+        "Plan task": "I am drafting an implementation plan from our discussion.",
+        "Supervisor plan summary": "I am checking the plan for the important tradeoffs and risks.",
+        "Supervisor exploration summary": "I am summarizing what the repository exploration found.",
+    }
+    return messages.get(title, f"I am working on: {title}.")
+
+
 def opencode_once(
     *,
     config: dict[str, Any],
@@ -425,6 +485,7 @@ def opencode_once(
     title: str,
     output: Path,
     attachments: list[Path] | None = None,
+    tee: bool = False,
 ) -> None:
     model = str(config["models"][role])
     if str(model).startswith("REPLACE_WITH_"):
@@ -443,30 +504,58 @@ def opencode_once(
         title,
     ]
     for attachment in attachments or []:
-        command.extend(["--file", str(attachment)])
+        command.append(f"--file={attachment}")
+    if attachments:
+        command.append("--")
     command.append(prompt)
 
-    print(f"\n=== {title} ===")
-    print(f"agent={role} model={model}")
+    progress = stage_progress_message(title)
+    print(f"\n{progress}")
     stderr_path = opencode_stderr_path(output)
-    with output.open("w", encoding="utf-8") as handle:
-        with stderr_path.open("w", encoding="utf-8") as error_handle:
-            result = subprocess.run(
+    with stderr_path.open("w", encoding="utf-8") as error_handle:
+        if tee:
+            process = subprocess.Popen(
                 command,
                 cwd=ROOT,
                 text=True,
-                stdout=handle,
+                stdout=subprocess.PIPE,
                 stderr=error_handle,
-                check=False,
             )
-    if result.returncode != 0:
+            with output.open("w", encoding="utf-8") as handle:
+                for line in process.stdout:
+                    handle.write(line)
+                    handle.flush()
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+            process.wait()
+            returncode = process.returncode
+        else:
+            with output.open("w", encoding="utf-8") as handle:
+                process = subprocess.Popen(
+                    command,
+                    cwd=ROOT,
+                    text=True,
+                    stdout=handle,
+                    stderr=error_handle,
+                )
+                started = time.monotonic()
+                next_update = started + 15
+                while process.poll() is None:
+                    time.sleep(1)
+                    now = time.monotonic()
+                    if now >= next_update:
+                        elapsed = int(now - started)
+                        print(f"Still working ({elapsed}s elapsed): {progress}")
+                        next_update = now + 15
+            returncode = process.returncode
+    if returncode != 0:
         raise OpenCodeStageError(
             title=title,
             role=role,
             model=model,
             output=output,
             stderr=stderr_path,
-            returncode=result.returncode,
+            returncode=returncode,
         )
     stderr_path.unlink(missing_ok=True)
 
@@ -480,6 +569,7 @@ def opencode(
     output: Path,
     attachments: list[Path] | None = None,
     block_state: dict[str, Any] | None = None,
+    tee: bool = False,
 ) -> None:
     retried_after_limit = False
     while True:
@@ -491,6 +581,7 @@ def opencode(
                 title=title,
                 output=output,
                 attachments=attachments,
+                tee=tee,
             )
             if retried_after_limit:
                 restore_after_limit_retry(config, block_state)
@@ -499,7 +590,11 @@ def opencode(
             if handle_opencode_stage_failure(config, error, block_state):
                 retried_after_limit = True
                 continue
-            die(f"OpenCode stage failed: {title}; stderr: {error.stderr}")
+            excerpt = file_excerpt(error.stderr)
+            detail = f"; stderr: {error.stderr}"
+            if excerpt:
+                detail += f"\n\n--- stderr excerpt ---\n{excerpt}"
+            die(f"OpenCode stage failed: {title}{detail}")
 
 
 def role_model_configured(config: dict[str, Any], role: str) -> bool:
@@ -693,8 +788,8 @@ def save_blocked_model_limit_state(
             "blocked_role": error.role,
             "blocked_model": error.model,
             "blocked_stage": error.title,
-            "blocked_output": str(error.output.relative_to(ROOT)),
-            "blocked_stderr": str(error.stderr.relative_to(ROOT)),
+            "blocked_output": workflow_path_value(error.output),
+            "blocked_stderr": workflow_path_value(error.stderr),
             "limit_classification": classification.get("classification"),
             "limit_summary": classification.get("summary"),
             "limit_evidence": classification.get("evidence", []),
@@ -962,7 +1057,7 @@ def save_blocked_validation_state(
             "phase": "blocked_validation",
             "validation_stage": stage,
             "validation_command": command,
-            "validation_log": str(log.relative_to(ROOT)),
+            "validation_log": workflow_path_value(log),
             "validation_remaining_commands": remaining_commands,
         }
     )
@@ -1030,7 +1125,14 @@ def parse_positive_config_int(config: dict[str, Any], key: str) -> int:
     return parsed
 
 
-def cmd_explore(config: dict[str, Any], task_args: list[str] | None = None, *, suggest_next: bool = True) -> None:
+def cmd_explore(
+    config: dict[str, Any],
+    task_args: list[str] | None = None,
+    *,
+    suggest_next: bool = True,
+    block_state: dict[str, Any] | None = None,
+    quiet: bool = False,
+) -> None:
     task = state_path(config, "task_file")
     if task_args is not None:
         captured = acquire_task_text(task, task_args, allow_reuse=False)
@@ -1041,31 +1143,48 @@ def cmd_explore(config: dict[str, Any], task_args: list[str] | None = None, *, s
         die(f"missing task file: {task}")
     out = state_path(config, "exploration_file")
     raw = out.with_suffix(".raw.txt")
+    exploration_prompt = (
+        "Explore the attached task in the current repository. Produce the "
+        "Markdown exploration report required by your agent instructions."
+    )
+    if quiet:
+        exploration_prompt = (
+            "Search the repository for the files, tests, functions, and commands "
+            "relevant to the attached task. Return only concrete evidence: file "
+            "paths with line numbers, relevant test names, key function signatures, "
+            "and usage examples. Do not produce a full exploration report with "
+            "sections, tradeoffs, or approaches. Be concise and evidence-only."
+        )
     opencode(
         config=config,
         role="explorer",
         title="Explore task",
         output=raw,
         attachments=[task],
-        block_state={
+        block_state=block_state or {
             "resume_command": "explore",
             "phase_before_block": "task_ready",
-            "task_file": str(task.relative_to(ROOT)),
+            "task_file": workflow_path_value(task),
         },
-        prompt=(
-            "Explore the attached task in the current repository. Produce the "
-            "Markdown exploration report required by your agent instructions."
-        ),
+        tee=not quiet,
+        prompt=exploration_prompt,
     )
     out.write_text(raw.read_text(encoding="utf-8"), encoding="utf-8")
     raw.unlink(missing_ok=True)
-    update_workflow_state(config, phase="explored", exploration_file=str(out.relative_to(ROOT)))
-    print(f"Wrote {out}")
-    if suggest_next:
+    update_workflow_state(config, phase="explored", exploration_file=workflow_path_value(out))
+    if not quiet:
+        print(f"Wrote {out}")
+    if suggest_next and not quiet:
         print("Next: scripts/agent plan")
 
 
-def cmd_plan(config: dict[str, Any], task_args: list[str] | None = None, *, suggest_next: bool = True) -> None:
+def cmd_plan(
+    config: dict[str, Any],
+    task_args: list[str] | None = None,
+    *,
+    suggest_next: bool = True,
+    quiet: bool = False,
+) -> None:
     task = state_path(config, "task_file")
     if task_args is not None:
         captured = acquire_task_text(task, task_args, allow_reuse=True)
@@ -1089,8 +1208,9 @@ def cmd_plan(config: dict[str, Any], task_args: list[str] | None = None, *, sugg
         block_state={
             "resume_command": "plan",
             "phase_before_block": "task_ready",
-            "task_file": str(task.relative_to(ROOT)),
+            "task_file": workflow_path_value(task),
         },
+        tee=not quiet,
         prompt=(
             "Create a proposed PLAN.md from the attached task and optional "
             "exploration report. Human comments or selected direction written "
@@ -1099,9 +1219,10 @@ def cmd_plan(config: dict[str, Any], task_args: list[str] | None = None, *, sugg
     )
     proposed.write_text(raw.read_text(encoding="utf-8"), encoding="utf-8")
     raw.unlink(missing_ok=True)
-    update_workflow_state(config, phase="plan_proposed", proposed_plan_file=str(proposed.relative_to(ROOT)))
-    print(f"Wrote {proposed}")
-    if suggest_next:
+    update_workflow_state(config, phase="plan_proposed", proposed_plan_file=workflow_path_value(proposed))
+    if not quiet:
+        print(f"Wrote {proposed}")
+    if suggest_next and not quiet:
         print("Review/edit it, then run: scripts/agent approve-plan")
 
 
@@ -1117,7 +1238,7 @@ def approve_plan(config: dict[str, Any]) -> Path:
             "before approval"
         )
     approved.write_text(text, encoding="utf-8")
-    update_workflow_state(config, phase="approved", plan_file=str(approved.relative_to(ROOT)))
+    update_workflow_state(config, phase="approved", plan_file=workflow_path_value(approved))
     return approved
 
 
@@ -1177,28 +1298,80 @@ def task_body_from_file(path: Path) -> str:
     return normalize_task_text(text)
 
 
-def should_recommend_exploration(task_text: str) -> tuple[bool, str]:
-    lowered = task_text.lower()
-    triggers = (
-        "investigate",
-        "explore",
-        "options",
-        "architecture",
-        "design",
-        "migration",
-        "refactor",
-        "cross-cutting",
-        "unclear",
-        "ambiguous",
-        "performance",
-        "concurrency",
-        "data integrity",
+def validate_supervisor_route(route: dict[str, Any], path: Path) -> None:
+    intent = route.get("intent")
+    next_step = route.get("recommended_next_step")
+    if intent not in {"research", "implementation", "review", "debug", "unknown"}:
+        die(f"malformed supervisor route in {path}: invalid intent")
+    if next_step not in {"answer", "explore", "plan", "ask_human"}:
+        die(f"malformed supervisor route in {path}: invalid recommended_next_step")
+    require_string(route, "reason", path)
+    require_string_or_null(route, "question", path)
+
+    if intent == "research" and next_step == "plan":
+        die(f"malformed supervisor route in {path}: research intent cannot recommend planning")
+    if intent == "implementation" and next_step == "answer":
+        die(f"malformed supervisor route in {path}: implementation intent cannot recommend answer")
+
+
+def human_route_choice() -> dict[str, Any] | None:
+    print("Supervisor model is not configured, so I need you to choose the direction.")
+    print('Say "plan" to draft an implementation plan, "explore" to inspect the code first, or "cancel" to stop.')
+    answer = sys.stdin.readline().strip().lower() if sys.stdin.isatty() else "c"
+    if answer in {"p", "plan"}:
+        return {
+            "intent": "implementation",
+            "recommended_next_step": "plan",
+            "reason": "human selected implementation planning",
+            "question": None,
+        }
+    if answer in {"e", "explore"}:
+        return {
+            "intent": "implementation",
+            "recommended_next_step": "explore",
+            "reason": "human selected exploration before planning",
+            "question": None,
+        }
+    print("Cancelled; run scripts/agent to resume later.")
+    return None
+
+
+def route_task_with_supervisor(config: dict[str, Any], task: Path) -> dict[str, Any] | None:
+    if not role_model_configured(config, "supervisor"):
+        return human_route_choice()
+
+    state_dir = ROOT / config["workflow"]["state_dir"]
+    raw = state_dir / "SUPERVISOR.route.raw.txt"
+    parsed = state_dir / "SUPERVISOR.route.json"
+    opencode(
+        config=config,
+        role="supervisor",
+        title="Supervisor route task",
+        output=raw,
+        attachments=[task],
+        block_state={
+            "resume_command": "supervise",
+            "phase_before_block": "task_ready",
+            "task_file": workflow_path_value(task),
+        },
+        prompt=(
+            "Classify the attached task before any planning. Decide whether the "
+            "user is asking for research/explanation, implementation, review, "
+            "debugging, or something unknown. Return only one JSON object with "
+            "keys: intent, recommended_next_step, reason, question. Allowed "
+            "intent values: research, implementation, review, debug, unknown. "
+            "Allowed recommended_next_step values: answer, explore, plan, "
+            "ask_human. For research/explanation questions, recommend explore "
+            "when repository inspection is needed and never recommend plan. "
+            "For implementation requests, recommend plan or explore. For review, "
+            "debug, or unknown requests, recommend ask_human unless a clear "
+            "research answer is enough. question must be null unless you need a "
+            "specific human clarification."
+        ),
     )
-    if any(trigger in lowered for trigger in triggers):
-        return True, "the task looks architectural or ambiguous"
-    if len(task_text) > 240:
-        return True, "the task has enough detail that a divergent pass may find risks"
-    return False, "the task looks localized enough to plan directly"
+    route = extract_json(raw, parsed, ["intent", "recommended_next_step", "reason", "question"])
+    validate_supervisor_route(route, parsed)
+    return route
 
 
 def print_artifact_excerpt(path: Path, title: str, *, max_lines: int = 80) -> None:
@@ -1210,6 +1383,151 @@ def print_artifact_excerpt(path: Path, title: str, *, max_lines: int = 80) -> No
         print(line)
     if len(lines) > max_lines:
         print(f"... ({len(lines) - max_lines} more line(s); see {path})")
+
+
+def print_conversation_answer(path: Path) -> None:
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if text:
+        print("\n" + text)
+
+
+def print_conversation_document(path: Path, heading: str) -> None:
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    if text:
+        print(f"\n{heading}\n")
+        print(text)
+
+
+def discussion_path(config: dict[str, Any]) -> Path:
+    return ROOT / config["workflow"]["state_dir"] / "DISCUSSION.md"
+
+
+def append_discussion_turn(path: Path, speaker: str, text: str) -> None:
+    text = normalize_task_text(text)
+    if not text:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    current = path.read_text(encoding="utf-8") if path.exists() else "# Discussion\n"
+    updated = current.rstrip() + f"\n\n## {speaker}\n\n{text}\n"
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(path)
+
+
+def wants_to_finish_discussion(text: str) -> bool:
+    return text.strip().lower() in {"done", "stop", "quit", "exit", "that's all", "that is all", "no thanks"}
+
+
+def wants_implementation_plan(text: str) -> bool:
+    lowered = text.strip().lower()
+    exact = {"plan", "make a plan", "create a plan", "write a plan", "implementation plan"}
+    phrases = {
+        "turn this into a plan",
+        "make this a plan",
+        "plan the implementation",
+        "start implementation",
+        "start implementing",
+        "implement this",
+        "build this",
+    }
+    return lowered in exact or any(phrase in lowered for phrase in phrases)
+
+
+CONVERSATION_ACTIONS = {
+    "respond",
+    "explore",
+    "draft_plan",
+    "revise_plan",
+    "approve_plan",
+    "run_implementation",
+    "status",
+    "stop",
+    "ask_human",
+}
+
+
+def validate_conversation_route(route: dict[str, Any], path: Path) -> None:
+    action = route.get("action")
+    if action not in CONVERSATION_ACTIONS:
+        die(f"malformed supervisor conversation route in {path}: invalid action")
+    require_string(route, "reason", path)
+    require_string_or_null(route, "question", path)
+
+
+def local_conversation_route(message: str) -> dict[str, Any]:
+    lowered = message.strip().lower()
+    if wants_to_finish_discussion(message):
+        action = "stop"
+    elif lowered in {"status", "where are we", "what is the status"}:
+        action = "status"
+    elif lowered in {"approve", "approved", "yes approve", "looks good"}:
+        action = "approve_plan"
+    elif "run" in lowered and ("implementation" in lowered or "agent" in lowered or "it" in lowered):
+        action = "run_implementation"
+    elif wants_implementation_plan(message) or lowered.startswith(("implement ", "build ", "add ", "fix ")):
+        action = "draft_plan"
+    elif lowered.startswith(("revise ", "change the plan", "update the plan")):
+        action = "revise_plan"
+    elif lowered.startswith(("explore ", "investigate ")):
+        action = "explore"
+    else:
+        action = "respond"
+    return {"action": action, "reason": "local conversational fallback", "question": None}
+
+
+def conversation_context_attachments(config: dict[str, Any]) -> list[Path]:
+    state_dir = ROOT / config["workflow"]["state_dir"]
+    candidates = [
+        state_path(config, "task_file"),
+        discussion_path(config),
+        state_path(config, "exploration_file"),
+        state_path(config, "plan_file"),
+        state_dir / "PLAN.proposed.md",
+        state_dir / "ANSWER.md",
+    ]
+    return [path for path in candidates if path.exists()]
+
+
+def route_conversation_turn(config: dict[str, Any], message: str) -> dict[str, Any]:
+    if not role_model_configured(config, "supervisor"):
+        return local_conversation_route(message)
+
+    state_dir = ROOT / config["workflow"]["state_dir"]
+    state_dir.mkdir(parents=True, exist_ok=True)
+    turn = state_dir / "CONVERSATION_TURN.md"
+    turn.write_text(message + "\n", encoding="utf-8")
+    raw = state_dir / "SUPERVISOR.conversation.raw.txt"
+    parsed = state_dir / "SUPERVISOR.conversation.json"
+    state = load_workflow_state(config)
+    opencode(
+        config=config,
+        role="supervisor",
+        title="Supervisor route conversation",
+        output=raw,
+        attachments=[turn, *conversation_context_attachments(config)],
+        block_state={
+            "resume_command": "supervise",
+            "phase_before_block": state.get("phase", "new"),
+        },
+        prompt=(
+            "Route Sam's latest message for the interactive Space agent supervisor. "
+            "Return only one JSON object with keys: action, reason, question. "
+            "Allowed action values: respond, explore, draft_plan, revise_plan, "
+            "approve_plan, run_implementation, status, stop, ask_human. Choose "
+            "respond for usage questions, design discussion, explanations, and "
+            "ordinary follow-up conversation. Choose draft_plan only when Sam wants "
+            "an implementation plan. Choose run_implementation only when Sam clearly "
+            "wants the approved plan implemented. question must be null unless a "
+            "specific clarification is needed."
+        ),
+    )
+    route = extract_json(raw, parsed, ["action", "reason", "question"])
+    validate_conversation_route(route, parsed)
+    return route
 
 
 def append_task_note(task_path: Path, note: str) -> None:
@@ -1284,7 +1602,7 @@ def resolve_plan_human_decisions(config: dict[str, Any], proposed: Path) -> bool
 
     task = state_path(config, "task_file")
     append_task_note(task, "Resolved planner decisions:\n\n" + answer)
-    update_workflow_state(config, phase="task_ready", task_file=str(task.relative_to(ROOT)))
+    update_workflow_state(config, phase="task_ready", task_file=workflow_path_value(task))
     cmd_plan(config, suggest_next=False)
     print_artifact_excerpt(proposed, "Revised Proposed Plan")
     return True
@@ -1306,31 +1624,158 @@ def ensure_supervisor_task(config: dict[str, Any], state: dict[str, Any]) -> dic
     return load_workflow_state(config)
 
 
-def supervisor_maybe_explore(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+def save_supervisor_route(config: dict[str, Any], task: Path, route: dict[str, Any]) -> None:
+    update_workflow_state(
+        config,
+        task_intent=route["intent"],
+        recommended_next_step=route["recommended_next_step"],
+        route_reason=route["reason"],
+        route_question=route.get("question"),
+        route_task_sha256=file_sha256(task),
+    )
+
+
+def supervisor_route(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     phase = state.get("phase")
-    if phase not in {"task_ready"}:
+    if phase not in {"task_ready", "explored"}:
         return state
 
     task = state_path(config, "task_file")
-    task_text = task_body_from_file(task)
-    recommend, reason = should_recommend_exploration(task_text)
-    print(f"I {'recommend' if recommend else 'do not think we need'} exploration because {reason}.")
-    if read_yes_no("Run exploration before planning?", default=recommend):
-        cmd_explore(config, suggest_next=False)
-        exploration = state_path(config, "exploration_file")
-        print_artifact_excerpt(exploration, "Exploration Results")
-        optional_supervisor(
-            config=config,
-            title="Supervisor exploration summary",
-            output=ROOT / config["workflow"]["state_dir"] / "SUPERVISOR.exploration.md",
-            attachments=[task, exploration],
-            prompt=(
-                "Summarize the exploration report for Sam. Highlight the viable "
-                "approaches, tradeoffs, unresolved decisions, and recommended "
-                "next action. Do not create an implementation plan."
-            ),
-        )
-        return load_workflow_state(config)
+    current_hash = file_sha256(task) if task.exists() else None
+    has_route = bool(state.get("task_intent") or state.get("recommended_next_step") or state.get("route_task_sha256"))
+    if phase == "explored" and not has_route:
+        return state
+    if (
+        state.get("task_intent")
+        and state.get("recommended_next_step")
+        and state.get("route_task_sha256") == current_hash
+    ):
+        return state
+    if has_route:
+        if phase == "explored":
+            reset_task_derived_artifacts(config)
+        save_task_ready_state(config, task)
+        state = load_workflow_state(config)
+
+    route = route_task_with_supervisor(config, task)
+    if route is None:
+        return state
+    save_supervisor_route(config, task, route)
+    print(f"Supervisor classified this as {route['intent']}: {route['reason']}")
+    return load_workflow_state(config)
+
+
+def respond_to_user(config: dict[str, Any], message: str | None = None) -> dict[str, Any]:
+    task = state_path(config, "task_file")
+    exploration = state_path(config, "exploration_file")
+    state_dir = ROOT / config["workflow"]["state_dir"]
+    state = load_workflow_state(config)
+    answer = state_dir / "ANSWER.md"
+    discussion = discussion_path(config)
+    attachments = [task]
+    if exploration.exists():
+        attachments.append(exploration)
+    if discussion.exists():
+        attachments.append(discussion)
+    opencode(
+        config=config,
+        role="supervisor",
+        title="Respond to conversation",
+        output=answer,
+        attachments=attachments,
+        block_state={
+            "resume_command": "respond",
+            "phase_before_block": state.get("phase", "task_ready"),
+            "task_file": workflow_path_value(task),
+        },
+        tee=True,
+        prompt=(
+            "Continue a conversation with Sam from the attached context. Answer "
+            "the latest question or request directly and concisely. Use plain text, "
+            "not report-style Markdown sections. Prefer 3-7 concrete bullets with "
+            "file paths, commands, commit hashes, or test names when the evidence "
+            "supports them. For usage/testing questions, give exact steps. For "
+            "design questions, list options with one-line tradeoffs. Do not include "
+            "preamble, recap, generic summaries, approval requests, or sign-offs. "
+            "Do not create PLAN.md."
+        ),
+    )
+    append_discussion_turn(discussion, "Space", answer.read_text(encoding="utf-8", errors="replace"))
+    update_workflow_state(config, answer_file=workflow_path_value(answer), discussion_file=workflow_path_value(discussion))
+    print_conversation_answer(answer)
+    return load_workflow_state(config)
+
+
+def answer_research_task(config: dict[str, Any], follow_up: str | None = None) -> dict[str, Any]:
+    if follow_up:
+        append_discussion_turn(discussion_path(config), "Sam", follow_up)
+    return respond_to_user(config, follow_up)
+
+
+def discussion_plan_context(config: dict[str, Any], direction: str) -> str:
+    discussion = discussion_path(config)
+    context = capped_text(discussion, max_chars=8000) if discussion.exists() else "[no discussion recorded]"
+    return "Discussion context:\n\n" + context + "\n\nImplementation direction:\n\n" + normalize_task_text(direction)
+
+
+def routed_exploration_block_state(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    task = state_path(config, "task_file")
+    block_state = {
+        "resume_command": "supervise",
+        "phase_before_block": "task_ready",
+        "task_file": workflow_path_value(task),
+    }
+    block_state.update(route_state_fields(state))
+    return block_state
+
+
+def supervisor_follow_route(config: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    if state.get("phase") not in {"task_ready", "explored"}:
+        return state
+
+    intent = state.get("task_intent")
+    next_step = state.get("recommended_next_step")
+    if intent == "research":
+        if state.get("phase") == "task_ready" and next_step == "explore":
+            cmd_explore(config, suggest_next=False, block_state=routed_exploration_block_state(config, state), quiet=True)
+            print("I found the relevant repository context. Now I will answer your question.")
+            return answer_research_task(config)
+        if next_step in {"answer", "explore"}:
+            return answer_research_task(config)
+        if next_step == "ask_human":
+            print(state.get("route_question") or "Supervisor needs human direction before continuing.")
+            return state
+
+    if intent == "implementation":
+        if state.get("phase") == "task_ready" and next_step == "explore":
+            cmd_explore(config, suggest_next=False, block_state=routed_exploration_block_state(config, state))
+            exploration = state_path(config, "exploration_file")
+            print_artifact_excerpt(exploration, "Exploration Results")
+            optional_supervisor(
+                config=config,
+                title="Supervisor exploration summary",
+                output=ROOT / config["workflow"]["state_dir"] / "SUPERVISOR.exploration.md",
+                attachments=[state_path(config, "task_file"), exploration],
+                prompt=(
+                    "Summarize the exploration report for Sam. Highlight the viable "
+                    "approaches, tradeoffs, unresolved decisions, and recommended "
+                    "next action. Do not create an implementation plan."
+                ),
+            )
+            return load_workflow_state(config)
+        if next_step == "plan" or state.get("phase") == "explored":
+            return state
+        if next_step == "ask_human":
+            print(state.get("route_question") or "Supervisor needs human direction before planning.")
+            return state
+
+    if intent in {"review", "debug", "unknown"}:
+        print(f"Supervisor classified this as {intent}, not an implementation task.")
+        if state.get("route_question"):
+            print(str(state["route_question"]))
+        print("Use an explicit command or revise the task before running the implementation pipeline.")
+        return state
+
     return state
 
 
@@ -1365,12 +1810,12 @@ def supervisor_approve_or_revise(config: dict[str, Any], state: dict[str, Any]) 
                 continue
             return state
         notify_human_required(config, "Plan Ready", "Review the proposed plan and approve, revise, edit, or cancel.")
-        print(f"\nProposed plan: {proposed}")
-        print("Choose: [a]pprove / [r]evise with feedback / [e]dit externally / [c]ancel")
+        print("\nI drafted an implementation plan.")
+        print('Tell me "approve", "revise", "edit externally", or "cancel".')
         answer = sys.stdin.readline().strip().lower() if sys.stdin.isatty() else "e"
         if answer in {"a", "approve", "y", "yes"}:
             approved = approve_plan(config)
-            print(f"Approved plan copied to {approved}")
+            print("Approved. I can start the implementation workflow next.")
             return load_workflow_state(config)
         if answer in {"r", "revise"}:
             task = state_path(config, "task_file")
@@ -1379,18 +1824,17 @@ def supervisor_approve_or_revise(config: dict[str, Any], state: dict[str, Any]) 
                 "Paste feedback for the planner and finish with a blank line.",
             )
             append_task_note(task, note)
-            update_workflow_state(config, phase="task_ready", task_file=str(task.relative_to(ROOT)))
+            update_workflow_state(config, phase="task_ready", task_file=workflow_path_value(task))
             cmd_plan(config, suggest_next=False)
             print_artifact_excerpt(proposed, "Revised Proposed Plan")
             continue
         if answer in {"e", "edit"}:
-            print(f"Edit externally, then run: scripts/agent")
-            print(f"Plan path: {proposed}")
+            print("Stopped for external edits. Run scripts/agent when you want to continue.")
             return state
         if answer in {"c", "cancel"}:
             print("Cancelled; run scripts/agent to resume later.")
             return state
-        print("Please answer a, r, e, or c.")
+        print('Please say "approve", "revise", "edit externally", or "cancel".')
 
 
 def supervisor_run_or_handoff(config: dict[str, Any], state: dict[str, Any]) -> None:
@@ -1441,6 +1885,131 @@ def supervisor_human_test_handoff(config: dict[str, Any], state: dict[str, Any])
     if state.get("phase") == "human_accepted":
         print("Human review has been accepted.")
         print_final_commit_handoff()
+
+
+def initialize_conversation_task(config: dict[str, Any], message: str) -> dict[str, Any]:
+    task = state_path(config, "task_file")
+    write_task_file(task, message)
+    reset_task_derived_artifacts(config)
+    save_task_ready_state(config, task)
+    append_discussion_turn(discussion_path(config), "Sam", message)
+    return load_workflow_state(config)
+
+
+def ensure_task_for_conversation(config: dict[str, Any], message: str) -> None:
+    task = state_path(config, "task_file")
+    if not task.exists():
+        initialize_conversation_task(config, message)
+
+
+def draft_plan_from_conversation(config: dict[str, Any], message: str) -> dict[str, Any]:
+    task = state_path(config, "task_file")
+    ensure_task_for_conversation(config, message)
+    append_task_note(task, discussion_plan_context(config, message))
+    reset_task_derived_artifacts(config)
+    save_task_ready_state(config, task)
+    cmd_plan(config, suggest_next=False, quiet=True)
+    proposed = proposed_plan_path(config)
+    print_conversation_document(proposed, "I drafted an implementation plan.")
+    return load_workflow_state(config)
+
+
+def revise_plan_from_conversation(config: dict[str, Any], message: str) -> dict[str, Any]:
+    task = state_path(config, "task_file")
+    append_task_note(task, "Plan revision request:\n\n" + message)
+    update_workflow_state(config, phase="task_ready", task_file=workflow_path_value(task))
+    cmd_plan(config, suggest_next=False, quiet=True)
+    proposed = proposed_plan_path(config)
+    print_conversation_document(proposed, "I revised the implementation plan.")
+    return load_workflow_state(config)
+
+
+def approve_plan_from_conversation(config: dict[str, Any]) -> dict[str, Any]:
+    state = load_workflow_state(config)
+    if state.get("phase") != "plan_proposed":
+        print("There is no proposed plan ready to approve yet. Tell me what you want to plan first.")
+        return state
+    approved = approve_plan(config)
+    print("Approved. I can run the implementation workflow when you want me to.")
+    return load_workflow_state(config)
+
+
+def run_implementation_from_conversation(config: dict[str, Any]) -> bool:
+    state = load_workflow_state(config)
+    if state.get("phase") == "plan_proposed":
+        print("The plan is not approved yet. Say approve if it looks right, or tell me what to revise.")
+        return False
+    if state.get("phase") not in {"approved", "ready_to_run"}:
+        print("I need an approved plan before I can run implementation.")
+        return False
+    supervisor_run_or_handoff(config, state)
+    return True
+
+
+def handle_conversation_action(config: dict[str, Any], message: str, route: dict[str, Any]) -> bool:
+    action = route["action"]
+    if action == "stop":
+        print("Okay. We can continue whenever you run scripts/agent again.")
+        return False
+    if action == "status":
+        cmd_status(config)
+        return True
+    if action == "ask_human":
+        print(route.get("question") or "I need a little more direction before continuing.")
+        return True
+    if action == "explore":
+        ensure_task_for_conversation(config, message)
+        cmd_explore(config, suggest_next=False, block_state=routed_exploration_block_state(config, load_workflow_state(config)), quiet=True)
+        print("I found the relevant repository context.")
+        respond_to_user(config, message)
+        return True
+    if action == "draft_plan":
+        draft_plan_from_conversation(config, message)
+        return True
+    if action == "revise_plan":
+        revise_plan_from_conversation(config, message)
+        return True
+    if action == "approve_plan":
+        approve_plan_from_conversation(config)
+        return True
+    if action == "run_implementation":
+        return not run_implementation_from_conversation(config)
+    respond_to_user(config, message)
+    return True
+
+
+def action_needs_task(action: str) -> bool:
+    return action in {"respond", "explore", "draft_plan", "revise_plan"}
+
+
+def next_conversation_message(config: dict[str, Any], state: dict[str, Any]) -> str:
+    phase = state.get("phase", "new")
+    if phase in {"new", "complete"}:
+        return normalize_task_text(read_task_from_supervisor())
+    return normalize_task_text(
+        read_multiline_prompt(
+            "What would you like to do next?",
+            'Ask a question, discuss options, ask me to make or revise a plan, say approve, run implementation, status, or done.',
+        )
+    )
+
+
+def conversation_loop(config: dict[str, Any]) -> None:
+    while True:
+        state = load_workflow_state(config)
+        message = next_conversation_message(config, state)
+        if not message:
+            print("No problem. Run scripts/agent when you want to continue.")
+            return
+        route = route_conversation_turn(config, message)
+        if state.get("phase") in {"new", "complete"}:
+            if action_needs_task(str(route["action"])):
+                initialize_conversation_task(config, message)
+        else:
+            append_discussion_turn(discussion_path(config), "Sam", message)
+        should_continue = handle_conversation_action(config, message, route)
+        if not should_continue or not sys.stdin.isatty():
+            return
 
 
 def resume_blocked_model_limit(config: dict[str, Any], state: dict[str, Any]) -> None:
@@ -1513,6 +2082,25 @@ def resume_blocked_model_limit(config: dict[str, Any], state: dict[str, Any]) ->
             clean_state["task_file"] = state["task_file"]
         save_workflow_state(config, clean_state)
         cmd_plan(config, suggest_next=False)
+        return
+    if command == "supervise":
+        phase = state.get("phase_before_block")
+        clean_state = {"phase": phase if isinstance(phase, str) else "task_ready"}
+        if isinstance(state.get("task_file"), str):
+            clean_state["task_file"] = state["task_file"]
+        clean_state.update(route_state_fields(state))
+        save_workflow_state(config, clean_state)
+        cmd_supervise(config)
+        return
+    if command in {"answer", "respond"}:
+        phase = state.get("phase_before_block")
+        clean_state = {"phase": phase if isinstance(phase, str) else "task_ready"}
+        if isinstance(state.get("task_file"), str):
+            clean_state["task_file"] = state["task_file"]
+        save_workflow_state(config, clean_state)
+        respond_to_user(config)
+        if sys.stdin.isatty():
+            conversation_loop(config)
         return
     if command == "run":
         run_step = state.get("run_step")
@@ -1594,11 +2182,7 @@ def cmd_supervise(config: dict[str, Any]) -> None:
     if state.get("phase") in {"ready_for_human_test", "human_accepted"}:
         supervisor_human_test_handoff(config, state)
         return
-    state = ensure_supervisor_task(config, state)
-    state = supervisor_maybe_explore(config, state)
-    state = supervisor_plan(config, load_workflow_state(config))
-    state = supervisor_approve_or_revise(config, state)
-    supervisor_run_or_handoff(config, load_workflow_state(config))
+    conversation_loop(config)
 
 
 def cmd_start(config: dict[str, Any], task_args: list[str]) -> None:
@@ -1757,7 +2341,7 @@ def write_human_test_handoff(config: dict[str, Any], state: dict[str, Any]) -> P
         capped_text(task, max_chars=2000),
         "",
         "## Approved Plan",
-        str(plan.relative_to(ROOT)) if plan.exists() else "[missing]",
+        workflow_path_value(plan) if plan.exists() else "[missing]",
         "",
         "## Automation Result",
         capped_text(success, max_chars=1000),
@@ -1836,7 +2420,7 @@ def run_block_state(
     state: dict[str, Any] = {
         "resume_command": "run",
         "phase_before_block": "running",
-        "run_dir": str(current_run.relative_to(ROOT)),
+        "run_dir": workflow_path_value(current_run),
         "base_commit": base_commit,
         "run_step": step,
         "review_round": review_round,
@@ -1935,6 +2519,7 @@ def run_review_loop(
                     review_round,
                     review_budget_end=max_rounds,
                 ),
+                tee=True,
                 prompt=full_review_prompt(base_commit, review_round),
             )
             review = extract_json(
@@ -1957,7 +2542,7 @@ def run_review_loop(
                 final_validation_block_state(current_run, base_commit, review_round, success_text, max_rounds),
             )
             (current_run / "SUCCESS").write_text(success_text, encoding="utf-8")
-            update_workflow_state(config, phase="ready_for_human_test", run_dir=str(current_run.relative_to(ROOT)))
+            update_workflow_state(config, phase="ready_for_human_test", run_dir=workflow_path_value(current_run))
             notify_human_required(config, "Ready For Human Test", "Automation passed. Perform final behavior review.")
             print("\nWorkflow passed. Ready for final human testing and review.")
             print(f"Run artifacts: {current_run}")
@@ -1982,6 +2567,7 @@ def run_review_loop(
                         review_round,
                         review_budget_end=max_rounds,
                     ),
+                tee=True,
                 prompt=(
                     "Adjudicate only the candidate findings in the attached full "
                     "review against PLAN.md and the current repository. Do not "
@@ -2013,7 +2599,7 @@ def run_review_loop(
                 final_validation_block_state(current_run, base_commit, review_round, success_text, max_rounds),
             )
             (current_run / "SUCCESS").write_text(success_text, encoding="utf-8")
-            update_workflow_state(config, phase="ready_for_human_test", run_dir=str(current_run.relative_to(ROOT)))
+            update_workflow_state(config, phase="ready_for_human_test", run_dir=workflow_path_value(current_run))
             notify_human_required(config, "Ready For Human Test", "Automation passed. Perform final behavior review.")
             print("\nWorkflow passed after adjudication rejected all candidates.")
             print("Ready for final human testing and review.")
@@ -2052,7 +2638,8 @@ def run_review_loop(
                         review_budget_end=max_rounds,
                         fix_budget_end=max_fix_attempt,
                     ),
-                    prompt=(
+                tee=True,
+                prompt=(
                         "Fix only the accepted findings in the attached "
                         "adjudication report. Use focused regression tests first, "
                         "then the complete relevant suite from PLAN.md. Do not "
@@ -2092,6 +2679,7 @@ def run_review_loop(
                     review_budget_end=max_rounds,
                     fix_budget_end=max_fix_attempt,
                 ),
+                tee=True,
                 prompt=(
                     "TARGETED VERIFICATION MODE. Verify only the accepted "
                     "findings and their attempted corrections. The attached "
@@ -2200,7 +2788,7 @@ def cmd_run(config: dict[str, Any]) -> None:
     task = state_path(config, "task_file")
 
     current_run = run_dir(config)
-    update_workflow_state(config, phase="running", run_dir=str(current_run.relative_to(ROOT)))
+    update_workflow_state(config, phase="running", run_dir=workflow_path_value(current_run))
     base_commit = git("rev-parse", "HEAD")
     (current_run / "base_commit.txt").write_text(base_commit + "\n")
     validation_log = current_run / "validation.log"
@@ -2216,10 +2804,11 @@ def cmd_run(config: dict[str, Any]) -> None:
         block_state={
             "resume_command": "run",
             "phase_before_block": "running",
-            "run_dir": str(current_run.relative_to(ROOT)),
+            "run_dir": workflow_path_value(current_run),
             "base_commit": base_commit,
             "run_step": "implementation",
         },
+        tee=True,
         prompt=(
             "Implement the complete approved plan. Use focused tests during "
             "development, then run the complete relevant suite and checks "

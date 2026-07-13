@@ -10,6 +10,10 @@ gl.log
 .agent-workflow/*.limit-input.txt
 .agent-workflow/*.limit-classifier.*
 .agent-workflow/SUPERVISOR.*.md
+.agent-workflow/SUPERVISOR.*.json
+.agent-workflow/ANSWER.md
+.agent-workflow/DISCUSSION.md
+.agent-workflow/CONVERSATION_TURN.md
 .agent-workflow/*.tmp
 
 # Python

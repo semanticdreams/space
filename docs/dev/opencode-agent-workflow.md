@@ -7,12 +7,17 @@ interface is the conversational supervisor:
 scripts/agent
 ```
 
-The supervisor gathers the task, recommends exploration when useful, coordinates
-the specialist agents, pauses for plan approval, resumes interrupted workflows,
-and then hands off to the autonomous implementation/review loop.
+The supervisor gathers the task, asks the supervisor model to classify the user
+intent, coordinates the specialist agents, pauses for plan approval when the task
+is implementation work, resumes interrupted workflows, and then hands off to the
+autonomous implementation/review loop.
 
 ```text
-optional exploration
+supervisor routes task intent
+        ↓
+research answer or implementation workflow
+        ↓
+optional implementation exploration
         ↓
 human selects/clarifies direction
         ↓
@@ -190,6 +195,10 @@ specifically requires snapshot validation.
 The external commands are deterministic gates. A failed command stops the
 workflow immediately and records output in the run's `validation.log`.
 
+For tests or isolated runs, `SPACE_AGENT_CONFIG=/path/to/agent.toml` overrides
+the default repo `agent.toml`. Use absolute workflow paths in that config when
+you want all state artifacts written outside the repository.
+
 ## 4. Commit the scaffold
 
 The automation requires a clean worktree before implementation so it can define
@@ -231,8 +240,28 @@ The supervisor uses `.agent-workflow/STATE.json` to resume. If you stop after
 exploration, after plan generation, after approval, or at the commit boundary,
 running `scripts/agent` again continues from that explicit state.
 
-If the supervisor model is configured, exploration and planning produce
-additional summaries such as `.agent-workflow/SUPERVISOR.exploration.md` and
+For the bare `scripts/agent` conversational entrypoint, the supervisor model is
+not advisory: each user message is routed to an action such as responding,
+exploring, drafting or revising a plan, approving a plan, running implementation,
+showing status, or stopping. If that routing decision is unavailable or
+malformed, the workflow stops or asks for explicit human direction.
+
+If `models.supervisor` is not configured, conversational mode cannot produce
+research answers. It asks for an explicit implementation direction instead:
+plan directly, explore then plan, or cancel. Configure `models.supervisor` to use
+the research-answer path.
+
+Research, design, and implementation tasks all happen in the same interactive
+conversation. The supervisor may inspect the repository, answer usage questions,
+discuss improvements, draft or revise a plan, approve a plan, and start the
+autonomous implementation workflow based on what you ask next. Workflow phases
+remain internal implementation state, not the user-facing conversation mode.
+
+Long model stages print what the supervisor is doing and periodic progress while
+the model runs, instead of staying silent until the stage completes.
+
+Exploration and planning can also produce additional summaries such as
+`.agent-workflow/SUPERVISOR.exploration.md` and
 `.agent-workflow/SUPERVISOR.plan.md`. These summaries are advisory; the approved
 `.agent-workflow/PLAN.md` remains the implementation contract. If an advisory
 summary fails, the supervisor prints a warning and continues.
@@ -245,11 +274,11 @@ Include enough detail for:
 - human-selected direction after exploration;
 - forbidden compatibility or architecture changes.
 
-## 6. Optional exploration
+## 6. Optional exploration and conversation
 
-The supervisor recommends exploration when the task looks architectural,
-ambiguous, migration-heavy, or cross-cutting. Advanced users can run exploration
-directly:
+The conversational supervisor routes each message to the next useful action:
+answer, explore, plan, revise, approve, run, status, or stop. Advanced users can
+still run exploration directly:
 
 Use exploration for ambiguous, architectural, cross-cutting, migration, or
 unfamiliar work:
@@ -270,7 +299,8 @@ The planner receives it; the approved plan becomes the sole implementation
 contract.
 
 Skip exploration for localized bugs, mechanical changes, or work that already
-has an approved design.
+has an approved design when you are using explicit commands. In conversational
+mode, let the supervisor route the task instead of relying on local heuristics.
 
 ## 7. Generate and approve the plan
 
@@ -521,9 +551,9 @@ artifacts.
 
 ## Agent safety model
 
-The Python supervisor owns state transitions. The optional supervisor agent owns
-conversation and summaries only. Neither writes implementation code, performs
-review, or adjudicates findings.
+The Python supervisor owns state transitions. The supervisor agent owns task
+routing, conversation, research answers, and summaries. It does not write
+implementation code, perform code review, or adjudicate findings.
 
 The supervisor, explorer, planner, reviewer, and adjudicator deny editing and
 shell access. The orchestrator supplies review-stage Git status and diff
@@ -541,6 +571,37 @@ run focused `./build/space` modules, and profile. Risky Make targets such as
 clean, install, release, packaging, and AppImage builds are denied. For
 sensitive repositories, run the workflow in a disposable Git worktree or
 container.
+
+## Online Integration Tests
+
+Offline tests mock OpenCode and are not sufficient to validate CLI parsing,
+provider/model availability, role prompts, attachment handling, or structured
+model output. Online tests are separate direct-run suites and are not part of the
+fast workflow tests:
+
+```bash
+python3 scripts/tests/test_agent_online.py
+```
+
+The online suite writes workflow state to temporary directories through
+`SPACE_AGENT_CONFIG`; it should not modify `.agent-workflow/` in the repository.
+It covers:
+
+- real `opencode run` attachment parsing with `--file=<path> -- <prompt>`;
+- supervisor route JSON for a research/explanation task;
+- read-only role smoke tests for explorer, planner, reviewer, and adjudicator;
+- conversational research end-to-end behavior, including answer creation and no
+  `PLAN.md` for explanation requests.
+
+The expensive editing-path test lives in a separate direct-run suite:
+
+```bash
+python3 scripts/tests/test_agent_online_full.py
+```
+
+That full test makes real model calls, creates a disposable Git worktree, overlays
+the current working-tree agent files into it, and exercises a minimal
+implementation pipeline. Use it when changing the autonomous run loop.
 
 ## Optional isolated worktree
 

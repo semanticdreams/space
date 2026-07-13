@@ -1,5 +1,6 @@
 import io
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -360,6 +361,241 @@ class AgentWorkflowTests(unittest.TestCase):
 
         self.assertEqual(calls, [["git", "status", "--short"], ["git", "diff", "--stat"]])
 
+    def test_opencode_once_passes_attachments_without_swallowing_prompt(self) -> None:
+        calls = []
+
+        class Process:
+            returncode = 0
+
+            def poll(self):
+                return 0
+
+        def fake_popen(command, **kwargs):
+            calls.append(command)
+            return Process()
+
+        output = self.root / ".agent-workflow" / "EXPLORATION.raw.txt"
+        output.parent.mkdir(parents=True)
+        attachment = self.root / ".agent-workflow" / "TASK.md"
+        attachment.write_text("# Task\n", encoding="utf-8")
+        prompt = "Explore the attached task."
+
+        with mock.patch.object(agent.subprocess, "Popen", fake_popen), mock.patch.object(sys, "stdout", io.StringIO()):
+            agent.opencode_once(
+                config=self.config,
+                role="explorer",
+                prompt=prompt,
+                title="Explore task",
+                output=output,
+                attachments=[attachment],
+            )
+
+        self.assertEqual(calls[0][-3:], [f"--file={attachment}", "--", prompt])
+        self.assertNotIn("--file", calls[0])
+
+    def test_opencode_once_prints_progress_while_waiting(self) -> None:
+        class Process:
+            def __init__(self) -> None:
+                self.returncode = 0
+                self.polls = 0
+
+            def poll(self):
+                self.polls += 1
+                return None if self.polls == 1 else 0
+
+        output = self.root / ".agent-workflow" / "ANSWER.md"
+        output.parent.mkdir(parents=True)
+        stdout = io.StringIO()
+
+        with mock.patch.object(agent.subprocess, "Popen", mock.Mock(return_value=Process())), \
+            mock.patch.object(agent.time, "sleep", mock.Mock()), \
+            mock.patch.object(agent.time, "monotonic", mock.Mock(side_effect=[0, 16])), \
+            mock.patch.object(sys, "stdout", stdout):
+            agent.opencode_once(
+                config=self.config,
+                role="explorer",
+                prompt="Answer",
+                title="Answer research task",
+                output=output,
+            )
+
+        self.assertIn("I am using the repository context to answer you.", stdout.getvalue())
+        self.assertIn("Still working", stdout.getvalue())
+
+    def test_opencode_once_tee_mode_streams_stdout_to_terminal(self) -> None:
+        lines = [f"searching file {i}\n" for i in range(3)]
+        lines.append("")
+
+        class Process:
+            returncode = 0
+            def __init__(self) -> None:
+                self.stdout = iter(lines)
+            def poll(self):
+                return 0
+            def wait(self):
+                pass
+
+        output = self.root / ".agent-workflow" / "ANSWER.md"
+        output.parent.mkdir(parents=True)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        err_file = output.with_name("ANSWER.stderr.txt")
+
+        with mock.patch.object(agent.subprocess, "Popen", mock.Mock(return_value=Process())), \
+            mock.patch.object(sys, "stdout", stdout), \
+            mock.patch.object(sys, "stderr", stderr):
+            agent.opencode_once(
+                config=self.config,
+                role="explorer",
+                prompt="Answer",
+                title="Respond to conversation",
+                output=output,
+                tee=True,
+            )
+
+        out = stdout.getvalue()
+        self.assertIn("searching file 0", out)
+        self.assertIn("searching file 1", out)
+        self.assertIn("searching file 2", out)
+        captured = output.read_text(encoding="utf-8")
+        self.assertIn("searching file 0", captured)
+
+    def test_respond_prompt_prefers_concise_plain_text(self) -> None:
+        seen_prompts = []
+
+        def fake_opencode(**kwargs) -> None:
+            seen_prompts.append(kwargs["prompt"])
+            kwargs["output"].write_text("Some answer.\n", encoding="utf-8")
+
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nHow can I test it?\n", encoding="utf-8")
+
+        with mock.patch.object(agent, "opencode", fake_opencode), mock.patch.object(sys, "stdout", io.StringIO()):
+            agent.respond_to_user(self.config, "How can I test it?")
+
+        prompt = seen_prompts[0]
+        self.assertIn("plain text", prompt.lower())
+        self.assertNotIn("## Summary", prompt)
+        self.assertNotIn("## Recommendation", prompt)
+
+    def test_respond_to_user_never_attaches_answer_as_input(self) -> None:
+        seen_attachments = []
+
+        def fake_opencode(**kwargs) -> None:
+            seen_attachments.extend(kwargs.get("attachments") or [])
+            kwargs["output"].write_text("New answer.\n", encoding="utf-8")
+
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nWhat now?\n", encoding="utf-8")
+
+        answer = agent.ROOT / self.config["workflow"]["state_dir"] / "ANSWER.md"
+        answer.parent.mkdir(parents=True, exist_ok=True)
+        answer.write_text("Prior answer.\n", encoding="utf-8")
+
+        with mock.patch.object(agent, "opencode", fake_opencode), mock.patch.object(sys, "stdout", io.StringIO()):
+            agent.respond_to_user(self.config, "What now?")
+
+        self.assertNotIn(answer, seen_attachments)
+        self.assertNotIn("Prior answer", answer.read_text(encoding="utf-8"))
+
+    def test_conversation_exploration_uses_concise_evidence_mode(self) -> None:
+        seen_prompts = []
+        seen_tee = []
+
+        def fake_opencode(**kwargs) -> None:
+            seen_prompts.append(kwargs["prompt"])
+            seen_tee.append(kwargs.get("tee", False))
+            kwargs["output"].write_text("src/panel_transfer.fnl:42 defines transfer.\n", encoding="utf-8")
+
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nHow to test panel transfer?\n", encoding="utf-8")
+
+        with mock.patch.object(agent, "opencode", fake_opencode), mock.patch.object(sys, "stdout", io.StringIO()):
+            agent.cmd_explore(self.config, suggest_next=False, quiet=True)
+
+        prompt = seen_prompts[0]
+        self.assertIn("concrete evidence", prompt.lower())
+        self.assertNotIn("## Trade-off matrix", prompt)
+        self.assertNotIn("## Approaches", prompt)
+        self.assertIn("concise", prompt.lower())
+        self.assertTrue(seen_tee[0] is False)
+
+    def test_opencode_failure_prints_stderr_excerpt(self) -> None:
+        output = self.root / ".agent-workflow" / "EXPLORATION.raw.txt"
+        output.parent.mkdir(parents=True)
+        stderr = output.with_name("EXPLORATION.raw.stderr.txt")
+        stderr.write_text("File not found: prompt was parsed as a file\n", encoding="utf-8")
+
+        def fake_once(**kwargs) -> None:
+            raise agent.OpenCodeStageError(
+                title=kwargs["title"],
+                role=kwargs["role"],
+                model="test/model",
+                output=kwargs["output"],
+                stderr=stderr,
+                returncode=1,
+            )
+
+        err = io.StringIO()
+        with mock.patch.object(agent, "opencode_once", fake_once), \
+            mock.patch.object(agent, "handle_opencode_stage_failure", mock.Mock(return_value=False)), \
+            mock.patch.object(sys, "stderr", err), \
+            self.assertRaises(SystemExit):
+            agent.opencode(
+                config=self.config,
+                role="explorer",
+                prompt="Explore",
+                title="Explore task",
+                output=output,
+            )
+
+        self.assertIn("stderr excerpt", err.getvalue())
+        self.assertIn("File not found", err.getvalue())
+
+    def test_online_requirements_fail_instead_of_skip(self) -> None:
+        import test_agent_online
+
+        with mock.patch.object(test_agent_online.shutil, "which", mock.Mock(return_value=None)):
+            with self.assertRaises(AssertionError):
+                test_agent_online.require_online()
+
+        config_text = '[models]\nsupervisor = "REPLACE_WITH_SUPERVISOR_MODEL"\n'
+        fake_open = mock.mock_open(read_data=config_text.encode("utf-8"))
+        with mock.patch.object(test_agent_online.Path, "open", fake_open):
+            with self.assertRaises(AssertionError):
+                test_agent_online.load_repo_config()
+
+    def test_online_keep_artifacts_uses_plain_temp_directory(self) -> None:
+        import test_agent_online
+
+        with mock.patch.dict(test_agent_online.os.environ, {"SPACE_AGENT_ONLINE_KEEP_ARTIFACTS": "1"}):
+            temporary, path = test_agent_online.make_test_workspace("space-agent-online-test-")
+
+        try:
+            self.assertIsNone(temporary)
+            self.assertTrue(path.exists())
+        finally:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def test_online_full_keeps_worktree_when_artifacts_are_kept(self) -> None:
+        import test_agent_online_full
+
+        run = mock.Mock()
+        worktree = self.root / "worktree"
+
+        with mock.patch.object(test_agent_online_full.subprocess, "run", run):
+            test_agent_online_full.remove_worktree_after_test(worktree, keep_artifacts=True)
+            test_agent_online_full.remove_worktree_after_test(worktree, keep_artifacts=False)
+
+        run.assert_called_once_with(
+            ["git", "worktree", "remove", "--force", str(worktree)],
+            cwd=test_agent_online_full.REPO_ROOT,
+            check=False,
+        )
+
     def test_validation_failure_notifies_human(self) -> None:
         notify = mock.Mock()
 
@@ -587,7 +823,7 @@ class AgentWorkflowTests(unittest.TestCase):
             (state / "PLAN.proposed.md").write_text("# Proposed\n", encoding="utf-8")
             agent.update_workflow_state(config, phase="plan_proposed")
 
-        with mock.patch.object(sys, "stdin", FakeStdin("Build the thing\n\nn\ne\n", tty=True)), \
+        with mock.patch.object(sys, "stdin", FakeStdin("Build the thing\n\n", tty=True)), \
             mock.patch.object(sys, "stdout", io.StringIO()), \
             mock.patch.object(agent, "cmd_plan", fake_plan), \
             mock.patch.object(agent, "cmd_explore", mock.Mock(side_effect=AssertionError("explore should not run"))):
@@ -597,6 +833,237 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("Build the thing", task)
         self.assertEqual(agent.load_workflow_state(self.config)["phase"], "plan_proposed")
 
+    def test_supervisor_research_route_answers_without_planning(self) -> None:
+        def fake_explore(config, **kwargs) -> None:
+            exploration = agent.state_path(config, "exploration_file")
+            exploration.write_text("# Exploration\n\nUse the feature this way.\n", encoding="utf-8")
+            agent.update_workflow_state(config, phase="explored", exploration_file=str(exploration.relative_to(agent.ROOT)))
+
+        def fake_response(config, message=None) -> dict:
+            answer = agent.ROOT / config["workflow"]["state_dir"] / "ANSWER.md"
+            answer.write_text("# Answer\n\nUse and test it this way.\n", encoding="utf-8")
+            agent.update_workflow_state(config, answer_file=str(answer.relative_to(agent.ROOT)))
+            return agent.load_workflow_state(config)
+
+        with mock.patch.object(sys, "stdin", FakeStdin("How can I use/test panel transfer?\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "route_conversation_turn", mock.Mock(return_value={"action": "explore", "reason": "needs code context", "question": None})), \
+            mock.patch.object(agent, "cmd_explore", fake_explore), \
+            mock.patch.object(agent, "respond_to_user", fake_response), \
+            mock.patch.object(agent, "cmd_plan", mock.Mock(side_effect=AssertionError("should not plan"))):
+            agent.cmd_supervise(self.config)
+
+        state = agent.load_workflow_state(self.config)
+        self.assertEqual(state["phase"], "explored")
+        self.assertIn("answer_file", state)
+
+    def test_conversation_accepts_followup_until_done(self) -> None:
+        answer = agent.ROOT / self.config["workflow"]["state_dir"] / "ANSWER.md"
+        answer.parent.mkdir(parents=True, exist_ok=True)
+        answer.write_text("Use it this way.\n", encoding="utf-8")
+        agent.save_workflow_state(self.config, {"phase": "task_ready", "answer_file": ".agent-workflow/ANSWER.md"})
+        followups = []
+
+        def fake_response(config, message=None) -> dict:
+            followups.append(message)
+            agent.update_workflow_state(config, answer_file=".agent-workflow/ANSWER.md")
+            return agent.load_workflow_state(config)
+
+        routes = [
+            {"action": "respond", "reason": "follow-up", "question": None},
+            {"action": "stop", "reason": "done", "question": None},
+        ]
+        with mock.patch.object(sys, "stdin", FakeStdin("How could we extend it?\n\ndone\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "route_conversation_turn", mock.Mock(side_effect=routes)), \
+            mock.patch.object(agent, "respond_to_user", fake_response):
+            agent.conversation_loop(self.config)
+
+        self.assertEqual(followups, ["How could we extend it?"])
+        self.assertEqual(agent.load_workflow_state(self.config)["phase"], "task_ready")
+
+    def test_conversation_can_turn_into_plan(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nHow can I test panel transfer?\n", encoding="utf-8")
+        discussion = agent.discussion_path(self.config)
+        agent.append_discussion_turn(discussion, "Sam", "How can I test it?")
+        agent.append_discussion_turn(discussion, "Space", "Run the panel transfer scenario.")
+        agent.save_workflow_state(self.config, {"phase": "task_ready", "task_file": ".agent-workflow/TASK.md"})
+
+        def fake_plan(config, **kwargs) -> None:
+            proposed = agent.proposed_plan_path(config)
+            proposed.write_text("# Proposed\n", encoding="utf-8")
+            agent.update_workflow_state(config, phase="plan_proposed", proposed_plan_file=str(proposed.relative_to(agent.ROOT)))
+
+        with mock.patch.object(sys, "stdin", FakeStdin("make a plan\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "cmd_plan", fake_plan):
+            agent.conversation_loop(self.config)
+
+        state = agent.load_workflow_state(self.config)
+        self.assertEqual(state["phase"], "plan_proposed")
+        self.assertIn("Discussion context", task.read_text(encoding="utf-8"))
+
+    def test_supervisor_review_route_does_not_plan(self) -> None:
+        with mock.patch.object(sys, "stdin", FakeStdin("review this branch\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "route_conversation_turn", mock.Mock(return_value={"action": "ask_human", "reason": "review request", "question": "What should be reviewed?"})), \
+            mock.patch.object(agent, "cmd_plan", mock.Mock(side_effect=AssertionError("should not plan"))):
+            agent.cmd_supervise(self.config)
+
+        state = agent.load_workflow_state(self.config)
+        self.assertEqual(state["phase"], "new")
+
+    def test_supervisor_reroutes_when_task_changes(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nOld task\n", encoding="utf-8")
+        agent.save_workflow_state(
+            self.config,
+            {
+                "phase": "task_ready",
+                "task_file": ".agent-workflow/TASK.md",
+                "task_intent": "implementation",
+                "recommended_next_step": "plan",
+                "route_reason": "old route",
+                "route_task_sha256": agent.file_sha256(task),
+            },
+        )
+        task.write_text("# Task\n\nHow can I use/test panel transfer?\n", encoding="utf-8")
+
+        route_calls = []
+
+        def fake_route(config, routed_task) -> dict:
+            route_calls.append(routed_task)
+            return {
+                "intent": "research",
+                "recommended_next_step": "ask_human",
+                "reason": "new task is research",
+                "question": "Should I answer this?",
+            }
+
+        with mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "route_task_with_supervisor", fake_route):
+            agent.supervisor_route(self.config, agent.load_workflow_state(self.config))
+
+        state = agent.load_workflow_state(self.config)
+        self.assertEqual(len(route_calls), 1)
+        self.assertEqual(state["task_intent"], "research")
+        self.assertEqual(state["route_task_sha256"], agent.file_sha256(task))
+
+    def test_supervisor_reroutes_and_resets_when_explored_task_changes(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nOld implementation task\n", encoding="utf-8")
+        exploration = agent.state_path(self.config, "exploration_file")
+        exploration.write_text("# Old exploration\n", encoding="utf-8")
+        agent.save_workflow_state(
+            self.config,
+            {
+                "phase": "explored",
+                "task_file": ".agent-workflow/TASK.md",
+                "exploration_file": ".agent-workflow/EXPLORATION.md",
+                "task_intent": "implementation",
+                "recommended_next_step": "plan",
+                "route_reason": "old route",
+                "route_task_sha256": agent.file_sha256(task),
+            },
+        )
+        task.write_text("# Task\n\nHow can I use/test panel transfer?\n", encoding="utf-8")
+
+        def fake_route(config, routed_task) -> dict:
+            return {
+                "intent": "research",
+                "recommended_next_step": "ask_human",
+                "reason": "new task is research",
+                "question": "Should I answer this?",
+            }
+
+        with mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "route_task_with_supervisor", fake_route):
+            agent.supervisor_route(self.config, agent.load_workflow_state(self.config))
+
+        state = agent.load_workflow_state(self.config)
+        self.assertEqual(state["phase"], "task_ready")
+        self.assertEqual(state["task_intent"], "research")
+        self.assertEqual(state["route_task_sha256"], agent.file_sha256(task))
+        self.assertFalse(exploration.exists())
+        self.assertNotIn("exploration_file", state)
+
+    def test_conversation_stop_does_not_plan(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nExisting task\n", encoding="utf-8")
+        agent.save_workflow_state(self.config, {"phase": "task_ready", "task_file": ".agent-workflow/TASK.md"})
+
+        with mock.patch.object(sys, "stdin", FakeStdin("done\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "route_conversation_turn", mock.Mock(return_value={"action": "stop", "reason": "done", "question": None})), \
+            mock.patch.object(agent, "cmd_plan", mock.Mock(side_effect=AssertionError("should not plan"))):
+            agent.cmd_supervise(self.config)
+
+        state = agent.load_workflow_state(self.config)
+        self.assertEqual(state["phase"], "task_ready")
+
+    def test_first_turn_status_does_not_create_task(self) -> None:
+        with mock.patch.object(sys, "stdin", FakeStdin("status\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "cmd_status", mock.Mock()), \
+            mock.patch.object(agent, "route_conversation_turn", mock.Mock(return_value={"action": "status", "reason": "status", "question": None})):
+            agent.cmd_supervise(self.config)
+
+        self.assertFalse(agent.state_path(self.config, "task_file").exists())
+        self.assertEqual(agent.load_workflow_state(self.config)["phase"], "new")
+
+    def test_routed_exploration_block_state_preserves_route_for_model_limit_resume(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nHow can I use panel transfer?\n", encoding="utf-8")
+        state = {
+            "phase": "task_ready",
+            "task_file": ".agent-workflow/TASK.md",
+            "task_intent": "research",
+            "recommended_next_step": "explore",
+            "route_reason": "research question",
+            "route_question": None,
+            "route_task_sha256": agent.file_sha256(task),
+        }
+        seen = {}
+
+        def fake_explore(config, **kwargs) -> None:
+            seen["block_state"] = kwargs["block_state"]
+            exploration = agent.state_path(config, "exploration_file")
+            exploration.write_text("# Exploration\n", encoding="utf-8")
+            agent.save_workflow_state(config, {**state, "phase": "explored", "exploration_file": str(exploration.relative_to(agent.ROOT))})
+
+        with mock.patch.object(agent, "cmd_explore", fake_explore), \
+            mock.patch.object(agent, "answer_research_task", mock.Mock(return_value={"phase": "explored"})), \
+            mock.patch.object(sys, "stdout", io.StringIO()):
+            agent.supervisor_follow_route(self.config, state)
+
+        block_state = seen["block_state"]
+        self.assertEqual(block_state["resume_command"], "supervise")
+        self.assertEqual(block_state["task_intent"], "research")
+        self.assertEqual(block_state["recommended_next_step"], "explore")
+        self.assertEqual(block_state["route_task_sha256"], agent.file_sha256(task))
+
+    def test_human_route_choice_without_supervisor_does_not_offer_research_answer(self) -> None:
+        with mock.patch.object(sys, "stdin", FakeStdin("a\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()) as stdout:
+            route = agent.human_route_choice()
+
+        self.assertIsNone(route)
+        self.assertNotIn("answer/research", stdout.getvalue())
+
+    def test_human_route_choice_without_supervisor_can_choose_plan(self) -> None:
+        with mock.patch.object(sys, "stdin", FakeStdin("p\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()):
+            route = agent.human_route_choice()
+
+        self.assertEqual(route["intent"], "implementation")
+        self.assertEqual(route["recommended_next_step"], "plan")
+
     def test_supervisor_resumes_approved_state_with_checkpoint_then_run(self) -> None:
         agent.save_workflow_state(self.config, {"phase": "approved"})
         task = agent.state_path(self.config, "task_file")
@@ -604,7 +1071,7 @@ class AgentWorkflowTests(unittest.TestCase):
         task.write_text("# Task\n\nExisting\n", encoding="utf-8")
         run = mock.Mock()
 
-        with mock.patch.object(sys, "stdin", FakeStdin("", tty=True)), \
+        with mock.patch.object(sys, "stdin", FakeStdin("run implementation\n\n", tty=True)), \
             mock.patch.object(sys, "stdout", io.StringIO()), \
             mock.patch.object(agent, "is_worktree_clean", mock.Mock(return_value=False)), \
             mock.patch.object(agent, "create_checkpoint_commit", mock.Mock(return_value="abc123def456")), \
@@ -656,18 +1123,21 @@ class AgentWorkflowTests(unittest.TestCase):
         output = self.root / ".agent-workflow" / "stage.raw.txt"
         output.parent.mkdir(parents=True)
 
-        class Result:
+        class Process:
             returncode = 1
 
-        def fake_run(command, **kwargs):
+            def poll(self):
+                return 1
+
+        def fake_popen(command, **kwargs):
             kwargs["stderr"].write("rate limit reached; try again later\n")
-            return Result()
+            return Process()
 
         config = dict(self.config)
         config["models"] = dict(self.config["models"])
         config["models"].pop("supervisor")
 
-        with mock.patch.object(agent.subprocess, "run", fake_run), \
+        with mock.patch.object(agent.subprocess, "Popen", fake_popen), \
             mock.patch.object(sys, "stdout", io.StringIO()), \
             self.assertRaises(SystemExit):
             agent.opencode(
@@ -779,6 +1249,84 @@ class AgentWorkflowTests(unittest.TestCase):
             agent.cmd_supervise(self.config)
 
         plan.assert_called_once_with(self.config, suggest_next=False)
+
+    def test_supervisor_resumes_blocked_conversation_route_with_original_phase(self) -> None:
+        proposed = agent.proposed_plan_path(self.config)
+        proposed.parent.mkdir(parents=True, exist_ok=True)
+        proposed.write_text("# Proposed\n", encoding="utf-8")
+        agent.save_workflow_state(
+            self.config,
+            {
+                "phase": "blocked_model_limit",
+                "resume_command": "supervise",
+                "phase_before_block": "plan_proposed",
+                "blocked_stage": "Supervisor route conversation",
+                "blocked_role": "supervisor",
+                "blocked_model": "test/supervisor",
+                "retry_at": "2000-01-01T00:00:00Z",
+                "limit_classification": "short_retryable_limit",
+                "wait_seconds": 1,
+                "limit_evidence": ["try again later"],
+            },
+        )
+
+        with mock.patch.object(sys, "stdin", FakeStdin("done\n\n", tty=True)), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(agent, "conversation_loop", mock.Mock()):
+            agent.cmd_supervise(self.config)
+
+        self.assertEqual(agent.load_workflow_state(self.config)["phase"], "plan_proposed")
+
+    def test_respond_block_state_uses_current_phase(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nExisting\n", encoding="utf-8")
+        agent.save_workflow_state(self.config, {"phase": "plan_proposed", "task_file": ".agent-workflow/TASK.md"})
+        seen = {}
+
+        def fake_opencode(**kwargs) -> None:
+            seen["block_state"] = kwargs["block_state"]
+            kwargs["output"].write_text("Answer\n", encoding="utf-8")
+
+        with mock.patch.object(agent, "opencode", fake_opencode), mock.patch.object(sys, "stdout", io.StringIO()):
+            agent.respond_to_user(self.config, "What now?")
+
+        self.assertEqual(seen["block_state"]["phase_before_block"], "plan_proposed")
+        self.assertEqual(agent.load_workflow_state(self.config)["phase"], "plan_proposed")
+
+    def test_respond_resume_preserves_original_phase(self) -> None:
+        task = agent.state_path(self.config, "task_file")
+        task.parent.mkdir(parents=True, exist_ok=True)
+        task.write_text("# Task\n\nExisting\n", encoding="utf-8")
+        answer = agent.ROOT / self.config["workflow"]["state_dir"] / "ANSWER.md"
+        agent.save_workflow_state(
+            self.config,
+            {
+                "phase": "blocked_model_limit",
+                "resume_command": "respond",
+                "phase_before_block": "plan_proposed",
+                "task_file": ".agent-workflow/TASK.md",
+                "blocked_stage": "Respond to conversation",
+                "blocked_role": "supervisor",
+                "blocked_model": "test/supervisor",
+                "retry_at": "2000-01-01T00:00:00Z",
+                "limit_classification": "short_retryable_limit",
+                "wait_seconds": 1,
+                "limit_evidence": ["try again later"],
+            },
+        )
+        saved_answer = agent.ROOT / ".agent-workflow" / "ANSWER.md"
+        saved_answer.parent.mkdir(parents=True, exist_ok=True)
+
+        def fake_respond(config, message=None) -> dict:
+            return agent.load_workflow_state(config)
+
+        with mock.patch.object(agent, "respond_to_user", fake_respond), \
+            mock.patch.object(sys, "stdout", io.StringIO()), \
+            mock.patch.object(sys.stdin, "isatty", mock.Mock(return_value=False)):
+            agent.resume_blocked_model_limit(self.config, agent.load_workflow_state(self.config))
+
+        self.assertEqual(agent.load_workflow_state(self.config)["phase"], "plan_proposed")
 
     def test_optional_supervisor_failure_does_not_stop_workflow(self) -> None:
         config = dict(self.config)
