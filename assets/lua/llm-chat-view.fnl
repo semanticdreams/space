@@ -517,7 +517,8 @@
             ((DefaultDialog {:title (or options.title "LLM Chat")
                              :name (or options.name "llm-chat-view")
                              :on-close options.on-close
-                             :child build-content})
+                             :child build-content
+                             :transfer-builder build})
              ctx))
         (set dialog.__chat-view view)
         (ensure-conversation)

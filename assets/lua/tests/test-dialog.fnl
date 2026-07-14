@@ -996,15 +996,15 @@
       (local dialog-builder
         (DefaultDialog {:title "No Persistence"
                         :child child.builder}))
+      (var state nil)
       (local (ok err)
         (pcall
           (fn []
             (hud:add-panel-child {:builder dialog-builder})
-            (hud:capture-state))))
+            (set state (hud:capture-state)))))
       (cleanup)
-      (assert (not ok) "Hud.capture-state should fail when a panel has no persistence")
-      (assert (string.find (tostring err) "without persistence")
-              "Hud.capture-state should report missing persistence")
+      (assert ok "Hud.capture-state should not throw when a panel has no persistence")
+      (assert (= (length state.panels) 0) "Hud.capture-state should skip panels without persistence")
       true)))
 
 (fn hud-capture-and-restore-persistent-panel []

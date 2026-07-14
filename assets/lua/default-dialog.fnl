@@ -45,9 +45,14 @@
     (fn do-transfer [destination]
       (when (and (not closed?) dialog)
         (local pt (and app app.panel-transfer))
-        (local payload {:builder (DefaultDialog options)
+        (local builder (or options.transfer-builder
+                           (DefaultDialog options)))
+        (local persistence (or options.persistence
+                               (when (and destination.current destination.current.find-panel-persistence)
+                                 (destination.current:find-panel-persistence dialog))))
+        (local payload {:builder builder
                         :builder-options (copy-table base-runtime-opts)
-                        :persistence options.persistence})
+                        :persistence persistence})
         (if pt
             (set dialog (pt:transfer-panel destination destination.current dialog payload))
             (do
@@ -82,11 +87,13 @@
 
     (each [key value (pairs options)]
       (when (and (not (= key :actions))
-                 (not (= key :on-close)))
+                 (not (= key :on-close))
+                 (not (= key :transfer-builder)))
         (set (. build-opts key) value)))
     (each [key value (pairs incoming)]
       (when (and (not (= key :actions))
-                 (not (= key :on-close)))
+                 (not (= key :on-close))
+                 (not (= key :transfer-builder)))
         (set (. build-opts key) value)))
 
     (local combined-actions [])

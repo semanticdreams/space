@@ -2,6 +2,7 @@
 (local PanelTransferModule (require :panel-transfer))
 (local PanelTransfer PanelTransferModule.PanelTransfer)
 (local DefaultDialog (require :default-dialog))
+(local LauncherView (require :launcher-view))
 (local Scene (require :scene))
 (local Hud (require :hud))
 (local AppProjection (require :app-projection))
@@ -798,6 +799,101 @@
 (table.insert tests {:name "dialog move passes custom rollback to transfer panel" :fn dialog-move-passes-custom-rollback-to-transfer-panel})
 (table.insert tests {:name "transfer rollback scene-like dest no double drop" :fn transfer-rollback-scene-like-dest-no-double-drop})
 (table.insert tests {:name "transfer rollback no drop when removal fails" :fn transfer-rollback-no-drop-when-removal-fails})
+
+(fn default-dialog-transfer-builder-uses-provided-builder []
+  (with-scene-and-hud
+    (fn [scene hud]
+      (local transfer-called? {:value false})
+      (local child-builder
+        (fn [_ctx]
+          (local {: Layout} (require :layout))
+          {:layout (Layout {:name "transfer-child"})
+           :drop (fn [_self] nil)}))
+      (local tracking-builder
+        (fn [ctx runtime-opts]
+          (set transfer-called?.value true)
+          ((DefaultDialog {:title "Tracked Transferable"
+                           :child child-builder})
+           ctx runtime-opts)))
+      (local dialog-builder
+        (DefaultDialog {:title "Tracked Transferable"
+                        :child child-builder
+                        :transfer-builder tracking-builder}))
+      (local element (app.scene:add-panel-child
+                       {:builder dialog-builder
+                        :position (glm.vec3 0 0 0)
+                        :rotation (glm.quat 1 0 0 0)}))
+      (assert element)
+      (local menu-captured {:last-action nil})
+      (set app.menu-manager
+           {:open (fn [_self opts]
+                    (when (and opts.actions (> (length opts.actions) 0))
+                      (set menu-captured.last-action (. opts.actions 1))))})
+      (app.panel-transfer:register-receiver
+        {:id :scene :label "Scene" :icon "view_in_ar"
+         :target-fn (fn [] app.scene)})
+      (app.panel-transfer:register-receiver
+        {:id :hud :label "HUD" :icon "dashboard"
+         :target-fn (fn [] app.hud)})
+      (local move-action (find-move-action element))
+      (move-action:on-click {:screen {:x 100 :y 200}})
+      (assert (not (= menu-captured.last-action nil)) "menu should be shown")
+      (set transfer-called?.value false)
+      (menu-captured.last-action.fn nil nil)
+      (assert transfer-called?.value
+              "transfer-builder should be used when transferring")
+      (assert (= (length scene.scene-children) 0)
+              "dialog should detach from scene")
+      (assert (= (length hud.tiles.children) 1)
+              "dialog should appear in HUD"))))
+(table.insert tests {:name "default dialog transfer-builder uses provided builder on transfer" :fn default-dialog-transfer-builder-uses-provided-builder})
+
+(fn launcher-view-transfer-preserves-search-and-set-items []
+  (with-scene-and-hud
+    (fn [scene hud]
+      (local menu-captured {:last-action nil})
+      (set app.menu-manager
+           {:open (fn [_self opts]
+                    (when (and opts.actions (> (length opts.actions) 0))
+                      (set menu-captured.last-action (. opts.actions 1))))})
+      (app.panel-transfer:register-receiver
+        {:id :scene :label "Scene" :icon "view_in_ar"
+         :target-fn (fn [] app.scene)})
+      (app.panel-transfer:register-receiver
+        {:id :hud :label "HUD" :icon "dashboard"
+         :target-fn (fn [] app.hud)})
+
+      (local dialog-builder (LauncherView {:title "Test Launcher"}))
+      (local element (app.scene:add-panel-child
+                       {:builder dialog-builder
+                        :position (glm.vec3 0 0 0)
+                        :rotation (glm.quat 1 0 0 0)}))
+      (assert element)
+      (local launcher (or element.front element))
+      (assert launcher.search "LauncherView should have search")
+      (assert launcher.set-items "LauncherView should have set-items")
+      (assert launcher.set-query "LauncherView should have set-query")
+
+      (local move-action (find-move-action element))
+      (assert move-action "should have move action")
+      (move-action:on-click {:screen {:x 100 :y 200}})
+      (assert (not (= menu-captured.last-action nil)) "menu should appear")
+      (menu-captured.last-action.fn nil nil)
+
+      (assert (= (length scene.scene-children) 0) "dialog should detach from scene")
+      (assert (= (length hud.tiles.children) 1) "dialog should appear in HUD tiles")
+
+      (local hud-wrapper (. hud.tiles.children 1 :element))
+      (local hud-element (or hud-wrapper.__hud_inner hud-wrapper))
+      (assert hud-element "transferred element should exist")
+      (local transferred (or hud-element.front hud-element))
+      (assert transferred.search
+              "transferred LauncherView should have search")
+      (assert transferred.set-items
+              "transferred LauncherView should have set-items")
+      (assert transferred.set-query
+              "transferred LauncherView should have set-query"))))
+(table.insert tests {:name "launcher view transfer preserves search and set-items on transfer" :fn launcher-view-transfer-preserves-search-and-set-items})
 
 (local main
   (fn []

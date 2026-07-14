@@ -292,7 +292,8 @@
       ((DefaultDialog {:title "Repository Workbench"
                        :name "repo-workbench-dialog"
                        :on-close incoming.on-close
-                       :child build-content})
+                       :child build-content
+                       :transfer-builder build})
        ctx))
 
     (set dialog.__view view)

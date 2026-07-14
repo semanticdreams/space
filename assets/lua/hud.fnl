@@ -538,6 +538,11 @@
       (self:refresh-panel-resizables))
     (not (= removed nil)))
 
+  (fn find-panel-persistence [self element]
+    (local wrapper (resolve-panel-wrapper element))
+    (local located (find-panel-metadata self wrapper))
+    (and located located.metadata located.metadata.persistence))
+
   (fn add-panel-child [self opts]
     (local options (or opts {}))
     (local destination (or options.location options.layer :tiles))
@@ -700,30 +705,29 @@
     (local panels [])
     (fn collect-record [layer metadata]
       (local persistence (and metadata metadata.persistence))
-      (assert persistence
-              (.. "Hud.capture-state found panel without persistence in layer " layer))
-      (local record (clone-table persistence))
-      (local kind record.kind)
-      (assert (= (type kind) :string)
-              "Hud.capture-state panel persistence requires string :kind")
-      (local module-name record.restorer-module)
-      (when (not (= module-name nil))
-        (assert (= (type module-name) :string)
-                (.. "Hud.capture-state panel persistence for kind "
+      (when persistence
+        (local record (clone-table persistence))
+        (local kind record.kind)
+        (assert (= (type kind) :string)
+                "Hud.capture-state panel persistence requires string :kind")
+        (local module-name record.restorer-module)
+        (when (not (= module-name nil))
+          (assert (= (type module-name) :string)
+                  (.. "Hud.capture-state panel persistence for kind "
+                      kind
+                      " requires string :restorer-module")))
+        (local registered (and (. self.panel-restorers kind)
+                               (. (. self.panel-restorers kind) :restore)))
+        (assert (or registered (= (type module-name) :string))
+                (.. "Hud.capture-state panel kind has no restore strategy: "
                     kind
-                    " requires string :restorer-module")))
-      (local registered (and (. self.panel-restorers kind)
-                             (. (. self.panel-restorers kind) :restore)))
-      (assert (or registered (= (type module-name) :string))
-              (.. "Hud.capture-state panel kind has no restore strategy: "
-                  kind
-                  " (register restorer or set :restorer-module)"))
-      (local placement (capture-panel-placement-state self layer metadata))
-      (assert placement
-              (.. "Hud.capture-state missing layout for panel kind: " kind))
-      (each [key value (pairs placement)]
-        (set (. record key) value))
-      (table.insert panels record))
+                    " (register restorer or set :restorer-module)"))
+        (local placement (capture-panel-placement-state self layer metadata))
+        (assert placement
+                (.. "Hud.capture-state missing layout for panel kind: " kind))
+        (each [key value (pairs placement)]
+          (set (. record key) value))
+        (table.insert panels record)))
     (when self.tiles
       (each [_ metadata (ipairs (or self.tiles.children []))]
         (collect-record "tiles" metadata)))
@@ -935,6 +939,7 @@
   (set self.screen-pos-ray screen-pos-ray)
   (set self.add-panel-child add-panel-child)
   (set self.remove-panel-child remove-panel-child)
+  (set self.find-panel-persistence find-panel-persistence)
   (set self.add-overlay-child add-overlay-child)
   (set self.remove-overlay-child remove-overlay-child)
   (set self.capture-panel-element-state capture-panel-element-state)

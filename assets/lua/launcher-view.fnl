@@ -19,13 +19,27 @@
     (local user-on-submit (or incoming.on-submit options.on-submit))
     (local registry (Launcher {}))
 
-    (local search
-      ((SearchView {:items []
-                    :name (or options.search-name "launcher-search")
-                    :placeholder (or options.placeholder "Search launchables")
-                    :items-per-page (or options.items-per-page 12)
-                    :scrollbar-policy :as-needed})
+    (local search-ref {:value nil})
+    (local child-builder
+      (fn [child-ctx]
+        (set search-ref.value
+             ((SearchView {:items []
+                           :name (or options.search-name "launcher-search")
+                           :placeholder (or options.placeholder "Search launchables")
+                           :items-per-page (or options.items-per-page 12)
+                           :scrollbar-policy :as-needed})
+              child-ctx))
+        search-ref.value))
+
+    (local dialog
+      ((DefaultDialog {:title (or options.title "Launcher")
+                       :name (or options.name "launcher-dialog")
+                       :on-close user-on-close
+                       :child child-builder
+                       :transfer-builder build})
        ctx))
+
+    (local search search-ref.value)
 
     (local submitted-handler
       (search.submitted:connect
@@ -35,13 +49,6 @@
               (user-on-submit entry)
               (when entry
                 (registry:run entry))))))
-
-    (local dialog
-      ((DefaultDialog {:title (or options.title "Launcher")
-                       :name (or options.name "launcher-dialog")
-                       :on-close user-on-close
-                       :child (fn [_] search)})
-       ctx))
 
     (set dialog.search search)
     (set dialog.set-items
