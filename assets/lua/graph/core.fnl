@@ -10,6 +10,7 @@
 (local logging (require :logging))
 (local LinkEntityStore (require :entities/link))
 (local IdentityStore (require :entities/identity))
+(local StringEntityStore (require :entities/string))
 (local Morphs (require :morphs/init))
 
 (local GraphNode NodeBase.GraphNode)
@@ -377,12 +378,14 @@
     (set Graph.GraphNode GraphNode)
     (set Graph.GraphEdge GraphEdge)
 
-    ;; Link entity integration
+    ;; Entity store integration
     (local link-store (or options.link-store (LinkEntityStore.get-default)))
     (local identity-store (or options.identity-store (IdentityStore.get-default)))
+    (local string-store (or options.string-store (StringEntityStore.get-default)))
     (local morphs (or options.morphs (Morphs.get-default)))
     (set self.link-store link-store)
     (set self.identity-store identity-store)
+    (set self.string-store string-store)
     (set self.morphs morphs)
     (set self.create-identity
         (fn [_self target-key opts]
@@ -487,6 +490,7 @@
     (var link-created-handler nil)
     (var link-updated-handler nil)
     (var link-deleted-handler nil)
+    (var string-entity-created-handler nil)
 
     (set link-created-handler
         (link-store.link-entity-created:connect
@@ -503,6 +507,12 @@
         (link-store.link-entity-deleted:connect
             (fn [entity]
                 (maybe-remove-link-edge entity))))
+
+    (set string-entity-created-handler
+        (string-store.string-entity-created:connect
+            (fn [entity]
+                (when (and entity entity.id)
+                    (self:load-by-key (.. "string-entity:" (tostring entity.id)))))))
 
     (fn refresh-link-edges-for-key [key]
         (local key-str (tostring (or key "")))
@@ -546,7 +556,7 @@
 
     ;; Removed node-added listener as it is now called directly in add-node
 
-    (fn disconnect-link-entity-handlers []
+    (fn disconnect-entity-handlers []
         (when link-created-handler
             (link-store.link-entity-created:disconnect link-created-handler true)
             (set link-created-handler nil))
@@ -556,6 +566,9 @@
         (when link-deleted-handler
             (link-store.link-entity-deleted:disconnect link-deleted-handler true)
             (set link-deleted-handler nil))
+        (when string-entity-created-handler
+            (string-store.string-entity-created:disconnect string-entity-created-handler true)
+            (set string-entity-created-handler nil))
         (when identity-updated-handler
             (identity-store.identity-updated:disconnect identity-updated-handler true)
             (set identity-updated-handler nil))
@@ -585,7 +598,7 @@
             (node-morphed:clear)
             (edge-added:clear)
             (edge-removed:clear)
-            (disconnect-link-entity-handlers)))
+            (disconnect-entity-handlers)))
 
     (when self.with-start
         (local start (StartNode))
