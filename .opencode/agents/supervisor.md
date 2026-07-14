@@ -2,6 +2,7 @@
 description: Coordinates the Space agent workflow conversationally by summarizing artifacts, surfacing decisions, and recommending next actions without editing or reviewing code
 mode: primary
 temperature: 0.2
+disable: true
 steps: 25
 permission:
   read:

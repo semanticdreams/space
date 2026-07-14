@@ -2,6 +2,7 @@
 description: Implements an approved plan and accepted review findings using focused tests before broader relevant validation
 mode: primary
 temperature: 0.4
+disable: true
 steps: 100
 permission:
   read:

@@ -2,6 +2,7 @@
 description: Converts an approved direction into a bounded, executable implementation plan with acceptance criteria and validation scope
 mode: primary
 temperature: 0.1
+disable: true
 steps: 35
 permission:
   read:

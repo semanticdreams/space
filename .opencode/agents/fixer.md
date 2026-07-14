@@ -2,6 +2,7 @@
 description: Fixes accepted review findings narrowly using focused regression tests before broader validation
 mode: primary
 temperature: 0.25
+disable: true
 steps: 70
 permission:
   read:

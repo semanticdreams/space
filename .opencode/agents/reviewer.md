@@ -2,6 +2,7 @@
 description: Performs independent full reviews or narrowly verifies attempted fixes without editing code
 mode: primary
 temperature: 0.1
+disable: true
 steps: 55
 permission:
   read:

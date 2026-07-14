@@ -2,6 +2,7 @@
 description: Validates candidate review findings against the plan and codebase, rejecting premature improvements and escalating real design ambiguity
 mode: primary
 temperature: 0.1
+disable: true
 steps: 40
 permission:
   read:

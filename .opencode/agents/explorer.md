@@ -2,6 +2,7 @@
 description: Explores a problem and repository, generates materially different approaches, and exposes trade-offs without committing to a plan
 mode: primary
 temperature: 0.7
+disable: true
 steps: 30
 permission:
   read:
