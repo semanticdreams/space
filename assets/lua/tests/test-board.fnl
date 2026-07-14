@@ -1462,7 +1462,10 @@
   (set app.canvas-mode-registry nil)
   (set app.canvas-modes-changed nil)
   (local root (LayoutRoot))
-  (local ctx (BuildContext {:layout-root root}))
+  (local ctx (BuildContext {:layout-root root
+                            :clickables app.clickables
+                            :hoverables app.hoverables
+                            :system-cursors app.system-cursors}))
   (local canvas {:layout-root root
                  :build-context ctx})
   (set app.canvas canvas)
@@ -1846,13 +1849,15 @@
           (local actions (app.canvas-mode-selection-actions
                            {:surface :canvas
                             :canvas-mode "board"}))
-          (assert (= (length actions) 1)
-                  "canvas-mode-selection-actions should return Connect Items for two connectable items")
-          (assert (= (. actions 1 :name) "Connect Items")
-                  "selection action should be Connect Items")
+          (assert (= (length actions) 2)
+                  "canvas-mode-selection-actions should return Delete Selected + Connect Items for two items")
+          (assert (= (. actions 1 :name) "Delete Selected")
+                  "first selection action should be Delete Selected")
+          (assert (= (. actions 2 :name) "Connect Items")
+                  "second selection action should be Connect Items")
           (assert (= (length app.board.connectors-in-order) 0)
                   "Board should start with no connectors")
-          ((. actions 1 :fn) nil nil)
+          ((. actions 2 :fn) nil nil)
           (assert (= (length app.board.connectors-in-order) 1)
                   "Connect Items action should create a board connector")
           (local connector (. app.board.connectors-in-order 1))
@@ -1880,11 +1885,11 @@
           (local actions (app.canvas-mode-selection-actions
                            {:surface :canvas
                             :canvas-mode "board"}))
-          (assert (= (length actions) 1)
-                  "selection action should show Connect Items even when already connected (idempotent)")
-          (assert (= (. actions 1 :name) "Connect Items")
-                  "selection action should be Connect Items")
-          ((. actions 1 :fn) nil nil)
+          (assert (= (length actions) 2)
+                  "selection actions should include Delete Selected + Connect Items for two items")
+          (assert (= (. actions 2 :name) "Connect Items")
+                  "second selection action should be Connect Items")
+          ((. actions 2 :fn) nil nil)
           (assert (= (length app.board.connectors-in-order) 1)
                   "Connect Items on already-connected items should not create a duplicate connector"))
         {:dir dir}))))
@@ -1923,13 +1928,134 @@
           (local actions (app.canvas-mode-selection-actions
                            {:surface :canvas
                             :canvas-mode "board"}))
-          (assert (= (length actions) 1)
-                  "selection actions should appear for two selected connectable items")
-          (assert (= (. actions 1 :name) "Connect Items"))
-          ((. actions 1 :fn) nil nil)
+          (assert (= (length actions) 2)
+                  "selection actions should include Delete Selected + Connect Items for two items")
+          (assert (= (. actions 2 :name) "Connect Items"))
+          ((. actions 2 :fn) nil nil)
           (assert (= (length app.board.connectors-in-order) 1)
                   "clicking Connect Items via selector wiring should create a connector"))
         {:dir dir :object-selector selector}))))
+
+(fn board-view-remove-item-deletes-string-entity []
+  (local owner {})
+  (var entity-id nil)
+  (with-board-mode-runtime
+    (fn [env]
+      (local item (env.board-view:add-string-entity {:value "hello"}))
+      (set entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
+      (assert entity-id "remove-item should have a string-entity id")
+      (local store (StringEntityStore.get-default))
+      (assert (store:get-entity entity-id) "Entity should exist before removal")
+      (assert (env.board-view:remove-item item) "remove-item should return truthy on success")
+      (assert (not (store:get-entity entity-id)) "Entity should be deleted from store after remove-item")
+      (assert (not (. app.board.items item.id)) "Board item should be removed after remove-item"))
+    {})
+  (when entity-id
+    (pcall (fn [] ((StringEntityStore.get-default):delete-entity entity-id))))
+  true)
+
+(fn board-view-remove-item-rolls-back-entity-on-board-failure []
+  (var entity-id nil)
+  (var original-value nil)
+  (with-board-mode-runtime
+    (fn [env]
+      (local item (env.board-view:add-string-entity {:value "keep-me"}))
+      (set entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
+      (assert entity-id)
+      (local store (StringEntityStore.get-default))
+      (local entity (store:get-entity entity-id))
+      (set original-value entity.value)
+      (local handler
+        (app.board.item-removed:connect
+          (fn [_it]
+            (error "item-removed handler failed"))))
+      (local (ok _err)
+        (pcall
+          (fn []
+            (env.board-view:remove-item item))))
+      (app.board.item-removed:disconnect handler true)
+      (assert (not ok) "remove-item should fail when item-removed handler fails")
+      (assert (. app.board.items item.id) "Board item should be rolled back after remove-item failure")
+      (local recovered (store:get-entity entity-id))
+      (assert recovered "Entity should be re-created after remove-item rollback")
+      (assert (= recovered.value original-value) "Re-created entity should have same value"))
+    {})
+  (when entity-id
+    (pcall (fn [] ((StringEntityStore.get-default):delete-entity entity-id))))
+  true)
+
+(fn board-view-remove-selected-items-removes-all-selected []
+  (with-board-mode-runtime
+    (fn [env]
+      (local item-a (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
+      (local item-b (env.board-view:add-item {:type "test-item" :subject-key "sk:b"}))
+      (local item-c (env.board-view:add-item {:type "test-item" :subject-key "sk:c"}))
+      (set app.board-view.selected-items [item-a item-c])
+      (local count (app.board-view:remove-selected-items))
+      (assert (= count 2) "Should remove exactly the two selected items")
+      (assert (not (. app.board.items item-a.id)) "Item-a should be removed from board")
+      (assert (. app.board.items item-b.id) "Unselected item-b should remain on board")
+      (assert (not (. app.board.items item-c.id)) "Item-c should be removed from board"))
+    {}))
+
+(fn board-delete-selection-hook-removes-selected-items []
+  (with-board-mode-runtime
+    (fn [env]
+      (local item (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
+      (set app.board-view.selected-items [item])
+      (assert (= (length app.board.items-in-order) 1))
+      (assert app.canvas-mode-delete-selection "delete-selection hook should be registered")
+      (local result (app.canvas-mode-delete-selection))
+      (assert result "delete-selection should return truthy when items were removed")
+      (assert (= (length app.board.items-in-order) 0) "Selected items should be removed"))
+    {}))
+
+(fn board-selection-action-shows-delete-when-items-selected []
+  (with-board-mode-runtime
+    (fn [env]
+      (local item (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
+      (set app.board-view.selected-items [item])
+      (local actions (app.canvas-mode-selection-actions
+                       {:surface :canvas :canvas-mode "board"}))
+      (assert (= (length actions) 1) "Should have one action for one selected item")
+      (assert (= (. actions 1 :name) "Delete Selected") "Action should be Delete Selected")
+      (assert (= (length app.board.items-in-order) 1))
+      ((. actions 1 :fn) nil nil)
+      (assert (= (length app.board.items-in-order) 0) "Should delete the selected item"))
+    {}))
+
+(fn board-selection-action-shows-delete-and-connect-for-two-items []
+  (with-board-mode-runtime
+    (fn [env]
+      (local item-a (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
+      (local item-b (env.board-view:add-item {:type "test-item" :subject-key "sk:b"}))
+      (set app.board-view.selected-items [item-a item-b])
+      (local actions (app.canvas-mode-selection-actions
+                       {:surface :canvas :canvas-mode "board"}))
+      (assert (= (length actions) 2) "Should have Delete Selected and Connect Items for two items")
+      (assert (= (. actions 1 :name) "Delete Selected") "First action should be Delete Selected")
+      (assert (= (. actions 2 :name) "Connect Items") "Second action should be Connect Items"))
+    {}))
+
+(fn board-selection-action-shows-delete-when-no-connectable-items []
+  (local owner {})
+  (BoardRegistry.unregister-item-type "no-subject-item" owner)
+  (BoardRegistry.register-item-type {:id "no-subject-item"
+                                      :label "NoSubject"
+                                      :builder dummy-widget}
+                                     owner)
+  (with-board-mode-runtime
+    (fn [env]
+      (local item (env.board-view:add-item {:type "no-subject-item"}))
+      (set app.board-view.selected-items [item])
+      (local actions (app.canvas-mode-selection-actions
+                       {:surface :canvas :canvas-mode "board"}))
+      (assert (= (length actions) 1) "Should have Delete Selected for item without subject-key")
+      (assert (= (. actions 1 :name) "Delete Selected") "Action should be Delete Selected")
+      ((. actions 1 :fn) nil nil)
+      (assert (= (length app.board.items-in-order) 0) "Should delete the item"))
+    {})
+  (BoardRegistry.unregister-owner owner))
 
 (table.insert tests {:name "BoardView registers selectables with selector"
                      :fn board-view-registers-selectables-with-selector})
@@ -1954,7 +2080,21 @@
 (table.insert tests {:name "Board context enricher sets selected-items"
                      :fn board-selection-action-enriches-context-with-selected-items})
 (table.insert tests {:name "Board selection action uses selector wiring through runtime"
-                     :fn board-selection-action-uses-selector-wiring-through-runtime})
+                      :fn board-selection-action-uses-selector-wiring-through-runtime})
+(table.insert tests {:name "BoardView remove-item deletes string entity from store"
+                      :fn board-view-remove-item-deletes-string-entity})
+(table.insert tests {:name "BoardView remove-item rolls back entity on board failure"
+                      :fn board-view-remove-item-rolls-back-entity-on-board-failure})
+(table.insert tests {:name "BoardView remove-selected-items removes all selected"
+                      :fn board-view-remove-selected-items-removes-all-selected})
+(table.insert tests {:name "Board delete-selection hook removes selected items"
+                      :fn board-delete-selection-hook-removes-selected-items})
+(table.insert tests {:name "Board selection action shows Delete Selected when items selected"
+                      :fn board-selection-action-shows-delete-when-items-selected})
+(table.insert tests {:name "Board selection action shows both Delete Selected and Connect Items for two items"
+                      :fn board-selection-action-shows-delete-and-connect-for-two-items})
+(table.insert tests {:name "Board selection action shows Delete Selected for non-connectable items"
+                      :fn board-selection-action-shows-delete-when-no-connectable-items})
 
 (fn main []
   (runner.run-tests {:name "board"

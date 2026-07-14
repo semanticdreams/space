@@ -510,3 +510,7 @@ forms.
 [12]: https://fennel-lang.org/reference#case-pattern-matching
 [13]: https://fennel-lang.org/tutorial#error-handling
 [14]: https://benaiah.me/posts/everything-you-didnt-want-to-know-about-lua-multivals/
+
+## See also
+
+- [[../../../knowledge/home|Knowledge Base]]

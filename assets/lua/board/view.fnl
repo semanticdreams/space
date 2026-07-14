@@ -340,6 +340,45 @@
       (error connector-or-err))
     connector-or-err)
 
+  (fn remove-item [self item-or-id]
+    (assert-not-dropped "remove-item")
+    (local id (if (= (type item-or-id) :table) item-or-id.id item-or-id))
+    (local item (and id (. board.items id)))
+    (when item
+      (var entity-snapshot nil)
+      (var entity-deleted? false)
+      (when (= item.type "string-entity")
+        (local {: entity-id-from-subject} (require :board/builtin-string-entity))
+        (local entity-id (entity-id-from-subject item.subject-key))
+        (when entity-id
+          (local store ((. (require :entities/string) :get-default)))
+          (set entity-snapshot (store:get-entity entity-id))
+          (when entity-snapshot
+            (store:delete-entity entity-id)
+            (set entity-deleted? true))))
+      (local (ok err)
+        (pcall
+          (fn []
+            (board:remove-item item))))
+      (when (and (not ok) entity-deleted? entity-snapshot)
+        (local store ((. (require :entities/string) :get-default)))
+        (store:create-entity {:id entity-snapshot.id
+                              :created-at entity-snapshot.created-at
+                              :updated-at entity-snapshot.updated-at
+                              :value entity-snapshot.value})
+        (error err))
+      (and ok item)))
+
+  (fn remove-selected-items [self]
+    (local items-to-remove [])
+    (for [i (length self.selected-items) 1 -1]
+      (table.insert items-to-remove 1 (. self.selected-items i)))
+    (var count 0)
+    (each [_ item (ipairs items-to-remove)]
+      (when (self:remove-item item)
+        (set count (+ count 1))))
+    count)
+
   (fn capture-state [_self]
     (assert-not-dropped "capture-state")
     (board:capture-state))
@@ -380,19 +419,21 @@
     (layer:drop))
 
   (set self {:board board
-             :canvas canvas
-             :ctx ctx
-             :layer layer
-             :item-records item-records
-             :connector-records connector-records
-             :selected-items selected-items
-             :selected-items-changed selected-items-changed
-             :add-item add-item
-             :add-string-entity add-string-entity
-             :connect-items connect-items
-             :capture-state capture-state
-             :update update
-             :drop drop})
+              :canvas canvas
+              :ctx ctx
+              :layer layer
+              :item-records item-records
+              :connector-records connector-records
+              :selected-items selected-items
+              :selected-items-changed selected-items-changed
+              :add-item add-item
+              :add-string-entity add-string-entity
+              :connect-items connect-items
+              :remove-item remove-item
+              :remove-selected-items remove-selected-items
+              :capture-state capture-state
+              :update update
+              :drop drop})
   (when selector
     (set selection-handler
          (selector.changed:connect

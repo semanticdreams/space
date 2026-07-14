@@ -389,3 +389,7 @@ Create a [discussion here on GitHub](https://github.com/semanticdreams/space/dis
 ## License
 
 [GNU General Public License version 3](https://opensource.org/license/gpl-3-0)
+
+## See also
+
+- [[knowledge/home|Knowledge Base]]

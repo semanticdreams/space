@@ -110,20 +110,33 @@
   (and item item.subject-key
        (not (= (tostring item.subject-key) ""))))
 
+(fn delete-selection []
+  (local view app.board-view)
+  (and view (> (view:remove-selected-items) 0)))
+
 (fn board-selection-actions [context]
   (local view (or (and context context.board context.board.view)
                   app.board-view))
   (local selected (or (and view view.selected-items) []))
-  (if (and (= (length selected) 2)
-           (connectable? (. selected 1))
-           (connectable? (. selected 2)))
-      (let [source (. selected 1)
-            target (. selected 2)]
-        [{:name "Connect Items"
-          :icon "link"
-          :fn (fn [_button _event]
-                (view:connect-items source target))}])
-      []))
+  (local actions [])
+  (when (> (length selected) 0)
+    (table.insert actions
+                  {:name "Delete Selected"
+                   :icon "delete"
+                   :variant {:action :danger}
+                   :fn (fn [_button _event]
+                         (view:remove-selected-items))}))
+  (when (and (= (length selected) 2)
+             (connectable? (. selected 1))
+             (connectable? (. selected 2)))
+    (let [source (. selected 1)
+          target (. selected 2)]
+      (table.insert actions
+                    {:name "Connect Items"
+                     :icon "link"
+                     :fn (fn [_button _event]
+                           (view:connect-items source target))})))
+  actions)
 
 (fn enrich-board-context! [context]
   (local view (or app.board-view
@@ -143,6 +156,7 @@
   (local view (create-board-view!))
   (ctx:set-root-actions! board-root-actions)
   (ctx:set-selection-actions! board-selection-actions)
+  (ctx:set-delete-selection! delete-selection)
   (ctx:set-command-hints-provider! (fn [_payload] []))
   (ctx:set-context-enricher! enrich-board-context!)
   (ctx:set-target-enabled! board-target-enabled?)

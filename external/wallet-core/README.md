@@ -140,3 +140,5 @@ Trust Wallet products leverage wallet core, however, they may or may not leverag
 # License
 
 Trust Wallet Core is available under the Apache 2.0 license. See the [LICENSE](LICENSE) file for more info.
+
+- [[../../knowledge/home|Knowledge Base]]

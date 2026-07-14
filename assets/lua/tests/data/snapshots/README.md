@@ -16,3 +16,7 @@ Current e2e outputs:
 - `graph-edges.png`: dedicated graph-edge visibility render.
 
 When adding or updating tests, view the PNGs directly to confirm the visuals match the intended scenario.
+
+## See also
+
+- [[../../../../../knowledge/home|Knowledge Base]]

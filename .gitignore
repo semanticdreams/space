@@ -33,6 +33,9 @@ __pycache__/
 *.out
 *.app
 
+# Obsidian (vault root is knowledge/, root .obsidian/ is personal cruft)
+/.obsidian/
+
 # Builds
 build/
 release/

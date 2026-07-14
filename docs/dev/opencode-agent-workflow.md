@@ -651,3 +651,8 @@ commit a checkpoint, or stash unrelated work before automation.
 This is orchestration built on OpenCode's agent, model, permission, and
 non-interactive CLI primitives. It is not a built-in OpenCode workflow engine.
 The scripts intentionally own the stage transitions and stopping rules.
+
+
+## See also
+
+- [[../../knowledge/home|Knowledge Base]]
