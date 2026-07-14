@@ -1,0 +1,114 @@
+{
+  "collapse-filter": false,
+  "search": "path:knowledge/",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": true,
+  "colorGroups": [
+    {
+      "query": "tag:#goal",
+      "color": {
+        "a": 1,
+        "rgb": 3898102
+      }
+    },
+    {
+      "query": "tag:#feature",
+      "color": {
+        "a": 1,
+        "rgb": 2278750
+      }
+    },
+    {
+      "query": "tag:#adr",
+      "color": {
+        "a": 1,
+        "rgb": 11052535
+      }
+    },
+    {
+      "query": "tag:#note",
+      "color": {
+        "a": 1,
+        "rgb": 10790052
+      }
+    },
+    {
+      "query": "tag:#milestone",
+      "color": {
+        "a": 1,
+        "rgb": 16096779
+      }
+    },
+    {
+      "query": "tag:#index",
+      "color": {
+        "a": 1,
+        "rgb": 5995418
+      }
+    },
+    {
+      "query": "tag:#tech-debt",
+      "color": {
+        "a": 1,
+        "rgb": 15676356
+      }
+    },
+    {
+      "query": "tag:#plan",
+      "color": {
+        "a": 1,
+        "rgb": 16096779
+      }
+    },
+    {
+      "query": "tag:#journal",
+      "color": {
+        "a": 1,
+        "rgb": 440020
+      }
+    },
+    {
+      "query": "tag:#bug",
+      "color": {
+        "a": 1,
+        "rgb": 15676356
+      }
+    },
+    {
+      "query": "tag:#idea",
+      "color": {
+        "a": 1,
+        "rgb": 10265263
+      }
+    },
+    {
+      "query": "tag:#research",
+      "color": {
+        "a": 1,
+        "rgb": 10265263
+      }
+    },
+    {
+      "query": "tag:#subsystem",
+      "color": {
+        "a": 1,
+        "rgb": 10265263
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": false,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.518713248970312,
+  "repelStrength": 10,
+  "linkStrength": 1,
+  "linkDistance": 250,
+  "scale": 0.9663140637221234,
+  "close": true
+}
