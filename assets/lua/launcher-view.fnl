@@ -17,7 +17,7 @@
     (local incoming (or runtime-opts {}))
     (local user-on-close (or incoming.on-close options.on-close))
     (local user-on-submit (or incoming.on-submit options.on-submit))
-    (local registry (Launcher {}))
+    (local registry (or (and app app.launcher) (Launcher {})))
 
     (local search-ref {:value nil})
     (local child-builder

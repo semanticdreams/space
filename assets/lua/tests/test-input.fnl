@@ -52,9 +52,8 @@
 (fn own-test-state! [name state]
   (local states (States {:hud_provider command-hints-hud-provider}))
   (states:add-state :normal {})
-  (states:add-state name {})
-  (states:set-state name)
   (states:add-state name state)
+  (states:set-state name)
   (set-app-states! states)
   states)
 
@@ -316,7 +315,10 @@
       (local original-states app.states)
       (local states (States))
       (var transitions [])
-      (states:add-state :text {})
+      (local text-state (TextState))
+      (local insert-state (InsertState))
+      (states:add-state :text text-state)
+      (states:add-state :insert insert-state)
       (states:set-state :text)
       (local original-set-state states.set-state)
       (set states.set-state
@@ -330,10 +332,6 @@
             (pcall
               (fn []
                 (InputState.connect-input input)
-                (local text-state (TextState))
-                (local insert-state (InsertState))
-                (states:add-state :text text-state)
-                (states:add-state :insert insert-state)
                 (text-state.on-key-down {:key (string.byte "i")})
                 (assert (= input.mode :insert))
                 (assert (= (input:get-text) ""))

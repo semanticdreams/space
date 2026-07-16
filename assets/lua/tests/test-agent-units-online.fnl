@@ -441,7 +441,7 @@
                                                                 :module-name "bubbles"
                                                                 :module-paths module-paths
                                                                 :source :user
-                                                                :owned-paths [init-file]}))))
+                                                                :owned-paths [(fs.join-path code-dir "bubbles") init-file]}))))
             (when ok
               (mgr:register manual-unit)
               (manual-unit:load {})

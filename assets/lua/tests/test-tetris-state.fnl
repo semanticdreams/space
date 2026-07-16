@@ -58,9 +58,9 @@
     (fn [record]
       (var paused false)
       (local board {:on-pause (fn [_self _payload] (set paused true))})
-      (TetrisStateRouter.connect-board board)
       (local state (TetrisState))
       (record.states:add-state :tetris state)
+      (TetrisStateRouter.connect-board board)
       (state.on-key-down {:key SDLK_ESCAPE})
       (TetrisStateRouter.release-active-board)
       (assert paused "Escape should pause the board"))))
@@ -70,9 +70,9 @@
     (fn [record]
       (var last-key nil)
       (local board {:on-key-down (fn [_self payload] (set last-key payload.key))})
-      (TetrisStateRouter.connect-board board)
       (local state (TetrisState))
       (record.states:add-state :tetris state)
+      (TetrisStateRouter.connect-board board)
       (state.on-key-down {:key SDLK_LEFT})
       (TetrisStateRouter.release-active-board)
       (assert (= last-key SDLK_LEFT) "Arrow key should dispatch to board"))))

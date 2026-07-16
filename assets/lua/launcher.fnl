@@ -1,6 +1,7 @@
 (local StringUtils (require :string-utils))
 
 (local fuzzy-match StringUtils.fuzzy-match)
+(local runtime-registry {})
 
 (local join-path
   (fn [a b]
@@ -50,6 +51,10 @@
       (when (. by-name launchable.name)
         (error (.. "Launchable already registered: " launchable.name)))
       (set (. by-name launchable.name) launchable))
+    (each [_ launchable (pairs runtime-registry)]
+      (when (. by-name launchable.name)
+        (error (.. "Launchable already registered: " launchable.name)))
+      (set (. by-name launchable.name) launchable))
     (local items [])
     (each [_ value (pairs by-name)]
       (table.insert items value))
@@ -59,6 +64,52 @@
                      (string.lower b.name))))
     {:items items
      :by-name by-name})
+
+  (fn wrap-runtime-run [run]
+    (local captured-fennel-path fennel.path)
+    (local captured-require _G.require)
+    (fn [...]
+      (local previous-fennel-path fennel.path)
+      (local previous-require _G.require)
+      (set fennel.path captured-fennel-path)
+      (set _G.require captured-require)
+      (local (ok result) (pcall run ...))
+      (set _G.require previous-require)
+      (set fennel.path previous-fennel-path)
+      (if ok result (error result))))
+
+  (fn register [_self launchable]
+    (local normalized (normalize-launchable launchable))
+    (local existing (list-launchables))
+    (when (. existing.by-name normalized.name)
+      (error (.. "Launchable already registered: " normalized.name)))
+    (tset normalized :run (wrap-runtime-run normalized.run))
+    (tset runtime-registry normalized.name normalized)
+    normalized)
+
+  (fn unregister [_self name]
+    (local key (normalize-name name))
+    (when key
+      (tset runtime-registry key nil))
+    nil)
+
+  (fn clear-runtime [_self]
+    (each [name _launchable (pairs runtime-registry)]
+      (tset runtime-registry name nil))
+    nil)
+
+  (fn snapshot-runtime [_self]
+    (local snap {})
+    (each [name launchable (pairs runtime-registry)]
+      (tset snap name launchable))
+    snap)
+
+  (fn restore-runtime [_self snap]
+    (each [name _launchable (pairs runtime-registry)]
+      (tset runtime-registry name nil))
+    (each [name launchable (pairs snap)]
+      (tset runtime-registry name launchable))
+    nil)
 
   (fn list [_self]
     (local result (list-launchables))
@@ -90,7 +141,12 @@
   {:list list
    :search search
    :get get
-   :run run})
+   :run run
+   :register register
+   :unregister unregister
+   :clear-runtime clear-runtime
+   :snapshot-runtime snapshot-runtime
+   :restore-runtime restore-runtime})
 
 (local exports {:Launcher Launcher})
 

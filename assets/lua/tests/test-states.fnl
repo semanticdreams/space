@@ -166,6 +166,99 @@
   (states:clear-history)
   (assert (= (# (states:get-history)) 0)))
 
+(fn remove-state-unregisters-inactive-state []
+  (local states (States))
+  (local state {})
+  (states:add-state :temporary state)
+  (assert (= (states:get-state :temporary) state))
+  (assert (= state.states_owner states))
+  (local removed (states:remove-state :temporary))
+  (assert (= removed state))
+  (assert (= (states:get-state :temporary) nil))
+  (assert (= state.states_owner nil)))
+
+(fn remove-state-leaves-active-state []
+  (local states (States))
+  (var left 0)
+  (states:add-state :normal {})
+  (states:add-state :temporary {:on-leave (fn [] (set left (+ left 1)))})
+  (states:set-state :temporary)
+  (states:remove-state :temporary {:fallback :normal})
+  (assert (= left 1))
+  (assert (= (states:active-name) :normal))
+  (assert (= (states:get-state :temporary) nil)))
+
+(fn remove-active-state-requires-fallback []
+  (local states (States))
+  (states:add-state :temporary {})
+  (states:set-state :temporary)
+  (local (ok err) (pcall #(states:remove-state :temporary)))
+  (assert (not ok) "removing active state without fallback should fail")
+  (assert (string.find (tostring err) "without :fallback" 1 true)
+          "error should explain missing fallback"))
+
+(fn add-state-replacing-owner-clears-previous-owner []
+  (local states (States))
+  (local old-state {:name :temporary})
+  (states:add-state :temporary old-state)
+  (assert (= old-state.states_owner states)
+          "old state should be bound to host")
+  (local new-state {:name :temporary})
+  (states:add-state :temporary new-state)
+  (assert (= old-state.states_owner nil)
+          "previous state owner should be cleared after replacement")
+  (assert (= new-state.states_owner states)
+          "new state should be bound to host"))
+
+(fn add-state-rejects-active-replacement []
+  (local states (States))
+  (states:add-state :normal {:name :normal})
+  (states:set-state :normal)
+  (local (ok err) (pcall #(states:add-state :normal {:name :normal})))
+  (assert (not ok) "add-state should reject replacing active state")
+  (assert (string.find (tostring err) "add-state" 1 true)
+          "error should mention add-state restriction"))
+
+(fn add-state-rejection-does-not-bind-rejected-state []
+  (local states (States))
+  (states:add-state :normal {:name :normal})
+  (states:set-state :normal)
+  (local rejected {:name :normal})
+  (local (ok err) (pcall #(states:add-state :normal rejected)))
+  (assert (not ok) "add-state should reject replacing active state")
+  (assert (= rejected.states_owner nil)
+          "rejected state should not be bound to the states host"))
+
+(fn add-state-rejects-same-object-alias []
+  (local states (States))
+  (local shared {:name :shared})
+  (states:add-state :alpha shared)
+  (local (ok err) (pcall #(states:add-state :beta shared)))
+  (assert (not ok) "add-state should reject same state object under different names")
+  (assert (string.find (tostring err) "multiple names" 1 true)
+          "error should explain multiple-name rejection"))
+
+(fn add-state-re-registering-same-object-is-idempotent []
+  (local states (States))
+  (local obj {:name :idem})
+  (states:add-state :idem obj)
+  (assert (= obj.states_owner states))
+  (states:add-state :idem obj)
+  (assert (= obj.states_owner states)
+          "owner should remain set after idempotent add-state"))
+
+(fn add-state-idempotent-when-active []
+  (local states (States))
+  (local obj {:name :idem})
+  (states:add-state :idem obj)
+  (states:set-state :idem)
+  (assert (= (states:active-name) :idem))
+  (states:add-state :idem obj)
+  (assert (= obj.states_owner states)
+          "owner should remain set after idempotent add-state on active state")
+  (assert (= (states:active-name) :idem)
+          "active name should be unchanged after idempotent add-state"))
+
 (fn create-controls-stub []
   (local record
     {:key_down nil
@@ -815,12 +908,11 @@
   (set app.first-person-controls controls)
   (local input {:on-key-down (fn [_self _payload] false)})
   (local states (States {:hud_provider command-hints-hud-provider}))
-  (states:add-state :normal {})
+  (local state (NormalState))
+  (states:add-state :normal state)
   (states:set-state :normal)
   (set-app-states! states)
   (InputState.connect-input input)
-  (local state (NormalState))
-  (states:add-state :normal state)
   (state.on-enter)
   (app.engine.events.key-down.emit {:key 87})
   (assert (= controls.record.key_down nil) "Input should block controls when connected")
@@ -1845,6 +1937,15 @@
 (table.insert tests {:name "State transitions call enter/leave hooks" :fn transitions-call-enter-and-leave})
 (table.insert tests {:name "Setting the same state twice is a no-op" :fn reselecting-active-state-noops})
 (table.insert tests {:name "State history records recent transitions" :fn state-history-tracks-transitions})
+(table.insert tests {:name "States remove inactive registered state" :fn remove-state-unregisters-inactive-state})
+(table.insert tests {:name "States remove active state calls leave" :fn remove-state-leaves-active-state})
+(table.insert tests {:name "States remove active state requires fallback" :fn remove-active-state-requires-fallback})
+(table.insert tests {:name "States replace owner clears previous owner" :fn add-state-replacing-owner-clears-previous-owner})
+(table.insert tests {:name "States reject active replacement via add-state" :fn add-state-rejects-active-replacement})
+(table.insert tests {:name "States rejection does not bind rejected state" :fn add-state-rejection-does-not-bind-rejected-state})
+(table.insert tests {:name "States rejects same-object alias via add-state" :fn add-state-rejects-same-object-alias})
+(table.insert tests {:name "States re-adding same object is idempotent" :fn add-state-re-registering-same-object-is-idempotent})
+(table.insert tests {:name "States add-state idempotent when active" :fn add-state-idempotent-when-active})
 (table.insert tests {:name "Normal state forwards events to controls" :fn normal-state-forwards-events})
 (table.insert tests {:name "Normal state injects single touch as mouse" :fn normal-state-injects-single-touch-as-mouse})
 (table.insert tests {:name "Normal state routes canvas multitouch to active controls"
@@ -1911,8 +2012,6 @@
     (States {:hud_provider command-hints-hud-provider
              :focus_manager_provider (fn [_self]
                                        app.focus)}))
-  (states:add-state :text {})
-  (states:set-state :text)
   (local original-set-state states.set-state)
   (set states.set-state
        (fn [_self name]

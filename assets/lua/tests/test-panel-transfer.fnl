@@ -2,6 +2,7 @@
 (local PanelTransferModule (require :panel-transfer))
 (local PanelTransfer PanelTransferModule.PanelTransfer)
 (local DefaultDialog (require :default-dialog))
+(local Launcher (require :launcher))
 (local LauncherView (require :launcher-view))
 (local Scene (require :scene))
 (local Hud (require :hud))
@@ -88,6 +89,8 @@
    :resizables app.resizables
    :intersectables app.intersectables
    :panel-transfer app.panel-transfer
+   :launcher app.launcher
+   :launcher-runtime-snap (when app.launcher (app.launcher:snapshot-runtime))
    :menu-manager app.menu-manager
    :camera app.camera
    :create-default-projection app.create-default-projection
@@ -103,6 +106,9 @@
   (set app.resizables saved.resizables)
   (set app.intersectables saved.intersectables)
   (set app.panel-transfer saved.panel-transfer)
+  (set app.launcher saved.launcher)
+  (when (and app.launcher saved.launcher-runtime-snap)
+    (app.launcher:restore-runtime saved.launcher-runtime-snap))
   (set app.menu-manager saved.menu-manager)
   (set app.camera saved.camera)
   (set app.create-default-projection saved.create-default-projection)
@@ -154,6 +160,8 @@
   (set app.movables (make-stub-movables))
   (set app.resizables (make-stub-resizables))
   (set app.intersectables (make-stub-intersectables))
+  (set app.launcher (Launcher {}))
+  (app.launcher:clear-runtime)
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (set app.create-default-projection AppProjection.create-default-projection)
   (set app.panel-transfer (PanelTransfer)))
@@ -862,6 +870,7 @@
       (app.panel-transfer:register-receiver
         {:id :hud :label "HUD" :icon "dashboard"
          :target-fn (fn [] app.hud)})
+      (app.launcher:register {:name "Runtime Game" :run (fn [] nil)})
 
       (local dialog-builder (LauncherView {:title "Test Launcher"}))
       (local element (app.scene:add-panel-child
@@ -873,6 +882,11 @@
       (assert launcher.search "LauncherView should have search")
       (assert launcher.set-items "LauncherView should have set-items")
       (assert launcher.set-query "LauncherView should have set-query")
+      (var found-runtime? false)
+      (each [_ pair (ipairs launcher.search.items)]
+        (when (= (. pair 2) "Runtime Game")
+          (set found-runtime? true)))
+      (assert found-runtime? "LauncherView should include app.launcher runtime entries")
 
       (local move-action (find-move-action element))
       (assert move-action "should have move action")

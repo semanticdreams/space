@@ -27,6 +27,7 @@
 (local AppConfig (require :app-config))
 (local CliArgs (require :cli-args))
 (local CanvasModes (require :canvas-modes))
+(local Launcher (require :launcher))
 
 (set app.engine-autocreated false)
 (when (not app.engine)
@@ -44,6 +45,8 @@
 (set fennel.macro-path runtime.fennel-path)
 
 (set app.unit-manager (or app.unit-manager (UnitManager {})))
+(set app.launcher (or app.launcher (Launcher {})))
+(app.launcher:clear-runtime)
 
 (global pp (fn [x] (logging.debug (fennel.view x))))
 
@@ -769,6 +772,7 @@
 (set app.tray-manager nil)
 (set app.menu-manager nil)
 (set app.panel-transfer nil)
+(set app.launcher nil)
 (set app.notify nil)
 (set app.kernels nil)
 (set app.settings nil)
@@ -1237,26 +1241,45 @@
   (when (and app.code-dir fs fs.list-dir (fs.exists app.code-dir))
     (local (ok entries) (pcall fs.list-dir app.code-dir false))
     (when ok
-      (local candidates [])
+      (local by-name {})
       (each [_ entry (ipairs entries)]
         (local module-name (string.match entry.name "^([^.]+)%.fnl$"))
-        (if (and entry.is-file module-name)
-            (table.insert candidates {:name module-name
-                                      :path (fs.join-path app.code-dir entry.name)})
-            (and entry.is-dir entry.name
-                 (fs.exists (fs.join-path app.code-dir entry.name "init.fnl")))
-            (table.insert candidates {:name entry.name
-                                      :path (fs.join-path app.code-dir entry.name "init.fnl")})))
+        (when (and entry.is-file module-name)
+          (tset by-name module-name
+                {:name module-name
+                 :path (fs.join-path app.code-dir entry.name)
+                 :owned-paths [(fs.join-path app.code-dir entry.name)]
+                 :directory? false})))
+      (each [_ entry (ipairs entries)]
+        (when (and entry.is-dir entry.name
+                   (fs.exists (fs.join-path app.code-dir entry.name "init.fnl")))
+          (let [had-flat? (not (not (. by-name entry.name)))
+                dir-path (fs.join-path app.code-dir entry.name)
+                init-path (fs.join-path dir-path "init.fnl")]
+            (tset by-name entry.name
+                  {:name entry.name
+                   :path init-path
+                   :owned-paths [dir-path init-path]
+                   :directory? true
+                   :directory-override? had-flat?}))))
+      (local candidates [])
+      (each [_ candidate (pairs by-name)]
+        (table.insert candidates candidate))
       (table.sort candidates (fn [a b] (< a.name b.name)))
-      (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+      (local default-module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+      (local dir-first-module-paths (.. app.code-dir "/?/init.fnl;" app.code-dir "/?.fnl"))
       (each [_ candidate (ipairs candidates)]
+        (local unit-module-paths
+          (if candidate.directory?
+              dir-first-module-paths
+              default-module-paths))
         (local unit
           (Units.ModuleUnit {:id (.. "user-" candidate.name)
                              :parent-id "app-root"
                              :source :user
                              :module-name candidate.name
-                             :module-paths module-paths
-                             :owned-paths [candidate.path]}))
+                             :module-paths unit-module-paths
+                             :owned-paths candidate.owned-paths}))
         (app.unit-manager:register unit)
         (unit:load))))
   true)
@@ -1556,6 +1579,8 @@
   (set app.terrain-paint-previous-state nil)
   (set app.layout-root nil)
   (set app.hud nil)
+  (set app.launcher (Launcher {}))
+  (app.launcher:clear-runtime)
   (CanvasModes.clear-mode-runtime-hooks!)
   (ensure-canvas-unit)
   (local hud-unit (ensure-hud-unit))

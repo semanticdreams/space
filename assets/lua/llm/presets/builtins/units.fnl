@@ -58,7 +58,7 @@
       parent
       (fs.parent file)))
 
-(fn resolve-unit-file [app unit relative-path tool-name]
+(fn resolve-unit-file [app unit relative-path tool-name allow-create?]
   (local fs (require :fs))
   (assert (= (type relative-path) "string")
           (.. tool-name " requires a relative string :path"))
@@ -78,7 +78,8 @@
   (when (= (fs.absolute root) (fs.absolute app.code-dir))
     (assert (= (fs.absolute file) (fs.absolute source-file))
             (.. tool-name " cannot edit sibling unit files")))
-  (assert (fs.exists file) (.. tool-name " file not found: " file))
+  (if (not allow-create?)
+      (assert (fs.exists file) (.. tool-name " file not found: " file)))
   file)
 
 (fn resolve-readable-unit-file [app unit relative-path tool-name]
@@ -148,6 +149,10 @@
                          (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
                          (if (not recover-ok) (.. " (recovery reload also failed: " (tostring recover-err) ")") ""))))))
       (do
+        (local (unload-ok unload-err)
+          (if (not (unit:loaded?))
+              (pcall #(unit:unload {}))
+              (values true nil)))
         (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
         (fs.write-file file old-source)
         (local (recover-ok recover-err)
@@ -155,6 +160,7 @@
                       (app.unit-manager:reload-unit unit.id {:source :agent-edit-recover})
                       (unit:load {}))))
         (error (.. tool-name " failed, source restored: " (tostring err)
+                   (if (not unload-ok) (.. " (unload also failed: " (tostring unload-err) ")") "")
                    (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
                    (if (not recover-ok) (.. " (recovery also failed: " (tostring recover-err) ")") ""))))))
 
@@ -164,6 +170,67 @@
   (local old-source (fs.read-file file))
   (fs.write-file file source)
   (reload-unit-with-rollback! app unit file old-source tool-name))
+
+(fn write-new-unit-file-and-reload! [app unit file source tool-name]
+  (local fs (require :fs))
+  (local json (require :json))
+  (assert (not (fs.exists file)) (.. tool-name " file already exists: " file))
+  (validate-fennel-source file source tool-name)
+  (local unit-root (unit-root-dir app unit tool-name))
+  (var created-dirs [])
+  (fn collect-missing-dirs! [target-file]
+    (local target-parent (fs.parent target-file))
+    (when target-parent
+      (var current target-parent)
+      (while (and current
+                  (path-under? current unit-root)
+                  (not= (fs.absolute current) (fs.absolute unit-root)))
+        (when (not (fs.exists current))
+          (table.insert created-dirs current))
+        (set current (fs.parent current)))))
+  (collect-missing-dirs! file)
+  (fn rollback-new-file []
+    (fs.remove-all file)
+    (each [_ dir (ipairs created-dirs)]
+      (pcall #(fs.remove dir))))
+  (local (write-ok write-err)
+    (pcall
+      (fn []
+        (when (> (length created-dirs) 0)
+          (fs.create-dirs (fs.parent file)))
+        (fs.write-file file source))))
+  (when (not write-ok)
+    (rollback-new-file)
+    (error (.. tool-name " failed to write file: " (tostring write-err))))
+  (local (reload-ok reload-err)
+    (pcall #(app.unit-manager:reload-unit unit.id {:source :agent-edit})))
+  (if reload-ok
+      (do
+        (local missing (validate-unit-exports unit))
+        (if (not missing)
+            (json.dumps {:id unit.id :file file :created true :reloaded true})
+            (do
+              (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+              (rollback-new-file)
+              (local (recover-ok recover-err) (pcall #(unit:reload {})))
+              (error (.. tool-name " failed, module exports invalid: missing " missing
+                         (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
+                         (if (not recover-ok) (.. " (recovery reload also failed: " (tostring recover-err) ")") ""))))))
+      (do
+        (local (unload-ok unload-err)
+          (if (not (unit:loaded?))
+              (pcall #(unit:unload {}))
+              (values true nil)))
+        (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+        (rollback-new-file)
+        (local (recover-ok recover-err)
+          (pcall #(if (unit:loaded?)
+                      (app.unit-manager:reload-unit unit.id {:source :agent-edit-recover})
+                      (unit:load {}))))
+        (error (.. tool-name " failed, new file removed: " (tostring reload-err)
+                   (if (not unload-ok) (.. " (unload also failed: " (tostring unload-err) ")") "")
+                   (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") "")
+                   (if (not recover-ok) (.. " (recovery also failed: " (tostring recover-err) ")") ""))))))
 
 (fn replace-exact-text [source old new]
   (assert (= (type old) "string") "space_unit_apply_patch requires string :old")
@@ -246,8 +313,8 @@
                     (.. "space_unit_run_tests could not locate space binary from cwd " cwd))
            resolved)))
    (local space-bin (resolve-space-bin))
-   (local unit-fennel-path (.. (fs.join-path app.code-dir "?.fnl")
-                               ";" (fs.join-path app.code-dir "?" "init.fnl")))
+    (local unit-fennel-path (.. (fs.join-path app.code-dir "?" "init.fnl")
+                                ";" (fs.join-path app.code-dir "?.fnl")))
    (local fennel-path (.. unit-fennel-path ";" runtime.fennel-path))
    (local result (Process.run
                    {:args [space-bin "-m" (.. test-module ":main")]
@@ -351,41 +418,83 @@
      :mcp-name "space_unit_create"
      :description (.. "Create a new user unit from Fennel source code. The source must be a "
                       "Fennel module returning a table with init/drop (and optionally snapshot/restore) "
-                      "functions. The unit is written to the user code directory and immediately loaded.")
+                       "functions. The unit is written to the user code directory and immediately loaded. "
+                       "Set :directory true to create a multi-file directory unit (init.fnl inside a "
+                       "subdirectory).")
      :inputSchema {:type "object"
-                   :properties {:id {:type "string" :description "Unit ID (also used as filename)"}
-                                :source {:type "string" :description "Fennel source code for the module"}}
+                    :properties {:id {:type "string" :description "Unit ID (also used as filename)"}
+                                 :source {:type "string" :description "Fennel source code for the module"}
+                                  :directory {:type "boolean"
+                                              :description "Create as a directory unit (default false)"}}
                    :required ["id" "source"]}
      :make-run (fn [app]
                  (fn [args]
                    (require-unit-manager app "space_unit_create")
                    (assert app.code-dir "space_unit_create requires app.code-dir")
-                   (assert (string.match args.id "^[%w_-]+$")
-                           "unit id must be alphanumeric with underscores and hyphens")
-                    (local file-path (fs.join-path app.code-dir (.. args.id ".fnl")))
-                    (when (fs.exists file-path)
-                      (error (.. "unit file already exists: " file-path)))
-                    (fs.write-file file-path args.source)
-                    (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
-                    (local unit
-                      (Units.ModuleUnit {:id (.. "user-" args.id)
-                                         :module-name args.id
-                                         :module-paths module-paths
-                                         :source :user
-                                         :owned-paths [file-path]}))
-                     (app.unit-manager:register unit)
+                    (assert (string.match args.id "^[%w_-]+$")
+                            "unit id must be alphanumeric with underscores and hyphens")
+                    (local flat-file (fs.join-path app.code-dir (.. args.id ".fnl")))
+                    (local dir-path (fs.join-path app.code-dir args.id))
+                    (when (fs.exists flat-file)
+                      (error (.. "unit file already exists: " flat-file)))
+                    (when (fs.exists dir-path)
+                      (error (.. "unit directory already exists: " dir-path)))
+                     (local flat-first-module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+                     (local dir-first-module-paths (.. app.code-dir "/?/init.fnl;" app.code-dir "/?.fnl"))
+                      (local (file-path cleanup-path response-fields)
+                         (if args.directory
+                           (do
+                             (local init-path (fs.join-path dir-path "init.fnl"))
+                             (fs.create-dirs dir-path)
+                             (local (write-ok write-err)
+                               (pcall fs.write-file init-path args.source))
+                             (when (not write-ok)
+                               (fs.remove-all dir-path)
+                               (error (.. "create failed to write init.fnl: " (tostring write-err))))
+                               (local unit
+                                 (Units.ModuleUnit {:id (.. "user-" args.id)
+                                                    :module-name args.id
+                                                    :module-paths dir-first-module-paths
+                                                    :source :user
+                                                    :owned-paths [dir-path init-path]}))
+                              (values init-path dir-path
+                                       {:directory true :files [init-path] :unit unit}))
+                           (do
+                             (local (write-ok write-err)
+                               (pcall fs.write-file flat-file args.source))
+                             (when (not write-ok)
+                               (error (.. "create failed to write file: " (tostring write-err))))
+                              (local unit
+                                (Units.ModuleUnit {:id (.. "user-" args.id)
+                                                   :module-name args.id
+                                                   :module-paths flat-first-module-paths
+                                                   :source :user
+                                                   :owned-paths [flat-file]}))
+                              (values flat-file flat-file
+                                      {:file flat-file :unit unit}))))
+                     (local unit response-fields.unit)
+                     (set response-fields.unit nil)
+                     (local (reg-ok reg-err) (pcall #(app.unit-manager:register unit)))
+                     (when (not reg-ok)
+                       (fs.remove-all cleanup-path)
+                       (error (.. "create failed, register error: " (tostring reg-err))))
                      (local (load-ok load-err) (pcall #(unit:load)))
                      (when (not load-ok)
-                        (local (unload-ok unload-err) (pcall #(unit:unload {})))
-                        (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
-                        (app.unit-manager:unregister unit.id)
-                        (fs.remove-all file-path)
-                        (error
-                          (..
-                            "create failed: " (tostring load-err)
-                            (if (not unload-ok) (.. " (cleanup also failed: " (tostring unload-err) ")") "")
-                            (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") ""))))
-                     (json.dumps {:id unit.id :module-name unit.module-name :file file-path :loaded (unit:loaded?)})))})
+                       (local (unload-ok unload-err) (pcall #(unit:unload {})))
+                       (local (purge-ok purge-err) (pcall #(unit:force-purge-module-cache!)))
+                       (app.unit-manager:unregister unit.id)
+                       (fs.remove-all cleanup-path)
+                       (error
+                         (..
+                           "create failed: " (tostring load-err)
+                           (if (not unload-ok) (.. " (cleanup also failed: " (tostring unload-err) ")") "")
+                           (if (not purge-ok) (.. " (purge also failed: " (tostring purge-err) ")") ""))))
+                     (local response {:id unit.id
+                                      :module-name unit.module-name
+                                      :loaded (unit:loaded?)})
+                     (each [k v (pairs response-fields)]
+                       (tset response k v))
+                     (json.dumps response)))})
 
   (adapters:register
     {:id "unit.register"
@@ -415,18 +524,21 @@
                                            :loaded (existing:loaded?) :reloaded true}))
                             (json.dumps {:id existing.id :module-name existing.module-name
                                          :loaded true :already-registered true}))
-                        (do
-                          (local init-path (fs.join-path app.code-dir source-dir-name "init.fnl"))
+                         (do
+                           (local flat-file (fs.join-path app.code-dir (.. source-dir-name ".fnl")))
+                           (assert (not (fs.exists flat-file))
+                                   (.. "a flat unit file conflicts with this module name: " flat-file))
+                           (local init-path (fs.join-path app.code-dir source-dir-name "init.fnl"))
                           (assert (fs.exists init-path)
                                   (.. "init.fnl not found at " init-path
                                       ". Create the directory and init.fnl first."))
-                          (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+                           (local module-paths (.. app.code-dir "/?/init.fnl;" app.code-dir "/?.fnl"))
                           (local unit
                             (Units.ModuleUnit {:id unit-id
                                                :module-name source-dir-name
                                                :module-paths module-paths
                                                :source :user
-                                               :owned-paths [init-path]}))
+                                                :owned-paths [(fs.join-path app.code-dir source-dir-name) init-path]}))
                           (app.unit-manager:register unit)
                           (local (load-ok load-err) (pcall #(unit:load)))
                           (when (not load-ok)
@@ -462,19 +574,23 @@
   (adapters:register
     {:id "unit.edit-file"
      :mcp-name "space_unit_edit_file"
-     :description (.. "Edit one existing file inside a user unit directory and hot reload the unit. "
-                      "The path must be relative to the unit directory; use this for multi-file units.")
+      :description (.. "Edit one file inside a user unit directory and hot reload the unit. "
+                       "Set :create? true to create a new file. The path must be relative "
+                       "to the unit directory; use this for multi-file units.")
      :inputSchema {:type "object"
                    :properties {:id {:type "string" :description "Unit ID to edit"}
-                                :path {:type "string" :description "Relative path inside the unit directory"}
-                                :source {:type "string" :description "New file content"}}
+                                 :path {:type "string" :description "Relative path inside the unit directory"}
+                                 :source {:type "string" :description "New file content"}
+                                 :create? {:type "boolean" :description "Create the file if it does not exist"}}
                    :required ["id" "path" "source"]}
      :make-run (fn [app]
                  (fn [args]
                    (assert app.code-dir "space_unit_edit_file requires app.code-dir")
                    (local unit (assert-user-unit app args.id "space_unit_edit_file"))
-                   (local file (resolve-unit-file app unit args.path "space_unit_edit_file"))
-                   (write-unit-file-and-reload! app unit file args.source "space_unit_edit_file")))})
+                    (local file (resolve-unit-file app unit args.path "space_unit_edit_file" args.create?))
+                    (if (fs.exists file)
+                        (write-unit-file-and-reload! app unit file args.source "space_unit_edit_file")
+                        (write-new-unit-file-and-reload! app unit file args.source "space_unit_edit_file"))))})
 
   (adapters:register
     {:id "unit.apply-patch"
@@ -774,10 +890,10 @@
          "Each unit is a file in the user code directory exporting a table with these functions:\n"
          "  (fn init [] ...)       -- called on load, sets up state/callbacks/signals\n"
          "  (fn drop [] ...)       -- called on unload, teardown everything\n"
-          "  (fn snapshot [] ...)   -- optional: return current state for hot reload\n"
-          "  (fn restore [state] ...) -- optional: reapply state after hot reload\n"
-          "  {:init init :drop drop :snapshot snapshot :restore restore}\n"
-          "\n{:: Available libraries ::}\n"
+         "  (fn snapshot [] ...)   -- optional: return current state for hot reload\n"
+         "  (fn restore [state] ...) -- optional: reapply state after hot reload\n"
+         "  {:init init :drop drop :snapshot snapshot :restore restore}\n"
+         "\n{:: Available libraries ::}\n"
          "fs       -- filesystem: read-file, write-file, list-dir, exists, create-dirs, join-path\n"
          "json     -- JSON: dumps (encode), loads (decode)\n"
          "signal   -- Signal() creates pub/sub: :emit payload, :connect fn, :disconnect fn\n"
@@ -787,104 +903,36 @@
          "\n{:: Global app table ::}\n"
          "The global `app` holds all runtime state. Key fields:\n"
          "  app.canvas-visible?        -- bool\n"
-         "  app.active-canvas-mode     -- \"drawing\" or \"graph\" or \"board\" or nil\n"
+         "  app.active-canvas-mode     -- current canvas mode name or nil\n"
          "  app.active-interaction-surface -- \"scene\" or \"canvas\"\n"
          "  app.code-dir               -- user code directory for user units\n"
          "  app.canvas                  -- Canvas object with .build-context, .camera, .half-width, etc.\n"
          "  app.clickables              -- Clickable registry for pointer input routing\n"
          "Use `space_unit_eval` with expressions like `app.canvas-visible?` to inspect.\n"
-         "\n{:: Known app signals ::}\n"
-         "  app.canvas-shell-changed  -- payload: {current {interaction-surface canvas-mode canvas-visible?}}\n"
-         "  app.canvas-modes-changed  -- fires when canvas modes are registered/unregistered\n"
-         "\n{:: Canvas mode architecture ::}\n"
-         "To create a canvas mode (like drawing, graph, or board), register a mode spec with\n"
-         "CanvasModes.register-mode({...}). The spec has these fields:\n"
-         "  :id         -- unique string id (e.g. \"bubbles\")\n"
-         "  :label      -- display name for sidebar button\n"
-         "  :icon       -- material icon name (must exist in assets/material-design-icons/icons.txt)\n"
-         "  :button-name -- unique string for the sidebar button widget\n"
-         "  :show-in-sidebar? -- bool, whether to show in the mode icon rail\n"
-         "  :activate   -- (fn [ctx] -> session) called on mode activation\n"
-         "  :deactivate -- (fn [ctx session] -> ...) called on deactivation\n"
-         "  :snapshot   -- optional (fn [ctx session] -> state) for state capture\n"
-         "  :restore    -- optional (fn [ctx session state] -> bool) for state restore\n"
-         "\n"
-         "Use CanvasModes.mode-registered? to check existence. CanvasModes.resolve returns\n"
-         "the canonical mode id string; use CanvasModes.spec to inspect label/icon/buttons.\n"
-         "\n"
-         "Inside activate(ctx), call these setters to wire up the mode:\n"
-         "  ctx:set-root-actions!(fn)       -- context menu: (fn [context]) -> [action-entries]\n"
-         "  ctx:set-update!(fn)             -- per-frame: (fn [{:world :runtime :delta}])\n"
-         "  ctx:set-input-handlers!(tbl)    -- {:mouse-button-down fn :mouse-motion fn :key-down fn}\n"
-         "  ctx:set-left-dock-builder!(fn)  -- sidebar: (fn [build-ctx]) -> widget-entity\n"
-         "  ctx:set-context-enricher!(fn)   -- inject data into context menus\n"
-         "  ctx:set-target-enabled!(fn)     -- pointer hit filter: (fn [target]) -> bool\n"
-         "  ctx:set-command-hints-provider!(fn) -- command hints for bottom bar\n"
-         "  ctx:set-drawing-enabled!(bool)  -- bool, whether pen/touch input is enabled\n"
-         "  ctx:set-delete-selection!(fn)   -- Del key: (fn []) -> bool\n"
-         "  ctx:set-activate-focused!(fn)   -- Enter key: (fn []) -> bool\n"
-         "  ctx:defer-cleanup!(fn)          -- register cleanup called on deactivation\n"
-         "\n"
-         "The update hook receives {:world :runtime :delta}. runtime.canvas.build-context\n"
-         "is the BuildContext for rendering. Add your own fields to runtime in activate.\n"
-         "\n"
-         "Input handlers receive (ctx payload). payload has .button, .x, .y for mouse.\n"
-         "Convert screen coords to world coords:\n"
-         "  (local ray (app.canvas:screen-pos-ray payload))\n"
-         "  (local world-pos ray.origin)  ;; glm.vec3 with .x .y .z\n"
-          "\n{:: Board mode extensions ::}\n"
-          "Board mode hosts arbitrary spatial widgets. Runtime units should extend it by\n"
-          "registering item types instead of editing board-canvas-mode-unit.fnl:\n"
-          "  (local BoardRegistry (require :board/registry))\n"
-          "  (BoardRegistry.register-item-type {:id \"my-item\" :label \"My Item\"\n"
-          "                                  :builder (fn [item view] widget-builder)} owner)\n"
-          "The builder must return a widget builder; the built widget must expose .layout and .drop.\n"
-          "Unregister runtime extensions with BoardRegistry.unregister-owner in unit drop.\n"
-          "Built-in string board items use entities/string for content and entities/link for\n"
-          "semantic connections. Board item transforms belong to the board, not the entity.\n"
-          "\n{:: Rendering from user units ::}\n"
-         "The BuildContext provides raw triangle rendering via VectorBuffer.\n"
-         "Vertex stride: 8 floats = position(glm.vec3) + color(glm.vec4) + depth(float).\n"
-         "\n"
-         "VectorBuffer API:\n"
-         "  ctx.triangle-vector:allocate(n-floats) -> handle\n"
-         "  :set-glm-vec3(handle, offset, glm-vec3) -- write vec3\n"
-         "  :set-glm-vec4(handle, offset, glm-vec4) -- write vec4\n"
-         "  :set-float(handle, offset, value) -- write float\n"
-         "  :delete(handle) -- free allocation\n"
-         "\n"
-         "DynamicTriangleBuffer pattern (replicate this):\n"
-         "  var handle, size; ensure-handle(n): if size changed, untrack old, delete, allocate\n"
-         "  update(vertices): write each vertex {position color depth} at (* (- i 1) 8),\n"
-         "    then call ctx:track-triangle-handle(handle, nil) to register for rendering\n"
-         "  drop(): ctx:untrack-triangle-handle(handle), ctx.triangle-vector:delete(handle)\n"
-         "\n"
-         "Graphics helpers:\n"
-         "  (glm.vec4 r g b a)      -- r,g,b,a in 0.0..1.0\n"
-         "  (glm.vec3 x y depth)    -- pos, higher depth = behind, lower = front\n"
-         "  (glm.length v), (glm.normalize v), (+ v1 v2), (- v1 v2), (* v scalar)\n"
-         "\n"
-         "Canvas bounds from runtime.canvas:\n"
-         "  canvas.half-width, canvas.half-height  -- view half-extents in world units\n"
-         "  canvas.camera.position.x, .y           -- camera center in world\n"
-         "  Bounds: left=cam.x-hw, right=cam.x+hw\n"
-         "\n"
-         "For textures: ctx:get-image-batch(texture) returns batch with .vector (10 floats/vert).\n"
-         "Read drawing/render.fnl for the full DynamicTriangleBuffer + DrawingRender code.\n"
-          "\n{:: Multi-file units ::}\n"
-          "For complex units, use subdirectories:\n"
-         "  <code-dir>/<name>/init.fnl     -- main module (exports load/unload/snapshot/restore)\n"
+         "\n{:: Code discovery workflow ::}\n"
+         "Before writing non-trivial unit code, use generic code exploration tools to\n"
+         "discover existing patterns instead of relying on memory or this prompt.\n"
+         "Use space_app_search to find relevant modules and call sites, then\n"
+         "space_app_read_file or space_unit_read_file to inspect the exact code.\n"
+         "Prefer matching established contracts over inventing new integration points.\n"
+         "Units may call runtime APIs directly from init/drop, but every registration,\n"
+         "subscription, widget, signal handler, or global mutation must be cleaned up\n"
+         "explicitly in drop.\n"
+         "\n{:: Multi-file units ::}\n"
+         "For complex units, use subdirectories:\n"
+         "  <code-dir>/<name>/init.fnl     -- main module (exports init/drop/snapshot/restore)\n"
          "  <code-dir>/<name>/render.fnl   -- custom renderer (exports factory)\n"
          "  <code-dir>/<name>/input.fnl    -- input handlers\n"
          "  <code-dir>/<name>/controller.fnl -- business logic / state\n"
-          "\n"
-          "For existing multi-file units, edit files with space_unit_apply_patch for small exact\n"
-          "replacements, or space_unit_edit_file for full-file rewrites. Avoid shell/perl/sed\n"
-          "for unit edits; these tools hot reload automatically. To load a new directory-style\n"
-          "unit after its directory and init.fnl already exist, call space_unit_register\n"
-          "{id \"<name>\"}.\n"
-          "Submodules use (require :name/render) (slash syntax);\n"
-          "Fennel converts slashes to dots internally, matching module paths.\n"
+         "\n"
+          "Create new multi-file units with space_unit_create {directory true}. Add new\n"
+         "submodule files with space_unit_edit_file {create? true}. For existing files,\n"
+         "edit with space_unit_apply_patch for small exact replacements or\n"
+         "space_unit_edit_file for full-file rewrites. Avoid shell/perl/sed for unit\n"
+         "edits; these tools hot reload automatically. To load a directory-style unit\n"
+         "that already exists on disk, call space_unit_register {id \"<name>\"}.\n"
+         "Submodules use (require :name/render) (slash syntax);\n"
+         "Fennel converts slashes to dots internally, matching module paths.\n"
          "\n{:: Idempotency ::}\n"
          "Before creating, call space_unit_list to check for existing units. Skip creation\n"
          "if the unit already exists and you were not asked to modify it.\n"
@@ -901,99 +949,100 @@
          "  graph/              -- graph core, views, nodes\n"
          "  llm/presets/builtins/ -- agent tool definitions\n"
          "  tests/              -- test modules (fast.fnl lists all)\n"
-          "\n{:: Search patterns ::}\n"
-         "rg \"register-mode\" assets/lua/         -- find mode registrations\n"
-         "rg \"triangle-vector\" assets/lua/       -- find rendering patterns\n"
-         "rg \"set-update!\" assets/lua/           -- find update hook usage\n"
-         "rg -n -A 30 \"fn DrawingRender\" assets/lua/drawing/render.fnl  -- read a function\n"
-         "rg -n \"\" assets/lua/<file>.fnl          -- read entire file\n"
-          "\n{:: Debugging runtime errors ::}\n"
-          "When a unit fails at runtime (activation error, signal handler crash, etc.),\n"
-           "the error and full traceback are written to the space log file. Use these tools:\n"
-           "\n"
-           "  1. space_unit_read_log            -- Read last 100 lines (fast overview)\n"
-           "  2. space_unit_read_log {lines 200 grep \"bubbles\"}  -- Filter for your unit\n"
-           "  3. space_unit_read_log {offset 200 limit 80}  -- Read a specific range\n"
-           "  4. space_app_read_file <log-path> -- Read the entire log only when needed\n"
-          "\n"
-          "The log path is in the unit context above. Always check the log after:\n"
-          "  - Creating a new unit (space_unit_create)\n"
-          "  - Editing a unit's source code (space_unit_edit)\n"
-          "  - Reloading a unit (space_unit_reload)\n"
-          "  - Switching to a canvas mode that uses your unit\n"
-          "\n"
-          "Look for the most recent ERROR entry containing your unit's id or file path.\n"
-          "The error trace shows the exact file and line number of the failure.\n"
-           "Use space_unit_read_log for log slicing instead of shell commands.\n"
-          "\n{:: Unit testing ::}\n"
-          "Every user unit MUST have thorough tests. Create tests alongside your unit code\n"
-          "using space_unit_create_test and run them with space_unit_run_tests.\n"
-          "\n"
-          "Test file convention:\n"
-          "  code-dir/<unit>/test-init.fnl        -- unit tests (export/init/drop)\n"
-          "  code-dir/<unit>/test-render.fnl      -- render logic tests\n"
-          "  code-dir/<unit>/test-integration.fnl  -- integration tests\n"
-          "\n"
-          "Test module structure:\n"
-          "  ;; test-init.fnl\n"
-          "  (local runner (require :tests/runner))\n"
-          "  (local tests [])\n"
-          "  (table.insert tests {:name \"description of what is tested\"\n"
-          "                       :fn (fn []\n"
-          "                             ;; setup: load the unit, init state\n"
-          "                             ;; action: trigger behavior\n"
-          "                             ;; assert: verify expected result\n"
-          "                             (assert (= expected actual) \"failure message\"))})\n"
-          "  (fn main [] (runner.run-tests {:name \"unit init\" :tests tests}))\n"
-          "  {:main main :tests tests}\n"
-          "\n"
-          "Test environment (available without require):\n"
-          "  app, app.engine          -- headless engine with mock OpenGL\n"
-          "  app.engine.events        -- engine event signals (auto-cleared between tests)\n"
-          "  reset-engine-events      -- global fn: clear all engine event signals\n"
-          "  assert, type, pairs, ipairs -- standard Lua globals\n"
-          "\n"
-          "Available with require:\n"
-          "  (require :fs)            -- filesystem ops\n"
-          "  (require :json)          -- JSON encode/decode\n"
-          "  (require :signal)        -- Signal() pub/sub\n"
-          "  (require :fennel)        -- compile-string, eval\n"
-          "  (require :logging)       -- logging.debug/info/warn/error\n"
-          "  (require :glm)           -- vec3, vec4, mat4, +, -, *, /, length, normalize\n"
-          "\n"
-          "Required test patterns (cover all of these):\n"
-          "  1. init/drop: Load the unit, call init, verify state exists. Call drop, verify\n"
-          "     cleanup. Load again, verify fresh state.\n"
-          "  2. Idempotency: Call init twice without drop — should be safe or error clearly.\n"
-          "  3. snap/restore (if unit exports them): Capture state, modify, restore, verify.\n"
-          "  4. Signal wiring: Connect handlers, emit signals, verify handlers receive payload.\n"
-          "     Disconnect, emit again, verify handler not called.\n"
-          "  5. Error handling: Feed bad inputs, verify the unit errors with clear messages.\n"
-          "  6. State isolation: Verify the unit does not leak values to the global scope.\n"
-          "\n"
-          "Integration test patterns (in test-integration.fnl):\n"
-          "  For canvas-mode units, test the full activate/deactivate cycle:\n"
-          "  - Create a mock app with needed fields (canvas, signals, clickables)\n"
-          "  - Register the canvas mode via CanvasModes.register-mode\n"
-          "  - Call activate, verify the returned session has expected structure\n"
-          "  - Simulate update calls, verify state updates correctly\n"
-          "  - Call deactivate, verify cleanup\n"
-          "  See test-agent-units-online.fnl for a full mock-app blueprint.\n"
-          "\n"
-          "For controller units, test business logic in isolation:\n"
-          "  - Import the controller module, call its functions with test inputs\n"
-          "  - Verify return values and state mutations\n"
-          "  - Test edge cases: empty state, max values, nil inputs\n"
-          "\n"
-           "Workflow after creating/editing a unit:\n"
-           "  1. Create test: space_unit_create_test {id \"user-bubbles\" test-name \"init\" source \"...\"}\n"
-           "  2. Run tests:  space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
-           "  3. Check log:  space_unit_read_log {grep \"bubbles\"}  -- if tests failed\n"
-           "  4. Read source/test files with space_unit_read_file when needed.\n"
-           "  5. Fix source: space_unit_apply_patch {id \"user-bubbles\" path \"controller.fnl\" old \"...\" new \"...\"}\n"
-           "  6. Re-run:     space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
-          "  7. Repeat 3-6 until all tests pass\n"
-          "\n{:: Unit code style (from AGENTS.md) ::}\n"
+         "\n{:: Search patterns ::}\n"
+         "space_app_search {pattern \"register-mode\" path \"assets/lua\" include \"*.fnl\"}\n"
+         "space_app_search {pattern \"triangle-vector\" path \"assets/lua\" include \"*.fnl\"}\n"
+         "space_app_search {pattern \"set-update!\" path \"assets/lua\" include \"*.fnl\"}\n"
+         "space_app_read_file {path \"assets/lua/drawing/render.fnl\"}\n"
+         "\n{:: Debugging runtime errors ::}\n"
+         "When log tools are available and a unit fails at runtime (activation error,\n"
+         "signal handler crash, etc.), the error and full traceback are written to\n"
+         "the space log file. Use these tools:\n"
+         "\n"
+         "  1. space_unit_read_log            -- Read last 100 lines (fast overview)\n"
+         "  2. space_unit_read_log {lines 200 grep \"bubbles\"}  -- Filter for your unit\n"
+         "  3. space_unit_read_log {offset 200 limit 80}  -- Read a specific range\n"
+         "  4. space_app_read_file <log-path> -- Read the entire log only when needed\n"
+         "\n"
+         "The log path is in the unit context above. Always check the log after:\n"
+         "  - Creating a new unit (space_unit_create)\n"
+         "  - Editing a unit's source code (space_unit_edit)\n"
+         "  - Reloading a unit (space_unit_reload)\n"
+         "  - Switching to a canvas mode that uses your unit\n"
+         "\n"
+         "Look for the most recent ERROR entry containing your unit's id or file path.\n"
+         "The error trace shows the exact file and line number of the failure.\n"
+         "Use space_unit_read_log for log slicing instead of shell commands.\n"
+         "\n{:: Unit testing ::}\n"
+         "When test tools are available, every user unit MUST have thorough tests.\n"
+         "Create tests alongside your unit code using space_unit_create_test and run\n"
+         "them with space_unit_run_tests.\n"
+         "\n"
+         "Test file convention:\n"
+         "  code-dir/<unit>/test-init.fnl        -- unit tests (export/init/drop)\n"
+         "  code-dir/<unit>/test-render.fnl      -- render logic tests\n"
+         "  code-dir/<unit>/test-integration.fnl  -- integration tests\n"
+         "\n"
+         "Test module structure:\n"
+         "  ;; test-init.fnl\n"
+         "  (local runner (require :tests/runner))\n"
+         "  (local tests [])\n"
+         "  (table.insert tests {:name \"description of what is tested\"\n"
+         "                       :fn (fn []\n"
+         "                             ;; setup: load the unit, init state\n"
+         "                             ;; action: trigger behavior\n"
+         "                             ;; assert: verify expected result\n"
+         "                             (assert (= expected actual) \"failure message\"))})\n"
+         "  (fn main [] (runner.run-tests {:name \"unit init\" :tests tests}))\n"
+         "  {:main main :tests tests}\n"
+         "\n"
+         "Test environment (available without require):\n"
+         "  app, app.engine          -- headless engine with mock OpenGL\n"
+         "  app.engine.events        -- engine event signals (auto-cleared between tests)\n"
+         "  reset-engine-events      -- global fn: clear all engine event signals\n"
+         "  assert, type, pairs, ipairs -- standard Lua globals\n"
+         "\n"
+         "Available with require:\n"
+         "  (require :fs)            -- filesystem ops\n"
+         "  (require :json)          -- JSON encode/decode\n"
+         "  (require :signal)        -- Signal() pub/sub\n"
+         "  (require :fennel)        -- compile-string, eval\n"
+         "  (require :logging)       -- logging.debug/info/warn/error\n"
+         "  (require :glm)           -- vec3, vec4, mat4, +, -, *, /, length, normalize\n"
+         "\n"
+         "Required test patterns (cover all of these):\n"
+         "  1. init/drop: Load the unit, call init, verify state exists. Call drop, verify\n"
+         "     cleanup. Load again, verify fresh state.\n"
+         "  2. Idempotency: Call init twice without drop — should be safe or error clearly.\n"
+         "  3. snap/restore (if unit exports them): Capture state, modify, restore, verify.\n"
+         "  4. Signal wiring: Connect handlers, emit signals, verify handlers receive payload.\n"
+         "     Disconnect, emit again, verify handler not called.\n"
+         "  5. Error handling: Feed bad inputs, verify the unit errors with clear messages.\n"
+         "  6. State isolation: Verify the unit does not leak values to the global scope.\n"
+         "\n"
+         "Integration test patterns (in test-integration.fnl):\n"
+         "  For canvas-mode units, test the full activate/deactivate cycle:\n"
+         "  - Create a mock app with needed fields (canvas, signals, clickables)\n"
+         "  - Register the canvas mode via CanvasModes.register-mode\n"
+         "  - Call activate, verify the returned session has expected structure\n"
+         "  - Simulate update calls, verify state updates correctly\n"
+         "  - Call deactivate, verify cleanup\n"
+         "  See test-agent-units-online.fnl for a full mock-app blueprint.\n"
+         "\n"
+         "For controller units, test business logic in isolation:\n"
+         "  - Import the controller module, call its functions with test inputs\n"
+         "  - Verify return values and state mutations\n"
+         "  - Test edge cases: empty state, max values, nil inputs\n"
+         "\n"
+         "Workflow after creating/editing a unit:\n"
+         "  1. Create test: space_unit_create_test {id \"user-bubbles\" test-name \"init\" source \"...\"}\n"
+         "  2. Run tests:  space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
+         "  3. Check log:  space_unit_read_log {grep \"bubbles\"}  -- if tests failed\n"
+         "  4. Read source/test files with space_unit_read_file when needed.\n"
+         "  5. Fix source: space_unit_apply_patch {id \"user-bubbles\" path \"controller.fnl\" old \"...\" new \"...\"}\n"
+         "  6. Re-run:     space_unit_run_tests {id \"user-bubbles\" test-name \"init\"}\n"
+         "  7. Repeat 3-6 until all tests pass\n"
+         "\n{:: Unit code style (from AGENTS.md) ::}\n"
          "- Four-space indentation, no trailing whitespace\n"
          "- Declare locals at top: (local fs (require :fs))\n"
          "- Use (var val) for mutables, (local val) for immutables\n"
