@@ -1692,11 +1692,15 @@
     (set app.agent-approvals
          (AgentApprovals.AgentApprovals
            {:data-dir (fs.join-path app.user-data-dir "agent-approvals")
-            :policy {:normal :auto
-                     :filesystem-read :ask
-                     :filesystem-write :ask
-                     :destructive :ask
-                     :shell :ask}})))
+             :policy {:normal :auto
+                      :filesystem-read :ask
+                      :filesystem-write {:default :ask
+                                         :tools {:unit.create-test :auto}}
+                      :destructive :ask
+                      :shell {:default :ask
+                              :tools {:unit.create :auto
+                                      :unit.eval :auto
+                                      :unit.connect-signal :auto}}}})))
   (when (not app.agent-tool-surface)
     (set app.agent-tool-surface
          (AgentToolSurface.AgentToolSurface

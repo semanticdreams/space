@@ -114,7 +114,18 @@
     (if (= risk :normal)
         :approved
         (do
-          (local policy-action (or (. policy risk) :ask))
+          (local risk-policy (. policy risk))
+          (local tool-source (and context context.source))
+          (local tool-action
+            (and tool-source
+                 (= (type risk-policy) "table")
+                 risk-policy.tools
+                 (. risk-policy.tools tool-source)))
+          (local policy-action
+            (or tool-action
+                (if (= (type risk-policy) "table")
+                    (or risk-policy.default :ask)
+                    (or risk-policy :ask))))
           (if (= policy-action :auto)
               :approved
               (= policy-action :deny)
@@ -125,7 +136,7 @@
     (assert (= (type callbacks) "table") "request-risk requires callbacks table")
     (assert (= (type callbacks.on-approved) "function") "request-risk requires on-approved callback")
     (assert (= (type callbacks.on-denied) "function") "request-risk requires on-denied callback")
-    (local state (self:check-risk risk))
+    (local state (self:check-risk risk context))
     (local key (request-key risk reason context))
     (local consumed-grant (if (= state :needs-approval)
                               (consume-grant key)
