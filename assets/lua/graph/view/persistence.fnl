@@ -14,8 +14,10 @@
     (local graph-data-dir (fs.join-path data-dir "graph-view"))
     (local metadata-path (fs.join-path graph-data-dir "metadata.json"))
     (var pending-save? false)
-    (var persisted {:positions {}})
+    (var persisted {:positions {}
+                    :presentations {}})
     (var persisted-positions persisted.positions)
+    (var persisted-presentations persisted.presentations)
 
     (fn finite-number? [value]
         (and (= (type value) :number)
@@ -63,10 +65,16 @@
                                       metadata-path
                                       decoded)))
             (local positions (or decoded.positions {}))
+            (local presentations (or decoded.presentations {}))
             (each [key value (pairs positions)]
                 (assert-valid-position key value "GraphViewPersistence load"))
-            (set persisted {:positions positions})
-            (set persisted-positions positions)))
+            (each [key value (pairs presentations)]
+                (assert (= value :expanded)
+                        (string.format "GraphViewPersistence load presentation for %s must be :expanded" key)))
+            (set persisted {:positions positions
+                            :presentations presentations})
+            (set persisted-positions positions)
+            (set persisted-presentations presentations)))
 
     (fn saved-position [_self node]
         (when (and node node.key)
@@ -74,6 +82,14 @@
             (when stored
                 (assert-valid-position node.key stored "GraphViewPersistence saved-position")
                 (ensure-glm-vec3 stored))))
+
+    (fn saved-presentation [_self node]
+        (when (and node node.key)
+            (local presentation (. persisted-presentations node.key))
+            (when presentation
+                (assert (= presentation :expanded)
+                        (string.format "GraphViewPersistence saved-presentation for %s must be :expanded" node.key))
+                presentation)))
 
     (fn capture-positions [_self points]
         (local positions {})
@@ -106,6 +122,7 @@
             (each [k v (pairs positions)]
                 (tset merged k v))
             (set persisted.positions merged)
+            (set persisted.presentations persisted-presentations)
             (local (write-ok err) (pcall (fn [] (JsonUtils.write-json! metadata-path persisted))))
             (when (not write-ok)
                 (error (string.format "GraphView failed to write %s: %s"
@@ -117,10 +134,23 @@
     (fn schedule-save [_self]
         (set pending-save? true))
 
+    (fn set-presentation [_self node presentation]
+        (assert (and node node.key) "GraphViewPersistence set-presentation requires a node with key")
+        (if presentation
+            (do
+                (assert (= presentation :expanded)
+                        "GraphViewPersistence only persists :expanded presentations")
+                (tset persisted-presentations node.key presentation))
+            (tset persisted-presentations node.key nil))
+        (set persisted.presentations persisted-presentations)
+        (set pending-save? true))
+
     (local self {:load load
                  :persist persist
                  :schedule-save schedule-save
                  :saved-position saved-position
+                 :saved-presentation saved-presentation
+                 :set-presentation set-presentation
                  :capture-positions capture-positions
                  :metadata-path metadata-path})
 

@@ -12,7 +12,7 @@
 (local GraphViewNodeViews (require :graph/view/node-views))
 (local GraphViewPersistence (require :graph/view/persistence))
 (local NodeBase (require :graph/node-base))
-(local LayeredPoint (require :layered-point))
+(local GraphNodePresentation (require :graph/view/presentation))
 
 (local new-triangle-line GraphViewEdge.new-triangle-line)
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
@@ -75,6 +75,9 @@
     (var expand-seq-timestamp 0)
     (var expand-seq-frontier [])
     (local expand-seq-timeout 800)
+    (local expanded-nodes {})
+    (local pinned-before-expand {})
+    (var toggle-node-presentation nil)
     (var dropped? false)
     (assert points "GraphView requires ctx.points")
     (assert vector "GraphView requires ctx.triangle-vector")
@@ -173,9 +176,14 @@
                        :fn (fn [_button event]
                                (when focus-manager
                                    (focus-manager:arm-auto-focus {:event event}))
-                               (views:open node)
-                               (when focus-manager
-                                   (focus-manager:clear-auto-focus)))})
+                                (views:open node)
+                                (when focus-manager
+                                    (focus-manager:clear-auto-focus)))})
+        (table.insert actions
+                      {:name (if (. expanded-nodes node) "Collapse" "Expand")
+                       :icon (if (. expanded-nodes node) "close_fullscreen" "open_in_full")
+                       :fn (fn [_button _event]
+                               (toggle-node-presentation node))})
         (table.insert actions
                       {:name "cube"
                        :fn (fn [_button _event]
@@ -225,6 +233,57 @@
                                   0))
             (point:set-layer-size focus-layer-index focus-size)
             (point:set-layer-size selection-layer-index selection-size)))
+
+    (fn bounds-for-presentation [presentation]
+        (when presentation
+            (if presentation._card-size
+                (do
+                    (local position (or (and presentation.layout presentation.layout.position)
+                                        presentation.position))
+                    (local size (or (and presentation.layout presentation.layout.size)
+                                    presentation._card-size))
+                    (when (and position size)
+                        {:position (glm.vec3 position.x position.y position.z)
+                         :size size}))
+                (do
+                    (local position presentation.position)
+                    (local size (or presentation.size 0))
+                    (local half (* size 0.5))
+                    (when position
+                        {:position (glm.vec3 (- position.x half)
+                                             (- position.y half)
+                                             (- position.z half))
+                         :size (glm.vec3 size size size)})))))
+
+    (fn attach-focus-bounds [node]
+        (local focus-node (. focus-nodes node))
+        (when (and focus-node focus)
+            (focus:attach-bounds
+                focus-node
+                {:get-bounds (fn [_self]
+                                  (bounds-for-presentation (. registry.points node)))})))
+
+    (fn bind-focus-node-activate [node focus-node]
+        (when focus-node
+            (set focus-node.activate
+                 (fn [_node opts]
+                     (local mod (and opts opts.event opts.event.mod))
+                     (if (Modifiers.alt-held? mod)
+                         (do
+                             (local ts (or (and opts opts.event opts.event.payload
+                                                opts.event.payload.timestamp) 0))
+                             (local continuing?
+                                 (and (> (length expand-seq-frontier) 0)
+                                      (> ts 0)
+                                      (<= (- ts expand-seq-timestamp) expand-seq-timeout)))
+                             (local frontier
+                                 (if continuing?
+                                     expand-seq-frontier
+                                     [(tostring node.key)]))
+                             (set expand-seq-frontier (expand-linked-frontier graph frontier))
+                             (set expand-seq-timestamp ts)
+                             true)
+                         (do (views:open node) true))))))
 
     (fn update-selection-set [nodes]
         (local next {})
@@ -315,11 +374,38 @@
         (when movables-handler
             (movables-handler:update-position node position)))
 
+    (fn compact-label-targets [nodes]
+        (local filtered [])
+        (each [_ node (ipairs (or nodes []))]
+            (when (not (. expanded-nodes node))
+                (table.insert filtered node)))
+        filtered)
+
     (fn update-labels [nodes opts]
-        (labels:update registry.points nodes opts))
+        (if nodes
+            (do
+                (local filtered (compact-label-targets nodes))
+                (when (> (length filtered) 0)
+                    (labels:update registry.points filtered opts)))
+            (do
+                (local filtered [])
+                (each [node _ (pairs registry.points)]
+                    (when (not (. expanded-nodes node))
+                        (table.insert filtered node)))
+                (labels:update registry.points filtered opts))))
 
     (fn refresh-label-positions [nodes]
-        (labels:refresh-positions registry.points nodes))
+        (if nodes
+            (do
+                (local filtered (compact-label-targets nodes))
+                (when (> (length filtered) 0)
+                    (labels:refresh-positions registry.points filtered)))
+            (do
+                (local filtered [])
+                (each [node _ (pairs registry.points)]
+                    (when (not (. expanded-nodes node))
+                        (table.insert filtered node)))
+                (labels:refresh-positions registry.points filtered))))
 
     (local graph-layout
           (GraphViewLayout {:layout layout
@@ -419,6 +505,86 @@
              (when movables-handler
                  (movables-handler:register node point))))
 
+    (fn presentation-position [presentation]
+        (glm.vec3 presentation.position.x
+                  presentation.position.y
+                  presentation.position.z))
+
+    (fn build-compact-presentation [node position]
+        (GraphNodePresentation.compact-point
+            {:points points
+             :position position
+             :pointer-target (or options.pointer-target
+                                 (and ctx ctx.pointer-target))
+             :depth-offset-step point-depth-offset-step
+             :base-depth-offset-index point-base-depth-offset
+             :base-layer-index base-layer-index
+             :layers [{:size 0
+                       :color resolved-focus-outline-color}
+                      {:size 0
+                       :color resolved-selection-border-color}
+                      {:size node.size
+                       :color node.color}]}))
+
+    (fn build-expanded-presentation [node position]
+        (local card-builder (GraphNodePresentation.card-builder
+                             {:node node
+                              :position position
+                              :size (glm.vec3 64.0 48.0 0)
+                              :depth-offset-index point-base-depth-offset
+                              :selection-color resolved-selection-border-color
+                              :focus-color resolved-focus-outline-color}))
+        (card-builder ctx))
+
+    (fn attach-presentation-events [node presentation]
+        (set presentation.on-click
+             (fn [_self _event]
+                 (local focus-node (. focus-nodes node))
+                 (when focus-node
+                     (focus-node:request-focus))))
+        (set presentation.on-double-click
+             (fn [_self event]
+                 (if (Modifiers.alt-held? (and event event.mod))
+                     (expand-linked-frontier graph [(tostring node.key)])
+                     (toggle-node-presentation node))))
+        (set presentation.on-right-click
+             (fn [_self event]
+                 (local focus-node (. focus-nodes node))
+                 (when focus-node
+                     (focus-node:request-focus))
+                 (local manager (get-menu-manager))
+                 (when manager
+                     (manager:open {:actions (node-menu-actions node)
+                                    :position (resolve-menu-position event)})))))
+
+    (fn detach-presentation [node presentation]
+        (when clickables
+            (clickables:unregister presentation)
+            (when clickables.unregister-right-click
+                (clickables:unregister-right-click presentation))
+            (clickables:unregister-double-click presentation)
+            (set presentation.on-double-click nil)
+            (set presentation.on-right-click nil))
+        (when movables-handler
+            (movables-handler:unregister node))
+        (set (. node-by-point presentation) nil)
+        (when presentation.drop
+            (presentation:drop)))
+
+    (fn install-presentation [node previous presentation]
+        (attach-presentation-events node presentation)
+        (clickables:register presentation)
+        (when clickables.register-right-click
+            (clickables:register-right-click presentation))
+        (clickables:register-double-click presentation)
+        (set (. registry.points node) presentation)
+        (set (. node-by-point presentation) node)
+        (when selector
+            (selector:replace-selectable previous presentation))
+        (register-movable node presentation)
+        (attach-focus-bounds node)
+        (update-point-state node))
+
     (fn detach-node-signals [node]
         (local record (. node-changed-handlers node))
         (when record
@@ -510,7 +676,7 @@
                 (assert-valid-position position "GraphView.add-node position" node)
                 (local idx (graph-layout:add-node node position (and node-opts node-opts.pinned)))
                 (assert (not (= idx nil)) "GraphView.add-node failed to allocate layout index")
-                (local point (LayeredPoint {:points points
+                (local point (GraphNodePresentation.compact-point {:points points
                                             :position position
                                             :pointer-target (or options.pointer-target
                                                                 (and ctx ctx.pointer-target))
@@ -526,38 +692,8 @@
                 (assert point (string.format "GraphView.add-node failed to create point for %s"
                                              (node-id node)))
                 (local focus-node (focus:create-node {:name (.. "graph-node-" (node-id node))
-                                                      :parent points-focus-scope}))
-                (when (and focus-node focus)
-                    (focus:attach-bounds
-                        focus-node
-                        {:get-bounds (fn [_self]
-                                        (when point.position
-                                            (local size (or point.size 0))
-                                            (local half (* size 0.5))
-                                            {:position (glm.vec3 (- point.position.x half)
-                                                                 (- point.position.y half)
-                                                                 (- point.position.z half))
-                                             :size (glm.vec3 size size size)}))}))
-                (when focus-node
-                    (set focus-node.activate
-                         (fn [_node opts]
-                             (local mod (and opts opts.event opts.event.mod))
-                             (if (Modifiers.alt-held? mod)
-                                 (do
-                                     (local ts (or (and opts opts.event opts.event.payload
-                                                        opts.event.payload.timestamp) 0))
-                                     (local continuing?
-                                         (and (> (length expand-seq-frontier) 0)
-                                              (> ts 0)
-                                              (<= (- ts expand-seq-timestamp) expand-seq-timeout)))
-                                     (local frontier
-                                         (if continuing?
-                                             expand-seq-frontier
-                                             [(tostring node.key)]))
-                                     (set expand-seq-frontier (expand-linked-frontier graph frontier))
-                                     (set expand-seq-timestamp ts)
-                                     true)
-                                 (do (views:open node) true)))))
+                                                       :parent points-focus-scope}))
+                (bind-focus-node-activate node focus-node)
                 (set (. focus-nodes node) focus-node)
                 (set (. node-by-focus focus-node) node)
                 (when (and focus-manager focus-node)
@@ -578,12 +714,7 @@
                      (fn [_self event]
                          (if (Modifiers.alt-held? (and event event.mod))
                              (expand-linked-frontier graph [(tostring node.key)])
-                             (do
-                                 (when focus-manager
-                                     (focus-manager:arm-auto-focus {:event event}))
-                                 (views:open node)
-                                 (when focus-manager
-                                     (focus-manager:clear-auto-focus))))))
+                             (toggle-node-presentation node))))
                 (set point.on-right-click
                      (fn [_self event]
                          (when focus-node
@@ -597,6 +728,7 @@
                     (clickables:register-right-click point))
                 (clickables:register-double-click point)
                 (registry:add-node node point idx (and node-opts node-opts.pinned))
+                (attach-focus-bounds node)
                 (register-movable node point)
                 (when selector
                     (selector:add-selectables [point]))
@@ -604,45 +736,64 @@
                 (update-point-state node)
                 (queue-label-refresh! node)
                 (attach-node-signals node)
-                (drain-pending-edges))))
+                (drain-pending-edges)
+                (when (= (persistence:saved-presentation node) :expanded)
+                    (toggle-node-presentation node)))))
 
     ;; Removed handle-edge-added from here as it was moved above
+
+    (set toggle-node-presentation
+         (fn [node]
+        (assert-not-dropped "toggle-node-presentation")
+        (when (not node) (lua "return nil"))
+        (local current-point (. registry.points node))
+        (when (not current-point) (lua "return nil"))
+        (local expanded? (. expanded-nodes node))
+        (local pos (presentation-position current-point))
+        (if expanded?
+            (do
+              (local new-point (build-compact-presentation node pos))
+              (detach-presentation node current-point)
+              (install-presentation node current-point new-point)
+              (set (. pinned node) (or (. pinned-before-expand node) false))
+              (set (. pinned-before-expand node) nil)
+              (set (. expanded-nodes node) nil)
+              (queue-label-refresh! node)
+              (persistence:set-presentation node nil)
+              (graph-layout:rebuild))
+            (do
+              (local new-card (build-expanded-presentation node pos))
+              (detach-presentation node current-point)
+              (install-presentation node current-point new-card)
+              (labels:drop-node node)
+              (set (. pinned-before-expand node) (. pinned node))
+              (set (. pinned node) true)
+              (set (. expanded-nodes node) true)
+              (persistence:set-presentation node :expanded)
+              (graph-layout:rebuild)))))
 
     (fn handle-node-replaced [payload]
         (assert-not-dropped "handle-node-replaced")
         (local existing (and payload payload.old))
         (local node (and payload payload.new))
         (when (and existing node)
+            (local was-expanded? (. expanded-nodes existing))
+            (local saved-pin-before (. pinned-before-expand existing))
+            (local had-saved-pin-before? (not (= saved-pin-before nil)))
             (when movables-handler
                 (movables-handler:unregister existing))
             (local replacement (registry:replace existing node))
-            (when replacement
+            (when was-expanded?
+                (set (. expanded-nodes node) true)
+                (set (. expanded-nodes existing) nil))
+            (when had-saved-pin-before?
+                (set (. pinned-before-expand node) saved-pin-before)
+                (set (. pinned-before-expand existing) nil))
+            (when (and replacement (not was-expanded?))
                 (when replacement.point
-                    (set replacement.point.on-double-click
-                         (fn [_self event]
-                             (if (Modifiers.alt-held? (and event event.mod))
-                                 (expand-linked-frontier graph [(tostring node.key)])
-                                 (do
-                                     (when focus-manager
-                                         (focus-manager:arm-auto-focus {:event event}))
-                                     (views:open node)
-                                     (when focus-manager
-                                         (focus-manager:clear-auto-focus))))))
-                    (set replacement.point.on-click
-                         (fn [_self _event]
-                             (local focus-node (. focus-nodes node))
-                             (when focus-node
-                                 (focus-node:request-focus))))
-                    (set replacement.point.on-right-click
-                         (fn [_self event]
-                             (local focus-node (. focus-nodes node))
-                             (when focus-node
-                                 (focus-node:request-focus))
-                             (local manager (get-menu-manager))
-                             (when manager
-                                 (manager:open {:actions (node-menu-actions node)
-                                                :position (resolve-menu-position event)})))))
-                (register-movable node replacement.point))
+                    (attach-presentation-events node replacement.point)
+                    (set (. node-by-point replacement.point) node)
+                    (register-movable node replacement.point)))
             (labels:move-label existing node)
             (views:move-view existing node)
             (detach-node-signals existing)
@@ -652,12 +803,46 @@
                 (set (. focus-nodes existing) nil)
                 (set (. focus-nodes node) focus-node)
                 (set (. node-by-focus focus-node) node)
+                (bind-focus-node-activate node focus-node)
+                (attach-focus-bounds node)
                 (when (= focused-node existing)
                     (set focused-node node)))
-            (each [i selected (ipairs selected-nodes)]
-                (when (= selected existing)
-                    (set (. selected-nodes i) node)))
-            (selection:set-selection selected-nodes)))
+            (local replacement-selection [])
+            (each [_ selected (ipairs selected-nodes)]
+                (table.insert replacement-selection
+                              (if (= selected existing) node selected)))
+            (selection:set-selection replacement-selection)
+            (when was-expanded?
+                ;; Rebuild the expanded card so its embedded widget belongs to the replacement node.
+                (local old-presentation replacement.point)
+                (set old-presentation.node node)
+                (attach-presentation-events node old-presentation)
+                (register-movable node old-presentation)
+                (attach-focus-bounds node)
+                (update-point-state node)
+                (local position (presentation-position old-presentation))
+                (local (build-ok replacement-card)
+                       (pcall (fn [] (build-expanded-presentation node position))))
+                (if build-ok
+                    (do
+                        (detach-presentation node old-presentation)
+                        (install-presentation node old-presentation replacement-card)
+                        (labels:drop-node node)
+                        (set (. pinned node) true)
+                        (set (. expanded-nodes node) true)
+                        (persistence:set-presentation node :expanded)
+                        (graph-layout:rebuild))
+                    (do
+                        (local compact (build-compact-presentation node position))
+                        (detach-presentation node old-presentation)
+                        (install-presentation node old-presentation compact)
+                        (set (. pinned node) (or (. pinned-before-expand node) false))
+                        (set (. pinned-before-expand node) nil)
+                        (set (. expanded-nodes node) nil)
+                        (queue-label-refresh! node)
+                        (persistence:set-presentation node nil)
+                        (graph-layout:rebuild)
+                        (error replacement-card))))))
 
     (fn handle-nodes-removed [payload]
         (assert-not-dropped "handle-nodes-removed")
@@ -684,12 +869,16 @@
                                                (point:drop)))}))
             (when (> removed-count 0)
                 (when selector
-                    (for [i (length selector.selectables) 1 -1]
-                        (table.remove selector.selectables i))
+                    (local remaining-selectables [])
                     (each [_ point (pairs registry.points)]
-                        (table.insert selector.selectables point))
+                        (table.insert remaining-selectables point))
+                    (selector:set-selectables remaining-selectables)
                     (selector:set-selected []))
                 (each [node _ (pairs removal-set)]
+                    (when (. expanded-nodes node)
+                        (persistence:set-presentation node nil))
+                    (set (. expanded-nodes node) nil)
+                    (set (. pinned-before-expand node) nil)
                     (local focus-node (. focus-nodes node))
                     (when focus-node
                         (focus-node:drop)
@@ -910,6 +1099,10 @@
              (set drag-active? false)
              (set drag-node nil)
              (clear-batched-graph-updates!)
+             (each [node _ (pairs expanded-nodes)]
+                 (set (. expanded-nodes node) nil))
+             (each [node _ (pairs pinned-before-expand)]
+                 (set (. pinned-before-expand node) nil))
              (set view.movable-targets (and movables-handler movables-handler.targets))
              (each [_ node (pairs nodes)]
                  (drop-node-artifacts node))
@@ -918,5 +1111,6 @@
              (each [node _ (pairs pinned)]
                  (set (. pinned node) nil))))
     view)
+
 
 GraphView

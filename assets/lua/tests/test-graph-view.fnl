@@ -6,6 +6,7 @@
 (local GraphViewLayout (require :graph/view/layout))
 (local GraphViewPersistence (require :graph/view/persistence))
 (local GraphViewNodeViews (require :graph/view/node-views))
+(local {: Layout : LayoutRoot} (require :layout))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local CodeDirNode (require :graph/nodes/code-dir))
 (local FnlModuleNode (require :graph/nodes/fnl-module))
@@ -82,10 +83,12 @@
                               :edit 4242
                               :close 4242
                               :cancel 4242
-                              :move_item 4242
-                              :select 4242
-                              :arrow_drop_down 4242
-                              :terminal 4242
+                               :move_item 4242
+                               :select 4242
+                               :arrow_drop_down 4242
+                               :open_in_full 4242
+                               :close_fullscreen 4242
+                               :terminal 4242
                               :settings 4242
                               :contrast 4242
                               :apps 4242
@@ -113,13 +116,15 @@
     (local options (or opts {}))
     (local focus-manager (FocusManager {:root-name "test-graph"}))
     (local focus-scope (focus-manager:create-scope {:name "test-graph-view"}))
+    (local layout-root (or options.layout-root (LayoutRoot {:log-dirt? false})))
     (local theme {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)
                           :label-color (glm.vec4 1 1 1 1)
                           :label-target-pixels 13.0
                           :label-min-scale 4.0
                           :edge-color (glm.vec4 0.6 0.6 0.6 1)}
                   :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})
-    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+    (local ctx (BuildContext {:layout-root layout-root
+                              :clickables (assert app.clickables "test requires app.clickables")
                               :hoverables (assert app.hoverables "test requires app.hoverables")
                               :theme theme
                               :focus-manager focus-manager
@@ -943,46 +948,472 @@
             (view:drop)
             (graph:drop))))
 
-(fn graph-opens-node-view-in-hud-on-double-click []
+(fn graph-expands-node-inline-on-double-click []
     (with-temp-data-dir
         (fn [_root]
             (local ctx (make-ctx))
             (local selector (ObjectSelector {:project (fn [position _opts] position)
                                              :ctx ctx
                                              :enabled? true}))
-            (local original-hud app.hud)
-            (when (not original-hud)
-                (local Hud (require :hud))
-                (set app.hud (Hud {:scene app.scene
-                                   :icons default-icons}))
-                (when app.hud
-                    (app.hud:build-default)))
-            (local hud app.hud)
-            (assert hud "Graph node view test requires app.hud")
             (local graph (Graph {}))
             (local view-controller (GraphView {:graph graph
-                                               :ctx ctx
-                                               :selector selector
-                                               :view-target hud}))
-            (local tiles hud.tiles)
-            (assert tiles "HUD tiles should exist for node views")
-            (local initial-count (length tiles.children))
+                                                :ctx ctx
+                                                :selector selector}))
             (local start graph.start)
             (local point (. view-controller.points start))
             (assert point.on-double-click "GraphView should attach double click handler to node point")
             (point:on-double-click {})
-            (local after-count (length tiles.children))
-            (assert (> after-count initial-count)
-                    "Double-clicking node should add its view to HUD tiles")
-            (view-controller.views:drop-node start)
-            (assert (= (length tiles.children) initial-count)
-                    "Closing node view should remove node view dialog from HUD")
+            (local card (. view-controller.points start))
+            (assert (not (= card point)) "Double-clicking node should replace compact point with expanded card")
+            (assert card._card-size "Expanded node should expose card bounds")
+            (assert card.view-widget "Expanded node should build the node view inline")
+            (assert (not (. view-controller.labels.labels start))
+                    "Expanded node should not keep a compact label")
+            (card:on-double-click {})
+            (local compact (. view-controller.points start))
+            (assert (not compact._card-size) "Double-clicking expanded card should restore compact point")
             (view-controller:drop)
             (graph:drop)
-            (selector:drop)
-            (when (and (not original-hud) app.hud)
-                (app.hud:drop)
-                (set app.hud nil)))))
+            (selector:drop))))
+
+(fn tracked-preview [state]
+    (fn [node _opts]
+        (fn [_ctx]
+            (set state.built-node node)
+            (local widget {:node node})
+            (fn measurer [self]
+                (set state.measured? true)
+                (set self.measure (or state.measure (glm.vec3 72 36 0))))
+            (fn constrained-measurer [self constraints]
+                (set state.constrained constraints)
+                (set self.measure (or state.constrained-measure state.measure (glm.vec3 70 32 0))))
+            (fn layouter [self]
+                (set state.laid-out? true)
+                (set state.laid-out-size self.size)
+                (set state.laid-out-position self.position)
+                (set state.depth-offset-index self.depth-offset-index))
+            (local layout (Layout {:name "tracked-graph-preview"
+                                   :measurer measurer
+                                   :constrained-measurer constrained-measurer
+                                   :layouter layouter}))
+            (set widget.layout layout)
+            (set widget.drop (fn [_self]
+                                 (set state.dropped? true)
+                                 (layout:drop)))
+            widget)))
+
+(fn graph-expanded-card-uses-preview-and-measures-child []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx}))
+            (local state {:measure (glm.vec3 73 37 0)
+                          :constrained-measure (glm.vec3 70 32 0)})
+            (var full-view-called? false)
+            (local node (Graph.GraphNode {:key "preview-card"
+                                          :view (fn [_node _opts]
+                                                    (set full-view-called? true)
+                                                    (fn [_ctx]
+                                                        (error "Expanded card should use preview, not full view")))
+                                          :preview (tracked-preview state)}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            (point:on-double-click {:mod 256})
+            (assert (not (. (. view.points node) :_card-size))
+                    "Alt+double-click should not toggle inline expansion")
+            (point:on-double-click {})
+            (local card (. view.points node))
+            (assert card._card-size "Plain double-click should expand node inline")
+            (assert (= card.layout.depth-offset-index 2)
+                    "Expanded card should render above graph edges")
+            (assert (= state.built-node node) "Expanded card should build the node preview")
+            (assert (not full-view-called?) "Expanded card should not build the full node view")
+            (ctx.layout-root:update)
+            (assert state.constrained "Expanded card should measure child with constraints")
+            (assert (= state.constrained.max.x 64.0)
+                    "Expanded card should constrain child to initial card width")
+            (assert (= state.constrained.max.y 48.0)
+                    "Expanded card should constrain child to initial card height")
+            (assert state.laid-out? "Expanded card should lay out child widget")
+            (assert (= state.laid-out-size.x card._card-size.x)
+                    "Expanded card child width should match card width")
+            (assert (= state.laid-out-size.y card._card-size.y)
+                    "Expanded card child height should match card height")
+            (assert (= state.depth-offset-index (+ card.layout.depth-offset-index 1))
+                    "Expanded card child should render above card background")
+            (assert (. view.pinned node) "Expanded node should be pinned")
+            (card:on-double-click {})
+            (assert (not (. view.pinned node)) "Collapsing should restore unpinned state")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-expanded-toggle-preserves-selection []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local selector (ObjectSelector {:project (fn [position _opts] position)
+                                             :ctx ctx
+                                             :enabled? true}))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :selector selector}))
+            (local node (Graph.GraphNode {:key "selected-toggle"
+                                          :preview (tracked-preview {})}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            (selector:set-selected [point])
+            (assert (= (. view.selected-nodes 1) node)
+                    "Fixture should select graph node before toggling")
+            (point:on-double-click {})
+            (local card (. view.points node))
+            (assert card._card-size "Plain double-click should expand selected node")
+            (assert (= (. selector.selected 1) card)
+                    "Expanded card should replace compact point in selector selection")
+            (assert (= (. view.selected-nodes 1) node)
+                    "GraphView selection should stay on node after expansion")
+            (card:on-double-click {})
+            (local compact (. view.points node))
+            (assert (not compact._card-size) "Second double-click should collapse selected node")
+            (assert (= (. selector.selected 1) compact)
+                    "Compact point should replace expanded card in selector selection")
+            (assert (= (. view.selected-nodes 1) node)
+                    "GraphView selection should stay on node after collapse")
+            (view:drop)
+            (graph:drop)
+            (selector:drop))))
+
+(fn graph-expanded-toggle-preserves-node-center []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx}))
+            (local node (Graph.GraphNode {:key "center-toggle"
+                                          :preview (tracked-preview {})}))
+            (local center (glm.vec3 10 20 0))
+            (graph:add-node node {:position center})
+            (local point (. view.points node))
+            (point:on-double-click {})
+            (local card (. view.points node))
+            (assert (= card.position.x center.x)
+                    "Expanded card position should remain the graph node center")
+            (assert (= card.position.y center.y)
+                    "Expanded card position should remain the graph node center")
+            (ctx.layout-root:update)
+            (assert (= card.layout.position.x (- center.x (/ card._card-size.x 2.0)))
+                    "Expanded card layout origin should be centered around graph node position")
+            (assert (= card.layout.position.y (- center.y (/ card._card-size.y 2.0)))
+                    "Expanded card layout origin should be centered around graph node position")
+            (local expanded-pos (view:get-position node))
+            (assert (= expanded-pos.x center.x)
+                    "GraphView position should stay anchored at node center while expanded")
+            (assert (= expanded-pos.y center.y)
+                    "GraphView position should stay anchored at node center while expanded")
+            (card:on-double-click {})
+            (local compact (. view.points node))
+            (assert (not compact._card-size) "Fixture should collapse back to compact point")
+            (assert (= compact.position.x center.x)
+                    "Collapsed compact point should keep original center")
+            (assert (= compact.position.y center.y)
+                    "Collapsed compact point should keep original center")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-remove-then-expand-keeps-selector-list-synchronized []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local selector (ObjectSelector {:project (fn [position _opts] position)
+                                             :ctx ctx
+                                             :enabled? true}))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :selector selector}))
+            (local a (Graph.GraphNode {:key "sync-a"
+                                       :preview (tracked-preview {})}))
+            (local b (Graph.GraphNode {:key "sync-b"}))
+            (local c (Graph.GraphNode {:key "sync-c"}))
+            (graph:add-node a {:position (glm.vec3 0 0 0)})
+            (graph:add-node b {:position (glm.vec3 10 0 0)})
+            (graph:add-node c {:position (glm.vec3 20 0 0)})
+            (local a-point (. view.points a))
+            (local b-point (. view.points b))
+            (selector:set-selected [b-point])
+            (view:remove-selected-nodes)
+            (assert (= (length selector.selectables) 2)
+                    "Selector public list should contain remaining graph nodes after removal")
+            (a-point:on-double-click {})
+            (local a-card (. view.points a))
+            (assert a-card._card-size "Remaining node should expand after a prior removal")
+            (assert (= (length selector.selectables) 2)
+                    "Selector public list should stay synchronized after remove then expand")
+            (var saw-card? false)
+            (var saw-old-point? false)
+            (var saw-removed? false)
+            (each [_ selectable (ipairs selector.selectables)]
+                (when (= selectable a-card)
+                    (set saw-card? true))
+                (when (= selectable a-point)
+                    (set saw-old-point? true))
+                (when (= selectable b-point)
+                    (set saw-removed? true)))
+            (assert saw-card? "Expanded card should replace compact point in selector public list")
+            (assert (not saw-old-point?) "Selector public list should not keep stale compact point")
+            (assert (not saw-removed?) "Selector public list should not keep removed point")
+            (view:drop)
+            (graph:drop)
+            (selector:drop))))
+
+(fn graph-expanded-toggle-failure-keeps-compact-point []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (var removed-quads 0)
+            (set ctx.get-rectangle-quad-batcher
+                 (fn [_self]
+                     {:upsert-quad (fn [_self _key _opts] nil)
+                      :remove-quad (fn [_self _key]
+                                       (set removed-quads (+ removed-quads 1)))}))
+            (local selector (ObjectSelector {:project (fn [position _opts] position)
+                                             :ctx ctx
+                                             :enabled? true}))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :selector selector}))
+            (fn assert-failed-expansion-keeps-compact-point [node expected-error]
+                (graph:add-node node {:position (glm.vec3 0 0 0)})
+                (local before-removed-quads removed-quads)
+                (local point (. view.points node))
+                (selector:set-selected [point])
+                (local (ok err) (pcall (fn [] (point:on-double-click {}))))
+                (assert (not ok) "Broken preview should make expansion fail loudly")
+                (assert (string.find (tostring err) expected-error 1 true)
+                        "Expansion failure should surface preview error")
+                (assert (= (. view.points node) point)
+                        "Failed expansion should keep the original compact point in registry")
+                (assert point.on-double-click
+                        "Failed expansion should keep compact point double-click handler")
+                (assert (= (. view.node-by-point point) node)
+                        "Failed expansion should keep compact point reverse mapping")
+                (assert (= (. selector.selected 1) point)
+                        "Failed expansion should preserve selector selection")
+                (assert (= (. view.selected-nodes 1) node)
+                        "Failed expansion should preserve GraphView selection")
+                (assert (> removed-quads before-removed-quads)
+                        "Failed expansion should drop partially built card background"))
+            (local build-error-node
+                   (Graph.GraphNode {:key "bad-preview-build"
+                                     :preview (fn [_node _opts]
+                                                  (fn [_ctx]
+                                                      (error "preview build failed")))}))
+            (assert-failed-expansion-keeps-compact-point build-error-node "preview build failed")
+            (local bad-layout-node
+                   (Graph.GraphNode {:key "bad-preview-layout"
+                                     :preview (fn [_node _opts]
+                                                  (fn [_ctx]
+                                                      {:layout {}}))}))
+            (assert-failed-expansion-keeps-compact-point bad-layout-node "set-root")
+            (view:drop)
+            (graph:drop)
+            (selector:drop))))
+
+(fn graph-expanded-card-rebuilds-preview-for-replacement []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx}))
+            (local first-state {})
+            (local second-state {})
+            (local first (Graph.GraphNode {:key "swap"
+                                           :preview (tracked-preview first-state)}))
+            (local second (Graph.GraphNode {:key "swap"
+                                            :preview (tracked-preview second-state)}))
+            (graph:add-node first {:position (glm.vec3 0 0 0)})
+            (local first-point (. view.points first))
+            (first-point:on-double-click {})
+            (assert (= (. view.points first :view-widget :node) first)
+                    "Expanded card should initially belong to original node")
+            (graph:add-node second)
+            (local replacement-card (. view.points second))
+            (assert replacement-card._card-size
+                    "Replacement for expanded node should stay expanded")
+            (assert (= replacement-card.view-widget.node second)
+                    "Replacement expanded card should rebuild for replacement node")
+            (assert first-state.dropped?
+                    "Replacing expanded node should drop stale preview widget")
+            (assert (not (. view.points first))
+                    "GraphView should remove old node point mapping after replacement")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-compact-replacement-refreshes-focus-binding []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local target {:children []
+                           :add-panel-child (fn [self opts]
+                                                (table.insert self.children opts)
+                                                opts)
+                           :remove-panel-child (fn [_self _element] nil)})
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :view-target target}))
+            (var first-opened 0)
+            (var second-opened 0)
+            (local first (Graph.GraphNode {:key "focus-swap"
+                                           :view (fn [_node]
+                                                     (set first-opened (+ first-opened 1))
+                                                     (fn [_ctx]
+                                                         {:layout (Layout {:name "first-focus-view"})}))}))
+            (local second (Graph.GraphNode {:key "focus-swap"
+                                            :view (fn [_node]
+                                                      (set second-opened (+ second-opened 1))
+                                                      (fn [_ctx]
+                                                          {:layout (Layout {:name "second-focus-view"})}))}))
+            (graph:add-node first {:position (glm.vec3 10 20 0)})
+            (local focus-node (. view.focus-nodes first))
+            (assert focus-node "Fixture should create focus node for original graph node")
+            (focus-node:request-focus)
+            (graph:add-node second)
+            (assert (= (. view.focus-nodes second) focus-node)
+                    "Replacement should keep the existing focus node")
+            (local bounds (focus-node:get-focus-bounds))
+            (assert bounds "Replacement focus bounds should resolve through replacement node")
+            (assert (= bounds.position.x 6.0)
+                    "Compact focus bounds should be based on replacement point position and size")
+            (ctx.focus.manager:activate-focused {})
+            (assert (= first-opened 0)
+                    "Replacement focus activation should not open stale original node")
+            (assert (= second-opened 1)
+                    "Replacement focus activation should open replacement node")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-expanded-card-replacement-preserves-selection []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local selector (ObjectSelector {:project (fn [position _opts] position)
+                                             :ctx ctx
+                                             :enabled? true}))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :selector selector}))
+            (local first-state {})
+            (local second-state {})
+            (local first (Graph.GraphNode {:key "swap-selected"
+                                           :preview (tracked-preview first-state)}))
+            (local second (Graph.GraphNode {:key "swap-selected"
+                                            :preview (tracked-preview second-state)}))
+            (graph:add-node first {:position (glm.vec3 0 0 0)})
+            (local first-point (. view.points first))
+            (first-point:on-double-click {})
+            (local first-card (. view.points first))
+            (selector:set-selected [first-card])
+            (assert (= (. view.selected-nodes 1) first)
+                    "Fixture should select the expanded original node before replacement")
+            (graph:add-node second)
+            (local replacement-card (. view.points second))
+            (assert replacement-card._card-size
+                    "Selected replacement should stay expanded")
+            (assert (= (. view.selected-nodes 1) second)
+                    "Replacing selected node should move GraphView selection to replacement")
+            (assert (= (. selector.selected 1) replacement-card)
+                    "Replacing selected expanded node should replace selector selection with replacement card")
+            (assert (> (or (rawget replacement-card "_selection-layer-size") 0) 0)
+                    "Replacement card should show selected visual state")
+            (assert first-state.dropped?
+                    "Replacing selected expanded node should drop stale preview widget")
+            (view:drop)
+            (graph:drop)
+            (selector:drop))))
+
+(fn graph-expanded-card-replacement-failure-collapses-to-compact []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx}))
+            (local first-state {})
+            (local first (Graph.GraphNode {:key "swap-fail"
+                                           :preview (tracked-preview first-state)}))
+            (local second (Graph.GraphNode {:key "swap-fail"
+                                            :preview (fn [_node _opts]
+                                                        (fn [_ctx]
+                                                            (error "replacement preview failed")))}))
+            (graph:add-node first {:position (glm.vec3 0 0 0)})
+            (local first-point (. view.points first))
+            (first-point:on-double-click {})
+            (local first-card (. view.points first))
+            (assert first-card._card-size
+                    "Fixture should expand original node before replacement")
+            (local (ok err) (pcall (fn [] (graph:add-node second))))
+            (assert (not ok) "Broken replacement preview should fail loudly")
+            (assert (string.find (tostring err) "replacement preview failed" 1 true)
+                    "Replacement failure should surface preview error")
+            (assert (= (graph:lookup "swap-fail") second)
+                    "Graph replacement should already point to replacement node after signal failure")
+            (assert (not (. view.points first))
+                    "Failed replacement should remove old node point mapping")
+            (local fallback-point (. view.points second))
+            (assert fallback-point
+                    "Failed replacement should install a fallback presentation for replacement node")
+            (assert (not (= fallback-point first-card))
+                    "Failed replacement should not keep stale expanded card as replacement presentation")
+            (assert (not fallback-point._card-size)
+                    "Failed replacement should collapse replacement node to compact presentation")
+            (assert (= (. view.node-by-point fallback-point) second)
+                    "Failed replacement should map fallback point to replacement node")
+            (assert (= (. view.node-by-point first-card) nil)
+                    "Failed replacement should detach stale card reverse point mapping")
+            (assert fallback-point.on-double-click
+                    "Failed replacement should keep replacement node interactive")
+            (assert first-state.dropped?
+                    "Failed replacement should drop stale expanded widget")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-removing-expanded-node-clears-persisted-presentation []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local presentations [])
+            (local persistence {:saved-position (fn [_self _node] nil)
+                                :saved-presentation (fn [_self _node] nil)
+                                :set-presentation (fn [_self node presentation]
+                                                        (table.insert presentations [node.key presentation]))
+                                :persist (fn [_self _points _force?] nil)
+                                :schedule-save (fn [_self] nil)})
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :persistence persistence}))
+            (local node (Graph.GraphNode {:key "remove-expanded"
+                                          :preview (tracked-preview {})}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            (point:on-double-click {})
+            (assert (= (. presentations (length presentations) 2) :expanded)
+                    "Expanding should persist expanded presentation")
+            (graph:remove-nodes [node])
+            (local last (. presentations (length presentations)))
+            (assert (= (. last 1) "remove-expanded")
+                    "Removing expanded node should update persisted presentation for node")
+            (assert (= (. last 2) nil)
+                    "Removing expanded node should clear persisted expanded presentation")
+            (view:drop)
+            (graph:drop))))
 
 (fn graph-point-right-click-opens-node-actions-menu []
     (with-temp-data-dir
@@ -1013,19 +1444,20 @@
             (assert point.on-right-click "GraphView should attach right click handler to node point")
             (point:on-right-click {:point (glm.vec3 3 4 0)})
             (assert opened "Right click should open a menu")
-            (assert (= (length opened.actions) 4)
-                    "Node menu should include Open, cube, custom actions, and Remove")
+            (assert (= (length opened.actions) 5)
+                    "Node menu should include Open, Expand, cube, custom actions, and Remove")
             (assert (= (. opened.actions 1 :name) "Open"))
-            (assert (= (. opened.actions 2 :name) "cube"))
-            (assert (= (. opened.actions 3 :name) "Custom Action"))
-            (assert (= (. opened.actions 4 :name) "Remove"))
-            ((. opened.actions 2 :fn) nil {})
+            (assert (= (. opened.actions 2 :name) "Expand"))
+            (assert (= (. opened.actions 3 :name) "cube"))
+            (assert (= (. opened.actions 4 :name) "Custom Action"))
+            (assert (= (. opened.actions 5 :name) "Remove"))
+            ((. opened.actions 3 :fn) nil {})
             (assert (= cube-invoked 1)
                     "Cube action should create one scene graph-node cube")
-            ((. opened.actions 3 :fn) nil {})
+            ((. opened.actions 4 :fn) nil {})
             (assert (= custom-invoked 1)
                     "Custom node action should be callable from the context menu")
-            ((. opened.actions 4 :fn) nil {})
+            ((. opened.actions 5 :fn) nil {})
             (assert (not (graph:lookup "menu-node"))
                     "Remove action should remove the node from the graph")
             (view:drop)
@@ -1179,29 +1611,29 @@
                                                :ctx ctx
                                                :selector selector}))
             (local node (Graph.GraphNode {:key "n"
-                                          :view (fn [_node]
-                                                    (fn [_ctx]
-                                                        {:layout {:position (glm.vec3 0 0 0)
-                                                                  :size (glm.vec2 0 0)
-                                                                  :rotation (glm.quat 1 0 0 0)}}))}))
+                                           :view (fn [_node]
+                                                     (fn [_ctx]
+                                                         {:layout {:position (glm.vec3 0 0 0)
+                                                                   :size (glm.vec2 0 0)
+                                                                   :rotation (glm.quat 1 0 0 0)}}))
+                                           :preview (tracked-preview {})}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
             (local point (. view-controller.points node))
             (assert point.on-double-click "GraphView should attach double click handler to node point")
             (point:on-double-click {})
-            (assert (= (length target.children) 1)
-                    "View controller should build a node view from double click")
+            (local card (. view-controller.points node))
+            (assert card._card-size "Double click should expand the graph node inline")
+            (assert card.view-widget "Expanded graph node should build its view widget")
             (view-controller:drop)
             (assert (= (length target.children) 0)
-                    "Dropping the view controller should remove views")
+                    "Inline node expansion should not open target panel views")
             (local view-controller-2 (GraphView {:graph graph
-                                                 :view-target target
-                                                 :ctx ctx
-                                                 :selector selector}))
+                                                  :view-target target
+                                                  :ctx ctx
+                                                  :selector selector}))
             (local point-2 (. view-controller-2.points node))
-            (assert point-2.on-double-click "GraphView should attach double click handler on rebuild")
-            (point-2:on-double-click {})
-            (assert (= (length target.children) 1)
-                    "Recreating view controller should build views for double click")
+            (assert point-2._card-size "Recreating view controller should restore expanded inline node")
+            (assert point-2.view-widget "Restored expanded node should rebuild its view widget")
             (view-controller-2:drop)
             (graph:drop)
             (selector:drop))))
@@ -1834,6 +2266,9 @@
             (local unregistered [])
             (var scheduled 0)
             (local persistence {:saved-position (fn [_self _node] nil)
+                                :saved-presentation (fn [_self _node] nil)
+                                :set-presentation (fn [_self _node _presentation]
+                                                        (set scheduled (+ scheduled 1)))
                                 :persist (fn [_self _points _force?] nil)
                                 :schedule-save (fn [_self]
                                                     (set scheduled (+ scheduled 1)))})
@@ -2138,7 +2573,27 @@
                      :fn text-module-node-view-exposes-edit-and-open-parent-actions})
 (table.insert tests {:name "Table node view adds edges for entries" :fn table-node-view-adds-child-nodes})
 (table.insert tests {:name "GraphView removes selected nodes and related edges" :fn graph-removes-selected-nodes-and-edges})
-(table.insert tests {:name "GraphView opens node view in HUD on double click" :fn graph-opens-node-view-in-hud-on-double-click})
+(table.insert tests {:name "GraphView expands node inline on double click" :fn graph-expands-node-inline-on-double-click})
+(table.insert tests {:name "GraphView expanded card uses preview and measures child"
+                     :fn graph-expanded-card-uses-preview-and-measures-child})
+(table.insert tests {:name "GraphView expanded toggle preserves selection"
+                     :fn graph-expanded-toggle-preserves-selection})
+(table.insert tests {:name "GraphView expanded toggle preserves node center"
+                     :fn graph-expanded-toggle-preserves-node-center})
+(table.insert tests {:name "GraphView remove then expand keeps selector list synchronized"
+                     :fn graph-remove-then-expand-keeps-selector-list-synchronized})
+(table.insert tests {:name "GraphView failed expanded toggle keeps compact point"
+                     :fn graph-expanded-toggle-failure-keeps-compact-point})
+(table.insert tests {:name "GraphView expanded card rebuilds preview for replacement"
+                      :fn graph-expanded-card-rebuilds-preview-for-replacement})
+(table.insert tests {:name "GraphView compact replacement refreshes focus binding"
+                      :fn graph-compact-replacement-refreshes-focus-binding})
+(table.insert tests {:name "GraphView expanded replacement preserves selection"
+                      :fn graph-expanded-card-replacement-preserves-selection})
+(table.insert tests {:name "GraphView failed replacement collapses to compact"
+                      :fn graph-expanded-card-replacement-failure-collapses-to-compact})
+(table.insert tests {:name "GraphView removing expanded node clears persisted presentation"
+                      :fn graph-removing-expanded-node-clears-persisted-presentation})
 (table.insert tests {:name "GraphView node point right-click opens node actions"
                      :fn graph-point-right-click-opens-node-actions-menu})
 (table.insert tests {:name "GraphView right-click resolves late menu manager"
