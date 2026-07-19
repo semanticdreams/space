@@ -1048,6 +1048,12 @@
                     "Expanded card child height should be less than full card height")
             (assert (= state.depth-offset-index (+ card.layout.depth-offset-index 2))
                     "Expanded card child should render above header and card background")
+            (assert (= state.laid-out-position.y card.layout.position.y)
+                    "Expanded card preview content should be at card origin (bottom)")
+            (assert (< (math.abs (- card.header-bar.layout.position.y
+                                    (+ card.layout.position.y (- card._card-size.y card._header-height))))
+                       1e-4)
+                    "Expanded card header should be at card top")
             (assert (. view.pinned node) "Expanded node should be pinned")
             (assert (and card.header-bar card.header-bar.children (= (length card.header-bar.children) 3))
                     "Expanded card header should have three buttons")
