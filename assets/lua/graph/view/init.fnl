@@ -176,9 +176,11 @@
                        :fn (fn [_button event]
                                (when focus-manager
                                    (focus-manager:arm-auto-focus {:event event}))
-                                (views:open node)
-                                (when focus-manager
-                                    (focus-manager:clear-auto-focus)))})
+                               (local (ok err) (pcall (fn [] (views:open node))))
+                               (when focus-manager
+                                   (focus-manager:clear-auto-focus))
+                               (when (not ok)
+                                   (error err)))})
         (table.insert actions
                       {:name (if (. expanded-nodes node) "Collapse" "Expand")
                        :icon (if (. expanded-nodes node) "close_fullscreen" "open_in_full")
@@ -533,7 +535,27 @@
                               :size (glm.vec3 64.0 48.0 0)
                               :depth-offset-index point-base-depth-offset
                               :selection-color resolved-selection-border-color
-                              :focus-color resolved-focus-outline-color}))
+                              :focus-color resolved-focus-outline-color
+                              :on-collapse (fn [] (toggle-node-presentation node))
+                              :on-open (fn [event]
+                                         (local focus-node (. focus-nodes node))
+                                         (when focus-node
+                                             (focus-node:request-focus))
+                                         (when focus-manager
+                                             (focus-manager:arm-auto-focus {:event event}))
+                                         (local (ok err) (pcall (fn [] (views:open node))))
+                                         (when focus-manager
+                                             (focus-manager:clear-auto-focus))
+                                         (when (not ok)
+                                             (error err)))
+                              :on-menu (fn [event]
+                                         (local focus-node (. focus-nodes node))
+                                         (when focus-node
+                                             (focus-node:request-focus))
+                                         (local manager (get-menu-manager))
+                                         (when manager
+                                             (manager:open {:actions (node-menu-actions node)
+                                                            :position (resolve-menu-position event)})))}))
         (card-builder ctx))
 
     (fn attach-presentation-events [node presentation]
@@ -542,20 +564,21 @@
                  (local focus-node (. focus-nodes node))
                  (when focus-node
                      (focus-node:request-focus))))
-        (set presentation.on-double-click
-             (fn [_self event]
-                 (if (Modifiers.alt-held? (and event event.mod))
-                     (expand-linked-frontier graph [(tostring node.key)])
-                     (toggle-node-presentation node))))
-        (set presentation.on-right-click
-             (fn [_self event]
-                 (local focus-node (. focus-nodes node))
-                 (when focus-node
-                     (focus-node:request-focus))
-                 (local manager (get-menu-manager))
-                 (when manager
-                     (manager:open {:actions (node-menu-actions node)
-                                    :position (resolve-menu-position event)})))))
+        (when (not presentation._card-size)
+            (set presentation.on-double-click
+                 (fn [_self event]
+                     (if (Modifiers.alt-held? (and event event.mod))
+                         (expand-linked-frontier graph [(tostring node.key)])
+                         (toggle-node-presentation node))))
+            (set presentation.on-right-click
+                 (fn [_self event]
+                     (local focus-node (. focus-nodes node))
+                     (when focus-node
+                         (focus-node:request-focus))
+                     (local manager (get-menu-manager))
+                     (when manager
+                         (manager:open {:actions (node-menu-actions node)
+                                        :position (resolve-menu-position event)}))))))
 
     (fn detach-presentation [node presentation]
         (when clickables
@@ -574,9 +597,10 @@
     (fn install-presentation [node previous presentation]
         (attach-presentation-events node presentation)
         (clickables:register presentation)
-        (when clickables.register-right-click
-            (clickables:register-right-click presentation))
-        (clickables:register-double-click presentation)
+        (when (not presentation._card-size)
+            (when clickables.register-right-click
+                (clickables:register-right-click presentation))
+            (clickables:register-double-click presentation))
         (set (. registry.points node) presentation)
         (set (. node-by-point presentation) node)
         (when selector

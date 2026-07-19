@@ -87,7 +87,9 @@
                                :select 4242
                                :arrow_drop_down 4242
                                :open_in_full 4242
+                               :open_in_new 4242
                                :close_fullscreen 4242
+                               :more_vert 4242
                                :terminal 4242
                               :settings 4242
                               :contrast 4242
@@ -124,7 +126,8 @@
                           :edge-color (glm.vec4 0.6 0.6 0.6 1)}
                   :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})
     (local ctx (BuildContext {:layout-root layout-root
-                              :clickables (assert app.clickables "test requires app.clickables")
+                              :clickables (or options.clickables
+                                              (assert app.clickables "test requires app.clickables"))
                               :hoverables (assert app.hoverables "test requires app.hoverables")
                               :theme theme
                               :focus-manager focus-manager
@@ -969,9 +972,10 @@
             (assert card.view-widget "Expanded node should build the node view inline")
             (assert (not (. view-controller.labels.labels start))
                     "Expanded node should not keep a compact label")
-            (card:on-double-click {})
+            (local collapse-button (. card.header-bar.children 1 :element))
+            (collapse-button:on-click {})
             (local compact (. view-controller.points start))
-            (assert (not compact._card-size) "Double-clicking expanded card should restore compact point")
+            (assert (not compact._card-size) "Collapse button should restore compact point")
             (view-controller:drop)
             (graph:drop)
             (selector:drop))))
@@ -1030,21 +1034,26 @@
                     "Expanded card should render above graph edges")
             (assert (= state.built-node node) "Expanded card should build the node preview")
             (assert (not full-view-called?) "Expanded card should not build the full node view")
+            (assert card.header-bar "Expanded card should have a header bar")
             (ctx.layout-root:update)
             (assert state.constrained "Expanded card should measure child with constraints")
             (assert (= state.constrained.max.x 64.0)
                     "Expanded card should constrain child to initial card width")
-            (assert (= state.constrained.max.y 48.0)
-                    "Expanded card should constrain child to initial card height")
+            (assert (< state.constrained.max.y 48.0)
+                    "Expanded card should constrain child height to less than full card height (header takes space)")
             (assert state.laid-out? "Expanded card should lay out child widget")
             (assert (= state.laid-out-size.x card._card-size.x)
                     "Expanded card child width should match card width")
-            (assert (= state.laid-out-size.y card._card-size.y)
-                    "Expanded card child height should match card height")
-            (assert (= state.depth-offset-index (+ card.layout.depth-offset-index 1))
-                    "Expanded card child should render above card background")
+            (assert (< state.laid-out-size.y card._card-size.y)
+                    "Expanded card child height should be less than full card height")
+            (assert (= state.depth-offset-index (+ card.layout.depth-offset-index 2))
+                    "Expanded card child should render above header and card background")
             (assert (. view.pinned node) "Expanded node should be pinned")
-            (card:on-double-click {})
+            (assert (and card.header-bar card.header-bar.children (= (length card.header-bar.children) 3))
+                    "Expanded card header should have three buttons")
+            (local collapse-button (. card.header-bar.children 1 :element))
+            (collapse-button:on-click {})
+            (assert (not (. view.points node :_card-size)) "Collapse button should collapse expanded card")
             (assert (not (. view.pinned node)) "Collapsing should restore unpinned state")
             (view:drop)
             (graph:drop))))
@@ -1074,7 +1083,8 @@
                     "Expanded card should replace compact point in selector selection")
             (assert (= (. view.selected-nodes 1) node)
                     "GraphView selection should stay on node after expansion")
-            (card:on-double-click {})
+            (local collapse-button (. card.header-bar.children 1 :element))
+            (collapse-button:on-click {})
             (local compact (. view.points node))
             (assert (not compact._card-size) "Second double-click should collapse selected node")
             (assert (= (. selector.selected 1) compact)
@@ -1113,7 +1123,8 @@
                     "GraphView position should stay anchored at node center while expanded")
             (assert (= expanded-pos.y center.y)
                     "GraphView position should stay anchored at node center while expanded")
-            (card:on-double-click {})
+            (local collapse-button (. card.header-bar.children 1 :element))
+            (collapse-button:on-click {})
             (local compact (. view.points node))
             (assert (not compact._card-size) "Fixture should collapse back to compact point")
             (assert (= compact.position.x center.x)
@@ -1412,6 +1423,112 @@
                     "Removing expanded node should update persisted presentation for node")
             (assert (= (. last 2) nil)
                     "Removing expanded node should clear persisted expanded presentation")
+            (view:drop)
+            (graph:drop))))
+
+(fn expanded-card-header-buttons-work []
+    (with-temp-data-dir
+        (fn [_root]
+            (local target {:children []
+                           :add-panel-child (fn [self child]
+                                               (table.insert self.children child)
+                                               child)
+                           :remove-panel-child (fn [_self _element] nil)})
+            (local ctx (make-ctx))
+            (var view nil)
+            (local graph (Graph {:with-start false}))
+            (var opened? false)
+            (var menu-opened? false)
+            (var menu-actions nil)
+            (local original-menu-manager app.menu-manager)
+            (set app.menu-manager {:open (fn [_self opts]
+                                           (set menu-opened? true)
+                                           (set menu-actions opts.actions))})
+            (local (ok err)
+                (pcall
+                    (fn []
+                        (local node (Graph.GraphNode {:key "header-button-test"
+                                                      :view (fn [_node]
+                                                                (set opened? true)
+                                                                (fn [_ctx]
+                                                                    {:layout (Layout {:name "header-open-test-view"})}))
+                                                      :preview (tracked-preview {})}))
+                        (set view (GraphView {:graph graph
+                                               :ctx ctx
+                                               :view-target target}))
+                        (graph:add-node node {:position (glm.vec3 0 0 0)})
+                        (local point (. view.points node))
+                        (point:on-double-click {})
+                        (local card (. view.points node))
+                        (assert card._card-size "Should be expanded after double-click")
+                        (assert card.header-bar "Expanded card should have a header bar")
+                        (assert (= (length card.header-bar.children) 3)
+                                "Header should have three buttons (collapse, open, menu)")
+                        ;; Test open button
+                        (local initial-children (length target.children))
+                        (local open-button (. card.header-bar.children 2 :element))
+                        (open-button:on-click {})
+                        (assert opened? "Header open button should invoke node view builder")
+                        (assert (> (length target.children) initial-children)
+                                "Header open button should add node view to target")
+                        (assert (= (ctx.focus.manager:get-focused-node) (. view.focus-nodes node))
+                                "Header Open button should focus the graph node first")
+                        ;; Test menu button
+                        (local menu-button (. card.header-bar.children 3 :element))
+                        (menu-button:on-click {})
+                        (assert menu-opened? "Header menu button should open a menu")
+                        (assert menu-actions "Header menu should include actions")
+                        (assert (= (length menu-actions) 4)
+                                "Header menu should include Open, Collapse, cube, and Remove")
+                        (assert (= (. menu-actions 1 :name) "Open"))
+                        (assert (= (. menu-actions 2 :name) "Collapse"))
+                        (assert (= (. menu-actions 4 :name) "Remove"))
+                        ;; Test collapse button
+                        (local collapse-button (. card.header-bar.children 1 :element))
+                        (collapse-button:on-click {})
+                        (assert (not (. view.points node :_card-size))
+                                "Header collapse button should collapse the card back to compact"))))
+            (set app.menu-manager original-menu-manager)
+            (when view (view:drop))
+            (graph:drop)
+            (when (not ok)
+                (error err)))))
+
+(fn expanded-card-skips-double-click-and-right-click-registration []
+    (with-temp-data-dir
+        (fn [_root]
+            (local registrations {:left []
+                                  :right []
+                                  :double []})
+            (local instrumented-clickables
+              {:register (fn [_self obj] (table.insert registrations.left obj))
+               :unregister (fn [_self obj] nil)
+               :register-right-click (fn [_self obj] (table.insert registrations.right obj))
+               :unregister-right-click (fn [_self obj] nil)
+               :register-double-click (fn [_self obj] (table.insert registrations.double obj))
+               :unregister-double-click (fn [_self obj] nil)})
+            (local ctx (make-ctx {:clickables instrumented-clickables}))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (local node (Graph.GraphNode {:key "reg-test"
+                                          :preview (tracked-preview {})}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            (point:on-double-click {})
+            (local card (. view.points node))
+            (assert card._card-size "Should be expanded")
+            (var card-in-left? false)
+            (var card-in-right? false)
+            (var card-in-double? false)
+            (each [_ obj (ipairs registrations.left)]
+                (when (= obj card) (set card-in-left? true)))
+            (each [_ obj (ipairs registrations.right)]
+                (when (= obj card) (set card-in-right? true)))
+            (each [_ obj (ipairs registrations.double)]
+                (when (= obj card) (set card-in-double? true)))
+            (assert card-in-left? "Expanded card should be registered for left-click (focus)")
+            (assert (not card-in-right?) "Expanded card should NOT be registered for right-click")
+            (assert (not card-in-double?) "Expanded card should NOT be registered for double-click")
             (view:drop)
             (graph:drop))))
 
@@ -2594,6 +2711,10 @@
                       :fn graph-expanded-card-replacement-failure-collapses-to-compact})
 (table.insert tests {:name "GraphView removing expanded node clears persisted presentation"
                       :fn graph-removing-expanded-node-clears-persisted-presentation})
+(table.insert tests {:name "GraphView expanded card header buttons work"
+                     :fn expanded-card-header-buttons-work})
+(table.insert tests {:name "GraphView expanded card skips double-click and right-click registration"
+                     :fn expanded-card-skips-double-click-and-right-click-registration})
 (table.insert tests {:name "GraphView node point right-click opens node actions"
                      :fn graph-point-right-click-opens-node-actions-menu})
 (table.insert tests {:name "GraphView right-click resolves late menu manager"
