@@ -50,10 +50,16 @@
   (local on-menu (assert options.on-menu "card-builder requires :on-menu"))
 
   (fn build-header-bar [ctx]
+    (fn spacer-builder [_ctx]
+      (local layout (Layout {:name "graph-card-header-spacer"
+                              :measurer (fn [self] (set self.measure (glm.vec3 0 0 0)))
+                              :layouter (fn [_self] nil)}))
+      {:layout layout :drop (fn [_self] (layout:drop))})
     ((Flex {:axis 1
             :yalign :center
             :xspacing 0.25
-            :children [(FlexChild (Button {:icon "close_fullscreen"
+            :children [(FlexChild spacer-builder 1)
+                       (FlexChild (Button {:icon "close_fullscreen"
                                             :variant :ghost
                                             :focusable? false
                                             :text nil
@@ -68,7 +74,7 @@
                                             :focusable? false
                                             :text nil
                                             :on-click (fn [_ event] (on-menu event))}) 0)]})
-     ctx))
+      ctx))
 
   (fn [ctx]
     (assert ctx "card-builder requires ctx")
