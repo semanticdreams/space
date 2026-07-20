@@ -2,8 +2,13 @@
 (local LayeredPoint (require :layered-point))
 (local {: Layout} (require :layout))
 (local Rectangle (require :rectangle))
+(local RawRectangle (require :raw-rectangle))
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
+(local {: resolve-card-colors} (require :widget-theme-utils))
+
+(local default-focus-border-width 0.3)
+(local default-selection-border-width 0.5)
 
 (fn compact-point [opts]
   "Create a compact graph node presentation (same LayeredPoint as before)."
@@ -25,9 +30,20 @@
   (local node (assert options.node "card-builder requires :node"))
   (local position (or options.position (glm.vec3 0 0 0)))
   (local initial-card-size (or options.size (glm.vec3 64.0 48.0 0)))
-  (local background-color (or options.background-color (glm.vec4 0.08 0.09 0.12 0.92)))
   (local selection-color (or options.selection-color (glm.vec4 0.22 0.16 0.08 0.96)))
   (local focus-color (or options.focus-color (glm.vec4 0.08 0.16 0.24 0.96)))
+  (local focus-border-width (if (not (= nil options.focus-border-width))
+                                options.focus-border-width
+                                default-focus-border-width))
+  (local selection-border-width (if (not (= nil options.selection-border-width))
+                                    options.selection-border-width
+                                    default-selection-border-width))
+  (fn finite-number? [v]
+    (and (= (type v) :number) (= v v) (not (= v math.huge)) (not (= v (- math.huge)))))
+  (assert (finite-number? focus-border-width) "focus-border-width must be a finite number")
+  (assert (finite-number? selection-border-width) "selection-border-width must be a finite number")
+  (assert (>= focus-border-width 0) "focus-border-width must be non-negative")
+  (assert (>= selection-border-width 0) "selection-border-width must be non-negative")
   (local depth-offset-index (or options.depth-offset-index 0))
   (local on-collapse (assert options.on-collapse "card-builder requires :on-collapse"))
   (local on-open (assert options.on-open "card-builder requires :on-open"))
@@ -63,7 +79,66 @@
     (assert (= (type preview-fn) :function)
             (.. "Graph card preview must be a function for " (or node.key "unknown")))
 
-    (local background ((Rectangle {:color background-color}) ctx))
+    (local card-colors (resolve-card-colors ctx options))
+    (local resolved-background card-colors.background)
+
+    (fn make-outline-strips [color border-width]
+      (local top ((RawRectangle {:color color}) ctx))
+      (local bottom ((RawRectangle {:color color}) ctx))
+      (local left ((RawRectangle {:color color}) ctx))
+      (local right ((RawRectangle {:color color}) ctx))
+      (local strips [top bottom left right])
+      (var visible? false)
+
+      (fn set-visible [v]
+        (local desired (not (not v)))
+        (when (not (= visible? desired))
+          (set visible? desired)
+          (each [_ strip (ipairs strips)]
+            (strip:set-visible desired))))
+
+      (fn update [pos card-size depth clip-region]
+        (local x pos.x)
+        (local y pos.y)
+        (local w card-size.x)
+        (local h card-size.y)
+        (local bw border-width)
+        (local doubled (* 2 bw))
+        (set top.position (glm.vec3 (- x bw) (+ y h) 0))
+        (set top.size (glm.vec2 (+ w doubled) bw))
+        (set top.depth-offset-index depth)
+        (set top.clip-region clip-region)
+        (top:update)
+        (set bottom.position (glm.vec3 (- x bw) (- y bw) 0))
+        (set bottom.size (glm.vec2 (+ w doubled) bw))
+        (set bottom.depth-offset-index depth)
+        (set bottom.clip-region clip-region)
+        (bottom:update)
+        (set left.position (glm.vec3 (- x bw) y 0))
+        (set left.size (glm.vec2 bw h))
+        (set left.depth-offset-index depth)
+        (set left.clip-region clip-region)
+        (left:update)
+        (set right.position (glm.vec3 (+ x w) y 0))
+        (set right.size (glm.vec2 bw h))
+        (set right.depth-offset-index depth)
+        (set right.clip-region clip-region)
+        (right:update))
+
+      (fn drop []
+        (each [_ strip (ipairs strips)]
+          (strip:drop)))
+
+      {:strips strips
+       :visible? (fn [] visible?)
+       :set-visible set-visible
+       :update update
+       :drop drop})
+
+    (local selection-outline (make-outline-strips selection-color selection-border-width))
+    (local focus-outline (make-outline-strips focus-color focus-border-width))
+    (local background ((Rectangle {:color resolved-background}) ctx))
+
     (local card {:node node
                   :_card-size (glm.vec3 initial-card-size.x initial-card-size.y initial-card-size.z)
                   :_header-height 3.0
@@ -76,21 +151,15 @@
     (set card.depth-offset-index depth-offset-index)
     (set card._focus-layer-size 0)
     (set card._selection-layer-size 0)
+    (set card._background background)
+    (set card._focus-outline focus-outline)
+    (set card._selection-outline selection-outline)
 
     (fn card-origin [size]
       (local resolved (or size card._card-size initial-card-size))
       (glm.vec3 (- card.position.x (/ resolved.x 2.0))
                 (- card.position.y (/ resolved.y 2.0))
                 (- card.position.z (/ resolved.z 2.0))))
-
-    (fn update-background-color []
-      (when background
-        (set background.color
-             (if (> card._focus-layer-size 0)
-                 focus-color
-                 (> card._selection-layer-size 0)
-                 selection-color
-                 background-color))))
 
     (local header-bar (build-header-bar ctx))
     (set card.header-bar header-bar)
@@ -119,25 +188,36 @@
       (set self.size card._card-size)
       (set self.position (card-origin card._card-size))
       (set self.rotation (glm.quat 1 0 0 0))
+      (local culled? (self:effective-culled?))
+      (when focus-outline
+        (local visible? (and (> card._focus-layer-size 0) (not culled?)))
+        (focus-outline.set-visible visible?)
+        (when visible?
+          (focus-outline.update self.position card._card-size (+ self.depth-offset-index 1) self.clip-region)))
+      (when selection-outline
+        (local show-selection? (and (> card._selection-layer-size 0) (not culled?)))
+        (selection-outline.set-visible show-selection?)
+        (when show-selection?
+          (selection-outline.update self.position card._card-size self.depth-offset-index self.clip-region)))
       (when background
         (set background.layout.position self.position)
         (set background.layout.size card._card-size)
         (set background.layout.rotation (glm.quat 1 0 0 0))
-        (set background.layout.depth-offset-index self.depth-offset-index)
+        (set background.layout.depth-offset-index (+ self.depth-offset-index 2))
         (background.layout:layouter true))
       (when (and card.header-bar card.header-bar.layout)
         (local header card.header-bar.layout)
         (set header.position (+ self.position (glm.vec3 0 (- card._card-size.y header-height) 0)))
         (set header.size (glm.vec3 card._card-size.x header-height 0))
         (set header.rotation (glm.quat 1 0 0 0))
-        (set header.depth-offset-index (+ self.depth-offset-index 1))
+        (set header.depth-offset-index (+ self.depth-offset-index 3))
         (header:layouter true))
       (when (and card.view-widget card.view-widget.layout)
         (local child card.view-widget.layout)
         (set child.position self.position)
         (set child.size (glm.vec3 card._card-size.x (- card._card-size.y header-height) 0))
         (set child.rotation (glm.quat 1 0 0 0))
-        (set child.depth-offset-index (+ self.depth-offset-index 2))
+        (set child.depth-offset-index (+ self.depth-offset-index 4))
         (child:layouter true)))
 
     (local layout
@@ -145,6 +225,20 @@
                :measurer measurer
                :layouter layouter}))
     (layout:set-root layout-root)
+    (local original-set-self-culled layout.set-self-culled)
+    (set layout.set-self-culled
+         (fn [self culled?]
+           (original-set-self-culled self culled?)
+           (when culled?
+             (focus-outline.set-visible false)
+             (selection-outline.set-visible false))))
+    (local original-set-parent-culled layout.set-parent-culled)
+    (set layout.set-parent-culled
+         (fn [self culled?]
+           (original-set-parent-culled self culled?)
+           (when culled?
+             (focus-outline.set-visible false)
+             (selection-outline.set-visible false))))
     (layout:add-child background.layout)
     (layout:add-child header-bar.layout)
     (set card.layout layout)
@@ -166,10 +260,15 @@
     (set card.set-layer-size
          (fn [_ idx size]
            (when (= idx 1)
-             (set card._focus-layer-size (or size 0)))
+             (set card._focus-layer-size (or size 0))
+             (when focus-outline
+               (focus-outline.set-visible (and (> card._focus-layer-size 0)
+                                               (not (layout:effective-culled?))))))
            (when (= idx 2)
-             (set card._selection-layer-size (or size 0)))
-           (update-background-color)
+             (set card._selection-layer-size (or size 0))
+             (when selection-outline
+               (selection-outline.set-visible (and (> card._selection-layer-size 0)
+                                                   (not (layout:effective-culled?))))))
            (layout:mark-layout-dirty)))
 
     (set card.intersect
@@ -186,8 +285,15 @@
               (when card.view-widget.drop
                 (card.view-widget:drop))
               (set card.view-widget nil))
+            (when focus-outline
+              (focus-outline.drop))
+            (when selection-outline
+              (selection-outline.drop))
             (when background
               (background:drop))
+            (set card._focus-outline nil)
+            (set card._selection-outline nil)
+            (set card._background nil)
             (layout:drop)))
 
     (local (ok result)

@@ -1046,8 +1046,8 @@
                     "Expanded card child width should match card width")
             (assert (< state.laid-out-size.y card._card-size.y)
                     "Expanded card child height should be less than full card height")
-            (assert (= state.depth-offset-index (+ card.layout.depth-offset-index 2))
-                    "Expanded card child should render above header and card background")
+            (assert (= state.depth-offset-index (+ card.layout.depth-offset-index 4))
+                    "Expanded card child should render above header, background, focus, and selection outlines")
             (assert (= state.laid-out-position.y card.layout.position.y)
                     "Expanded card preview content should be at card origin (bottom)")
             (assert (< (math.abs (- card.header-bar.layout.position.y
@@ -2270,6 +2270,213 @@
                     "Line start should reflect moved node position")
             (layout:clear))))
 
+(local light-card-background (glm.vec4 0.945 0.958 0.978 1))
+
+(fn graph-expanded-card-uses-themed-background []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (set ctx.theme.card {:background light-card-background})
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (local node (Graph.GraphNode {:key "theme-card-node"
+                                          :preview (tracked-preview {})}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            (point:on-double-click {})
+            (local card (. view.points node))
+            (assert card._card-size "Should be expanded")
+            (assert card._background "Expanded card should have a background rectangle")
+            (assert (= card._background.color.x light-card-background.x)
+                    "Expanded card should use themed card background color (R)")
+            (assert (= card._background.color.y light-card-background.y)
+                    "Expanded card should use themed card background color (G)")
+            (assert (= card._background.color.z light-card-background.z)
+                    "Expanded card should use themed card background color (B)")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-expanded-card-outlines-not-background-fill []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (set ctx.theme.card {:background light-card-background})
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (local node (Graph.GraphNode {:key "outline-node"
+                                          :preview (tracked-preview {})}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            (point:on-double-click {})
+            (local card (. view.points node))
+            (assert card._card-size "Should be expanded")
+            (assert card._focus-outline "Expanded card should have a focus outline")
+            (assert card._selection-outline "Expanded card should have a selection outline")
+            (local background-before card._background.color)
+            (view.selection:set-selection [node])
+            (assert (= card._background.color.x background-before.x)
+                    "Selection should not change card background color (R)")
+            (assert (= card._background.color.y background-before.y)
+                    "Selection should not change card background color (G)")
+            (assert (= card._background.color.z background-before.z)
+                    "Selection should not change card background color (B)")
+            (assert (> card._selection-layer-size 0)
+                    "Selection should set selection layer size")
+            (assert (card._selection-outline.visible?)
+                    "Selection outline should be visible")
+            (ctx.layout-root:update)
+            (local sel-top (. card._selection-outline.strips 1))
+            (assert (= sel-top.depth-offset-index
+                       card.layout.depth-offset-index)
+                    "Selection outline should be at card base depth")
+            (assert (> sel-top.size.x 0)
+                    "Selection outline top strip should have non-zero width")
+            (assert (= sel-top.size.x
+                       (+ (. card._background.layout.size 1) 1.0))
+                    "Selection outline top strip should be 1.0 wider than background")
+            (assert (< sel-top.position.x
+                       card._background.layout.position.x)
+                    "Selection outline top strip should be shifted left of background")
+            (assert (< sel-top.depth-offset-index
+                       card._background.layout.depth-offset-index)
+                    "Selection outline should render behind card background")
+            (local focus-node (. view.focus-nodes node))
+            (assert focus-node "GraphView should create a focus node")
+            (focus-node:request-focus)
+            (assert (= card._background.color.x background-before.x)
+                    "Focus should not change card background color (R)")
+            (assert (> card._focus-layer-size 0)
+                    "Focus should set focus layer size")
+            (assert (card._focus-outline.visible?)
+                    "Focus outline should be visible")
+            (ctx.layout-root:update)
+            (local foc-top (. card._focus-outline.strips 1))
+            (assert (= foc-top.depth-offset-index
+                       (+ card.layout.depth-offset-index 1))
+                    "Focus outline should be above selection outline")
+            (assert (> foc-top.size.x 0)
+                    "Focus outline top strip should have non-zero width")
+            (local sel-top-size (. (. card._selection-outline.strips 1) :size))
+            (assert (< foc-top.size.x sel-top-size.x)
+                    "Focus outline should be narrower than selection outline")
+            (assert (< foc-top.depth-offset-index
+                       card._background.layout.depth-offset-index)
+                    "Focus outline should render behind card background")
+            (assert (card._selection-outline.visible?)
+                    "Selection outline should remain visible when focused")
+            (assert (card._focus-outline.visible?)
+                    "Focus outline should be visible when focused")
+            (ctx.layout-root:update)
+            (ctx.focus.manager:clear-focus)
+            (ctx.layout-root:update)
+            (assert (not (card._focus-outline.visible?))
+                    "Focus outline should hide after focus released")
+            (assert (card._selection-outline.visible?)
+                    "Selection outline should remain visible after focus released")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-expanded-card-custom-border-widths []
+    (local ctx (make-ctx))
+    (local node (Graph.GraphNode {:key "custom-border-node"
+                                  :preview (tracked-preview {})}))
+    (local GraphNodePresentation (require :graph/view/presentation))
+    (local custom-focus-width 0.9)
+    (local custom-selection-width 1.5)
+    (local card-builder (GraphNodePresentation.card-builder
+                         {:node node
+                          :position (glm.vec3 0 0 0)
+                          :size (glm.vec3 64.0 48.0 0)
+                          :focus-border-width custom-focus-width
+                          :selection-border-width custom-selection-width
+                          :on-collapse (fn [] nil)
+                          :on-open (fn [_] nil)
+                          :on-menu (fn [_] nil)}))
+    (local card (card-builder ctx))
+    (assert card._card-size "Card should be built")
+    (card:set-layer-size 2 1)
+    (card:set-layer-size 1 1)
+    (ctx.layout-root:update)
+    (local sel-strip (. card._selection-outline.strips 1))
+    (local foc-strip (. card._focus-outline.strips 1))
+    (assert ((. MathUtils :approx) sel-strip.size.x
+                   (+ (. card._background.layout.size 1) (* 2 custom-selection-width)))
+            (.. "Selection outline should be " (* 2 custom-selection-width) " wider than background"))
+    (assert ((. MathUtils :approx) foc-strip.size.x
+                   (+ (. card._background.layout.size 1) (* 2 custom-focus-width)))
+            (.. "Focus outline should be " (* 2 custom-focus-width) " wider than background"))
+    (card:drop))
+
+(fn graph-expanded-card-outline-strips-obey-clip-and-culling []
+    (local ctx (make-ctx))
+    (local {: Layout} (require :layout))
+    (local node (Graph.GraphNode {:key "clip-cull-node"
+                                  :preview (tracked-preview {})}))
+    (local GraphNodePresentation (require :graph/view/presentation))
+    (local card-builder (GraphNodePresentation.card-builder
+                         {:node node
+                          :position (glm.vec3 0 0 0)
+                          :size (glm.vec3 64.0 48.0 0)
+                          :on-collapse (fn [] nil)
+                          :on-open (fn [_] nil)
+                          :on-menu (fn [_] nil)}))
+    (local card (card-builder ctx))
+    (assert card._card-size "Card should be built")
+    (card:set-layer-size 2 1)
+    (ctx.layout-root:update)
+    ;; clip-region propagation
+    (local clip {:bounds {:position (glm.vec3 0 0 0) :size (glm.vec3 100 100 0)}})
+    (set card.layout.clip-region clip)
+    (card.layout:mark-layout-dirty)
+    (ctx.layout-root:update)
+    (local sel-strip (. card._selection-outline.strips 1))
+    (assert sel-strip.clip-region
+            "Selection outline strip should receive clip-region from card layout")
+    (assert (= sel-strip.clip-region clip)
+            "Selection outline strip clip-region should match card layout")
+    ;; self-culling hides outlines
+    (card.layout:set-self-culled true)
+    (ctx.layout-root:update)
+    (assert (not (card._selection-outline.visible?))
+            "Selection outline strips should hide when card is self-culled")
+    ;; uncull and verify outlines come back on next layout pass
+    (card.layout:set-self-culled false)
+    (card.layout:mark-layout-dirty)
+    (ctx.layout-root:update)
+    (assert (card._selection-outline.visible?)
+            "Selection outline strips should reappear when card is unculled")
+    (assert sel-strip.clip-region
+            "Strip clip-region should be set after uncull re-layout")
+    ;; parent culling also hides outlines
+    (local parent-layout (Layout {:name "parent-cull-test"}))
+    (parent-layout:set-root ctx.layout-root)
+    (parent-layout:add-child card.layout)
+    (set card.layout.clip-region clip)
+    (card.layout:mark-layout-dirty)
+    (ctx.layout-root:update)
+    (assert (card._selection-outline.visible?)
+            "Selection outline should be visible under unculled parent")
+    (parent-layout:set-self-culled true)
+    (ctx.layout-root:update)
+    (assert (not (card._selection-outline.visible?))
+            "Selection outline strips should hide when ancestor is culled")
+    ;; when parent-culled, set-layer-size must not re-show outlines
+    (card:set-layer-size 1 1)
+    (ctx.layout-root:update)
+    (assert (not (card._focus-outline.visible?))
+            "Focus outline should stay hidden when layer set while parent-culled")
+    ;; ancestor uncull restores outline visibility
+    (parent-layout:set-self-culled false)
+    (card.layout:mark-layout-dirty)
+    (ctx.layout-root:update)
+    (assert (card._selection-outline.visible?)
+            "Selection outline strips should reappear when ancestor is unculled")
+    (assert sel-strip.clip-region
+            "Clip-region should be propagated after ancestor uncull re-layout")
+    (parent-layout:clear-children)
+    (parent-layout:drop)
+    (card:drop))
+
 (local approx (. MathUtils :approx))
 
 (fn graph-view-updates-selection-and-focus-borders []
@@ -2750,6 +2957,10 @@
 (table.insert tests {:name "GraphView node views engine events drive heightfield perlin tool pick"
                      :fn graph-view-node-views-engine-events-drive-heightfield-perlin-tool-pick})
 (table.insert tests {:name "GraphViewLayout updates lines and labels" :fn graph-layout-module-updates-lines-and-labels})
+(table.insert tests {:name "GraphView expanded card uses themed background" :fn graph-expanded-card-uses-themed-background})
+(table.insert tests {:name "GraphView expanded card outlines instead of background fill" :fn graph-expanded-card-outlines-not-background-fill})
+(table.insert tests {:name "GraphView expanded card custom border widths" :fn graph-expanded-card-custom-border-widths})
+(table.insert tests {:name "GraphView expanded card outline strips obey clip and culling" :fn graph-expanded-card-outline-strips-obey-clip-and-culling})
 (table.insert tests {:name "Graph movables register and clean up drag targets" :fn graph-movables-module-registers-and-cleans-up})
 (table.insert tests {:name "Graph nodes register with movables for dragging" :fn graph-nodes-are-movable})
 (table.insert tests {:name "Graph drag respects latest force layout position" :fn graph-drag-respects-force-layout-position})
