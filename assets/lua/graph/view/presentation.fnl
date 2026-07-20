@@ -25,11 +25,30 @@
   "Returns a builder function (ctx) -> widget for an expanded graph node card.
   The returned widget has .layout (Layout), .position (vec3), .size (number),
   and the standard GraphView point interface including .intersect, .set-position,
-  .set-position-values, .set-layer-size, .drop, and event handler fields."
+  .set-position-values, .set-size, .set-layer-size, .drop, and event handler fields."
   (local options (or opts {}))
   (local node (assert options.node "card-builder requires :node"))
   (local position (or options.position (glm.vec3 0 0 0)))
-  (local initial-card-size (or options.size (glm.vec3 64.0 48.0 0)))
+  (local default-size (or options.default-size options.size (glm.vec3 64.0 48.0 0)))
+  (local min-size (or options.min-size default-size))
+  (local max-size (or options.max-size default-size))
+  (local resize-max-size (or options.resize-max-size max-size))
+  (fn finite-number? [v]
+    (and (= (type v) :number) (= v v) (not (= v math.huge)) (not (= v (- math.huge)))))
+  (fn assert-finite-size [vec label]
+    (assert (finite-number? vec.x) (.. label ".x must be finite"))
+    (assert (finite-number? vec.y) (.. label ".y must be finite"))
+    (assert (finite-number? vec.z) (.. label ".z must be finite")))
+  (assert-finite-size min-size "min-size")
+  (assert-finite-size max-size "max-size")
+  (assert-finite-size resize-max-size "resize-max-size")
+  (assert-finite-size default-size "default-size")
+  (assert (>= min-size.x 0) "min-size.x must be non-negative")
+  (assert (>= min-size.y 0) "min-size.y must be non-negative")
+  (assert (>= max-size.x min-size.x) "max-size.x must be >= min-size.x")
+  (assert (>= max-size.y min-size.y) "max-size.y must be >= min-size.y")
+  (assert (>= resize-max-size.x max-size.x) "resize-max-size.x must be >= max-size.x")
+  (assert (>= resize-max-size.y max-size.y) "resize-max-size.y must be >= max-size.y")
   (local selection-color (or options.selection-color (glm.vec4 0.22 0.16 0.08 0.96)))
   (local focus-color (or options.focus-color (glm.vec4 0.08 0.16 0.24 0.96)))
   (local focus-border-width (if (not (= nil options.focus-border-width))
@@ -38,8 +57,6 @@
   (local selection-border-width (if (not (= nil options.selection-border-width))
                                     options.selection-border-width
                                     default-selection-border-width))
-  (fn finite-number? [v]
-    (and (= (type v) :number) (= v v) (not (= v math.huge)) (not (= v (- math.huge)))))
   (assert (finite-number? focus-border-width) "focus-border-width must be a finite number")
   (assert (finite-number? selection-border-width) "selection-border-width must be a finite number")
   (assert (>= focus-border-width 0) "focus-border-width must be non-negative")
@@ -146,23 +163,32 @@
     (local background ((Rectangle {:color resolved-background}) ctx))
 
     (local card {:node node
-                  :_card-size (glm.vec3 initial-card-size.x initial-card-size.y initial-card-size.z)
+                  :_card-size (glm.vec3 default-size.x default-size.y default-size.z)
                   :_header-height 3.0
+                  :_min-size min-size
+                  :_max-size max-size
+                  :_resize-max-size resize-max-size
+                  :_user-size nil
                   :on-click nil
                   :on-double-click nil
                   :on-right-click nil})
 
     (set card.position (glm.vec3 position.x position.y position.z))
-    (set card.size (math.max initial-card-size.x initial-card-size.y))
+    (set card.size (math.max default-size.x default-size.y))
     (set card.depth-offset-index depth-offset-index)
     (set card._focus-layer-size 0)
     (set card._selection-layer-size 0)
     (set card._background background)
     (set card._focus-outline focus-outline)
     (set card._selection-outline selection-outline)
+    (set card._pointer-target options.pointer-target)
+    (when options.requested-size
+      (set card._user-size (glm.vec3 (math.max min-size.x (math.min resize-max-size.x options.requested-size.x))
+                                      (math.max min-size.y (math.min resize-max-size.y options.requested-size.y))
+                                      0)))
 
     (fn card-origin [size]
-      (local resolved (or size card._card-size initial-card-size))
+      (local resolved (or size card._card-size default-size))
       (glm.vec3 (- card.position.x (/ resolved.x 2.0))
                 (- card.position.y (/ resolved.y 2.0))
                 (- card.position.z (/ resolved.z 2.0))))
@@ -175,17 +201,25 @@
       (set card._header-height (or header-bar.layout.measure.y 3.0))
       (local child (and card.view-widget card.view-widget.layout))
       (when child
-        (child:measure-constrained {:max (glm.vec3 initial-card-size.x
-                                                    (math.max 0 (- initial-card-size.y card._header-height))
-                                                    initial-card-size.z)}))
+        (local effective-max (if card._user-size card._user-size card._max-size))
+        (child:measure-constrained {:max (glm.vec3 effective-max.x
+                                                    (math.max 0 (- effective-max.y card._header-height))
+                                                    effective-max.z)}))
       (local child-measure (and child child.measure))
-      (local total-y (if child-measure
-                         (+ card._header-height child-measure.y)
-                         initial-card-size.y))
+      (local desired-y (if child-measure
+                           (+ card._header-height child-measure.y)
+                           default-size.y))
+      (local desired-x (if child-measure
+                           (math.max default-size.x child-measure.x)
+                           default-size.x))
       (set card._card-size
-           (glm.vec3 (math.max initial-card-size.x (or (and child-measure child-measure.x) 0))
-                     (math.max initial-card-size.y total-y)
-                     (math.max initial-card-size.z (or (and child-measure child-measure.z) 0))))
+           (if card._user-size
+               (glm.vec3 (math.max min-size.x (math.min resize-max-size.x card._user-size.x))
+                         (math.max min-size.y (math.min resize-max-size.y card._user-size.y))
+                         0)
+               (glm.vec3 (math.max min-size.x (math.min max-size.x desired-x))
+                         (math.max min-size.y (math.min max-size.y desired-y))
+                         0)))
       (set card.size (math.max card._card-size.x card._card-size.y))
       (set self.measure card._card-size))
 
@@ -224,7 +258,11 @@
         (set child.size (glm.vec3 card._card-size.x (- card._card-size.y header-height) 0))
         (set child.rotation (glm.quat 1 0 0 0))
         (set child.depth-offset-index (+ self.depth-offset-index 4))
-        (child:layouter true)))
+        (child:layouter true))
+      (when card._resize-target
+        (set card._resize-target.position self.position)
+        (set card._resize-target.size card._card-size)
+        (set card._resize-target.rotation self.rotation)))
 
     (local layout
       (Layout {:name (.. "graph-card-" (or node.key "unknown"))
@@ -248,6 +286,21 @@
     (layout:add-child background.layout)
     (layout:add-child header-bar.layout)
     (set card.layout layout)
+    (set card._resize-target
+         {:position layout.position
+          :size card._card-size
+          :rotation layout.rotation
+          :set-transform (fn [self transform]
+                          (when transform.size
+                            (local clamped-x (math.max min-size.x (math.min resize-max-size.x transform.size.x)))
+                            (local clamped-y (math.max min-size.y (math.min resize-max-size.y transform.size.y)))
+                            (set self.size (glm.vec3 clamped-x clamped-y 0))
+                            (card:set-size self.size))
+                          (when transform.position
+                            (set self.position (glm.vec3 transform.position.x transform.position.y transform.position.z))
+                            (local center-x (+ transform.position.x (/ self.size.x 2)))
+                            (local center-y (+ transform.position.y (/ self.size.y 2)))
+                            (card:set-position (glm.vec3 center-x center-y 0))))})
     (set layout.position (card-origin card._card-size))
     (set layout.size card._card-size)
     (set layout.measure card._card-size)
@@ -260,8 +313,23 @@
             (layout:mark-layout-dirty)))
 
     (set card.set-position-values
-         (fn [_ x y z]
-           (card:set-position (glm.vec3 x y z))))
+          (fn [_ x y z]
+            (card:set-position (glm.vec3 x y z))))
+
+    (set card.set-size
+         (fn [_ size]
+           (set card._user-size (glm.vec3 (math.max min-size.x (math.min resize-max-size.x size.x))
+                                           (math.max min-size.y (math.min resize-max-size.y size.y))
+                                           0))
+           (layout:mark-measure-dirty)
+           (layout:mark-layout-dirty)))
+
+    (set card.set-transform
+         (fn [_ transform]
+           (when transform.position
+             (card:set-position transform.position))
+           (when transform.size
+             (card:set-size transform.size))))
 
     (set card.set-layer-size
          (fn [_ idx size]

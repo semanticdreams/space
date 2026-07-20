@@ -1037,9 +1037,9 @@
             (assert card.header-bar "Expanded card should have a header bar")
             (ctx.layout-root:update)
             (assert state.constrained "Expanded card should measure child with constraints")
-            (assert (= state.constrained.max.x 64.0)
-                    "Expanded card should constrain child to initial card width")
-            (assert (< state.constrained.max.y 48.0)
+            (assert (= state.constrained.max.x 52.0)
+                    "Expanded card should constrain child to max-size width")
+            (assert (< state.constrained.max.y 34.0)
                     "Expanded card should constrain child height to less than full card height (header takes space)")
             (assert state.laid-out? "Expanded card should lay out child widget")
             (assert (= state.laid-out-size.x card._card-size.x)
@@ -1416,6 +1416,8 @@
             (local presentations [])
             (local persistence {:saved-position (fn [_self _node] nil)
                                 :saved-presentation (fn [_self _node] nil)
+                                :saved-size (fn [_self _node] nil)
+                                :set-size (fn [_self _node _size] nil)
                                 :set-presentation (fn [_self node presentation]
                                                         (table.insert presentations [node.key presentation]))
                                 :persist (fn [_self _points _force?] nil)
@@ -1437,6 +1439,81 @@
                     "Removing expanded node should update persisted presentation for node")
             (assert (= (. last 2) nil)
                     "Removing expanded node should clear persisted expanded presentation")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-removing-expanded-node-unregisters-resizable []
+    (local original-resizables app.resizables)
+    (var unregistered nil)
+    (set app.resizables
+         {:register (fn [_self _target _opts] nil)
+          :unregister (fn [_self key] (set unregistered key))
+          :on-mouse-button-down (fn [_self _payload] false)
+          :on-mouse-button-up (fn [_self _payload] nil)
+          :on-mouse-motion (fn [_self _payload] nil)})
+    (local (ok err) (pcall (fn []
+                        (with-temp-data-dir
+                            (fn [_root]
+                                (local ctx (make-ctx))
+                                (local graph (Graph {:with-start false}))
+                                (local view (GraphView {:graph graph :ctx ctx}))
+                                (local node (Graph.GraphNode {:key "remove-resize"
+                                                              :preview (tracked-preview {})}))
+                                (graph:add-node node {:position (glm.vec3 0 0 0)})
+                                (local point (. view.points node))
+                                (point:on-double-click {})
+                                (local card (. view.points node))
+                                (assert card._resize-target "Card should have a _resize-target")
+                                (set unregistered nil)
+                                (graph:remove-nodes [node])
+                                (assert (= unregistered card._resize-target)
+                                        "Removing expanded node should unregister its resize target")
+                                (view:drop)
+                                (graph:drop))))))
+    (set app.resizables original-resizables)
+    (when (not ok)
+        (error err)))
+
+(fn graph-removing-collapsed-node-clears-persisted-size []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local sizes [])
+            (local persistence {:saved-position (fn [_self _node] nil)
+                                :saved-presentation (fn [_self _node] nil)
+                                :saved-size (fn [_self _node] nil)
+                                :set-size (fn [_self node size]
+                                                (table.insert sizes [node.key size]))
+                                :set-presentation (fn [_self _node _presentation] nil)
+                                :persist (fn [_self _points _force?] nil)
+                                :schedule-save (fn [_self] nil)})
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph
+                                    :ctx ctx
+                                    :persistence persistence}))
+            (local node (Graph.GraphNode {:key "collapse-remove-size"
+                                          :preview (tracked-preview {})}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local point (. view.points node))
+            ;; Expand
+            (point:on-double-click {})
+            ;; Simulate a prior resize through persistence
+            (persistence:set-size node (glm.vec3 50 30 0))
+            ;; Collapse back via header bar collapse button
+            (local card (. view.points node))
+            (assert card._card-size "Should be expanded before collapse")
+            (local collapse-button (. card.header-bar.children 2 :element))
+            (collapse-button:on-click {})
+            ;; Verify collapsed
+            (local compact (. view.points node))
+            (assert (not compact._card-size) "Should be collapsed")
+            ;; Now remove - should still clear size even though collapsed
+            (graph:remove-nodes [node])
+            (local last-size (. sizes (length sizes)))
+            (assert (= (. last-size 1) "collapse-remove-size")
+                    "Removing collapsed node should clear persisted size for node")
+            (assert (= (. last-size 2) nil)
+                    "Removing collapsed node should set size to nil")
             (view:drop)
             (graph:drop))))
 
@@ -2485,6 +2562,145 @@
     (parent-layout:drop)
     (card:drop))
 
+(fn graph-expanded-card-auto-sizes []
+    (local ctx (make-ctx))
+    (local node (Graph.GraphNode {:key "auto-size-node"
+                                  :preview (tracked-preview {})}))
+    (local GraphNodePresentation (require :graph/view/presentation))
+    (local card-builder (GraphNodePresentation.card-builder
+                         {:node node
+                          :position (glm.vec3 0 0 0)
+                          :default-size (glm.vec3 28 16 0)
+                          :min-size (glm.vec3 20 12 0)
+                          :max-size (glm.vec3 40 26 0)
+                          :on-collapse (fn [] nil)
+                          :on-open (fn [_] nil)
+                          :on-menu (fn [_] nil)}))
+    (local card (card-builder ctx))
+    (assert card._card-size "Card should be built")
+    (ctx.layout-root:update)
+    (assert (>= card._card-size.x card._min-size.x)
+            "Card width should be at least min-size")
+    (assert (<= card._card-size.x card._max-size.x)
+            "Card width should be at most max-size")
+    (assert (>= card._card-size.y card._min-size.y)
+            "Card height should be at least min-size")
+    (assert (<= card._card-size.y card._max-size.y)
+            "Card height should be at most max-size")
+    (card:drop))
+
+(fn graph-expanded-card-set-size-overrides-auto []
+    (local ctx (make-ctx))
+    (local node (Graph.GraphNode {:key "set-size-node"
+                                  :preview (tracked-preview {})}))
+    (local GraphNodePresentation (require :graph/view/presentation))
+    (local card-builder (GraphNodePresentation.card-builder
+                         {:node node
+                          :position (glm.vec3 0 0 0)
+                          :default-size (glm.vec3 28 16 0)
+                          :min-size (glm.vec3 20 12 0)
+                          :max-size (glm.vec3 40 26 0)
+                          :resize-max-size (glm.vec3 80 40 0)
+                          :on-collapse (fn [] nil)
+                          :on-open (fn [_] nil)
+                          :on-menu (fn [_] nil)}))
+    (local card (card-builder ctx))
+    (assert card._card-size "Card should be built")
+    (card:set-size (glm.vec3 60 30 0))
+    (ctx.layout-root:update)
+    (assert (= card._card-size.x 60.0)
+            "Card width should respect set-size")
+    (assert (= card._card-size.y 30.0)
+            "Card height should respect set-size")
+    ;; clamp to min
+    (card:set-size (glm.vec3 10 5 0))
+    (ctx.layout-root:update)
+    (assert (= card._card-size.x card._min-size.x)
+            "Card width should be clamped to min-size")
+    (assert (= card._card-size.y card._min-size.y)
+            "Card height should be clamped to min-size")
+    ;; clamp to resize-max
+    (card:set-size (glm.vec3 200 150 0))
+    (ctx.layout-root:update)
+    (assert (= card._card-size.x 80.0)
+            "Card width should be clamped to resize-max-size")
+    (assert (= card._card-size.y 40.0)
+            "Card height should be clamped to resize-max-size")
+    (card:drop))
+
+(fn graph-expanded-card-resize-target-clamps-max-size []
+    (local ctx (make-ctx))
+    (local node (Graph.GraphNode {:key "max-clamp-node"
+                                  :preview (tracked-preview {})}))
+    (local GraphNodePresentation (require :graph/view/presentation))
+    (local card-builder (GraphNodePresentation.card-builder
+                         {:node node
+                          :position (glm.vec3 40 30 0)
+                          :default-size (glm.vec3 28 16 0)
+                          :min-size (glm.vec3 20 12 0)
+                          :max-size (glm.vec3 40 26 0)
+                          :resize-max-size (glm.vec3 80 40 0)
+                          :on-collapse (fn [] nil)
+                          :on-open (fn [_] nil)
+                          :on-menu (fn [_] nil)}))
+    (local card (card-builder ctx))
+    (ctx.layout-root:update)
+    (local target card._resize-target)
+    ;; Simulate right-edge resize: origin stays, size exceeds resize-max
+    (local origin (glm.vec3 target.position.x target.position.y target.position.z))
+    (target:set-transform {:size (glm.vec3 200 150 0) :position origin})
+    (ctx.layout-root:update)
+    (assert (<= target.size.x 80.0)
+            "Target size.x should be clamped to resize-max-size.x")
+    (assert (<= target.size.y 40.0)
+            "Target size.y should be clamped to resize-max-size.y")
+    (assert (= card._card-size.x target.size.x)
+            "Card size should match clamped target size")
+    ;; Position should not change for right-edge resize
+    (assert (= target.position.x origin.x)
+            "Target position.x should stay at origin for right-edge resize")
+    (assert (= target.position.y origin.y)
+            "Target position.y should stay at origin for right-edge resize")
+    (card:drop))
+
+(fn graph-expanded-card-registers-as-resizable []
+    (local original-resizables app.resizables)
+    (var registered-target nil)
+    (var registered-opts nil)
+    (set app.resizables
+         {:register (fn [_self target opts]
+                      (set registered-target target)
+                      (set registered-opts opts))
+          :unregister (fn [_self _key] nil)
+          :on-mouse-button-down (fn [_self _payload] false)
+          :on-mouse-button-up (fn [_self _payload] nil)
+          :on-mouse-motion (fn [_self _payload] nil)})
+    (local (ok err) (pcall (fn []
+                        (with-temp-data-dir
+                            (fn [_root]
+                                (local ctx (make-ctx))
+                                (local graph (Graph {:with-start false}))
+                                (local view (GraphView {:graph graph :ctx ctx}))
+                                (local node (Graph.GraphNode {:key "resizable-node"
+                                                              :preview (tracked-preview {})}))
+                                (graph:add-node node {:position (glm.vec3 0 0 0)})
+                                (local point (. view.points node))
+                                (point:on-double-click {})
+                                (local card (. view.points node))
+                                (assert card._card-size "Should be expanded")
+                                (assert card._resize-target "Card should have a _resize-target")
+                                (assert (= registered-target card._resize-target)
+                                        "Resize target should be the card's _resize-target, not the card itself")
+                                (assert (= (type registered-opts.target.size) :userdata)
+                                        "Resize target size should be a vec3")
+                                (assert registered-opts.on-resize-start "Should have on-resize-start callback")
+                                (assert registered-opts.on-resize-end "Should have on-resize-end callback")
+                                (view:drop)
+                                (graph:drop))))))
+    (set app.resizables original-resizables)
+    (when (not ok)
+        (error err)))
+
 (local approx (. MathUtils :approx))
 
 (fn graph-view-updates-selection-and-focus-borders []
@@ -2605,6 +2821,8 @@
             (var scheduled 0)
             (local persistence {:saved-position (fn [_self _node] nil)
                                 :saved-presentation (fn [_self _node] nil)
+                                :saved-size (fn [_self _node] nil)
+                                :set-size (fn [_self _node _size] nil)
                                 :set-presentation (fn [_self _node _presentation]
                                                         (set scheduled (+ scheduled 1)))
                                 :persist (fn [_self _points _force?] nil)
@@ -2932,6 +3150,10 @@
                       :fn graph-expanded-card-replacement-failure-collapses-to-compact})
 (table.insert tests {:name "GraphView removing expanded node clears persisted presentation"
                       :fn graph-removing-expanded-node-clears-persisted-presentation})
+(table.insert tests {:name "GraphView removing expanded node unregisters resize target"
+                      :fn graph-removing-expanded-node-unregisters-resizable})
+(table.insert tests {:name "GraphView removing collapsed node clears persisted size"
+                      :fn graph-removing-collapsed-node-clears-persisted-size})
 (table.insert tests {:name "GraphView expanded card header buttons work"
                      :fn expanded-card-header-buttons-work})
 (table.insert tests {:name "GraphView expanded card skips double-click and right-click registration"
@@ -2969,6 +3191,10 @@
 (table.insert tests {:name "GraphView expanded card outlines instead of background fill" :fn graph-expanded-card-outlines-not-background-fill})
 (table.insert tests {:name "GraphView expanded card custom border widths" :fn graph-expanded-card-custom-border-widths})
 (table.insert tests {:name "GraphView expanded card outline strips obey clip and culling" :fn graph-expanded-card-outline-strips-obey-clip-and-culling})
+(table.insert tests {:name "GraphView expanded card auto-sizes within min and max" :fn graph-expanded-card-auto-sizes})
+(table.insert tests {:name "GraphView expanded card set-size overrides auto size" :fn graph-expanded-card-set-size-overrides-auto})
+(table.insert tests {:name "GraphView expanded card resize-target clamps max size" :fn graph-expanded-card-resize-target-clamps-max-size})
+(table.insert tests {:name "GraphView expanded card registers as resizable" :fn graph-expanded-card-registers-as-resizable})
 (table.insert tests {:name "Graph movables register and clean up drag targets" :fn graph-movables-module-registers-and-cleans-up})
 (table.insert tests {:name "Graph nodes register with movables for dragging" :fn graph-nodes-are-movable})
 (table.insert tests {:name "Graph drag respects latest force layout position" :fn graph-drag-respects-force-layout-position})

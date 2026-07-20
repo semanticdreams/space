@@ -529,13 +529,20 @@
                        :color node.color}]}))
 
     (fn build-expanded-presentation [node position]
+        (local saved-size (persistence:saved-size node))
         (local card-builder (GraphNodePresentation.card-builder
                              {:node node
                               :position position
-                              :size (glm.vec3 64.0 48.0 0)
+                              :default-size (glm.vec3 32.0 18.0 0)
+                              :min-size (glm.vec3 24.0 12.0 0)
+                              :max-size (glm.vec3 52.0 34.0 0)
+                              :resize-max-size (glm.vec3 90.0 60.0 0)
+                              :requested-size saved-size
                               :depth-offset-index point-base-depth-offset
                               :selection-color resolved-selection-border-color
                               :focus-color resolved-focus-outline-color
+                              :pointer-target (or options.pointer-target
+                                                  (and ctx ctx.pointer-target))
                               :on-collapse (fn [] (toggle-node-presentation node))
                               :on-open (fn [event]
                                          (local focus-node (. focus-nodes node))
@@ -591,6 +598,8 @@
         (when movables-handler
             (movables-handler:unregister node))
         (set (. node-by-point presentation) nil)
+        (when (and presentation._card-size app.resizables presentation._resize-target)
+          (app.resizables:unregister presentation._resize-target))
         (when presentation.drop
             (presentation:drop)))
 
@@ -607,7 +616,25 @@
             (selector:replace-selectable previous presentation))
         (register-movable node presentation)
         (attach-focus-bounds node)
-        (update-point-state node))
+        (update-point-state node)
+        (when (and presentation._card-size app.resizables presentation._resize-target)
+           (app.resizables:register presentation._resize-target
+             {:target presentation._resize-target
+              :handle presentation.layout
+              :key presentation._resize-target
+              :min-size presentation._min-size
+              :max-size presentation._resize-max-size
+              :on-resize-start (fn [entry _drag]
+                               (set entry.target.position presentation.layout.position)
+                               (set entry.target.size presentation._card-size)
+                               (set entry.target.rotation presentation.layout.rotation)
+                               entry)
+             :on-resize-end (fn [entry]
+                             (when (and entry entry.target persistence)
+                               (persistence:set-size (. presentation :node) entry.target.size)))
+             :pointer-target (or presentation._pointer-target
+                                  (and options options.pointer-target)
+                                  (and ctx ctx.pointer-target))})))
 
     (fn detach-node-signals [node]
         (local record (. node-changed-handlers node))
@@ -875,19 +902,21 @@
         (when (and nodes-to-remove (> (length nodes-to-remove) 0))
             (local (removed-count removal-set)
                   (registry:remove-nodes nodes-to-remove
-                      {:before-remove (fn [node point]
-                                           (drop-node-artifacts node)
-                                           (when (and clickables point)
-                                               (clickables:unregister point)
-                                               (when clickables.unregister-right-click
-                                                   (clickables:unregister-right-click point))
-                                               (clickables:unregister-double-click point)
-                                               (set point.on-double-click nil)
-                                               (set point.on-right-click nil))
-                                           (when selector
-                                               (selector:remove-selectables [point]))
-                                           (when movables-handler
-                                               (movables-handler:unregister node)))
+                       {:before-remove (fn [node point]
+                                            (drop-node-artifacts node)
+                                            (when (and clickables point)
+                                                (clickables:unregister point)
+                                                (when clickables.unregister-right-click
+                                                    (clickables:unregister-right-click point))
+                                                (clickables:unregister-double-click point)
+                                                (set point.on-double-click nil)
+                                                (set point.on-right-click nil))
+                                            (when selector
+                                                (selector:remove-selectables [point]))
+                                            (when movables-handler
+                                                (movables-handler:unregister node))
+                                            (when (and point._card-size app.resizables point._resize-target)
+                                                (app.resizables:unregister point._resize-target)))
                        :on-drop-point (fn [point]
                                            (when (and point point.drop)
                                                (point:drop)))}))
@@ -901,6 +930,7 @@
                 (each [node _ (pairs removal-set)]
                     (when (. expanded-nodes node)
                         (persistence:set-presentation node nil))
+                    (persistence:set-size node nil)
                     (set (. expanded-nodes node) nil)
                     (set (. pinned-before-expand node) nil)
                     (local focus-node (. focus-nodes node))
@@ -1106,6 +1136,8 @@
                 (when selector
                     (selector:remove-selectables [point]))
                 (set (. node-by-point point) nil)
+                (when (and point._card-size app.resizables point._resize-target)
+                    (app.resizables:unregister point._resize-target))
                 (when point.drop
                     (point:drop)))
             (each [node focus-node (pairs focus-nodes)]

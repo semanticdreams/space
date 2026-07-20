@@ -590,6 +590,7 @@
            :key entry.key
            :owner entry.owner
            :min-size entry.min-size
+           :max-size entry.max-size
            :on-resize-start entry.on-resize-start
            :on-resize-end entry.on-resize-end})))
 
@@ -606,6 +607,7 @@
         (when handle (set options.handle handle))
         (when entry.pointer-target (set options.pointer-target entry.pointer-target))
         (when entry.min-size (set options.min-size entry.min-size))
+        (when entry.max-size (set options.max-size entry.max-size))
         (when entry.on-resize-start (set options.on-resize-start entry.on-resize-start))
         (when entry.on-resize-end (set options.on-resize-end entry.on-resize-end))
         (local key (or entry.key widget entry))
