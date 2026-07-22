@@ -736,7 +736,10 @@
     (when self.float
       (each [_ metadata (ipairs (or self.float.children []))]
         (collect-record "float" metadata)))
-    {:panels panels})
+    (local state {:panels panels})
+    (when (and app.extended-sidebar app.extended-sidebar.capture-state)
+      (set state.extended-sidebar (app.extended-sidebar:capture-state)))
+    state)
 
   (fn resolve-panel-restorer [self panel]
     (local kind panel.kind)
@@ -788,6 +791,10 @@
       (assert (= (type kind) :string) "Hud.restore-state panel kind must be a string")
       (local restorer (resolve-panel-restorer self panel))
       (restorer panel))
+    (when payload.extended-sidebar
+      (if (and app.extended-sidebar app.extended-sidebar.restore-state)
+          (app.extended-sidebar:restore-state payload.extended-sidebar)
+          (set app.pending-extended-sidebar-state payload.extended-sidebar)))
     true)
 
   (fn drop [self]

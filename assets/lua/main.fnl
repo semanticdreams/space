@@ -105,6 +105,8 @@
 (local SpaceAgent (require :llm/agent/builtins/space-agent))
 (local PromptUtils (require :llm/agent/prompt-utils))
 (local OpencodeSdk (require :llm/providers/opencode))
+(local HudExtendedSidebar (require :hud-extended-sidebar))
+(local HudExtendedSidebarView (require :hud-extended-sidebar-view))
 (local fennel-cache (require :fennel-cache))
 (local bytecode-enabled
   (do
@@ -916,6 +918,36 @@
     (app.hud:remove-overlay-child app.active-world-hud-overlay)
     (set app.active-world-hud-overlay nil)))
 
+(fn ensure-extended-sidebar! []
+  (when (not app.extended-sidebar)
+    (set app.extended-sidebar (HudExtendedSidebar))
+    (local TerminalWidget (require :terminal-widget))
+    (app.extended-sidebar:register-entry
+      {:id :terminal
+       :icon :terminal
+       :label "Terminal"
+       :build-panel (fn [ctx]
+                      ((TerminalWidget {:focusable? true}) ctx))}))
+  (when (and app.agent-runner (not (app.extended-sidebar:get-entry :space-agent)))
+    (local AgentPanel (require :llm/agent/ui/panel))
+    (app.extended-sidebar:register-entry
+      {:id :space-agent
+       :icon :smart_toy
+       :label "Space Agent"
+       :build-panel (fn [ctx]
+                      ((AgentPanel.AgentPanel
+                         {:runner app.agent-runner
+                          :registry app.agent-registry
+                          :approvals app.agent-approvals
+                          :presets app.agent-presets})
+                       ctx))}))
+  (when app.pending-extended-sidebar-state
+    (app.extended-sidebar:restore-state app.pending-extended-sidebar-state)
+    (when (or (not app.pending-extended-sidebar-state.active-id)
+              (= app.extended-sidebar.active-id app.pending-extended-sidebar-state.active-id))
+      (set app.pending-extended-sidebar-state nil)))
+  true)
+
 (fn apply-active-world-hud-contrib []
   (when app.hud
     (local contrib (resolve-active-world-hud-contrib))
@@ -933,14 +965,9 @@
     (when contrib.left_dock_builder
       (set hud-opts.left-dock-builder contrib.left_dock_builder))
     (when app.agent-runner
-      (local AgentPanel (require :llm/agent/ui/panel))
-      (set hud-opts.right-dock-builder
-           (fn [ctx]
-             ((AgentPanel.AgentPanel {:runner app.agent-runner
-                                       :registry app.agent-registry
-                                       :approvals app.agent-approvals
-                                       :presets app.agent-presets})
-              ctx))))
+      (ensure-extended-sidebar!)
+      (set hud-opts.right-dock-builder (HudExtendedSidebarView app.extended-sidebar))
+      (set hud-opts.right-dock-width 6))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)
     (when contrib.overlay
