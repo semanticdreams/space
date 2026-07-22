@@ -274,7 +274,7 @@
                                      :module-name "bubbles"
                                      :module-paths module-paths
                                      :source :user
-                                     :owned-paths [init-path]}))
+                                     :owned-paths [(fs.join-path code-dir "bubbles") init-path]}))
       (mgr:register unit)
       (unit:load {})
 

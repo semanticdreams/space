@@ -25,7 +25,7 @@
         value
         (.. "0x" value)))
 
-(fn build-wallet-send-dialog [opts ctx runtime-opts]
+(fn build-wallet-send-dialog [opts ctx runtime-opts transfer-builder]
     (local options (or opts {}))
     (var rpc (or options.rpc (WalletRpc {})))
     (local owns-rpc? (not options.rpc))
@@ -341,7 +341,8 @@
                         :name (or options.name "wallet-send-dialog")
                         :on-close options.on-close
                         :child (Padding {:edge-insets [0.6 0.6]
-                                         :child content})}))
+                                         :child content})
+                        :transfer-builder transfer-builder}))
     (local dialog (dialog-builder ctx runtime-opts))
     (set-status "Ready")
     (when dialog
@@ -360,8 +361,9 @@
 
 (fn WalletSendDialog [opts]
     (local options (or opts {}))
-    (fn [ctx runtime-opts]
-        (build-wallet-send-dialog options ctx runtime-opts)))
+    (fn build [ctx runtime-opts]
+        (build-wallet-send-dialog options ctx runtime-opts build))
+    build)
 
 (local exports {:WalletSendDialog WalletSendDialog})
 

@@ -1,7 +1,7 @@
 (local glm (require :glm))
 (import-macros {: incf : maxf} :macros)
 
-(local {: Layout} (require :layout))
+(local {: Layout : finite-constraint?} (require :layout))
 
 (local axis-labels {1 "x" 2 "y" 3 "z"})
 (local axis-name-map {:x 1 :y 2 :z 3 "x" 1 "y" 2 "z" 3})
@@ -93,7 +93,47 @@
       (measure-children self nil))
 
     (fn constrained-measurer [self constraints]
-      (measure-children self constraints))
+      (if (and constraints (finite-constraint? constraints axis))
+          ;; Flex-aware measurement: fixed children are measured first to
+          ;; determine the remaining axis space for flex children.
+          (let [axis-spacing (. spacing axis)
+                total-spacing (* axis-spacing (math.max 0 (- (length self.children) 1)))
+                constraint-max-axis (. constraints.max axis)]
+            ;; Measure fixed children at full constraint
+            (each [i child (ipairs self.children)]
+              (let [metadata (. e.children i)]
+                (when (= metadata.flex 0)
+                  (child:measure-constrained constraints))))
+            ;; Sum axis space consumed by fixed children
+            (var fixed-sum 0.0)
+            (each [i child (ipairs self.children)]
+              (let [metadata (. e.children i)]
+                (when (= metadata.flex 0)
+                  (set fixed-sum (+ fixed-sum (. child.measure axis))))))
+            ;; Remaining axis space shared proportionally by flex children
+            (local remaining (math.max 0 (- constraint-max-axis fixed-sum total-spacing)))
+            (local flex-sum (accumulate [sum 0 _ x (ipairs e.children)] (+ sum x.flex)))
+            (each [i child (ipairs self.children)]
+              (let [metadata (. e.children i)]
+                (when (> metadata.flex 0)
+                  (local share (if (> flex-sum 0)
+                                   (/ (* remaining metadata.flex) flex-sum)
+                                   0))
+                  (local child-constraints
+                    (let [m (glm.vec3 (or (. constraints.max 1) 0)
+                                      (or (. constraints.max 2) 0)
+                                      (or (. constraints.max 3) 0))]
+                      (set (. m axis) share)
+                      {:max m}))
+                  (child:measure-constrained child-constraints))))
+            ;; Sum all axis measures
+            (set self.measure (glm.vec3 0))
+            (each [i child (ipairs self.children)]
+              (incf (. self.measure axis) (. child.measure axis))
+              (each [_ a (ipairs cross-axes)]
+                (maxf (. self.measure a) (. child.measure a))))
+            (incf (. self.measure axis) total-spacing))
+          (measure-children self constraints)))
 
     (fn layouter [self]
       (local flex-sum (accumulate [sum 0 _ x (ipairs e.children)] (+ sum x.flex)))

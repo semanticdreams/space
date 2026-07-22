@@ -82,7 +82,6 @@
   (local restore-export (or options.restore-export "restore"))
   (local suppress-run-main? (not (= options.suppress-run-main? false)))
   (local module-paths options.module-paths)
-  (var owned-module-roots nil)
   (var loaded-owned-modules {})
   (local fennel-cache (require :fennel-cache))
   (local path-utils (require :path-utils))
@@ -90,13 +89,6 @@
   (fn loaded-or-required [name]
     (or (. package.loaded name)
         (require name)))
-
-  (fn module-root-from-pattern [pattern]
-    (if (string.match pattern "/%?%.fnl$")
-        (string.sub pattern 1 (- (# pattern) 6))
-        (string.match pattern "/%?/init%.fnl$")
-        (string.sub pattern 1 (- (# pattern) 11))
-        nil))
 
   (fn path-separator? [c]
     (path-utils.path-separator? c))
@@ -111,27 +103,6 @@
                 (or (= path-len root-len)
                     (path-separator? (string.sub path (+ root-len 1) (+ root-len 1))))))))
 
-  (fn module-roots []
-    (when (= owned-module-roots nil)
-      (set owned-module-roots [])
-      (when module-paths
-        (local fs (loaded-or-required :fs))
-        (each [pattern (string.gmatch module-paths "[^;]+")]
-          (local root (module-root-from-pattern pattern))
-          (when root
-            (table.insert owned-module-roots (fs.absolute root))))))
-    owned-module-roots)
-
-  (fn owned-module-path? [path]
-    (when path
-      (local fs (loaded-or-required :fs))
-      (local abs-path (fs.absolute path))
-      (var matched? false)
-      (each [_ root (ipairs (module-roots)) &until matched?]
-        (when (path-under? abs-path root)
-          (set matched? true)))
-      matched?))
-
   (fn module-source-path [name]
     (local fennel (loaded-or-required :fennel))
     (local old-fennel-path fennel.path)
@@ -142,10 +113,36 @@
       (set fennel.path old-fennel-path))
     (if ok path nil))
 
+  (var owned-paths nil)
+
+  (fn get-owned-paths []
+    (when (= owned-paths nil)
+      (set owned-paths
+        (let [explicit (. options :owned-paths)]
+          (if (and explicit (< 0 (# explicit)))
+              explicit
+              (let [resolved (module-source-path module-name)]
+                (if (not resolved)
+                    []
+                    (string.match resolved "/init%.fnl$")
+                    [(: (loaded-or-required :fs) :parent resolved) resolved]
+                    [resolved]))))))
+    owned-paths)
+
+  (fn owned-path? [path]
+    (when path
+      (local fs (loaded-or-required :fs))
+      (local abs-path (fs.absolute path))
+      (var matched? false)
+      (each [_ owned (ipairs (or (get-owned-paths) [])) &until matched?]
+        (when (path-under? abs-path (fs.absolute owned))
+          (set matched? true)))
+      matched?))
+
   (fn remember-owned-module! [name]
     (when (and (= (type name) :string))
       (local source-path (module-source-path name))
-      (when (owned-module-path? source-path)
+      (when (owned-path? source-path)
         (tset loaded-owned-modules name source-path))))
 
   (fn clear-owned-loaded-modules! []
@@ -202,6 +199,10 @@
     (local module (require-module))
     (assert (= (type module) :table)
             (.. "Unit module " module-name " did not return a table"))
+    (when (= export-name load-export)
+      (local unload-handler (. module unload-export))
+      (assert (= (type unload-handler) :function)
+              (.. "Unit module " module-name " missing function " unload-export)))
     (local handler (. module export-name))
     (assert (= (type handler) :function)
             (.. "Unit module " module-name " missing function " export-name))
@@ -218,7 +219,7 @@
                       :module-name module-name
                       :parent-id options.parent-id
                       :source options.source
-                      :owned-paths options.owned-paths
+                      :owned-paths (or (get-owned-paths) [])
                       :load (fn [_ctx]
                                (call-export load-export nil))
                       :unload (fn [_ctx]

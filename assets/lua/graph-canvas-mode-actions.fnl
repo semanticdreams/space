@@ -46,18 +46,13 @@
   (local selected (or (and context.graph context.graph.selected-nodes) []))
   (local canvas-target (or (and context.targets context.targets.canvas)
                            (and context.targets context.targets.hud)))
-  (table.insert actions
-                {:name "Create String Entity"
-                 :icon "note_add"
-                 :fn (fn [_button _event]
-                       (local StringEntityStore (require :entities/string))
-                       (local store (StringEntityStore.get-default))
-                       (local entity (store:create-entity {}))
-                       (when (and graph entity)
-                         (local {:StringEntityNode StringEntityNode} (require :graph/nodes/string-entity))
-                         (local node (StringEntityNode {:entity-id entity.id
-                                                        :store store}))
-                         (graph:add-node node)))})
+    (table.insert actions
+                 {:name "Create String Entity"
+                  :icon "note_add"
+                  :fn (fn [_button _event]
+                        (local StringEntityStore (require :entities/string))
+                        (local store (StringEntityStore.get-default))
+                        (store:create-entity {}))})
   (table.insert actions
                 {:name "Create Link Entity"
                  :icon "link"

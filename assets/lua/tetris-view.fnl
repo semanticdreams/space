@@ -295,7 +295,7 @@
                  game.lines-cleared
                  game.score))
 
-(fn build-tetris-dialog [ctx options runtime-opts]
+(fn build-tetris-dialog [ctx options runtime-opts transfer-builder]
   (local game (TetrisGame (or options.game {})))
   (var status-text-entity nil)
   (local gameplay-lease-id (.. "tetris:" (tostring game)))
@@ -420,7 +420,8 @@
     (DeepDialog {:title (or options.title "Tetris")
                  :body-padding [0 0]
                  :child body-builder
-                 :on-close options.on-close}))
+                 :on-close options.on-close
+                 :transfer-builder transfer-builder}))
   (local content (dialog-builder ctx runtime-opts))
   (assert board "TetrisDialog build requires board entity")
 
@@ -440,7 +441,7 @@
 (fn TetrisDialog [opts]
   (local options (or opts {}))
   (fn build [ctx runtime-opts]
-    (build-tetris-dialog ctx options runtime-opts))
+    (build-tetris-dialog ctx options runtime-opts build))
   build)
 
 (local exports {:TetrisDialog TetrisDialog

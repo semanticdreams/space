@@ -369,3 +369,5 @@ SIMD extensions be disabled, either by passing an argument of `-DWITH_SIMD=0`
 to `cmake` when configuring the build or by setting the environment variable
 `JSIMD_FORCENONE` to `1` at run time, when testing libjpeg-turbo with Valgrind,
 MSan, or other memory debuggers.
+
+- [[../../knowledge/home|Knowledge Base]]

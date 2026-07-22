@@ -84,7 +84,7 @@
         ((Input {:text ""
                  :multiline? true
                  :min-lines (or entry.line-count 1)
-                 :max-lines (or entry.line-count 1)
+                 :max-lines math.huge
                  :min-columns 12
                  :max-columns (or options.output-max-columns 64)})
          child-ctx))
@@ -517,7 +517,8 @@
             ((DefaultDialog {:title (or options.title "LLM Chat")
                              :name (or options.name "llm-chat-view")
                              :on-close options.on-close
-                             :child build-content})
+                             :child build-content
+                             :transfer-builder build})
              ctx))
         (set dialog.__chat-view view)
         (ensure-conversation)

@@ -430,3 +430,8 @@ Those are separate features.
 - Should there be a one-click `All graph`, `All scene`, `All drawing` group state control?
 
 The initial implementation can defer these and keep the contract small: every preset gets `Auto`, `On`, and `Off`.
+
+
+## See also
+
+- [[../../knowledge/home|Knowledge Base]]

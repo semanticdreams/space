@@ -151,6 +151,36 @@
         (each [_ selectable (ipairs (or new-selectables []))]
             (table.insert selectables selectable)))
 
+    (fn replace-selectable [_self previous next-selectable]
+        (assert previous "ObjectSelector.replace-selectable requires previous selectable")
+        (assert next-selectable "ObjectSelector.replace-selectable requires replacement selectable")
+        (for [i (length selectables) 1 -1]
+            (when (and (= (. selectables i) next-selectable)
+                       (not (= next-selectable previous)))
+                (table.remove selectables i)))
+        (var replaced? false)
+        (for [i (length selectables) 1 -1]
+            (when (= (. selectables i) previous)
+                (if replaced?
+                    (table.remove selectables i)
+                    (do
+                        (set (. selectables i) next-selectable)
+                        (set replaced? true)))))
+        (assert replaced? "ObjectSelector.replace-selectable previous selectable is not registered")
+        (var selected-changed? false)
+        (for [i (length selected) 1 -1]
+            (when (and (= (. selected i) next-selectable)
+                       (not (= next-selectable previous)))
+                (table.remove selected i)
+                (set selected-changed? true)))
+        (each [i selectable (ipairs selected)]
+            (when (= selectable previous)
+                (set (. selected i) next-selectable)
+                (set selected-changed? true)))
+        (when selected-changed?
+            (log-selection selected)
+            (changed:emit selected)))
+
     (fn remove-selectables [_self removals]
         (local keep [])
         (each [_ selectable (ipairs selectables)]
@@ -160,7 +190,7 @@
                     (set removed true)))
             (when (not removed)
                 (table.insert keep selectable)))
-        (set selectables keep)
+        (replace-contents selectables keep)
         (local intersection [])
         (each [_ item (ipairs selected)]
             (each [_ candidate (ipairs selectables)]
@@ -228,9 +258,10 @@
      :toggle toggle
      :enabled? (fn [_self] enabled?)
      :active? (fn [_self] (box:active?))
-     :set-selectables set-selectables
-     :add-selectables add-selectables
-     :remove-selectables remove-selectables
+      :set-selectables set-selectables
+      :add-selectables add-selectables
+      :replace-selectable replace-selectable
+      :remove-selectables remove-selectables
      :set-selected set-selected
      :unselect-all unselect-all
      :on-mouse-button on-mouse-button

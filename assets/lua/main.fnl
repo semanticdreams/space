@@ -27,6 +27,7 @@
 (local AppConfig (require :app-config))
 (local CliArgs (require :cli-args))
 (local CanvasModes (require :canvas-modes))
+(local Launcher (require :launcher))
 
 (set app.engine-autocreated false)
 (when (not app.engine)
@@ -44,6 +45,8 @@
 (set fennel.macro-path runtime.fennel-path)
 
 (set app.unit-manager (or app.unit-manager (UnitManager {})))
+(set app.launcher (or app.launcher (Launcher {})))
+(app.launcher:clear-runtime)
 
 (global pp (fn [x] (logging.debug (fennel.view x))))
 
@@ -64,6 +67,7 @@
 (local TerrainIssueLog (require :terrain-issue-log))
 (TerrainIssueLog.start-session! "space startup")
 (local fs (require :fs))
+(local json (require :json))
 (local appdirs (require :appdirs))
 (local log-dir
   (or (os.getenv "SPACE_LOG_DIR")
@@ -81,6 +85,7 @@
 (local RuntimePerformance (require :runtime-performance))
 (local VolumeControl (require :volume-control))
 (local MenuManager (require :menu-manager))
+(local PanelTransfer (require :panel-transfer))
 (local WalletManager (require :wallet-manager))
 (local AgentPresetRegistry (require :llm/presets/registry))
 (local AgentPresetManager (require :llm/presets/init))
@@ -90,6 +95,7 @@
 (local AgentBuiltinScene (require :llm/presets/builtins/scene))
 (local AgentBuiltinGeneral (require :llm/presets/builtins/general))
 (local AgentBuiltinUnits (require :llm/presets/builtins/units))
+(local AgentBuiltinRepo (require :llm/presets/builtins/repo))
 (local AgentRegistry (require :llm/agent/registry))
 (local AgentRunner (require :llm/agent/runner))
 (local AgentToolSurface (require :llm/agent/tool-surface))
@@ -765,6 +771,8 @@
 (set app.board-view nil)
 (set app.tray-manager nil)
 (set app.menu-manager nil)
+(set app.panel-transfer nil)
+(set app.launcher nil)
 (set app.notify nil)
 (set app.kernels nil)
 (set app.settings nil)
@@ -823,9 +831,18 @@
    :canvas-visible? (= app.canvas-visible? true)})
 
 (fn agent-preset-context []
+  (fn repos-available?* []
+    (local store-path (and app.user-data-dir
+                           (fs.join-path app.user-data-dir "repositories" "registry.json")))
+    (when store-path
+      (when (fs.exists store-path)
+        (local parsed (json.loads (fs.read-file store-path)))
+        (when (= (type parsed) :table)
+          (not= (next parsed) nil)))))
   {:surface (or app.active-interaction-surface :scene)
    :mode app.active-canvas-mode
-   :canvas-visible? (= app.canvas-visible? true)})
+   :canvas-visible? (= app.canvas-visible? true)
+   :repos-available? (= (repos-available?*) true)})
 
 (fn canvas-shell-state= [a b]
   (and a b
@@ -1100,8 +1117,8 @@
   (when (and app.scene app.scene.build-context)
     (set app.scene.build-context.object-selector app.object-selector)
     (set app.scene.build-context.layout-root app.layout-root))
-  (when (and runtime runtime.restore-surface-state)
-    (runtime:restore-surface-state app.canvas app.hud))
+  (when (and runtime runtime.restore-canvas-shell-state)
+    (runtime:restore-canvas-shell-state app.canvas))
   (local requested-mode-id
     (if (and runtime runtime.requested-canvas-mode-known?)
         runtime.requested-canvas-mode-id
@@ -1119,6 +1136,8 @@
           (set runtime.requested-canvas-mode-id requested-mode-id)
           (set runtime.requested-canvas-mode-known? true)
           (set runtime.active-canvas-mode nil))))
+  (when (and runtime runtime.restore-surface-state)
+    (runtime:restore-surface-state app.canvas app.hud))
   (app.set-active-interaction-surface (or (and runtime runtime.preferred-interaction-surface)
                                           app.preferred-interaction-surface)
                                       {:sync-canvas-visibility true})
@@ -1222,26 +1241,45 @@
   (when (and app.code-dir fs fs.list-dir (fs.exists app.code-dir))
     (local (ok entries) (pcall fs.list-dir app.code-dir false))
     (when ok
-      (local candidates [])
+      (local by-name {})
       (each [_ entry (ipairs entries)]
         (local module-name (string.match entry.name "^([^.]+)%.fnl$"))
-        (if (and entry.is-file module-name)
-            (table.insert candidates {:name module-name
-                                      :path (fs.join-path app.code-dir entry.name)})
-            (and entry.is-dir entry.name
-                 (fs.exists (fs.join-path app.code-dir entry.name "init.fnl")))
-            (table.insert candidates {:name entry.name
-                                      :path (fs.join-path app.code-dir entry.name "init.fnl")})))
+        (when (and entry.is-file module-name)
+          (tset by-name module-name
+                {:name module-name
+                 :path (fs.join-path app.code-dir entry.name)
+                 :owned-paths [(fs.join-path app.code-dir entry.name)]
+                 :directory? false})))
+      (each [_ entry (ipairs entries)]
+        (when (and entry.is-dir entry.name
+                   (fs.exists (fs.join-path app.code-dir entry.name "init.fnl")))
+          (let [had-flat? (not (not (. by-name entry.name)))
+                dir-path (fs.join-path app.code-dir entry.name)
+                init-path (fs.join-path dir-path "init.fnl")]
+            (tset by-name entry.name
+                  {:name entry.name
+                   :path init-path
+                   :owned-paths [dir-path init-path]
+                   :directory? true
+                   :directory-override? had-flat?}))))
+      (local candidates [])
+      (each [_ candidate (pairs by-name)]
+        (table.insert candidates candidate))
       (table.sort candidates (fn [a b] (< a.name b.name)))
-      (local module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+      (local default-module-paths (.. app.code-dir "/?.fnl;" app.code-dir "/?/init.fnl"))
+      (local dir-first-module-paths (.. app.code-dir "/?/init.fnl;" app.code-dir "/?.fnl"))
       (each [_ candidate (ipairs candidates)]
+        (local unit-module-paths
+          (if candidate.directory?
+              dir-first-module-paths
+              default-module-paths))
         (local unit
           (Units.ModuleUnit {:id (.. "user-" candidate.name)
                              :parent-id "app-root"
                              :source :user
                              :module-name candidate.name
-                             :module-paths module-paths
-                             :owned-paths [candidate.path]}))
+                             :module-paths unit-module-paths
+                             :owned-paths candidate.owned-paths}))
         (app.unit-manager:register unit)
         (unit:load))))
   true)
@@ -1541,6 +1579,8 @@
   (set app.terrain-paint-previous-state nil)
   (set app.layout-root nil)
   (set app.hud nil)
+  (set app.launcher (Launcher {}))
+  (app.launcher:clear-runtime)
   (CanvasModes.clear-mode-runtime-hooks!)
   (ensure-canvas-unit)
   (local hud-unit (ensure-hud-unit))
@@ -1567,6 +1607,42 @@
     (app.menu-manager:drop)
     (set app.menu-manager nil))
   (set app.menu-manager (MenuManager))
+
+  (when app.panel-transfer
+    (set app.panel-transfer nil))
+  (set app.panel-transfer (PanelTransfer))
+  (app.panel-transfer:register-receiver
+    {:id :hud
+     :label "HUD"
+     :icon "dashboard"
+     :target-fn (fn [] app.hud)
+     :rollback (fn [_r el]
+                 (var removed false)
+                 (when (and app.hud app.hud.remove-panel-child)
+                   (set removed (app.hud:remove-panel-child el)))
+                 (when (and removed el el.drop)
+                   (el:drop))
+                 removed)})
+  (app.panel-transfer:register-receiver
+    {:id :scene
+     :label "Scene"
+     :icon "view_in_ar"
+     :target-fn (fn [] app.scene)
+     :rollback (fn [_r el]
+                 (when (and app.scene app.scene.remove-panel-child)
+                   (app.scene:remove-panel-child el)))})
+  (app.panel-transfer:register-receiver
+    {:id :canvas
+     :label "Canvas"
+     :icon "space_dashboard"
+     :target-fn (fn [] app.canvas)
+     :rollback (fn [_r el]
+                 (var removed false)
+                 (when (and app.canvas app.canvas.remove-panel-child)
+                   (set removed (app.canvas:remove-panel-child el)))
+                 (when (and removed el el.drop)
+                   (el:drop))
+                 removed)})
 
   (when app.system-cursors
     (app.system-cursors:reset))
@@ -1605,7 +1681,8 @@
     (AgentBuiltinGraph.register app.agent-presets)
     (AgentBuiltinScene.register app.agent-presets)
     (AgentBuiltinGeneral.register app.agent-presets)
-    (AgentBuiltinUnits.register app.agent-presets))
+    (AgentBuiltinUnits.register app.agent-presets)
+    (AgentBuiltinRepo.register app.agent-presets))
   (app.agent-presets:set-context (agent-preset-context))
 
   ;; Agent layer bootstrap
@@ -1615,11 +1692,15 @@
     (set app.agent-approvals
          (AgentApprovals.AgentApprovals
            {:data-dir (fs.join-path app.user-data-dir "agent-approvals")
-            :policy {:normal :auto
-                     :filesystem-read :ask
-                     :filesystem-write :ask
-                     :destructive :ask
-                     :shell :ask}})))
+             :policy {:normal :auto
+                      :filesystem-read :ask
+                      :filesystem-write {:default :ask
+                                         :tools {:unit.create-test :auto}}
+                      :destructive :ask
+                      :shell {:default :ask
+                              :tools {:unit.create :auto
+                                      :unit.eval :auto
+                                      :unit.connect-signal :auto}}}})))
   (when (not app.agent-tool-surface)
     (set app.agent-tool-surface
          (AgentToolSurface.AgentToolSurface
@@ -1645,12 +1726,8 @@
   (when (and app.canvas-shell-changed (not app.agent-presets-canvas-handler))
     (set app.agent-presets-canvas-handler
          (app.canvas-shell-changed:connect
-           (fn [payload]
-             (local current payload.current)
-             (app.agent-presets:set-context
-               {:surface current.interaction-surface
-                :mode current.canvas-mode
-                :canvas-visible? current.canvas-visible?})))))
+           (fn [_payload]
+             (app.agent-presets:set-context (agent-preset-context))))))
 
   (when (not app.agent-providers)
     (set app.agent-providers {}))
@@ -1974,6 +2051,8 @@
   (when app.menu-manager
     (app.menu-manager:drop)
     (set app.menu-manager nil))
+  (when app.panel-transfer
+    (set app.panel-transfer nil))
   (when (and app.focus-void-callback app.clickables)
     (app.clickables:unregister-left-click-void-callback app.focus-void-callback)
     (set app.focus-void-callback nil))

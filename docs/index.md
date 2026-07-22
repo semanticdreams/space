@@ -74,3 +74,7 @@ This section will eventually show short demos. The current planned gallery label
 - [ ] Shared-world state and realtime sync with permissions and provenance
 - [ ] Matrix-based social and contribution views around code, assets, and worlds
 - [ ] Concrete pod, asset distribution, and service-management workflows
+
+## See also
+
+- [[knowledge/home|Knowledge Base]]

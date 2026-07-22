@@ -340,6 +340,70 @@
               "bind-active-world-runtime should mark requested mode as known when preserving it")
       true)))
 
+(fn bind-active-world-runtime-restores-panels-after-mode-activation []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (local saved-registry app.canvas-mode-registry)
+      (set app.canvas-mode-registry nil)
+      (CanvasModes.ensure-registry)
+      (var activation-log [])
+      (CanvasModes.register-mode
+        {:id "graph"
+         :label "Graph"
+         :icon "account_tree"
+         :button-name "graph-canvas-mode"
+         :show-in-sidebar? true
+         :activate (fn [_ctx]
+                     (table.insert activation-log :activate)
+                     {:mode-id "graph"})})
+      (set app.preferred-interaction-surface :scene)
+      (set app.active-interaction-surface :scene)
+      (set app.canvas-visible? false)
+      (set app.scene-interactive? true)
+      (set app.canvas-interactive? false)
+      (set app.world-manager {:active-world (fn [_self]
+                                               {:world {:get-hud-contrib (fn [_world] {})}})})
+      (set app.hud {:build-context {}
+                    :build-default (fn [_self _opts] true)
+                    :add-overlay-child (fn [_self _opts] :overlay)
+                    :remove-overlay-child (fn [_self _overlay] true)
+                    :on-viewport-changed (fn [_self _viewport] true)
+                    :restore-state (fn [_self _state] true)})
+      (set app.reset-projection (fn [] true))
+      (local runtime {:active-canvas-mode "graph"
+                      :preferred-interaction-surface :canvas
+                      :first-person-controls {:id :scene-controls}
+                      :canvas-controls {:id :canvas-controls}
+                      :scene nil
+                      :canvas {:build-context {}
+                               :restore-state (fn [_self _state] true)
+                               :restore-shell-state (fn [_self _state] true)}
+                      :restore-canvas-shell-state (fn [_self _canvas]
+                                                    (table.insert activation-log :shell))
+                      :restore-surface-state (fn [_self _canvas _hud]
+                                               (table.insert activation-log :panels)
+                                               (assert app.active-canvas-mode
+                                                       "Active canvas mode should be set before panel restore"))})
+      (local (ok result)
+        (pcall
+          (fn []
+            (app.bind-active-world-runtime {:id "test-world"} runtime)
+            (assert (= app.active-canvas-mode "graph")
+                    "bind-active-world-runtime should activate the canvas mode")
+            (assert (= (. activation-log 1) :shell)
+                    "Canvas shell state should be restored before mode activation")
+            (assert (= (. activation-log 2) :activate)
+                    "Canvas mode should activate after shell restore")
+            (assert (= (. activation-log 3) :panels)
+                    "Panel state should be restored after mode activation")
+            true)))
+      (set app.canvas-mode-registry saved-registry)
+      (when (not ok)
+        (error result))
+      result)))
+
 (fn set-active-canvas-mode-rejects-unknown-mode []
   (with-restored-app-fields bind-state-keys
     (fn []
@@ -455,6 +519,8 @@
                       :fn bind-active-world-runtime-defers-canvas-mode-without-canvas})
 (table.insert tests {:name "bind-active-world-runtime promotes active-canvas-mode to requested"
                       :fn bind-active-world-runtime-preserves-active-canvas-mode-as-requested})
+(table.insert tests {:name "bind-active-world-runtime restores panels after mode activation"
+                     :fn bind-active-world-runtime-restores-panels-after-mode-activation})
 (table.insert tests {:name "set-active-canvas-mode rejects unknown modes"
                      :fn set-active-canvas-mode-rejects-unknown-mode})
 (table.insert tests {:name "Canvas modes ordered specs preserve registration order"

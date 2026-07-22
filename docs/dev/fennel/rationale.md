@@ -92,3 +92,7 @@ a powerful construct is justified.
 
 For a more detailed look at the guiding principles of Fennel from a
 design perspective see [the Values of Fennel](https://fennel-lang.org/values).
+
+## See also
+
+- [[../../../knowledge/home|Knowledge Base]]

@@ -626,6 +626,87 @@
   ;; No direct access to decisions list, but no error means success
   (assert true))
 
+(fn test-approvals-per-tool-auto-overrides-risk-ask []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :ask
+                                       :tools {:unit.create :auto}}}}))
+  (local context {:tool "space_unit_create" :source "unit.create"})
+  (assert (= (approvals:check-risk :shell context) :approved)
+          "per-tool auto should override shell ask"))
+
+(fn test-approvals-per-tool-deny-overrides-risk-auto []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :auto
+                                       :tools {:unit.create :deny}}}}))
+  (local context {:tool "space_unit_create" :source "unit.create"})
+  (assert (= (approvals:check-risk :shell context) :denied)
+          "per-tool deny should override shell auto"))
+
+(fn test-approvals-per-tool-unmatched-falls-back-to-default []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :ask
+                                       :tools {:unit.create :auto}}}}))
+  (local context {:tool "space_app_run_bash" :source "app.run-bash"})
+  (assert (= (approvals:check-risk :shell context) :needs-approval)
+          "unmatched tool should fall back to default :ask"))
+
+(fn test-approvals-per-tool-unmatched-falls-back-to-auto-default []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :auto
+                                       :tools {:unit.create :auto}}}}))
+  (local context {:tool "space_app_run_bash" :source "app.run-bash"})
+  (assert (= (approvals:check-risk :shell context) :approved)
+          "unmatched tool should fall back to default :auto"))
+
+(fn test-approvals-per-tool-nil-context-falls-back []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :ask
+                                       :tools {:unit.create :auto}}}}))
+  (assert (= (approvals:check-risk :shell) :needs-approval)
+          "nil context should fall back to :needs-approval"))
+
+(fn test-approvals-per-tool-table-without-default []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals
+    (AgentApprovals {:policy {:shell {:tools {:unit.create :auto}}}}))
+  (local context {:tool "space_unit_create" :source "unit.create"})
+  (assert (= (approvals:check-risk :shell context) :approved)
+          "table without default should use .tools entry and return :approved")
+  (local context2 {:tool "space_app_run_bash" :source "app.run-bash"})
+  (assert (= (approvals:check-risk :shell context2) :needs-approval)
+          "table without default should fall back to :ask for unmatched tools"))
+
+(fn test-approvals-per-tool-plain-risk-value-still-works []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (local approvals (AgentApprovals {:policy {:shell :auto}}))
+  (local context {:tool "space_app_run_bash" :source "app.run-bash"})
+  (assert (= (approvals:check-risk :shell context) :approved)
+          "plain risk value should still auto-approve"))
+
+(fn test-approvals-per-tool-request-risk-auto-resolves []
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var approved? false)
+  (var denied? false)
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :ask
+                                       :tools {:unit.create :auto}}}}))
+  (local context {:tool "space_unit_create"
+                  :source "unit.create"
+                  :grant-on-approve true})
+  (approvals:request-risk :shell "create unit"
+    {:on-approved (fn [_r] (set approved? true))
+     :on-denied (fn [_r] (set denied? true))}
+    context)
+  (assert approved? "per-tool auto should fire on-approved synchronously")
+  (assert (not denied?) "per-tool auto should not fire on-denied")
+  (assert (= (# (approvals:list-pending)) 0)
+          "per-tool auto should not create a pending request"))
+
 ;; ═══════════════════════════════════════
 ;; Tool surface tests
 ;; ═══════════════════════════════════════
@@ -718,6 +799,35 @@
   (assert call-log "call should have been dispatched")
   (assert (= call-log.name "space_draw_circle") "should call correct tool")
   (assert (= call-log.args.radius 10) "should pass args"))
+
+(fn test-tool-surface-call-per-tool-auto-policy []
+  (local {: AgentToolSurface} (require :llm/agent/tool-surface))
+  (local {: AgentApprovals} (require :llm/agent/approvals))
+  (var called false)
+  (local mock-def {:name "space_unit_create"
+                   :description "create unit"
+                   :inputSchema {}
+                   :managed-source "unit.create"
+                   :run (fn [_args]
+                          (set called true)
+                          "created")})
+  (local mock-presets
+    {:get-tool-defs (fn [] [mock-def])
+     :get-active-presets (fn [] [{:name "units-create-tools" :risk :shell :tool-ids ["unit.create"]}])
+     :get-prompt-fragments (fn [] [])})
+  (local approvals (AgentApprovals
+                     {:policy {:shell {:default :ask
+                                       :tools {:unit.create :auto}}}}))
+  (var pending nil)
+  (approvals.requested:connect
+    (fn [request] (when request (set pending request))))
+  (local surface (AgentToolSurface {:presets mock-presets
+                                     :mcp-tools {}
+                                     :approvals approvals}))
+  (local result (surface:call "space_unit_create" {:source "(+ 1 2)"}))
+  (assert (= result "created") "auto-approved per-tool call should execute synchronously")
+  (assert called "auto-approved tool should run")
+  (assert (not pending) "auto-approved tool should not create a pending approval request"))
 
 (fn test-tool-surface-exposes-and-gates-ask-risk []
   (local {: AgentToolSurface} (require :llm/agent/tool-surface))
@@ -2328,11 +2438,20 @@
 (table.insert tests {:name "approvals denied policy does not consume grant" :fn test-approvals-denied-policy-does-not-consume-grant})
 (table.insert tests {:name "approvals unknown risk asserts" :fn test-approvals-unknown-risk-asserts})
 (table.insert tests {:name "approvals record decision" :fn test-approvals-record-decision})
+(table.insert tests {:name "approvals per-tool auto overrides risk ask" :fn test-approvals-per-tool-auto-overrides-risk-ask})
+(table.insert tests {:name "approvals per-tool deny overrides risk auto" :fn test-approvals-per-tool-deny-overrides-risk-auto})
+(table.insert tests {:name "approvals per-tool unmatched falls back to default" :fn test-approvals-per-tool-unmatched-falls-back-to-default})
+(table.insert tests {:name "approvals per-tool unmatched falls back to auto default" :fn test-approvals-per-tool-unmatched-falls-back-to-auto-default})
+(table.insert tests {:name "approvals per-tool nil context falls back" :fn test-approvals-per-tool-nil-context-falls-back})
+(table.insert tests {:name "approvals per-tool table without default" :fn test-approvals-per-tool-table-without-default})
+(table.insert tests {:name "approvals per-tool plain risk value still works" :fn test-approvals-per-tool-plain-risk-value-still-works})
+(table.insert tests {:name "approvals per-tool request-risk auto resolves" :fn test-approvals-per-tool-request-risk-auto-resolves})
 
 (table.insert tests {:name "tool surface active presets" :fn test-tool-surface-active-presets})
 (table.insert tests {:name "tool surface openai tools" :fn test-tool-surface-openai-tools})
 (table.insert tests {:name "tool surface mcp defs" :fn test-tool-surface-mcp-defs})
 (table.insert tests {:name "tool surface call runs active tool" :fn test-tool-surface-call-runs-active-tool})
+(table.insert tests {:name "tool surface call per-tool auto policy" :fn test-tool-surface-call-per-tool-auto-policy})
 (table.insert tests {:name "tool surface exposes and gates ask risk" :fn test-tool-surface-exposes-and-gates-ask-risk})
 (table.insert tests {:name "tool surface request approval tool grants exact call" :fn test-tool-surface-request-approval-tool-grants-exact-call})
 (table.insert tests {:name "tool surface request approval normalizes opencode prefix"

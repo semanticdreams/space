@@ -10,7 +10,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const docsDir = resolve(__dirname, '..')
-const devlogDir = join(docsDir, 'dev', 'devlog')
+const devlogDir = resolve(docsDir, '..', 'knowledge', 'journal')
 
 function get_required_env(name)
 {
@@ -110,14 +110,33 @@ async function read_entries()
         const normalized = raw.replace(/\r\n/g, '\n')
         const lines = normalized.split('\n')
 
-        if (!lines[0] || !lines[0].startsWith('# ')) {
-            throw new Error('Expected first line of ' + name + ' to start with "# "')
+        let startIndex = 0
+        let frontmatterEnd = 0
+        if (lines[0]?.trim() === '---') {
+            startIndex = 1
+            while (startIndex < lines.length && lines[startIndex].trim() !== '---') {
+                startIndex += 1
+            }
+            frontmatterEnd = startIndex
+            startIndex += 1
+            while (startIndex < lines.length && lines[startIndex].trim() === '') {
+                startIndex += 1
+            }
         }
 
-        const body = lines.slice(1).join('\n').trim()
+        const hasDevlogTag = lines.slice(1, frontmatterEnd).some((line) => line.includes('devlog'))
+        if (!hasDevlogTag) {
+            continue
+        }
+
+        if (startIndex >= lines.length || !lines[startIndex]?.startsWith('# ')) {
+            throw new Error('Expected heading "# " in ' + name)
+        }
+
+        const body = lines.slice(startIndex + 1).join('\n').trim()
         entries.push({
             id,
-            title: lines[0].slice(2).trim(),
+            title: lines[startIndex].slice(2).trim(),
             body,
             sourcePath: path,
             urlPath: '/dev/devlog#_' + id

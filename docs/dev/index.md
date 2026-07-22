@@ -4,7 +4,6 @@ This section contains internal architecture, implementation notes, and integrati
 
 - [Concepts](/dev/concepts)
 - [Lifecycle Invariants](/dev/lifecycle-invariants)
-- [Lifecycle Hardening Plan](/dev/lifecycle-hardening-plan)
 - [Reloadable Units And Hot Reload](/dev/reloadable-units)
 - [Repository Workbench](/dev/repository-workbench)
 - [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown)
@@ -13,23 +12,8 @@ This section contains internal architecture, implementation notes, and integrati
 - [Video Playback (FFmpeg)](/dev/video-playback)
 - [SQL Builder (SQLite)](/dev/sql-builder)
 - [Devlog](/dev/devlog)
-- [Milestones](/dev/milestones)
-- [Notes](/dev/notes/aubio)
-- [C Builder Notes](/dev/notes/c-builder)
-- [C IR Notes](/dev/notes/c-ir)
-- [GCCJIT Notes](/dev/notes/gccjit)
-- [Native Build Notes](/dev/notes/native-build)
-- [Windows + Wine Build Notes](/dev/notes/windows-wine-build-and-test)
-- [Graph Identity Notes](/dev/notes/graph-identity)
-- [Morphs Notes](/dev/notes/morphs)
-- [Libtorrent Notes](/dev/notes/libtorrent)
-- [Terrain Architecture](/dev/notes/terrain-architecture)
-- [Drawing Architecture](/dev/notes/drawing-architecture)
-- [Raster Drawing Implementation](/dev/notes/drawing-raster-implementation)
-- [Terrain Selection Notes](/dev/notes/terrain-selection)
-- [Terrain Physics Debugging Notes](/dev/notes/terrain-physics-debugging)
-- [Light Balls](/dev/notes/light-balls)
-- [Depth Precision For Long-Distance Rendering](/dev/notes/depth-precision-long-distance)
-- [Test Harness Cleanup Notes](/dev/notes/test-harness-cleanup)
-- [Composable Input States](/dev/notes/composable-states)
-- [Heightfield Terrain Implementation Plan](/dev/notes/heightfield-terrain-implementation)
+- [Knowledge Base](https://github.com/semanticdreams/space/tree/main/knowledge)
+
+## See also
+
+- [[../../../knowledge/home|Knowledge Base]]

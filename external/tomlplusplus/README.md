@@ -347,3 +347,5 @@ though you're welcome to reach out via other means. In order of likely response 
 [something better than std::optional]: https://github.com/TartanLlama/optional
 [m.css]: https://mcss.mosra.cz/documentation/doxygen
 [`toml.hpp`]: https://raw.githubusercontent.com/marzer/tomlplusplus/master/toml.hpp
+
+- [[../../knowledge/home|Knowledge Base]]

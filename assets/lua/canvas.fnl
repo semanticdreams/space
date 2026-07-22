@@ -160,8 +160,9 @@
           (canvas:remove-panel-child element))))
     (set builder-options.on-close handle-close)
     (set element (builder self.build-context builder-options))
+    (local default-position (or (and camera camera.position) (glm.vec3 0 0 0)))
     (local metadata
-      (self.float:attach-child element {:position panel-opts.position
+      (self.float:attach-child element {:position (or panel-opts.position default-position)
                                         :rotation panel-opts.rotation
                                         :size panel-opts.size
                                         :depth-offset-index panel-opts.depth-offset-index}))
@@ -177,6 +178,10 @@
       (unregister-panel-interactions element)
       (self.float:remove-child element)
       true))
+
+  (fn find-panel-persistence [_canvas element]
+    (local metadata (find-panel-metadata element))
+    (and metadata metadata.persistence))
 
   (fn register-panel-restorer [_canvas kind restorer owner]
     (assert (= (type kind) :string) "Canvas.register-panel-restorer requires string kind")
@@ -211,30 +216,30 @@
     (local panels [])
     (each [_ metadata (ipairs (or self.float.children []))]
       (local persistence (and metadata metadata.persistence))
-      (assert persistence "Canvas.capture-state found panel without persistence")
-      (local record (clone-table persistence))
-      (local kind record.kind)
-      (assert (= (type kind) :string)
-              "Canvas.capture-state panel persistence requires string :kind")
-      (local module-name record.restorer-module)
-      (when (not (= module-name nil))
-        (assert (= (type module-name) :string)
-                (.. "Canvas.capture-state panel persistence for kind "
-                    kind
-                    " requires string :restorer-module")))
-      (local registered (and (. self.panel-restorers kind)
-                             (. (. self.panel-restorers kind) :restore)))
-      (assert (or registered (= (type module-name) :string))
-              (.. "Canvas.capture-state panel kind has no restore strategy: "
-                  kind))
-      (local layout-state (capture-panel-layout-state metadata))
-      (assert layout-state
-              (.. "Canvas.capture-state missing layout for panel kind: " kind))
-      (set record.layer "float")
-      (set record.position layout-state.position)
-      (set record.rotation layout-state.rotation)
-      (set record.size layout-state.size)
-      (table.insert panels record))
+      (when persistence
+        (local record (clone-table persistence))
+        (local kind record.kind)
+        (assert (= (type kind) :string)
+                "Canvas.capture-state panel persistence requires string :kind")
+        (local module-name record.restorer-module)
+        (when (not (= module-name nil))
+          (assert (= (type module-name) :string)
+                  (.. "Canvas.capture-state panel persistence for kind "
+                      kind
+                      " requires string :restorer-module")))
+        (local registered (and (. self.panel-restorers kind)
+                               (. (. self.panel-restorers kind) :restore)))
+        (assert (or registered (= (type module-name) :string))
+                (.. "Canvas.capture-state panel kind has no restore strategy: "
+                    kind))
+        (local layout-state (capture-panel-layout-state metadata))
+        (assert layout-state
+                (.. "Canvas.capture-state missing layout for panel kind: " kind))
+        (set record.layer "float")
+        (set record.position layout-state.position)
+        (set record.rotation layout-state.rotation)
+        (set record.size layout-state.size)
+        (table.insert panels record)))
     {:camera {:position (vec3->array camera.position)}
      :scale_factor self.scale-factor
      :panels panels})
@@ -268,7 +273,7 @@
                       :target self
                       :panel payload})))))
 
-  (fn restore-state [_canvas state]
+  (fn restore-shell-state [self state]
     (local payload (or state {}))
     (local camera-state (or payload.camera {}))
     (local (ok position) (pcall array->vec3 camera-state.position))
@@ -281,6 +286,11 @@
         (self:set-scale-factor scale-factor)
         (when (not (= scale-factor nil))
           (logging.warn "[canvas] invalid persisted scale factor; keeping current value")))
+    true)
+
+  (fn restore-state [_canvas state]
+    (self:restore-shell-state state)
+    (local payload (or state {}))
     (local panels (or payload.panels []))
     (assert (= (type panels) :table) "Canvas.restore-state requires :panels table")
     (each [_ panel (ipairs panels)]
@@ -416,11 +426,13 @@
   (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
   (set self.add-panel-child add-panel-child)
   (set self.remove-panel-child remove-panel-child)
+  (set self.find-panel-persistence find-panel-persistence)
   (set self.register-panel-restorer register-panel-restorer)
   (set self.unregister-panel-restorer unregister-panel-restorer)
   (set self.capture-panel-element-state capture-panel-element-state)
   (set self.capture-state capture-state)
   (set self.restore-state restore-state)
+  (set self.restore-shell-state restore-shell-state)
   (set self.screen-pos-ray screen-pos-ray)
   (set self.update-projection update-projection)
   (set self.set-scale-factor set-scale-factor)

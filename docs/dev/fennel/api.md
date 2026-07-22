@@ -753,3 +753,7 @@ tested it with, or a string containing a pattern which is checked
 against Fennel's version with `string.find`.  If your plugin is used
 with a version of Fennel that doesn't match `:versions` it will emit a
 warning. You should also have a `:name` field with the plugin's name.
+
+## See also
+
+- [[../../../knowledge/home|Knowledge Base]]

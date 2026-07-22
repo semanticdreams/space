@@ -41,56 +41,7 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/dev/' },
             { text: 'Concepts', link: '/dev/concepts' },
-            { text: 'Devlog', link: '/dev/devlog' },
-            { text: 'Milestones', link: '/dev/milestones' }
-          ]
-        },
-        {
-          text: 'Notes',
-          items: [
-            { text: 'aubio', link: '/dev/notes/aubio' },
-            { text: 'audio', link: '/dev/notes/audio' },
-            { text: 'directional-focus-traversal', link: '/dev/notes/directional-focus-traversal' },
-            { text: 'focus-change-ordering', link: '/dev/notes/focus-change-ordering' },
-            { text: 'force-layout-barnes-hut', link: '/dev/notes/force-layout-barnes-hut' },
-            { text: 'gltf-async-embedded-texture-decode', link: '/dev/notes/gltf-async-embedded-texture-decode' },
-            { text: 'graph-key-based-loaders', link: '/dev/notes/graph-key-based-loaders' },
-            { text: 'graph-llm', link: '/dev/notes/graph-llm' },
-            { text: 'graph-view-as-widget', link: '/dev/notes/graph-view-as-widget' },
-            { text: 'graph-vs-entities', link: '/dev/notes/graph-vs-entities' },
-            { text: 'graph', link: '/dev/notes/graph' },
-            { text: 'hackernews', link: '/dev/notes/hackernews' },
-            { text: 'icons', link: '/dev/notes/icons' },
-            { text: 'interpreter', link: '/dev/notes/interpreter' },
-            { text: 'layered-points-in-graph', link: '/dev/notes/layered-points-in-graph' },
-            { text: 'lighting', link: '/dev/notes/lighting' },
-            { text: 'link-entities', link: '/dev/notes/link-entities' },
-            { text: 'list-entities', link: '/dev/notes/list-entities' },
-            { text: 'loop', link: '/dev/notes/loop' },
-            { text: 'matrix', link: '/dev/notes/matrix' },
-            { text: 'multithreading', link: '/dev/notes/multithreading' },
-            { text: 'mystery-layout-error', link: '/dev/notes/mystery-layout-error' },
-            { text: 'preload', link: '/dev/notes/preload' },
-            { text: 'process', link: '/dev/notes/process' },
-            { text: 'prof-graph-layout', link: '/dev/notes/prof-graph-layout' },
-            { text: 'prof-scroll', link: '/dev/notes/prof-scroll' },
-            { text: 'prof-terminal', link: '/dev/notes/prof-terminal' },
-            { text: 'render-architecture', link: '/dev/notes/render-architecture' },
-            { text: 'render-capture', link: '/dev/notes/render-capture' },
-            { text: 'resize-bugs', link: '/dev/notes/resize-bugs' },
-            { text: 'selection', link: '/dev/notes/selection' },
-            { text: 'string-entities', link: '/dev/notes/string-entities' },
-            { text: 'sub-app', link: '/dev/notes/sub-app' },
-            { text: 'sub_world', link: '/dev/notes/sub_world' },
-            { text: 'tempfile', link: '/dev/notes/tempfile' },
-            { text: 'terminal', link: '/dev/notes/terminal' },
-            { text: 'testing-http-clients', link: '/dev/notes/testing-http-clients' },
-            { text: 'transform-pass', link: '/dev/notes/transform-pass' },
-            { text: 'wallet-core', link: '/dev/notes/wallet-core' },
-            { text: 'wallet', link: '/dev/notes/wallet' },
-            { text: 'wlroots-status', link: '/dev/notes/wlroots-status' },
-            { text: 'xapian', link: '/dev/notes/xapian' },
-            { text: 'xdg-icon-browser-and-svg-support', link: '/dev/notes/xdg-icon-browser-and-svg-support' }
+            { text: 'Devlog', link: '/dev/devlog' }
           ]
         }
       ]

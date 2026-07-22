@@ -104,7 +104,8 @@
     ((DefaultDialog {:title title
                      :name name
                      :on-close run-options.on-close
-                     :child build-content})
+                     :child build-content
+                     :transfer-builder build})
      ctx))
 
   build)

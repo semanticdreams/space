@@ -110,3 +110,7 @@ Clean design is important, refactor when reasonable.
 ## Assets & Configuration Tips
 - When adding assets, ensure `AssetManager::getAssetPath` can locate them and verify packaging copies from `assets/`.
 - For icon names used by UI buttons/widgets, validate availability against `assets/material-design-icons/icons.txt` before committing. Use `rg` on that file (e.g. `rg -n "^delete\\b|^expand_more\\b" assets/material-design-icons/icons.txt`) and prefer exact icon-name matches from the start of each line.
+
+## See also
+
+- [[knowledge/home|Knowledge Base]]

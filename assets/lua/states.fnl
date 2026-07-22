@@ -38,7 +38,17 @@
   (fn add-state [_self name state]
     (assert name "State name is required")
     (assert state "State definition is required")
+    (local previous (. registry name))
+    (assert (or (not= name active-name) (= previous state))
+            (.. "Cannot replace active state " (tostring name)
+                " via add-state; use remove-state with :fallback first"))
     (bind-state-host state)
+    (each [other-name other-state (pairs registry)]
+      (when (and (not= other-name name) (= other-state state))
+        (error (.. "Cannot register the same state object under multiple names: "
+                   (tostring name) " and " (tostring other-name)))))
+    (when (and previous (not= previous state) (= previous.states_owner self))
+      (set previous.states_owner nil))
     (set (. registry name) state)
     state)
 
@@ -50,6 +60,25 @@
       (table.insert history entry)
       (when (> (length history) history-limit)
         (table.remove history 1))))
+
+  (fn remove-state [self name opts]
+    (assert name "State name is required")
+    (local options (or opts {}))
+    (local state (get-state self name))
+    (when state
+      (when (= active-name name)
+        (local fallback options.fallback)
+        (assert fallback (.. "Cannot remove active state " (tostring name) " without :fallback"))
+        (assert (not= fallback name) "State remove fallback must differ from removed name")
+        (local fallback-state (get-state self fallback))
+        (assert (not= fallback-state state)
+                (.. "Cannot remove active state " (tostring name)
+                    " when fallback " (tostring fallback) " is the same state object"))
+        (self:set-state fallback))
+      (when (= state.states_owner self)
+        (set state.states_owner nil))
+      (tset registry name nil))
+    state)
 
   (fn set-state [_self name]
     (local next-state (get-state self name))
@@ -111,8 +140,9 @@
     provider)
 
   (set self
-       {:add-state add-state
-        :set-state set-state
+        {:add-state add-state
+         :remove-state remove-state
+         :set-state set-state
         :get-state get-state
         :active-state (fn [_self] active-state)
         :active-name (fn [_self] active-name)

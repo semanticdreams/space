@@ -88,16 +88,22 @@
       -1
       1))
 
-(fn update-axis [edge value size min-size]
+(fn update-axis [edge value size min-size max-size]
   (if (= edge 1)
       (do
-        (local resolved (math.max value min-size))
-        (values resolved 0))
+        (local resolved (math.max min-size (or value 0)))
+        (if (and max-size (> resolved max-size))
+            (values max-size 0)
+            (values resolved 0)))
       (do
         (local max-offset (- size min-size))
-        (local min-offset (math.min value max-offset))
-        (local resolved (- size min-offset))
-        (values resolved min-offset))))
+        (local clamped-value (math.min (or value 0) max-offset))
+        (local resolved (- size clamped-value))
+        (if (and max-size (> resolved max-size))
+            (do
+              (local origin-offset (- size max-size))
+              (values max-size origin-offset))
+            (values resolved clamped-value)))))
 
 (fn Resizables [opts]
   (local intersector
@@ -187,6 +193,7 @@
                     :pointer-target pointer-target
                     :key (or (and options options.key) widget)
                     :min-size (and options options.min-size)
+                    :max-size (and options options.max-size)
                     :on-resize-start (and options options.on-resize-start)
                     :on-resize-end (and options options.on-resize-end)})
       (when entry.key
@@ -217,12 +224,14 @@
         (local rotation (resolve-target-rotation target))
         (local size (resolve-target-size target))
         (local min-size (or resolved.min-size (glm.vec3 0 0 0)))
+        (local max-size resolved.max-size)
         (local inverse (rotation:inverse))
         (local local-hit (inverse:rotate (- drag.hit-point position)))
         (set drag.position position)
         (set drag.rotation rotation)
         (set drag.size size)
         (set drag.min-size min-size)
+        (set drag.max-size max-size)
         (set drag.edge-x (edge-sign local-hit.x size.x))
         (set drag.edge-y (edge-sign local-hit.y size.y))
         (set drag.plane (make-plane drag.hit-point)))))
@@ -267,10 +276,11 @@
         (local inverse (rotation:inverse))
         (local local-hit (inverse:rotate (- hit drag.position)))
         (local min-size drag.min-size)
+        (local max-size drag.max-size)
         (local (size-x offset-x)
-          (update-axis drag.edge-x local-hit.x drag.size.x min-size.x))
+          (update-axis drag.edge-x local-hit.x drag.size.x min-size.x (and max-size max-size.x)))
         (local (size-y offset-y)
-          (update-axis drag.edge-y local-hit.y drag.size.y min-size.y))
+          (update-axis drag.edge-y local-hit.y drag.size.y min-size.y (and max-size max-size.y)))
         (local size (glm.vec3 size-x size-y (. drag.size 3)))
         (local offset (glm.vec3 offset-x offset-y 0))
         (local world-position (+ drag.position (rotation:rotate offset)))
