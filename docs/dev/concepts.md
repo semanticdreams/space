@@ -129,8 +129,3 @@ By generating low-level code from a high-level language, the technically complex
 - Load libraries or programs at runtime without prior linking e.g. via `dlopen` or `exec`. Enables space to function as a full operating system with runtime access to virtually all software.
 - Zero-overhead Permission System: Enforced during JIT compilation at runtime, enabling the seamless integration of code from a multitude of sources. Avoid the complexity of static analysis by enforcing permissions at the compilation output stage. Interactively require user permission as part of the compilation process. For example, if code attempts access to a file system node, the compiler refuses to output a program containing such an action unless authorized by the user. Similar to WASM's capability model. Also enables sophisticated multiplayer coding games by removing the need for isolation.
 - Personal Syntax Views: Language customizations that can be applied bidirectionally form part of a personal syntax view unique to the developer and not shared with collaborators as part of the code. For example, formatting (e.g. spaces vs tabs), or even some convenience macros.
-
-
-## See also
-
-- [[../../knowledge/home|Knowledge Base]]

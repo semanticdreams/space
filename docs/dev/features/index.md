@@ -1,0 +1,24 @@
+# Feature Pages
+
+Detailed design and implementation notes for major feature systems.
+
+- [Agent Runner System](./agent-runner-system)
+- [Agent Tools](./agent-tools)
+- [Board Canvas Mode](./board-canvas-mode)
+- [Canvas Mode System](./canvas-mode-system)
+- [CEF In-World Browser](./cef-in-world-browser)
+- [Core Platform](./core-platform)
+- [Development Tooling](./development-tooling)
+- [FFmpeg Video Playback](./ffmpeg-video-playback)
+- [Graph Browsing](./graph-browsing)
+- [Graph Foundation](./graph-foundation)
+- [Graph Notebooks](./graph-notebooks)
+- [Hot Reload Units](./hot-reload-units)
+- [Kernel System](./kernel-system)
+- [Layout Widget Engine](./layout-widget-engine)
+- [Opencode Agent Workflow](./opencode-agent-workflow)
+- [Panel Transfer System](./panel-transfer-system)
+- [Stylus Drawing Input](./stylus-drawing-input)
+- [Terrain Heightfield System](./terrain-heightfield-system)
+- [Wallet System](./wallet-system)
+- [World Building](./world-building)

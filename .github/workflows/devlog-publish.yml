@@ -32,7 +32,7 @@ jobs:
       - name: Compute latest docs-affecting commit
         id: docs-head
         run: |
-          sha="$(git log -1 --format=%H -- docs assets/pics/space.png .github/workflows/docs-pages.yml)"
+          sha="$(git log -1 --format=%H -- docs assets/pics/space.png .github/workflows/docs-pages.yml .github/workflows/devlog-publish.yml)"
           if [ -z "${sha}" ]; then
             echo "Unable to determine latest docs-affecting commit" >&2
             exit 1

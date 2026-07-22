@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const docsDir = resolve(__dirname, '..')
-const devlogDir = resolve(docsDir, '..', 'knowledge', 'journal')
+const devlogDir = resolve(docsDir, 'dev', 'journal')
 
 function format_today_utc()
 {

@@ -312,8 +312,3 @@ This document is narrower:
 - how recursive `drop` is supposed to work in composed UI code
 
 Use both documents together when reviewing UI lifecycle code.
-
-
-## See also
-
-- [[../../knowledge/home|Knowledge Base]]

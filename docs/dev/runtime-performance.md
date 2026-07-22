@@ -360,8 +360,3 @@ SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.tes
 - Engine runtime controls/events: `src/engine.cpp`, `src/engine.h`
 - Video playback activity query: `src/video_player.cpp`, `src/video_player.h`
 - Gameplay consumer example: `assets/lua/tetris-view.fnl`
-
-
-## See also
-
-- [[../../knowledge/home|Knowledge Base]]

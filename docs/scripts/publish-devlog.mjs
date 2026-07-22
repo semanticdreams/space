@@ -10,7 +10,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const docsDir = resolve(__dirname, '..')
-const devlogDir = resolve(docsDir, '..', 'knowledge', 'journal')
+const devlogDir = resolve(docsDir, 'dev', 'journal')
 
 function get_required_env(name)
 {

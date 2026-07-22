@@ -610,7 +610,3 @@ by Taylor R. Campbell
 [2]: https://blog.janestreet.com/whats-in-a-name/
 [3]: https://jacobian.org/2009/nov/10/what-to-write/
 [4]: https://fennel-lang.org/values
-
-## See also
-
-- [[../../../knowledge/home|Knowledge Base]]

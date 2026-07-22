@@ -153,5 +153,3 @@ There's a string manipulation class not exposed in the efsw header ( efsw::Strin
 This software started as a fork of the [simplefilewatcher](http://code.google.com/p/simplefilewatcher/) by James Wynn (james[at]jameswynn.com), [MIT licensed](http://www.opensource.org/licenses/mit-license.html).
 
 The icon used for the project is part of the [Haiku®'s Icons](http://www.haiku-inc.org/haiku-icons.html), [MIT licensed](http://www.opensource.org/licenses/mit-license.html).
-
-- [[../../knowledge/home|Knowledge Base]]

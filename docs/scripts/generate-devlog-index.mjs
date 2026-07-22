@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const docsDir = resolve(__dirname, '..')
-const devlogDir = resolve(docsDir, '..', 'knowledge', 'journal')
+const devlogDir = resolve(docsDir, 'dev', 'journal')
 const indexPath = join(docsDir, 'dev', 'devlog.md')
 
 const entryNames = (await readdir(devlogDir))
