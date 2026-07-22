@@ -158,7 +158,8 @@
             ((DefaultDialog {:title (or options.title "Graph View Control")
                              :name (or options.name "graph-view-control-view")
                              :on-close options.on-close
-                             :child build-content})
+                             :child build-content
+                             :transfer-builder build})
              ctx))
         (set dialog.__control-view view)
         (local base-drop dialog.drop)

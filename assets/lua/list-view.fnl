@@ -1,5 +1,5 @@
 (local glm (require :glm))
-(local {: Layout} (require :layout))
+(local {: Layout : finite-constraint?} (require :layout))
 (local ScrollView (require :scroll-view))
 (local Padding (require :padding))
 (local Text (require :text))
@@ -50,6 +50,8 @@
                               true)
                  :scrollbar-width (math.max 0 (or options.scrollbar-width 0.85))
                  :scrollbar-policy (or options.scrollbar-policy :as-needed)
+                 :_viewport-needs-check false
+                 :_last-auto-viewport-width nil
                  :pagination nil
                  :scroll-view nil
                  :pagination-range {:start-index 0 :stop-index 0}
@@ -134,11 +136,51 @@
         (child:layouter)
         (set offset (+ offset height))
         (when (< idx child-count)
-          (set offset (+ offset spacing)))))
+          (set offset (+ offset spacing))))
+      (when (and list.auto-scroll-viewport? list.scroll-view
+                 list.scroll-view.state (> self.size.x 0)
+                 (or list._viewport-needs-check
+                     (not (and list._last-auto-viewport-width
+                               (< (math.abs (- self.size.x list._last-auto-viewport-width))
+                                  0.001)))))
+        (set list._viewport-needs-check false)
+        (set list._last-auto-viewport-width self.size.x)
+        (local correct-height (list:compute-scroll-viewport-height self.size.x))
+        (when correct-height
+          (local current (or list.scroll-view.state.viewport-height 0))
+          (when (> (math.abs (- correct-height current)) 0.001)
+            (if (not (and app app.next-frame))
+                (error "ListView auto viewport correction requires app.next-frame"))
+            (list.scroll-view:set-viewport-height correct-height {:mark-measure-dirty? false})
+            (app.next-frame
+              (fn []
+                (when (and list.scroll-view list.scroll-view.layout)
+                  (list.scroll-view.layout:mark-measure-dirty))))))))
+
+    (fn measure-layout-constrained [self constraints]
+      (if (and constraints list.fill-width? (finite-constraint? constraints 1))
+          (let [constraint-x constraints.max.x]
+            (var width 0)
+            (var height 0)
+            (var depth 0)
+            (local spacing list.item-spacing)
+            (local child-count (length self.children))
+            (each [idx child (ipairs self.children)]
+              (child:measure-constrained {:max (glm.vec3 constraint-x (. constraints.max 2) (. constraints.max 3))})
+              (when (> child.measure.x width)
+                (set width child.measure.x))
+              (when (> child.measure.z depth)
+                (set depth child.measure.z))
+              (set height (+ height child.measure.y))
+              (when (< idx child-count)
+                (set height (+ height spacing))))
+            (set self.measure (glm.vec3 width height depth)))
+          (measure-layout self)))
 
     (local layout
       (Layout {:name list-name
                :measurer measure-layout
+               :constrained-measurer measure-layout-constrained
                :layouter layout-children}))
 
     (set list.content-layout layout)
@@ -333,7 +375,7 @@
       (self.content-layout:mark-layout-dirty)
       (self:update-scroll-viewport))
 
-    (fn compute-scroll-viewport-height [self]
+    (fn compute-scroll-viewport-height [self available-width]
       (if (not (and self.scroll?
                     self.scroll-view
                     self.auto-scroll-viewport?
@@ -341,7 +383,11 @@
                     (> self.scroll-items-per-page 0)))
           nil
           (do
-            (self.content-layout:measurer)
+            (local use-constrained (and available-width (> available-width 0)
+                                        self.fill-width?))
+            (local constraint (if use-constrained
+                                  {:max (glm.vec3 available-width 100000.0 0)}
+                                  nil))
             (local spacing (or self.item-spacing 0))
             (local limit (math.min self.scroll-items-per-page (length self.item-widgets)))
             (var height 0)
@@ -354,16 +400,39 @@
                 (set height (+ height amount))
                 (set added (+ added 1))))
             (when (and self.header self.header.layout)
+              (if use-constrained
+                  (self.header.layout:measure-constrained constraint)
+                  (self.header.layout:measurer))
               (add-height (or self.header.layout.measure.y 0)))
             (for [idx 1 limit]
               (local widget (. self.item-widgets idx))
               (when (and widget widget.layout)
+                (if use-constrained
+                    (widget.layout:measure-constrained constraint)
+                    (widget.layout:measurer))
                 (add-height (or widget.layout.measure.y 0))))
             height)))
 
     (fn update-scroll-viewport [self]
       (when (and self.scroll-view self.scroll-view.set-viewport-height self.auto-scroll-viewport?)
-        (local height (self:compute-scroll-viewport-height))
+        (local scroll-state (and self.scroll-view self.scroll-view.state))
+        ;; Prefer the actual content-layout width over the scroll viewport
+        ;; width, because the viewport includes ScrollView's internal padding.
+        (local available-width
+          (or (and self.content-layout self.content-layout.size
+                   (> self.content-layout.size.x 0)
+                   self.content-layout.size.x)
+              (and scroll-state scroll-state.viewport-size
+                   (> scroll-state.viewport-size.x 0)
+                   (< scroll-state.viewport-size.x 1e6)
+                   scroll-state.viewport-size.x)
+              (and self.scroll-view.layout self.scroll-view.layout.size
+                   (> self.scroll-view.layout.size.x 0)
+                   (< self.scroll-view.layout.size.x 1e6)
+                   self.scroll-view.layout.size.x)))
+        (when (not available-width)
+          (set self._viewport-needs-check true))
+        (local height (self:compute-scroll-viewport-height available-width))
         (when height
           (self.scroll-view:set-viewport-height height))))
 

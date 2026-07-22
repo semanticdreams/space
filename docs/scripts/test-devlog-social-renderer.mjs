@@ -28,14 +28,23 @@ function create_entry(body)
 
 async function read_fixture_entry(id)
 {
-    const raw = await readFile(join(docsDir, 'dev', 'devlog', id + '.md'), 'utf8')
+    const raw = await readFile(join(docsDir, '..', 'knowledge', 'journal', id + '.md'), 'utf8')
     const normalized = raw.replace(/\r\n/g, '\n')
     const lines = normalized.split('\n')
 
+    let startIndex = 0
+    if (lines[0]?.trim() === '---') {
+        startIndex = 1
+        while (startIndex < lines.length && lines[startIndex].trim() !== '---') {
+            startIndex += 1
+        }
+        startIndex += 1
+    }
+
     return {
         id,
-        title: lines[0].slice(2).trim(),
-        body: lines.slice(1).join('\n').trim(),
+        title: lines[startIndex].slice(2).trim(),
+        body: lines.slice(startIndex + 1).join('\n').trim(),
         urlPath: '/dev/devlog#_' + id
     }
 }

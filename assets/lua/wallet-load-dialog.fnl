@@ -16,7 +16,7 @@
         (.. name " - " wallet.address suffix)
         (.. name suffix)))
 
-(fn build-wallet-load-dialog [options ctx runtime-opts]
+(fn build-wallet-load-dialog [options ctx runtime-opts transfer-builder]
     (local store (or options.store (WalletStore {})))
     (local wallets [])
     (var dialog nil)
@@ -96,14 +96,16 @@
                         :name (or options.name "wallet-load-dialog")
                         :on-close options.on-close
                         :child (Padding {:edge-insets [0.6 0.6]
-                                         :child content})}))
+                                         :child content})
+                        :transfer-builder transfer-builder}))
     (set dialog (dialog-builder ctx runtime-opts))
     dialog)
 
 (fn WalletLoadDialog [opts]
     (local options (or opts {}))
-    (fn [ctx runtime-opts]
-        (build-wallet-load-dialog options ctx runtime-opts)))
+    (fn build [ctx runtime-opts]
+        (build-wallet-load-dialog options ctx runtime-opts build))
+    build)
 
 (local exports {:WalletLoadDialog WalletLoadDialog})
 

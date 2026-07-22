@@ -280,3 +280,7 @@ These are used for loading Lua code. The `load*` functions return a
 [15]: https://www.lua.org/manual/5.4/manual.html#pdf-io.popen
 [16]: http://lua-users.org/lists/lua-l/2007-10/msg00189.html
 [17]: https://lunarmodules.github.io/luasocket/
+
+## See also
+
+- [[../../../knowledge/home|Knowledge Base]]

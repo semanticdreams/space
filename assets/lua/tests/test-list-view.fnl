@@ -91,8 +91,33 @@
                            (set self.measure (glm.vec3 1 0.5 0)))
                :layouter (fn [_self] nil)}))
     (local widget {:layout layout})
-    (set widget.drop (fn [_]
-                       (set state.dropped (+ state.dropped 1))))
+     (set widget.drop (fn [_]
+                        (set state.dropped (+ state.dropped 1))))
+     widget))
+
+(fn make-wrapping-item-builder [measures states]
+  "Items have a constrained-measurer that reports taller height when X is narrow
+(simulating wrapped text)."
+  (var index 0)
+  (fn builder [item _ctx]
+    (set index (+ index 1))
+    (local base-measure (or (. measures index) (glm.vec3 10 1 0)))
+    (local state {:item item :index index :dropped false})
+    (table.insert states state)
+    (local layout
+      (Layout {:name (.. "wrap-item-" index)
+               :measurer (fn [self]
+                           (set self.measure base-measure))
+               :constrained-measurer (fn [self constraints]
+                                       (local max-x (and constraints constraints.max (. constraints.max 1)))
+                                       ;; If constrained to < 5 width, "wrap" to 5 lines
+                                       (local height (if (and max-x (< max-x 5))
+                                                        5
+                                                        base-measure.y))
+                                       (set self.measure (glm.vec3 (or max-x base-measure.x) height base-measure.z)))
+               :layouter (fn [self] nil)}))
+    (local widget {:layout layout :state state})
+    (set widget.drop (fn [_] (set state.dropped true)))
     widget))
 
 (fn list-view-measurer-includes-spacing []
@@ -413,6 +438,112 @@
   (assert (= scroll-state.viewport-height 1.75))
   (list:drop))
 
+(fn list-view-scroll-viewport-constrained-when-width-known []
+  "When scroll-view.layout.size.x is available from a previous frame,
+scroll-items-per-page should use constrained measurement so wrapping
+children report correct height. When no prior width is available,
+a deferred correction schedules re-measure after the first layout."
+  (local states [])
+  (local builder (make-wrapping-item-builder [(glm.vec3 10 1 0)
+                                               (glm.vec3 10 1 0)
+                                               (glm.vec3 10 1 0)] states))
+  (local ctx (make-test-ctx))
+  (local list ((ListView {:items [:a :b :c]
+                          :builder builder
+                          :scroll true
+                          :scroll-items-per-page 2
+                          :item-spacing 0
+                          :fill-width true
+                          :show-head false}) ctx))
+  (local scroll-state (and list.scroll-view list.scroll-view.state))
+  (assert scroll-state)
+  ;; First construction: no prior width -> uses unconstrained measurement initially
+  (assert (approx scroll-state.viewport-height 2)
+          (.. "First viewport without width should fall back to unconstrained (2 items * 1), got "
+              (tostring scroll-state.viewport-height)))
+  ;; Simulate a prior layout: set scroll-view viewport-size to a narrow width
+  (set list.scroll-view.state.viewport-size (glm.vec3 3 20 0))
+  ;; set-items triggers update-scroll-viewport which now sees known viewport width=3
+  (list:set-items [:x :y :z])
+  (assert (approx scroll-state.viewport-height 10)
+          (.. "Second viewport with known viewport width=3 (< 5) should use constrained (2 items * 5 lines), got "
+              (tostring scroll-state.viewport-height)))
+  ;; After no prior width (first construction), the deferred check on layout
+  ;; schedules a one-frame correction via app.next-frame.  Verify it arrives.
+  (local list2 ((ListView {:items [:a :b :c]
+                           :builder builder
+                           :scroll true
+                           :scroll-items-per-page 2
+                           :item-spacing 0
+                           :fill-width true
+                           :show-head false}) ctx))
+  ;; Measure + layout to trigger deferred correction check
+  (local queue-length-before (or (and app app.next-frame-queue
+                                      (length app.next-frame-queue))
+                                 0))
+  (list2.content-layout:measurer)
+  (set list2.scroll-view.layout.size (glm.vec3 3 20 0))
+  (set list2.content-layout.size (glm.vec3 3 20 0))
+  (list2.content-layout:layouter)
+  ;; After layout, viewport-height should be corrected immediately
+  (local scroll-state2 (and list2.scroll-view list2.scroll-view.state))
+  (assert (approx scroll-state2.viewport-height 10)
+          (.. "After layout with known width, deferred check should correct viewport to 10, got "
+              (tostring scroll-state2.viewport-height)))
+  ;; The deferred callback should be queued
+  (assert (and app app.next-frame-queue (> (length app.next-frame-queue) queue-length-before))
+          "Deferred viewport correction should schedule app.next-frame callback")
+  ;; Run the queued callback and verify it marks the scroll-view layout dirty
+  (local sv-layout list2.scroll-view.layout)
+  ;; Clear any pre-existing dirt so we can detect the callback's effect
+  (set sv-layout.measure-dirty false)
+  (local total-queued (length app.next-frame-queue))
+  (for [i 1 (- total-queued queue-length-before)]
+    (local cb (table.remove app.next-frame-queue))
+    (when cb (cb)))
+  (assert sv-layout.measure-dirty
+          "Scroll-view layout should be marked measure-dirty after deferred callback")
+  (list:drop)
+  (list2:drop))
+
+(fn list-view-scroll-viewport-prefers-content-width []
+  "When both content-layout.size.x and scroll-view.state.viewport-size.x are set
+and differ, update-scroll-viewport should prefer the narrower content-layout width
+for constrained measurement (viewport includes internal padding)."
+  (local states [])
+  (local builder (make-wrapping-item-builder [(glm.vec3 10 1 0)
+                                               (glm.vec3 10 1 0)
+                                               (glm.vec3 10 1 0)] states))
+  (local ctx (make-test-ctx))
+  (local list ((ListView {:items [:a :b :c]
+                          :builder builder
+                          :scroll true
+                          :scroll-items-per-page 2
+                          :item-spacing 0
+                          :fill-width true
+                          :show-head false}) ctx))
+  (local scroll-state (and list.scroll-view list.scroll-view.state))
+  (assert scroll-state)
+  ;; Set viewport-size wider than content-layout to simulate ScrollView padding
+  (set list.scroll-view.state.viewport-size (glm.vec3 10 20 0))
+  (set list.content-layout.size (glm.vec3 3 20 0))
+  ;; set-items triggers update-scroll-viewport; content-layout.size wins
+  (list:set-items [:x :y :z])
+  ;; With content-layout width=3 (< 5), wrapping items report height=5 each
+  ;; 2 items * 5 = 10
+  (assert (approx scroll-state.viewport-height 10)
+          (.. "Should use content-layout width 3 (< 5) -> wrapped height 10, got "
+              (tostring scroll-state.viewport-height)))
+  ;; Now keep the same viewport-size but widen content-layout beyond wrap threshold
+  (set list.content-layout.size (glm.vec3 10 20 0))
+  (list:set-items [:a :b :c])
+  ;; With content-layout width=10 (> 5), items report natural height=1 each
+  ;; 2 items * 1 = 2
+  (assert (approx scroll-state.viewport-height 2)
+          (.. "Should use content-layout width 10 (> 5) -> natural height 2, got "
+              (tostring scroll-state.viewport-height)))
+  (list:drop))
+
 (fn list-view-set-items-resets-scroll []
   (local ctx (make-test-ctx))
   (local list ((ListView {:items [:a :b :c]
@@ -466,6 +597,50 @@
 (table.insert tests {:name "ListView pagination disables scroll wrapper" :fn list-view-pagination-disables-scroll})
 (table.insert tests {:name "ListView scroll items clamp viewport" :fn list-view-scroll-items-limit-viewport})
 (table.insert tests {:name "ListView scroll viewport includes header" :fn list-view-scroll-items-include-header})
+(fn list-view-scroll-viewport-corrects-on-width-change []
+  "When auto-scroll-viewport is active and the content-layout width changes
+between layouts (e.g. window resize), the viewport height should be recalculated."
+  (local states [])
+  (local builder (make-wrapping-item-builder [(glm.vec3 10 1 0)
+                                               (glm.vec3 10 1 0)
+                                               (glm.vec3 10 1 0)] states))
+  (local ctx (make-test-ctx))
+  (local list ((ListView {:items [:a :b :c]
+                          :builder builder
+                          :scroll true
+                          :scroll-items-per-page 2
+                          :item-spacing 0
+                          :fill-width true
+                          :show-head false}) ctx))
+  (local scroll-state (and list.scroll-view list.scroll-view.state))
+  (assert scroll-state)
+  ;; First layout at wide width: no wrapping, viewport height = 2
+  (list.content-layout:measurer)
+  (set list.scroll-view.layout.size (glm.vec3 10 20 0))
+  (set list.content-layout.size (glm.vec3 10 20 0))
+  (list.content-layout:layouter)
+  (assert (approx scroll-state.viewport-height 2)
+          (.. "First layout wide -> viewport height 2 (no wrap), got "
+              (tostring scroll-state.viewport-height)))
+  ;; Resize to narrow: wrapping should increase viewport height
+  (set list.scroll-view.layout.size (glm.vec3 3 20 0))
+  (set list.content-layout.size (glm.vec3 3 20 0))
+  (list.content-layout:layouter)
+  (assert (approx scroll-state.viewport-height 10)
+          (.. "Resize to narrow (3 < 5) -> viewport height 10 (wrapped), got "
+              (tostring scroll-state.viewport-height)))
+  ;; Resize back to wide: viewport height should shrink
+  (set list.scroll-view.layout.size (glm.vec3 10 20 0))
+  (set list.content-layout.size (glm.vec3 10 20 0))
+  (list.content-layout:layouter)
+  (assert (approx scroll-state.viewport-height 2)
+          (.. "Resize back to wide -> viewport height 2 (no wrap), got "
+              (tostring scroll-state.viewport-height)))
+  (list:drop))
+
+(table.insert tests {:name "ListView scroll viewport uses constrained when width known" :fn list-view-scroll-viewport-constrained-when-width-known})
+(table.insert tests {:name "ListView scroll viewport prefers content-layout width over viewport" :fn list-view-scroll-viewport-prefers-content-width})
+(table.insert tests {:name "ListView scroll viewport corrects on width change" :fn list-view-scroll-viewport-corrects-on-width-change})
 (table.insert tests {:name "ListView set-items resets scroll offset" :fn list-view-set-items-resets-scroll})
 (table.insert tests {:name "ListView set-items resets pagination page" :fn list-view-set-items-resets-pagination})
 

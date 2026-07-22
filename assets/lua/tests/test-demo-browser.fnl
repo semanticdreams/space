@@ -1802,6 +1802,7 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
+  (var state nil)
   (local (ok err)
     (pcall
       (fn []
@@ -1812,11 +1813,10 @@
                                                              :layouter (fn [self]
                                                                          (set self.size self.measure))})
                                             :drop (fn [_self])})})
-        (scene:capture-state))))
+        (set state (scene:capture-state)))))
   (cleanup)
-  (assert (not ok) "Scene.capture-state should fail when panel persistence is missing")
-  (assert (string.find (tostring err) "without persistence")
-          "Scene.capture-state should report missing persistence")
+  (assert ok "Scene.capture-state should not throw when panel persistence is missing")
+  (assert (= (length state.panels) 0) "Scene.capture-state should skip panels without persistence")
   true)
 
 (fn scene-capture-state-requires-restore-strategy []

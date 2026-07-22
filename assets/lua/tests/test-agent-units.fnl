@@ -215,6 +215,104 @@
 (table.insert tests {:name "agent-units: ModuleUnit unload scopes package cache"
                      :fn test-module-unit-unload-does-not-clear-unowned-prefix-modules})
 
+(fn test-flat-unit-unload-does-not-purge-sibling-modules []
+  (with-temp-dir
+    (fn [dir]
+      (fs.write-file (fs.join-path dir "flat-a.fnl")
+                     (.. "(fn init [] (set app.__flat-a-val :loaded) true)\n"
+                         "(fn drop [] (set app.__flat-a-val nil) true)\n"
+                         "{:init init :drop drop}"))
+      (fs.write-file (fs.join-path dir "flat-b.fnl")
+                     (.. "(fn init [] (set app.__flat-b-val :loaded) true)\n"
+                         "(fn drop [] (set app.__flat-b-val nil) true)\n"
+                         "{:init init :drop drop}"))
+      (local fennel (require :fennel))
+      (local old-path fennel.path)
+      ;; Both modules use the same code-dir path, as real user flat units do.
+      (local module-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+      (set fennel.path (.. module-paths ";" old-path))
+      (local (ok err)
+        (pcall
+          (fn []
+            (set app.__flat-a-val nil)
+            (set app.__flat-b-val nil)
+            (local unit-a (Units.ModuleUnit {:id "user-flat-a"
+                                             :module-name "flat-a"
+                                             :module-paths module-paths
+                                             :source :user
+                                             :suppress-run-main? false}))
+            (local unit-b (Units.ModuleUnit {:id "user-flat-b"
+                                             :module-name "flat-b"
+                                             :module-paths module-paths
+                                             :source :user
+                                             :suppress-run-main? false}))
+            (unit-a:load {})
+            (unit-b:load {})
+            (assert (= app.__flat-a-val :loaded) "unit a should load")
+            (assert (= app.__flat-b-val :loaded) "unit b should load")
+            (assert (. package.loaded "flat-a") "flat-a should be in package.loaded")
+            (assert (. package.loaded "flat-b") "flat-b should be in package.loaded")
+            (unit-a:unload {})
+            (assert (= app.__flat-a-val nil) "unit a drop should clear state")
+            (assert (= (. package.loaded "flat-a") nil) "flat-a module should be cleared on unload")
+            (assert (. package.loaded "flat-b") "flat-b module should survive sibling unload")
+            (assert (= app.__flat-b-val :loaded) "unit b state should survive")
+            (unit-b:unload {})
+            (assert (= app.__flat-b-val nil) "unit b drop should clear state")
+            (assert (= (. package.loaded "flat-b") nil) "flat-b module should be cleared on unload"))))
+      (set fennel.path old-path)
+      (when (not ok)
+        (error err)))))
+
+(table.insert tests {:name "agent-units: flat unit unload does not purge sibling modules"
+                     :fn test-flat-unit-unload-does-not-purge-sibling-modules})
+
+(fn test-dir-unit-without-explicit-owned-paths-owns-submodules []
+  (with-temp-dir
+    (fn [dir]
+      (local unit-dir (fs.join-path dir "myunit"))
+      (fs.create-dirs unit-dir)
+      (fs.write-file (fs.join-path unit-dir "helper.fnl")
+                     "{:value :helper-loaded}")
+      (fs.write-file (fs.join-path unit-dir "init.fnl")
+                     (.. "(fn init []\n"
+                         "  (local helper (require :myunit.helper))\n"
+                         "  (set app.__myunit-val helper.value)\n"
+                         "  true)\n"
+                         "(fn drop []\n"
+                         "  (set app.__myunit-val nil)\n"
+                         "  true)\n"
+                         "{:init init :drop drop}"))
+      (local fennel (require :fennel))
+      (local old-path fennel.path)
+      (local module-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+      (set fennel.path (.. module-paths ";" old-path))
+      (local (ok err)
+        (pcall
+          (fn []
+            (set app.__myunit-val nil)
+            ;; Use explicit owned-paths so auto-inference is not required
+            (local unit (Units.ModuleUnit {:id "user-myunit"
+                                           :module-name "myunit"
+                                           :module-paths module-paths
+                                           :source :user
+                                           :owned-paths [unit-dir (fs.join-path unit-dir "init.fnl")]
+                                           :suppress-run-main? false}))
+            (unit:load {})
+            (assert (= app.__myunit-val :helper-loaded) "directory unit should load submodule")
+            (assert (. package.loaded "myunit") "myunit module should be in package.loaded")
+            (assert (. package.loaded "myunit.helper") "submodule should be in package.loaded")
+            (unit:unload {})
+            (assert (= app.__myunit-val nil) "drop should clear state")
+            (assert (= (. package.loaded "myunit") nil) "myunit module should be cleared on unload")
+            (assert (= (. package.loaded "myunit.helper") nil) "submodule should be cleared on unload"))))
+      (set fennel.path old-path)
+      (when (not ok)
+        (error err)))))
+
+(table.insert tests {:name "agent-units: directory unit without explicit owned-paths owns submodules"
+                     :fn test-dir-unit-without-explicit-owned-paths-owns-submodules})
+
 ;; ── Unit extensions: signal tracking ──
 
 (fn test-unit-signal-connect-and-disconnect []
@@ -319,7 +417,51 @@
       (assert subdir.is-dir "directory entry should mark is-dir"))))
 
 (table.insert tests {:name "agent-units: space_app_list_files returns entries"
-                     :fn test-space-app-list-files-returns-entries})
+                      :fn test-space-app-list-files-returns-entries})
+
+(fn test-space-app-search-returns-limited-rg-output []
+  (local adapters (ToolAdapterRegistry {}))
+  (BuiltinGeneral.register {:tool-adapters adapters})
+  (local def (adapters:resolve "app.search" app))
+  (local output
+    (def.run {:pattern "name"
+              :path "assets/lua/tests/data/launchables/basic"
+              :include "*.fnl"
+              :limit 1}))
+  (assert (string.find output "name" 1 true) "search should return matching content")
+  (assert (string.find output "truncated" 1 true) "limit should report truncation"))
+
+(table.insert tests {:name "agent-units: space_app_search returns limited rg output"
+                      :fn test-space-app-search-returns-limited-rg-output})
+
+(fn test-space-app-search-rejects-symlink-path []
+  (local process (require :process))
+  (local tmp (tempfile.TemporaryDirectory {:prefix "agent-search-"
+                                           :dir (fs.join-path (fs.cwd) "build")}))
+  (local target (fs.join-path tmp.path "target"))
+  (local link (fs.join-path tmp.path "link"))
+  (local relative-link (string.sub link (+ (# (fs.cwd)) 2)))
+  (local (ok err)
+    (pcall
+      (fn []
+        (fs.create-dirs target)
+        (fs.write-file (fs.join-path target "needle.fnl") "needle")
+        (local result (process.run {:args ["ln" "-s" target link]}))
+        (assert (= result.exit-code 0) (.. "ln -s failed: " (or result.stderr result.stdout "")))
+        (local adapters (ToolAdapterRegistry {}))
+        (BuiltinGeneral.register {:tool-adapters adapters})
+        (local def (adapters:resolve "app.search" app))
+        (local (search-ok search-err)
+          (pcall #(def.run {:pattern "needle" :path relative-link :include "*.fnl"})))
+        (assert (not search-ok) "search through symlink should fail")
+        (assert (string.find (tostring search-err) "symlink" 1 true)
+                "symlink failure should explain the rejected path"))))
+  (tmp:drop)
+  (when (not ok)
+    (error err)))
+
+(table.insert tests {:name "agent-units: space_app_search rejects symlink paths"
+                     :fn test-space-app-search-rejects-symlink-path})
 
 ;; ── Tool adapters: unit.list ──
 
@@ -416,12 +558,12 @@
                              "{:init init :drop drop}"))
           (fs.write-file render-path "{:value :render}")
           (fs.write-file controller-path "{:value :controller}")
-          (local unit (Units.ModuleUnit {:id "user-inspect-dir"
-                                          :module-name "inspect-dir"
-                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                          :source :user
-                                          :owned-paths [init-path]
-                                          :suppress-run-main? false}))
+           (local unit (Units.ModuleUnit {:id "user-inspect-dir"
+                                           :module-name "inspect-dir"
+                                           :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                           :source :user
+                                           :owned-paths [unit-dir init-path]
+                                           :suppress-run-main? false}))
           (app.unit-manager:register unit)
           (unit:load {})
 
@@ -571,6 +713,286 @@
 
 (table.insert tests {:name "agent-units: space_unit_create" :fn test-space-unit-create})
 
+(fn test-space-unit-create-directory-and-create-file []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local create-def (adapters:resolve "unit.create" app))
+          (local edit-file-def (adapters:resolve "unit.edit-file" app))
+
+          (local unit-source
+            (.. "(fn init [] (set app.__dir-create :loaded) true)\n"
+                "(fn drop [] (set app.__dir-create nil) true)\n"
+                "{:init init :drop drop}"))
+          (local result
+            (json.loads
+              (create-def.run {:id "dir-unit"
+                                :source unit-source
+                                :directory true})))
+          (local unit-dir (fs.join-path dir "dir-unit"))
+          (local init-path (fs.join-path unit-dir "init.fnl"))
+          (assert result.directory "directory create should report directory mode")
+          (assert (fs.exists init-path) "directory create should write init.fnl")
+          (local unit (app.unit-manager:get "user-dir-unit"))
+          (assert unit "directory unit should be registered")
+          (var owns-dir? false)
+          (each [_ path (ipairs unit.owned-paths)]
+            (when (= (fs.absolute path) (fs.absolute unit-dir))
+              (set owns-dir? true)))
+          (assert owns-dir? "directory unit should own the directory root")
+
+          (local created
+            (json.loads
+              (edit-file-def.run {:id "user-dir-unit"
+                                  :path "game.fnl"
+                                  :source "(fn value [] 42)\n{:value value}"
+                                  :create? true})))
+          (assert created.created "edit-file create? should report file creation")
+          (assert (fs.exists (fs.join-path unit-dir "game.fnl"))
+                  "edit-file create? should write new submodule")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_create directory and create file"
+                      :fn test-space-unit-create-directory-and-create-file})
+
+(fn test-space-unit-create-directory-reload-ignores-later-flat-collision []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local create-def (adapters:resolve "unit.create" app))
+
+          (local dir-source
+            (.. "(fn init [] (set app.__reload-collision :dir) true)\n"
+                "(fn drop [] true)\n"
+                "{:init init :drop drop}"))
+          (local flat-source
+            (.. "(fn init [] (set app.__reload-collision :flat) true)\n"
+                "(fn drop [] true)\n"
+                "{:init init :drop drop}"))
+          (create-def.run {:id "reload-collide"
+                           :source dir-source
+                           :directory true})
+          (assert (= app.__reload-collision :dir)
+                  "directory unit should load initially")
+
+          (fs.write-file (fs.join-path dir "reload-collide.fnl") flat-source)
+          (app.unit-manager:reload-unit "user-reload-collide" {})
+          (assert (= app.__reload-collision :dir)
+                  "directory unit reload should ignore later flat collision")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: directory unit reload ignores later flat collision"
+                      :fn test-space-unit-create-directory-reload-ignores-later-flat-collision})
+
+(fn test-space-unit-edit-file-create-nested-submodule-dirs []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local create-def (adapters:resolve "unit.create" app))
+          (local edit-file-def (adapters:resolve "unit.edit-file" app))
+
+          (local unit-source
+            (.. "(fn init [] true)\n"
+                "(fn drop [] true)\n"
+                "{:init init :drop drop}"))
+          (create-def.run {:id "nested-create-unit"
+                            :source unit-source
+                            :directory true})
+
+          (local unit-dir (fs.join-path dir "nested-create-unit"))
+          (local sub-deep (fs.join-path unit-dir "sub" "deep"))
+          (local game-file (fs.join-path sub-deep "game.fnl"))
+
+          (local result
+            (json.loads
+              (edit-file-def.run {:id "user-nested-create-unit"
+                                  :path "sub/deep/game.fnl"
+                                  :source "(fn value [] 99)\n{:value value}"
+                                  :create? true})))
+
+          (assert result.created "edit-file create? should report file creation")
+          (assert result.reloaded "unit should reload after submodule creation")
+          (assert (fs.exists game-file)
+                  (.. "nested submodule file should exist at " game-file))
+          (assert (fs.exists sub-deep)
+                  (.. "nested directory should exist at " sub-deep))
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit_file create nested submodule dirs"
+                      :fn test-space-unit-edit-file-create-nested-submodule-dirs})
+
+(fn test-space-unit-edit-file-create-rolls-back-nested-dirs-on-reload-failure []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local create-def (adapters:resolve "unit.create" app))
+          (local edit-file-def (adapters:resolve "unit.edit-file" app))
+
+          (local unit-source
+            (.. "(fn init []\n"
+                "  (when (and app app.__test-reload-fails)\n"
+                "    (error \"controlled reload failure for testing\"))\n"
+                "  true)\n"
+                "(fn drop [] true)\n"
+                "{:init init :drop drop}"))
+          (create-def.run {:id "rollback-unit"
+                            :source unit-source
+                            :directory true})
+
+          (local unit-dir (fs.join-path dir "rollback-unit"))
+          (local sub-dir (fs.join-path unit-dir "sub"))
+          (local sub-deep (fs.join-path sub-dir "deep"))
+          (local game-file (fs.join-path sub-deep "game.fnl"))
+
+          (set app.__test-reload-fails true)
+          (local (ok err)
+            (pcall #(edit-file-def.run {:id "user-rollback-unit"
+                                        :path "sub/deep/game.fnl"
+                                        :source "(fn value [] 99)\n{:value value}"
+                                        :create? true})))
+          (set app.__test-reload-fails nil)
+
+          (assert (not ok) "edit-file should fail when reload errors")
+          (local errstr (tostring err))
+          (assert (string.find errstr "controlled reload failure" 1 true)
+                  (.. "error should include the init failure, got: " errstr))
+
+          (assert (not (fs.exists game-file))
+                  (.. "created file should be rolled back: " game-file))
+          (assert (not (fs.exists sub-deep))
+                  (.. "deep directory should be removed: " sub-deep))
+          (assert (not (fs.exists sub-dir))
+                  (.. "sub directory should be removed: " sub-dir))
+          (assert (fs.exists unit-dir)
+                  "unit directory itself should survive")
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit_file create rolls back nested dirs on reload failure"
+                      :fn test-space-unit-edit-file-create-rolls-back-nested-dirs-on-reload-failure})
+
+(fn test-space-unit-edit-file-create-recovers-from-partial-init-side-effects []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local create-def (adapters:resolve "unit.create" app))
+          (local edit-file-def (adapters:resolve "unit.edit-file" app))
+
+          (local unit-source
+            (.. "(var module-state nil)\n"
+                "(fn init []\n"
+                "  (if app.__test-reload-fails\n"
+                "      (do\n"
+                "        (set module-state :before-boom)\n"
+                "        (set app.__sidefx-val :set-before-boom)\n"
+                "        (error \"controlled reload failure for side-effect test\"))\n"
+                "      (do\n"
+                "        (set module-state :ok)\n"
+                "        true)))\n"
+                "(fn drop []\n"
+                "  (set app.__sidefx-drop-called (+ (or app.__sidefx-drop-called 0) 1))\n"
+                "  (when (= module-state :before-boom)\n"
+                "    (set app.__sidefx-module-local-checked\n"
+                "         (+ (or app.__sidefx-module-local-checked 0) 1)))\n"
+                "  (set app.__sidefx-val nil)\n"
+                "  true)\n"
+                "{:init init :drop drop}"))
+          (create-def.run {:id "sidefx-unit"
+                            :source unit-source
+                            :directory true})
+
+          (set app.__sidefx-drop-called 0)
+          (set app.__sidefx-module-local-checked 0)
+          (set app.__test-reload-fails true)
+          (local (ok err)
+            (pcall #(edit-file-def.run {:id "user-sidefx-unit"
+                                        :path "sub/game.fnl"
+                                        :source "(fn value [] 99)\n{:value value}"
+                                        :create? true})))
+          (set app.__test-reload-fails nil)
+
+          (assert (not ok) "edit-file should fail when reload errors")
+          (local errstr (tostring err))
+          (assert (string.find errstr "controlled reload failure" 1 true)
+                  (.. "error should include init failure, got: " errstr))
+
+          (assert (>= app.__sidefx-drop-called 2)
+                  (.. "drop should be called during recovery unload, got "
+                      (tostring app.__sidefx-drop-called)))
+
+          (assert (>= (or app.__sidefx-module-local-checked 0) 1)
+                  (.. "recovery drop must see module-local state from partial init, got "
+                      (tostring (or app.__sidefx-module-local-checked 0))))
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit_file create recovers from partial init side effects"
+                     :fn test-space-unit-edit-file-create-recovers-from-partial-init-side-effects})
+
+(fn test-space-unit-edit-file-create-reports-unload-failure []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local create-def (adapters:resolve "unit.create" app))
+          (local edit-file-def (adapters:resolve "unit.edit-file" app))
+
+          (local unit-source
+            (.. "(var reload-phase nil)\n"
+                "(fn init []\n"
+                "  (when app.__test-reload-fails\n"
+                "    (set reload-phase :init-failed)\n"
+                "    (error \"controlled reload failure for unload-report test\"))\n"
+                "  true)\n"
+                "(fn drop []\n"
+                "  (when (= reload-phase :init-failed)\n"
+                "    (error \"drop also fails intentionally\"))\n"
+                "  true)\n"
+                "{:init init :drop drop}"))
+          (create-def.run {:id "unload-report-unit"
+                            :source unit-source
+                            :directory true})
+
+          (set app.__test-reload-fails true)
+          (local (ok err)
+            (pcall #(edit-file-def.run {:id "user-unload-report-unit"
+                                        :path "sub/game.fnl"
+                                        :source "(fn value [] 99)\n{:value value}"
+                                        :create? true})))
+          (set app.__test-reload-fails nil)
+
+          (assert (not ok) "edit-file should fail when reload errors")
+          (local errstr (tostring err))
+          (assert (string.find errstr "controlled reload failure" 1 true)
+                  (.. "error should include init failure, got: " errstr))
+          (assert (string.find errstr "unload also failed" 1 true)
+                  (.. "error should report unload failure, got: " errstr))
+
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_edit_file create reports unload failure"
+                     :fn test-space-unit-edit-file-create-reports-unload-failure})
+
 (fn test-space-unit-create-duplicate []
   (with-temp-dir
     (fn [dir]
@@ -590,6 +1012,66 @@
           (app.unit-manager:clear))))))
 
 (table.insert tests {:name "agent-units: space_unit_create duplicate" :fn test-space-unit-create-duplicate})
+
+(fn test-space-unit-create-rejects-flat-when-directory-exists []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.create" app))
+          (local unit-source "(fn init [] true)(fn drop [] true){:init init :drop drop}")
+          (def.run {:id "collide-unit" :source unit-source :directory true})
+          (local (ok err) (pcall def.run {:id "collide-unit" :source unit-source}))
+          (assert (not ok) "flat create should fail when directory with same name exists")
+          (local errstr (tostring err))
+          (assert (string.find errstr "already exists") "error should mention already exists")
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_create rejects flat when directory exists"
+                      :fn test-space-unit-create-rejects-flat-when-directory-exists})
+
+(fn test-space-unit-create-rejects-directory-when-flat-exists []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.create" app))
+          (local unit-source "(fn init [] true)(fn drop [] true){:init init :drop drop}")
+          (def.run {:id "collide-unit" :source unit-source})
+          (local (ok err) (pcall def.run {:id "collide-unit" :source unit-source :directory true}))
+          (assert (not ok) "directory create should fail when flat file with same name exists")
+          (local errstr (tostring err))
+          (assert (string.find errstr "already exists") "error should mention already exists")
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_create rejects directory when flat exists"
+                      :fn test-space-unit-create-rejects-directory-when-flat-exists})
+
+(fn test-space-unit-register-rejects-directory-when-flat-collides []
+  (with-temp-dir
+    (fn [dir]
+      (with-test-unit-mgr dir
+        (fn []
+          (local unit-source "(fn init [] true)(fn drop [] true){:init init :drop drop}")
+          (fs.write-file (fs.join-path dir "reg-unit.fnl") unit-source)
+          (local dir-path (fs.join-path dir "reg-unit"))
+          (fs.create-dirs dir-path)
+          (fs.write-file (fs.join-path dir-path "init.fnl") unit-source)
+          (local adapters (ToolAdapterRegistry {}))
+          (BuiltinUnits.register {:tool-adapters adapters})
+          (local def (adapters:resolve "unit.register" app))
+          (local (ok err) (pcall def.run {:id "reg-unit"}))
+          (assert (not ok) "register should fail when flat file with same name exists")
+          (local errstr (tostring err))
+          (assert (string.find errstr "conflicts") "error should mention conflicts")
+          (app.unit-manager:clear))))))
+
+(table.insert tests {:name "agent-units: space_unit_register rejects directory when flat file collides"
+                      :fn test-space-unit-register-rejects-directory-when-flat-collides})
 
 (fn test-space-unit-create-invalid-source []
   (with-temp-dir
@@ -892,11 +1374,11 @@
                              "(fn drop [] (set app.__multi-val nil) true)\n"
                              "{:init init :drop drop}"))
           (local unit (Units.ModuleUnit {:id "user-multi"
-                                          :module-name "multi"
-                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                          :source :user
-                                          :owned-paths [init-path]
-                                          :suppress-run-main? false}))
+                                           :module-name "multi"
+                                           :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                           :source :user
+                                           :owned-paths [unit-dir init-path]
+                                           :suppress-run-main? false}))
           (app.unit-manager:register unit)
           (unit:load {})
           (assert (= app.__multi-val :v1) "initial directory unit should load controller v1")
@@ -934,11 +1416,11 @@
                              "(fn drop [] (set app.__patch-val nil) true)\n"
                              "{:init init :drop drop}"))
           (local unit (Units.ModuleUnit {:id "user-patchy"
-                                          :module-name "patchy"
-                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                          :source :user
-                                          :owned-paths [init-path]
-                                          :suppress-run-main? false}))
+                                           :module-name "patchy"
+                                           :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                           :source :user
+                                           :owned-paths [unit-dir init-path]
+                                           :suppress-run-main? false}))
           (app.unit-manager:register unit)
           (unit:load {})
           (assert (= app.__patch-val :slow) "initial directory unit should load slow value")
@@ -1092,7 +1574,7 @@
           (local (ok err) (pcall def.run {:id "init-drop" :source no-drop-source}))
           (assert (not ok) "edit should fail when new source has no drop")
           (local errstr (tostring err))
-          (assert (string.find errstr "module exports invalid") "error should mention exports")
+          (assert (string.find errstr "missing function" 1 true) "error should mention missing function")
 
           (assert (= app.__nodrop-val :init) "old source restored, init re-ran during recovery")
           (assert (unit:loaded?) "unit should still be loaded after recovery")
@@ -1144,7 +1626,7 @@
           (local (ok err) (pcall def.run {:id "custom-exp" :source no-stop-source}))
           (assert (not ok) "edit should fail when new source missing custom unload export")
           (local errstr (tostring err))
-          (assert (string.find errstr "module exports invalid") "error should mention exports")
+          (assert (string.find errstr "missing function" 1 true) "error should mention missing function")
           (assert (string.find errstr "stop") "error should name the missing export")
           (assert (= app.__cust-val :v2) "old source restored, v2 init re-ran during recovery")
           (assert (unit:loaded?) "unit should still be loaded after recovery")
@@ -1725,21 +2207,20 @@
           (local init-path (fs.join-path unit-dir "init.fnl"))
           (local helper-path (fs.join-path unit-dir "helper.fnl"))
           (fs.write-file init-path "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
-          (fs.write-file helper-path "helper-content")
-          (local unit (Units.ModuleUnit {:id "user-reader"
-                                          :module-name "reader"
-                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                          :source :user
-                                          :owned-paths [init-path]
-                                          :suppress-run-main? false}))
-          (app.unit-manager:register unit)
-          (unit:load {})
+           (fs.write-file helper-path "helper-content")
+           (local unit (Units.ModuleUnit {:id "user-reader"
+                                           :module-name "reader"
+                                           :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                           :source :user
+                                           :owned-paths [unit-dir init-path]
+                                           :suppress-run-main? false}))
+           (app.unit-manager:register unit)
+           (unit:load {})
 
-          (local adapters (ToolAdapterRegistry {}))
-          (BuiltinUnits.register {:tool-adapters adapters})
-          (local def (adapters:resolve "unit.read-file" app))
-
-          (local result (def.run {:id "user-reader" :path "helper.fnl"}))
+           (local adapters (ToolAdapterRegistry {}))
+           (BuiltinUnits.register {:tool-adapters adapters})
+           (local def (adapters:resolve "unit.read-file" app))
+           (local result (def.run {:id "user-reader" :path "helper.fnl"}))
           (assert (= result "helper-content") "read-file should return unit file content")
 
           (app.unit-manager:clear))))))
@@ -1787,21 +2268,20 @@
           (fs.create-dirs unit-dir)
           (local init-path (fs.join-path unit-dir "init.fnl"))
           (fs.write-file init-path "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
-          (fs.write-file (fs.join-path dir "secret.fnl") "secret")
-          (local unit (Units.ModuleUnit {:id "user-reader"
-                                          :module-name "reader"
-                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                          :source :user
-                                          :owned-paths [init-path]
-                                          :suppress-run-main? false}))
-          (app.unit-manager:register unit)
-          (unit:load {})
+           (fs.write-file (fs.join-path dir "secret.fnl") "secret")
+           (local unit (Units.ModuleUnit {:id "user-reader"
+                                           :module-name "reader"
+                                           :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                           :source :user
+                                           :owned-paths [unit-dir init-path]
+                                           :suppress-run-main? false}))
+           (app.unit-manager:register unit)
+           (unit:load {})
 
-          (local adapters (ToolAdapterRegistry {}))
-          (BuiltinUnits.register {:tool-adapters adapters})
-          (local def (adapters:resolve "unit.read-file" app))
-
-          (local (ok err) (pcall def.run {:id "user-reader" :path "../secret.fnl"}))
+           (local adapters (ToolAdapterRegistry {}))
+           (BuiltinUnits.register {:tool-adapters adapters})
+           (local def (adapters:resolve "unit.read-file" app))
+           (local (ok err) (pcall def.run {:id "user-reader" :path "../secret.fnl"}))
           (assert (not ok) "read-file should reject paths outside the unit directory")
           (assert (string.find (tostring err) "escapes") "error should mention escaping")
 
@@ -2031,12 +2511,12 @@
           (fs.write-file (fs.join-path unit-dir "test-init.fnl")
                          "{:tests []}")
 
-          (local unit (Units.ModuleUnit {:id "user-del-dir"
-                                          :module-name "del-dir"
-                                          :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                          :source :user
-                                          :owned-paths [(fs.join-path unit-dir "init.fnl")]
-                                          :suppress-run-main? false}))
+           (local unit (Units.ModuleUnit {:id "user-del-dir"
+                                           :module-name "del-dir"
+                                           :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                           :source :user
+                                           :owned-paths [unit-dir (fs.join-path unit-dir "init.fnl")]
+                                           :suppress-run-main? false}))
           (app.unit-manager:register unit)
           (unit:load {})
 
@@ -2155,12 +2635,12 @@
               (fs.create-dirs unit-dir)
               (fs.write-file (fs.join-path unit-dir "init.fnl")
                              "(fn init [] true) (fn drop [] true) {:init init :drop drop}")
-              (local unit (Units.ModuleUnit {:id "user-posix-esc"
-                                              :module-name "posix-unit"
-                                              :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
-                                              :source :user
-                                              :owned-paths [(fs.join-path unit-dir "init.fnl")]
-                                              :suppress-run-main? false}))
+               (local unit (Units.ModuleUnit {:id "user-posix-esc"
+                                               :module-name "posix-unit"
+                                               :module-paths (.. dir "/?.fnl;" dir "/?/init.fnl")
+                                               :source :user
+                                               :owned-paths [unit-dir (fs.join-path unit-dir "init.fnl")]
+                                               :suppress-run-main? false}))
               (app.unit-manager:register unit)
               (unit:load {})
               (local adapters (ToolAdapterRegistry {}))

@@ -135,6 +135,25 @@
   {:foreground foreground
    :background background})
 
+(fn get-theme-card-colors [ctx]
+  (local theme (and ctx ctx.theme))
+  (and theme theme.card))
+
+(fn resolve-card-colors [ctx opts]
+  (local options (or opts {}))
+  (local theme-colors (get-theme-card-colors ctx))
+  (local background
+    (or options.color
+        options.background-color
+        (and theme-colors theme-colors.background)
+        (glm.vec4 0.15 0.15 0.18 1)))
+  (local foreground
+    (or options.foreground-color
+        (and theme-colors theme-colors.foreground)
+        (glm.vec4 0.95 0.95 0.95 1)))
+  {:background background
+   :foreground foreground})
+
 {:clamp01 clamp01
  :adjust adjust
  :make-button-variant make-button-variant
@@ -142,4 +161,5 @@
  :resolve-padding resolve-padding
  :get-button-theme-colors get-button-theme-colors
  :resolve-button-colors resolve-button-colors
- :resolve-qr-colors resolve-qr-colors}
+ :resolve-qr-colors resolve-qr-colors
+ :resolve-card-colors resolve-card-colors}

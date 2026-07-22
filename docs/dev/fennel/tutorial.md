@@ -795,3 +795,7 @@ current module name string (`...`).
 [17]: https://fennel-lang.org/api
 [18]: https://benaiah.me/posts/everything-you-didnt-want-to-know-about-lua-multivals/
 [19]: https://fennel-lang.org/see
+
+## See also
+
+- [[../../../knowledge/home|Knowledge Base]]

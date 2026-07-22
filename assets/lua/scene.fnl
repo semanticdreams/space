@@ -590,6 +590,7 @@
            :key entry.key
            :owner entry.owner
            :min-size entry.min-size
+           :max-size entry.max-size
            :on-resize-start entry.on-resize-start
            :on-resize-end entry.on-resize-end})))
 
@@ -606,6 +607,7 @@
         (when handle (set options.handle handle))
         (when entry.pointer-target (set options.pointer-target entry.pointer-target))
         (when entry.min-size (set options.min-size entry.min-size))
+        (when entry.max-size (set options.max-size entry.max-size))
         (when entry.on-resize-start (set options.on-resize-start entry.on-resize-start))
         (when entry.on-resize-end (set options.on-resize-end entry.on-resize-end))
         (local key (or entry.key widget entry))
@@ -780,6 +782,16 @@
       (remove-entries-for-owner entity.movables removed-element)
       (remove-entries-for-owner entity.resizables removed-element))
     removed)
+
+  (fn find-panel-persistence [_scene element]
+    (var current element)
+    (var metadata nil)
+    (var guard 0)
+    (while (and (not metadata) current (< guard 16))
+      (set metadata (find-scene-metadata-by-element self.scene-children current))
+      (set current (and (not metadata) current.__scene_wrapper))
+      (set guard (+ guard 1)))
+    (and metadata metadata.persistence))
 
   (fn capture-panel-element-state [self element]
     (local metadata (find-scene-metadata-by-element self.scene-children element))
@@ -1469,34 +1481,33 @@
           nil))
     (each [_ metadata (ipairs (or self.scene-children []))]
       (local persistence (and metadata metadata.persistence))
-      (assert persistence
-              "Scene.capture-state found panel without persistence")
-      (local kind (and persistence persistence.kind))
-      (assert (= (type kind) :string)
-              "Scene.capture-state panel persistence requires string :kind")
-      (local module-name (and persistence persistence.restorer-module))
-      (when (not (= module-name nil))
-        (assert (= (type module-name) :string)
-                (.. "Scene.capture-state panel persistence for kind "
+      (when persistence
+        (local kind (and persistence persistence.kind))
+        (assert (= (type kind) :string)
+                "Scene.capture-state panel persistence requires string :kind")
+        (local module-name (and persistence persistence.restorer-module))
+        (when (not (= module-name nil))
+          (assert (= (type module-name) :string)
+                  (.. "Scene.capture-state panel persistence for kind "
+                      kind
+                      " requires string :restorer-module")))
+        (local registered (and (. self.panel-restorers kind)
+                               (. (. self.panel-restorers kind) :restore)))
+        (local built-in? (. built-in-scene-kinds kind))
+        (assert (or built-in? registered (= (type module-name) :string))
+                (.. "Scene.capture-state panel kind has no restore strategy: "
                     kind
-                    " requires string :restorer-module")))
-      (local registered (and (. self.panel-restorers kind)
-                             (. (. self.panel-restorers kind) :restore)))
-      (local built-in? (. built-in-scene-kinds kind))
-      (assert (or built-in? registered (= (type module-name) :string))
-              (.. "Scene.capture-state panel kind has no restore strategy: "
-                  kind
-                  " (register restorer or set :restorer-module)"))
-      (local layout-state (capture-panel-layout-state metadata))
-      (when layout-state
-        (local record
-          (if (and metadata.element metadata.element.capture-persistence)
-              (clone-table (metadata.element:capture-persistence))
-              (clone-table persistence)))
-        (set record.position layout-state.position)
-        (set record.rotation layout-state.rotation)
-        (set record.size (or layout-state.size record.size))
-        (table.insert panels record)))
+                    " (register restorer or set :restorer-module)"))
+        (local layout-state (capture-panel-layout-state metadata))
+        (when layout-state
+          (local record
+            (if (and metadata.element metadata.element.capture-persistence)
+                (clone-table (metadata.element:capture-persistence))
+                (clone-table persistence)))
+          (set record.position layout-state.position)
+          (set record.rotation layout-state.rotation)
+          (set record.size (or layout-state.size record.size))
+          (table.insert panels record))))
     (local captured {:panels panels
                      :terrains terrains
                      :lights lights})
@@ -1698,6 +1709,7 @@
 (set self.add-object add-object)
 (set self.add-panel-child add-panel-child)
 (set self.remove-panel-child remove-panel-child)
+(set self.find-panel-persistence find-panel-persistence)
 (set self.add-demo-entry add-demo-entry)
 (set self.add-demo-browser add-demo-browser)
 (set self.add-physics-body add-physics-body)

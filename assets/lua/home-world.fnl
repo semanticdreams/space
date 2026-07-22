@@ -249,6 +249,20 @@
     (if persisted
         (do
           (set world.state (merge-state-defaults (base-default-state) persisted))
+          (fn migrate-legacy-panels! [panels]
+            (var changed? false)
+            (each [_ panel (ipairs (or panels []))]
+              (when (and (= panel.kind "graph-node-view")
+                         (not panel.restorer-module))
+                (set panel.restorer-module "graph/view/node-view-panel-restorer")
+                (set changed? true)))
+            changed?)
+          (when (migrate-legacy-panels! (and world.state.canvas world.state.canvas.panels))
+            (set repaired-persisted-state? true))
+          (when (migrate-legacy-panels! (and world.state.hud world.state.hud.panels))
+            (set repaired-persisted-state? true))
+          (when (migrate-legacy-panels! (and world.state.scene world.state.scene.panels))
+            (set repaired-persisted-state? true))
           (local persisted-lights (and persisted.scene persisted.scene.lights))
           (local persisted-skybox (and persisted.scene persisted.scene.skybox))
           (local persisted-background (and persisted.scene persisted.scene.background))
@@ -532,29 +546,30 @@
     (local canvas (and runtime runtime.canvas))
     (local graph (and runtime runtime.graph))
     (local hud (and ctx ctx.hud))
+    (local next-state (clone-table world.state))
     (when camera
       (local position (sanitize-vec3 camera.position (glm.vec3 0 0 30)))
       (when (not (= position camera.position))
         (logging.warn (string.format
                         "[world] %s camera position out of bounds during capture; resetting to default"
                         world.id)))
-      (set world.state.camera
+      (set next-state.camera
             {:position (vec3->array position)
              :rotation (quat->array camera.rotation)}))
     (when (and graph graph.capture-state)
-      (set world.state.graph
+      (set next-state.graph
            (merge-preserved-graph-state
              graph
-              world.state.graph
+              next-state.graph
               (graph:capture-state))))
     (when runtime
       (if (and runtime.board-view runtime.board-view.capture-state)
-          (set world.state.board (runtime.board-view:capture-state))
+          (set next-state.board (runtime.board-view:capture-state))
           (when runtime.board-state
-            (set world.state.board (clone-table runtime.board-state)))))
+            (set next-state.board (clone-table runtime.board-state)))))
     (when (and scene scene.capture-state)
       (local captured-scene (scene:capture-state))
-      (local existing-scene (or world.state.scene {}))
+      (local existing-scene (or next-state.scene {}))
       (set captured-scene.panels
            (merge-panel-state
              captured-scene.panels
@@ -577,21 +592,22 @@
              (assert existing-scene.skybox
                      "HomeWorld.capture-runtime-state requires persisted scene skybox policy")
              "HomeWorld.capture-runtime-state persisted skybox"))
-      (set world.state.scene captured-scene))
+      (set next-state.scene captured-scene))
     (local canvas-state
       (if (and canvas canvas.capture-state)
           (canvas:capture-state)
-          (and world.state world.state.canvas)))
+          (and next-state next-state.canvas)))
     (when canvas-state
-      (set world.state.canvas (capture-canvas-shell-state world runtime canvas-state)))
+      (set next-state.canvas (capture-canvas-shell-state world runtime canvas-state)))
     (when (and runtime runtime.drawing-controller)
-      (set world.state.drawing
+      (set next-state.drawing
            (runtime.drawing-controller:snapshot)))
     (when (and hud hud.capture-state)
-      (set world.state.hud (hud:capture-state)))
-    (local physics-state (or world.state.physics {}))
+      (set next-state.hud (hud:capture-state)))
+    (local physics-state (or next-state.physics {}))
     (set physics-state.containment (resolve-runtime-containment-config world))
-    (set world.state.physics physics-state))
+    (set next-state.physics physics-state)
+    (set world.state next-state))
 
   (fn queue-runtime-restore-state [world]
     (local runtime world.runtime)
@@ -720,6 +736,10 @@
          (fn [rt state]
            (assert (= rt runtime) "HomeWorld.restore-canvas-unit-state called with wrong runtime")
            ((. (current-canvas-runtime-module) :restore-runtime-canvas-unit-state!) runtime state)))
+    (set runtime.restore-canvas-shell-state
+         (fn [rt canvas-target]
+           (when (and canvas-target rt.pending-canvas-state)
+             (canvas-target:restore-shell-state rt.pending-canvas-state))))
     (set runtime.restore-surface-state
          (fn [rt canvas-target hud]
            (when (and canvas-target canvas-target.restore-state rt.pending-canvas-state)

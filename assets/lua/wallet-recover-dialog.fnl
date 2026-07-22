@@ -18,7 +18,7 @@
             "Invalid recovery phrase"
             nil)))
 
-(fn build-wallet-recover-dialog [options ctx runtime-opts]
+(fn build-wallet-recover-dialog [options ctx runtime-opts transfer-builder]
     (local wallet (assert options.wallet "WalletRecoverDialog requires wallet metadata"))
     (local store (or options.store (WalletStore {})))
     (local state {:mnemonic ""
@@ -128,15 +128,17 @@
                           :name (or options.name "wallet-recover-dialog")
                           :on-close options.on-close
                           :child (Padding {:edge-insets [0.6 0.6]
-                                           :child content})})
+                                           :child content})
+                          :transfer-builder transfer-builder})
           ctx
           runtime-opts))
     dialog)
 
 (fn WalletRecoverDialog [opts]
     (local options (or opts {}))
-    (fn [ctx runtime-opts]
-        (build-wallet-recover-dialog options ctx runtime-opts)))
+    (fn build [ctx runtime-opts]
+        (build-wallet-recover-dialog options ctx runtime-opts build))
+    build)
 
 (local exports {:WalletRecoverDialog WalletRecoverDialog})
 

@@ -48,7 +48,7 @@
            :yspacing 0.5
            :children children}))
 
-(fn build-wallet-view [options ctx runtime-opts]
+(fn build-wallet-view [options ctx runtime-opts transfer-builder]
     (local store (or options.store
                      (and options.manager options.manager.store)
                      (WalletStore {})))
@@ -351,7 +351,8 @@
                           :name (or options.name "wallet-dialog")
                           :on-close options.on-close
                           :child (Padding {:edge-insets [0.6 0.6]
-                                           :child content})})
+                                           :child content})
+                          :transfer-builder transfer-builder})
           ctx
           runtime-opts))
     (when manager
@@ -375,8 +376,9 @@
 
 (fn WalletView [opts]
     (local options (or opts {}))
-    (fn [ctx runtime-opts]
-        (build-wallet-view options ctx runtime-opts)))
+    (fn build [ctx runtime-opts]
+        (build-wallet-view options ctx runtime-opts build))
+    build)
 
 (local exports {:WalletView WalletView})
 

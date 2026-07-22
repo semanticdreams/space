@@ -11,4 +11,8 @@ Then continue here:
 - [User Docs](/user/)
 - [Developer Docs](/dev/)
 - [Concepts](/dev/concepts)
-- [Milestones](/dev/milestones)
+- [Milestones](https://github.com/semanticdreams/space/blob/main/knowledge/milestones.md)
+
+## See also
+
+- [[../index|User Docs Home]]

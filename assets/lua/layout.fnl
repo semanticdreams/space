@@ -371,13 +371,15 @@
       (self.root.layout-dirt:remove self)))
 
   (fn intersect [self ray]
-    (local (hit point distance)
-           (ray-box-intersection ray {:position self.position
-                                      :rotation self.rotation
-                                      :size self.size}))
-    (if (and hit (clip-allows-point? self.clip-region point))
-        (values true point distance)
-        (values false nil nil)))
+    (if (self:effective-culled?)
+        (values false nil nil)
+        (let [(hit point distance)
+              (ray-box-intersection ray {:position self.position
+                                         :rotation self.rotation
+                                         :size self.size})]
+          (if (and hit (clip-allows-point? self.clip-region point))
+              (values true point distance)
+              (values false nil nil)))))
 
   (local o {:name opts.name :root opts.root :parent opts.parent :children []
             :position opts.position :rotation opts.rotation

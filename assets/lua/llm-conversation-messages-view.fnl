@@ -307,7 +307,8 @@
                        :name (or options.name "llm-conversation-messages-view")
                        :resizeable true
                        :on-close options.on-close
-                       :child (fn [_] content)})
+                       :child (fn [_] content)
+                       :transfer-builder build})
        ctx))
     (set dialog.__messages-view view)
 

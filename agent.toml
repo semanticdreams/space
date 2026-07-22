@@ -1,0 +1,43 @@
+[models]
+# Obtain or refresh exact identifiers with: opencode models --refresh
+explorer = "openai/gpt-5.5"
+supervisor = "opencode-go/deepseek-v4-pro"
+planner = "openai/gpt-5.5"
+implementer = "opencode-go/deepseek-v4-pro"
+fixer = "opencode-go/deepseek-v4-pro"
+reviewer = "openai/gpt-5.5"
+adjudicator = "openai/gpt-5.5"
+
+[workflow]
+review_round_budget = 10
+fix_attempt_budget = 5
+# If OpenCode reports an explicit short model-limit reset, the supervisor may
+# wait this long and retry automatically. Longer or unclear limits stop with a
+# resumable blocked_model_limit state.
+max_model_limit_wait_seconds = 21600
+state_dir = ".agent-workflow"
+state_file = ".agent-workflow/STATE.json"
+plan_file = ".agent-workflow/PLAN.md"
+task_file = ".agent-workflow/TASK.md"
+exploration_file = ".agent-workflow/EXPLORATION.md"
+
+[notifications]
+enabled = true
+sound = ["paplay", "/usr/share/sounds/freedesktop/stereo/message.oga"]
+desktop = ["notify-send"]
+
+[validation]
+# The implementer is instructed to run focused tests first and then the
+# relevant suite. These commands are deterministic gates run by the
+# orchestrator after the model finishes.
+#
+# Space defaults: implementers still run focused tests from PLAN.md, while the
+# orchestrator enforces repository-level gates at stage boundaries.
+after_implementation = ["make build"]
+after_fix = ["make build"]
+final = ["make test"]
+
+# Example:
+# after_implementation = ["make build", "./build/space -m tests.test-sized:main"]
+# after_fix = ["make build"]
+# final = ["make test", "make test-e2e"]

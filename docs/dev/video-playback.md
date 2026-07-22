@@ -249,3 +249,8 @@ Note: `SPACE_DISABLE_AUDIO=1` is still useful for deterministic CI/sandbox runs,
 - Add live in-world telemetry panel for active players.
 - Add targeted audio-device reset/replug scripted validation.
 - Add adaptive queue sizing based on stream properties and measured jitter.
+
+
+## See also
+
+- [[../../knowledge/home|Knowledge Base]]

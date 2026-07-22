@@ -1601,6 +1601,93 @@
 (table.insert tests {:name "HomeWorld persists graph node views on targets instead of graph state"
                      :fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state})
 
+(fn home-world-load-state-migrates-legacy-graph-node-view-panels []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:graph {:nodes []
+                                          :edges []}}
+                          :scene {:panels [{:kind "graph-node-view"
+                                            :node-key "node-a"
+                                            :layer "float"
+                                            :position [1 2 3]
+                                            :rotation [1 0 0 0]
+                                            :size [7 8 9]}]
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
+                          :canvas {:camera {:position [0 0 100]}
+                                   :scale_factor 1.0
+                                   :panels [{:kind "graph-node-view"
+                                              :node-key "canvas-node"
+                                              :layer "float"
+                                              :position [10 20 0]
+                                              :rotation [1 0 0 0]
+                                              :size [32 16 0]}]}
+                          :hud {:panels [{:kind "graph-node-view"
+                                          :node-key "hud-node"
+                                          :layer "tiles"}]}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local hud-panel (. (. world.state.hud :panels) 1))
+      (assert (= hud-panel.restorer-module "graph/view/node-view-panel-restorer")
+              "Legacy HUD graph-node-view panel should get restorer-module on load")
+      (local canvas-panel (. (. world.state.canvas :panels) 1))
+      (assert (= canvas-panel.restorer-module "graph/view/node-view-panel-restorer")
+              "Legacy canvas graph-node-view panel should get restorer-module on load")
+      (local scene-panel (. (. world.state.scene :panels) 1))
+      (assert (= scene-panel.restorer-module "graph/view/node-view-panel-restorer")
+              "Legacy scene graph-node-view panel should get restorer-module on load")
+      true)))
+
+(table.insert tests {:name "HomeWorld load-state migrates legacy graph-node-view panels"
+                     :fn home-world-load-state-migrates-legacy-graph-node-view-panels})
+
+(fn home-world-capture-runtime-state-is-transactional []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local saved-board {:items [{:id "a" :type "test" :subject-key "sk:a"
+                                   :position [0 0 0] :rotation [1 0 0 0] :size [8 4 0] :state []}]
+                          :connectors []})
+      (set world.state.board saved-board)
+      (set world.runtime
+           {:camera {:position [0 0 0] :rotation [1 0 0 0]}
+            :board-view {:capture-state (fn [_self]
+                                          {:items [{:id "b" :type "test" :subject-key "sk:b"
+                                                    :position [1 2 3] :rotation [1 0 0 0]
+                                                    :size [8 4 0] :state []}]
+                                           :connectors []})}
+            :scene {:capture-state (fn [_self]
+                                     (error "capture failed"))
+                    :debug-id "test-scene"}
+            :unload-canvas-runtime (fn [_self] true)})
+      (local (ok err) (pcall (fn []
+                               (world:deactivate {} "switch"))))
+      (assert (not ok)
+              "HomeWorld deactivate should propagate capture failure")
+      (assert (= (length world.state.board.items) 1)
+              "HomeWorld board state should be preserved when later capture fails")
+      (assert (= (. (. world.state.board.items 1) :id) "a")
+              "HomeWorld board items should be unchanged when scene capture fails")
+      true)))
+
+(table.insert tests {:name "HomeWorld capture runtime state is transactional"
+                     :fn home-world-capture-runtime-state-is-transactional})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

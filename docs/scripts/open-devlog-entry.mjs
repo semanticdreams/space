@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const docsDir = resolve(__dirname, '..')
-const devlogDir = join(docsDir, 'dev', 'devlog')
+const devlogDir = resolve(docsDir, '..', 'knowledge', 'journal')
 
 function format_today_utc()
 {
@@ -35,7 +35,7 @@ async function ensure_entry(entryPath, date)
     }
 
     await mkdir(dirname(entryPath), { recursive: true })
-    await writeFile(entryPath, `# ${date}\n\n`, 'utf8')
+    await writeFile(entryPath, `---\ntype: journal\ntags: [journal, devlog]\ncreated: ${date}\n---\n\n# ${date}\n\n`, 'utf8')
 }
 
 async function command_exists(command)

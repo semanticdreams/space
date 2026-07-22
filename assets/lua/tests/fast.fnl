@@ -31,6 +31,7 @@
     :tests.test-hud
     :tests.test-hud-command-hints
     :tests.test-hud-control-panel
+    :tests.test-hud-extended-sidebar
     :tests.test-hud-layout
     :tests.test-deep-dialog
     :tests.test-tetris-game
@@ -154,10 +155,21 @@
     :tests.test-heightfield-terrain
     :tests.test-graph-view
     :tests.test-graph-view-control-view
+    :tests.test-hackernews-graph-view-node-views
     :tests.test-world-manager
     :tests.test-world-tabs-widget
     :tests.test-demo-browser
-    :tests.test-chart]})
+    :tests.test-chart
+    :tests.test-repo-sha256
+    :tests.test-repo-remote
+    :tests.test-repo-git
+    :tests.test-repo-path-policy
+    :tests.test-repo-workspace
+    :tests.test-repo-store
+    :tests.test-repo-checks
+    :tests.test-repo-presets
+    :tests.test-repo-display
+    :tests.test-panel-transfer]})
 
 (local main
   (fn []

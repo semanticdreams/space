@@ -396,6 +396,44 @@
 (table.insert tests {:name "user code unit replaces app state and survives clear"
                      :fn user-code-unit-replaces-app-state-and-survives-clear})
 
+(fn scanner-prefers-directory-init-when-flat-collides []
+  (with-temp-dir
+    (fn [dir]
+      (local old-fennel-path (. (require :fennel) :path))
+      (fs.write-file (fs.join-path dir "collide.fnl")
+                     (.. "(fn init [] (set app.__collide-loaded :flat) true)\n"
+                         "(fn drop [] (set app.__collide-loaded nil) true)\n"
+                         "{:init init :drop drop}"))
+      (fs.create-dirs (fs.join-path dir "collide"))
+      (fs.write-file (fs.join-path dir "collide" "init.fnl")
+                     (.. "(fn init [] (set app.__collide-loaded :dir) true)\n"
+                         "(fn drop [] (set app.__collide-loaded nil) true)\n"
+                         "{:init init :drop drop}"))
+       (set app.__collide-loaded nil)
+       (local original-code-dir app.code-dir)
+       (local original-unit-manager app.unit-manager)
+       (local (ok err)
+         (pcall
+           (fn []
+             (set app.unit-manager (UnitManager {}))
+             (set app.code-dir dir)
+             (Main.ensure-user-code-units!)
+             (assert (= app.__collide-loaded :dir)
+                     (.. "should load directory init when both shapes exist, got "
+                         (tostring app.__collide-loaded)))
+             (assert (= (app.unit-manager:count) 1)
+                     "should register exactly 1 unit for colliding name")
+             (app.unit-manager:clear))))
+       (set app.code-dir original-code-dir)
+       (set app.unit-manager original-unit-manager)
+      (tset (require :fennel) :path old-fennel-path)
+      (set app.__collide-loaded nil)
+      (when (not ok)
+        (error err)))))
+
+(table.insert tests {:name "scanner prefers directory init when flat collides"
+                     :fn scanner-prefers-directory-init-when-flat-collides})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

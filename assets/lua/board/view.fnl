@@ -1,6 +1,7 @@
 (global app (or app {}))
 
 (local glm (require :glm))
+(local Signal (require :signal))
 (local FloatLayer (require :float-layer))
 (local Registry (require :board/registry))
 (local LinkEntityStore (require :entities/link))
@@ -32,6 +33,9 @@
                              :depth-layer-step 8}) ctx))
   (local item-records {})
   (local connector-records {})
+  (local selector (or options.selector (and ctx ctx.object-selector)))
+  (local selected-items [])
+  (local selected-items-changed (Signal))
   (var dropped? false)
   (var self nil)
 
@@ -39,6 +43,19 @@
 
   (fn assert-not-dropped [context]
     (assert (not dropped?) (.. "BoardView " context " called after drop")))
+
+  (fn create-selectable [item]
+    {:item item
+     :position (item-center item)})
+
+  (fn find-existing-semantic-connector [source-item target-item]
+    (var found nil)
+    (each [_ connector (ipairs board.connectors-in-order) &until found]
+      (when (and (= connector.kind "semantic-link")
+                 (= connector.source-item-id source-item.id)
+                 (= connector.target-item-id target-item.id))
+        (set found connector)))
+    found)
 
   (fn update-connector-line [connector]
     (local record (. connector-records connector.id))
@@ -155,8 +172,12 @@
           (register-movable item metadata)
           (register-resizable item metadata)
           (set (. item-records item.id) {:item item
-                                         :element element
-                                         :metadata metadata})
+                                          :element element
+                                          :metadata metadata})
+          (when selector
+            (local selectable (create-selectable item))
+            (set (. item-records item.id :selectable) selectable)
+            (selector:add-selectables [selectable]))
           (update-connectors-for-item item)
           element)))
     (when (not ok)
@@ -172,6 +193,8 @@
   (fn remove-item-view [item]
     (local record (and item (. item-records item.id)))
     (when record
+      (when (and selector record.selectable)
+        (selector:remove-selectables [record.selectable]))
       (unregister-interactions record)
       (layer:remove-child record.element)
       (set (. item-records item.id) nil)))
@@ -186,6 +209,8 @@
       (when record.element.layout
         (set record.element.layout.size item.size)
         (record.element.layout:mark-layout-dirty)))
+    (when (and selector record record.selectable)
+      (set record.selectable.position (item-center item)))
     (update-connectors-for-item item))
 
   (fn add-connector-view [connector]
@@ -222,6 +247,7 @@
   (var connector-removed-handler nil)
   (var link-updated-handler nil)
   (var link-deleted-handler nil)
+  (var selection-handler nil)
 
   (fn connectors-for-link [link-id]
     (local out [])
@@ -284,6 +310,9 @@
             "BoardView.connect-items target item requires non-empty subject-key")
     (assert (same-subject? target target-key)
             "BoardView.connect-items target item subject-key does not match board item")
+    (local existing (find-existing-semantic-connector source target))
+    (when (and existing (not options.link))
+      (lua "return existing"))
     (local created? (= options.link nil))
     (var link nil)
     (local (ok connector-or-err)
@@ -311,6 +340,45 @@
       (error connector-or-err))
     connector-or-err)
 
+  (fn remove-item [self item-or-id]
+    (assert-not-dropped "remove-item")
+    (local id (if (= (type item-or-id) :table) item-or-id.id item-or-id))
+    (local item (and id (. board.items id)))
+    (when item
+      (var entity-snapshot nil)
+      (var entity-deleted? false)
+      (when (= item.type "string-entity")
+        (local {: entity-id-from-subject} (require :board/builtin-string-entity))
+        (local entity-id (entity-id-from-subject item.subject-key))
+        (when entity-id
+          (local store ((. (require :entities/string) :get-default)))
+          (set entity-snapshot (store:get-entity entity-id))
+          (when entity-snapshot
+            (store:delete-entity entity-id)
+            (set entity-deleted? true))))
+      (local (ok err)
+        (pcall
+          (fn []
+            (board:remove-item item))))
+      (when (and (not ok) entity-deleted? entity-snapshot)
+        (local store ((. (require :entities/string) :get-default)))
+        (store:create-entity {:id entity-snapshot.id
+                              :created-at entity-snapshot.created-at
+                              :updated-at entity-snapshot.updated-at
+                              :value entity-snapshot.value})
+        (error err))
+      (and ok item)))
+
+  (fn remove-selected-items [self]
+    (local items-to-remove [])
+    (for [i (length self.selected-items) 1 -1]
+      (table.insert items-to-remove 1 (. self.selected-items i)))
+    (var count 0)
+    (each [_ item (ipairs items-to-remove)]
+      (when (self:remove-item item)
+        (set count (+ count 1))))
+    count)
+
   (fn capture-state [_self]
     (assert-not-dropped "capture-state")
     (board:capture-state))
@@ -335,25 +403,50 @@
     (when link-deleted-handler
       (link-store.link-entity-deleted:disconnect link-deleted-handler true)
       (set link-deleted-handler nil))
+    (when (and selector selection-handler)
+      (selector.changed:disconnect selection-handler true)
+      (set selection-handler nil))
+    (when selector
+      (each [_ record (pairs item-records)]
+        (when record.selectable
+          (selector:remove-selectables [record.selectable]))))
     (each [_ record (pairs connector-records)]
       (when record.line
         (record.line:drop)))
     (each [_ record (pairs item-records)]
       (unregister-interactions record))
+    (selected-items-changed:clear)
     (layer:drop))
 
   (set self {:board board
-             :canvas canvas
-             :ctx ctx
-             :layer layer
-             :item-records item-records
-             :connector-records connector-records
-             :add-item add-item
-             :add-string-entity add-string-entity
-             :connect-items connect-items
-             :capture-state capture-state
-             :update update
-             :drop drop})
+              :canvas canvas
+              :ctx ctx
+              :layer layer
+              :item-records item-records
+              :connector-records connector-records
+              :selected-items selected-items
+              :selected-items-changed selected-items-changed
+              :add-item add-item
+              :add-string-entity add-string-entity
+              :connect-items connect-items
+              :remove-item remove-item
+              :remove-selected-items remove-selected-items
+              :capture-state capture-state
+              :update update
+              :drop drop})
+  (when selector
+    (set selection-handler
+         (selector.changed:connect
+           (fn [new-selected]
+             (local items [])
+             (each [_ sel (ipairs new-selected)]
+                (when (and sel.item (= (. board.items sel.item.id) sel.item))
+                 (table.insert items sel.item)))
+             (for [i (length selected-items) 1 -1]
+               (table.remove selected-items i))
+             (each [_ it (ipairs items)]
+               (table.insert selected-items it))
+             (selected-items-changed:emit selected-items)))))
   (set item-added-handler (board.item-added:connect add-item-view))
   (set item-removed-handler (board.item-removed:connect remove-item-view))
   (set item-updated-handler (board.item-updated:connect sync-item-transform))
