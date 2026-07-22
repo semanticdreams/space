@@ -297,5 +297,3 @@ void addGlyphsToAtlas(GlyphGeometry *glyphs, int count) {
 ```
 
 The atlas storage (and its bitmap) can be accessed as `dynamicAtlas.atlasGenerator().atlasStorage()`.
-
-- [[../../knowledge/home|Knowledge Base]]

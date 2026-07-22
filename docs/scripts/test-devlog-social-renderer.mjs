@@ -28,7 +28,7 @@ function create_entry(body)
 
 async function read_fixture_entry(id)
 {
-    const raw = await readFile(join(docsDir, '..', 'knowledge', 'journal', id + '.md'), 'utf8')
+    const raw = await readFile(join(docsDir, 'dev', 'journal', id + '.md'), 'utf8')
     const normalized = raw.replace(/\r\n/g, '\n')
     const lines = normalized.split('\n')
 

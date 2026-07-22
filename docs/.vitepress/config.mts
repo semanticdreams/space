@@ -37,11 +37,86 @@ export default defineConfig({
       ],
       '/dev/': [
         {
-          text: 'Developer',
+          text: 'Overview',
           items: [
-            { text: 'Overview', link: '/dev/' },
+            { text: 'Developer Docs', link: '/dev/' },
             { text: 'Concepts', link: '/dev/concepts' },
             { text: 'Devlog', link: '/dev/devlog' }
+          ]
+        },
+        {
+          text: 'Project',
+          items: [
+            { text: 'Goals', link: '/dev/project/goals' },
+            { text: 'Features', link: '/dev/project/features' },
+            { text: 'Ideas', link: '/dev/project/ideas' },
+            { text: 'Research', link: '/dev/project/research' },
+            { text: 'Milestones', link: '/dev/project/milestones/' },
+            { text: 'Project History', link: '/dev/project/history' },
+            { text: 'Bugs', link: '/dev/project/bugs/' },
+            { text: 'Technical Debt', link: '/dev/project/tech-debt/' }
+          ]
+        },
+        {
+          text: 'Architecture',
+          items: [
+            { text: 'Lifecycle Invariants', link: '/dev/lifecycle-invariants' },
+            { text: 'Lifecycle Centralization', link: '/dev/lifecycle-centralization' },
+            { text: 'Lifecycle Hardening Plan', link: '/dev/lifecycle-hardening-plan' },
+            { text: 'Widget Ownership & Teardown', link: '/dev/widget-ownership-and-teardown' },
+            { text: 'ADRs', link: '/dev/adrs/' },
+            { text: 'Subsystems', link: '/dev/subsystems/' }
+          ]
+        },
+        {
+          text: 'Features',
+          items: [
+            { text: 'Agent Runner System', link: '/dev/features/agent-runner-system' },
+            { text: 'Agent Tools', link: '/dev/features/agent-tools' },
+            { text: 'Board Canvas Mode', link: '/dev/features/board-canvas-mode' },
+            { text: 'Canvas Mode System', link: '/dev/features/canvas-mode-system' },
+            { text: 'CEF In-World Browser', link: '/dev/features/cef-in-world-browser' },
+            { text: 'Core Platform', link: '/dev/features/core-platform' },
+            { text: 'Development Tooling', link: '/dev/features/development-tooling' },
+            { text: 'FFmpeg Video Playback', link: '/dev/features/ffmpeg-video-playback' },
+            { text: 'Graph Browsing', link: '/dev/features/graph-browsing' },
+            { text: 'Graph Foundation', link: '/dev/features/graph-foundation' },
+            { text: 'Graph Notebooks', link: '/dev/features/graph-notebooks' },
+            { text: 'Hot Reload Units', link: '/dev/features/hot-reload-units' },
+            { text: 'Kernel System', link: '/dev/features/kernel-system' },
+            { text: 'Layout Widget Engine', link: '/dev/features/layout-widget-engine' },
+            { text: 'Opencode Agent Workflow', link: '/dev/features/opencode-agent-workflow' },
+            { text: 'Panel Transfer System', link: '/dev/features/panel-transfer-system' },
+            { text: 'Stylus Drawing Input', link: '/dev/features/stylus-drawing-input' },
+            { text: 'Terrain Heightfield System', link: '/dev/features/terrain-heightfield-system' },
+            { text: 'Wallet System', link: '/dev/features/wallet-system' },
+            { text: 'World Building', link: '/dev/features/world-building' }
+          ]
+        },
+        {
+          text: 'Notes',
+          collapsed: true,
+          items: [
+            { text: 'Notes Index', link: '/dev/notes/' }
+          ]
+        },
+        {
+          text: 'Journal',
+          collapsed: true,
+          items: [
+            { text: 'Journal Index', link: '/dev/journal/' },
+            { text: 'Devlog', link: '/dev/devlog' }
+          ]
+        },
+        {
+          text: 'Internals',
+          items: [
+            { text: 'Reloadable Units', link: '/dev/reloadable-units' },
+            { text: 'Repository Workbench', link: '/dev/repository-workbench' },
+            { text: 'Runtime Performance', link: '/dev/runtime-performance' },
+            { text: 'Agent Preset Control Panel', link: '/dev/agent-preset-control-panel' },
+            { text: 'Video Playback', link: '/dev/video-playback' },
+            { text: 'SQL Builder', link: '/dev/sql-builder' }
           ]
         }
       ]

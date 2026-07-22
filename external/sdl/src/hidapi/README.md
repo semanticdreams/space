@@ -194,5 +194,3 @@ Check the documentation/package list of your package manager.
 ## Build from Source
 
 Check [BUILD.md](BUILD.md) for details.
-
-- [[../../../../knowledge/home|Knowledge Base]]

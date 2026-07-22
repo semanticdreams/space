@@ -147,8 +147,3 @@ be used in identifiers. This also makes it easier to write macros
 which do similar things; now we have a way to indicate that a given
 symbol must have some meaning assigned to it other than being an
 identifier.
-
-
-## See also
-
-- [[../../../knowledge/home|Knowledge Base]]

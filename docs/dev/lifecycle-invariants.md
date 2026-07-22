@@ -3,7 +3,7 @@
 This note documents the runtime ownership and lifecycle rules that prevent stale-callback, use-after-drop, and rebuild-state bugs.
 
 For widget subtree teardown specifically, see [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown).
-For prevention strategies and next-step options, see [Lifecycle Hardening Plan](https://github.com/semanticdreams/space/blob/main/knowledge/lifecycle-hardening-plan.md).
+For prevention strategies and next-step options, see [Lifecycle Hardening Plan](/dev/lifecycle-hardening-plan).
 
 ## Why This Exists
 
@@ -154,8 +154,3 @@ When adding or reviewing a runtime object, check these points:
 - Are there tests for misuse, not just normal operation?
 
 If any answer is unclear, the object is probably under-specified.
-
-
-## See also
-
-- [[../../knowledge/home|Knowledge Base]]

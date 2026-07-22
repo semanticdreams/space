@@ -23,5 +23,3 @@ ffi/matrix/target/release/libmatrix.*
 
 Include `ffi/matrix/include/matrix.h` and link against the shared library. All async
 operations invoke callbacks on a Tokio runtime thread.
-
-- [[../../knowledge/home|Knowledge Base]]

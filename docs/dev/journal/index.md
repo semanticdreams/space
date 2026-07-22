@@ -1,0 +1,21 @@
+---
+type: index
+aliases:
+  - Journal
+tags:
+  - index
+  - journal
+---
+
+# Journal
+
+Chronological log of development work and decisions. Each entry records what was built, problems encountered, and ideas surfaced on a given day.
+
+- [2026-07-14](./2026-07-14)
+- [2026-03-18](./2026-03-18)
+- [2026-02-16](./2026-02-16)
+- [2026-02-09](./2026-02-09)
+- [2026-02-08](./2026-02-08)
+- [2025-09-24](./2025-09-24)
+- [2025-09-17](./2025-09-17)
+- [2025-09-16](./2025-09-16)

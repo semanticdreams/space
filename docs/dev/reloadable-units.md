@@ -494,8 +494,3 @@ The important thing is that the abstraction is now real:
 - a unit is the thing hot reload targets
 
 That is enough foundation to keep extracting more boundaries as the codebase needs them.
-
-
-## See also
-
-- [[../../knowledge/home|Knowledge Base]]

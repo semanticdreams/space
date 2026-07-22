@@ -570,8 +570,3 @@ Key test areas:
   integration.
 - `assets/lua/llm/presets/init.fnl` — PresetManager with override and context
   gating.
-
-
-## See also
-
-- [[../../knowledge/home|Knowledge Base]]

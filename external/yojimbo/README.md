@@ -43,5 +43,3 @@ If you find this software useful, please consider [sponsoring it](https://github
 ## License
 
 [BSD 3-Clause license](https://opensource.org/licenses/BSD-3-Clause).
-
-- [[../../knowledge/home|Knowledge Base]]
