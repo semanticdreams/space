@@ -1,6 +1,23 @@
 cmake_minimum_required(VERSION 3.18.0)
 set(CMAKE_CXX_STANDARD 17)
 project(space VERSION 0.1.0)
+
+option(SPACE_ENABLE_CCACHE "Use ccache to speed up rebuilds" ON)
+
+if(SPACE_ENABLE_CCACHE)
+    find_program(CCACHE_PROGRAM ccache)
+    if(CCACHE_PROGRAM)
+        get_filename_component(_ccache_base_dir "${CMAKE_SOURCE_DIR}" ABSOLUTE)
+        if(NOT CMAKE_C_COMPILER_LAUNCHER)
+            set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM};base_dir=${_ccache_base_dir}")
+        endif()
+        if(NOT CMAKE_CXX_COMPILER_LAUNCHER)
+            set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM};base_dir=${_ccache_base_dir}")
+        endif()
+        message(STATUS "ccache found and enabled as compiler launcher (base_dir=${_ccache_base_dir})")
+    endif()
+endif()
+
 set(OpenGL_GL_PREFERENCE "GLVND")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
