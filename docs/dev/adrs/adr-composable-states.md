@@ -46,5 +46,5 @@ The new model: each input concern (keyboard, mouse, touch, scroll, gamepad) is a
 
 - Goal: [Core Platform](/dev/features/core-platform) — composable states are a core platform input primitive
 - Goal: [Graph Foundation](/dev/features/graph-foundation) — graph interaction relies on composable input states
-- [Graph as Universal Model](/dev/adrs/adr-graph-as-universal-model) — similar philosophy of explicit over implicit
+- [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model) — similar philosophy of explicit over implicit
 - [Lifecycle Centralization](/dev/lifecycle-centralization) — companion decision on ownership

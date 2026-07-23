@@ -15,7 +15,7 @@ updated: 2026-07-14
 
 ## Summary
 
-Use the existing LLM integration and conversation infrastructure to build useful agentic workflows. Make saved conversations first-class graph objects, support branch/fork workflows, connect conversations to related entities (tasks, code, notes), and expose Space capabilities as MCP tools with risk-gated approval models.
+Use the existing LLM integration and conversation infrastructure to build useful agentic workflows. Expose saved conversations through the graph, support branch/fork workflows, connect conversations to related entities (tasks, code, notes), and expose Space capabilities as MCP tools with risk-gated approval models.
 
 ## Why
 
@@ -23,7 +23,7 @@ The LLM and agent infrastructure is already substantial (agent runner, preset sy
 
 ## Success criteria
 
-- Saved conversations are first-class graph objects linked to related entities
+- Saved conversations are exposed through the graph and linked to related entities
 - Branch/fork conversation workflows work cleanly
 - Agent presets expose useful Space capabilities with clear risk boundaries
 - MCP tool integration stays provider-agnostic

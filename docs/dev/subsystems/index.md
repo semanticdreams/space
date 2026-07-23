@@ -20,7 +20,7 @@ See [Concepts](/dev/concepts) for the VitePress concept docs, and [Dev Notes](/d
 - **Physics** — Bullet integration for rigid-body and world simulation
 - **Audio** — OpenAL/PortAudio-based positional audio with microphone input. See [Audio](/dev/subsystems/audio)
 - **Audio Analysis** — aubio bindings: FFT, pitch/onset/tempo/notes detection, MFCC, spectral descriptors, phase vocoder, wavetable synthesis. See [Audio](/dev/subsystems/audio)
-- **Graph** — Entity/graph architecture for app state, knowledge objects, and linked views. See [Graph Identity](/dev/notes/graph-identity) and [Graph Llm](/dev/notes/graph-llm)
+- **Graph** — Exposure layer for app state, knowledge objects, and linked views. See [Graph Identity](/dev/notes/graph-identity) and [Graph Llm](/dev/notes/graph-llm)
 - **Video** — FFmpeg-based in-world video playback with A/V sync telemetry. See [Video Playback](/dev/video-playback)
 - **Browser** — CEF-based embedded browser surfaces rendered onto 3D geometry
 - **Terminal** — PTY-based terminal widget via libvterm

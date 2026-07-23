@@ -6,9 +6,9 @@ tags:
 created: 2026-07-14
 ---
 
-# M5: Graph-native conversations and tools
+# M5: Conversations exposed through the graph
 
-Make saved conversations first-class graph objects, support branch/fork workflows, connect conversations to tasks/code/notes, expose Space capabilities as MCP tools.
+Make saved conversations visible in the graph, support branch/fork workflows, connect conversations to tasks/code/notes, expose Space capabilities as MCP tools.
 
 - Goal: [Agent Tools](/dev/features/agent-tools)
 - Features: [Agent Runner System](/dev/features/agent-runner-system)

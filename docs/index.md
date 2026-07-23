@@ -62,7 +62,7 @@ This section will eventually show short demos. The current planned gallery label
 
 - [x] 3D runtime with scene rendering, physics, spatial widgets, and embedded surfaces
 - [x] Fennel + C++ runtime with the current layout and widget system
-- [x] Entity and graph model for state, linked objects, and graph-backed views
+- [x] Entity and graph model for state, linked objects, and views exposed through the graph
 - [x] Core UI primitives and interactions: text, buttons, inputs, lists, focus, and selection
 - [x] Engine and app integrations: terminal, video playback, browser embedding, search, LLM client work, and remote-control debugging
 - [x] Interactive world-editing work: terrain, lighting, scene objects, and drawing/canvas workflows

@@ -4,9 +4,33 @@ tags:
   - note
 ---
 
-# Graph Core Refactors
+# Graph Core Refactors & Architecture Doctrine
 
-Now that `assets/lua/graph/core.fnl` is a pure model, `assets/lua/graph/view.fnl` owns all visual + interactive systems while keeping node views pluggable via signals.
+## Doctrine: Graph as exposure layer, not universal store
+
+**The graph is an exposure/adaptor layer — it does not own the objects it exposes.** Domain data lives wherever it naturally belongs: entity data in entity stores (`entities/string/`, `entities/code/`, etc.), world/terrain/light state in world scene state, LLM conversations in the LLM store (`llm/`), filesystem nodes on the real filesystem, kernel instances in the kernel system. The graph creates lightweight adapter nodes that project these domain objects into a uniform navigable topology.
+
+**Graph core persists only topology** — which node keys exist and which edge connections exist (`graph:capture-state` / `graph:restore-state`). Owning systems persist the actual object data. There is no "full graph state backup" that captures domain data; `capture-state` stores node keys and edge source/target keys only.
+
+### Canonical terminology
+
+| Use | Avoid |
+|-----|-------|
+| graph-exposed object, graph-visible object | graph-backed object, graph object |
+| graph node adapter, projection | first-class graph object |
+| entity-store-backed node, world-state-backed node, LLM-store-backed node | backed by the graph |
+| graph topology state (node keys + edge keys) | full graph state, graph data, graph node data |
+| exposed through the graph, visible in the graph | lives in the graph, stored in the graph |
+| graph as universal interface / exposure layer | graph as universal model |
+| domain object | graph-native object |
+
+### Key architectural facts
+
+- `graph/core.fnl`: nodes are lightweight records (key, label, color, view ref, graph ref). `capture-state` stores node keys and edge source/target keys only — no domain data.
+- `graph/key-loaders.fnl`: each loader adapts its owning store/system into a graph node on demand via `load-by-key`. Entity loaders adapt entity stores; LLM loaders adapt the LLM store; world/terrain/light loaders adapt `world-manager` and `WorldData`.
+- `graph/world-data.fnl`: terrain records come from `world.state.scene.terrains`; lights from `world.state.scene.lights`. Updates mutate world scene state directly, then sync to active scene and persist world. Graph nodes are projections, not the source of truth.
+- `graph/nodes/*.fnl`: node constructors receive stores/world-manager, resolve domain records from them, and emit signals when underlying data changes.
+- `graph/view/`: owns visual/interactive systems (ForceLayout, points, labels, selection, movables, persistence metadata). Graph nodes do not track view instances.
 
 ## Extracted
 - Graph model: `graph/core` owns nodes/edges, add/remove/replace, and emits signals (`node-added`, `node-removed`, `node-replaced`, `edge-added`, `edge-removed`).
@@ -35,4 +59,4 @@ Now that `assets/lua/graph/core.fnl` is a pure model, `assets/lua/graph/view.fnl
 
 ## See also
 
-- [Graph Foundation](/dev/features/graph-foundation), [Graph as Universal Model](/dev/adrs/adr-graph-as-universal-model)
+- [Graph Foundation](/dev/features/graph-foundation), [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model)
