@@ -174,7 +174,7 @@ Additional cleanup:
 1. Matrix DLL discovery/runtime path mismatch
 
 - symptom: matrix-related runtime loading issues for Windows artifact runs
-- resolution: `scripts/prepare-windows-runtime.sh` stages `matrix.dll` from known target paths and dependency scan
+- resolution: CMake copies the Rust artifact into the build tree, and `scripts/prepare-windows-runtime.sh` stages `matrix.dll` from there alongside the dependency scan
 
 2. OpenAL device open failures under Wine
 

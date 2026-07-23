@@ -54,7 +54,7 @@ Ubuntu/Pop!_OS:
 
 <!-- CI_DEPS_START -->
 ```bash
-sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pil python3-zmq cargo libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev libsecret-1-dev libfreetype-dev libwayland-dev libegl1-mesa-dev libxkbcommon-dev libxi-dev xvfb
+sudo apt install cmake libbullet-dev libglm-dev libopenal-dev libepoxy-dev portaudio19-dev libvterm-dev libnotify-dev libcurl4-openssl-dev libzmq3-dev python3 python3-pil python3-zmq cargo sccache libaubio-dev libboost-dev libxapian-dev libtorrent-rasterbar-dev ripgrep ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libgccjit-11-dev libsecret-1-dev libfreetype-dev libwayland-dev libegl1-mesa-dev libxkbcommon-dev libxi-dev xvfb
 ```
 <!-- CI_DEPS_END -->
 
@@ -76,6 +76,7 @@ sudo dnf install \
   python3-pillow \
   python3-zmq \
   cargo \
+  sccache \
   aubio-devel \
   boost-devel \
   xapian-core-devel \
@@ -106,6 +107,7 @@ sudo zypper install \
   pkgconf \
   rpm-build \
   ccache \
+  sccache \
   bzip2 \
   tar \
   libbullet-devel \
@@ -206,6 +208,9 @@ Windows release builds currently publish:
 
 The Matrix FFI library (`ffi/matrix`) is built by default and requires `cargo`. To skip it, configure
 with `-DSPACE_BUILD_MATRIX=OFF` (e.g. `make cmake` then `cmake -DSPACE_BUILD_MATRIX=OFF ..`).
+Matrix Rust artifacts are written to a shared Cargo target directory under the user cache by default
+so new worktrees can reuse them. When `sccache` is installed, the build also enables it automatically
+for Rust compilation.
 
 Wallet-core integration is disabled by default. Enable it by configuring with `-DSPACE_ENABLE_WALLET_CORE=ON`
 (e.g. `make cmake` then `cmake -DSPACE_ENABLE_WALLET_CORE=ON ..`).

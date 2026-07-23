@@ -23,6 +23,8 @@ sudo apt-get install -y \
     python3 \
     python3-pil
 
+sudo apt-get install -y sccache || true
+
 if command -v ninja >/dev/null 2>&1 && [ ! -x /usr/local/bin/ninja ]; then
     sudo mkdir -p /usr/local/bin
     sudo ln -sf "$(command -v ninja)" /usr/local/bin/ninja
