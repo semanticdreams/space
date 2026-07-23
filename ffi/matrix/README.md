@@ -13,11 +13,9 @@ make build
 ```
 
 The CMake build runs `cargo build --release` for the library (when `SPACE_BUILD_MATRIX=ON`
-and `cargo` is present). The shared library lands at:
-
-```
-ffi/matrix/target/release/libmatrix.*
-```
+and `cargo` is present). Cargo incrementally compiles into a shared target directory
+(by default `~/.cache/space/cargo-target/matrix/`), and CMake copies the artifact into
+the build tree so each build tree owns its output at e.g. `build/libmatrix.so`.
 
 ## C ABI
 

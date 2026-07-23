@@ -881,7 +881,29 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 if(SPACE_BUILD_MATRIX)
     find_program(CARGO_EXECUTABLE cargo)
     if(CARGO_EXECUTABLE)
+        find_program(SCCACHE_PROGRAM sccache)
         set(MATRIX_DIR ${CMAKE_SOURCE_DIR}/ffi/matrix)
+        set(SPACE_MATRIX_CARGO_TARGET_DIR "" CACHE PATH
+            "Cargo target directory for ffi/matrix (empty uses a shared user cache)")
+        if(SPACE_MATRIX_CARGO_TARGET_DIR)
+            get_filename_component(MATRIX_CARGO_TARGET_ROOT "${SPACE_MATRIX_CARGO_TARGET_DIR}" ABSOLUTE)
+        elseif(DEFINED ENV{CARGO_TARGET_DIR} AND NOT "$ENV{CARGO_TARGET_DIR}" STREQUAL "")
+            get_filename_component(MATRIX_CARGO_TARGET_ROOT "$ENV{CARGO_TARGET_DIR}" ABSOLUTE)
+        else()
+            if(DEFINED ENV{XDG_CACHE_HOME} AND NOT "$ENV{XDG_CACHE_HOME}" STREQUAL "")
+                set(_space_cache_home "$ENV{XDG_CACHE_HOME}")
+            elseif(WIN32 AND DEFINED ENV{LOCALAPPDATA} AND NOT "$ENV{LOCALAPPDATA}" STREQUAL "")
+                set(_space_cache_home "$ENV{LOCALAPPDATA}")
+            elseif(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" STREQUAL "")
+                set(_space_cache_home "$ENV{HOME}/.cache")
+            else()
+                set(_space_cache_home "${CMAKE_BINARY_DIR}/_cache")
+            endif()
+            set(MATRIX_CARGO_TARGET_ROOT "${_space_cache_home}/space/cargo-target/matrix")
+        endif()
+        file(MAKE_DIRECTORY "${MATRIX_CARGO_TARGET_ROOT}")
+        message(STATUS "Matrix Cargo target directory: ${MATRIX_CARGO_TARGET_ROOT}")
+
         set(_space_matrix_rust_target_default "")
         if(DEFINED ENV{RUST_TARGET} AND NOT "$ENV{RUST_TARGET}" STREQUAL "")
             set(_space_matrix_rust_target_default "$ENV{RUST_TARGET}")
@@ -913,45 +935,92 @@ if(SPACE_BUILD_MATRIX)
         set(MATRIX_CARGO_ARGS build --release)
         if(MATRIX_RUST_TARGET)
             list(APPEND MATRIX_CARGO_ARGS --target ${MATRIX_RUST_TARGET})
-            set(MATRIX_TARGET_DIR ${MATRIX_DIR}/target/${MATRIX_RUST_TARGET}/release)
+            set(MATRIX_TARGET_DIR ${MATRIX_CARGO_TARGET_ROOT}/${MATRIX_RUST_TARGET}/release)
         else()
-            set(MATRIX_TARGET_DIR ${MATRIX_DIR}/target/release)
+            set(MATRIX_TARGET_DIR ${MATRIX_CARGO_TARGET_ROOT}/release)
         endif()
 
         if(MATRIX_RUST_TARGET MATCHES "windows")
             set(MATRIX_OUTPUT_NAME matrix.dll)
+            if(MATRIX_RUST_TARGET MATCHES "msvc")
+                set(MATRIX_LIB_NAME matrix.dll.lib)
+            else()
+                set(MATRIX_LIB_NAME libmatrix.dll.a)
+            endif()
         elseif(MATRIX_RUST_TARGET MATCHES "apple|darwin")
             set(MATRIX_OUTPUT_NAME libmatrix.dylib)
+            set(MATRIX_LIB_NAME ${MATRIX_OUTPUT_NAME})
         elseif(MATRIX_RUST_TARGET)
             set(MATRIX_OUTPUT_NAME libmatrix.so)
+            set(MATRIX_LIB_NAME ${MATRIX_OUTPUT_NAME})
         elseif(WIN32)
             set(MATRIX_OUTPUT_NAME matrix${CMAKE_SHARED_LIBRARY_SUFFIX})
+            if(MINGW)
+                set(MATRIX_LIB_NAME libmatrix${CMAKE_SHARED_LIBRARY_SUFFIX}.a)
+            else()
+                set(MATRIX_LIB_NAME matrix${CMAKE_SHARED_LIBRARY_SUFFIX}.lib)
+            endif()
         else()
             set(MATRIX_OUTPUT_NAME libmatrix${CMAKE_SHARED_LIBRARY_SUFFIX})
+            set(MATRIX_LIB_NAME ${MATRIX_OUTPUT_NAME})
         endif()
-        set(MATRIX_OUTPUT ${MATRIX_TARGET_DIR}/${MATRIX_OUTPUT_NAME})
-        add_custom_command(
-            OUTPUT ${MATRIX_OUTPUT}
-            COMMAND ${CARGO_EXECUTABLE} ${MATRIX_CARGO_ARGS}
-            WORKING_DIRECTORY ${MATRIX_DIR}
-            DEPENDS ${MATRIX_DIR}/Cargo.toml ${MATRIX_DIR}/src/lib.rs
-            BYPRODUCTS ${MATRIX_OUTPUT}
-            COMMENT "---- Build matrix (Rust)"
-        )
-        add_custom_target(matrix_build ALL DEPENDS ${MATRIX_OUTPUT})
+        set(MATRIX_CARGO_OUTPUT ${MATRIX_TARGET_DIR}/${MATRIX_OUTPUT_NAME})
+        set(MATRIX_BUILD_OUTPUT ${CMAKE_BINARY_DIR}/${MATRIX_OUTPUT_NAME})
+
+        set(MATRIX_CARGO_COMMAND "${CARGO_EXECUTABLE}")
+        set(_space_rustc_wrapper "")
+        if(DEFINED ENV{RUSTC_WRAPPER} AND NOT "$ENV{RUSTC_WRAPPER}" STREQUAL "")
+            set(_space_rustc_wrapper "$ENV{RUSTC_WRAPPER}")
+        elseif(SCCACHE_PROGRAM)
+            set(_space_rustc_wrapper "${SCCACHE_PROGRAM}")
+        endif()
+        if(_space_rustc_wrapper)
+            set(MATRIX_CARGO_COMMAND "${CMAKE_COMMAND}" -E env
+                "CARGO_TARGET_DIR=${MATRIX_CARGO_TARGET_ROOT}"
+                "RUSTC_WRAPPER=${_space_rustc_wrapper}"
+                "${CARGO_EXECUTABLE}")
+            message(STATUS "Rust compiler cache enabled for Matrix build: RUSTC_WRAPPER=${_space_rustc_wrapper}")
+        else()
+            set(MATRIX_CARGO_COMMAND "${CMAKE_COMMAND}" -E env
+                "CARGO_TARGET_DIR=${MATRIX_CARGO_TARGET_ROOT}"
+                "${CARGO_EXECUTABLE}")
+            message(STATUS "sccache not found; Matrix Rust build will run without a Rust compiler cache")
+        endif()
+
+        file(GLOB_RECURSE MATRIX_RUST_SOURCES CONFIGURE_DEPENDS ${MATRIX_DIR}/src/*.rs)
+
+        if(MATRIX_OUTPUT_NAME STREQUAL MATRIX_LIB_NAME)
+            add_custom_command(
+                OUTPUT ${MATRIX_BUILD_OUTPUT}
+                COMMAND ${MATRIX_CARGO_COMMAND} ${MATRIX_CARGO_ARGS}
+                COMMAND ${CMAKE_COMMAND} -E copy "${MATRIX_CARGO_OUTPUT}" "${MATRIX_BUILD_OUTPUT}"
+                WORKING_DIRECTORY ${MATRIX_DIR}
+                DEPENDS ${MATRIX_DIR}/Cargo.toml ${MATRIX_DIR}/Cargo.lock ${MATRIX_RUST_SOURCES}
+                COMMENT "---- Build matrix (Rust)"
+            )
+            set(MATRIX_BUILD_TARGETS ${MATRIX_BUILD_OUTPUT})
+            target_link_libraries(${PROJECT_NAME}_lib "${MATRIX_BUILD_OUTPUT}")
+        else()
+            set(MATRIX_CARGO_LIB ${MATRIX_TARGET_DIR}/${MATRIX_LIB_NAME})
+            set(MATRIX_BUILD_LIB ${CMAKE_BINARY_DIR}/${MATRIX_LIB_NAME})
+            add_custom_command(
+                OUTPUT ${MATRIX_BUILD_OUTPUT} ${MATRIX_BUILD_LIB}
+                COMMAND ${MATRIX_CARGO_COMMAND} ${MATRIX_CARGO_ARGS}
+                COMMAND ${CMAKE_COMMAND} -E copy "${MATRIX_CARGO_OUTPUT}" "${MATRIX_BUILD_OUTPUT}"
+                COMMAND ${CMAKE_COMMAND} -E copy "${MATRIX_CARGO_LIB}" "${MATRIX_BUILD_LIB}"
+                WORKING_DIRECTORY ${MATRIX_DIR}
+                DEPENDS ${MATRIX_DIR}/Cargo.toml ${MATRIX_DIR}/Cargo.lock ${MATRIX_RUST_SOURCES}
+                COMMENT "---- Build matrix (Rust)"
+            )
+            set(MATRIX_BUILD_TARGETS ${MATRIX_BUILD_OUTPUT} ${MATRIX_BUILD_LIB})
+            target_link_libraries(${PROJECT_NAME}_lib "${MATRIX_BUILD_LIB}")
+        endif()
+        add_custom_target(matrix_build ALL DEPENDS ${MATRIX_BUILD_TARGETS})
         add_dependencies(${PROJECT_NAME}_lib matrix_build)
         add_dependencies(${PROJECT_NAME} matrix_build)
         target_compile_definitions(${PROJECT_NAME}_lib PUBLIC SPACE_MATRIX_ENABLED=1)
-        target_link_directories(${PROJECT_NAME}_lib PRIVATE ${MATRIX_TARGET_DIR})
-        target_link_directories(${PROJECT_NAME} PRIVATE ${MATRIX_TARGET_DIR})
-        target_link_libraries(${PROJECT_NAME}_lib matrix)
-        target_link_libraries(${PROJECT_NAME} matrix)
-        set(MATRIX_BUILD_RPATH "\$ORIGIN/../ffi/matrix/target/release")
-        if(MATRIX_RUST_TARGET)
-            set(MATRIX_BUILD_RPATH "\$ORIGIN/../ffi/matrix/target/${MATRIX_RUST_TARGET}/release")
-        endif()
-        set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY BUILD_RPATH "${MATRIX_BUILD_RPATH}")
-        install(FILES ${MATRIX_OUTPUT} DESTINATION lib)
+        set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY BUILD_RPATH "${CMAKE_BINARY_DIR}")
+        install(FILES ${MATRIX_BUILD_OUTPUT} DESTINATION lib)
     else()
         message(WARNING "cargo not found; matrix build disabled.")
     endif()

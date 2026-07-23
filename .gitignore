@@ -23,6 +23,8 @@ __pycache__/
 # Builds
 build/
 release/
+.sccache/
+.sccache-windows/
 .vscode/ipch
 cmake-build-*
 ffi/matrix/target/

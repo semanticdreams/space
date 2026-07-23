@@ -24,6 +24,8 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v5
         with:
@@ -38,6 +40,16 @@ jobs:
             ccache-${{ runner.os }}-linux-${{ github.ref }}-
             ccache-${{ runner.os }}-linux-
             ccache-${{ runner.os }}-
+
+      - name: Restore sccache
+        uses: actions/cache@v5
+        with:
+          path: .sccache
+          key: sccache-${{ runner.os }}-linux-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt') }}
+          restore-keys: |
+            sccache-${{ runner.os }}-linux-${{ github.ref }}-
+            sccache-${{ runner.os }}-linux-
+            sccache-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
@@ -133,6 +145,13 @@ jobs:
       - name: ccache stats
         run: ccache -s
 
+      - name: sccache stats
+        run: |
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+            sccache --stop-server || true
+          fi
+
       - name: Resolve release artifacts
         id: linux-release-artifacts
         run: |
@@ -167,6 +186,8 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache-windows
       CCACHE_MAXSIZE: 1G
       CCACHE_BASEDIR: ${{ github.workspace }}
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache-windows
+      SCCACHE_CACHE_SIZE: 2G
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
     steps:
       - uses: actions/checkout@v5
@@ -179,6 +200,15 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
             ccache-${{ runner.os }}-windows-cross-
+
+      - name: Restore sccache
+        uses: actions/cache@v5
+        with:
+          path: .sccache-windows
+          key: sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-${{ hashFiles('ffi/matrix/Cargo.lock', 'ffi/matrix/Cargo.toml', 'external/wallet-core/rust/Cargo.lock', 'external/wallet-core/rust/Cargo.toml', 'CMakeLists.txt', 'scripts/build-windows.sh', 'scripts/build-windows-from-linux.sh', 'scripts/setup-windows-build-host.sh') }}
+          restore-keys: |
+            sccache-${{ runner.os }}-windows-cross-${{ github.ref }}-
+            sccache-${{ runner.os }}-windows-cross-
 
       - name: Setup Windows cross-build host
         run: scripts/setup-windows-build-host.sh
@@ -212,6 +242,13 @@ jobs:
 
       - name: ccache stats
         run: ccache -s
+
+      - name: sccache stats
+        run: |
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+            sccache --stop-server || true
+          fi
 
       - name: Upload Windows packaging inputs
         uses: actions/upload-artifact@v4
@@ -270,4 +307,3 @@ jobs:
             build/dist/space-windows-setup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

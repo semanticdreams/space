@@ -105,7 +105,7 @@ DESKTOP
         cp -a ${BUILD_DIR}/external/sdl/libSDL3.so* "${APPDIR}/usr/lib/"
     fi
 
-    copy_if_exists "${ROOT_DIR}/ffi/matrix/target/release/libmatrix.so" "${APPDIR}/usr/lib/"
+    copy_if_exists "${BUILD_DIR}/libmatrix.so" "${APPDIR}/usr/lib/"
 fi
 
 download_with_retry() {

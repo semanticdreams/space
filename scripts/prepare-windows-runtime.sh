@@ -52,17 +52,6 @@ if [ -n "${VCPKG_ROOT}" ]; then
     add_search_dir "${VCPKG_ROOT}/installed/${VCPKG_TRIPLET}/bin"
 fi
 
-copy_if_present() {
-    local source="$1"
-    local dest_name
-    if [ ! -f "${source}" ]; then
-        return 1
-    fi
-    dest_name="$(basename "${source}")"
-    cp -f "${source}" "${BUILD_DIR}/${dest_name}"
-    return 0
-}
-
 copy_mingw_runtime_dll() {
     local dll_name="$1"
     local source
@@ -76,16 +65,6 @@ copy_mingw_runtime_dll() {
 
 for dll in libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll libgomp-1.dll libssp-0.dll; do
     copy_mingw_runtime_dll "${dll}" || true
-done
-
-matrix_candidates=(
-    "${ROOT_DIR}/ffi/matrix/target/x86_64-pc-windows-gnu/release/matrix.dll"
-    "${ROOT_DIR}/ffi/matrix/target/release/matrix.dll"
-)
-for candidate in "${matrix_candidates[@]}"; do
-    if copy_if_present "${candidate}"; then
-        break
-    fi
 done
 
 is_system_dll() {
