@@ -76,7 +76,7 @@ Each match label is formatted as `path:line — text...` truncated to `max-label
 
 ## Integration with graph system
 
-RipgrepView is used within the graph browsing workflow to search code directories and filesystem-backed graph nodes. Results can be linked to graph entities for cross-referencing between search hits and graph objects.
+RipgrepView is used within the graph browsing workflow to search code directories and filesystem-backed graph nodes. Results can be linked to entities exposed through the graph for cross-referencing between search hits and graph-visible objects.
 
 
 ## See also

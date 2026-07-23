@@ -40,6 +40,13 @@ Clean design is important, refactor when reasonable.
 ## Data Persistence
 - Use `assets/lua/json-utils.fnl` (`JsonUtils.write-json!`) for JSON writes so updates are atomic and do not leave corrupt files behind.
 
+## Graph Architecture Doctrine
+- The graph is an exposure/adaptor layer — it does not own the objects it exposes. Domain objects live in their owning systems (entity stores, LLM store, world scene state, filesystem, kernels). Graph core persists only topology (node keys and edge connections).
+- Graph nodes are lightweight adapters: key, label, color, view ref, graph ref. They project domain objects into a uniform navigable topology. Key loaders adapt owning stores into graph nodes on demand.
+- Canonical terminology: "graph-exposed object" or "graph-visible object" (not "graph-backed" or "graph object"). "Graph topology state" for node-key/edge-key persistence (not "full graph state" or "graph node data"). "Graph as universal interface / exposure layer" (not "universal model"). See [Graph Architecture Doctrine](docs/dev/notes/graph.md) for the full list.
+- Do not say "everything lives in the graph", "stored in the graph", "graph-backed", "first-class graph object", "graph-native", or "graph node data" unless the backing is literally graph-owned (which is almost never true). Objects are *exposed through* the graph.
+- When adding new graph node types, the key loader must adapt an owning store/system. Never store domain data on graph nodes directly. Graph nodes may cache references to the owning store and resolve domain data from it.
+
 ## Build, Run & Test
 - `make cmake` primes the `build/` directory; rerun after editing CMake files.
 - `make build` compiles a Release build in `build/`.

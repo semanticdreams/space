@@ -14,18 +14,18 @@ updated: 2026-07-14
 
 ## Summary
 
-Refine the graph browsing and editing experience so users can navigate, manipulate, and understand their graph-backed objects fluently.
+Refine the graph browsing and editing experience so users can navigate, manipulate, and understand objects exposed through the graph fluently.
 
 ## Motivation
 
-Currently graph-backed objects exist but navigating between them, inspecting their contents, and editing relationships is not yet smooth. This is central to making the graph the primary interface for everything.
+Currently objects exist and are visible in the graph, but navigating between them, inspecting their contents, and editing relationships is not yet smooth. This is central to making the graph the primary interface for everything.
 
 ## Design
 
 - Improve the graph view widget for smoother navigation
 - Add keyboard-driven browsing (search, jump, expand/collapse)
 - Make node property inspection fast with inline editing
-- Support drag-to-link between graph objects
+- Support drag-to-link between objects exposed in the graph
 - Keep interaction model consistent with rest of space UI
 
 ## Tasks
@@ -34,12 +34,12 @@ Currently graph-backed objects exist but navigating between them, inspecting the
 - [ ] Design improved navigation keybindings
 - [ ] Implement keyboard-driven focus/selection in graph view
 - [ ] Add inline property editing for graph nodes
-- [ ] Implement drag-to-link between graph-backed objects
+- [ ] Implement drag-to-link between objects exposed in the graph
 - [ ] Test with realistic-sized graphs
 
 ## Related
 
 - Goal: [Graph Foundation](/dev/features/graph-foundation)
 - Depends on: [Canvas Mode System](/dev/features/canvas-mode-system) — graph-surface mode is a canvas mode
-- ADRs: [Graph as Universal Model](/dev/adrs/adr-graph-as-universal-model), [Composable States](/dev/adrs/adr-composable-states)
+- ADRs: [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model), [Composable States](/dev/adrs/adr-composable-states)
 - See: [Graph Identity](/dev/notes/graph-identity), [Graph View As Widget](/dev/notes/graph-view-as-widget), [Graph Vs Entities](/dev/notes/graph-vs-entities)

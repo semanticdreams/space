@@ -22,7 +22,7 @@ Space is a 3D spatial computing platform, not a 2D window manager. Without inter
 
 ## Success criteria
 
-- Terrain is created, edited, and persisted as a graph-backed object
+- Terrain is created, edited, and persisted as a world-state-backed object exposed through the graph
 - Physics collision works on editable terrain, not just an infinite floor plane
 - Lighting controls are interactive and spatial (not buried in config dialogs)
 - Widgets can be placed into the 3D world, not just on the HUD or canvas

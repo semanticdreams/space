@@ -1,6 +1,6 @@
 # Developer Docs
 
-Space is a 3D spatial computing platform and malleable software environment — a runtime where the world, the tools, and the data live in one unified graph. Built in C++ with Fennel (Lisp) scripting. GPLv3.
+Space is a 3D spatial computing platform and malleable software environment — a runtime where the world, the tools, and the data are projected into one unified graph. Built in C++ with Fennel (Lisp) scripting. GPLv3.
 
 - **Website:** [spaceui.org](https://spaceui.org)
 - **Source:** [github.com/semanticdreams/space](https://github.com/semanticdreams/space)

@@ -29,7 +29,7 @@ Work happened on a long-lived Lua branch. [Lua Branch Development](/dev/adrs/adr
 
 Massive merge from the Lua branch. Nearly every subsystem appeared:
 - [SDL3 Migration](/dev/adrs/adr-sdl3-migration)
-- [Graph as Universal Model](/dev/adrs/adr-graph-as-universal-model) — Notebooks, code directories, entities all unified under graph nodes
+- [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model) — Notebooks, code directories, entities all unified under the same graph exposure layer
 - [CEF In-World Browser](/dev/features/cef-in-world-browser)
 - [FFmpeg Video Playback](/dev/features/ffmpeg-video-playback)
 - [Libtorrent](/dev/notes/libtorrent)
@@ -39,12 +39,12 @@ Massive merge from the Lua branch. Nearly every subsystem appeared:
 
 ## Phase IV: Peak velocity (2026-03) — ~130 commits
 
-The "world building" month. Terrain, graph editing, world entities, and lighting matured into a cohesive graph-backed system.
+The "world building" month. Terrain, graph editing, world entities, and lighting matured into a cohesive system exposed through the graph.
 
 Key events:
 - [Terrain Heightfield System](/dev/features/terrain-heightfield-system)
 - Graph editing (selection, keyboard focus, inline property editing)
-- World entity architecture (skybox, background, terrain as graph nodes)
+- World entity architecture (skybox, background, terrain exposed through graph nodes)
 - Physics containment over infinite floor plane
 - [SSBO Quad Pipeline](/dev/adrs/adr-ssbo-quad-pipeline)
 - Controller/dial input, QR encoding, Codex SDK

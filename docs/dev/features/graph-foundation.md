@@ -29,7 +29,7 @@ If inspection, linking, filtering, and navigation are weak, expanding what the g
 ## Features implementing this goal
 
 - [Graph Browsing](/dev/features/graph-browsing) — graph navigation and editing UX
-- [Graph Notebooks](/dev/features/graph-notebooks) — graph-backed notebooks with identity references
+- [Graph Notebooks](/dev/features/graph-notebooks) — notebooks exposed through the graph with identity references
 
 ## Bugs
 
@@ -37,7 +37,7 @@ If inspection, linking, filtering, and navigation are weak, expanding what the g
 
 ## ADRs underlying this goal
 
-- [Graph as Universal Model](/dev/adrs/adr-graph-as-universal-model) — why everything is a graph node
+- [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model) — why everything is exposed through the graph
 - [Composable States](/dev/adrs/adr-composable-states) — input handling for graph interaction
 
 ## Related

@@ -66,7 +66,7 @@
      :risk :normal
      :contexts [{:surface :canvas :mode "graph"}]
      :tool-ids ["graph.create-identity"]
-     :system-prompt "Use identity tools to create graph-backed identity nodes."})
+     :system-prompt "Use identity tools to create identity nodes (entity-backed, exposed through the graph)."})
 
   (mgr:register
     {:name "graph-state-tools"
@@ -75,7 +75,7 @@
      :risk :destructive
      :contexts [{:surface :canvas :mode "graph"}]
      :tool-ids ["graph.get-state" "graph.restore-state"]
-     :system-prompt "Graph state operations can overwrite current data and require approval."}))
+     :system-prompt "Graph topology state operations can overwrite current node/edge keys and require approval."}))
 
 (fn add-node-run [app]
   (fn [args]
@@ -233,7 +233,7 @@
   (adapters:register
     {:id "graph.create-identity"
      :mcp-name "space_graph_create_identity"
-     :description "Create a graph-backed identity node."
+     :description "Create an identity node (entity-backed, exposed through the graph)."
      :inputSchema {:type "object"
                    :properties {:name {:type "string" :description "Identity name"}
                                 :role {:type "string" :description "Identity role"}}
@@ -243,14 +243,14 @@
   (adapters:register
     {:id "graph.get-state"
      :mcp-name "space_graph_get_state"
-     :description "Get the full graph state for backup purposes."
+     :description "Get the graph topology state (node keys and edge connections) for backup purposes."
      :inputSchema empty-schema
      :make-run get-state-run})
 
   (adapters:register
     {:id "graph.restore-state"
      :mcp-name "space_graph_restore_state"
-     :description "Restore graph state from a backup. This overwrites current data."
+     :description "Restore graph topology state from a snapshot. This overwrites current node/edge topology."
      :inputSchema {:type "object"
                    :properties {:state {:type "object" :description "Graph state to restore"}}
                    :required ["state"]}

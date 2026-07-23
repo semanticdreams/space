@@ -42,7 +42,7 @@ Bidirectional labeled connections between graph keys. Links have a source key, t
 
 ### List entity (`entities/list.fnl`)
 
-Ordered collections of entity references. Used for grouping related graph objects.
+Ordered collections of entity references. Used for grouping related entities exposed through the graph.
 
 - **Fields**: `:items` (array of entity reference keys)
 - **Store**: `entities/list/`
@@ -67,9 +67,9 @@ All entity stores follow the same pattern:
 
 ## Integration with graph system
 
-The graph system (`graph/core.fnl`) uses entity stores as the persistence backend for graph nodes. Each graph node type maps to one entity type. When a graph node is created, its backing entity is created in the corresponding store. When loaded, the entity store resolves the node's key to its data.
+The graph system (`graph/core.fnl`) uses entity stores as one of several persistence backends for domain objects that are exposed through the graph. Not every graph node is entity-backed — world/terrain/light nodes are backed by world scene state, LLM nodes by the LLM store, filesystem nodes by the real filesystem. When an entity-backed graph node adapter is created, its backing entity lives in the corresponding entity store. When loaded by key, the entity store resolves the node's key to its data.
 
-Link entities are especially important — they are the backing store for graph edges. The bidirectional index on link entities (`get-by-from` / `get-by-to`) enables the graph to traverse relationships in either direction without scanning.
+Link entities are especially important — they are the backing store for persisted user/domain relationship edges exposed through the graph. The bidirectional index on link entities (`get-by-from` / `get-by-to`) enables the graph to traverse relationships in either direction without scanning.
 
 Identity entities provide stable references: a notebook reference to a code file uses an identity entity as the target. If the code file's content changes, the identity persists and all references remain valid.
 
