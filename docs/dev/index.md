@@ -57,7 +57,6 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Hot Reload Units](/dev/features/hot-reload-units)
 - [Kernel System](/dev/features/kernel-system)
 - [Layout Widget Engine](/dev/features/layout-widget-engine)
-- [Opencode Agent Workflow](/dev/features/opencode-agent-workflow)
 - [Panel Transfer System](/dev/features/panel-transfer-system)
 - [Stylus Drawing Input](/dev/features/stylus-drawing-input)
 - [Terrain Heightfield System](/dev/features/terrain-heightfield-system)
