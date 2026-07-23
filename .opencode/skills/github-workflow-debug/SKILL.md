@@ -8,7 +8,7 @@ description: Debug a GitHub Actions workflow end-to-end using a temporary branch
 Use this skill when the user wants a GitHub Actions workflow fixed autonomously in CI, not just locally.
 
 Use the bundled helper first:
-- Script: `scripts/gh-workflow-debug.sh`
+- Script: `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh`
 - It provides deterministic branch naming, remote branch SHA checks, run lookup by workflow/branch/SHA, failed-job lookup, and 100-second polling.
 
 This skill is for the full loop:
@@ -26,7 +26,7 @@ This skill is for the full loop:
 - Workflow file or workflow name, for example `.github/workflows/test.yml`
 - Base branch: default to `main`
 - Temporary branch name:
-  - `codex/workflow-debug/<workflow-stem>-<utc-timestamp>`
+  - `opencode/workflow-debug/<workflow-stem>-<utc-timestamp>`
 
 If the workflow target is ambiguous, ask once before doing any branch work.
 
@@ -64,13 +64,13 @@ The throwaway-branch trigger change is temporary and must not survive the final 
 ## Main loop
 
 1. Create and switch to the throwaway branch from `main`.
-   - Prefer: `scripts/gh-workflow-debug.sh branch-name <workflow>`
+   - Prefer: `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh branch-name <workflow>`
 2. Add the temporary workflow trigger change.
 3. Commit and push.
    - Verify the remote branch SHA if needed:
-     - `scripts/gh-workflow-debug.sh remote-branch-sha <throwaway-branch>`
+     - `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh remote-branch-sha <throwaway-branch>`
 4. Poll the workflow with `gh run` every `100s` until it completes.
-   - Prefer: `scripts/gh-workflow-debug.sh wait-run --workflow <workflow> --branch <throwaway-branch> --sha <pushed-sha>`
+   - Prefer: `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh wait-run --workflow <workflow> --branch <throwaway-branch> --sha <pushed-sha>`
    - Prefer filtering by the throwaway branch.
    - Confirm the run corresponds to the pushed commit before acting on it.
    - If no run appears after a reasonable wait, treat that as a workflow-trigger failure:
@@ -81,7 +81,7 @@ The throwaway-branch trigger change is temporary and must not survive the final 
 5. If it fails:
    - inspect the failing job log
    - prefer selecting the first failed job deterministically:
-     - `scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>`
+     - `.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>`
    - identify the first real blocker
    - implement the cleanest fix
    - commit
@@ -110,11 +110,11 @@ If improvements are worthwhile, make them on the throwaway branch and repeat the
 Typical commands:
 
 ```bash
-scripts/gh-workflow-debug.sh branch-name .github/workflows/test.yml
-scripts/gh-workflow-debug.sh remote-branch-sha <branch>
-scripts/gh-workflow-debug.sh latest-run-id --workflow test.yml --branch <branch> --sha <sha>
-scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>
-scripts/gh-workflow-debug.sh wait-run --workflow test.yml --branch <branch> --sha <sha> --json
+.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh branch-name .github/workflows/test.yml
+.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh remote-branch-sha <branch>
+.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh latest-run-id --workflow test.yml --branch <branch> --sha <sha>
+.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh first-failed-job-id --run-id <run-id>
+.opencode/skills/github-workflow-debug/scripts/gh-workflow-debug.sh wait-run --workflow test.yml --branch <branch> --sha <sha> --json
 gh run list --workflow <workflow-file> --limit 5
 gh run view <run-id> --json jobs
 gh run view <run-id> --job <job-id> --log

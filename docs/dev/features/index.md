@@ -16,7 +16,6 @@ Detailed design and implementation notes for major feature systems.
 - [Hot Reload Units](./hot-reload-units)
 - [Kernel System](./kernel-system)
 - [Layout Widget Engine](./layout-widget-engine)
-- [Opencode Agent Workflow](./opencode-agent-workflow)
 - [Panel Transfer System](./panel-transfer-system)
 - [Stylus Drawing Input](./stylus-drawing-input)
 - [Terrain Heightfield System](./terrain-heightfield-system)
