@@ -19,7 +19,7 @@
     (fs.remove-all dir))
   (fs.create-dirs dir)
   (local Process (require :process))
-  (Process.run {:args ["git" "init" "--bare" dir] :merge-stderr true :timeout 30})
+  (Process.run {:args ["git" "init" "--bare" "--initial-branch=main" dir] :merge-stderr true :timeout 30})
   (var committed? false)
   (local clone-dir (.. dir "-clone"))
   (when (fs.exists clone-dir)
