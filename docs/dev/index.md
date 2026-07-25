@@ -32,6 +32,7 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Concepts](/dev/concepts)
 - [Lifecycle Invariants](/dev/lifecycle-invariants)
 - [Lifecycle Centralization](/dev/lifecycle-centralization)
+- [E2E Snapshot Tests](/dev/e2e-testing)
 - [Profiling](/dev/profiling)
 - [Reloadable Units And Hot Reload](/dev/reloadable-units)
 - [Remote Control (Debugging)](/dev/remote-control)
@@ -45,7 +46,6 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [SQL Builder (SQLite)](/dev/sql-builder)
 - [Terminal Widget](/dev/terminal)
 - [Devlog](/dev/devlog)
-- [E2E Snapshot Tests](/dev/e2e-testing)
 
 ## Feature Pages
 
