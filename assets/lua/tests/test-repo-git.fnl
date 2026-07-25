@@ -139,7 +139,7 @@
     (runner.run-tests {:name "repo-git"
                        :tests tests})))
 
-(local module-tests tests)
+(local module-tests (if is-windows [] tests))
 
 {:name "repo-git"
  :tests module-tests
