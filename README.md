@@ -21,7 +21,7 @@ space is a 3D spatial computing platform and live programming environment — a 
 
 **Prebuilt packages:** [Download the latest release](https://github.com/semanticdreams/space/releases/latest) — AppImage, .deb, .rpm, .exe, and .zip available.
 
-**Build from source:** See [Building space](/dev/building) for per-distro dependencies and build instructions.
+**Build from source:** See [Building space](https://spaceui.org/dev/building) for per-distro dependencies and build instructions.
 
 ## Contribute
 
