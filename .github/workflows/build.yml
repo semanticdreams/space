@@ -55,7 +55,12 @@ jobs:
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
+          # sccache not available via apt on Ubuntu 22.04 — install via cargo below
+          deps=$(echo "$deps" | sed 's/\bsccache\b//g')
           sudo apt-get install -y ${deps} ccache rpm
+
+      - name: Install sccache
+        run: cargo install sccache --locked
 
       - name: Configure and Build
         env:
