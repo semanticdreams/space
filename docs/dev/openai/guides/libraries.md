@@ -63,7 +63,7 @@ Execute the code with `node example.mjs` (or the equivalent command for Deno or 
 
 Learn more on GitHub
 
-Discover more SDK capabilities and options on the library's GitHub README.
+Discover more SDK capabilities and options on the library's GitHub repository.
 
 ](https://github.com/openai/openai-node)
 
@@ -99,7 +99,7 @@ Execute the code with `python example.py`. In a few moments, you should see the 
 
 Learn more on GitHub
 
-Discover more SDK capabilities and options on the library's GitHub README.
+Discover more SDK capabilities and options on the library's GitHub repository.
 
 ](https://github.com/openai/openai-python)
 
@@ -132,7 +132,7 @@ To learn more about using the OpenAI API in .NET, check out the GitHub repo link
 
 Learn more on GitHub
 
-Discover more SDK capabilities and options on the library's GitHub README.
+Discover more SDK capabilities and options on the library's GitHub repository.
 
 ](https://github.com/openai/openai-dotnet)
 
@@ -174,7 +174,7 @@ To learn more about using the OpenAI API in Java, check out the GitHub repo link
 
 Learn more on GitHub
 
-Discover more SDK capabilities and options on the library's GitHub README.
+Discover more SDK capabilities and options on the library's GitHub repository.
 
 ](https://github.com/openai/openai-java)
 
@@ -230,7 +230,7 @@ To learn more about using the OpenAI API in Go, check out the GitHub repo linked
 
 Learn more on GitHub
 
-Discover more SDK capabilities and options on the library's GitHub README.
+Discover more SDK capabilities and options on the library's GitHub repository.
 
 ](https://github.com/openai/openai-go)
 

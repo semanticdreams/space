@@ -62,7 +62,7 @@ Glyph styling ✅
 - Input mapping covered by terminal widget test (focus, text/key/mouse send).
 
 8) Configuration and docs ✅
-- Documented `SPACE_TERMINAL_PROGRAM` default/override in README and below; the command is whitespace-split and defaults to `/bin/sh`.
+- Documented `SPACE_TERMINAL_PROGRAM` default/override in the [Terminal Widget](/dev/terminal) docs and below; the command is whitespace-split and defaults to `/bin/sh`.
 - Sandboxed/PTY-less environments now render a placeholder message and leave scrollback controls disabled instead of crashing.
 
 9) Misc

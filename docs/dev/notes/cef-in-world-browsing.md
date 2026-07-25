@@ -276,7 +276,7 @@ When browser output looks wrong:
    - Implement `space_setup_cef_for_target_windows` and `..._macos` without changing Lua/browser APIs.
    - Keep `BrowserSystem`/Fennel API unchanged so platform bring-up stays in CMake/runtime glue.
 4. Add docs cross-links:
-   - Link this note from top-level README CEF section and test docs once e2e coverage lands.
+   - Link this note from the CEF build section of [Building space](/dev/building) and test docs once e2e coverage lands.
 
 ## File Inventory (Implementation Scope)
 
