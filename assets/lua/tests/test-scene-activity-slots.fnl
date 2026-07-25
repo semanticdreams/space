@@ -474,6 +474,14 @@
       (assert (= (length sandbox-captured.terrains) 1)
               "Sandbox terrain should be preserved through activation switches")
 
+      ;; R1-2: Restoring one terrain record into an active empty slot yields
+      ;; exactly one runtime terrain record (no duplicates).
+      (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+      (assert sandbox-slot.scene-terrains
+              "Sandbox slot should have runtime terrain after activation")
+      (assert (= (length sandbox-slot.scene-terrains) 1)
+              "Sandbox slot should have exactly one runtime terrain record")
+
       (drop-fixture fixture))))
 
 (fn no-active-slot-mutation-asserts []

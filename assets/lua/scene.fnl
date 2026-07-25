@@ -867,16 +867,16 @@
     (when (= self.active-activity-slot slot)
       (apply-state-to-services self canonical)
       ;; Rebuild terrain runtime from stored records (panels deferred to Task 5).
-      ;; Build the slot root/entity first if needed, then add terrain records.
+      ;; Each canonical terrain record is built exactly once.
       (when (and canonical.terrains (> (length canonical.terrains) 0))
-        (when (not self.entity)
-          ;; No base entity yet — build default with terrains
-          (self:build-default {:terrains canonical.terrains}))
-        (when self.entity
-          ;; Entity exists (possibly just built); add any missing terrain records
-          (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
-          (each [_ entry (ipairs entries)]
-            (self:add-terrain-record entry.record)))))
+        (if (not self.entity)
+            ;; No base entity yet — build-default creates entity and all terrains
+            (self:build-default {:terrains canonical.terrains})
+            ;; Entity already exists — add only missing terrain records
+            (do
+              (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
+              (each [_ entry (ipairs entries)]
+                (self:add-terrain-record entry.record))))))
     true)
 
   (fn deactivate-activity-slot [_scene activity-id]
