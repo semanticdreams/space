@@ -111,6 +111,11 @@ export default defineConfig({
         {
           text: 'Internals',
           items: [
+            { text: 'Building', link: '/dev/building' },
+            { text: 'E2E Snapshot Tests', link: '/dev/e2e-testing' },
+            { text: 'Profiling', link: '/dev/profiling' },
+            { text: 'Remote Control', link: '/dev/remote-control' },
+            { text: 'Terminal Widget', link: '/dev/terminal' },
             { text: 'Reloadable Units', link: '/dev/reloadable-units' },
             { text: 'Repository Workbench', link: '/dev/repository-workbench' },
             { text: 'Runtime Performance', link: '/dev/runtime-performance' },

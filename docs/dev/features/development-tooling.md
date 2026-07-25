@@ -33,7 +33,7 @@ A 3D spatial computing platform with C++ and Fennel components needs specialized
 - **Remote control** (`remote-control.fnl`): ZeroMQ-based live Fennel evaluation for debugging running apps.
 - **CLI tools** (`tools/`): Remote control client, MCP remote server, torrent download/upload scripts.
 
-- **DEB/RPM packaging**: Per-distro DEB (ubuntu-22.04/24.04, debian-12/13) and RPM (fedora, opensuse-tumbleweed) packages via CMake/CPack. CEF runtime bundling in full-profile packages; minimal-profile packages exclude it. Distro smoke tests via xvfb + headless engine. AppImage and tarball distribution formats. See [README](https://github.com/semanticdreams/space) — build/install section.
+- **DEB/RPM packaging**: Per-distro DEB (ubuntu-22.04/24.04, debian-12/13) and RPM (fedora, opensuse-tumbleweed) packages via CMake/CPack. CEF runtime bundling in full-profile packages; minimal-profile packages exclude it. Distro smoke tests via xvfb + headless engine. AppImage and tarball distribution formats. See [Building space](/dev/building).
 
 ## Tasks
 
