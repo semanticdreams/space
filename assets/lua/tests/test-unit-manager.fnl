@@ -434,6 +434,42 @@
 (table.insert tests {:name "scanner prefers directory init when flat collides"
                      :fn scanner-prefers-directory-init-when-flat-collides})
 
+(fn ensure-user-code-units-survives-bad-module []
+  (with-temp-dir
+    (fn [dir]
+      (local old-fennel-path (. (require :fennel) :path))
+      (fs.write-file (fs.join-path dir "bad-unit.fnl")
+                     (.. "(fn init [] (require :nonexistent-module) true)\n"
+                         "(fn drop [] true)\n"
+                         "{:init init :drop drop}"))
+      (fs.write-file (fs.join-path dir "good-unit.fnl")
+                     (.. "(fn init [] (set app.__good-loaded true) true)\n"
+                         "(fn drop [] (set app.__good-loaded false) true)\n"
+                         "{:init init :drop drop}"))
+      (set app.__good-loaded nil)
+      (local (ok err)
+        (pcall
+          (fn []
+            (set app.unit-manager (or app.unit-manager (UnitManager {})))
+            (local original-code-dir app.code-dir)
+            (set app.code-dir dir)
+            (Main.ensure-user-code-units!)
+            (set app.code-dir original-code-dir)
+            (assert app.__good-loaded "good unit should be loaded even when bad unit fails")
+            (assert (= (app.unit-manager:count) 1)
+                    "only good unit should be registered, bad one unregistered")
+            (app.unit-manager:clear)
+            (assert (not app.__good-loaded) "good unit should be unloaded on clear")
+            (assert (= (app.unit-manager:count) 0) "manager should be empty after clear")
+            (app.unit-manager:clear))))
+      (tset (require :fennel) :path old-fennel-path)
+      (set app.__good-loaded nil)
+      (when (not ok)
+        (error err)))))
+
+(table.insert tests {:name "ensure-user-code-units survives bad module"
+                     :fn ensure-user-code-units-survives-bad-module})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
