@@ -342,6 +342,7 @@
   ;; Task 2: Restore environment state on activation; empty state clears services.
   ;; Requires: ActivitySceneState, capture-activity-slot-state, restore-activity-slot-state,
   ;; and activation applying lights/skybox/background/containment.
+  ;; R1-6: Use valid terrain record, assert containment installs/clears, assert content preserved.
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
@@ -351,11 +352,12 @@
       (local LightingViewState (require :lighting-view-state))
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
+      (local PhysicsContainment (require :physics-containment))
       (local AppProjection (require :app-projection))
       (when (not app.create-default-projection)
         (set app.create-default-projection AppProjection.create-default-projection))
 
-      ;; Mock renderer skybox
+      ;; Mock renderer skybox / background
       (var skybox-state {:enabled? false
                          :name "lake"
                          :brightness 0.1
@@ -367,15 +369,21 @@
                           :set-background-state (fn [_ state]
                                                    (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
 
+      ;; Mock physics for containment
+      (var installed-bodies [])
+      (set app.engine {:physics {:addRigidBody (fn [_phys body] (table.insert installed-bodies body))
+                                  :removeRigidBody (fn [_phys _body])}})
+
       (local fixture (make-scene))
       (local scene fixture.scene)
       (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
       (local graph-slot (scene:ensure-activity-slot "graph"))
 
-      ;; Non-default sandbox state: enabled ambient, enabled skybox with custom brightness, custom background, enabled containment.
+      ;; Non-default sandbox state: enabled ambient, enabled skybox, custom background, enabled containment.
+      ;; R1-6: Include a valid terrain record.
       (local sandbox-state
         {:panels []
-         :terrains []
+         :terrains [{:kind "heightfield-terrain"}]
          :lights {:ambient {:enabled? true :color [1.0 1.0 1.0] :intensity 1.0}
                   :directional []
                   :point []
@@ -408,6 +416,12 @@
                    (= (. app.background-state.color 3) 0.4))
               "Sandbox activation should apply custom background color")
 
+      ;; R1-6: Assert Sandbox containment installs
+      (assert (not (= app.physics-containment-config nil))
+              "Sandbox activation should set physics-containment-config")
+      (assert app.physics-containment-config.enabled?
+              "Sandbox containment config should have enabled? true")
+
       ;; Restore graph with empty state
       (assert (scene:restore-activity-slot-state "graph" empty-state)
               "restore-activity-slot-state with empty-state should return true")
@@ -425,6 +439,11 @@
                    (= (. app.background-state.color 3) 0.0))
               "Graph activation with empty state should set neutral background")
 
+      ;; R1-6: Assert Graph activation clears containment
+      (assert (and app.physics-containment-config
+                   (not app.physics-containment-config.enabled?))
+              "Graph activation should disable containment")
+
       ;; Capture graph state: should have empty terrain/panels
       (local graph-captured (scene:capture-activity-slot-state "graph"))
       (assert graph-captured "capture-activity-slot-state should return state")
@@ -437,7 +456,7 @@
       (assert (= (length graph-captured.terrains) 0)
               "Graph activation with empty state should leave no terrains")
 
-      ;; Switch back to sandbox: services should reflect sandbox state again
+      ;; R1-6: Switch back to sandbox — services should reflect sandbox state again
       (scene:activate-activity-slot "sandbox")
       (local sandbox-lights (app.lights:get-state))
       (assert sandbox-lights.ambient.enabled?
@@ -446,8 +465,40 @@
               "Switching back to sandbox should re-enable skybox")
       (assert (= skybox-state.brightness 0.5)
               "Switching back to sandbox should restore skybox brightness")
+      ;; R1-6: Assert Sandbox containment returns
+      (assert (and app.physics-containment-config
+                   app.physics-containment-config.enabled?)
+              "Switching back to sandbox should re-enable containment")
+      ;; R1-6: Assert terrain record was preserved through switches
+      (local sandbox-captured (scene:capture-activity-slot-state "sandbox"))
+      (assert (= (length sandbox-captured.terrains) 1)
+              "Sandbox terrain should be preserved through activation switches")
 
       (drop-fixture fixture))))
+
+(fn no-active-slot-mutation-asserts []
+  ;; R1-6: Content mutators must assert when slots exist but none is active.
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  ;; Register a slot to enter slot mode
+  (scene:ensure-activity-slot "sandbox")
+  ;; No slot is active — mutations should fail with the expected message.
+  (local (ok1 err1) (pcall (fn [] (scene:add-object {:scene-object-options (fn [] {})}))))
+  (assert (not ok1) "add-object without active slot should fail")
+  (assert (string.find (tostring err1) "Scene content mutation requires an active activity scene slot")
+          "add-object should produce the expected assertion message")
+
+  (local (ok2 err2) (pcall (fn [] (scene:build-default {}))))
+  (assert (not ok2) "build-default without active slot should fail")
+  (assert (string.find (tostring err2) "Scene content mutation requires an active activity scene slot")
+          "build-default should produce the expected assertion message")
+
+  (local (ok3 err3) (pcall (fn [] (scene:add-terrain-record {:kind "heightfield-terrain"}))))
+  (assert (not ok3) "add-terrain-record without active slot should fail")
+  (assert (string.find (tostring err3) "Scene content mutation requires an active activity scene slot")
+          "add-terrain-record should produce the expected assertion message")
+
+  (drop-fixture fixture))
 
 (fn physics-bodies-suspend-and-resume []
   ;; Task 2: LayoutPhysicsBodies.deactivate/activate remove and restore Bullet bodies
@@ -593,7 +644,9 @@
 (table.insert tests {:name "Scene physics bodies suspend and resume"
                       :fn physics-bodies-suspend-and-resume})
 (table.insert tests {:name "Scene containment enabled flag controls install"
-                      :fn containment-enabled-flag-controls-install})
+                       :fn containment-enabled-flag-controls-install})
+(table.insert tests {:name "Scene content mutation asserts without active slot"
+                       :fn no-active-slot-mutation-asserts})
 
 (local main
   (fn []

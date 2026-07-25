@@ -568,6 +568,12 @@
        :pointer-target nil
        :root nil
        :entity nil
+       :scene-children nil
+       :scene-terrains nil
+       :queued-cube-panels []
+       :panel-restorers {}
+       :demo-browser nil
+       :physics-body-count 0
        :scene-state nil
        :visible? false
        :interactive? false})
@@ -594,15 +600,21 @@
              (focus-manager:detach slot-self.focus-scope))
            slot-self))
     (set slot.drop
-         (fn [slot-self]
-           (slot-self:deactivate)
-           (when (and slot-self.root slot-self.root.drop)
-             (slot-self.root:drop))
-           (set slot-self.root nil)
-           (when slot-self.focus-scope
-             (slot-self.focus-scope:drop)
-             (set slot-self.focus-scope nil))
-           true))
+          (fn [slot-self]
+            (slot-self:deactivate)
+            (when (and slot-self.root slot-self.root.drop)
+              (slot-self.root:drop))
+            (set slot-self.root nil)
+            (set slot-self.entity nil)
+            (set slot-self.scene-children nil)
+            (set slot-self.scene-terrains nil)
+            (set slot-self.queued-cube-panels [])
+            (set slot-self.demo-browser nil)
+            (set slot-self.physics-body-count 0)
+            (when slot-self.focus-scope
+              (slot-self.focus-scope:drop)
+              (set slot-self.focus-scope nil))
+            true))
     (slot:deactivate)
     slot)
 
@@ -657,27 +669,51 @@
 
   (fn apply-state-to-services [scene state]
     (assert state "Scene.apply-state-to-services requires state")
-    (when (and state.lights
-               app app.lights app.lights.set-state)
-      (app.lights:set-state state.lights))
-    (when (and state.skybox
-               app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-      (app.renderers.skybox:set-state state.skybox))
-    (when (and state.background
-               app app.renderers app.renderers.set-background-state)
-      (app.renderers:set-background-state state.background))
-    (when state.containment
-      (local PhysicsContainment (require :physics-containment))
-      (local enabled? (if (= state.containment.enabled? nil)
-                          true
-                          state.containment.enabled?))
-      (PhysicsContainment.ensure-installed {:config {:enabled? enabled?} :scene scene}))
-    true)
+    (local (ok err) (pcall
+                    (fn []
+                      (when (and state.lights
+                                 app app.lights app.lights.set-state)
+                        (app.lights:set-state state.lights))
+                      (when (and state.skybox
+                                 app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+                        (app.renderers.skybox:set-state state.skybox))
+                      (when (and state.background
+                                 app app.renderers app.renderers.set-background-state)
+                        (app.renderers:set-background-state state.background))
+                      (when state.containment
+                        (local PhysicsContainment (require :physics-containment))
+                        (PhysicsContainment.ensure-installed {:config state.containment :scene scene})))))
+    (if (not ok)
+        (do
+          ;; Transactional rollback: reset all services to empty
+          (local ActivitySceneState (require :activity-scene-state))
+          (local empty (ActivitySceneState.empty-state))
+          (pcall
+            (fn []
+              (when (and app app.lights app.lights.set-state)
+                (app.lights:set-state empty.lights))
+              (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+                (app.renderers.skybox:set-state empty.skybox))
+              (when (and app app.renderers app.renderers.set-background-state)
+                (app.renderers:set-background-state empty.background))
+              (when app.engine
+                (local PhysicsContainment (require :physics-containment))
+                (PhysicsContainment.ensure-installed {:config empty.containment :scene scene}))))
+          (error err))
+        true))
 
   (fn reset-services-to-empty [scene]
     (local ActivitySceneState (require :activity-scene-state))
     (local empty (ActivitySceneState.empty-state))
     (apply-state-to-services scene empty))
+
+  (fn assert-active-content-slot []
+    ;; Require an active slot only when the scene has registered slots (slot-aware mode).
+    ;; In legacy/compat mode (no slots registered), allow surface-level mutations.
+    (when (and self.activity-slots
+               (next self.activity-slots))
+      (assert self.active-activity-slot
+              "Scene content mutation requires an active activity scene slot")))
 
   (fn activate-activity-slot [scene activity-id]
     (local slot (ensure-activity-slot scene activity-id))
@@ -688,6 +724,14 @@
       ;; Capture old active services state onto the old slot
       (set self.active-activity-slot.scene-state
            (capture-active-service-state self))
+      ;; Capture old slot's content state back to its slot fields
+      (set self.active-activity-slot.entity self.entity)
+      (set self.active-activity-slot.scene-children self.scene-children)
+      (set self.active-activity-slot.scene-terrains self.scene-terrains)
+      (set self.active-activity-slot.queued-cube-panels self.queued-cube-panels)
+      (set self.active-activity-slot.panel-restorers self.panel-restorers)
+      (set self.active-activity-slot.demo-browser self.demo-browser)
+      (set self.active-activity-slot.physics-body-count self.physics-body-count)
       ;; Deactivate old physics bodies
       (when (and self.active-activity-slot.entity
                  (pcall require :layout-physics-bodies))
@@ -696,13 +740,27 @@
       (self.active-activity-slot:deactivate))
     ;; Reset engine services to empty before applying target state
     (reset-services-to-empty self)
+    ;; Bind target slot content to Scene surface aliases
+    (set self.entity slot.entity)
+    (set self.scene-children slot.scene-children)
+    (set self.scene-terrains slot.scene-terrains)
+    (set self.queued-cube-panels slot.queued-cube-panels)
+    (set self.panel-restorers slot.panel-restorers)
+    (set self.demo-browser slot.demo-browser)
+    (set self.physics-body-count slot.physics-body-count)
     ;; Activate target slot
     (slot:activate)
     (set self.active-activity-slot-id activity-id)
     (set self.active-activity-slot slot)
-    ;; Apply target slot's stored scene state to engine services
+    ;; Apply target slot's stored scene state to engine services (transactional)
     (when slot.scene-state
       (apply-state-to-services self slot.scene-state))
+    ;; Build terrain from stored records if slot has no terrain yet and has records
+    (when (and slot.scene-state
+               slot.scene-state.terrains
+               (> (length slot.scene-state.terrains) 0)
+               (not self.scene-terrains))
+      (pcall (fn [] (self:build-default {:terrains slot.scene-state.terrains}))))
     ;; Activate target physics bodies
     (when (and slot.entity
                (pcall require :layout-physics-bodies))
@@ -712,7 +770,7 @@
 
   (fn capture-activity-slot-state [scene activity-id]
     (local slot (ensure-activity-slot scene activity-id))
-    ;; Capture current scene content
+    ;; Capture current scene content from the active slot's aliases
     (local panels [])
     (when self.scene-children
       (each [_ metadata (ipairs (or self.scene-children []))]
@@ -725,11 +783,14 @@
             (set record.rotation capture-state.rotation)
             (set record.size (or capture-state.size record.size))
             (table.insert panels record)))))
+    ;; Preserve queued cube panels
+    (each [_ panel (ipairs (or self.queued-cube-panels []))]
+      (table.insert panels (clone-table panel)))
     (local terrains
       (if (= self.scene-terrains nil)
           nil
           (SceneWorldState.capture-terrains self.scene-terrains)))
-    ;; Capture current service state
+    ;; Capture current service state (full containment config)
     (local services (capture-active-service-state self))
     ;; Build canonical state
     (local ActivitySceneState (require :activity-scene-state))
@@ -751,9 +812,14 @@
     (local canonical (ActivitySceneState.normalize-state state "Scene.restore-activity-slot-state"))
     (local slot (ensure-activity-slot scene activity-id))
     (set slot.scene-state canonical)
-    ;; If this slot is currently active, apply state immediately
+    ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
-      (apply-state-to-services self canonical))
+      (apply-state-to-services self canonical)
+      ;; Rebuild terrain runtime from stored records (panels deferred to Task 5)
+      (when (and canonical.terrains (> (length canonical.terrains) 0))
+        (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
+        (each [_ entry (ipairs entries)]
+          (self:add-terrain-record entry.record))))
     true)
 
   (fn deactivate-activity-slot [_scene activity-id]
@@ -761,6 +827,14 @@
     (when slot
       (slot:deactivate)
       (when (= self.active-activity-slot slot)
+        ;; Unbind content aliases; slot retains ownership
+        (set self.entity nil)
+        (set self.scene-children nil)
+        (set self.scene-terrains nil)
+        (set self.queued-cube-panels [])
+        (set self.panel-restorers {})
+        (set self.demo-browser nil)
+        (set self.physics-body-count 0)
         (set self.active-activity-slot nil)
         (set self.active-activity-slot-id nil)))
     slot)
@@ -923,6 +997,7 @@
       (register-entity-resizables self entity)))
 
   (fn register-scene-object [self entry]
+    (assert-active-content-slot)
     (local entity self.entity)
     (assert entity "Scene.register-scene-object requires an attached entity")
     (when (not entity.scene-objects)
@@ -1065,6 +1140,7 @@
                :size layout-state.size}))))
 
   (fn register-panel-restorer [self kind restorer owner]
+    (assert-active-content-slot)
     (assert (= (type kind) :string) "Scene.register-panel-restorer requires string kind")
     (assert (= (type restorer) :function) "Scene.register-panel-restorer requires function restorer")
     (set (. self.panel-restorers kind) {:restore restorer
@@ -1082,6 +1158,7 @@
     true)
 
   (fn add-panel-child [self opts]
+    (assert-active-content-slot)
     (local entity self.entity)
     (var builder (and opts opts.builder))
     (when (and entity builder)
@@ -1167,6 +1244,7 @@
       element))
 
   (fn add-object [self object opts]
+    (assert-active-content-slot)
     (assert object "Scene.add-object requires an object")
     (local object-config
       (if object.scene-object-options
@@ -1193,6 +1271,7 @@
     element)
 
   (fn add-demo-entry [self entry]
+    (assert-active-content-slot)
     (when (and entry entry.builder)
       (assert entry.persistence
               (.. "Scene.add-demo-entry requires :persistence for demo entry key "
@@ -1202,6 +1281,7 @@
                              :persistence entry.persistence})))
 
   (fn add-light-ball [self opts]
+    (assert-active-content-slot)
     (local options (or opts {}))
     (local light-ball-options (clone-table options))
     (set light-ball-options.position nil)
@@ -1213,6 +1293,7 @@
        :rotation options.rotation}))
 
   (fn add-physics-body [self opts]
+    (assert-active-content-slot)
     (local options (or opts {}))
     (local size (or options.size (glm.vec3 4 4 4)))
     (local placement (resolve-camera-placement self))
@@ -1239,6 +1320,7 @@
     element)
 
   (fn add-graph-node-cube [self opts]
+    (assert-active-content-slot)
     (local options (or opts {}))
     (local key (tostring (or options.node-key (and options.node options.node.key) "")))
     (assert (> (string.len key) 0)
@@ -1349,6 +1431,7 @@
     element)
 
   (fn add-demo-browser [self opts]
+    (assert-active-content-slot)
     (if self.demo-browser
         self.demo-browser
         (let [options (or opts {})
@@ -1381,6 +1464,7 @@
           (entry:sync entity)))))
 
   (fn replace-terrain-record [self terrain-id record]
+    (assert-active-content-slot)
     (local runtime-entry (require-terrain-runtime-entry self terrain-id))
     (local entity runtime-entry.entity)
     (local terrain-entry runtime-entry.terrain-entry)
@@ -1452,6 +1536,7 @@
     (element:get-selection-target))
 
   (fn add-terrain-record [self record]
+    (assert-active-content-slot)
     (local entity self.entity)
     (assert entity "Scene.add-terrain-record requires an attached entity")
     (local built-entry (SceneWorldState.build-terrain-entries [record]))
@@ -1492,6 +1577,7 @@
     true)
 
   (fn remove-terrain [self terrain-id]
+    (assert-active-content-slot)
     (local runtime-entry (require-terrain-runtime-entry self terrain-id))
     (local entity runtime-entry.entity)
     (local terrain-entry runtime-entry.terrain-entry)
@@ -1558,6 +1644,7 @@
       (self:attach-entity nil)))
 
 (fn build-default [self opts]
+  (assert-active-content-slot)
   (log-terrain-diagnostic self :info
                           "build-default"
                           (string.format "requested-terrains=%s"
@@ -1588,6 +1675,8 @@
     (set self.scene-children nil)
     (set self.scene-terrains nil))
   (set self.demo-browser nil)
+  (set self.queued-cube-panels [])
+  (set self.physics-body-count 0)
   (when (and self.focus-manager self.focus-scope)
     (self.focus-manager:detach self.focus-scope)
     (set self.focus-scope nil))

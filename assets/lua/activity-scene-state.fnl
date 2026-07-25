@@ -4,6 +4,8 @@
 
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
+(local TerrainRecords (require :scene-terrain-records))
+(local PhysicsContainment (require :physics-containment))
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -23,6 +25,9 @@
 (fn empty-panels [] [])
 
 (fn empty-terrains [] [])
+
+(fn default-sandbox-terrains []
+  (TerrainRecords.default-records))
 
 (fn empty-lights []
   {:ambient {:enabled? false
@@ -61,10 +66,10 @@
   (BackgroundState.default-state))
 
 (fn empty-containment []
-  {:enabled? false})
+  (PhysicsContainment.serialize-config {:enabled? false}))
 
 (fn default-sandbox-containment []
-  {:enabled? true})
+  (PhysicsContainment.serialize-config (PhysicsContainment.default-config)))
 
 (fn empty-state []
   {:panels (empty-panels)
@@ -76,7 +81,7 @@
 
 (fn default-sandbox-state []
   {:panels (empty-panels)
-   :terrains (empty-terrains)
+   :terrains (default-sandbox-terrains)
    :lights (default-sandbox-lights)
    :skybox (default-sandbox-skybox)
    :background (default-sandbox-background)
@@ -119,8 +124,9 @@
 (fn normalize-containment [containment path]
   (local label (.. (or path "ActivitySceneState") ".containment"))
   (assert (= (type containment) :table) (.. label " requires a table"))
-  (assert (= (type containment.enabled?) :boolean) (.. label " requires :enabled? boolean"))
-  {:enabled? containment.enabled?})
+  ;; Use the full serialization to normalize/preserve complete containment config
+  (PhysicsContainment.serialize-config
+    (PhysicsContainment.normalize-config containment)))
 
 (fn normalize-state [state path]
   (local label (or path "ActivitySceneState"))
