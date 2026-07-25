@@ -1,5 +1,5 @@
 # User Docs
 
-This section is for running and using `space`.
+This section covers running and using `space`.
 
-- Start with [Quick Start](/user/quick-start)
+- [Quick Start](/user/quick-start) — install prebuilt packages or build from source
