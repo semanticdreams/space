@@ -88,8 +88,9 @@
                  (set app.layout-root scene.layout-root)
                  (set app.movables movables)
                  (set app.camera camera)
-                 (configure-test-physics-world)
-                 (scene:build-default)
+                  (configure-test-physics-world)
+                  (scene:activate-activity-slot "sandbox")
+                  (scene:build-default)
                  {:scene scene :movables movables}))]
     (if ok
         {:cleanup cleanup :scene-result payload}

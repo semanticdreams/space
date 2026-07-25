@@ -477,24 +477,26 @@
       (drop-fixture fixture))))
 
 (fn no-active-slot-mutation-asserts []
-  ;; R1-6: Content mutators must assert when slots exist but none is active.
+  ;; R1-6: Content mutators must assert when no active slot exists,
+  ;; both before any slot is registered and after a registered slot is inactive.
   (local fixture (make-scene))
   (local scene fixture.scene)
-  ;; Register a slot to enter slot mode
-  (scene:ensure-activity-slot "sandbox")
-  ;; No slot is active — mutations should fail with the expected message.
+
+  ;; Case 1: No slots registered at all — mutation should still fail
   (local (ok1 err1) (pcall (fn [] (scene:add-object {:scene-object-options (fn [] {})}))))
-  (assert (not ok1) "add-object without active slot should fail")
+  (assert (not ok1) "add-object without any slots should fail")
   (assert (string.find (tostring err1) "Scene content mutation requires an active activity scene slot")
           "add-object should produce the expected assertion message")
 
+  ;; Case 2: Register a slot, don't activate — mutation should fail
+  (scene:ensure-activity-slot "sandbox")
   (local (ok2 err2) (pcall (fn [] (scene:build-default {}))))
-  (assert (not ok2) "build-default without active slot should fail")
+  (assert (not ok2) "build-default with inactive slot should fail")
   (assert (string.find (tostring err2) "Scene content mutation requires an active activity scene slot")
           "build-default should produce the expected assertion message")
 
   (local (ok3 err3) (pcall (fn [] (scene:add-terrain-record {:kind "heightfield-terrain"}))))
-  (assert (not ok3) "add-terrain-record without active slot should fail")
+  (assert (not ok3) "add-terrain-record with inactive slot should fail")
   (assert (string.find (tostring err3) "Scene content mutation requires an active activity scene slot")
           "add-terrain-record should produce the expected assertion message")
 

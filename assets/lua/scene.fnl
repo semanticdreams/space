@@ -708,18 +708,17 @@
     (apply-state-to-services scene empty))
 
   (fn assert-active-content-slot []
-    ;; Require an active slot only when the scene has registered slots (slot-aware mode).
-    ;; In legacy/compat mode (no slots registered), allow surface-level mutations.
-    (when (and self.activity-slots
-               (next self.activity-slots))
-      (assert self.active-activity-slot
-              "Scene content mutation requires an active activity scene slot")))
+    (assert self.active-activity-slot
+            "Scene content mutation requires an active activity scene slot"))
 
   (fn activate-activity-slot [scene activity-id]
     (local slot (ensure-activity-slot scene activity-id))
     (local was-different-slot
       (and self.active-activity-slot
            (not (= self.active-activity-slot slot))))
+    ;; Capture and deactivate old slot (but keep it in a snapshot for rollback)
+    (local previous-slot self.active-activity-slot)
+    (local previous-slot-id self.active-activity-slot-id)
     (when was-different-slot
       ;; Capture old active services state onto the old slot
       (set self.active-activity-slot.scene-state
@@ -737,10 +736,13 @@
                  (pcall require :layout-physics-bodies))
         (local LayoutPhysicsBodies (require :layout-physics-bodies))
         (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
-      (self.active-activity-slot:deactivate))
+      (self.active-activity-slot:deactivate)
+      ;; Clear active binding
+      (set self.active-activity-slot nil)
+      (set self.active-activity-slot-id nil))
     ;; Reset engine services to empty before applying target state
     (reset-services-to-empty self)
-    ;; Bind target slot content to Scene surface aliases
+    ;; Bind target slot content to Scene surface aliases BEFORE activation
     (set self.entity slot.entity)
     (set self.scene-children slot.scene-children)
     (set self.scene-terrains slot.scene-terrains)
@@ -748,13 +750,41 @@
     (set self.panel-restorers slot.panel-restorers)
     (set self.demo-browser slot.demo-browser)
     (set self.physics-body-count slot.physics-body-count)
-    ;; Activate target slot
+    ;; Try applying target slot's stored scene state to engine services
+    (local (service-ok service-err)
+      (pcall
+        (fn []
+          (when slot.scene-state
+            (apply-state-to-services self slot.scene-state)))))
+    (if (not service-ok)
+        (do
+          ;; Rollback: reset services to empty, restore previous slot binding
+          (reset-services-to-empty self)
+          (when previous-slot
+            ;; Restore previous slot's content and activation
+            (set self.entity previous-slot.entity)
+            (set self.scene-children previous-slot.scene-children)
+            (set self.scene-terrains previous-slot.scene-terrains)
+            (set self.queued-cube-panels previous-slot.queued-cube-panels)
+            (set self.panel-restorers previous-slot.panel-restorers)
+            (set self.demo-browser previous-slot.demo-browser)
+            (set self.physics-body-count previous-slot.physics-body-count)
+            (previous-slot:activate)
+            (set self.active-activity-slot previous-slot)
+            (set self.active-activity-slot-id previous-slot-id)
+            ;; Restore previous services
+            (when previous-slot.scene-state
+              (apply-state-to-services self previous-slot.scene-state))
+            ;; Reactivate physics
+            (when (and previous-slot.entity
+                       (pcall require :layout-physics-bodies))
+              (local LayoutPhysicsBodies (require :layout-physics-bodies))
+              (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
+          (error (.. "Scene.activate-activity-slot service application failed: " (tostring service-err)))))
+    ;; Activate target slot (services succeeded)
     (slot:activate)
     (set self.active-activity-slot-id activity-id)
     (set self.active-activity-slot slot)
-    ;; Apply target slot's stored scene state to engine services (transactional)
-    (when slot.scene-state
-      (apply-state-to-services self slot.scene-state))
     ;; Build terrain from stored records if slot has no terrain yet and has records
     (when (and slot.scene-state
                slot.scene-state.terrains
@@ -770,28 +800,49 @@
 
   (fn capture-activity-slot-state [scene activity-id]
     (local slot (ensure-activity-slot scene activity-id))
-    ;; Capture current scene content from the active slot's aliases
+    (local is-active (= self.active-activity-slot slot))
+    ;; Capture panels and terrains from the slot's own content,
+    ;; not from the current active slot's aliases.
     (local panels [])
-    (when self.scene-children
-      (each [_ metadata (ipairs (or self.scene-children []))]
+    (local source-children
+      (if is-active
+          self.scene-children
+          slot.scene-children))
+    (when source-children
+      (each [_ metadata (ipairs (or source-children []))]
         (local persistence (and metadata metadata.persistence))
         (when persistence
-          (local capture-state (capture-panel-layout-state metadata))
-          (when capture-state
+          (local capture-layout (capture-panel-layout-state metadata))
+          (when capture-layout
             (local record (clone-table persistence))
-            (set record.position capture-state.position)
-            (set record.rotation capture-state.rotation)
-            (set record.size (or capture-state.size record.size))
+            (set record.position capture-layout.position)
+            (set record.rotation capture-layout.rotation)
+            (set record.size (or capture-layout.size record.size))
             (table.insert panels record)))))
-    ;; Preserve queued cube panels
-    (each [_ panel (ipairs (or self.queued-cube-panels []))]
+    ;; Preserve queued cube panels from slot's own queued list
+    (local source-queued
+      (if is-active
+          self.queued-cube-panels
+          slot.queued-cube-panels))
+    (each [_ panel (ipairs (or source-queued []))]
       (table.insert panels (clone-table panel)))
+    (local source-terrains
+      (if is-active
+          self.scene-terrains
+          slot.scene-terrains))
     (local terrains
-      (if (= self.scene-terrains nil)
+      (if (= source-terrains nil)
           nil
-          (SceneWorldState.capture-terrains self.scene-terrains)))
-    ;; Capture current service state (full containment config)
-    (local services (capture-active-service-state self))
+          (SceneWorldState.capture-terrains source-terrains)))
+    ;; Capture service state: for active slot, read from live engine;
+    ;; for inactive slot, use stored scene-state services.
+    (local services
+      (if is-active
+          (capture-active-service-state self)
+          (or slot.scene-state
+              (do
+                (local ActivitySceneState (require :activity-scene-state))
+                (ActivitySceneState.empty-state)))))
     ;; Build canonical state
     (local ActivitySceneState (require :activity-scene-state))
     (local state
@@ -815,11 +866,17 @@
     ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
       (apply-state-to-services self canonical)
-      ;; Rebuild terrain runtime from stored records (panels deferred to Task 5)
+      ;; Rebuild terrain runtime from stored records (panels deferred to Task 5).
+      ;; Build the slot root/entity first if needed, then add terrain records.
       (when (and canonical.terrains (> (length canonical.terrains) 0))
-        (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
-        (each [_ entry (ipairs entries)]
-          (self:add-terrain-record entry.record))))
+        (when (not self.entity)
+          ;; No base entity yet — build default with terrains
+          (self:build-default {:terrains canonical.terrains}))
+        (when self.entity
+          ;; Entity exists (possibly just built); add any missing terrain records
+          (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
+          (each [_ entry (ipairs entries)]
+            (self:add-terrain-record entry.record)))))
     true)
 
   (fn deactivate-activity-slot [_scene activity-id]

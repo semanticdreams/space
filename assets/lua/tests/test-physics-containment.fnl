@@ -81,6 +81,10 @@
         (set scene (Scene scene-opts))
         (set app.scene scene)
         (set app.layout-root scene.layout-root)
+        ;; Activate a slot so content mutations pass the assertion;
+        ;; then clear containment config so tests start with a clean slate
+        (scene:activate-activity-slot "sandbox")
+        (set app.physics-containment-config nil)
         (f scene))))
   (when scene
     (scene:drop))
