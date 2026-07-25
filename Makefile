@@ -61,11 +61,11 @@ clean:
 	rm -rf build/*
 
 test:
-	SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 \
+	@SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 \
 	SPACE_LOG_DIR=/tmp/space/tests/log SPACE_ASSETS_PATH=$(shell pwd)/assets \
 	FENNEL_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
 	FENNEL_MACRO_PATH=$(shell pwd)/assets/lua/?.fnl\;$(shell pwd)/assets/lua/?/init.fnl \
-	xvfb-run -a ctest --test-dir build --output-on-failure -V -E "^space_fnl_tests_integration$$"
+	xvfb-run -a python3 scripts/ctest-summary.py --test-dir build --output-on-failure -E "^space_fnl_tests_integration$$"
 
 test-e2e:
 	SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 \

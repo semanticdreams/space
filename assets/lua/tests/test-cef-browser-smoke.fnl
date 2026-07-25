@@ -1,4 +1,5 @@
 (local EngineModule (require :engine))
+(local test-verbose (os.getenv "TEST_VERBOSE"))
 
 (fn log-line [msg]
   (print msg)
@@ -64,9 +65,11 @@
 
 (local main
   (fn []
-    (log-line "[RUN] CEF browser surface smoke")
+    (when test-verbose
+      (log-line "[RUN] CEF browser surface smoke"))
     (run-cef-browser-smoke)
-    (log-line "[PASS] CEF browser surface smoke")
+    (when test-verbose
+      (log-line "[PASS] CEF browser surface smoke"))
     (log-line "Executed 1 Lua test")))
 
 {:name "cef-browser-smoke"

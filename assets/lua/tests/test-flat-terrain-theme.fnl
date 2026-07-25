@@ -23,8 +23,15 @@
   (assert (and entity entity.layout) "FlatTerrain should build an entity with a layout")
   (entity:drop))
 
-(fn main []
-  (test-flat-terrain-uses-theme-colors)
-  (print "[PASS] FlatTerrain uses theme colors when provided"))
+(local tests
+  [{:name "FlatTerrain uses theme colors when provided"
+    :fn test-flat-terrain-uses-theme-colors}])
 
-{:main main}
+(fn main []
+  (local runner (require :tests/runner))
+  (runner.run-tests {:name "flat-terrain-theme"
+                     :tests tests}))
+
+{:name "flat-terrain-theme"
+ :tests tests
+ :main main}
