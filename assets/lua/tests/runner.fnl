@@ -291,7 +291,8 @@
       (log-line (.. "[RUN] " test.name)))
     (local (ok err) (protected-call-with-timeout traceback test timeout-seconds))
     (if ok
-        (log-line (.. "[PASS] " test.name))
+        (when test-verbose
+          (log-line (.. "[PASS] " test.name)))
         (do
           (log-line (.. "[FAIL] " test.name))
           (log-line (tostring err))
