@@ -114,6 +114,12 @@ Clean design is important, refactor when reasonable.
 - Run Fennel scripts (including quick experiments) via `build/space`; pass the module name (e.g. `./build/space -m tests.fast:main`) instead of using the system `fennel` binary; to avoid issues with your sandbox, disable audio by passing `SPACE_DISABLE_AUDIO=1`.
 -  Fennel tests may use the mock opengl feature but everything else should not be mocked, real objects created by real app code should be used instead. No synthetic objects or stubs.
 
+## Commit Conventions
+- Use the `type(scope)` format as described by the `git-commit` skill.
+- Scopes (when useful): `engine`, `render`, `physics`, `audio`, `lua`, `ui`, `assets`, `scripts`.
+- Before committing, run the full test suite:
+  `SKIP_KEYRING_TESTS=1 XDG_DATA_HOME=/tmp/space/tests/xdg-data SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets make test`
+
 ## Assets & Configuration Tips
 - When adding assets, ensure `AssetManager::getAssetPath` can locate them and verify packaging copies from `assets/`.
 - For icon names used by UI buttons/widgets, validate availability against `assets/material-design-icons/icons.txt` before committing. Use `rg` on that file (e.g. `rg -n "^delete\\b|^expand_more\\b" assets/material-design-icons/icons.txt`) and prefer exact icon-name matches from the start of each line.
