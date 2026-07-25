@@ -523,13 +523,18 @@
   (apply-active-theme ctx)
 
   ;; Activity slot infrastructure
+  (fn make-slot-focus-scope [activity-id]
+    (and focus-manager
+         (focus-manager:create-scope {:name (.. "scene:" activity-id)
+                                      :directional-traversal-boundary? true})))
+
   (fn make-slot-pointer-target [slot]
     {:interaction-surface :scene
      :activity-slot slot
      :screen-pos-ray (fn [_target pos opts]
                        (self:screen-pos-ray pos opts))})
 
-  (fn make-slot-build-context [slot slot-layout-root]
+  (fn make-slot-build-context [slot slot-layout-root slot-focus-scope]
     (local slot-ctx
       (BuildContext {:theme (resolve-active-theme)
                      :clickables app.clickables
@@ -542,14 +547,15 @@
                      :layout-root slot-layout-root
                      :movables options.movables
                      :focus-manager focus-manager
-                     :focus-parent focus-root
-                     :focus-scope focus-scope}))
+                     :focus-parent focus-scope
+                     :focus-scope slot-focus-scope}))
     (set slot-ctx.pointer-target slot.pointer-target)
     (set slot-ctx.panel-target slot)
     (apply-active-theme slot-ctx)
     slot-ctx)
 
   (fn make-activity-slot [activity-id]
+    (local slot-focus-scope (make-slot-focus-scope activity-id))
     (local slot-layout-root (LayoutRoot {:log-dirt? true}))
     (local slot
       {:activity-id activity-id
@@ -558,16 +564,22 @@
        :ctx nil
        :build-context nil
        :layout-root slot-layout-root
+       :focus-scope slot-focus-scope
        :pointer-target nil
        :root nil
        :entity nil
        :visible? false
        :interactive? false})
     (set slot.pointer-target (make-slot-pointer-target slot))
-    (set slot.ctx (make-slot-build-context slot slot-layout-root))
+    (set slot.ctx (make-slot-build-context slot slot-layout-root slot-focus-scope))
     (set slot.build-context slot.ctx)
     (set slot.activate
          (fn [slot-self]
+           (when (and focus-manager
+                      focus-scope
+                      slot-self.focus-scope
+                      (not slot-self.focus-scope.parent))
+             (focus-manager:attach slot-self.focus-scope focus-scope))
            (set slot-self.visible? true)
            (set slot-self.interactive? true)
            slot-self))
@@ -575,6 +587,10 @@
          (fn [slot-self]
            (set slot-self.visible? false)
            (set slot-self.interactive? false)
+           (when (and focus-manager
+                      slot-self.focus-scope
+                      slot-self.focus-scope.parent)
+             (focus-manager:detach slot-self.focus-scope))
            slot-self))
     (set slot.drop
          (fn [slot-self]
@@ -582,6 +598,9 @@
            (when (and slot-self.root slot-self.root.drop)
              (slot-self.root:drop))
            (set slot-self.root nil)
+           (when slot-self.focus-scope
+             (slot-self.focus-scope:drop)
+             (set slot-self.focus-scope nil))
            true))
     (slot:deactivate)
     slot)
@@ -1432,10 +1451,19 @@
     (self:sync-physics-bodies)
     (self:sync-scene-objects)
     (self.layout-root:update)
+    (when (and self.active-activity-slot
+               self.active-activity-slot.layout-root)
+      (self.active-activity-slot.layout-root:update))
     (sync-terrain-runtime-state self))
 
   (fn drop [self]
   (log-terrain-diagnostic self :info "drop:begin")
+  ;; Drop all retained activity slots first
+  (local slot-ids [])
+  (each [id _ (pairs self.activity-slots)]
+    (table.insert slot-ids id))
+  (each [_ id (ipairs slot-ids)]
+    (drop-activity-slot self id))
   (when self.entity
     (self:unregister-entity self.entity)
     (self.entity:drop)

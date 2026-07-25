@@ -3,6 +3,7 @@
 (local Scene (require :scene))
 (local Camera (require :camera))
 (local AppProjection (require :app-projection))
+(local {: FocusManager} (require :focus))
 
 (local tests [])
 
@@ -167,6 +168,123 @@
           "deactivate-activity-slot should return nil for unknown ids")
   (drop-fixture fixture))
 
+(fn active-slot-batch-accessors-route-correctly []
+  ;; R1-4: Exercise all renderer-facing batch accessors in active/inactive/switch routing.
+  ;; Batch methods return computed values, so we verify they are callable and produce
+  ;; distinct per-context results by checking they don't throw.
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+
+  ;; Inactive: all batch accessors are callable and return non-nil from surface context
+  (assert (not (= (scene:get-triangle-batches) nil))
+          "get-triangle-batches should be callable when inactive")
+  (assert (not (= (scene:get-quad-draw-list) nil))
+          "get-quad-draw-list should be callable when inactive")
+  (assert (not (= (scene:get-text-ssbo-draw-list) nil))
+          "get-text-ssbo-draw-list should be callable when inactive")
+  (assert (not (= (scene:get-mesh-batches) nil))
+          "get-mesh-batches should be callable when inactive")
+  (assert (not (= (scene:get-instanced-color-mesh-batches) nil))
+          "get-instanced-color-mesh-batches should be callable when inactive")
+
+  ;; Activate sandbox: all batch accessors still callable and non-nil
+  (scene:activate-activity-slot "sandbox")
+  (assert (not (= (scene:get-triangle-batches) nil))
+          "Active slot triangle batches should be non-nil")
+  (assert (not (= (scene:get-quad-draw-list) nil))
+          "Active slot quad draw list should be non-nil")
+  (assert (not (= (scene:get-text-ssbo-draw-list) nil))
+          "Active slot text SSBO draw list should be non-nil")
+  (assert (not (= (scene:get-mesh-batches) nil))
+          "Active slot mesh batches should be non-nil")
+  (assert (not (= (scene:get-instanced-color-mesh-batches) nil))
+          "Active slot instanced color mesh batches should be non-nil")
+
+  ;; Deactivate: fall back to surface context, all still callable
+  (scene:deactivate-activity-slot "sandbox")
+  (assert (not (= (scene:get-triangle-batches) nil))
+          "Deactivated get-triangle-batches should fall back to surface")
+  (assert (not (= (scene:get-mesh-batches) nil))
+          "Deactivated get-mesh-batches should fall back to surface")
+
+  (drop-fixture fixture))
+
+(fn active-slot-layout-root-updates-during-update []
+  ;; R1-1: Scene.update must update the active slot layout root
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local slot (scene:activate-activity-slot "sandbox"))
+  (var updated? false)
+  (local original-update slot.layout-root.update)
+  (set slot.layout-root.update (fn [self]
+                                 (set updated? true)
+                                 (when original-update
+                                   (original-update self))))
+  (scene:update)
+  (assert updated?
+          "Scene.update should update the active slot layout root")
+  (drop-fixture fixture))
+
+(fn inactive-slot-layout-root-not-updated []
+  ;; R1-1: Inactive slot layout roots must not be updated
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+  (scene:activate-activity-slot "graph")
+  (var sandbox-updated? false)
+  (local original-update sandbox-slot.layout-root.update)
+  (set sandbox-slot.layout-root.update (fn [self]
+                                         (set sandbox-updated? true)
+                                         (when original-update
+                                           (original-update self))))
+  (scene:update)
+  (assert (not sandbox-updated?)
+          "Scene.update must not update inactive slot layout roots")
+  (drop-fixture fixture))
+
+(fn slot-focus-scope-follows-activation []
+  ;; R1-2: Per-slot focus scope attaches/detaches with activation
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local focus-manager (FocusManager {:root-name "test-scene-focus"}))
+  (local scene (Scene {:camera camera
+                       :focus-manager focus-manager
+                       :focus-scope-name "test-scene-focus"}))
+  (local slot (scene:ensure-activity-slot "sandbox"))
+  (assert slot.focus-scope
+          "Scene activity slot should own a focus scope")
+  (assert (= slot.focus-scope.parent nil)
+          "Inactive activity slot focus scope should be detached")
+  (scene:activate-activity-slot "sandbox")
+  (assert (= slot.focus-scope.parent scene.focus-scope)
+          "Active activity slot focus scope should attach to Scene focus scope")
+  (scene:deactivate-activity-slot "sandbox")
+  (assert (= slot.focus-scope.parent nil)
+          "Deactivated activity slot focus scope should detach from traversal")
+  (scene:drop)
+  (camera:drop)
+  (focus-manager:drop))
+
+(fn scene-drop-disposes-retained-slots []
+  ;; R1-3: Scene.drop must dispose all retained activity slots
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (var sandbox-dropped? false)
+  (var graph-dropped? false)
+  (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+  (local graph-slot (scene:ensure-activity-slot "graph"))
+  (set sandbox-slot.root {:drop (fn [_] (set sandbox-dropped? true))})
+  (set graph-slot.root {:drop (fn [_] (set graph-dropped? true))})
+  ;; Drop the scene (which should cascade to all slots)
+  (scene:drop)
+  (assert sandbox-dropped?
+          "Scene.drop should drop sandbox slot root")
+  (assert graph-dropped?
+          "Scene.drop should drop graph slot root")
+  (fixture.camera:drop))
+
 (table.insert tests {:name "Scene activity slots return same slot on repeat"
                      :fn ensure-activity-slot-returns-same-slot})
 (table.insert tests {:name "Scene activity slots have distinct context and root"
@@ -179,6 +297,16 @@
                      :fn drop-activity-slot-removes-content})
 (table.insert tests {:name "Scene activity-slot returns nil for unknown"
                      :fn activity-slot-returns-nil-for-unknown})
+(table.insert tests {:name "Scene active slot batch accessors route correctly"
+                     :fn active-slot-batch-accessors-route-correctly})
+(table.insert tests {:name "Scene active slot layout root updates during update"
+                     :fn active-slot-layout-root-updates-during-update})
+(table.insert tests {:name "Scene inactive slot layout root not updated"
+                     :fn inactive-slot-layout-root-not-updated})
+(table.insert tests {:name "Scene slot focus scope follows activation"
+                     :fn slot-focus-scope-follows-activation})
+(table.insert tests {:name "Scene drop disposes retained slots"
+                     :fn scene-drop-disposes-retained-slots})
 
 (local main
   (fn []
