@@ -294,7 +294,7 @@
   (assert (= update-count after-visible) "hidden panel should not receive updates")
   (entity:drop))
 
-(fn view-hidden-panel-layout-is-culled []
+(fn view-hidden-panel-layout-is-not-in-tree []
   (local sidebar (HudExtendedSidebar))
   (sidebar:register-entry {:id :test
                             :icon :test_icon
@@ -314,8 +314,7 @@
   (each [_ child (ipairs entity.layout.children)]
     (when (= child.name "test-panel")
       (set panel-layout child)))
-  (assert panel-layout "panel layout should still be a child of root")
-  (assert (panel-layout:effective-culled?) "collapsed panel layout should be culled")
+  (assert (not panel-layout) "collapsed panel layout should not be in layout tree")
   (entity:drop))
 
 (fn hud-capture-includes-extended-sidebar []
@@ -450,7 +449,7 @@
   (assert (= (length sidebar.entry-ids) 3) "re-registration should not grow entry-ids")
   (assert (= (. sidebar.entry-ids 1) :first) "first entry-id should remain :first"))
 
-(fn view-culled-layout-does-not-intersect []
+(fn view-hidden-panel-layout-does-not-intersect []
   (local sidebar (HudExtendedSidebar))
   (sidebar:register-entry {:id :test
                             :icon :test_icon
@@ -463,16 +462,21 @@
   (local entity (view ctx))
   (entity:update)
   (entity:update)
-  (sidebar:toggle)
-  (entity:update)
-  (entity:update)
+  ;; Cache the layout while it's still in the tree (visible).
   (var panel-layout nil)
   (each [_ child (ipairs entity.layout.children)]
     (when (= child.name "test-panel")
       (set panel-layout child)))
-  (assert (panel-layout:effective-culled?) "layout should be culled")
-  (var (hit _point _dist) (panel-layout:intersect {:origin (glm.vec3 0 0 1) :direction (glm.vec3 0 0 -1)}))
-  (assert (not hit) "culled layout should not intersect")
+  (assert panel-layout "panel layout should be in tree while visible")
+  (sidebar:toggle)
+  (entity:update)
+  (entity:update)
+  ;; After toggling, the panel is removed from the layout tree entirely.
+  (var panel-in-tree-after-toggle? false)
+  (each [_ child (ipairs entity.layout.children)]
+    (when (= child.name "test-panel")
+      (set panel-in-tree-after-toggle? true)))
+  (assert (not panel-in-tree-after-toggle?) "hidden panel should not be in layout tree")
   (entity:drop))
 
 (fn hud-capture-restore-pending-sidebar-state []
@@ -515,7 +519,7 @@
 (table.insert tests {:name "view panel survives collapse" :fn view-panel-survives-collapse})
 (table.insert tests {:name "view panel survives switch" :fn view-panel-survives-switch})
 (table.insert tests {:name "view hidden panel not updated" :fn view-hidden-panel-not-updated})
-(table.insert tests {:name "view hidden panel layout is culled" :fn view-hidden-panel-layout-is-culled})
+(table.insert tests {:name "view hidden panel layout is not in tree" :fn view-hidden-panel-layout-is-not-in-tree})
 (table.insert tests {:name "hud capture includes extended-sidebar" :fn hud-capture-includes-extended-sidebar})
 (table.insert tests {:name "hud restore includes extended-sidebar" :fn hud-restore-includes-extended-sidebar})
 (table.insert tests {:name "view rail is always visible" :fn view-rail-is-always-visible})
@@ -524,7 +528,7 @@
 (table.insert tests {:name "sidebar select rejects invalid id" :fn sidebar-select-rejects-invalid-id})
 (table.insert tests {:name "sidebar restore ignores invalid active-id" :fn sidebar-restore-ignores-invalid-active-id})
 (table.insert tests {:name "sidebar entries ordered by registration" :fn sidebar-entries-ordered-by-registration})
-(table.insert tests {:name "view culled layout does not intersect" :fn view-culled-layout-does-not-intersect})
+(table.insert tests {:name "view hidden panel layout does not intersect" :fn view-hidden-panel-layout-does-not-intersect})
 (fn hud-capture-restore-pending-retained-on-mismatch []
   (set app.extended-sidebar nil)
   (set app.pending-extended-sidebar-state nil)

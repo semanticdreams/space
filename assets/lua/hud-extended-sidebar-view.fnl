@@ -50,6 +50,8 @@
     (fn deactivate-current-panel! []
       (when active-panel-entity
         (active-panel-entity.layout:set-self-culled true)
+        (when active-panel-entity.disconnect-update
+          (active-panel-entity:disconnect-update))
         (set active-panel-entity nil)))
 
     (fn activate-panel! [id]
@@ -58,7 +60,9 @@
         (local panel (ensure-panel-built id))
         (when panel
           (set active-panel-entity panel)
-          (panel.layout:set-self-culled false))))
+          (panel.layout:set-self-culled false)
+          (when panel.connect-update
+            (panel:connect-update)))))
 
     (fn build-rail []
       (local rail-children [])
@@ -103,8 +107,8 @@
           (deactivate-current-panel!))
       (set rail-entity (build-rail))
       (root-layout:clear-children)
-      (each [_ panel (pairs cached-panels)]
-        (root-layout:add-child panel.layout))
+      (when active-panel-entity
+        (root-layout:add-child active-panel-entity.layout))
       (root-layout:add-child rail-entity.layout)
       (clear-focus-on-culled!)
       (root-layout:mark-measure-dirty)
