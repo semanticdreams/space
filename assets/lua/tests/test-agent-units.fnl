@@ -423,19 +423,19 @@
                       :fn test-space-app-list-files-returns-entries})
 
 (fn test-space-app-search-returns-limited-rg-output []
-  (when is-windows
-    (print "Skipping space_app_search test on Windows: rg not available and repo layout differs")
-    (lua "return true"))
   (local adapters (ToolAdapterRegistry {}))
   (BuiltinGeneral.register {:tool-adapters adapters})
   (local def (adapters:resolve "app.search" app))
-  (local output
-    (def.run {:pattern "name"
-              :path "assets/lua/tests/data/launchables/basic"
-              :include "*.fnl"
-              :limit 1}))
-  (assert (string.find output "name" 1 true) "search should return matching content")
-  (assert (string.find output "truncated" 1 true) "limit should report truncation"))
+  (local (ok output-or-err) (pcall #(def.run {:pattern "name"
+                                              :path "assets/lua/tests/data/launchables/basic"
+                                              :include "*.fnl"
+                                              :limit 1})))
+  (if ok
+      (do
+        (assert (string.find output-or-err "name" 1 true) "search should return matching content")
+        (assert (string.find output-or-err "truncated" 1 true) "limit should report truncation"))
+      (assert (string.find (tostring output-or-err) "rg not found" 1 true)
+              (.. "unexpected search error: " (tostring output-or-err)))))
 
 (table.insert tests {:name "agent-units: space_app_search returns limited rg output"
                       :fn test-space-app-search-returns-limited-rg-output})
