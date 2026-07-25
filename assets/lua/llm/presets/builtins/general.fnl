@@ -294,6 +294,9 @@
                            (.. "search path escapes project root: " search-root))
                    (assert (not (path-has-symlink? search-root project-root))
                            (.. "search path contains a symlink component: " search-root))
+                    (local rg-check (Process.run {:args ["rg" "--version"] :timeout 5 :merge-stderr true}))
+                    (when (not (= rg-check.exit-code 0))
+                      (error "search unavailable: rg not found on PATH"))
                     (var rg-args ["rg" "--no-config" "--no-heading" "--line-number"
                                   "--color" "never" "--no-messages" "--max-columns" "500"])
                     (when args.include

@@ -6,7 +6,6 @@
 (local platform-os (. (sysinfo.platform) :os))
 (local is-windows (= platform-os "windows"))
 (local is-ci (os.getenv "CI"))
-(local skip-module (or is-windows is-ci))
 
 (var temp-counter 0)
 (local test-root "/tmp/space/tests/repo-git")
@@ -100,6 +99,9 @@
     (assert (= s "") "status should be clean after commit"))))
 
 (fn git-add-all-commits-push []
+  (when is-ci
+    (print "Skipping git add commit push flow on CI: push to origin not supported")
+    (lua "return true"))
   (with-temp-repo (fn [bare-path clone-path]
     (fs.write-file (fs.join-path clone-path "data.txt") "data\n")
     (Git.add-all clone-path)
@@ -130,14 +132,14 @@
 
 (local main
   (fn []
-    (when skip-module
-      (print "Skipping repo git tests: git 2.54 incompatibility on CI or Windows platform")
+    (when is-windows
+      (print "Skipping repo git tests: git operations not supported on Windows platform")
       (lua "return true"))
     (local runner (require :tests/runner))
     (runner.run-tests {:name "repo-git"
                        :tests tests})))
 
-(local module-tests (if skip-module [] tests))
+(local module-tests (if is-windows [] tests))
 
 {:name "repo-git"
  :tests module-tests
