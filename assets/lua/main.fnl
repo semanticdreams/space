@@ -769,6 +769,8 @@
 (set app.canvas-interactive? false)
 (set app.canvas-surface-interactive? true)
 (set app.canvas-visible? false)
+(set app.graph-map nil)
+(set app.graph-map-manager nil)
 (set app.graph-view nil)
 (set app.board nil)
 (set app.board-view nil)
@@ -1151,6 +1153,9 @@
   (set app.terrain-paint-session nil)
   (set app.terrain-paint-previous-state nil)
   (set app.graph (and runtime runtime.graph))
+  (set app.graph-map (or (and runtime runtime.graph-map-manager (runtime.graph-map-manager:get-active-map))
+                         (and runtime runtime.graph-map)))
+  (set app.graph-map-manager (and runtime runtime.graph-map-manager))
   (set app.graph-view nil)
   (set app.board nil)
   (set app.board-view nil)
@@ -1625,6 +1630,8 @@
   (set app.canvas-surface-interactive? true)
   (set app.canvas-visible? false)
   (set app.graph nil)
+  (set app.graph-map nil)
+  (set app.graph-map-manager nil)
   (set app.graph-view nil)
   (set app.board nil)
   (set app.board-view nil)
@@ -1667,6 +1674,12 @@
   (when app.panel-transfer
     (set app.panel-transfer nil))
   (set app.panel-transfer (PanelTransfer))
+  (fn active-canvas-panel-target []
+    (or (and app.canvas
+             app.canvas.active-activity-slot
+             app.canvas.active-activity-slot.visible?
+             app.canvas.active-activity-slot)
+        app.canvas))
   (app.panel-transfer:register-receiver
     {:id :hud
      :label "HUD"
@@ -1676,8 +1689,6 @@
                  (var removed false)
                  (when (and app.hud app.hud.remove-panel-child)
                    (set removed (app.hud:remove-panel-child el)))
-                 (when (and removed el el.drop)
-                   (el:drop))
                  removed)})
   (app.panel-transfer:register-receiver
     {:id :scene
@@ -1691,14 +1702,13 @@
     {:id :canvas
      :label "Canvas"
      :icon "space_dashboard"
-     :target-fn (fn [] app.canvas)
+     :target-fn active-canvas-panel-target
      :rollback (fn [_r el]
-                 (var removed false)
-                 (when (and app.canvas app.canvas.remove-panel-child)
-                   (set removed (app.canvas:remove-panel-child el)))
-                 (when (and removed el el.drop)
-                   (el:drop))
-                 removed)})
+                  (var removed false)
+                  (local target (active-canvas-panel-target))
+                  (when (and target target.remove-panel-child)
+                    (set removed (target:remove-panel-child el)))
+                  removed)})
 
   (when app.system-cursors
     (app.system-cursors:reset))
@@ -2063,6 +2073,8 @@
   (set app.active-pointer-controls nil)
   (set app.camera nil)
   (set app.graph nil)
+  (set app.graph-map nil)
+  (set app.graph-map-manager nil)
   (set app.graph-view nil)
   (set app.board nil)
   (set app.board-view nil)

@@ -108,6 +108,26 @@
   (assert (= result nil) "load-by-key should return nil when loader returns nil")
   (graph:drop))
 
+(fn world-backed-loaders-return-nil-for-missing-objects []
+  (local Graph (require :graph/init))
+  (local GraphKeyLoaders (require :graph/key-loaders))
+  (local graph (Graph {:with-start false}))
+  (local world-manager {:get-world-entry (fn [_self _id] nil)
+                        :list-tabs (fn [_self] [])})
+  (GraphKeyLoaders.register graph {:world-manager world-manager})
+  (local keys ["world:missing"
+               "terrain:missing:t1"
+               "terrain-editor:missing:t1"
+               "terrain-tool:missing:t1:resize-terrain"
+               "light:missing:point:p1"
+               "scene-panel:missing:1"
+               "hud-panel:missing:tiles:1"])
+  (each [_ key (ipairs keys)]
+    (local (ok result) (pcall (fn [] (graph:create-node-by-key key))))
+    (assert ok (.. "Missing world-backed key should not throw: " key))
+    (assert (= result nil) (.. "Missing world-backed key should return nil: " key)))
+  (graph:drop))
+
 (fn multiple-loaders-match-by-scheme []
   (local Graph (require :graph/init))
   (local graph (Graph {:with-start false}))
@@ -580,6 +600,22 @@
       (graph:drop)
       (kernels:drop))))
 
+(fn fs-loader-returns-nil-for-missing-path []
+  (with-temp-dir
+    (fn [dir]
+      (local GraphKeyLoaders (require :graph/key-loaders))
+      (local Graph (require :graph/init))
+      (local graph (Graph {:with-start false}))
+      (GraphKeyLoaders.register graph {})
+      (local existing-key (.. "fs:" dir))
+      (local existing-node (graph:load-by-key existing-key))
+      (assert existing-node "fs loader should resolve an existing path")
+      (local missing-key (.. "fs:" (fs.join-path dir "missing")))
+      (local missing-node (graph:create-node-by-key missing-key))
+      (assert (= missing-node nil)
+              "fs loader should return nil for a missing path")
+      (graph:drop))))
+
 (fn hackernews-ensure-client-propagates-to-child-nodes []
   (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
   (local ensure-client (fn [] {:fetch-topstories (fn [] nil)}))
@@ -619,6 +655,8 @@
                      :fn load-by-key-adds-node-to-graph})
 (table.insert tests {:name "load-by-key returns nil when loader returns nil"
                      :fn load-by-key-returns-nil-when-loader-returns-nil})
+(table.insert tests {:name "world-backed loaders return nil for missing objects"
+                     :fn world-backed-loaders-return-nil-for-missing-objects})
 (table.insert tests {:name "multiple loaders match by scheme"
                      :fn multiple-loaders-match-by-scheme})
 (table.insert tests {:name "load-by-key parses scheme before first colon"
@@ -666,8 +704,10 @@
 (table.insert tests {:name "list entity node loads items via load-by-key"
                      :fn list-entity-node-loads-items-via-load-by-key})
 (table.insert tests {:name "graph key loaders registers and loads nodes"
-                     :fn graph-key-loaders-registers-and-loads-nodes})
+                      :fn graph-key-loaders-registers-and-loads-nodes})
+(table.insert tests {:name "fs loader returns nil for missing path"
+                     :fn fs-loader-returns-nil-for-missing-path})
 (table.insert tests {:name "hackernews ensure-client propagates to child nodes"
-                     :fn hackernews-ensure-client-propagates-to-child-nodes})
+                      :fn hackernews-ensure-client-propagates-to-child-nodes})
 
 tests

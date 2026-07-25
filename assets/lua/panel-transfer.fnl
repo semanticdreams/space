@@ -1,4 +1,5 @@
 (local glm (require :glm))
+(local Signal (require :signal))
 (local exports {})
 
 (fn screen-pos->hud [screen-pos hud]
@@ -79,37 +80,55 @@
                         :position position}))
   nil)
 
-(fn transfer-panel [_self destination current element payload]
+(fn transfer-panel [self destination current element payload]
   (local new-element (destination.receive destination payload))
   (if (not new-element)
       (error (.. "Failed to transfer panel to " (or destination.label destination.id)))
       (do
         (local target-element (or element.__scene_wrapper element))
-        (local removed (if (and current current.remove-panel-child target-element)
-                            (current:remove-panel-child target-element)
-                            (do
-                              (when (and element element.drop)
-                                (element:drop))
-                              true)))
-        (if removed
-            new-element
+        (local (remove-ok removed)
+          (pcall
+            (fn []
+              (if (and current current.remove-panel-child target-element)
+                  (current:remove-panel-child target-element)
+                  (do
+                    (when (and element element.drop)
+                      (element:drop))
+                    true)))))
+        (if (and remove-ok removed)
+            (do
+              (self.panel-transferred:emit {:current current
+                                            :receiver-id (or destination.receiver-id
+                                                             destination.id)
+                                            :target destination.target
+                                            :destination destination
+                                            :element element
+                                            :new-element new-element
+                                            :payload payload
+                                            :persistence (and payload payload.persistence)})
+              new-element)
             (do
               (var rolled-back false)
               (if destination.rollback
                   (set rolled-back (destination:rollback new-element))
                   (if (and destination.target destination.target.remove-panel-child)
                       (set rolled-back (destination.target:remove-panel-child new-element))
-                      (do
-                        (when (and new-element new-element.drop)
-                          (new-element:drop))
-                        (set rolled-back true))))
-              (if (not rolled-back)
-                  (error (.. "Panel transfer rollback failed for " (or destination.label destination.id) " - panel was received but could not be removed"))
-                  (error "Failed to detach panel from source during transfer")))))))
+                       (do
+                         (when (and new-element new-element.drop)
+                           (new-element:drop))
+                         (set rolled-back true))))
+               (if (not rolled-back)
+                   (error (.. "Panel transfer rollback failed for " (or destination.label destination.id) " - panel was received but could not be removed"))
+                   (if remove-ok
+                       (error "Failed to detach panel from source during transfer")
+                       (error (.. "Failed to detach panel from source during transfer: "
+                                  (tostring removed))))))))))
 
 (fn PanelTransfer []
   (local receivers [])
+  (local panel-transferred (Signal))
   {:receivers receivers
+   :panel-transferred panel-transferred
    :register-receiver (fn [_self receiver]
                         (assert (= (type receiver.id) :string) "Panel receiver requires string :id")
                         (assert (= (type receiver.label) :string) "Panel receiver requires string :label")
@@ -120,6 +139,9 @@
                           (assert (= (type receiver.rollback) :function) "Panel receiver :rollback must be a function"))
                         (when receiver.receive
                           (assert receiver.rollback "Panel receiver with :receive requires :rollback"))
+                        (each [_ existing (ipairs receivers)]
+                          (assert (not (= existing.id receiver.id))
+                                  (.. "Panel receiver with id " receiver.id " already registered")))
                         (table.insert receivers receiver)
                         receiver)
    :unregister-receiver (fn [_self receiver-id]
@@ -127,6 +149,11 @@
                             (when (= (. receivers i :id) receiver-id)
                               (table.remove receivers i))))
    :available-receivers (fn [_self] (available-receivers-excluding receivers nil))
+   :find-receiver-by-id (fn [_self receiver-id]
+                           (each [_ receiver (ipairs receivers)]
+                             (when (= receiver.id receiver-id)
+                               (lua "return receiver")))
+                           nil)
    :find-receiver-for-target (fn [_self target] (find-matching-receiver receivers target))
    :show-move-menu show-move-menu
    :transfer-panel transfer-panel})

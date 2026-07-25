@@ -59,7 +59,7 @@ See [Concepts](/dev/concepts) for the VitePress concept docs, and [Dev Notes](/d
 - **Lifecycle** — `app.init/update/drop` with signal-driven events. See [Lifecycle Invariants](/dev/lifecycle-invariants)
 - **Signals** — Event system for decoupled communication across all subsystems
 - **Reloadable units** — Hot-reload architecture with load/unload/snapshot/restore and efsw file watching. See [Hot Reload Units](/dev/features/hot-reload-units), [Reloadable Units](/dev/reloadable-units)
-- **Remote control** — ZeroMQ-based live debugging with async result polling. See [Opencode Agent Workflow](/dev/features/opencode-agent-workflow)
+- **Remote control** — ZeroMQ-based live debugging with async result polling.
 - **State management** — Composable state machines with route wrappers, enter/leave hooks, and pluggable input-state handlers (focus, hover, camera, gamepad, touch, pen)
 - **Fennel caching** — Compiled Fennel → Lua bytecode cache for fast startup. See [Fennel Cache](/dev/project/tech-debt/tech-debt-fennel-cache)
 

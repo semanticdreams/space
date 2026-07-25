@@ -22,6 +22,13 @@
       app.active-activity-id
       (Activities.resolve activity-id)))
 
+(fn canvas-panel-target []
+  (or (and app.canvas
+           app.canvas.active-activity-slot
+           app.canvas.active-activity-slot.visible?
+           app.canvas.active-activity-slot)
+      app.canvas))
+
 (fn enrich-active-activity-context! [context]
   (if (and (= context.surface :canvas)
            app.activity-context-enricher
@@ -46,10 +53,11 @@
                  :ctrl? (Modifiers.ctrl-held? (and event event.mod))
                  :alt? (Modifiers.alt-held? (and event event.mod))}
      :engine app.engine
-     :targets {:canvas app.canvas
+     :targets {:canvas (canvas-panel-target)
                :hud app.hud}
      :scene {:scene app.scene}
      :graph {:graph app.graph
+             :graph-map app.graph-map
              :view app.graph-view}
      :drawing {}}))
 
@@ -62,10 +70,11 @@
           (or options.activity
               app.active-activity-id))
         nil))
-  (local targets-defaults {:canvas app.canvas
+  (local targets-defaults {:canvas (canvas-panel-target)
                            :hud app.hud})
   (local scene-defaults {:scene app.scene})
   (local graph-defaults {:graph app.graph
+                         :graph-map app.graph-map
                          :view (or (and options.graph options.graph.view)
                                    app.graph-view)})
   (enrich-active-activity-context!

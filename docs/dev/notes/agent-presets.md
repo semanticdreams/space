@@ -299,7 +299,7 @@ Context: `{:surface :canvas :activity "graph"}`
 | Preset | Default | Risk | MCP Tools |
 |--------|---------|------|-----------|
 | `graph-node-tools` | `:auto` | `:normal` | `space_graph_add_node`, `space_graph_load_node` |
-| `graph-node-destructive-tools` | `:off` | `:destructive` | `space_graph_remove_nodes` |
+| `graph-node-map-tools` | `:auto` | `:destructive` | `space_graph_remove_nodes` |
 | `graph-edge-tools` | `:auto` | `:normal` | `space_graph_add_edge` |
 | `graph-nav-tools` | `:auto` | `:normal` | `space_graph_focus_node`, `space_graph_open_node`, `space_graph_search_nodes` |
 | `graph-identity-tools` | `:auto` | `:normal` | `space_graph_create_identity` |

@@ -1,5 +1,6 @@
 (local callbacks (require :callbacks))
 (local EngineModule (require :engine))
+(local test-verbose (os.getenv "TEST_VERBOSE"))
 
 (fn log-line [msg]
   (print msg)
@@ -153,15 +154,19 @@
 
 (local main
   (fn []
-    (log-line "[RUN] headless engine run dispatches queued and job callbacks")
+    (when test-verbose
+      (log-line "[RUN] headless engine run dispatches queued and job callbacks"))
     (run-headless-callback-dispatch-test)
-    (log-line "[PASS] headless engine run dispatches queued and job callbacks")
-    (log-line "[RUN] headless zero-fps run dispatches queued and job callbacks")
+    (when test-verbose
+      (log-line "[PASS] headless engine run dispatches queued and job callbacks")
+      (log-line "[RUN] headless zero-fps run dispatches queued and job callbacks"))
     (run-headless-zero-fps-idle-test)
-    (log-line "[PASS] headless zero-fps run dispatches queued and job callbacks")
-    (log-line "[RUN] headless zero-fps request-frame wakes the loop")
+    (when test-verbose
+      (log-line "[PASS] headless zero-fps run dispatches queued and job callbacks")
+      (log-line "[RUN] headless zero-fps request-frame wakes the loop"))
     (run-headless-zero-fps-request-frame-test)
-    (log-line "[PASS] headless zero-fps request-frame wakes the loop")
+    (when test-verbose
+      (log-line "[PASS] headless zero-fps request-frame wakes the loop"))
     (log-line "Executed 3 Lua tests")))
 
 {:name "headless-engine-run"

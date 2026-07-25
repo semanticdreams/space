@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local Activities (require :activities))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
 (local ObjectSelector (require :object-selector))
@@ -28,9 +29,11 @@
 
 (fn activity-switching-retains-presentations []
   (local app-keys [:active-world-runtime
-                   :canvas
-                   :graph
-                   :graph-view
+                    :canvas
+                    :graph
+                    :graph-map
+                    :graph-map-manager
+                    :graph-view
                    :drawing-controller
                    :drawing-render
                    :board
@@ -85,6 +88,7 @@
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (canvas:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
                                                         (or (and canvas.active-activity-slot
                                                                  canvas.active-activity-slot.ctx)
@@ -94,6 +98,7 @@
   (controller:add-layer "vector")
   (local runtime {:canvas canvas
                   :graph graph
+                  :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
                   :canvas-camera camera
@@ -103,6 +108,7 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph graph)
+  (set app.graph-map graph-map)
   (set app.drawing-controller controller)
   (local (ok result)
     (pcall
@@ -181,6 +187,7 @@
   (pcall DrawingActivityUnit.unload-drawing-activity!)
   (pcall BoardActivityUnit.unload-board-activity!)
   (object-selector:drop)
+  (graph-map:drop)
   (graph:drop)
   (canvas:drop)
   (focus-manager:drop)
@@ -605,6 +612,36 @@
 
 (table.insert tests {:name "Inactive runtime canvas surface clears activity sessions without active cleanup"
                      :fn inactive-runtime-canvas-surface-clears-activity-sessions-without-active-cleanup})
+
+(fn inactive-runtime-canvas-surface-does-not-double-drop-slot-root []
+  (local app-snapshot (snapshot-app-fields [:active-world-runtime]))
+  (set app.active-world-runtime {:id :other-runtime})
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local canvas (Canvas {:camera camera}))
+  (local slot (canvas:activate-activity-slot "graph"))
+  (var drop-count 0)
+  (local view {:drop (fn [_self]
+                       (set drop-count (+ drop-count 1))
+                       (assert (= drop-count 1)
+                               "Inactive runtime graph view should only be dropped once"))})
+  (set slot.root view)
+  (local runtime {:canvas canvas
+                  :graph-view view})
+  (local (ok result)
+    (pcall
+      (fn []
+        (HomeWorldCanvasRuntime.drop-runtime-canvas-surface! runtime)
+        (assert (= drop-count 1)
+                "Dropping inactive runtime canvas surface should not double-drop slot root")
+        (assert (= runtime.canvas nil)
+                "Dropping inactive runtime canvas surface should clear runtime canvas")
+        true)))
+  (camera:drop)
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Inactive runtime canvas surface does not double-drop slot root"
+                     :fn inactive-runtime-canvas-surface-does-not-double-drop-slot-root})
 
 (local main
   (fn []

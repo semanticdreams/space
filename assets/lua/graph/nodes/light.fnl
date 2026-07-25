@@ -97,12 +97,12 @@
   (set node.actions
        (if (= type-key "ambient")
            []
-           [{:name "Remove"
+            [{:name "Delete Light"
              :fn (fn [_button _event]
                    (assert (node:remove-light)
                            (.. "Failed to remove light " node.light-id))
-                   (when (and node.graph node.graph.remove-nodes)
-                     (node.graph:remove-nodes [node])))}]))
+                    (when (and node.graph node.graph.remove-nodes)
+                      (node.graph:remove-nodes [node] {:cause "shared-delete"})))}]))
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
@@ -113,8 +113,8 @@
                  (set node.light-record (clone-table (or current.record {})))
                  (set node.label (light-label type-key light-id))
                  (node.changed:emit node.light-record))
-               (when (and node.graph node.graph.remove-nodes)
-                 (node.graph:remove-nodes [node]))))))
+                (when (and node.graph node.graph.remove-nodes)
+                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
          (when changed-handler

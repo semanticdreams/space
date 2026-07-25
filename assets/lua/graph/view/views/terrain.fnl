@@ -69,7 +69,7 @@
                               (target:open-editor)))})
        build-ctx))
     (local remove-button
-      ((Button {:text "Remove"
+      ((Button {:text "Delete Terrain"
                 :variant :ghost
                 :enabled? (not (not (and target target.remove-terrain)))
                 :on-click (fn [_button _event]

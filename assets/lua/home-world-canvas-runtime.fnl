@@ -55,6 +55,13 @@
     (set (. runtime.activity-sessions activity-id) nil))
   true)
 
+(fn clear-slot-root! [runtime activity-id root]
+  (local slot (and runtime runtime.canvas runtime.canvas.activity-slot
+                   (runtime.canvas:activity-slot activity-id)))
+  (when (and slot (= slot.root root))
+    (set slot.root nil))
+  true)
+
 (fn drop-runtime-canvas-surface! [runtime]
   (if (= app.active-world-runtime runtime)
       (Activities.with-workspace-shell-change-suppressed
@@ -64,12 +71,15 @@
       (clear-runtime-activity-sessions! runtime))
   (set runtime.activity-sessions nil)
   (when runtime.drawing-render
+    (clear-slot-root! runtime "drawing" runtime.drawing-render)
     (runtime.drawing-render:drop)
     (set runtime.drawing-render nil))
   (when runtime.graph-view
+    (clear-slot-root! runtime "graph" runtime.graph-view)
     (runtime.graph-view:drop)
     (set runtime.graph-view nil))
   (when runtime.board-view
+    (clear-slot-root! runtime "board" runtime.board-view)
     (runtime.board-view:drop)
     (set runtime.board-view nil))
   (set runtime.board nil)

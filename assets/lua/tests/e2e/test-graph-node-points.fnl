@@ -20,7 +20,7 @@
       {:focus-manager focus-manager
        :builder (fn [ctx]
                   (set graph (Graph {:with-start false}))
-                  (set view (GraphView {:graph graph
+                  (set view (GraphView {:graph-map graph
                                         :ctx ctx
                                         :data-dir data-root}))
                   (local node-a (Graph.GraphNode {:key "node-a"

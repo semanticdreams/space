@@ -1,5 +1,7 @@
 (local glm (require :glm))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
+(local GraphKeyLoaders (require :graph/key-loaders))
 (local GraphView (require :graph/view))
 (local BuildContext (require :build-context))
 (local ObjectSelector (require :object-selector))
@@ -135,6 +137,21 @@
     (set ctx.icons (or options.icons default-icons))
     ctx)
 
+(fn register-graph-map-test-loaders [graph keys]
+    (local seen {})
+    (each [_ key (ipairs (or keys []))]
+        (local key-str (tostring key))
+        (local (colon-at _end) (string.find key-str ":" 1 true))
+        (local scheme (if colon-at (string.sub key-str 1 (- colon-at 1)) key-str))
+        (when (and (> (string.len scheme) 0)
+                   (not (. seen scheme))
+                   (not (graph:has-key-loader-for-key key-str)))
+            (set (. seen scheme) true)
+            (graph:register-key-loader scheme
+                (fn [loaded-key]
+                    (Graph.GraphNode {:key loaded-key})))))
+    graph)
+
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "graph-fs-node-tmp"))
 
@@ -216,7 +233,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local a (Graph.GraphNode {:key "a" :color (glm.vec4 0.2 0.6 1.0 1)}))
             (local b (Graph.GraphNode {:key "b" :color (glm.vec4 1 0.4 0.2 1)}))
             (graph:add-node a {:position (glm.vec3 0 0 0)})
@@ -245,7 +262,7 @@
                      (set raw-update-connect-count (+ raw-update-connect-count 1))
                      (original-connect signal handler)))
             (local view
-                (GraphView {:graph graph :ctx ctx}))
+                (GraphView {:graph-map graph :ctx ctx}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
             (set raw-updated-signal.connect original-connect)
             (assert (= raw-update-connect-count 0)
@@ -260,7 +277,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (view:drop)
             (local (ok err)
                 (pcall (fn []
@@ -275,7 +292,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (view:drop)
             (local (ok err)
                 (pcall (fn []
@@ -291,7 +308,7 @@
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
             (local node (Graph.GraphNode {:key "a" :label "Alpha"}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
             (view:drop)
             (local checks
@@ -498,6 +515,43 @@
                     (assert (= (graph:edge-count) 1))
                     (graph:drop))))))
 
+(fn graph-map-fs-code-actions-use-loader-backed-nodes []
+    (with-temp-data-dir
+        (fn [_root]
+            (with-temp-dir
+                (fn [root]
+                    (local fnl-file (fs.join-path root "main.fnl"))
+                    (fs.write-file fnl-file "(local x 1)\n")
+                    (local graph (Graph {:with-start false}))
+                    (GraphKeyLoaders.register graph {})
+                    (local graph-map (GraphMap.GraphMap {:graph graph :id "code-actions"}))
+                    (local dir-key (.. "fs:" (fs.absolute root)))
+                    (local dir-node (graph-map:load-by-key dir-key))
+                    (assert dir-node "GraphMap should load fs directory node")
+                    (var code-action nil)
+                    (each [_ action (ipairs (dir-node:actions))]
+                        (when (= action.name "Open as Code Graph")
+                            (set code-action action)))
+                    (assert code-action "FsNode directory should expose Open as Code Graph")
+                    (code-action.fn nil {})
+                    (local code-key (.. "code-dir:" (fs.absolute root)))
+                    (assert (graph-map:lookup code-key)
+                            "Open as Code Graph should add code-dir node to GraphMap")
+                    (local file-key (.. "fs:" (fs.absolute fnl-file)))
+                    (local file-node (graph-map:load-by-key file-key))
+                    (assert file-node "GraphMap should load fs file node")
+                    (var module-action nil)
+                    (each [_ action (ipairs (file-node:actions))]
+                        (when (= action.name "Open as Fennel Module")
+                            (set module-action action)))
+                    (assert module-action "FsNode .fnl should expose Open as Fennel Module")
+                    (module-action.fn nil {})
+                    (local module-key (.. "fnl-module:" (fs.absolute fnl-file)))
+                    (assert (graph-map:lookup module-key)
+                            "Open as Fennel Module should add fnl-module node to GraphMap")
+                    (graph-map:drop)
+                    (graph:drop))))))
+
 (fn fnl-module-node-view-adds-required-module-node []
     (with-temp-data-dir
         (fn [_root]
@@ -638,7 +692,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local center (glm.vec3 15 25 0))
             (view.layout:set-center-position center)
             (local node (Graph.GraphNode {:key "centered"}))
@@ -702,17 +756,29 @@
         (fn [_root]
             (with-temp-dir
                 (fn [root]
-                    (local original-hud app.hud)
-                    (local original-canvas app.canvas)
+                     (local original-hud app.hud)
+                     (local original-canvas app.canvas)
+                     (local original-graph-view app.graph-view)
                     (local added-opts [])
                     (local panel-target
                       {:add-panel-child (fn [_self opts]
                                           (table.insert added-opts opts)
                                           {:layout {:position (glm.vec3 0 0 0)}
                                            :drop (fn [_] nil)})})
-                    (set app.hud nil)
-                    (set app.canvas nil)
-                    (local (ok err)
+       (set app.hud nil)
+      (set app.canvas nil)
+      (set app.graph-view {:extra-panels []
+                           :register-extra-panel! (fn [self entry _target _element]
+                                                     (table.insert self.extra-panels entry)
+                                                     entry)
+                           :remove-extra-panel-entry! (fn [self kind node-key graph-map-id]
+                                                        (for [i (length self.extra-panels) 1 -1]
+                                                          (local entry (. self.extra-panels i))
+                                                          (when (and (= entry.kind kind)
+                                                                     (= entry.node-key node-key)
+                                                                     (= entry.graph-map-id graph-map-id))
+                                                            (table.remove self.extra-panels i))))})
+      (local (ok err)
                       (pcall
                         (fn []
                           (local ctx (make-ctx))
@@ -734,8 +800,9 @@
                                   "Ripgrep panel should prefill FsNode absolute path")
                           (view:drop)
                           (graph:drop))))
-                    (set app.hud original-hud)
-                    (set app.canvas original-canvas)
+       (set app.hud original-hud)
+      (set app.canvas original-canvas)
+      (set app.graph-view original-graph-view)
                     (when (not ok)
                         (error err)))))))
 
@@ -744,14 +811,26 @@
     (fn [_root]
       (local original-hud app.hud)
       (local original-canvas app.canvas)
+      (local original-graph-view app.graph-view)
       (local added-opts [])
       (local panel-target
         {:add-panel-child (fn [_self opts]
                             (table.insert added-opts opts)
                             {:layout {:position (glm.vec3 0 0 0)}
                              :drop (fn [_] nil)})})
-      (set app.hud nil)
+       (set app.hud nil)
       (set app.canvas nil)
+      (set app.graph-view {:extra-panels []
+                           :register-extra-panel! (fn [self entry _target _element]
+                                                     (table.insert self.extra-panels entry)
+                                                     entry)
+                           :remove-extra-panel-entry! (fn [self kind node-key graph-map-id]
+                                                        (for [i (length self.extra-panels) 1 -1]
+                                                          (local entry (. self.extra-panels i))
+                                                          (when (and (= entry.kind kind)
+                                                                     (= entry.node-key node-key)
+                                                                     (= entry.graph-map-id graph-map-id))
+                                                            (table.remove self.extra-panels i))))})
       (local (ok err)
         (pcall
           (fn []
@@ -766,14 +845,23 @@
             (assert (= (length added-opts) 1)
                     "LlmConversationView should open one messages panel")
             (local opts (. added-opts 1))
-            (assert (and opts opts.persistence)
-                    "Messages panel should carry persistence data")
-            (assert (= (and opts.persistence opts.persistence.node-key) conversation.key)
-                    "Messages panel should persist the conversation node key")
+            (assert (= (and opts opts.persistence opts.persistence.kind)
+                       "llm-conversation-messages-view-dialog")
+                    "Messages panel should carry target-level persistence for transfer sync")
+            (assert (= (and opts opts.persistence opts.persistence.node-key)
+                       conversation.key)
+                    "Messages panel persistence should identify the conversation node")
+            (assert (and app.graph-view app.graph-view.extra-panels
+                         (> (length app.graph-view.extra-panels) 0))
+                    "Messages panel should register in graph-view extra-panels")
+            (assert (= (. (. app.graph-view.extra-panels 1) :node-key)
+                       conversation.key)
+                    "Extra-panels entry should reference the conversation node key")
             (view:drop)
             (graph:drop))))
       (set app.hud original-hud)
       (set app.canvas original-canvas)
+      (set app.graph-view original-graph-view)
       (when (not ok)
         (error err))
       true)))
@@ -822,22 +910,24 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (register-graph-map-test-loaders graph ["a" "b" "c"])
+            (local map (GraphMap.GraphMap {:graph graph :id "test-remove-selected"}))
+            (local view (GraphView {:graph-map map
                                     :ctx ctx
                                     :selector selector}))
             (local a (Graph.GraphNode {:key "a"}))
             (local b (Graph.GraphNode {:key "b"}))
             (local c (Graph.GraphNode {:key "c"}))
-            (graph:add-node a {:position (glm.vec3 0 0 0)})
-            (graph:add-node b {:position (glm.vec3 10 0 0)})
-            (graph:add-node c {:position (glm.vec3 20 0 0)})
-            (graph:add-edge (Graph.GraphEdge {:source a :target b}))
-            (graph:add-edge (Graph.GraphEdge {:source b :target c}))
+            (map:add-node a {:position (glm.vec3 0 0 0)})
+            (map:add-node b {:position (glm.vec3 10 0 0)})
+            (map:add-node c {:position (glm.vec3 20 0 0)})
+            (map:add-edge (Graph.GraphEdge {:source a :target b}))
+            (map:add-edge (Graph.GraphEdge {:source b :target c}))
             (selector:set-selected [(. view.points b)])
             (local removed (view:remove-selected-nodes))
             (assert (= removed 1) "GraphView should report the number of removed nodes")
-            (assert (not (graph:lookup "b")) "Removed node should be cleared from lookup")
-            (assert (= (graph:edge-count) 0) "Edges connected to removed nodes should be dropped")
+            (assert (not (map:lookup "b")) "Removed node should be cleared from map lookup")
+            (assert (= (map:edge-count) 0) "Edges connected to removed nodes should be dropped from map")
             (local remaining-points (icollect [_ point (pairs view.points)] point))
             (assert (= (length remaining-points) 2)
                     (string.format "GraphView should retain two point records (got %s)"
@@ -847,8 +937,51 @@
                                    (length selector.selectables)))
             (assert (= (length view.selected-nodes) 0) "Graph selection should clear after removal")
             (view:drop)
+            (map:drop)
             (graph:drop)
             (selector:drop))))
+
+(fn graph-removing-node-closes-live-scene-cube-panel []
+    (with-temp-data-dir
+        (fn [_root]
+            (local original-scene app.scene)
+            (local removed [])
+            (local scene {:scene-children []})
+            (set scene.remove-panel-child
+                 (fn [self element]
+                     (table.insert removed element)
+                     (for [i (length self.scene-children) 1 -1]
+                         (when (= (. self.scene-children i :element) element)
+                             (table.remove self.scene-children i)))))
+            (local (ok err)
+                (pcall
+                    (fn []
+                        (set app.scene scene)
+                        (local ctx (make-ctx))
+                        (local graph (Graph {:with-start false}))
+                        (register-graph-map-test-loaders graph ["test:cube-node"])
+                        (local graph-map (GraphMap.GraphMap {:graph graph :id "cube-map"}))
+                        (local view (GraphView {:graph-map graph-map :ctx ctx}))
+                        (local node (graph-map:load-by-key "test:cube-node"))
+                        (local element {:layout (Layout {:name "live-cube-panel"})})
+                        (table.insert scene.scene-children
+                                      {:element element
+                                       :persistence {:kind "graph-node-cube"
+                                                     :node-key "test:cube-node"
+                                                     :graph-map-id "cube-map"}})
+                        (graph-map:remove-nodes [node])
+                        (assert (= (length removed) 1)
+                                "Removing a map node should close its live scene cube panel")
+                        (assert (= (. removed 1) element)
+                                "Removed scene panel should be the matching cube element")
+                        (assert (= (length scene.scene-children) 0)
+                                "Scene should not retain the removed cube panel")
+                        (view:drop)
+                        (graph-map:drop)
+                        (graph:drop))))
+            (set app.scene original-scene)
+            (when (not ok)
+                (error err)))))
 
 (fn quit-node-view-invokes-handler []
     (local ctx (make-ctx))
@@ -959,7 +1092,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {}))
-            (local view-controller (GraphView {:graph graph
+            (local view-controller (GraphView {:graph-map graph
                                                 :ctx ctx
                                                 :selector selector}))
             (local start graph.start)
@@ -1011,7 +1144,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local state {:measure (glm.vec3 73 37 0)
                           :constrained-measure (glm.vec3 70 32 0)})
@@ -1080,7 +1213,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local node (Graph.GraphNode {:key "selected-toggle"
@@ -1114,7 +1247,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local node (Graph.GraphNode {:key "center-toggle"
                                           :preview (tracked-preview {})}))
@@ -1156,7 +1289,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local a (Graph.GraphNode {:key "sync-a"
@@ -1208,7 +1341,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (fn assert-failed-expansion-keeps-compact-point [node expected-error]
@@ -1253,7 +1386,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local first-state {})
             (local second-state {})
@@ -1289,7 +1422,7 @@
                                                 opts)
                            :remove-panel-child (fn [_self _element] nil)})
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :view-target target}))
             (var first-opened 0)
@@ -1323,6 +1456,90 @@
             (view:drop)
             (graph:drop))))
 
+(fn graph-node-view-replacement-preserves-panel-placement []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (var captured-element nil)
+            (var captured-state nil)
+            (var last-add-opts nil)
+            (var last-removed nil)
+            (local resolved-panel {:location :float
+                                   :position [55 65 0]
+                                   :size [420 340 0]
+                                   :rotation [1 0 0 0]})
+            (local target {:children []
+                           :panel-placement-options (fn [_self entry]
+                                                       {:location (or entry.location ":float")
+                                                        :position (or entry.position resolved-panel.position)
+                                                        :size (or entry.size resolved-panel.size)
+                                                        :rotation (or entry.rotation resolved-panel.rotation)})
+                           :add-panel-child (fn [self opts]
+                                               (set last-add-opts opts)
+                                               (table.insert self.children opts)
+                                               opts)
+                           :remove-panel-child (fn [self element]
+                                                (set last-removed element)
+                                                (for [i (length self.children) 1 -1]
+                                                    (when (= (. self.children i) element)
+                                                        (table.remove self.children i))))
+                           :capture-panel-element-state (fn [_self element]
+                                                           (set captured-element element)
+                                                           (set captured-state {:location :float
+                                                                                 :position [50 60 0]
+                                                                                 :size [400 300 0]})
+                                                           captured-state)})
+            (local graph (Graph {:with-start false}))
+            (register-graph-map-test-loaders graph ["panel-swap"])
+            (local map (GraphMap.GraphMap {:graph graph :id "test-panel-placement"}))
+            (local first (Graph.GraphNode {:key "panel-swap"
+                                           :view (fn [_node]
+                                                     (fn [_ctx]
+                                                         {:layout (Layout {:name "first-panel-view"})}))}))
+            (local second (Graph.GraphNode {:key "panel-swap"
+                                            :view (fn [_node]
+                                                      (fn [_ctx]
+                                                          {:layout (Layout {:name "second-panel-view"})}))}))
+            (local view (GraphView {:graph-map map
+                                    :ctx ctx
+                                    :view-target target}))
+            (map:add-node first {:position (glm.vec3 0 0 0)})
+            (view.views:open first)
+            (assert (= (length target.children) 1)
+                    "Opening node view should add a panel child")
+            (local first-element (. target.children 1))
+            (assert first-element "First node should have a panel element")
+            ;; Replace the node to trigger node-replaced -> move-view (via GraphMap)
+            (map:add-node second)
+            (assert captured-element
+                    "Node replacement should capture panel element state from old node")
+            (assert (= captured-element first-element)
+                    "Captured element should be the old node's panel element")
+            (assert captured-state "Node replacement should produce captured state")
+            (assert (= (. captured-state :position 1) 50)
+                    "Captured state should preserve panel position x")
+            (assert last-removed
+                    "Node replacement should remove the old panel child")
+            (assert (= last-removed first-element)
+                    "Removed element should be the old node's panel element")
+            (assert (= (length target.children) 1)
+                    "Replacement node should have exactly one panel child")
+            (local second-element (. target.children 1))
+            (assert second-element "Replacement node should have a panel element")
+            (assert (not (= second-element first-element))
+                    "Replacement node should create a new panel element, not reuse the old one")
+            (assert last-add-opts "Replacement node should call add-panel-child")
+            ;; Verify the captured placement was forwarded through to add-panel-child opts
+            (assert (= (. last-add-opts :position 1) 50)
+                    "add-panel-child opts position.x should be from captured state")
+            (assert (= (. last-add-opts :position 2) 60)
+                    "add-panel-child opts position.y should be from captured state")
+            (assert (= (. last-add-opts :size 1) 400)
+                    "add-panel-child opts size.x should be from captured state")
+            (view:drop)
+            (map:drop)
+            (graph:drop))))
+
 (fn graph-expanded-card-replacement-preserves-selection []
     (with-temp-data-dir
         (fn [_root]
@@ -1331,7 +1548,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local first-state {})
@@ -1368,7 +1585,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (local first-state {})
             (local first (Graph.GraphNode {:key "swap-fail"
@@ -1423,7 +1640,7 @@
                                 :persist (fn [_self _points _force?] nil)
                                 :schedule-save (fn [_self] nil)})
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :persistence persistence}))
             (local node (Graph.GraphNode {:key "remove-expanded"
@@ -1456,7 +1673,7 @@
                             (fn [_root]
                                 (local ctx (make-ctx))
                                 (local graph (Graph {:with-start false}))
-                                (local view (GraphView {:graph graph :ctx ctx}))
+                                (local view (GraphView {:graph-map graph :ctx ctx}))
                                 (local node (Graph.GraphNode {:key "remove-resize"
                                                               :preview (tracked-preview {})}))
                                 (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -1488,7 +1705,7 @@
                                 :persist (fn [_self _points _force?] nil)
                                 :schedule-save (fn [_self] nil)})
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :persistence persistence}))
             (local node (Graph.GraphNode {:key "collapse-remove-size"
@@ -1528,6 +1745,8 @@
             (local ctx (make-ctx))
             (var view nil)
             (local graph (Graph {:with-start false}))
+            (register-graph-map-test-loaders graph ["header-button-test"])
+            (local map (GraphMap.GraphMap {:graph graph :id "test-header-buttons"}))
             (var opened? false)
             (var menu-opened? false)
             (var menu-actions nil)
@@ -1544,10 +1763,10 @@
                                                                 (fn [_ctx]
                                                                     {:layout (Layout {:name "header-open-test-view"})}))
                                                       :preview (tracked-preview {})}))
-                        (set view (GraphView {:graph graph
+                        (set view (GraphView {:graph-map map
                                                :ctx ctx
                                                :view-target target}))
-                        (graph:add-node node {:position (glm.vec3 0 0 0)})
+                        (map:add-node node {:position (glm.vec3 0 0 0)})
                         (local point (. view.points node))
                         (point:on-double-click {})
                         (local card (. view.points node))
@@ -1570,17 +1789,29 @@
                         (assert menu-opened? "Header menu button should open a menu")
                         (assert menu-actions "Header menu should include actions")
                         (assert (= (length menu-actions) 4)
-                                "Header menu should include Open, Collapse, cube, and Remove")
+                                "Header menu should include Open, Collapse, cube, and Remove from Map")
                         (assert (= (. menu-actions 1 :name) "Open"))
                         (assert (= (. menu-actions 2 :name) "Collapse"))
-                        (assert (= (. menu-actions 4 :name) "Remove"))
+                        (assert (= (. menu-actions 4 :name) "Remove from Map"))
                         ;; Test collapse button
                         (local collapse-button (. card.header-bar.children 2 :element))
                         (collapse-button:on-click {})
                         (assert (not (. view.points node :_card-size))
-                                "Header collapse button should collapse the card back to compact"))))
+                                "Header collapse button should collapse the card back to compact")
+                        ;; Re-expand and test Remove from Map action
+                        (local compact-after-collapse (. view.points node))
+                        (compact-after-collapse:on-double-click {})
+                        (assert (. view.points node :_card-size)
+                                "Should be re-expanded after second double-click")
+                        (local menu-button-2 (. (. view.points node :header-bar :children 4) :element))
+                        (menu-button-2:on-click {})
+                        (assert menu-actions "Re-expanded header menu should include actions")
+                        ((. menu-actions 4 :fn) nil {})
+                        (assert (not (map:lookup "header-button-test"))
+                                "Remove from Map should remove the node from the map"))))
             (set app.menu-manager original-menu-manager)
             (when view (view:drop))
+            (map:drop)
             (graph:drop)
             (when (not ok)
                 (error err)))))
@@ -1600,7 +1831,7 @@
                :unregister-double-click (fn [_self obj] nil)})
             (local ctx (make-ctx {:clickables instrumented-clickables}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "reg-test"
                                           :preview (tracked-preview {})}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -1628,6 +1859,8 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
+            (register-graph-map-test-loaders graph ["menu-node"])
+            (local map (GraphMap.GraphMap {:graph graph :id "test-menu"}))
             (var opened nil)
             (var custom-invoked 0)
             (var cube-invoked 0)
@@ -1645,20 +1878,20 @@
                                                      :icon "build"
                                                      :fn (fn [_button _event]
                                                              (set custom-invoked (+ custom-invoked 1)))}]}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map map
                                     :ctx ctx}))
-            (graph:add-node node {:position (glm.vec3 10 12 0)})
+            (map:add-node node {:position (glm.vec3 10 12 0)})
             (local point (. view.points node))
             (assert point.on-right-click "GraphView should attach right click handler to node point")
             (point:on-right-click {:point (glm.vec3 3 4 0)})
             (assert opened "Right click should open a menu")
             (assert (= (length opened.actions) 5)
-                    "Node menu should include Open, Expand, cube, custom actions, and Remove")
+                    "Node menu should include Open, Expand, cube, custom actions, and Remove from Map")
             (assert (= (. opened.actions 1 :name) "Open"))
             (assert (= (. opened.actions 2 :name) "Expand"))
             (assert (= (. opened.actions 3 :name) "cube"))
             (assert (= (. opened.actions 4 :name) "Custom Action"))
-            (assert (= (. opened.actions 5 :name) "Remove"))
+            (assert (= (. opened.actions 5 :name) "Remove from Map"))
             ((. opened.actions 3 :fn) nil {})
             (assert (= cube-invoked 1)
                     "Cube action should create one scene graph-node cube")
@@ -1666,9 +1899,10 @@
             (assert (= custom-invoked 1)
                     "Custom node action should be callable from the context menu")
             ((. opened.actions 5 :fn) nil {})
-            (assert (not (graph:lookup "menu-node"))
-                    "Remove action should remove the node from the graph")
+            (assert (not (map:lookup "menu-node"))
+                    "Remove from Map action should remove the node from the map")
             (view:drop)
+            (map:drop)
             (graph:drop)
             (set app.menu-manager original-menu-manager)
             (set app.scene original-scene))))
@@ -1682,7 +1916,7 @@
             (local original-menu-manager app.menu-manager)
             (set app.menu-manager nil)
             (local node (Graph.GraphNode {:key "late-menu-node"}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx}))
             (graph:add-node node {:position (glm.vec3 1 1 0)})
             (set app.menu-manager {:open (fn [_self opts]
@@ -1778,7 +2012,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local node (Graph.GraphNode {:key "n"}))
@@ -1814,7 +2048,7 @@
                                                      (when (= (. self.children i) element)
                                                          (table.remove self.children i))))})
             (local graph (Graph {:with-start false}))
-            (local view-controller (GraphView {:graph graph
+            (local view-controller (GraphView {:graph-map graph
                                                :view-target target
                                                :ctx ctx
                                                :selector selector}))
@@ -1835,7 +2069,7 @@
             (view-controller:drop)
             (assert (= (length target.children) 0)
                     "Inline node expansion should not open target panel views")
-            (local view-controller-2 (GraphView {:graph graph
+            (local view-controller-2 (GraphView {:graph-map graph
                                                   :view-target target
                                                   :ctx ctx
                                                   :selector selector}))
@@ -1944,7 +2178,7 @@
                                                     :world-manager manager
                                                     :terrain-id "terrain-a"}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
-            (local views (GraphViewNodeViews {:graph graph
+            (local views (GraphViewNodeViews {:graph-map graph
                                               :ctx ctx
                                               :view-target target}))
             (views:open node)
@@ -2089,7 +2323,7 @@
                                                     :world-manager manager
                                                     :terrain-id "terrain-a"}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
-            (local views (GraphViewNodeViews {:graph graph
+            (local views (GraphViewNodeViews {:graph-map graph
                                               :ctx ctx
                                               :view-target target}))
             (views:open node)
@@ -2237,7 +2471,7 @@
                                                     :world-manager manager
                                                     :terrain-id "terrain-a"}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
-            (local views (GraphViewNodeViews {:graph graph
+            (local views (GraphViewNodeViews {:graph-map graph
                                               :ctx ctx
                                               :view-target target}))
             (views:open node)
@@ -2363,7 +2597,7 @@
             (local ctx (make-ctx))
             (set ctx.theme.card {:background light-card-background})
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "theme-card-node"
                                           :preview (tracked-preview {})}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -2387,7 +2621,7 @@
             (local ctx (make-ctx))
             (set ctx.theme.card {:background light-card-background})
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "outline-node"
                                           :preview (tracked-preview {})}))
             (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -2680,7 +2914,7 @@
                             (fn [_root]
                                 (local ctx (make-ctx))
                                 (local graph (Graph {:with-start false}))
-                                (local view (GraphView {:graph graph :ctx ctx}))
+                                (local view (GraphView {:graph-map graph :ctx ctx}))
                                 (local node (Graph.GraphNode {:key "resizable-node"
                                                               :preview (tracked-preview {})}))
                                 (graph:add-node node {:position (glm.vec3 0 0 0)})
@@ -2708,7 +2942,7 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "border-node" :size 8}))
             (graph:add-node node {:position (glm.vec3 0 0 0) :run-force? false})
             (local point (. view.points node))
@@ -2735,7 +2969,7 @@
             (local ctx (make-ctx))
             (local focus-manager (. ctx.focus :manager))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "auto-focus-node" :size 6}))
             (focus-manager:arm-auto-focus {:event {:mod 0}})
             (graph:add-node node {:position (glm.vec3 0 0 0) :run-force? false})
@@ -2781,7 +3015,7 @@
                         (local ctx (make-ctx))
                         (local focus-manager (. ctx.focus :manager))
                         (set graph (Graph {:with-start false}))
-                        (set view (GraphView {:graph graph
+                        (set view (GraphView {:graph-map graph
                                               :ctx ctx
                                               :pointer-target pointer-target}))
                         (local node (Graph.GraphNode {:key "logical-click-focus"
@@ -2833,7 +3067,7 @@
                              :unregister (fn [_self node]
                                              (table.insert unregistered node))})
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :movables movables
                                     :persistence persistence}))
@@ -2877,7 +3111,7 @@
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :movables movables}))
             (local node (Graph.GraphNode {:key "drag"}))
@@ -2928,7 +3162,7 @@
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :movables movables}))
             (local a (Graph.GraphNode {:key "a"}))
@@ -2954,6 +3188,30 @@
             (set app.active-interaction-surface original-active-surface)
             (set app.scene-interactive? original-scene-interactive?)
             (set app.canvas-interactive? original-canvas-interactive?))))
+
+(fn graph-persistence-rejects-unsafe-map-id []
+    (with-temp-data-dir
+        (fn [root]
+            (local unsafe-ids ["." "/" ".." "a.b" "a/b" "a\\b"])
+            (each [_ unsafe-id (ipairs unsafe-ids)]
+                (var caught? false)
+                (pcall (fn []
+                           (GraphViewPersistence {:data-dir root :map-id unsafe-id})
+                           (set caught? true)))
+                (assert (not caught?)
+                        (.. "GraphViewPersistence should reject unsafe map-id: " unsafe-id)))
+            (var caught-empty? false)
+            (pcall (fn []
+                       (GraphViewPersistence {:data-dir root :map-id ""})
+                       (set caught-empty? true)))
+            (assert (not caught-empty?)
+                    "GraphViewPersistence should reject empty map-id")
+            (var caught-number? false)
+            (pcall (fn []
+                       (GraphViewPersistence {:data-dir root :map-id 123})
+                       (set caught-number? true)))
+            (assert (not caught-number?)
+                    "GraphViewPersistence should reject numeric map-id"))))
 
 (fn graph-persistence-class-saves-and-restores []
     (with-temp-data-dir
@@ -2981,6 +3239,145 @@
             (assert (= updated-pos.y 9))
             (assert (= updated-pos.z 10)))))
 
+(fn graph-persistence-filters-wrong-map-panels []
+    (with-temp-data-dir
+        (fn [root]
+            (local graph-dir (fs.join-path (fs.join-path (fs.join-path root "graph") "maps") "main"))
+            (fs.create-dirs graph-dir)
+            (local metadata-path (fs.join-path graph-dir "metadata.json"))
+            (JsonUtils.write-json! metadata-path
+                                   {:positions {}
+                                    :panels [{:kind "graph-node-view"
+                                              :node-key "keep"
+                                              :graph-map-id "main"}
+                                             {:kind "graph-node-view"
+                                              :node-key "drop"
+                                              :graph-map-id "other"}]
+                                    :extra_panels [{:kind "graph-node-cube"
+                                                    :node-key "cube-keep"
+                                                    :graph-map-id "main"}
+                                                   {:kind "graph-node-cube"
+                                                    :node-key "cube-drop"
+                                                    :graph-map-id "other"}]})
+            (local persistence (GraphViewPersistence {:data-dir root :map-id "main"}))
+            (local panels (persistence:saved-panels))
+            (local extra-panels (persistence:saved-extra-panels))
+            (assert (= (length panels) 1)
+                    "GraphViewPersistence should filter wrong-map node-view panels")
+            (assert (= (. panels 1 :node-key) "keep"))
+            (assert (= (length extra-panels) 1)
+                    "GraphViewPersistence should filter wrong-map extra panels")
+            (assert (= (. extra-panels 1 :node-key) "cube-keep"))
+            (local compacted (json.loads (fs.read-file metadata-path)))
+            (assert (= (length compacted.panels) 1)
+                    "GraphViewPersistence should compact wrong-map panels on disk")
+            (assert (= (. compacted.panels 1 :node-key) "keep"))
+            (assert (= (length compacted.extra_panels) 1)
+                    "GraphViewPersistence should compact wrong-map extra panels on disk")
+            (assert (= (. compacted.extra_panels 1 :node-key) "cube-keep")))))
+
+(fn graph-view-accepts-transitional-graph-option []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local view (GraphView {:graph graph :ctx ctx}))
+            (assert view "GraphView should accept documented transitional :graph option")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-view-restores-extra-panel-size-and-rotation []
+    (with-temp-data-dir
+        (fn [_root]
+            (local original-scene app.scene)
+            (var captured nil)
+            (local (ok err)
+                (pcall
+                    (fn []
+                        (set app.scene {:add-graph-node-cube
+                                        (fn [_self opts]
+                                            (set captured opts)
+                                            {:ok true})})
+                        (local ctx (make-ctx))
+                        (local graph (Graph {:with-start false}))
+                        (local graph-map (GraphMap.GraphMap {:graph graph :id "cube-map"}))
+                        (local view (GraphView {:graph-map graph-map :ctx ctx}))
+                        (view:restore-state {:extra_panels [{:kind "graph-node-cube"
+                                                             :node-key "cube-node"
+                                                             :graph-map-id "cube-map"
+                                                             :panel {:node-key "cube-node"
+                                                                     :size [7 8 9]
+                                                                     :rotation [0.5 0.5 0.5 0.5]}}]})
+                        (assert captured "GraphView should call scene graph-node-cube restorer")
+                        (assert (= captured.size.x 7)
+                                "GraphView should restore extra panel size x")
+                        (assert (= captured.size.y 8)
+                                "GraphView should restore extra panel size y")
+                        (assert (= captured.size.z 9)
+                                "GraphView should restore extra panel size z")
+                        (assert (= captured.rotation.w 0.5)
+                                 "GraphView should restore extra panel rotation")
+                        (assert (= (length view.extra-panels) 1)
+                                "Restored cube extra panel should remain registered for capture")
+                        (assert (= (length view.extra-panel-runtimes) 1)
+                                "Restored cube extra panel should keep runtime target and element")
+                        (local captured-state (view:capture-state))
+                        (assert (= (length captured-state.extra_panels) 1)
+                                "GraphView capture should preserve restored cube extra panel")
+                        (assert (= (. captured-state.extra_panels 1 :node-key) "cube-node"))
+                        (view:drop)
+                        (graph-map:drop)
+                        (graph:drop))))
+            (set app.scene original-scene)
+            (when (not ok)
+                (error err)))))
+
+(fn graph-view-extra-panel-restore-errors-on-missing-restorer []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+            (local view (GraphView {:graph-map graph-map :ctx ctx}))
+            (local (ok err)
+                (pcall (fn []
+                         (view:restore-state
+                           {:extra_panels [{:kind "missing-extra-panel"
+                                            :node-key "missing-node"
+                                            :graph-map-id "main"
+                                            :restorer-module "graph/view/views/not-a-real-restorer"}]}))))
+            (assert (not ok)
+                    "GraphView extra panel restore should fail on missing restorer module")
+            (assert (string.find (tostring err) "failed requiring extra panel restorer module" 1 true)
+                    "GraphView extra panel restore error should identify bad restorer module")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop))))
+
+(fn graph-view-cube-extra-panel-restore-errors-without-scene-restorer []
+    (with-temp-data-dir
+        (fn [_root]
+            (local original-scene app.scene)
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+            (local view (GraphView {:graph-map graph-map :ctx ctx}))
+            (set app.scene nil)
+            (local (ok err)
+                (pcall (fn []
+                         (view:restore-state
+                           {:extra_panels [{:kind "graph-node-cube"
+                                            :node-key "cube-node"
+                                            :graph-map-id "main"}]}))))
+            (set app.scene original-scene)
+            (assert (not ok)
+                    "GraphView graph-node-cube extra panel restore should fail without scene restorer")
+            (assert (string.find (tostring err) "requires app.scene.add-graph-node-cube" 1 true)
+                    "GraphView graph-node-cube extra panel restore error should identify missing scene restorer")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop))))
+
 
 (fn graph-restores-saved-node-position []
     (with-temp-data-dir
@@ -2991,7 +3388,7 @@
             (JsonUtils.write-json! metadata-path {:positions {:persisted [12 34 0]}})
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "persisted"}))
             (graph:add-node node {})
             (local pos (view:get-position node))
@@ -3007,13 +3404,13 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local a (Graph.GraphNode {:key "a"}))
             (local b (Graph.GraphNode {:key "b"}))
             (graph:add-node a {:position (glm.vec3 -60 0 0)})
             (graph:add-node b {:position (glm.vec3 60 0 0)})
             (graph:add-edge (Graph.GraphEdge {:source a :target b}))
-            (local graph-dir (fs.join-path (appdirs.user-data-dir "space") "graph-view"))
+            (local graph-dir (fs.join-path (fs.join-path (appdirs.user-data-dir "space") "graph" "maps") "main"))
             (local metadata-path (fs.join-path graph-dir "metadata.json"))
             (for [i 1 200]
                 (view:update 0.016))
@@ -3032,13 +3429,13 @@
         (fn [_root]
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
             (local node (Graph.GraphNode {:key "sticky"}))
             (graph:add-node node {:position (glm.vec3 7 9 0)})
             (view:drop)
             (graph:drop)
             (local graph2 (Graph {:with-start false}))
-            (local view2 (GraphView {:graph graph2 :ctx (make-ctx)}))
+            (local view2 (GraphView {:graph-map graph2 :ctx (make-ctx)}))
             (local node2 (Graph.GraphNode {:key "sticky"}))
             (graph2:add-node node2 {})
             (local pos (view2:get-position node2))
@@ -3061,7 +3458,8 @@
                     (when id
                         (Graph.GraphNode {:key key
                                           :label id}))))
-            (local view (GraphView {:graph graph :ctx ctx}))
+            (local graph-map (GraphMap.GraphMap {:graph graph}))
+            (local view (GraphView {:graph-map graph-map :ctx ctx}))
             (local original-start view.graph-layout.start)
             (local original-label-update view.labels.update)
             (var start-count 0)
@@ -3082,11 +3480,12 @@
                     "GraphView restore should start layout once for the whole batch")
             (assert (= label-update-count 1)
                     "GraphView restore should refresh labels once for the whole batch")
-            (assert (= (graph:node-count) 2))
-            (assert (= (graph:edge-count) 1))
-            (assert (. view.points (graph:lookup "test:a")))
-            (assert (. view.points (graph:lookup "test:b")))
+            (assert (= (graph-map:node-count) 2))
+            (assert (= (graph-map:edge-count) 1))
+            (assert (. view.points (graph-map:lookup "test:a")))
+            (assert (. view.points (graph-map:lookup "test:b")))
             (view:drop)
+            (graph-map:drop)
             (graph:drop))))
 
 (fn graph-view-updates-node-labels-without-lod-change []
@@ -3095,7 +3494,7 @@
             (local ctx (make-ctx))
             (local graph (Graph {:with-start false}))
             (local camera {:position (glm.vec3 0 0 0)})
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :camera camera}))
             (local node (Graph.GraphNode {:key "label-node"
@@ -3137,6 +3536,8 @@
                      :fn fs-node-actions-open-code-dir-for-directories})
 (table.insert tests {:name "Fs node actions open fnl-module for .fnl files"
                      :fn fs-node-actions-open-fnl-module-for-fnl-files})
+(table.insert tests {:name "GraphMap fs code actions use loader-backed nodes"
+                     :fn graph-map-fs-code-actions-use-loader-backed-nodes})
 (table.insert tests {:name "Code dir node view adds edges for dir and module entries"
                      :fn code-dir-node-view-adds-subdir-and-module-nodes})
 (table.insert tests {:name "Fnl module node view adds dependency module edge"
@@ -3147,6 +3548,7 @@
                      :fn text-module-node-view-exposes-edit-and-open-parent-actions})
 (table.insert tests {:name "Table node view adds edges for entries" :fn table-node-view-adds-child-nodes})
 (table.insert tests {:name "GraphView removes selected nodes and related edges" :fn graph-removes-selected-nodes-and-edges})
+(table.insert tests {:name "GraphView removing node closes live scene cube panel" :fn graph-removing-node-closes-live-scene-cube-panel})
 (table.insert tests {:name "GraphView expands node inline on double click" :fn graph-expands-node-inline-on-double-click})
 (table.insert tests {:name "GraphView expanded card uses preview and measures child"
                      :fn graph-expanded-card-uses-preview-and-measures-child})
@@ -3166,6 +3568,8 @@
                       :fn graph-expanded-card-replacement-preserves-selection})
 (table.insert tests {:name "GraphView failed replacement collapses to compact"
                       :fn graph-expanded-card-replacement-failure-collapses-to-compact})
+(table.insert tests {:name "GraphView node view replacement preserves panel placement"
+                      :fn graph-node-view-replacement-preserves-panel-placement})
 (table.insert tests {:name "GraphView removing expanded node clears persisted presentation"
                       :fn graph-removing-expanded-node-clears-persisted-presentation})
 (table.insert tests {:name "GraphView removing expanded node unregisters resize target"
@@ -3216,12 +3620,540 @@
 (table.insert tests {:name "Graph movables register and clean up drag targets" :fn graph-movables-module-registers-and-cleans-up})
 (table.insert tests {:name "Graph nodes register with movables for dragging" :fn graph-nodes-are-movable})
 (table.insert tests {:name "Graph drag respects latest force layout position" :fn graph-drag-respects-force-layout-position})
+(table.insert tests {:name "GraphViewPersistence rejects unsafe map-id" :fn graph-persistence-rejects-unsafe-map-id})
 (table.insert tests {:name "GraphViewPersistence saves and restores positions" :fn graph-persistence-class-saves-and-restores})
+(table.insert tests {:name "GraphViewPersistence filters wrong-map panels" :fn graph-persistence-filters-wrong-map-panels})
+(table.insert tests {:name "GraphView accepts transitional graph option" :fn graph-view-accepts-transitional-graph-option})
+(table.insert tests {:name "GraphView restores extra panel size and rotation" :fn graph-view-restores-extra-panel-size-and-rotation})
+(table.insert tests {:name "GraphView extra panel restore errors on missing restorer"
+                      :fn graph-view-extra-panel-restore-errors-on-missing-restorer})
+(table.insert tests {:name "GraphView cube extra panel restore requires scene restorer"
+                     :fn graph-view-cube-extra-panel-restore-errors-without-scene-restorer})
 (table.insert tests {:name "Graph restores saved node position" :fn graph-restores-saved-node-position})
 (table.insert tests {:name "GraphView saves positions after force layout stabilizes" :fn graph-saves-positions-after-stabilizing})
 (table.insert tests {:name "GraphView keeps saved positions when rebuilt" :fn graph-keeps-saved-positions-when-rebuilt})
 (table.insert tests {:name "GraphView batches restore graph state" :fn graph-view-batches-restore-graph-state})
 (table.insert tests {:name "GraphView updates node labels without LOD change" :fn graph-view-updates-node-labels-without-lod-change})
+
+(fn graph-view-capture-restore-selected-node-keys []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local node (Graph.GraphNode {:key "a" :label "A"}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
+            (graph:add-node node {:position (glm.vec3 0 0 0)})
+            (local state (view:capture-state))
+            (assert (= (type state.selected_node_keys) :table)
+                    "capture-state should emit selected_node_keys")
+            (assert (= (length state.selected_node_keys) 0)
+                    "capture-state should emit empty selected_node_keys when nothing selected")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-view-capture-restore-preserves-selection []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (local a (Graph.GraphNode {:key "a" :label "A"}))
+            (local b (Graph.GraphNode {:key "b" :label "B"}))
+            (local view (GraphView {:graph-map graph :ctx ctx}))
+            (graph:add-node a {:position (glm.vec3 0 0 0)})
+            (graph:add-node b {:position (glm.vec3 10 0 0)})
+            (view.selection:set-selection [a b])
+            (local captured (view:capture-state))
+            (assert (= (length captured.selected_node_keys) 2)
+                    "capture-state should include selected node keys")
+            (view.selection:set-selection [])
+            (assert (= (length view.selected-nodes) 0)
+                    "selection should be cleared before restore")
+            (view:restore-state captured)
+            (assert (= (length view.selected-nodes) 2)
+                    "restore-state should restore selection from captured selected_node_keys")
+            (view:drop)
+            (graph:drop))))
+
+(fn graph-node-view-capture-includes-graph-map-id []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local target {:children []
+                           :add-panel-child (fn [self opts]
+                                               (table.insert self.children opts)
+                                               opts)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))})
+            (local graph (Graph {:with-start false}))
+            (register-graph-map-test-loaders graph ["scoped-node"])
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "scoped-map"}))
+            (local node (Graph.GraphNode {:key "scoped-node"
+                                          :view (fn [_node]
+                                                  (fn [_ctx]
+                                                      {:layout (Layout {:name "scoped-node-view"})}))}))
+            (local view (GraphView {:graph-map graph-map
+                                    :ctx ctx
+                                    :view-target target}))
+            (graph-map:add-node node)
+            (view.views:open node)
+            (local state (view:capture-state))
+            (local panel (. state.views.open-views 1))
+            (assert (= panel.graph-map-id "scoped-map")
+                    "Captured graph node panel should include graph-map-id")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop))))
+
+(fn graph-view-capture-persists-node-view-panels []
+    (with-temp-data-dir
+        (fn [root]
+            (local ctx (make-ctx))
+            (local target {:children []
+                           :add-panel-child (fn [self opts]
+                                               (table.insert self.children opts)
+                                               opts)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))
+                           :capture-panel-element-state (fn [_self _element]
+                                                          {:position [11 12 0]
+                                                           :size [40 20 0]})})
+            (local graph (Graph {:with-start false}))
+            (register-graph-map-test-loaders graph ["persist-node"])
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "persist-panels"}))
+            (local node (Graph.GraphNode {:key "persist-node"
+                                          :view (fn [_node]
+                                                  (fn [_ctx]
+                                                      {:layout (Layout {:name "persist-node-view"})}))}))
+            (local view (GraphView {:graph-map graph-map
+                                    :ctx ctx
+                                    :view-target target}))
+            (graph-map:add-node node)
+            (view.views:open node)
+            (view:capture-state)
+            (local reloaded (GraphViewPersistence {:data-dir root :map-id "persist-panels"}))
+            (local panels (reloaded:saved-panels))
+            (local panel (. panels 1))
+            (local panel-placement (and panel panel.panel))
+            (assert (= (length panels) 1)
+                    "GraphView capture-state should persist one node-view panel")
+            (assert (= panel.node-key "persist-node")
+                    "Persisted node-view panel should keep node-key")
+            (assert (= panel.graph-map-id "persist-panels")
+                    "Persisted node-view panel should keep graph-map-id")
+            (assert (= (. panel-placement.position 1) 11)
+                    "Persisted node-view panel should keep captured placement")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop))))
+
+(fn graph-view-restore-rejects-unscoped-node-view-panel []
+    (with-temp-data-dir
+        (fn [_root]
+            (local ctx (make-ctx))
+            (local graph (Graph {:with-start false}))
+            (register-graph-map-test-loaders graph ["scoped-node"])
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "scoped-map"}))
+            (local node (Graph.GraphNode {:key "scoped-node"
+                                          :view (fn [_node]
+                                                  (fn [_ctx]
+                                                      {:layout (Layout {:name "scoped-node-view"})}))}))
+            (local view (GraphView {:graph-map graph-map :ctx ctx}))
+            (graph-map:add-node node)
+            (local (ok _err)
+                (pcall (fn []
+                           (view:restore-views-state {:open-views [{:node-key "scoped-node"}]}))))
+            (assert (not ok)
+                    "GraphView should reject unscoped graph node panel restore state")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop))))
+
+(fn llm-message-extra-panel-drops-with-graph-view []
+    (with-temp-data-dir
+      (fn [_root]
+        (local original-graph-view app.graph-view)
+        (local original-graph-map app.graph-map)
+        (var removed 0)
+        (local target {:children []
+                       :add-panel-child (fn [self opts]
+                                           (table.insert self.children opts)
+                                           opts)
+                       :remove-panel-child (fn [self element]
+                                             (set removed (+ removed 1))
+                                             (for [i (length self.children) 1 -1]
+                                                 (when (= (. self.children i) element)
+                                                     (table.remove self.children i))))
+                       :capture-panel-element-state (fn [_self _element]
+                                                      {:position [1 2 0] :size [3 4 0]})})
+        (local (ok err)
+          (pcall
+            (fn []
+              (local ctx (make-ctx))
+              (local graph (Graph {:with-start false}))
+              (register-graph-map-test-loaders graph ["llm-conversation:conv-drop"])
+              (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
+              (local view (GraphView {:graph-map graph-map
+                                      :ctx ctx
+                                      :view-target target}))
+              (set app.graph-view view)
+              (set app.graph-map graph-map)
+              (local conversation (LlmConversationNode {:conversation {:id "conv-drop"
+                                                                       :title "Drop Test"
+                                                                       :messages []}}))
+              (graph-map:add-node conversation)
+              (local dialog (require :graph/view/views/llm-conversation-messages-dialog))
+              (dialog.open-panel {:target target
+                                  :graph graph-map
+                                  :node conversation
+                                  :node-key conversation.key})
+              (assert (= (length target.children) 1)
+                      "LLM message panel should be live before GraphView drop")
+              (assert (= (length view.extra-panels) 1)
+                      "LLM message panel metadata should be registered")
+              (view:drop)
+              (assert (= removed 1)
+                      "GraphView drop should remove live LLM message panel")
+              (assert (= (length target.children) 0)
+                      "Target should not retain LLM message panel after GraphView drop")
+              (graph-map:drop)
+              (graph:drop))))
+        (set app.graph-view original-graph-view)
+        (set app.graph-map original-graph-map)
+        (when (not ok)
+          (error err)))))
+
+(fn llm-message-extra-panel-reopen-drops-previous-runtime []
+    (with-temp-data-dir
+      (fn [_root]
+        (local original-graph-view app.graph-view)
+        (local original-graph-map app.graph-map)
+        (var removed 0)
+        (local target {:children []
+                       :add-panel-child (fn [self opts]
+                                           (table.insert self.children opts)
+                                           opts)
+                       :remove-panel-child (fn [self element]
+                                             (set removed (+ removed 1))
+                                             (for [i (length self.children) 1 -1]
+                                                 (when (= (. self.children i) element)
+                                                     (table.remove self.children i))))
+                       :capture-panel-element-state (fn [_self _element]
+                                                      {:position [1 2 0] :size [3 4 0]})})
+        (local (ok err)
+          (pcall
+            (fn []
+              (local ctx (make-ctx))
+              (local graph (Graph {:with-start false}))
+              (register-graph-map-test-loaders graph ["llm-conversation:conv-reopen"])
+              (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
+              (local view (GraphView {:graph-map graph-map
+                                      :ctx ctx
+                                      :view-target target}))
+              (set app.graph-view view)
+              (set app.graph-map graph-map)
+              (local conversation (LlmConversationNode {:conversation {:id "conv-reopen"
+                                                                       :title "Reopen Test"
+                                                                       :messages []}}))
+              (graph-map:add-node conversation)
+              (local dialog (require :graph/view/views/llm-conversation-messages-dialog))
+              (dialog.open-panel {:target target
+                                  :graph graph-map
+                                  :node conversation
+                                  :node-key conversation.key})
+              (dialog.open-panel {:target target
+                                  :graph graph-map
+                                  :node conversation
+                                  :node-key conversation.key})
+              (assert (= removed 1)
+                      "Reopening LLM messages should drop the previous live panel")
+              (assert (= (length target.children) 1)
+                      "Only the newest LLM messages panel should remain live")
+              (assert (= (length view.extra-panels) 1)
+                      "Only one LLM messages metadata entry should remain")
+              (view:drop)
+              (assert (= removed 2)
+                      "GraphView drop should remove the remaining live LLM messages panel")
+              (assert (= (length target.children) 0)
+                      "No LLM messages panels should remain after GraphView drop")
+              (graph-map:drop)
+              (graph:drop))))
+        (set app.graph-view original-graph-view)
+        (set app.graph-map original-graph-map)
+        (when (not ok)
+          (error err)))))
+
+(fn llm-message-extra-panel-capture-refreshes-placement []
+    (with-temp-data-dir
+      (fn [_root]
+        (local original-graph-view app.graph-view)
+        (local original-graph-map app.graph-map)
+        (var panel-state {:position [1 2 0] :size [3 4 0]})
+        (local target {:children []
+                       :add-panel-child (fn [self opts]
+                                           (table.insert self.children opts)
+                                           opts)
+                       :remove-panel-child (fn [self element]
+                                             (for [i (length self.children) 1 -1]
+                                                 (when (= (. self.children i) element)
+                                                     (table.remove self.children i))))
+                       :capture-panel-element-state (fn [_self _element]
+                                                      panel-state)})
+        (local (ok err)
+          (pcall
+            (fn []
+              (local ctx (make-ctx))
+              (local graph (Graph {:with-start false}))
+              (register-graph-map-test-loaders graph ["llm-conversation:conv-placement"])
+              (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
+              (local view (GraphView {:graph-map graph-map
+                                      :ctx ctx
+                                      :view-target target}))
+              (set app.graph-view view)
+              (set app.graph-map graph-map)
+              (local conversation (LlmConversationNode {:conversation {:id "conv-placement"
+                                                                       :title "Placement Test"
+                                                                       :messages []}}))
+              (graph-map:add-node conversation)
+              (local dialog (require :graph/view/views/llm-conversation-messages-dialog))
+              (dialog.open-panel {:target target
+                                  :graph graph-map
+                                  :node conversation
+                                  :node-key conversation.key})
+              (set panel-state {:position [9 8 0] :size [7 6 0]})
+              (local captured (view:capture-state))
+              (local panel (. (. captured.extra_panels 1) :panel))
+              (assert (= (. panel.position 1) 9)
+                      "GraphView capture-state should refresh extra panel position")
+              (assert (= (. panel.size 1) 7)
+                      "GraphView capture-state should refresh extra panel size")
+              (view:drop)
+              (graph-map:drop)
+              (graph:drop))))
+        (set app.graph-view original-graph-view)
+        (set app.graph-map original-graph-map)
+        (when (not ok)
+          (error err)))))
+
+(fn llm-message-extra-panel-restore-preserves-stale-entry []
+    (with-temp-data-dir
+      (fn [_root]
+        (local original-graph-view app.graph-view)
+        (local original-graph-map app.graph-map)
+        (local target {:children []
+                       :add-panel-child (fn [self opts]
+                                           (table.insert self.children opts)
+                                           opts)
+                       :remove-panel-child (fn [self element]
+                                             (for [i (length self.children) 1 -1]
+                                                 (when (= (. self.children i) element)
+                                                     (table.remove self.children i))))})
+        (local (ok err)
+          (pcall
+            (fn []
+              (local ctx (make-ctx))
+              (local graph (Graph {:with-start false}))
+              (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
+              (local view (GraphView {:graph-map graph-map
+                                      :ctx ctx
+                                      :view-target target}))
+              (set app.graph-view view)
+              (set app.graph-map graph-map)
+              (local dialog (require :graph/view/views/llm-conversation-messages-dialog))
+              (local result
+                (dialog.open-panel {:target target
+                                    :graph graph-map
+                                    :node-key "llm-conversation:missing"
+                                    :restore? true
+                                    :panel {:node-key "llm-conversation:missing"
+                                            :graph-map-id "llm-map"
+                                            :panel {:position [4 5 0]
+                                                    :size [6 7 0]}}}))
+              (assert (not result)
+                      "Missing restored LLM message panel should not open a live element")
+              (assert (= (length target.children) 0)
+                      "Missing restored LLM message panel should not add a panel child")
+              (assert (= (length view.extra-panels) 1)
+                      "Missing restored LLM message panel should remain in extra-panel persistence")
+              (local entry (. view.extra-panels 1))
+              (assert (= entry.node-key "llm-conversation:missing"))
+              (assert (= entry.graph-map-id "llm-map"))
+              (assert (= (. entry.panel.position 1) 4)
+                      "Stale LLM extra panel should keep placement")
+              (view:drop)
+              (graph-map:drop)
+              (graph:drop))))
+        (set app.graph-view original-graph-view)
+        (set app.graph-map original-graph-map)
+        (when (not ok)
+          (error err)))))
+
+(fn llm-message-extra-panel-transfer-updates-target []
+    (with-temp-data-dir
+      (fn [_root]
+        (local original-graph-view app.graph-view)
+        (local original-graph-map app.graph-map)
+        (local original-panel-transfer app.panel-transfer)
+        (var dest-state {:position [11 12 0] :size [13 14 0]})
+        (local source {:children []
+                       :add-panel-child (fn [self opts]
+                                           (table.insert self.children opts)
+                                           opts)
+                       :remove-panel-child (fn [self element]
+                                             (for [i (length self.children) 1 -1]
+                                                 (when (= (. self.children i) element)
+                                                     (table.remove self.children i))))
+                       :capture-panel-element-state (fn [_self _element]
+                                                      {:position [1 2 0] :size [3 4 0]})})
+        (local destination {:children []
+                            :remove-panel-child (fn [self element]
+                                                  (for [i (length self.children) 1 -1]
+                                                      (when (= (. self.children i) element)
+                                                          (table.remove self.children i))))
+                            :capture-panel-element-state (fn [_self _element]
+                                                           dest-state)})
+        (local (ok err)
+          (pcall
+            (fn []
+              (set app.panel-transfer {:panel-transferred (Signal)})
+              (local ctx (make-ctx))
+              (local graph (Graph {:with-start false}))
+              (register-graph-map-test-loaders graph ["llm-conversation:conv-transfer"])
+              (local graph-map (GraphMap.GraphMap {:graph graph :id "llm-map"}))
+              (local view (GraphView {:graph-map graph-map
+                                      :ctx ctx
+                                      :view-target source}))
+              (set app.graph-view view)
+              (set app.graph-map graph-map)
+              (local conversation (LlmConversationNode {:conversation {:id "conv-transfer"
+                                                                       :title "Transfer Test"
+                                                                       :messages []}}))
+              (graph-map:add-node conversation)
+              (local dialog (require :graph/view/views/llm-conversation-messages-dialog))
+              (dialog.open-panel {:target source
+                                  :graph graph-map
+                                  :node conversation
+                                  :node-key conversation.key})
+              (local source-element (. source.children 1))
+              (assert source-element "LLM message panel should open before transfer")
+              (local destination-element {:layout {:name "dest-llm-panel"}})
+              (table.insert destination.children destination-element)
+              (app.panel-transfer.panel-transferred:emit {:target destination
+                                                          :receiver-id "dest-receiver"
+                                                          :new-element destination-element
+                                                          :persistence source-element.persistence})
+              (set dest-state {:position [21 22 0] :size [23 24 0]})
+              (local captured (view:capture-state))
+              (local entry (. captured.extra_panels 1))
+              (assert (= entry.target-kind "receiver")
+                      "Transferred LLM extra panel should persist receiver target-kind")
+              (assert (= entry.target-receiver-id "dest-receiver")
+                      "Transferred LLM extra panel should persist receiver id")
+              (assert (= (. entry.panel.position 1) 21)
+                      "Transferred LLM extra panel should capture placement from destination target")
+              (view:drop)
+              (graph-map:drop)
+              (graph:drop))))
+        (set app.graph-view original-graph-view)
+        (set app.graph-map original-graph-map)
+        (set app.panel-transfer original-panel-transfer)
+        (when (not ok)
+          (error err)))))
+
+(fn graph-view-capture-persists-extra-panels []
+    (with-temp-data-dir
+        (fn [root]
+            (local ctx (make-ctx))
+            (local target {:children []
+                           :add-panel-child (fn [self opts]
+                                               (table.insert self.children opts)
+                                               opts)
+                           :remove-panel-child (fn [self element]
+                                                 (for [i (length self.children) 1 -1]
+                                                     (when (= (. self.children i) element)
+                                                         (table.remove self.children i))))
+                           :capture-panel-element-state (fn [_self _element]
+                                                          {:position [21 22 0]
+                                                           :size [50 25 0]})})
+            (local graph (Graph {:with-start false}))
+            (local graph-map (GraphMap.GraphMap {:graph graph :id "persist-extra"}))
+            (local view (GraphView {:graph-map graph-map
+                                    :ctx ctx
+                                    :view-target target}))
+            (local element (target:add-panel-child {}))
+            (view:register-extra-panel! {:kind "test-extra-panel"
+                                         :node-key "extra-node"
+                                         :graph-map-id "persist-extra"
+                                         :target-kind "canvas"
+                                         :panel {:node-key "extra-node"
+                                                 :graph-map-id "persist-extra"}}
+                                        target
+                                        element)
+            (view:capture-state)
+            (local reloaded (GraphViewPersistence {:data-dir root :map-id "persist-extra"}))
+            (local panels (reloaded:saved-extra-panels))
+            (local panel (. panels 1))
+            (local panel-placement (and panel panel.panel))
+            (assert (= (length panels) 1)
+                    "GraphView capture-state should persist one extra panel")
+            (assert (= panel.node-key "extra-node")
+                    "Persisted extra panel should keep node-key")
+            (assert (= panel.graph-map-id "persist-extra")
+                    "Persisted extra panel should keep graph-map-id")
+            (assert (= (. panel-placement.position 1) 21)
+                    "Persisted extra panel should keep captured placement")
+            (view:drop)
+            (graph-map:drop)
+            (graph:drop))))
+
+(fn graph-view-extra-panel-receiver-restore-errors-without-panel-transfer []
+    (with-temp-data-dir
+        (fn [_root]
+            (local original-panel-transfer app.panel-transfer)
+            (set app.panel-transfer nil)
+            (var view nil)
+            (var graph-map nil)
+            (var graph nil)
+            (local (ok err)
+                (pcall
+                  (fn []
+                    (local ctx (make-ctx))
+                    (set graph (Graph {:with-start false}))
+                    (set graph-map (GraphMap.GraphMap {:graph graph :id "receiver-map"}))
+                    (set view (GraphView {:graph-map graph-map :ctx ctx}))
+                    (local state {:extra_panels [{:kind "llm-conversation-messages-view-dialog"
+                                                  :node-key "llm-conversation:missing"
+                                                  :graph-map-id "receiver-map"
+                                                  :restorer-module "graph/view/views/llm-conversation-messages-dialog"
+                                                  :target-kind "receiver"
+                                                  :target-receiver-id "missing-receiver"}]})
+                    (view:restore-state state))))
+            (set app.panel-transfer original-panel-transfer)
+            (when view (view:drop))
+            (when graph-map (graph-map:drop))
+            (when graph (graph:drop))
+            (assert (not ok)
+                    "Receiver extra panel restore should fail without panel-transfer")
+            (assert (string.find (tostring err) "requires app.panel-transfer" 1 true)
+                    "Receiver extra panel restore error should mention missing panel-transfer"))))
+
+(table.insert tests {:name "GraphView capture-state emits selected_node_keys" :fn graph-view-capture-restore-selected-node-keys})
+(table.insert tests {:name "GraphView capture/restore preserves node selection" :fn graph-view-capture-restore-preserves-selection})
+(table.insert tests {:name "GraphView node-view panel capture includes graph-map-id" :fn graph-node-view-capture-includes-graph-map-id})
+(table.insert tests {:name "GraphView capture-state persists node-view panels" :fn graph-view-capture-persists-node-view-panels})
+(table.insert tests {:name "GraphView rejects unscoped node-view panel restore" :fn graph-view-restore-rejects-unscoped-node-view-panel})
+(table.insert tests {:name "GraphView drops LLM extra panel runtimes" :fn llm-message-extra-panel-drops-with-graph-view})
+(table.insert tests {:name "GraphView LLM extra panel reopen drops previous runtime" :fn llm-message-extra-panel-reopen-drops-previous-runtime})
+(table.insert tests {:name "GraphView LLM extra panel capture refreshes placement" :fn llm-message-extra-panel-capture-refreshes-placement})
+(table.insert tests {:name "GraphView LLM extra panel restore preserves stale entry"
+                     :fn llm-message-extra-panel-restore-preserves-stale-entry})
+(table.insert tests {:name "GraphView LLM extra panel transfer updates target"
+                     :fn llm-message-extra-panel-transfer-updates-target})
+(table.insert tests {:name "GraphView capture-state persists extra panels" :fn graph-view-capture-persists-extra-panels})
+(table.insert tests {:name "GraphView receiver extra panel restore requires panel-transfer" :fn graph-view-extra-panel-receiver-restore-errors-without-panel-transfer})
 
 (local main
   (fn []

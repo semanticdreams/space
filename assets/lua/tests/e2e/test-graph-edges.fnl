@@ -19,7 +19,7 @@
       {:focus-manager focus-manager
        :builder (fn [ctx]
                   (set graph (Graph {:with-start false}))
-                  (set view (GraphView {:graph graph
+                  (set view (GraphView {:graph-map graph
                                         :ctx ctx
                                         :edge-color (glm.vec4 1.0 0.2 0.1 1.0)
                                         :edge-thickness 8.0

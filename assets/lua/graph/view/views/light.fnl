@@ -15,15 +15,15 @@
   (local action-buttons
     (if (and target target.removable? (target:removable?))
         [{:key :remove
-          :text "Remove"
+          :text "Delete Light"
           :variant :ghost
           :on-click (fn [_payload]
                       (when (and target target.remove-light)
                         (assert (target:remove-light)
                                 (.. "Failed to remove light "
                                     (or (and target target.light-id) "?")))
-                        (when (and target.graph target.graph.remove-nodes)
-                          (target.graph:remove-nodes [target]))))}]
+                         (when (and target.graph target.graph.remove-nodes)
+                           (target.graph:remove-nodes [target] {:cause "shared-delete"}))))}]
         []))
   (TerrainEditorFormView target {:validation validation
                                  :name "light-node-view"

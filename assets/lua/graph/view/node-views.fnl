@@ -5,7 +5,8 @@
 
 (fn GraphViewNodeViews [opts]
     (local options (or opts {}))
-    (local graph options.graph)
+    (local graph-map options.graph-map)
+    (local graph-map-id (or (and graph-map graph-map.id) "main"))
     (local ctx options.ctx)
     (local view-target options.view-target)
     (local view-context (or options.view-context ctx))
@@ -16,11 +17,15 @@
     (local restorer-owner {})
 
     (var open-node-view nil)
+    (var panel-transfer-handler nil)
+    (var panel-transfer-source nil)
 
     (fn build-persistence [node-key]
-        {:kind persistence-kind
-         :node-key node-key
-         :restorer-module "graph/view/node-view-panel-restorer"})
+        (local record {:kind persistence-kind
+                        :node-key node-key
+                        :restorer-module "graph/view/node-view-panel-restorer"})
+        (set record.graph-map-id graph-map-id)
+        record)
 
     (fn same-open-view? [left right]
         (and (= (and left left.node-key) (and right right.node-key))
@@ -29,12 +34,18 @@
     (fn record-unresolved-open-view [entry]
         (when (and (= (type entry) :table)
                    (= (type entry.node-key) :string))
+            (local normalized {})
+            (each [k v (pairs entry)]
+                (set (. normalized k) v))
+            (when (not normalized.graph-map-id)
+                (set normalized.graph-map-id (or (and normalized.panel normalized.panel.graph-map-id)
+                                                 graph-map-id)))
             (var exists? false)
             (each [_ current (ipairs unresolved-open-views)]
-                (when (same-open-view? current entry)
+                (when (same-open-view? current normalized)
                     (set exists? true)))
             (when (not exists?)
-                (table.insert unresolved-open-views entry))))
+                (table.insert unresolved-open-views normalized))))
 
     (fn resolve-node-view-builder [node]
         (local view-fn (and node node.view))
@@ -84,28 +95,30 @@
                 (if (and target target.add-panel-child)
                     (do
                         (local panel-opts {:builder dialog-builder
-                                           :location placement.location
-                                           :align-x placement.align-x
-                                           :align-y placement.align-y
-                                           :position placement.position
-                                           :rotation placement.rotation
-                                           :size placement.size
-                                           :persistence persistence})
+                                            :location placement.location
+                                            :align-x placement.align-x
+                                            :align-y placement.align-y
+                                            :position placement.position
+                                            :rotation placement.rotation
+                                            :size placement.size
+                                            :persistence persistence})
                         (local element (target:add-panel-child panel-opts))
-                        (set (. node-views node) {:target target
-                                                  :element element}))
+                        (local record {:target target
+                                       :element element})
+                        (when local-opts.receiver-id
+                            (set record.receiver-id local-opts.receiver-id))
+                        (set (. node-views node) record))
                     (when view-context
                         (local dialog (dialog-builder view-context))
                         (set (. node-views node) {:dialog dialog
-                                                  :target nil}))))))
+                                                   :target nil}))))))
 
     (set open-node-view
          (fn [_self node opts]
              (ensure-node-view node opts)))
 
     (fn resolve-restored-node [key]
-        (local node (or (and graph graph.lookup (graph:lookup key))
-                        (and graph graph.load-by-key (graph:load-by-key key))))
+        (local node (and graph-map graph-map.lookup (graph-map:lookup key)))
         (if node
             (for [idx (length unresolved-open-views) 1 -1]
                 (when (= (and (. unresolved-open-views idx) (. (. unresolved-open-views idx) :node-key)) key)
@@ -117,6 +130,13 @@
         (when (and target
                    target.register-panel-restorer
                    target.unregister-panel-restorer)
+            (fn restore-target []
+                (or (and (= target app.canvas)
+                         app.canvas
+                         app.canvas.active-activity-slot
+                         app.canvas.active-activity-slot.visible?
+                         app.canvas.active-activity-slot)
+                    target))
             (var exists? false)
             (each [_ existing (ipairs restorer-targets)]
                 (when (= existing target)
@@ -125,15 +145,20 @@
                 (target:register-panel-restorer
                     persistence-kind
                     (fn [panel]
+                        (assert (= (type panel.graph-map-id) :string)
+                                "graph-node-view restorer requires string :graph-map-id")
+                        (assert (= graph-map-id panel.graph-map-id)
+                                "graph-node-view restorer graph-map-id must match active graph map")
                         (local key panel.node-key)
                         (assert (= (type key) :string)
                                 "graph-node-view restorer requires string :node-key")
                         (local node (resolve-restored-node key))
                         (when node
-                            (open-node-view nil node {:target target
-                                                      :panel panel}))
+                            (open-node-view nil node {:target (restore-target)
+                                                       :panel panel}))
                         (when (not node)
                             (record-unresolved-open-view {:node-key key
+                                                          :graph-map-id panel.graph-map-id
                                                           :panel panel})))
                     restorer-owner)
                 (table.insert restorer-targets target))))
@@ -143,13 +168,67 @@
             (target:unregister-panel-restorer persistence-kind restorer-owner))
         (set restorer-targets []))
 
+    (fn graph-node-view-persistence? [persistence]
+        (= (and persistence persistence.kind) persistence-kind))
+
+    (fn persistence-matches-node? [persistence node]
+        (and (graph-node-view-persistence? persistence)
+             (= persistence.node-key (and node node.key))
+             (= persistence.graph-map-id graph-map-id)))
+
+    (fn handle-panel-transferred [payload]
+        (local persistence (and payload payload.persistence))
+        (when (graph-node-view-persistence? persistence)
+            (each [node record (pairs node-views)]
+                (when (and record
+                           (or (= record.element (and payload payload.element))
+                               (persistence-matches-node? persistence node)))
+                    (set record.target (or (and payload payload.target)
+                                           (and payload payload.destination payload.destination.target)))
+                    (set record.element (and payload payload.new-element))
+                    (set record.receiver-id (and payload payload.receiver-id))))))
+
+    (fn register-panel-transfer-handler []
+        (local pt (and app app.panel-transfer))
+        (when (and pt pt.panel-transferred (not panel-transfer-handler))
+            (set panel-transfer-source pt)
+            (set panel-transfer-handler
+                 (pt.panel-transferred:connect handle-panel-transferred))))
+
+    (fn unregister-panel-transfer-handler []
+        (local pt panel-transfer-source)
+        (when (and pt pt.panel-transferred panel-transfer-handler)
+            (pt.panel-transferred:disconnect panel-transfer-handler true)
+            (set panel-transfer-handler nil)
+            (set panel-transfer-source nil)))
+
+    (fn identify-target-kind [target record]
+        (if record.receiver-id
+            (values "receiver" record.receiver-id)
+            (= target app.hud) "hud"
+            (= target app.scene) "scene"
+            (= target view-target) "canvas"
+            (not target) "canvas"
+            (not app.panel-transfer)
+            (error "GraphViewNodeViews: unrecognised target and no panel-transfer available")
+            (let [receiver (app.panel-transfer:find-receiver-for-target target)]
+                (if receiver
+                    (values "receiver" receiver.id)
+                    (error "GraphViewNodeViews: unrecognised target with no registered receiver")))))
+
     (fn capture-state [_self]
         (local records [])
         (each [node record (pairs node-views)]
             (when (and node node.key)
                 (local entry {:node-key node.key})
+                (set entry.graph-map-id graph-map-id)
                 (local target (and record record.target))
                 (local element (and record record.element))
+                (when target
+                    (local (kind receiver-id) (identify-target-kind target record))
+                    (set entry.target-kind kind)
+                    (when receiver-id
+                        (set entry.target-receiver-id receiver-id)))
                 (when (and target element target.capture-panel-element-state)
                     (local panel (target:capture-panel-element-state element))
                     (when panel
@@ -168,13 +247,44 @@
                         (< (or a.node-key "") (or b.node-key ""))))
         {:open-views records})
 
+    (fn resolve-restore-target [entry]
+        (if (= entry.target-kind nil) (values view-target nil)
+            (= entry.target-kind "canvas") (values view-target nil)
+            (= entry.target-kind "hud")
+            (do
+                (assert app.hud
+                        "GraphViewNodeViews: hud target-kind requires app.hud")
+                (values app.hud nil))
+            (= entry.target-kind "scene")
+            (do
+                (assert app.scene
+                        "GraphViewNodeViews: scene target-kind requires app.scene")
+                (values app.scene nil))
+            (= entry.target-kind "receiver")
+            (do
+                (assert entry.target-receiver-id
+                        "GraphViewNodeViews: receiver target-kind requires target-receiver-id")
+                (assert app.panel-transfer
+                        "GraphViewNodeViews: receiver target-kind requires app.panel-transfer")
+                (let [receiver (app.panel-transfer:find-receiver-by-id entry.target-receiver-id)]
+                    (assert receiver
+                            (.. "GraphViewNodeViews: receiver not found for restore: "
+                                entry.target-receiver-id))
+                    (let [target (receiver.target-fn)]
+                        (assert target
+                                (.. "GraphViewNodeViews: receiver target-fn returned nil for: "
+                                    entry.target-receiver-id))
+                        (values target entry.target-receiver-id))))
+            (error (.. "GraphViewNodeViews: unknown target-kind for restore: " entry.target-kind))))
+
     (fn restore-state [_self state]
         (local payload (or state {}))
         (local open-views
             (if (and payload.open-views (= (type payload.open-views) :table))
                 payload.open-views
                 (icollect [_ key (ipairs (or payload.open-node-keys []))]
-                    {:node-key key})))
+                    {:node-key key
+                     :graph-map-id graph-map-id})))
         (assert (= (type open-views) :table)
                 "GraphViewNodeViews.restore-state requires :open-views table")
         (set unresolved-open-views [])
@@ -184,17 +294,26 @@
             (local key entry.node-key)
             (assert (= (type key) :string)
                     "GraphViewNodeViews.restore-state node-key must be a string")
+            (assert (= (type entry.graph-map-id) :string)
+                    "GraphViewNodeViews.restore-state requires graph-map-id")
+            (assert (= entry.graph-map-id graph-map-id)
+                    "GraphViewNodeViews.restore-state graph-map-id must match active graph map")
             (local node (resolve-restored-node key))
             (when node
-                (ensure-node-view node {:panel entry.panel}))
+                (local (target receiver-id) (resolve-restore-target entry))
+                (ensure-node-view node {:panel entry.panel :target target :receiver-id receiver-id}))
             (when (not node)
                 (record-unresolved-open-view entry)))
         true)
 
     (fn move-view [_self old new]
         (when (and old new (. node-views old))
-            (set (. node-views new) (. node-views old))
-            (set (. node-views old) nil)))
+            (local record (. node-views old))
+            (local opts {:target record.target :receiver-id record.receiver-id})
+            (when (and record.target record.element record.target.capture-panel-element-state)
+                (set opts.panel (record.target:capture-panel-element-state record.element)))
+            (drop-node-view old)
+            (ensure-node-view new opts)))
 
     (fn drop-node [_self node]
         (drop-node-view node))
@@ -202,11 +321,13 @@
     (fn drop-all [_self]
         (each [node _ (pairs node-views)]
             (drop-node-view node))
-        (unregister-target-restorers))
+        (unregister-target-restorers)
+        (unregister-panel-transfer-handler))
 
     (register-target-restorer view-target)
     (register-target-restorer app.hud)
     (register-target-restorer app.canvas)
+    (register-panel-transfer-handler)
 
     {:node-views node-views
      :open open-node-view

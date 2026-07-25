@@ -91,7 +91,7 @@
            (when (= (tostring deleted.id) (tostring entity-id))
              (node.identity-deleted:emit deleted)
              (when (and node.graph node.graph.remove-nodes)
-               (node.graph:remove-nodes [node]))))))
+                (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
 
   (set updated-handler
        (store.identity-updated:connect

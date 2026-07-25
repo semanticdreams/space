@@ -248,6 +248,32 @@
         (table.insert edges record)
         record)
 
+    (fn refresh-edge-line [_self record]
+        (drop-edge-label record)
+        (when record.line
+            (record.line:drop))
+        (local edge record.edge)
+        (local source-size (or (and edge edge.source edge.source.size) 0))
+        (local target-size (or (and edge edge.target edge.target.size) 0))
+        (local min-node-size (math.min source-size target-size))
+        (local scaled-edge-thickness
+               (if (> min-node-size 0)
+                   (math.max base-edge-thickness (* min-node-size 0.35))
+                   base-edge-thickness))
+        (local line (make-line ctx {:color (ensure-glm-vec4 edge.color default-edge-color)
+                                     :thickness scaled-edge-thickness
+                                     :label (edge-key edge)}))
+        (set record.line line)
+        (when (and ctx edge.label (> (string.len edge.label) 0))
+            (local span (create-edge-label edge.label))
+            (set record.label-span span))
+        (local start-pos (get-position-raw self edge.source))
+        (local end-pos (get-position-raw self edge.target))
+        (when (and start-pos end-pos)
+            (line:update start-pos end-pos)
+            (when record.label-span
+                (place-edge-label record.label-span start-pos end-pos))))
+
     (fn set-node-position [_self node position opts]
         (when position
             (local idx (. indices node))
@@ -316,6 +342,7 @@
     (set self.start start)
     (set self.update-lines update-lines)
     (set self.drop-edge-label drop-edge-label)
+    (set self.refresh-edge-line refresh-edge-line)
 
     self)
 

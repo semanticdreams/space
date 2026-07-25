@@ -43,8 +43,6 @@ Before higher-level features like graph browsing, world building, or agent tools
 
 - [Development Tooling](/dev/features/development-tooling) — profiling, testing, render capture, remote control, CLI tools
 
-- [Opencode Agent Workflow](/dev/features/opencode-agent-workflow) — Python-based multi-role OpenCode agent orchestrator
-
 ## Bugs
 
 - [Windows Cef Support](/dev/project/bugs/windows-cef-support) — no Windows CEF handler

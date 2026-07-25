@@ -77,7 +77,7 @@ branch_name_cmd() {
     require_arg "$workflow" "<workflow>"
     local stem
     stem="$(workflow_stem "$workflow")"
-    printf 'codex/workflow-debug/%s-%s\n' "$stem" "$(date -u +%Y%m%d%H%M%S)"
+    printf 'opencode/workflow-debug/%s-%s\n' "$stem" "$(date -u +%Y%m%d%H%M%S)"
 }
 
 remote_branch_sha_cmd() {

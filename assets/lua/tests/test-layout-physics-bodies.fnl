@@ -7,6 +7,8 @@
 (local {: Layout} (require :layout))
 (local PerlinTerrain (require :perlin-terrain))
 (local bt (require :bt))
+(local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 
 (local tests [])
 (local approx (. MathUtils :approx))
@@ -353,6 +355,11 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
+  (local original-graph-map app.graph-map)
+  (local graph (Graph {:with-start false}))
+  (local map (GraphMap.GraphMap {:graph graph :id "test-fpc-cube"}))
+  (set scene.graph-map map)
+  (set app.graph-map map)
   (local original-camera app.camera)
   (local camera (Camera {:position (glm.vec3 0 0 0)}))
   (local controls (FirstPersonControls {:camera camera}))
@@ -372,6 +379,9 @@
             (assert cube "Expected graph-node cube element")))]
     (controls:drop)
     (set app.camera original-camera)
+    (set app.graph-map original-graph-map)
+    (map:drop)
+    (graph:drop)
     (cleanup)
     (assert ok
             (.. "Adding graph-node cube should not crash after ms FPC update, but got: "

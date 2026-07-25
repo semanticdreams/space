@@ -4,6 +4,7 @@
 (local Camera (require :camera))
 (local ObjectSelector (require :object-selector))
 (local Signal (require :signal))
+(local {: Layout} (require :layout))
 (local {: FocusManager} (require :focus))
 
 (local tests [])
@@ -206,6 +207,43 @@
       (selector:drop)
       (drop-fixture fixture))))
 
+(fn activity-slot-panel-children-use-slot-context []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (local slot (canvas:activate-activity-slot "graph"))
+  (var built-ctx nil)
+  (var dropped? false)
+  (local element
+    (slot:add-panel-child
+      {:builder (fn [ctx]
+                  (set built-ctx ctx)
+                  {:layout (Layout {:name "slot-panel"})
+                   :drop (fn [_self]
+                           (set dropped? true))})
+       :persistence {:kind "slot-panel"}}))
+  (assert (= built-ctx slot.ctx)
+          "Activity slot panels should build with the slot context")
+  (assert (= built-ctx.pointer-target slot.pointer-target)
+          "Activity slot panels should route input through the slot pointer target")
+  (assert (= built-ctx.panel-target slot)
+          "Activity slot panels should expose the slot as their panel target")
+  (assert (= (length slot.float.children) 1)
+          "Activity slot panel should mount in the slot float layer")
+  (assert (= (length canvas.float.children) 0)
+          "Activity slot panel should not mount in the canvas default float layer")
+  (local persistence (slot:find-panel-persistence element))
+  (assert (= persistence.kind "slot-panel"))
+  (canvas:activate-activity-slot "drawing")
+  (local contexts (canvas:get-render-contexts))
+  (assert (not (= (. contexts 1) slot.ctx))
+          "Inactive activity slot panel context should not be rendered")
+  (assert (not slot.visible?)
+          "Switching activities should hide the prior slot")
+  (slot:remove-panel-child element)
+  (assert dropped?
+          "Removing an activity slot panel should drop it")
+  (drop-fixture fixture))
+
 (fn activity-slot-focus-scope-follows-activation []
   (local fixture (make-focused-canvas))
   (local canvas fixture.canvas)
@@ -253,6 +291,8 @@
                       :fn inactive-activity-slot-rejects-pointer-targets})
 (table.insert tests {:name "Object selector filters inactive activity selectables"
                      :fn object-selector-filters-inactive-activity-selectables})
+(table.insert tests {:name "Canvas activity slot panel children use slot context"
+                     :fn activity-slot-panel-children-use-slot-context})
 (table.insert tests {:name "Canvas activity slot focus scope follows activation"
                       :fn activity-slot-focus-scope-follows-activation})
 (table.insert tests {:name "Canvas retained activity slot themes update"

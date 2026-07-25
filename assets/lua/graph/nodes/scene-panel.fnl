@@ -37,12 +37,12 @@
        (fn [self]
          (WorldData.remove-scene-panel self.world-manager self.world-id self.panel-index)))
   (set node.actions
-       [{:name "Remove"
+        [{:name "Delete Scene Panel"
          :icon "delete"
          :fn (fn [_button _event]
                (when (node:remove-panel)
-                 (when (and node.graph node.graph.remove-nodes)
-                   (node.graph:remove-nodes [node]))))}])
+                  (when (and node.graph node.graph.remove-nodes)
+                    (node.graph:remove-nodes [node] {:cause "shared-delete"}))))}])
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
@@ -54,7 +54,7 @@
                   (and node.panel-record current.panel (not (= current.panel node.panel-record)))))
             (when stale?
               (when (and node.graph node.graph.remove-nodes)
-                (node.graph:remove-nodes [node]))))))
+                (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
          (when changed-handler

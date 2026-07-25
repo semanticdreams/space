@@ -73,11 +73,11 @@
        [{:name "Open Editor"
          :fn (fn [_button _event]
                (node:open-editor))}
-        {:name "Remove"
+         {:name "Delete Terrain"
          :fn (fn [_button _event]
                (when (node:remove-terrain)
-                 (when (and node.graph node.graph.remove-nodes)
-                   (node.graph:remove-nodes [node]))))}])
+                  (when (and node.graph node.graph.remove-nodes)
+                    (node.graph:remove-nodes [node] {:cause "shared-delete"}))))}])
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
@@ -92,8 +92,8 @@
                   (set node.terrain (or current.entry current.record {}))
                   (set node.terrain-record (or current.record {}))
                   (node.changed:emit current))
-               (when (and node.graph node.graph.remove-nodes)
-                 (node.graph:remove-nodes [node]))))))
+                (when (and node.graph node.graph.remove-nodes)
+                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
          (when changed-handler

@@ -401,7 +401,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local start (Graph.StartNode))
@@ -424,7 +424,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local start (Graph.StartNode))
@@ -445,7 +445,7 @@
                                              :ctx ctx
                                              :enabled? true}))
             (local graph (Graph {:with-start false}))
-            (local view (GraphView {:graph graph
+            (local view (GraphView {:graph-map graph
                                     :ctx ctx
                                     :selector selector}))
             (local node (Graph.GraphNode {:key "n" :label "n"}))

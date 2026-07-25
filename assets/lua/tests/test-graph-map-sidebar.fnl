@@ -1,0 +1,232 @@
+(local Graph (require :graph/init))
+(local GraphMapManager (require :graph/map-manager))
+(local GraphMapSidebar (require :graph/map-sidebar))
+(local BuildContext (require :build-context))
+
+(local tests [])
+
+(fn manager-active-map-id-updates-after-switch []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (assert (= manager.active-map-id "main") "Initial active-map-id should be main")
+    (manager:create-map! "alpha" "Alpha")
+    (manager:switch-map! "alpha")
+    (assert (= manager.active-map-id "alpha") "active-map-id should update after switch")
+    (assert (= manager.active-map-name "Alpha") "active-map-name should update after switch")
+    (manager:switch-map! "main")
+    (assert (= manager.active-map-id "main") "active-map-id should update after switch back")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-rename-updates-active-map-name []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:rename-map! "main" "Renamed Map")
+    (assert (= manager.active-map-name "Renamed Map") "active-map-name should update after rename")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-active-map-status-returns-correct-values []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local status (manager:active-map-status))
+    (assert status "active-map-status should return a table")
+    (assert (= status.id "main") "active-map-status id should match")
+    (assert (= (type status.name) :string) "active-map-status name should be a string")
+    (assert (= (type status.node-count) :number) "active-map-status node-count should be a number")
+    (assert (= (type status.edge-count) :number) "active-map-status edge-count should be a number")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-next-map-id-increments-on-create []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local first-id manager.next-map-id)
+    (manager:create-map! "second" "Second")
+    (assert (> manager.next-map-id first-id) "next-map-id should increment after create")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-delete-updates-active-info []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:create-map! "extra" "Extra")
+    (manager:switch-map! "extra")
+    (assert (= manager.active-map-name "Extra") "active-map-name should be Extra after switch")
+    (manager:switch-map! "main")
+    (manager:delete-map! "extra")
+    (assert (= manager.active-map-id "main") "active-map-id should still be main after delete")
+    (assert (= manager.active-map-name "Main") "active-map-name should still be Main")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-switch-emits-correct-payload []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:create-map! "beta" "Beta")
+    (var received-payload nil)
+    (local handler (manager.maps-changed:connect (fn [p] (set received-payload p))))
+    (manager:switch-map! "beta")
+    (assert received-payload "Signal should fire on switch")
+    (assert (= received-payload.previous-id "main") "previous-id should be main")
+    (assert (= received-payload.active-id "beta") "active-id should be beta")
+    (manager.maps-changed:disconnect handler true)
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-capture-state-preserves-map-names []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:create-map! "named" "Custom Name")
+    (local state (manager:capture-state))
+    (var found nil)
+    (each [_ m (ipairs state.maps)]
+        (when (= m.id "named")
+            (set found m)))
+    (assert found "Captured state should include created map")
+    (assert (= found.name "Custom Name") "Captured state should preserve map name")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-allows-delete-main-when-not-active []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:create-map! "second" "Second")
+    (manager:switch-map! "second")
+    (assert (= manager.active-map-id "second") "Active should be second")
+    (manager:delete-map! "main")
+    (assert (= manager.active-map-id "second") "Active should still be second after main deleted")
+    (local maps (manager:list-maps))
+    (assert (= (length maps) 1) "Only one map should remain")
+    (assert (= (. maps 1 :id) "second") "Remaining map should be second")
+    (manager:drop)
+    (graph:drop))
+
+(fn manager-rejects-unsafe-map-ids []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local bad-ids ["../escape" "sub/dir" "with.dot" ".." "."])
+    (each [_ id (ipairs bad-ids)]
+        (local (ok _err) (pcall (fn [] (manager:create-map! id id))))
+        (assert (not ok) (.. "create-map! should reject unsafe id: " id)))
+    (manager:drop)
+    (graph:drop))
+
+(fn make-hoverables-stub []
+    (local stub {})
+    (set stub.register (fn [_self _obj]))
+    (set stub.unregister (fn [_self _obj]))
+    stub)
+
+(fn contains-label? [labels target]
+    (var found? false)
+    (each [_ label (ipairs (or labels []))]
+        (when (= label target)
+            (set found? true)))
+    found?)
+
+(fn sidebar-constructs-and-drops []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (manager:create-map! "alpha" "Alpha")
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local builder (GraphMapSidebar.GraphMapSidebar {:manager manager}))
+    (local entity (builder ctx))
+    (assert entity "Sidebar should return an entity")
+    (assert entity.layout "Sidebar should have a layout")
+    (assert entity.update "Sidebar should have update")
+    (assert entity.drop "Sidebar should have drop")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-rebuilds-on-maps-changed []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local builder (GraphMapSidebar.GraphMapSidebar {:manager manager}))
+    (local entity (builder ctx))
+    (assert entity.layout "Sidebar should have layout before rebuild")
+    (manager:create-map! "gamma" "Gamma")
+    (entity:update)
+    (assert entity.layout "Sidebar should still have layout after maps-changed rebuild")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-exposes-map-labels-and-selected-count []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (var selected-count 2)
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local builder (GraphMapSidebar.GraphMapSidebar
+                     {:manager manager
+                      :selected-count-provider (fn [] selected-count)}))
+    (local entity (builder ctx))
+    (local labels (entity:visible-labels))
+    (assert (contains-label? labels "Graph Maps") "Sidebar should label the graph maps dock")
+    (assert (contains-label? labels "Switch Map") "Sidebar should include Switch Map label")
+    (assert (contains-label? labels "Delete Map") "Sidebar should use Delete Map label")
+    (assert (contains-label? labels "Selected: 2") "Sidebar should show selected count")
+    (set selected-count 5)
+    (entity:update)
+    (assert (contains-label? (entity:visible-labels) "Selected: 5")
+            "Sidebar should refresh selected count on update")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-refreshes-active-map_counts_after_map_mutations []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "test"
+        (fn [key]
+            (Graph.GraphNode {:key key})))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                              :hoverables (make-hoverables-stub)}))
+    (local builder (GraphMapSidebar.GraphMapSidebar {:manager manager}))
+    (local entity (builder ctx))
+    (local active (manager:get-active-map))
+    (active:load-by-key "test:a")
+    (entity:update)
+    (assert (contains-label? (entity:visible-labels) "Main *  1n/0e")
+            "Sidebar should refresh active map node count after node-added")
+    (local a (active:lookup "test:a"))
+    (local b (Graph.GraphNode {:key "test:b"}))
+    (active:add-edge (Graph.GraphEdge {:source a :target b}))
+    (entity:update)
+    (assert (contains-label? (entity:visible-labels) "Main *  2n/1e")
+            "Sidebar should refresh active map edge count after edge-added")
+    (active:remove-nodes [a])
+    (entity:update)
+    (assert (contains-label? (entity:visible-labels) "Main *  1n/0e")
+            "Sidebar should refresh active map counts after node removal")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(table.insert tests {:name "GraphMapManager active-map-id updates after switch" :fn manager-active-map-id-updates-after-switch})
+(table.insert tests {:name "GraphMapManager rename updates active-map-name" :fn manager-rename-updates-active-map-name})
+(table.insert tests {:name "GraphMapManager active-map-status returns correct values" :fn manager-active-map-status-returns-correct-values})
+(table.insert tests {:name "GraphMapManager next-map-id increments on create" :fn manager-next-map-id-increments-on-create})
+(table.insert tests {:name "GraphMapManager delete updates active info" :fn manager-delete-updates-active-info})
+(table.insert tests {:name "GraphMapManager switch emits correct payload" :fn manager-switch-emits-correct-payload})
+(table.insert tests {:name "GraphMapManager capture-state preserves map names" :fn manager-capture-state-preserves-map-names})
+(table.insert tests {:name "GraphMapManager allows delete main when not active" :fn manager-allows-delete-main-when-not-active})
+(table.insert tests {:name "GraphMapManager rejects unsafe map ids" :fn manager-rejects-unsafe-map-ids})
+(table.insert tests {:name "GraphMap sidebar constructs and drops" :fn sidebar-constructs-and-drops})
+(table.insert tests {:name "GraphMap sidebar rebuilds on maps-changed" :fn sidebar-rebuilds-on-maps-changed})
+(table.insert tests {:name "GraphMap sidebar labels map actions and selected count" :fn sidebar-exposes-map-labels-and-selected-count})
+(table.insert tests {:name "GraphMap sidebar refreshes active map counts after map mutations" :fn sidebar-refreshes-active-map_counts_after_map_mutations})
+
+(local main
+    (fn []
+        (local runner (require :tests/runner))
+        (runner.run-tests {:name "graph-map-sidebar" :tests tests})))
+
+{:name "graph-map-sidebar"
+ :tests tests
+ :main main}

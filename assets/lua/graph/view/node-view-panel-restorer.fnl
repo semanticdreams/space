@@ -1,6 +1,5 @@
 (local PanelUtils (require :target-panel-utils))
 (local NodeViewDialogBuilder (require :graph/view/node-view-dialog-builder))
-(local logging (require :logging))
 
 (fn restore [opts]
   (local options (assert opts "graph-node-view panel restorer requires opts"))
@@ -12,27 +11,39 @@
                        "graph-node-view panel restorer requires :panel"))
   (assert (= (type panel.node-key) :string)
           "graph-node-view panel restorer requires string :node-key")
+  (assert (= (type panel.graph-map-id) :string)
+          "graph-node-view panel restorer requires string :graph-map-id")
   (local key panel.node-key)
-  (local graph (or app.graph
-                   (and app.active-world-runtime app.active-world-runtime.graph)))
-  (when (not graph)
-    (logging.warn "[graph-node-view] skipping panel restore: no graph available")
-    (lua "return nil"))
-  (local node (or (when graph.lookup (graph:lookup key))
-                  (when graph.load-by-key (graph:load-by-key key))))
-  (when (not node)
-    (logging.warn (.. "[graph-node-view] skipping panel restore: node not found: " key))
-    (lua "return nil"))
+  (fn match-map [candidate]
+      (and candidate
+           candidate.lookup
+           (= candidate.id panel.graph-map-id)))
+  (fn target-graph-map [target]
+      (and target target.graph-map (match-map target.graph-map) target.graph-map))
+  (local graph (or (target-graph-map options.target)
+                     (target-graph-map options.scene)
+                     (target-graph-map options.hud)
+                     (target-graph-map options.canvas)
+                     (and (match-map app.graph-map) app.graph-map)
+                     (and app.active-world-runtime
+                          (match-map app.active-world-runtime.graph-map)
+                          app.active-world-runtime.graph-map)))
+  (assert graph "graph-node-view panel restore requires active matching graph-map")
+  (local node (when graph.lookup (graph:lookup key)))
+  (assert node (.. "graph-node-view panel restore node not found: " key))
   (local view-fn (and node node.view))
-  (when (not (= (type view-fn) :function))
-    (logging.warn (.. "[graph-node-view] skipping panel restore: node has no view function: " key))
-    (lua "return nil"))
+  (assert (= (type view-fn) :function)
+          (.. "graph-node-view panel restore node has no view function: " key))
   (local builder (view-fn node))
-  (when (not (= (type builder) :function))
-    (logging.warn (.. "[graph-node-view] skipping panel restore: view returned non-builder for node: " key))
-    (lua "return nil"))
+  (assert (= (type builder) :function)
+          (.. "graph-node-view panel restore view returned non-builder for node: " key))
   (var panel-element nil)
   (local placement (PanelUtils.panel-placement-options target panel))
+  (local persistence {:kind "graph-node-view"
+                      :node-key key
+                      :restorer-module "graph/view/node-view-panel-restorer"})
+  (when (and graph graph.id)
+     (set persistence.graph-map-id graph.id))
   (set panel-element
        (target:add-panel-child
          {:builder (NodeViewDialogBuilder.make-dialog-builder
@@ -46,8 +57,6 @@
           :position placement.position
           :rotation placement.rotation
           :size placement.size
-          :persistence {:kind "graph-node-view"
-                         :node-key key
-                         :restorer-module "graph/view/node-view-panel-restorer"}})))
+          :persistence persistence})))
 
 {:restore restore}

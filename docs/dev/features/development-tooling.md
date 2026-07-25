@@ -51,4 +51,3 @@ A 3D spatial computing platform with C++ and Fennel components needs specialized
 
 - Goal: [Core Platform](/dev/features/core-platform)
 - See: [Subsystems](/dev/subsystems/) — Tooling section
-- See: [Opencode Agent Workflow](/dev/features/opencode-agent-workflow) — remote control usage

@@ -1,8 +1,14 @@
-(local {: GraphNode} (require :graph/node-base))
 (local {: GraphEdge} (require :graph/edge))
 
-(fn require-graph [app tool-name]
-  (assert app.graph (.. tool-name " requires app.graph")))
+(fn require-graph-map [app tool-name]
+  (local runtime (and app app.active-world-runtime))
+  (local g (or (and runtime
+                    runtime.graph-map-manager
+                    (runtime.graph-map-manager:get-active-map))
+               (and runtime runtime.graph-map)
+               app.graph-map))
+  (assert g (.. tool-name " requires a graph-map"))
+  g)
 
 (fn lookup-node [graph id]
   (assert (= (type id) "string") "graph node id must be a string")
@@ -34,13 +40,13 @@
      :system-prompt "Use graph node tools to create and load nodes in the knowledge graph."})
 
   (mgr:register
-    {:name "graph-node-destructive-tools"
+    {:name "graph-node-map-tools"
      :group "graph"
      :default-state :auto
      :risk :destructive
      :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.remove-nodes"]
-     :system-prompt "Removing nodes is destructive. Confirm with the user before deleting graph nodes."})
+           :system-prompt "Removing nodes from the graph map. This is non-destructive; backing objects are not deleted."})
 
   (mgr:register
     {:name "graph-edge-tools"
@@ -79,18 +85,21 @@
 
 (fn add-node-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_add_node"))
-    (local node (GraphNode {:key args.id
-                            :label args.label}))
-    (set node.metadata {:kind args.kind
-                        :content args.content})
-    (local added (graph:add-node node))
-    (tostring added.key)))
+    (local graph-map (require-graph-map app "space_graph_add_node"))
+    (when (and args.kind (not= args.kind "string-entity"))
+      (error (.. "space_graph_add_node unsupported kind: " (tostring args.kind))))
+    (local StringEntityStore (require :entities/string))
+    (local store (StringEntityStore.get-default))
+    (local entity (store:create-entity {:value (or args.content args.label "")}))
+    (local key (.. "string-entity:" (tostring entity.id)))
+    (local node (graph-map:load-by-key key))
+    (assert node (.. "space_graph_add_node failed to load created string entity: " key))
+    key))
 
 (fn load-node-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_load_node"))
-    (local node (lookup-node graph args.id))
+    (local graph-map (require-graph-map app "space_graph_load_node"))
+    (local node (lookup-node graph-map args.id))
     (if node
         (do
           (when app.graph-view
@@ -100,47 +109,47 @@
 
 (fn remove-nodes-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_remove_nodes"))
+    (local graph-map (require-graph-map app "space_graph_remove_nodes"))
     (local nodes [])
     (each [_ id (ipairs args.ids)]
-      (local node (lookup-node graph id))
-      (assert node (.. "Node not found: " id))
+      (local node (and graph-map.lookup (graph-map:lookup id)))
+      (assert node (.. "Node not in active graph map: " id))
       (table.insert nodes node))
-    (graph:remove-nodes nodes)
+    (graph-map:remove-nodes nodes)
     (.. "removed " (# nodes) " nodes")))
 
 (fn add-edge-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_add_edge"))
-    (local source (lookup-node graph args.from))
-    (local target (lookup-node graph args.to))
+    (local graph-map (require-graph-map app "space_graph_add_edge"))
+    (local source (lookup-node graph-map args.from))
+    (local target (lookup-node graph-map args.to))
     (assert source (.. "Source node not found: " args.from))
     (assert target (.. "Target node not found: " args.to))
-    (local edge (graph:add-edge (GraphEdge {:source source :target target :label args.label})))
+    (local edge (graph-map:add-edge (GraphEdge {:source source :target target :label args.label})))
     (or edge.label "created")))
 
 (fn focus-node-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_focus_node"))
-    (local node (lookup-node graph args.id))
+    (local graph-map (require-graph-map app "space_graph_focus_node"))
+    (local node (lookup-node graph-map args.id))
     (assert node (.. "Node not found: " args.id))
     (request-focus app node)
     "focused"))
 
 (fn open-node-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_open_node"))
-    (local node (lookup-node graph args.id))
+    (local graph-map (require-graph-map app "space_graph_open_node"))
+    (local node (lookup-node graph-map args.id))
     (assert node (.. "Node not found: " args.id))
     (open-node-view app node)
     "opened"))
 
 (fn search-nodes-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_search_nodes"))
+    (local graph-map (require-graph-map app "space_graph_search_nodes"))
     (local query (string.lower args.query))
     (local results [])
-    (each [_ node (pairs graph.nodes)]
+    (each [_ node (pairs graph-map.nodes)]
       (local label (string.lower (tostring (or node.label node.key ""))))
       (local kind (and node.metadata node.metadata.kind))
       (when (and (string.find label query 1 true)
@@ -150,19 +159,22 @@
 
 (fn create-identity-run [app]
   (fn [args]
-    (local graph (require-graph app "space_graph_create_identity"))
-    (local node (graph:create-identity args.name {:metadata {:role args.role}}))
+    (local graph-map (require-graph-map app "space_graph_create_identity"))
+    (local shared-graph graph-map.graph)
+    (local node (shared-graph:create-identity args.name {:metadata {:role args.role}}))
+    (when (and graph-map.load-by-key node)
+      (graph-map:load-by-key node.key))
     (tostring node.key)))
 
 (fn get-state-run [app]
   (fn [_args]
-    (local graph (require-graph app "space_graph_get_state"))
-    (graph:capture-state)))
+    (local graph-map (require-graph-map app "space_graph_get_state"))
+    (graph-map:capture-state)))
 
 (fn restore-state-run [app]
   (fn [args]
-    (assert app.graph "space_graph_restore_state requires app.graph")
-    (app.graph:restore-state args.state)
+    (local graph-map (require-graph-map app "space_graph_restore_state"))
+    (graph-map:restore-state args.state)
     "restored"))
 
 (fn register-graph-adapters [adapters]
@@ -171,11 +183,11 @@
   (adapters:register
     {:id "graph.add-node"
      :mcp-name "space_graph_add_node"
-     :description "Add a new node to the graph."
+     :description "Create a string entity and add it to the active graph map."
      :inputSchema {:type "object"
                    :properties {:label {:type "string" :description "Node label"}
-                                :kind {:type "string" :description "Node kind"}
-                                :content {:type "string" :description "Optional node content"}}
+                                 :kind {:type "string" :description "Optional node kind; only string-entity is supported"}
+                                 :content {:type "string" :description "Optional node content"}}
                    :required ["label"]}
      :make-run add-node-run})
 
@@ -189,7 +201,7 @@
   (adapters:register
     {:id "graph.remove-nodes"
      :mcp-name "space_graph_remove_nodes"
-     :description "Remove nodes from the graph. This is destructive."
+      :description "Remove nodes from the graph map. Backing objects are not deleted."
      :inputSchema {:type "object"
                    :properties {:ids {:type "array" :items {:type "string"} :description "Node IDs to remove"}}
                    :required ["ids"]}

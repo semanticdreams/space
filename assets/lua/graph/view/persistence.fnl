@@ -11,15 +11,27 @@
     (local options (or opts {}))
     (local data-dir options.data-dir)
     (assert data-dir "GraphViewPersistence requires data-dir")
-    (local graph-data-dir (fs.join-path data-dir "graph-view"))
+    (local map-id (or options.map-id "main"))
+    (assert (and (= (type map-id) :string)
+                 (> (string.len map-id) 0)
+                 (not (= (string.sub map-id 1 1) "."))
+                 (not (string.find map-id "/" 1 true))
+                 (not (string.find map-id "\\" 1 true))
+                 (not (string.find map-id "." 1 true)))
+            (.. "GraphViewPersistence: unsafe map-id: " (tostring map-id)))
+    (local graph-data-dir (fs.join-path (fs.join-path data-dir "graph" "maps") map-id))
     (local metadata-path (fs.join-path graph-data-dir "metadata.json"))
     (var pending-save? false)
     (var persisted {:positions {}
                     :presentations {}
-                    :sizes {}})
+                    :sizes {}
+                    :panels []
+                    :extra_panels []})
     (var persisted-positions persisted.positions)
     (var persisted-presentations persisted.presentations)
     (var persisted-sizes persisted.sizes)
+    (var persisted-panels persisted.panels)
+    (var persisted-extra-panels [])
 
     (fn finite-number? [value]
         (and (= (type value) :number)
@@ -66,35 +78,79 @@
                                   result)))
         true)
 
+    (local legacy-metadata-path (fs.join-path (fs.join-path data-dir "graph-view") "metadata.json"))
+
     (fn load []
-        (ensure-graph-data-dir)
-        (when (fs.exists metadata-path)
-            (local (read-ok content) (pcall fs.read-file metadata-path))
+        (var source-path metadata-path)
+        (when (and (= map-id "main") (not (fs.exists metadata-path)) (fs.exists legacy-metadata-path))
+            (set source-path legacy-metadata-path)
+            (ensure-graph-data-dir))
+        (when (and (not (= map-id "main"))
+                   (= options.map-id nil)
+                   (not (fs.exists metadata-path))
+                   (fs.exists legacy-metadata-path))
+            (set source-path legacy-metadata-path))
+        (when (fs.exists source-path)
+            (local (read-ok content) (pcall fs.read-file source-path))
             (when (not read-ok)
                 (error (string.format "GraphView failed to read %s: %s"
-                                      metadata-path
+                                      source-path
                                       content)))
             (local (parse-ok decoded) (pcall json.loads content))
             (when (not parse-ok)
                 (error (string.format "GraphView failed to parse %s: %s"
-                                      metadata-path
+                                      source-path
                                       decoded)))
             (local positions (or decoded.positions {}))
             (local presentations (or decoded.presentations {}))
             (local sizes (or decoded.sizes {}))
-            (each [key value (pairs positions)]
-                (assert-valid-position key value "GraphViewPersistence load"))
-            (each [key value (pairs presentations)]
-                (assert (= value :expanded)
-                        (string.format "GraphViewPersistence load presentation for %s must be :expanded" key)))
-            (each [key value (pairs sizes)]
-                (assert-valid-size key value "GraphViewPersistence load"))
-            (set persisted {:positions positions
-                            :presentations presentations
-                            :sizes sizes})
-            (set persisted-positions positions)
-            (set persisted-presentations presentations)
-            (set persisted-sizes sizes)))
+             (local panels (or decoded.panels []))
+             (local extra-panels (or decoded.extra_panels []))
+             (each [key value (pairs positions)]
+                 (assert-valid-position key value "GraphViewPersistence load"))
+             (each [key value (pairs presentations)]
+                 (assert (= value :expanded)
+                         (string.format "GraphViewPersistence load presentation for %s must be :expanded" key)))
+             (each [key value (pairs sizes)]
+                 (assert-valid-size key value "GraphViewPersistence load"))
+            (assert (= (type panels) :table)
+                    "GraphViewPersistence load panels must be a table")
+            (assert (= (type extra-panels) :table)
+                    "GraphViewPersistence load extra_panels must be a table")
+              (local kept-panels [])
+              (local kept-extra-panels [])
+              (var compacted? false)
+              (each [_ panel (ipairs panels)]
+                  (when (and (= panel.kind "graph-node-view")
+                             (not panel.graph-map-id))
+                      (set panel.graph-map-id map-id)
+                      (set compacted? true))
+                  (if (or (not panel.graph-map-id)
+                          (= panel.graph-map-id map-id))
+                      (table.insert kept-panels panel)
+                      (set compacted? true)))
+              (each [_ panel (ipairs extra-panels)]
+                  (when (and panel.kind
+                             (not panel.graph-map-id))
+                      (set panel.graph-map-id map-id)
+                      (set compacted? true))
+                  (if (or (not panel.graph-map-id)
+                          (= panel.graph-map-id map-id))
+                      (table.insert kept-extra-panels panel)
+                      (set compacted? true)))
+              (set persisted {:positions positions
+                              :presentations presentations
+                              :sizes sizes
+                              :panels kept-panels
+                              :extra_panels kept-extra-panels})
+             (set persisted-positions positions)
+             (set persisted-presentations presentations)
+             (set persisted-sizes sizes)
+              (set persisted-panels kept-panels)
+              (set persisted-extra-panels kept-extra-panels)
+              (when compacted?
+                  (ensure-graph-data-dir)
+                  (JsonUtils.write-json! metadata-path persisted))))
 
     (fn saved-position [_self node]
         (when (and node node.key)
@@ -148,9 +204,11 @@
                     (tset merged k v)))
             (each [k v (pairs positions)]
                 (tset merged k v))
-            (set persisted.positions merged)
-            (set persisted.presentations persisted-presentations)
-            (set persisted.sizes persisted-sizes)
+             (set persisted.positions merged)
+             (set persisted.presentations persisted-presentations)
+             (set persisted.sizes persisted-sizes)
+             (set persisted.panels persisted-panels)
+             (set persisted.extra_panels persisted-extra-panels)
             (local (write-ok err) (pcall (fn [] (JsonUtils.write-json! metadata-path persisted))))
             (when (not write-ok)
                 (error (string.format "GraphView failed to write %s: %s"
@@ -186,14 +244,60 @@
         (set persisted.sizes persisted-sizes)
         (set pending-save? true))
 
+    (fn prune-node-key [_self key]
+        (assert (= (type key) :string) "GraphViewPersistence prune-node-key requires a string key")
+        (tset persisted-positions key nil)
+        (tset persisted-presentations key nil)
+        (tset persisted-sizes key nil)
+        (local kept-panels [])
+        (local kept-extra-panels [])
+        (each [_ panel (ipairs (or persisted-panels []))]
+            (when (not (= panel.node-key key))
+                (table.insert kept-panels panel)))
+        (each [_ panel (ipairs (or persisted-extra-panels []))]
+            (when (not (= panel.node-key key))
+                (table.insert kept-extra-panels panel)))
+        (set persisted-panels kept-panels)
+        (set persisted-extra-panels kept-extra-panels)
+        (set persisted.positions persisted-positions)
+        (set persisted.presentations persisted-presentations)
+        (set persisted.sizes persisted-sizes)
+        (set persisted.panels persisted-panels)
+        (set persisted.extra_panels persisted-extra-panels)
+        (set pending-save? true)
+        true)
+
+    (fn saved-panels [_self]
+        persisted-panels)
+
+    (fn set-panels [_self panels]
+        (assert (= (type panels) :table) "GraphViewPersistence set-panels requires a table")
+        (set persisted-panels panels)
+        (set persisted.panels panels)
+        (set pending-save? true))
+
+    (fn saved-extra-panels [_self]
+        persisted-extra-panels)
+
+    (fn set-extra-panels [_self extra-panels]
+        (assert (= (type extra-panels) :table) "GraphViewPersistence set-extra-panels requires a table")
+        (set persisted-extra-panels extra-panels)
+        (set persisted.extra_panels extra-panels)
+        (set pending-save? true))
+
     (local self {:load load
                  :persist persist
                  :schedule-save schedule-save
                  :saved-position saved-position
                  :saved-presentation saved-presentation
                  :saved-size saved-size
-                 :set-size set-size
-                 :set-presentation set-presentation
+                 :saved-panels saved-panels
+                 :saved-extra-panels saved-extra-panels
+                  :set-size set-size
+                  :set-presentation set-presentation
+                  :prune-node-key prune-node-key
+                  :set-panels set-panels
+                 :set-extra-panels set-extra-panels
                  :capture-positions capture-positions
                  :metadata-path metadata-path})
 

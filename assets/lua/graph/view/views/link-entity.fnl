@@ -125,7 +125,7 @@
     ;; Delete button
     (local delete-button
       ((Button {:icon "delete"
-                :text "Delete"
+                :text "Delete Entity"
                 :variant :ghost
                 :on-click (fn [_button _event]
                             (when (and target target.delete-entity)

@@ -57,7 +57,7 @@
            (if current
                (node:refresh)
                (when (and node.graph node.graph.remove-nodes)
-                 (node.graph:remove-nodes [node]))))))
+                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
 
   (set node.drop
        (fn [self]

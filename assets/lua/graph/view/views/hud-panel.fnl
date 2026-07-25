@@ -21,7 +21,7 @@
              :color (glm.vec4 0.6 0.6 0.6 1)}))
     (local remove-button-builder
       (Button {:icon "delete"
-               :text "Remove"
+                :text "Delete HUD Panel"
                :variant :ghost
                :on-click (fn [_button _event]
                            (when (and target target.actions)

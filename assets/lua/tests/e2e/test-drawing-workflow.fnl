@@ -169,8 +169,8 @@
 (fn triangle-vector-length []
   (local vector
     (and app.canvas
-         app.canvas.build-context
-         (. app.canvas.build-context :triangle-vector)))
+         app.canvas.get-triangle-vector
+         (app.canvas:get-triangle-vector)))
   (and vector (vector:length)))
 
 (fn raster-tile-count []
@@ -188,8 +188,8 @@
 (fn image-batch-vertex-count []
   (local batches
     (and app.canvas
-         app.canvas.build-context
-         (. app.canvas.build-context :image-batches)))
+         app.canvas.get-image-batches
+         (app.canvas:get-image-batches)))
   (var count 0)
   (each [_ batch (pairs (or batches {}))]
     (when (and batch batch.vector batch.vector.length)
