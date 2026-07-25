@@ -462,6 +462,34 @@
 
 (table.insert tests {:name "agent-presets: validate mcp-name prefix" :fn test-adapters-validate-prefix})
 
+(fn test-graph-tool-adapter-uses-active-manager-map []
+  (local Graph (require :graph/init))
+  (local GraphMap (require :graph/map))
+  (local graph (Graph {:with-start false}))
+  (graph:register-key-loader "test"
+                             (fn [key]
+                               (Graph.GraphNode {:key key})))
+  (local first-map (GraphMap.GraphMap {:graph graph :id "first"}))
+  (local second-map (GraphMap.GraphMap {:graph graph :id "second"}))
+  (local adapters (ToolAdapterRegistry {}))
+  (local mgr {:tool-adapters adapters
+              :register (fn [_self _preset] nil)})
+  (BuiltinGraph.register mgr)
+  (local appctx {:graph-map first-map
+                 :active-world-runtime {:graph-map first-map
+                                        :graph-map-manager {:get-active-map (fn [_self] second-map)}}})
+  (local tool (adapters:resolve "graph.load-node" appctx))
+  (tool.run {:id "test:item"})
+  (assert (not (first-map:lookup "test:item"))
+          "Graph tool should not mutate stale app.graph-map")
+  (assert (second-map:lookup "test:item")
+          "Graph tool should use graph-map-manager active map")
+  (first-map:drop)
+  (second-map:drop)
+  (graph:drop))
+
+(table.insert tests {:name "agent-presets: graph tool uses active manager map" :fn test-graph-tool-adapter-uses-active-manager-map})
+
 ;; ── PresetManager: create ──
 
 (fn test-manager-create []

@@ -624,7 +624,7 @@
   (assert node.actions "ScenePanelNode should have actions")
   (assert (= (length node.actions) 1) "ScenePanelNode should have one action")
   (local action (. node.actions 1))
-  (assert (= action.name "Remove") "action should be Remove")
+  (assert (= action.name "Delete Scene Panel") "action should be Delete Scene Panel")
   (node:drop))
 
 (fn test-hud-panel-node-has-remove-action []
@@ -636,7 +636,7 @@
   (assert node.actions "HudPanelNode should have actions")
   (assert (= (length node.actions) 1) "HudPanelNode should have one action")
   (local action (. node.actions 1))
-  (assert (= action.name "Remove") "action should be Remove")
+  (assert (= action.name "Delete HUD Panel") "action should be Delete HUD Panel")
   (node:drop))
 
 (fn test-terrain-node-has-actions []
@@ -652,7 +652,7 @@
   (assert node.actions "TerrainNode should have actions")
   (assert (= (length node.actions) 2) "TerrainNode should have editor and remove actions")
   (assert (= (. (. node.actions 1) :name) "Open Editor") "first terrain action should open properties")
-  (assert (= (. (. node.actions 2) :name) "Remove") "second terrain action should remove terrain")
+  (assert (= (. (. node.actions 2) :name) "Delete Terrain") "second terrain action should delete terrain")
   (node:drop))
 
 (fn test-flat-terrain-node-updates-world-state []
@@ -2063,7 +2063,18 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels [{:kind "p1"}
+                                                               {:kind "p2"}
+                                                               {:kind "p3"}
+                                                               {:kind "p4"}
+                                                               {:kind "p5"}]
+                                                      :terrains []
+                                                      :lights (LightSystemModule.default-state)
+                                                      :skybox (make-skybox-state)
+                                                      :background (make-background-state)}
+                                              :hud {:panels []}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
       (local result (graph:load-by-key "scene-panel:test-world:5"))
       (assert result "scene-panel loader should create node")
       (assert (= result.key "scene-panel:test-world:5") "scene-panel key should match")
@@ -2075,7 +2086,16 @@
   (with-temp-dir
     (fn [dir]
       (local graph (Graph {:with-start false}))
-      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world"})})
+      (local entry (make-world-entry {:id "test-world"
+                                      :state {:scene {:panels []
+                                                      :terrains []
+                                                      :lights (LightSystemModule.default-state)
+                                                      :skybox (make-skybox-state)
+                                                      :background (make-background-state)}
+                                              :hud {:panels [{:kind "h1" :layer "float"}
+                                                             {:kind "h2" :layer "float"}
+                                                             {:kind "h3" :layer "float"}]}}}))
+      (GraphKeyLoaders.register graph {:world-manager (make-world-manager {:id "test-world" :entry entry})})
       (local result (graph:load-by-key "hud-panel:test-world:float:3"))
       (assert result "hud-panel loader should create node")
       (assert (= result.key "hud-panel:test-world:float:3") "hud-panel key should match")

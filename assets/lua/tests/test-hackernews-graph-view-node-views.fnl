@@ -1,6 +1,7 @@
 (local glm (require :glm))
 (local BuildContext (require :build-context))
 (local GraphViewNodeViews (require :graph/view/node-views))
+(local PanelTransfer (require :panel-transfer))
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
 (local {: Layout} (require :layout))
 
@@ -125,12 +126,12 @@
                        :view (fn [_node]
                                  (fn [_builder-ctx _opts]
                                      (make-simple-view)))})
-          (local graph {:nodes {}})
+           (local graph {:id "main" :nodes {}})
           (set (. graph.nodes node.key) node)
           (set graph.lookup (fn [_self key] (. graph.nodes key)))
           (set graph.load-by-key (fn [_self key] (. graph.nodes key)))
           (local views (GraphViewNodeViews {:ctx ctx
-                                            :graph graph
+                                            :graph-map graph
                                             :view-target target}))
           (views:open node)
           (local dialog (. target.children 1))
@@ -147,10 +148,11 @@
                   "capture-state should include panel placement")
           (views:drop-all)
           (target:remove-panel-child dialog)
-          (views:restore-state {:open-views [{:node-key node.key
-                                              :panel {:layer "tiles"
-                                                      :align-x :end
-                                                      :align-y :start}}]})
+           (views:restore-state {:open-views [{:node-key node.key
+                                               :graph-map-id "main"
+                                               :panel {:layer "tiles"
+                                                       :align-x :end
+                                                       :align-y :start}}]})
           (assert (= (length target.children) 1)
                   "restore-state should reopen persisted node view")
           (assert (= (and target.last-add-panel-opts target.last-add-panel-opts.location) :tiles))
@@ -160,16 +162,41 @@
                           target.last-add-panel-opts.persistence
                           target.last-add-panel-opts.persistence.kind)
                      "graph-node-view")))}
+ {:name "graph view node-views legacy open-node-keys restore uses map id"
+  :fn (fn []
+          (local ctx (make-ctx))
+          (local target (make-view-target ctx))
+          (local node {:key "legacy-open-node"
+                       :label "Legacy open node"
+                       :view (fn [_node]
+                                 (fn [_builder-ctx _opts]
+                                     (make-simple-view)))})
+          (local graph {:id "legacy-map" :nodes {}})
+          (set (. graph.nodes node.key) node)
+          (set graph.lookup (fn [_self key] (. graph.nodes key)))
+          (local views (GraphViewNodeViews {:ctx ctx
+                                            :graph-map graph
+                                            :view-target target}))
+          (views:restore-state {:open-node-keys [node.key]})
+          (assert (= (length target.children) 1)
+                  "legacy open-node-keys should restore node view on active map")
+          (local state (views:capture-state))
+          (local captured (. state.open-views 1))
+          (assert (= captured.graph-map-id "legacy-map")
+                  "legacy open-node-keys restore should capture active graph-map-id")
+          (views:drop-all))}
  {:name "graph view node-views restore skips unresolved nodes"
   :fn (fn []
           (local ctx (make-ctx))
           (local target (make-view-target ctx))
-          (local graph {:lookup (fn [_self _key] nil)
-                        :load-by-key (fn [_self _key] nil)})
+           (local graph {:id "main"
+                         :lookup (fn [_self _key] nil)
+                         :load-by-key (fn [_self _key] nil)})
           (local views (GraphViewNodeViews {:ctx ctx
-                                            :graph graph
+                                            :graph-map graph
                                             :view-target target}))
-          (views:restore-state {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"}]})
+           (views:restore-state {:open-views [{:node-key "terrain-tool:world-1:apply-perlin"
+                                               :graph-map-id "main"}]})
           (assert (= (length target.children) 0)
                   "restore-state should skip unresolved node views")
           (local state (views:capture-state))
@@ -182,15 +209,17 @@
   :fn (fn []
           (local ctx (make-ctx))
           (local target (make-view-target ctx))
-          (local graph {:lookup (fn [_self _key] nil)
-                        :load-by-key (fn [_self _key] nil)})
+           (local graph {:id "main"
+                         :lookup (fn [_self _key] nil)
+                         :load-by-key (fn [_self _key] nil)})
           (local views (GraphViewNodeViews {:ctx ctx
-                                            :graph graph
+                                            :graph-map graph
                                             :view-target target}))
           (assert (and target.restorer target.restorer.restorer)
                   "expected graph node views to register panel restorer")
-          ((. target.restorer :restorer) {:node-key "terrain:world-1:node-a"
-                                          :layer "float"})
+           ((. target.restorer :restorer) {:node-key "terrain:world-1:node-a"
+                                           :graph-map-id "main"
+                                           :layer "float"})
           (assert (= (length target.children) 0)
                   "panel restorer should skip unresolved node views")
           (local state (views:capture-state))
@@ -241,19 +270,21 @@
            (local saved-graph app.graph)
            (local saved-runtime app.active-world-runtime)
            (local graph
-             {:lookup (fn [_self key]
-                        (when (= key "test-node") node))
+              {:id "main"
+               :lookup (fn [_self key]
+                         (when (= key "test-node") node))
               :nodes {"test-node" node}})
            (set app.graph graph)
-           (set app.active-world-runtime {:graph graph})
+           (set app.active-world-runtime {:graph-map graph})
            (local (ok result)
              (pcall
                (fn []
-                 (RestorerModule.restore {:hud target
-                                           :panel {:kind "graph-node-view"
-                                                   :node-key "test-node"
-                                                   :layer "tiles"
-                                                   :align-x :start}})
+                  (RestorerModule.restore {:hud target
+                                            :panel {:kind "graph-node-view"
+                                                    :node-key "test-node"
+                                                    :graph-map-id "main"
+                                                    :layer "tiles"
+                                                    :align-x :start}})
                  (assert (= (length target.children) 1)
                          "module restorer should add one child")
                  (local child (. target.children 1))
@@ -275,6 +306,38 @@
                  true)))
            (set app.graph saved-graph)
            (set app.active-world-runtime saved-runtime)
+            (when (not ok)
+              (error result))
+            true)}
+  {:name "graph-node-view panel restorer resolves canvas graph-map"
+   :fn (fn []
+           (local RestorerModule (require :graph/view/node-view-panel-restorer))
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
+           (local node {:key "canvas-node"
+                        :label "Canvas Node"
+                        :view (fn [_node]
+                                  (fn [_builder-ctx _builder-opts]
+                                      (make-simple-view)))})
+           (local saved-graph-map app.graph-map)
+           (local saved-runtime app.active-world-runtime)
+           (local graph {:id "canvas-map"
+                         :lookup (fn [_self key] (when (= key "canvas-node") node))
+                         :nodes {"canvas-node" node}})
+           (set target.graph-map graph)
+           (set app.graph-map nil)
+           (set app.active-world-runtime nil)
+           (local (ok result)
+             (pcall
+               (fn []
+                 (RestorerModule.restore {:canvas target
+                                          :panel {:kind "graph-node-view"
+                                                  :node-key "canvas-node"
+                                                  :graph-map-id "canvas-map"}})
+                 (assert (= (length target.children) 1)
+                         "canvas restorer should add one child from canvas graph-map"))))
+           (set app.graph-map saved-graph-map)
+           (set app.active-world-runtime saved-runtime)
            (when (not ok)
              (error result))
            true)}
@@ -291,18 +354,20 @@
                                           (make-simple-view))))})
            (local saved-graph app.graph)
            (local saved-runtime app.active-world-runtime)
-           (local graph {:lookup (fn [_self key] (when (= key "nested") node))
-                         :nodes {"nested" node}})
+            (local graph {:id "main"
+                          :lookup (fn [_self key] (when (= key "nested") node))
+                          :nodes {"nested" node}})
            (set app.graph graph)
-           (set app.active-world-runtime {:graph graph})
+           (set app.active-world-runtime {:graph-map graph})
            (local (ok result)
              (pcall
                (fn []
-                 (RestorerModule.restore {:hud target
-                                           :panel {:kind "graph-node-view"
-                                                   :node-key "nested"
-                                                   :layer "float"
-                                                   :position [1 2 3]
+                  (RestorerModule.restore {:hud target
+                                            :panel {:kind "graph-node-view"
+                                                    :node-key "nested"
+                                                    :graph-map-id "main"
+                                                    :layer "float"
+                                                    :position [1 2 3]
                                                    :size [4 5 6]}})
                  (assert (= (length target.children) 1)
                          "module restorer should unwrap nested builders and add a child")
@@ -312,9 +377,203 @@
                  true)))
            (set app.graph saved-graph)
            (set app.active-world-runtime saved-runtime)
-           (when (not ok)
-             (error result))
-           true)}])
+            (when (not ok)
+              (error result))
+            true)}
+   {:name "graph view node-views scene target round-trips target-kind"
+    :fn (fn []
+            (local ctx (make-ctx))
+            (local target (make-view-target ctx))
+            (local scene-target (make-view-target ctx))
+            (local saved-scene app.scene)
+            (local saved-hud app.hud)
+            (var views nil)
+            (local (ok err)
+              (pcall
+                (fn []
+                    (set app.scene scene-target)
+                    (set app.hud nil)
+                    (local node {:key "scene-node"
+                                 :label "Scene"
+                                 :view (fn [_node]
+                                           (fn [_builder-ctx _opts]
+                                               (make-simple-view)))})
+                    (local graph {:id "main" :nodes {}})
+                    (set (. graph.nodes node.key) node)
+                    (set graph.lookup (fn [_self key] (. graph.nodes key)))
+                    (set graph.load-by-key (fn [_self key] (. graph.nodes key)))
+                    (set views (GraphViewNodeViews {:ctx ctx
+                                                    :graph-map graph
+                                                    :view-target target}))
+                    (views:open node {:target app.scene})
+                    (local state (views:capture-state))
+                    (local captured (. state.open-views 1))
+                    (assert (= captured.target-kind "scene")
+                            "capture-state should record scene target-kind")
+                    (views:drop-all)
+                    (each [_ child (ipairs scene-target.children)]
+                        (scene-target:remove-panel-child child))
+                    (views:restore-state state)
+                    (assert (= (length scene-target.children) 1)
+                            "restore-state should reopen node view on scene target")
+                    (views:drop-all)
+                    (set views nil))))
+            (when views (views:drop-all))
+            (set app.scene saved-scene)
+            (set app.hud saved-hud)
+            (when (not ok)
+                (error err)))}
+   {:name "graph view node-views custom receiver target round-trips"
+    :fn (fn []
+            (local ctx (make-ctx))
+            (local target (make-view-target ctx))
+            (local custom-target (make-view-target ctx))
+            (local saved-pt app.panel-transfer)
+            (var views nil)
+            (local (ok err)
+              (pcall
+                (fn []
+                    (local pt (PanelTransfer.PanelTransfer))
+                    (pt:register-receiver {:id "custom-view"
+                                           :label "Custom View"
+                                           :target-fn (fn [] custom-target)})
+                    (set app.panel-transfer pt)
+                    (local node {:key "custom-node"
+                                 :label "Custom"
+                                 :view (fn [_node]
+                                           (fn [_builder-ctx _opts]
+                                               (make-simple-view)))})
+                    (local graph {:id "main" :nodes {}})
+                    (set (. graph.nodes node.key) node)
+                    (set graph.lookup (fn [_self key] (. graph.nodes key)))
+                    (set graph.load-by-key (fn [_self key] (. graph.nodes key)))
+                    (set views (GraphViewNodeViews {:ctx ctx
+                                                    :graph-map graph
+                                                    :view-target target}))
+                    (views:open node {:target custom-target})
+                    (local state (views:capture-state))
+                    (local captured (. state.open-views 1))
+                    (assert (= captured.target-kind "receiver")
+                            "capture-state should record receiver target-kind for custom target")
+                    (assert (= captured.target-receiver-id "custom-view")
+                            "capture-state should record receiver id")
+                    (views:drop-all)
+                    (each [_ child (ipairs custom-target.children)]
+                        (custom-target:remove-panel-child child))
+                    (views:restore-state state)
+                    (assert (= (length custom-target.children) 1)
+                            "restore-state should reopen node view on custom receiver target")
+                    (views:drop-all)
+                    (set views nil))))
+            (when views (views:drop-all))
+            (set app.panel-transfer saved-pt)
+    (when (not ok)
+                (error err)))}
+   {:name "graph view node-views transfer updates captured target"
+    :fn (fn []
+            (local ctx (make-ctx))
+            (local source-target (make-view-target ctx))
+            (local dest-target (make-view-target ctx))
+            (local saved-pt app.panel-transfer)
+            (var views nil)
+            (local (ok err)
+              (pcall
+                (fn []
+                    (local pt (PanelTransfer.PanelTransfer))
+                    (pt:register-receiver {:id "dest-view"
+                                           :label "Dest View"
+                                           :target-fn (fn [] dest-target)})
+                    (set app.panel-transfer pt)
+                    (local node {:key "transfer-node"
+                                 :label "Transfer"
+                                 :view (fn [_node]
+                                           (fn [_builder-ctx _opts]
+                                               (make-simple-view)))})
+                    (local graph {:id "main" :nodes {}})
+                    (set (. graph.nodes node.key) node)
+                    (set graph.lookup (fn [_self key] (. graph.nodes key)))
+                    (set views (GraphViewNodeViews {:ctx ctx
+                                                    :graph-map graph
+                                                    :view-target source-target}))
+                    (views:open node {:target source-target})
+                    (local element (. source-target.children 1))
+                    (assert element "source should contain opened node view")
+                    (pt:transfer-panel {:id "dest-view"
+                                        :label "Dest View"
+                                        :target dest-target
+                                        :receive (fn [_receiver payload]
+                                                   (dest-target:add-panel-child payload))
+                                        :rollback (fn [_receiver element]
+                                                    (dest-target:remove-panel-child element))}
+                                       source-target
+                                       element
+                                       element.__test_panel_opts)
+                    (assert (= (length source-target.children) 0)
+                            "transfer should remove source panel")
+                    (assert (= (length dest-target.children) 1)
+                            "transfer should add destination panel")
+                    (local state (views:capture-state))
+                    (local captured (. state.open-views 1))
+                    (assert (= captured.target-kind "receiver")
+                            "capture should use destination receiver after transfer")
+                    (assert (= captured.target-receiver-id "dest-view")
+                            "capture should store destination receiver id after transfer")
+                    (views:drop-all)
+                    (set views nil))))
+            (when views (views:drop-all))
+            (set app.panel-transfer saved-pt)
+            (when (not ok)
+                (error err)))}
+   {:name "graph view node-views capture-state errors for unregistered custom target"
+    :fn (fn []
+            (local ctx (make-ctx))
+            (local target (make-view-target ctx))
+            (local custom-target (make-view-target ctx))
+            (local saved-pt app.panel-transfer)
+            (local pt (PanelTransfer.PanelTransfer))
+            (set app.panel-transfer pt)
+            (var views nil)
+            (var capture-ok true)
+            (pcall (fn []
+                       (local node {:key "unreg-node"
+                                    :label "Unreg"
+                                    :view (fn [_node]
+                                              (fn [_builder-ctx _opts]
+                                                  (make-simple-view)))})
+                        (local graph {:id "main" :nodes {}})
+                       (set (. graph.nodes node.key) node)
+                       (set graph.lookup (fn [_self key] (. graph.nodes key)))
+                       (set graph.load-by-key (fn [_self key] (. graph.nodes key)))
+                       (set views (GraphViewNodeViews {:ctx ctx
+                                                       :graph-map graph
+                                                       :view-target target}))
+                       (views:open node {:target custom-target})
+                       (views:capture-state)
+                       (set capture-ok false)))
+            (when views (views:drop-all))
+            (set app.panel-transfer saved-pt)
+             (assert capture-ok
+                     "capture-state should error when target is not a registered receiver"))}
+  {:name "graph view node-views restore does not auto-load nodes into map"
+   :fn (fn []
+           (local ctx (make-ctx))
+           (local target (make-view-target ctx))
+           (var load-by-key-called? false)
+            (local graph {:id "main"
+                          :lookup (fn [_self _key] nil)
+                          :load-by-key (fn [_self _key]
+                                          (set load-by-key-called? true)
+                                          nil)})
+           (local views (GraphViewNodeViews {:ctx ctx
+                                             :graph-map graph
+                                             :view-target target}))
+            (views:restore-state {:open-views [{:node-key "missing-node"
+                                                :graph-map-id "main"}]})
+           (assert (not load-by-key-called?)
+                   "restore-state should not call load-by-key for missing nodes")
+           (assert (= (length target.children) 0)
+                   "restore-state should not add child for missing nodes")
+           (views:drop-all))}])
 
 (local main
   (fn []

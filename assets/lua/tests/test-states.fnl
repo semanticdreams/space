@@ -682,7 +682,7 @@
                                                 10)
                               :direction (glm.vec3 0 0 -1)})})
         (set graph (Graph {:with-start false}))
-        (set view (GraphView {:graph graph
+        (set view (GraphView {:graph-map graph
                               :ctx ctx
                               :pointer-target pointer-target}))
         (local node (Graph.GraphNode {:key "touch-focus-node"

@@ -541,8 +541,8 @@
                                                    {:panels [{:kind "graph-node-view"
                                                               :node-key "node-a"}]})}}
                         "switch")
-      (assert (= (. (. world.runtime.pending-canvas-state.panels 1) :node-key) "node-a")
-              "World deactivate should queue canvas panel state for restore")
+      (assert (= (length (or world.runtime.pending-canvas-state.panels [])) 0)
+              "World deactivate should not queue graph-node-view canvas panel state for restore")
       (assert (= (. (. world.runtime.pending-hud-state.panels 1) :kind) "dialog/demo")
               "World deactivate should queue hud panel state for restore")
       true)))
@@ -1354,6 +1354,65 @@
               "Unsupported graph edge target should be preserved")
       true)))
 
+(fn home-world-does-not-resurrect-pruned-active-map-keys []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:active_map_id "main"
+                                  :next_map_id 2
+                                  :maps [{:id "main"
+                                          :name "Main"
+                                          :nodes ["test:valid" "mystery:stale"]
+                                          :edges [{:source "test:valid"
+                                                   :target "mystery:stale"}]}
+                                         {:id "archive"
+                                          :name "Archive"
+                                          :nodes ["mystery:inactive"]
+                                          :edges [{:source "mystery:inactive"
+                                                   :target "test:valid"}]}]}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (set world.runtime
+           {:graph {:has-key-loader-for-key (fn [_self key]
+                                             (= key "test:valid"))}
+            :graph-map-manager {:capture-state
+                                (fn [_self]
+                                  {:active_map_id "main"
+                                   :next_map_id 2
+                                   :maps [{:id "main"
+                                           :name "Main"
+                                           :nodes ["test:valid"]
+                                           :edges []}
+                                          {:id "archive"
+                                           :name "Archive"
+                                           :nodes []
+                                           :edges []}]})}})
+      (world:deactivate {} "switch")
+      (local maps (and world.state world.state.graph world.state.graph.maps))
+      (local main-map (. maps 1))
+      (local archive-map (. maps 2))
+      (assert (= (length main-map.nodes) 1)
+              "Hydrated active map should not resurrect pruned stale keys")
+      (assert (= (. main-map.nodes 1) "test:valid"))
+      (assert (= (length main-map.edges) 0)
+              "Hydrated active map should not resurrect pruned stale edges")
+      (assert (= (length archive-map.nodes) 1)
+              "Inactive unsupported map keys should still be preserved")
+      (assert (= (. archive-map.nodes 1) "mystery:inactive"))
+      true)))
+
 (fn home-world-load-state-errors-on-stale-terrain-persistence-refs []
   (with-temp-dir
     (fn [root]
@@ -1413,10 +1472,10 @@
               "Expected load-state stale terrain graph error to include terrain editor key")
       (assert (string.find err-text "terrain%-tool:world%-a:terrain%-stale:resize%-terrain")
               "Expected load-state stale terrain graph error to include terrain tool key")
-      (assert (string.find err-text "terrain%-tool:world%-a:terrain%-canvas:resize%-terrain")
-              "Expected load-state stale terrain graph error to include canvas graph-node-view key")
-      (assert (string.find err-text "terrain%-editor:world%-a:terrain%-hud")
-              "Expected load-state stale terrain graph error to include hud graph-node-view key")
+      (assert (not (string.find err-text "terrain%-tool:world%-a:terrain%-canvas:resize%-terrain"))
+              "Stale terrain graph error should not include removed canvas graph-node-view key")
+      (assert (not (string.find err-text "terrain%-editor:world%-a:terrain%-hud"))
+              "Stale terrain graph error should not include removed hud graph-node-view key")
       (assert (string.find err-text "terrain:world%-a:terrain%-scene")
               "Expected load-state stale terrain graph error to include scene graph-node-cube key")
       true)))
@@ -1460,7 +1519,7 @@
                   err-text))
       true)))
 
-(fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state []
+(fn home-world-removes-graph-node-views-from-target-state []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -1505,11 +1564,9 @@
               "Graph node views should no longer persist through graph state")
       (local panels (and world.state world.state.canvas world.state.canvas.panels))
       (assert (= (type panels) :table)
-              "Canvas should capture graph node view panels")
-      (assert (= (length panels) 1)
-              "Canvas should persist the captured graph node view panel")
-      (assert (= (. (. panels 1) :node-key) "start")
-              "Canvas should persist graph node view placement by node key")
+              "Canvas state should still contain a panels table")
+      (assert (= (length panels) 0)
+              "Canvas state should not persist graph-node-view panels")
       true)))
 
 (table.insert tests {:name "WorldManager creates and activates default home world"
@@ -1593,13 +1650,15 @@
 (table.insert tests {:name "HomeWorld preserves supported terrain when runtime capture misses terrains"
                      :fn home-world-preserves-supported-terrain-when-runtime-capture-misses-terrains})
 (table.insert tests {:name "HomeWorld preserves unsupported graph nodes on deactivate"
-                     :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
+                      :fn home-world-preserves-unsupported-graph-nodes-on-deactivate})
+(table.insert tests {:name "HomeWorld does not resurrect pruned active map keys"
+                     :fn home-world-does-not-resurrect-pruned-active-map-keys})
 (table.insert tests {:name "HomeWorld load-state errors on stale terrain persistence refs"
                      :fn home-world-load-state-errors-on-stale-terrain-persistence-refs})
 (table.insert tests {:name "HomeWorld load-state errors on cross-world terrain refs"
                      :fn home-world-load-state-errors-on-cross-world-terrain-refs})
-(table.insert tests {:name "HomeWorld persists graph node views on targets instead of graph state"
-                     :fn home-world-persists-graph-node-views-on-targets-instead-of-graph-state})
+(table.insert tests {:name "HomeWorld removes graph-node-view panels from target state"
+                     :fn home-world-removes-graph-node-views-from-target-state})
 
 (fn home-world-load-state-migrates-legacy-graph-node-view-panels []
   (with-temp-dir
@@ -1636,19 +1695,133 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local hud-panel (. (. world.state.hud :panels) 1))
-      (assert (= hud-panel.restorer-module "graph/view/node-view-panel-restorer")
-              "Legacy HUD graph-node-view panel should get restorer-module on load")
-      (local canvas-panel (. (. world.state.canvas :panels) 1))
-      (assert (= canvas-panel.restorer-module "graph/view/node-view-panel-restorer")
-              "Legacy canvas graph-node-view panel should get restorer-module on load")
-      (local scene-panel (. (. world.state.scene :panels) 1))
-      (assert (= scene-panel.restorer-module "graph/view/node-view-panel-restorer")
-              "Legacy scene graph-node-view panel should get restorer-module on load")
+      (assert (= (length (or (and world.state.hud world.state.hud.panels) [])) 0)
+              "Legacy HUD graph-node-view panels should be removed on load")
+      (assert (= (length (or (and world.state.canvas world.state.canvas.panels) [])) 0)
+              "Legacy canvas graph-node-view panels should be removed on load")
+       (assert (= (length (or (and world.state.scene world.state.scene.panels) [])) 0)
+               "Legacy scene graph-node-view panels should be removed on load")
+       (local metadata-path (fs.join-path world-dir "graph" "maps" "main" "metadata.json"))
+       (assert (fs.exists metadata-path)
+               "Legacy graph-node-view panels should migrate to graph map metadata")
+       (local meta (json.loads (fs.read-file metadata-path)))
+       (assert (= (length (or meta.panels [])) 3)
+               "All legacy graph-node-view panels should migrate to metadata")
+       (local by-key {})
+       (each [_ panel (ipairs meta.panels)]
+         (set (. by-key panel.node-key) panel))
+       (assert (= (. (. by-key "hud-node") :target-kind) "hud")
+               "HUD legacy panel should keep target kind")
+       (assert (= (. (. by-key "canvas-node") :target-kind) "canvas")
+               "Canvas legacy panel should keep target kind")
+       (assert (= (. (. by-key "node-a") :target-kind) "scene")
+               "Scene legacy panel should keep target kind")
+       (local graph-map (. world.state.graph.maps 1))
+       (assert (= (length graph-map.nodes) 3)
+               "Migrated graph-node-view panel keys should be added to map membership")
+       (local node-keys {})
+       (each [_ key (ipairs graph-map.nodes)]
+         (set (. node-keys key) true))
+       (assert (. node-keys "hud-node") "HUD migrated panel key should be in map membership")
+       (assert (. node-keys "canvas-node") "Canvas migrated panel key should be in map membership")
+       (assert (. node-keys "node-a") "Scene migrated panel key should be in map membership")
+       true)))
+
+(fn home-world-load-state-migrates-legacy-graph-node-view-panels-by-map []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:active_map_id "main"
+                                  :next_map_id 2
+                                  :maps [{:id "main" :name "Main" :nodes [] :edges []}
+                                         {:id "beta" :name "Beta" :nodes [] :edges []}]}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
+                          :canvas {:camera {:position [0 0 100]}
+                                   :scale_factor 1.0
+                                   :panels [{:kind "graph-node-view"
+                                             :graph-map-id "main"
+                                             :node-key "main-node"
+                                             :layer "tiles"}
+                                            {:kind "graph-node-view"
+                                             :graph-map-id "beta"
+                                             :node-key "beta-node"
+                                             :layer "tiles"}]}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local main-meta (json.loads (fs.read-file (fs.join-path world-dir "graph" "maps" "main" "metadata.json"))))
+      (local beta-meta (json.loads (fs.read-file (fs.join-path world-dir "graph" "maps" "beta" "metadata.json"))))
+      (assert (= (length (or main-meta.panels [])) 1)
+              "Main map metadata should receive only main legacy panels")
+      (assert (= (. (. main-meta.panels 1) :node-key) "main-node")
+              "Main map metadata should contain main-node panel")
+      (assert (= (length (or beta-meta.panels [])) 1)
+              "Beta map metadata should receive only beta legacy panels")
+      (assert (= (. (. beta-meta.panels 1) :node-key) "beta-node")
+              "Beta map metadata should contain beta-node panel")
+      (local main-map (. world.state.graph.maps 1))
+      (local beta-map (. world.state.graph.maps 2))
+      (assert (= (. main-map.nodes 1) "main-node")
+              "Main migrated panel key should be added to main map")
+       (assert (= (. beta-map.nodes 1) "beta-node")
+               "Beta migrated panel key should be added to beta map")
+       true)))
+
+(fn home-world-load-state-drops-legacy-panels-for-missing-map []
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+                         {:camera {:position [0 0 30]
+                                   :rotation [1 0 0 0]}
+                          :graph {:active_map_id "main"
+                                  :next_map_id 2
+                                  :maps [{:id "main" :name "Main" :nodes [] :edges []}]}
+                          :scene {:panels []
+                                  :terrains []
+                                  :lights (LightSystemModule.default-state)
+                                  :skybox (make-skybox-state)}
+                          :canvas {:camera {:position [0 0 100]}
+                                   :scale_factor 1.0
+                                   :panels [{:kind "graph-node-view"
+                                             :graph-map-id "deleted-map"
+                                             :node-key "stale-node"
+                                             :layer "tiles"}]}
+                          :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (assert (= (length world.state.graph.maps) 1)
+              "Legacy panel with missing map id should not recreate deleted map")
+      (local main-map (. world.state.graph.maps 1))
+      (assert (= (length (or main-map.nodes [])) 0)
+              "Missing-map legacy panel should not add node membership")
+      (assert (= (length (or (and world.state.canvas world.state.canvas.panels) [])) 0)
+              "Missing-map legacy panel should be removed from canvas state")
+      (local deleted-meta (fs.join-path (fs.join-path (fs.join-path (fs.join-path world-dir "graph") "maps") "deleted-map") "metadata.json"))
+      (assert (not (fs.exists deleted-meta))
+              "Missing-map legacy panel should not create metadata")
       true)))
 
 (table.insert tests {:name "HomeWorld load-state migrates legacy graph-node-view panels"
                      :fn home-world-load-state-migrates-legacy-graph-node-view-panels})
+(table.insert tests {:name "HomeWorld load-state migrates legacy graph-node-view panels by map"
+                     :fn home-world-load-state-migrates-legacy-graph-node-view-panels-by-map})
+(table.insert tests {:name "HomeWorld load-state drops legacy graph-node-view panels for missing map"
+                     :fn home-world-load-state-drops-legacy-panels-for-missing-map})
 
 (fn home-world-capture-runtime-state-is-transactional []
   (with-temp-dir

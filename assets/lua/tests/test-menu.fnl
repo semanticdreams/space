@@ -10,6 +10,7 @@
 (local {: Layout} (require :layout))
 (local fs (require :fs))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local LinkEntityStore (require :entities/link))
 
 (local tests [])
@@ -32,9 +33,11 @@
                             :brush 4242
                             :layers 4242
                             :link 4242
-                            :playlist_add 4242
-                            :tune 4242
-                            :exit_to_app 4242}})
+                             :playlist_add 4242
+                             :tune 4242
+                             :move_item 4242
+                             :close 4242
+                             :exit_to_app 4242}})
   (set stub.get
        (fn [self name]
          (local value (. self.codepoints name))
@@ -77,14 +80,15 @@
        :icon "account_tree"
        :button-name "graph-canvas-mode"
        :show-in-sidebar? true
-       :activate (fn [ctx]
-                   (ctx:set-context-enricher!
-                     (fn [context]
-                       (set context.graph
-                            {:graph app.graph
-                             :view app.graph-view
-                             :selected-nodes (GraphCanvasModeActions.selected-graph-nodes app.graph-view)})
-                       context))
+        :activate (fn [ctx]
+                    (ctx:set-context-enricher!
+                      (fn [context]
+                        (set context.graph
+                             {:graph app.graph
+                              :graph-map app.graph-map
+                              :view app.graph-view
+                              :selected-nodes (GraphCanvasModeActions.selected-graph-nodes app.graph-view)})
+                        context))
                    (ctx:set-root-actions! (. GraphCanvasModeActions :graph-root-actions))
                    (ctx:set-selection-actions! nil)
                    {:mode-id "graph"})
@@ -306,6 +310,20 @@
       (set found (. menu.buttons idx))))
   found)
 
+(fn find-action-by-name [actions name]
+  (var found nil)
+  (each [_ action (ipairs (or actions []))]
+    (when (and (not found) (= action.name name))
+      (set found action)))
+  found)
+
+(fn find-dialog-action-row [dialog]
+  (local titlebar-meta (. dialog.children 1))
+  (local titlebar titlebar-meta.element)
+  (local title-flex (. titlebar.children 2))
+  (local action-row-meta (. title-flex.children (length title-flex.children)))
+  action-row-meta.element)
+
 (fn with-package-loaded-overrides [overrides f]
   (local originals {})
   (each [name value (pairs overrides)]
@@ -333,7 +351,9 @@
       (set LinkEntityStore.get-default (fn [_opts] store))
 
       (local graph (Graph {:with-start false
-                           :link-store store}))
+                            :link-store store}))
+      (local {:register-loader register-link-loader} (require :graph/nodes/link-entity))
+      (register-link-loader graph {:store store})
       (local a (Graph.GraphNode {:key "node-a"}))
       (local b (Graph.GraphNode {:key "node-b"}))
       (graph:add-node a)
@@ -345,9 +365,12 @@
       (local e4 (store:create-entity {:source-key "node-b" :target-key "node-x"}))
 
       (local original-graph app.graph)
+      (local original-graph-map app.graph-map)
       (local original-view app.graph-view)
       (local original-surface app.active-interaction-surface)
+      (local map (GraphMap.GraphMap {:graph graph :id "test-show-link-entities"}))
       (set app.graph graph)
+      (set app.graph-map map)
       (set app.graph-view {:selection {:selected-nodes [a]}})
       (set app.active-interaction-surface :canvas)
       (activate-canvas-mode! "graph")
@@ -367,16 +390,16 @@
             (local button (find-button-by-name element "Show link entities"))
             (assert button "Root context menu should include 'Show link entities'")
 
-            (local before (graph:node-count))
+            (local before (map:node-count))
             (button:on-click {:button 1})
 
-            (assert (= (graph:node-count) (+ before 2))
+            (assert (= (map:node-count) (+ before 2))
                     "Show link entities should add link entity nodes for selected endpoints")
-            (local n1 (graph:lookup (.. "link-entity:" (tostring e1.id))))
-            (local n2 (graph:lookup (.. "link-entity:" (tostring e2.id))))
+            (local n1 (map:lookup (.. "link-entity:" (tostring e1.id))))
+            (local n2 (map:lookup (.. "link-entity:" (tostring e2.id))))
             (assert n1 "Should add link entity node for e1")
             (assert n2 "Should add link entity node for e2")
-            (assert (not (graph:lookup (.. "link-entity:" (tostring e4.id))))
+            (assert (not (map:lookup (.. "link-entity:" (tostring e4.id))))
                     "Should not add link entity nodes unrelated to the selection")
 
             ;; Expanding selection to both a and b uses AND logic: only entities
@@ -389,22 +412,174 @@
             (local button-2 (find-button-by-name element-2 "Show link entities"))
             (assert button-2 "Root context menu should still include 'Show link entities'")
             (button-2:on-click {:button 1})
-            (local n1-after (graph:lookup (.. "link-entity:" (tostring e1.id))))
-            (local n2-after (graph:lookup (.. "link-entity:" (tostring e2.id))))
+            (local n1-after (map:lookup (.. "link-entity:" (tostring e1.id))))
+            (local n2-after (map:lookup (.. "link-entity:" (tostring e2.id))))
             (assert (= n1-after n1) "Action should not replace existing link entity nodes")
             (assert (= n2-after n2) "Existing link entity nodes from prior action should remain")
-            (assert (not (graph:lookup (.. "link-entity:" (tostring e4.id))))
+            (assert (not (map:lookup (.. "link-entity:" (tostring e4.id))))
                     "AND filtering should exclude entities not covering all selected keys"))))
 
       (manager:drop)
+      (map:drop)
       (graph:drop)
       (set app.graph original-graph)
+      (set app.graph-map original-graph-map)
       (set app.graph-view original-view)
       (set app.active-interaction-surface original-surface)
       (set LinkEntityStore.get-default original-get-default)
 
       (when (not ok)
         (error err)))))
+
+(fn graph-root-add-to-map-loads-entered-key []
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local target {:children []})
+  (var removed-count 0)
+  (set target.add-panel-child
+       (fn [self opts]
+         (local builder (assert opts.builder "target.add-panel-child requires builder"))
+         (var element nil)
+         (local builder-options {})
+         (each [key value (pairs (or opts.builder-options {}))]
+           (set (. builder-options key) value))
+         (set builder-options.on-close
+              (fn [_dialog _button _event]
+                (when element
+                  (self:remove-panel-child element))))
+         (set element (builder ctx builder-options))
+         (table.insert self.children {:element element :opts opts})
+         element))
+  (set target.remove-panel-child
+       (fn [self element]
+         (var removed? false)
+         (for [i (length self.children) 1 -1]
+           (when (= (. self.children i :element) element)
+             (table.remove self.children i)
+             (set removed? true)))
+         (when removed?
+           (set removed-count (+ removed-count 1))
+           (element:drop))
+         removed?))
+
+  (local graph (Graph {:with-start false}))
+  (graph:register-key-loader "test"
+                             (fn [key]
+                               (Graph.GraphNode {:key key})))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "test-add-to-map"}))
+  (local actions (GraphCanvasModeActions.graph-root-actions
+                   {:graph {:graph-map graph-map}
+                    :targets {:canvas target}}))
+  (local action (find-action-by-name actions "Add to Map"))
+  (assert action "Graph root actions should include Add to Map")
+  (action.fn nil nil)
+  (assert (= (length target.children) 1) "Add to Map should open a target panel")
+  (local dialog (. (. target.children 1) :element))
+  (assert dialog.input "Add to Map dialog should expose key input")
+  (dialog.input:set-text "test:item")
+  (local node (dialog:add-key-to-map))
+  (assert node "Add to Map should return the loaded node")
+  (assert (graph-map:lookup "test:item") "Add to Map should load the key into the active map")
+  (local action-row (find-dialog-action-row dialog))
+  (local close-button (. (. action-row.children 2) :element))
+  (assert (= close-button.icon "close") "Add to Map dialog should keep DefaultDialog close button")
+  (close-button:on-click {:button 1})
+  (assert (= removed-count 1) "Add to Map close should remove the panel from its target")
+  (assert (= (length target.children) 0) "Add to Map close should clear target panel metadata")
+  (graph-map:drop)
+  (graph:drop))
+
+(fn graph-root-add-to-map-uses-current-map-after-switch []
+  (local clickables (make-clickables-stub))
+  (local hoverables (make-hoverables-stub))
+  (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
+  (local target {:children []})
+  (set target.add-panel-child
+       (fn [self opts]
+         (local builder (assert opts.builder "target.add-panel-child requires builder"))
+         (local element (builder ctx {}))
+         (table.insert self.children {:element element :opts opts})
+         element))
+  (set target.remove-panel-child
+       (fn [self element]
+         (var removed? false)
+         (for [i (length self.children) 1 -1]
+           (when (= (. self.children i :element) element)
+             (table.remove self.children i)
+             (set removed? true)))
+         removed?))
+  (local saved-graph-map app.graph-map)
+  (local saved-runtime app.active-world-runtime)
+  (local graph (Graph {:with-start false}))
+  (graph:register-key-loader "test"
+                             (fn [key]
+                               (Graph.GraphNode {:key key})))
+  (local first-map (GraphMap.GraphMap {:graph graph :id "first"}))
+  (local second-map (GraphMap.GraphMap {:graph graph :id "second"}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (set app.graph-map first-map)
+        (set app.active-world-runtime {:graph-map first-map})
+        (local actions (GraphCanvasModeActions.graph-root-actions
+                         {:graph {:graph-map first-map}
+                          :targets {:canvas target}}))
+        (local action (find-action-by-name actions "Add to Map"))
+        (assert action "Graph root actions should include Add to Map")
+        (action.fn nil nil)
+        (local dialog (. (. target.children 1) :element))
+        (assert dialog "Add to Map should open dialog")
+        (set app.graph-map first-map)
+        (set app.active-world-runtime {:graph-map first-map
+                                       :graph-map-manager {:get-active-map (fn [_self] second-map)}})
+        (dialog.input:set-text "test:item")
+        (dialog:add-key-to-map)
+        (assert (not (first-map:lookup "test:item"))
+                "Stale Add to Map dialog should not mutate old active map")
+        (assert (second-map:lookup "test:item")
+                "Stale Add to Map dialog should mutate current active map"))))
+  (set app.graph-map saved-graph-map)
+  (set app.active-world-runtime saved-runtime)
+  (first-map:drop)
+  (second-map:drop)
+  (graph:drop)
+  (when (not ok)
+    (error err)))
+
+(fn graph-root-create-string-entity-uses-current-map-after-switch []
+  (local saved-graph-map app.graph-map)
+  (local saved-runtime app.active-world-runtime)
+  (local graph (Graph {:with-start false}))
+  (graph:register-key-loader "string-entity"
+                             (fn [key]
+                               (Graph.GraphNode {:key key})))
+  (local first-map (GraphMap.GraphMap {:graph graph :id "first"}))
+  (local second-map (GraphMap.GraphMap {:graph graph :id "second"}))
+  (local (ok err)
+    (pcall
+      (fn []
+        (set app.graph-map first-map)
+        (set app.active-world-runtime {:graph-map first-map})
+        (local actions (GraphCanvasModeActions.graph-root-actions
+                         {:graph {:graph-map first-map}
+                          :targets {}}))
+        (local action (find-action-by-name actions "Create String Entity"))
+        (assert action "Graph root actions should include Create String Entity")
+        (set app.active-world-runtime {:graph-map first-map
+                                       :graph-map-manager {:get-active-map (fn [_self] second-map)}})
+        (action.fn nil nil)
+        (assert (= (first-map:node-count) 0)
+                "Stale Create String Entity action should not mutate old active map")
+        (assert (= (second-map:node-count) 1)
+                "Stale Create String Entity action should mutate current active map"))))
+  (set app.graph-map saved-graph-map)
+  (set app.active-world-runtime saved-runtime)
+  (first-map:drop)
+  (second-map:drop)
+  (graph:drop)
+  (when (not ok)
+    (error err)))
 
 (fn menu-manager-root-add-cuboid-invokes-scene []
   (reset-engine-events)
@@ -916,8 +1091,14 @@
 (table.insert tests {:name "Menu manager opens and closes menu" :fn menu-manager-opens-and-closes})
 (table.insert tests {:name "Menu root show link entities adds related nodes"
                      :fn menu-manager-root-show-link-entities-adds-related-nodes})
+(table.insert tests {:name "Graph root Add to Map loads entered key"
+                      :fn graph-root-add-to-map-loads-entered-key})
+(table.insert tests {:name "Graph root Add to Map uses current map after switch"
+                     :fn graph-root-add-to-map-uses-current-map-after-switch})
+(table.insert tests {:name "Graph root Create String Entity uses current map after switch"
+                     :fn graph-root-create-string-entity-uses-current-map-after-switch})
 (table.insert tests {:name "Menu root add cuboid invokes scene"
-                     :fn menu-manager-root-add-cuboid-invokes-scene})
+                      :fn menu-manager-root-add-cuboid-invokes-scene})
 (table.insert tests {:name "Menu root demo video player opens launchable"
                      :fn menu-manager-root-demo-video-player-opens-launchable})
 (table.insert tests {:name "Menu root demo video player errors loudly when unavailable"

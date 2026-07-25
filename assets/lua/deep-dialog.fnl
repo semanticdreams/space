@@ -348,11 +348,12 @@
             (pt:show-move-menu
               {:current-target current
                :event event
-               :on-transfer (fn [receiver]
-                              (do-transfer {:current current
-                                            :target receiver.target
-                                            :receive receiver.receive
-                                            :rollback receiver.rollback}))})
+                :on-transfer (fn [receiver]
+                               (do-transfer {:current current
+                                             :receiver-id receiver.id
+                                             :target receiver.target
+                                             :receive receiver.receive
+                                             :rollback receiver.rollback}))})
             (do
               (local destination (resolve-destination current))
               (when destination

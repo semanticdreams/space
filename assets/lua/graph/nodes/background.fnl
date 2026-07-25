@@ -49,7 +49,7 @@
                         (WorldData.get-background world-manager world-id)))
                  (node.changed:emit node.background-record))
                (when (and node.graph node.graph.remove-nodes)
-                 (node.graph:remove-nodes [node]))))))
+                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
          (when changed-handler

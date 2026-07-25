@@ -296,6 +296,24 @@
     {:id :a :label "A" :target-fn (fn [] {:id :t})})
   (assert (= (pt:find-receiver-for-target {:id :unknown}) nil)))
 
+(fn find-receiver-by-id-looks-up-by-string-id []
+  (local pt (PanelTransfer))
+  (pt:register-receiver
+    {:id :first :label "First" :target-fn (fn [] {:id :t-a})})
+  (pt:register-receiver
+    {:id :second :label "Second" :target-fn (fn [] {:id :t-b})})
+  (local found (pt:find-receiver-by-id "second"))
+  (assert found "Should find receiver by string id")
+  (assert (= found.id "second") "Should match on the correct receiver id")
+  (assert (= found.label "Second") "Should return the complete receiver record"))
+
+(fn find-receiver-by-id-returns-nil-for-unknown-id []
+  (local pt (PanelTransfer))
+  (pt:register-receiver
+    {:id :only :label "Only" :target-fn (fn [] {:id :t})})
+  (assert (= (pt:find-receiver-by-id "nonexistent") nil)
+          "Should return nil for unknown id"))
+
 (fn receiver-target-fn-error-is-not-silent []
   (local pt (PanelTransfer))
   (pt:register-receiver
@@ -321,6 +339,16 @@
             (set caught? true)))
   (assert (not caught?)
           "register-receiver should error when id is missing"))
+
+(fn register-receiver-rejects-duplicate-id []
+  (local pt (PanelTransfer))
+  (pt:register-receiver {:id "dup" :label "First" :target-fn (fn [] {:id :t})})
+  (var caught? false)
+  (pcall (fn []
+            (pt:register-receiver {:id "dup" :label "Second" :target-fn (fn [] {:id :other})})
+            (set caught? true)))
+  (assert (not caught?)
+          "register-receiver should error on duplicate id"))
 
 (fn requires-string-label []
   (var caught? false)
@@ -589,6 +617,29 @@
   (assert (not source-dropped?.dropped) "source element should not be dropped on failed detach")
   (assert received-dropped?.dropped "destination element should be dropped on rollback"))
 
+(fn transfer-rolls-back-when-detach-throws []
+  (local pt (PanelTransfer))
+  (local received-dropped? {:dropped false})
+  (local received-element {:layout {:name "received"}
+                           :drop (fn [_self] (set received-dropped?.dropped true))})
+  (local source-element {:layout {:name "source-panel"}
+                         :drop (fn [_self] nil)})
+  (local stub-dest {:id :dest
+                    :add-panel-child (fn [_self _opts] received-element)})
+  (local stub-source {:remove-panel-child (fn [_self _el]
+                                            (error "source detach exploded"))})
+  (local recv {:target stub-dest
+               :id :dest
+               :label "Dest"
+               :receive (fn [_r payload] (stub-dest:add-panel-child payload))})
+  (local payload {:builder (fn [_ctx] source-element)
+                  :persistence {:kind :test}})
+  (local (ok err) (pcall (fn [] (pt:transfer-panel recv stub-source source-element payload))))
+  (assert (not ok) "transfer-panel should throw when source detach throws")
+  (assert (string.find (tostring err) "source detach exploded" 1 true)
+          "transfer-panel should preserve detach error context")
+  (assert received-dropped?.dropped "destination element should be dropped on thrown detach rollback"))
+
 (fn transfer-rollback-drops-after-dest-remove-panel-child []
   (local pt (PanelTransfer))
   (local received-dropped? {:dropped false})
@@ -790,8 +841,11 @@
 (table.insert tests {:name "unregister removes receiver" :fn unregister-removes-receiver})
 (table.insert tests {:name "find receiver matches target" :fn find-receiver-matches-target})
 (table.insert tests {:name "find receiver returns nil for unknown target" :fn find-receiver-returns-nil-for-unknown-target})
+(table.insert tests {:name "find receiver by id looks up by string id" :fn find-receiver-by-id-looks-up-by-string-id})
+(table.insert tests {:name "find receiver by id returns nil for unknown id" :fn find-receiver-by-id-returns-nil-for-unknown-id})
 (table.insert tests {:name "receiver target-fn error is not silent" :fn receiver-target-fn-error-is-not-silent})
 (table.insert tests {:name "requires string id" :fn requires-string-id})
+(table.insert tests {:name "register receiver rejects duplicate id" :fn register-receiver-rejects-duplicate-id})
 (table.insert tests {:name "requires string label" :fn requires-string-label})
 (table.insert tests {:name "requires function target-fn" :fn requires-function-target-fn})
 (table.insert tests {:name "requires rollback when receive provided" :fn requires-rollback-when-receive-provided})
@@ -802,6 +856,7 @@
 (table.insert tests {:name "default dialog menu transfer moves between targets" :fn default-dialog-menu-transfer-moves-between-targets})
 (table.insert tests {:name "custom receiver receive is called on transfer" :fn custom-receiver-receive-is-called})
 (table.insert tests {:name "transfer rolls back on detach failure" :fn transfer-rolls-back-on-detach-failure})
+(table.insert tests {:name "transfer rolls back when detach throws" :fn transfer-rolls-back-when-detach-throws})
 (table.insert tests {:name "transfer rollback drops after dest remove-panel-child" :fn transfer-rollback-drops-after-dest-remove-panel-child})
 (table.insert tests {:name "transfer rollback calls custom rollback hook" :fn transfer-rollback-calls-custom-rollback-hook})
 (table.insert tests {:name "dialog move passes custom rollback to transfer panel" :fn dialog-move-passes-custom-rollback-to-transfer-panel})

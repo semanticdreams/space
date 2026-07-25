@@ -130,6 +130,9 @@
     :tests.test-status-badge
     :tests.test-cgltf
     :tests.test-graph-core
+    :tests.test-graph-map
+    :tests.test-graph-map-manager
+    :tests.test-graph-map-sidebar
     :tests.test-graph-edge-batch
     :tests.test-graph-view-registry
     :tests.test-graph-view-labels

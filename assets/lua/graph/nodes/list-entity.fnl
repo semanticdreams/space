@@ -221,8 +221,8 @@
          (fn [deleted]
            (when (= (tostring deleted.id) (tostring entity-id))
              (node.entity-deleted:emit deleted)
-             (when (and node.graph node.graph.remove-nodes)
-               (node.graph:remove-nodes [node]))))))
+              (when (and node.graph node.graph.remove-nodes)
+                (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
 
   (set updated-handler
        (store.list-entity-updated:connect
@@ -271,18 +271,19 @@
                             (when (contains-identity-item? entity.items)
                               ;; Identity targets can appear after identity store updates.
                               (self:add-item-nodes)))))))))
-         (local removed-signal (and graph graph.node-removed))
-         (when (and removed-signal (not graph-node-removed-handler))
-           (set graph-node-removed-signal removed-signal)
-           (set graph-node-removed-handler
-                (removed-signal:connect
-                  (fn [payload]
-                    (each [_ removed-node (ipairs (or (and payload payload.nodes) []))]
-                      (local removed-key (and removed-node removed-node.key))
-                      (when (and removed-key (not (identity-key? removed-key)))
-                        (local entity (self:get-entity))
-                        (when (and entity (entity-contains-node-key? entity removed-key))
-                          (self:remove-item removed-key))))))))
+          (local removed-signal (and graph graph.node-removed))
+          (when (and removed-signal (not graph-node-removed-handler))
+            (set graph-node-removed-signal removed-signal)
+            (set graph-node-removed-handler
+                 (removed-signal:connect
+                   (fn [payload]
+                     (when (not payload.map-only?)
+                       (each [_ removed-node (ipairs (or (and payload payload.nodes) []))]
+                         (local removed-key (and removed-node removed-node.key))
+                         (when (and removed-key (not (identity-key? removed-key)))
+                           (local entity (self:get-entity))
+                           (when (and entity (entity-contains-node-key? entity removed-key))
+                             (self:remove-item removed-key)))))))))
          (local morphed-signal (and graph graph.node-morphed))
          (when (and morphed-signal (not graph-node-morphed-handler))
            (set graph-node-morphed-signal morphed-signal)

@@ -9,6 +9,8 @@
 (local {: FirstPersonControls} (require :first-person-controls))
 (local Graph (require :graph/init))
 (local GraphKeyLoaders (require :graph/key-loaders))
+(local GraphMap (require :graph/map))
+(local GraphMapManager (require :graph/map-manager))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
 (local CanvasModeDockView (require :canvas-mode-dock-view))
@@ -58,6 +60,169 @@
             (set (. out k) (clone-table v))))
         out)))
 
+(fn drop-graph-node-view-panels! [state]
+  (local panels (and state state.panels))
+  (if (not (= (type panels) :table))
+      false
+      (do
+        (local kept [])
+        (var changed? false)
+        (each [_ panel (ipairs panels)]
+          (if (= (and panel panel.kind) "graph-node-view")
+              (set changed? true)
+              (table.insert kept panel)))
+        (when changed?
+          (set state.panels kept))
+        changed?)))
+
+(fn safe-graph-map-id? [id]
+  (and (= (type id) :string)
+       (> (string.len id) 0)
+       (not (= (string.sub id 1 1) "."))
+       (not (string.find id "/" 1 true))
+       (not (string.find id "\\" 1 true))
+       (not (string.find id "." 1 true))))
+
+(fn list-contains? [items value]
+  (var found? false)
+  (each [_ item (ipairs (or items [])) &until found?]
+    (when (= item value)
+      (set found? true)))
+  found?)
+
+(fn ensure-graph-map-state-entry! [world map-id]
+  (assert (safe-graph-map-id? map-id)
+          (.. "HomeWorld legacy graph panel migration unsafe map id: " (tostring map-id)))
+  (when (not world.state.graph)
+    (set world.state.graph {}))
+  (local graph-state world.state.graph)
+  (when (not (= (type graph-state.maps) :table))
+    (local active-id (if (= (type graph-state.active_map_id) :string)
+                         graph-state.active_map_id
+                         "main"))
+    (local core (if (= (type graph-state.graph) :table)
+                    graph-state.graph
+                    graph-state))
+    (set graph-state.maps [{:id active-id
+                            :name (if (= active-id "main") "Main" active-id)
+                            :nodes (clone-table (or core.nodes []))
+                            :edges (clone-table (or core.edges []))
+                            :selected_node_keys (clone-table (or core.selected_node_keys []))
+                            :focused_node_key core.focused_node_key}])
+    (set graph-state.active_map_id active-id)
+    (set graph-state.next_map_id (or graph-state.next_map_id 2))
+    (set graph-state.graph nil))
+  (var entry nil)
+  (each [_ candidate (ipairs graph-state.maps) &until entry]
+    (when (= candidate.id map-id)
+      (set entry candidate)))
+  entry)
+
+(fn ensure-legacy-panel-node-in-map! [world map-id node-key]
+  (assert (= (type node-key) :string)
+          "HomeWorld legacy graph panel migration requires graph-node-view :node-key")
+  (local entry (ensure-graph-map-state-entry! world map-id))
+  (when entry
+    (when (not (= (type entry.nodes) :table))
+      (set entry.nodes []))
+    (when (not (list-contains? entry.nodes node-key))
+      (table.insert entry.nodes node-key)))
+  entry)
+
+(fn metadata-path-for-graph-map [world map-id]
+  (assert (safe-graph-map-id? map-id)
+          (.. "HomeWorld graph map metadata unsafe map id: " (tostring map-id)))
+  (local metadata-dir (fs.join-path (fs.join-path (fs.join-path world.dir "graph") "maps") map-id))
+  (local metadata-path (fs.join-path metadata-dir "metadata.json"))
+  (local (dir-ok dir-err) (pcall fs.create-dirs metadata-dir))
+  (when (not dir-ok)
+    (error (string.format "HomeWorld failed to create %s for graph panel migration: %s"
+                          metadata-dir
+                          dir-err)))
+  metadata-path)
+
+(fn read-graph-map-metadata-for-migration [metadata-path]
+  (if (fs.exists metadata-path)
+      (do
+        (local (read-ok content) (pcall fs.read-file metadata-path))
+        (when (not read-ok)
+          (error (string.format "HomeWorld failed to read %s for graph panel migration: %s"
+                                metadata-path
+                                content)))
+        (local (parse-ok decoded) (pcall json.loads content))
+        (when (not parse-ok)
+          (error (string.format "HomeWorld failed to parse %s for graph panel migration: %s"
+                                metadata-path
+                                decoded)))
+        decoded)
+      {:positions {}
+       :presentations {}
+       :sizes {}
+       :panels []
+       :extra_panels []}))
+
+(fn write-graph-map-metadata-for-migration! [metadata-path meta]
+  (local (write-ok write-err) (pcall (fn [] (JsonUtils.write-json! metadata-path meta))))
+  (when (not write-ok)
+    (error (string.format "HomeWorld failed to write %s for graph panel migration: %s"
+                          metadata-path
+                          write-err))))
+
+(fn migrate-legacy-graph-node-view-panels! [world]
+  (local migrated-by-map {})
+  (local migrated-node-keys-by-map {})
+  (fn collect! [state target-kind]
+    (local panels (and state state.panels))
+    (if (not (= (type panels) :table))
+        false
+        (do
+          (local kept [])
+          (var changed? false)
+          (each [_ panel (ipairs panels)]
+            (if (= (and panel panel.kind) "graph-node-view")
+                (do
+                  (set changed? true)
+                  (local map-id (or panel.graph-map-id
+                                    (and world.state world.state.graph
+                                         world.state.graph.active_map_id)
+                                    "main"))
+                  (local entry {:kind "graph-node-view"
+                                :graph-map-id map-id
+                                :node-key panel.node-key
+                                :target-kind target-kind
+                                :restorer-module (or panel.restorer-module
+                                                     "graph/view/node-view-panel-restorer")
+                                :panel (clone-table panel)})
+                  (when (not (. migrated-by-map map-id))
+                    (tset migrated-by-map map-id []))
+                  (table.insert (. migrated-by-map map-id) entry))
+                (table.insert kept panel)))
+          (when changed?
+            (set state.panels kept))
+          changed?)))
+  (local canvas-changed? (collect! (and world.state world.state.canvas) "canvas"))
+  (local hud-changed? (collect! (and world.state world.state.hud) "hud"))
+  (local scene-changed? (collect! (and world.state world.state.scene) "scene"))
+  (local changed? (or canvas-changed? hud-changed? scene-changed?))
+  (when changed?
+    (each [map-id entries (pairs migrated-by-map)]
+      (local valid-entries [])
+      (each [_ entry (ipairs entries)]
+        (when (ensure-legacy-panel-node-in-map! world map-id entry.node-key)
+          (when (not (. migrated-node-keys-by-map map-id))
+            (tset migrated-node-keys-by-map map-id {}))
+          (tset (. migrated-node-keys-by-map map-id) entry.node-key true)
+          (table.insert valid-entries entry)))
+      (when (> (length valid-entries) 0)
+        (local metadata-path (metadata-path-for-graph-map world map-id))
+        (local meta (read-graph-map-metadata-for-migration metadata-path))
+        (local panels (or meta.panels []))
+        (each [_ entry (ipairs valid-entries)]
+          (table.insert panels entry))
+        (set meta.panels panels)
+        (write-graph-map-metadata-for-migration! metadata-path meta))))
+  (values changed? migrated-node-keys-by-map))
+
 (local resolve-runtime-interaction-surface CanvasShellState.resolve-runtime-interaction-surface)
 (local encode-interaction-surface CanvasShellState.encode-interaction-surface)
 (local capture-canvas-shell-state CanvasShellState.capture-canvas-shell-state)
@@ -91,47 +256,101 @@
   (local payload (or state {}))
   (if (and (= (type payload.graph) :table))
       payload.graph
+      (and (= (type payload.maps) :table)
+           (= (type payload.active_map_id) :string))
+      (do
+        (var entry nil)
+        (each [_ m (ipairs payload.maps) &until entry]
+          (when (= m.id payload.active_map_id)
+            (set entry m)))
+        {:nodes (or (and entry entry.nodes) [])
+         :edges (or (and entry entry.edges) [])})
       {:nodes (or payload.nodes [])
        :edges (or payload.edges [])}))
 
-(fn merge-preserved-graph-state [graph existing-state captured-state]
-  (local existing-core (resolve-graph-core-state existing-state))
-  (local captured-core (resolve-graph-core-state captured-state))
+(fn merge-preserved-graph-map-state [graph existing-state captured-map-state]
+  (local merged (clone-table captured-map-state))
+  (local active-map-id merged.active_map_id)
   (local supports-key?
     (fn [key]
       (and graph graph.has-key-loader-for-key (graph:has-key-loader-for-key key))))
-  (local captured-nodes {})
-  (local captured-edges {})
-  (var merged-nodes [])
-  (var merged-edges [])
+  (when (= (type merged.maps) :table)
+    ;; Build lookup from existing persisted map entries by id (including legacy
+    ;; graph.graph which maps to "main").
+    (local existing-by-id {})
+    (if (= (type existing-state.maps) :table)
+        ;; Maps format - authoritative when present
+        (each [_ m (ipairs existing-state.maps)]
+          (set (. existing-by-id m.id)
+               {:nodes (or m.nodes [])
+                :edges (or m.edges [])}))
+        (= (type existing-state.graph) :table)
+        ;; Legacy format (.graph directly has nodes/edges)
+        (set (. existing-by-id "main")
+             {:nodes (or existing-state.graph.nodes [])
+              :edges (or existing-state.graph.edges [])}))
+    (each [_ map-entry (ipairs merged.maps)]
+      (local existing (. existing-by-id map-entry.id))
+      (when (and existing (not (= map-entry.id active-map-id)))
+        (local captured-nodes {})
+        (local captured-edges {})
+        (each [_ key (ipairs (or map-entry.nodes []))]
+          (set (. captured-nodes key) true))
+        (each [_ edge (ipairs (or map-entry.edges []))]
+          (local composite (.. (or edge.source "") "->" (or edge.target "")))
+          (set (. captured-edges composite) true))
+        (each [_ key (ipairs (or existing.nodes []))]
+          (when (and (not (. captured-nodes key))
+                     (not (supports-key? key)))
+            (table.insert map-entry.nodes key)))
+        (each [_ edge (ipairs (or existing.edges []))]
+          (local source-key edge.source)
+          (local target-key edge.target)
+          (local composite (.. (or source-key "") "->" (or target-key "")))
+          (local preserve?
+            (and (not (. captured-edges composite))
+                 (or (and source-key (not (supports-key? source-key)))
+                     (and target-key (not (supports-key? target-key))))))
+          (when preserve?
+            (table.insert map-entry.edges edge))))))
+  merged)
 
-  (each [_ key (ipairs (or captured-core.nodes []))]
-    (set (. captured-nodes key) true)
-    (table.insert merged-nodes key))
-
-  (each [_ edge (ipairs (or captured-core.edges []))]
-    (local composite (.. (or edge.source "") "->" (or edge.target "")))
-    (set (. captured-edges composite) true)
-    (table.insert merged-edges edge))
-
-  (each [_ key (ipairs (or existing-core.nodes []))]
-    (when (and (not (. captured-nodes key))
-               (not (supports-key? key)))
-      (table.insert merged-nodes key)))
-
-  (each [_ edge (ipairs (or existing-core.edges []))]
-    (local source-key edge.source)
-    (local target-key edge.target)
-    (local composite (.. (or source-key "") "->" (or target-key "")))
-    (local preserve?
-      (and (not (. captured-edges composite))
-           (or (and source-key (not (supports-key? source-key)))
-               (and target-key (not (supports-key? target-key))))))
-    (when preserve?
-      (table.insert merged-edges edge)))
-
-  {:graph {:nodes merged-nodes
-           :edges merged-edges}})
+(fn merge-preserved-graph-state [graph existing-state captured-state]
+  (if (= (type captured-state.maps) :table)
+      (merge-preserved-graph-map-state graph existing-state captured-state)
+      (do
+        (local existing-core (resolve-graph-core-state existing-state))
+        (local captured-core (resolve-graph-core-state captured-state))
+        (local supports-key?
+          (fn [key]
+            (and graph graph.has-key-loader-for-key (graph:has-key-loader-for-key key))))
+        (local captured-nodes {})
+        (local captured-edges {})
+        (var merged-nodes [])
+        (var merged-edges [])
+        (each [_ key (ipairs (or captured-core.nodes []))]
+          (set (. captured-nodes key) true)
+          (table.insert merged-nodes key))
+        (each [_ edge (ipairs (or captured-core.edges []))]
+          (local composite (.. (or edge.source "") "->" (or edge.target "")))
+          (set (. captured-edges composite) true)
+          (table.insert merged-edges edge))
+        (each [_ key (ipairs (or existing-core.nodes []))]
+          (when (and (not (. captured-nodes key))
+                     (not (supports-key? key)))
+            (table.insert merged-nodes key)))
+        (each [_ edge (ipairs (or existing-core.edges []))]
+          (local source-key edge.source)
+          (local target-key edge.target)
+          (local composite (.. (or source-key "") "->" (or target-key "")))
+          (local preserve?
+            (and (not (. captured-edges composite))
+                 (or (and source-key (not (supports-key? source-key)))
+                     (and target-key (not (supports-key? target-key))))))
+          (when preserve?
+            (table.insert merged-edges edge)))
+        {:graph {:nodes merged-nodes
+                 :edges merged-edges}})))
 
 (fn parse-terrain-persistence-key [key]
   (if (= (type key) :string)
@@ -157,10 +376,9 @@
                         nil))))))
       nil))
 
-(fn invalid-terrain-persistence-keys [world state]
+(fn invalid-terrain-persistence-keys [world state transient-map-node-keys]
   (local payload (or state {}))
   (local graph-state (or payload.graph {}))
-  (local graph-core (resolve-graph-core-state graph-state))
   (local valid-terrain-ids {})
   (var invalid-keys [])
   (local seen-invalid {})
@@ -182,11 +400,24 @@
   (fn validate-panel-node-key! [panel expected-kind]
     (when (= (and panel panel.kind) expected-kind)
       (validate-key! (and panel panel.node-key))))
-  (each [_ key (ipairs (or graph-core.nodes []))]
-    (validate-key! key))
-  (each [_ edge (ipairs (or graph-core.edges []))]
-    (validate-key! edge.source)
-    (validate-key! edge.target))
+  (fn transient-map-node-key? [map-id key]
+    (local map-keys (and transient-map-node-keys
+                         map-id
+                         (. transient-map-node-keys map-id)))
+    (and map-keys key (. map-keys key)))
+  (fn validate-map-entries [map-state]
+    (local map-id (and map-state map-state.id))
+    (each [_ key (ipairs (or map-state.nodes []))]
+      (when (not (transient-map-node-key? map-id key))
+        (validate-key! key)))
+    (each [_ edge (ipairs (or map-state.edges []))]
+      (validate-key! edge.source)
+      (validate-key! edge.target)))
+  ;; Validate all maps when in new format; otherwise validate active/resolved core
+  (if (= (type graph-state.maps) :table)
+      (each [_ m (ipairs graph-state.maps)]
+        (validate-map-entries m))
+      (validate-map-entries (resolve-graph-core-state graph-state)))
   (each [_ key (ipairs (or (and graph-state.views graph-state.views.open-node-keys) []))]
     (validate-key! key))
   (each [_ panel (ipairs (or (and payload.canvas payload.canvas.panels) []))]
@@ -249,19 +480,9 @@
     (if persisted
         (do
           (set world.state (merge-state-defaults (base-default-state) persisted))
-          (fn migrate-legacy-panels! [panels]
-            (var changed? false)
-            (each [_ panel (ipairs (or panels []))]
-              (when (and (= panel.kind "graph-node-view")
-                         (not panel.restorer-module))
-                (set panel.restorer-module "graph/view/node-view-panel-restorer")
-                (set changed? true)))
-            changed?)
-          (when (migrate-legacy-panels! (and world.state.canvas world.state.canvas.panels))
-            (set repaired-persisted-state? true))
-          (when (migrate-legacy-panels! (and world.state.hud world.state.hud.panels))
-            (set repaired-persisted-state? true))
-          (when (migrate-legacy-panels! (and world.state.scene world.state.scene.panels))
+          (local (migrated-legacy-panels? transient-map-node-keys)
+            (migrate-legacy-graph-node-view-panels! world))
+          (when migrated-legacy-panels?
             (set repaired-persisted-state? true))
           (local persisted-lights (and persisted.scene persisted.scene.lights))
           (local persisted-skybox (and persisted.scene persisted.scene.skybox))
@@ -291,7 +512,7 @@
                 (set world.state.scene.background (BackgroundState.default-state))
                 (set repaired-persisted-state? true)))
           (local stale-terrain-graph-keys
-            (invalid-terrain-persistence-keys world world.state))
+            (invalid-terrain-persistence-keys world world.state transient-map-node-keys))
           (when (> (length stale-terrain-graph-keys) 0)
             (error
               (string.format
@@ -545,6 +766,7 @@
     (local scene (and runtime runtime.scene))
     (local canvas (and runtime runtime.canvas))
     (local graph (and runtime runtime.graph))
+    (local graph-map (and runtime runtime.graph-map))
     (local hud (and ctx ctx.hud))
     (local next-state (clone-table world.state))
     (when camera
@@ -556,12 +778,26 @@
       (set next-state.camera
             {:position (vec3->array position)
              :rotation (quat->array camera.rotation)}))
-    (when (and graph graph.capture-state)
-      (set next-state.graph
-           (merge-preserved-graph-state
-             graph
-              next-state.graph
-              (graph:capture-state))))
+    (when (and runtime.graph-view runtime.graph-view.capture-state)
+        (runtime.graph-view:capture-state))
+    (if (and runtime.graph-map-manager runtime.graph-map-manager.capture-state)
+        (set next-state.graph
+             (merge-preserved-graph-state
+               graph
+               next-state.graph
+               (runtime.graph-map-manager:capture-state)))
+        (and graph-map graph-map.capture-state)
+        (set next-state.graph
+             (merge-preserved-graph-state
+               graph
+               next-state.graph
+               (graph-map:capture-state)))
+        (and graph graph.capture-state)
+        (set next-state.graph
+             (merge-preserved-graph-state
+               graph
+               next-state.graph
+               (graph:capture-state))))
     (when runtime
       (if (and runtime.board-view runtime.board-view.capture-state)
           (set next-state.board (runtime.board-view:capture-state))
@@ -592,18 +828,22 @@
              (assert existing-scene.skybox
                      "HomeWorld.capture-runtime-state requires persisted scene skybox policy")
              "HomeWorld.capture-runtime-state persisted skybox"))
+      (drop-graph-node-view-panels! captured-scene)
       (set next-state.scene captured-scene))
     (local canvas-state
       (if (and canvas canvas.capture-state)
           (canvas:capture-state)
           (and next-state next-state.canvas)))
     (when canvas-state
+      (drop-graph-node-view-panels! canvas-state)
       (set next-state.canvas (capture-canvas-shell-state world runtime canvas-state)))
     (when (and runtime runtime.drawing-controller)
       (set next-state.drawing
            (runtime.drawing-controller:snapshot)))
     (when (and hud hud.capture-state)
-      (set next-state.hud (hud:capture-state)))
+      (local hud-state (hud:capture-state))
+      (drop-graph-node-view-panels! hud-state)
+      (set next-state.hud hud-state))
     (local physics-state (or next-state.physics {}))
     (set physics-state.containment (resolve-runtime-containment-config world))
     (set next-state.physics physics-state)
@@ -650,12 +890,18 @@
                       "[world] %s invalid canvas restore position; using default"
                       world.id)))
     (local canvas-camera (Camera {:position canvas-camera-position}))
-    (local graph (Graph {}))
+    (local graph (Graph {:with-start false :entity-events? false}))
     (GraphKeyLoaders.register graph
                               {:world-manager (assert world.graph-world-manager
                                                       (.. "HomeWorld " world.id " requires :graph-world-manager"))
                                :asset-path-resolver (assert world.asset-path-resolver
                                                            (.. "HomeWorld " world.id " requires :asset-path-resolver"))})
+    (local graph-map-manager (GraphMapManager.GraphMapManager
+                               {:graph graph
+                                :state (or world.state.graph {})
+                                :data-dir world.dir}))
+    (local graph-map (graph-map-manager:get-active-map))
+    (var graph-map-sync-handler nil)
     (local scene-scope
       (do
         (local scope
@@ -676,7 +922,8 @@
                 (PhysicsContainment.schedule-refresh
                   {:scene updated-scene
                    :config (resolve-runtime-containment-config world)}))
-              :graph graph}))
+               :graph graph
+              :graph-map graph-map}))
     (local drawing-state
       (DrawingDocument.normalize-state
         (or world.state.drawing
@@ -685,7 +932,6 @@
       (DrawingController {:document drawing-state.document
                           :ui drawing-state.ui
                           :data_dir world.dir}))
-    (local graph-state (resolve-graph-core-state world.state.graph))
     (local scene-state (or world.state.scene {}))
     (scene:build-default {:terrains scene-state.terrains})
     (local containment-config
@@ -703,8 +949,10 @@
        :first-person-controls controls
        :scene-scope scene-scope
        :scene scene
-       :graph graph
-       :drawing-controller drawing-controller
+         :graph graph
+         :graph-map graph-map
+         :graph-map-manager graph-map-manager
+         :drawing-controller drawing-controller
        :active-canvas-mode nil
        :requested-canvas-mode-id canvas-state.active_mode
        :requested-canvas-mode-known? true
@@ -719,7 +967,21 @@
                    :completed? false
                    :start-scheduled? false
                    :scene-panels (clone-table scene-state.panels)
-                   :scene-panel-index 1}})
+        :scene-panel-index 1}})
+    (local sync-active-graph-map!
+      (fn []
+        (local active-graph-map (graph-map-manager:get-active-map))
+        (set runtime.graph-map active-graph-map)
+        (when (and runtime.scene runtime.scene.set-graph-map)
+          (runtime.scene:set-graph-map active-graph-map))
+        (when (= app.active-world-runtime runtime)
+          (set app.graph-map active-graph-map)
+          (set app.graph-map-manager graph-map-manager))
+        active-graph-map))
+    (set graph-map-sync-handler
+         (graph-map-manager.maps-changed:connect (fn [_payload]
+                                                   (sync-active-graph-map!))))
+    (set runtime.graph-map-sync-handler graph-map-sync-handler)
     (set runtime.load-canvas-runtime
          (fn [rt]
            (assert (= rt runtime) "HomeWorld.load-canvas-runtime called with wrong runtime")
@@ -749,8 +1011,6 @@
              (hud:restore-state rt.pending-hud-state)
              (set rt.pending-hud-state nil))))
     (runtime:load-canvas-runtime)
-    (when (and graph-state graph graph.restore-state)
-      (graph:restore-state graph-state))
     runtime)
 
   (fn clear-runtime [world ctx reason]
@@ -768,6 +1028,12 @@
       (when runtime.scene
         (runtime.scene:drop)
         (set runtime.scene nil))
+      (when runtime.graph-map-manager
+        (when runtime.graph-map-sync-handler
+          (runtime.graph-map-manager.maps-changed:disconnect runtime.graph-map-sync-handler true)
+          (set runtime.graph-map-sync-handler nil))
+        (runtime.graph-map-manager:drop)
+        (set runtime.graph-map-manager nil))
       (when runtime.graph
         (runtime.graph:drop)
         (set runtime.graph nil))

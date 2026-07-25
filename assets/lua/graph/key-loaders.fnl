@@ -1,7 +1,10 @@
 (local {:TableNode TableNode} (require :graph/nodes/table))
 (local ClassNode (require :graph/nodes/class))
 (local {:register-loader register-code-entity-loader} (require :graph/nodes/code-entity))
+(local CodeDirNode (require :graph/nodes/code-dir))
+(local CppModuleNode (require :graph/nodes/cpp-module))
 (local EntitiesNode (require :graph/nodes/entities))
+(local FnlModuleNode (require :graph/nodes/fnl-module))
 (local {:FsNode FsNode} (require :graph/nodes/fs))
 (local HackerNewsRootNode (require :graph/nodes/hackernews-root))
 (local HackerNewsStoryListNode (require :graph/nodes/hackernews-story-list))
@@ -31,6 +34,7 @@
 (local StartNode (require :graph/nodes/start))
 (local {:register-loader register-string-entity-loader} (require :graph/nodes/string-entity))
 (local StringEntityListNode (require :graph/nodes/string-entity-list))
+(local TextModuleNode (require :graph/nodes/text-module))
 (local {:WorldsNode WorldsNode} (require :graph/nodes/worlds))
 (local {:WorldNode WorldNode} (require :graph/nodes/world))
 (local {:ScenePanelsNode ScenePanelsNode} (require :graph/nodes/scene-panels))
@@ -56,6 +60,7 @@
 (local StringEntityStore (require :entities/string))
 (local LlmStore (require :llm/conversations/store))
 (local Kernels (require :kernels))
+(local fs (require :fs))
 
 (local M {})
 
@@ -94,6 +99,27 @@
     (local suffix (strip-prefix key prefix))
     (when (non-empty-string? suffix)
       (make-node suffix key))))
+
+(fn existing-path-loader [prefix kind make-node]
+  (assert (non-empty-string? prefix) "existing-path-loader requires string prefix")
+  (assert (= (type make-node) "function") "existing-path-loader requires make-node function")
+  (fn [key]
+    (local path (strip-prefix key prefix))
+    (when (non-empty-string? path)
+      (local stat (and fs.stat (fs.stat path)))
+      (when (and stat stat.exists
+                 (if (= kind :dir) stat.is-dir stat.is-file))
+        (make-node path key)))))
+
+(fn existing-any-path-loader [prefix make-node]
+  (assert (non-empty-string? prefix) "existing-any-path-loader requires string prefix")
+  (assert (= (type make-node) "function") "existing-any-path-loader requires make-node function")
+  (fn [key]
+    (local path (strip-prefix key prefix))
+    (when (non-empty-string? path)
+      (local stat (and fs.stat (fs.stat path)))
+      (when (and stat stat.exists)
+        (make-node path key)))))
 
 (fn require-table-global [name]
   (when (and name (not (string.find name ":" 1 true)))
@@ -149,7 +175,10 @@
       (fn [] (KernelsNode {:kernels kernels}))))
   (graph:register-key-loader "start"
     (exact-key-loader "start"
-      (fn [] (StartNode))))
+      (fn []
+          (local node (StartNode))
+          (set node.auto-focus? true)
+          node)))
   (graph:register-key-loader "quit"
     (exact-key-loader "quit"
       (fn [] (QuitNode {}))))
@@ -160,9 +189,36 @@
         (ClassNode {:id id :name id}))))
 
   (graph:register-key-loader "fs"
-    (prefix-loader "fs:"
+    (existing-any-path-loader "fs:"
       (fn [path key]
         (FsNode {:path path :key key}))))
+
+  (graph:register-key-loader "code-dir"
+    (existing-path-loader "code-dir:" :dir
+      (fn [path key]
+        (CodeDirNode {:path path :root path :key key}))))
+
+  (graph:register-key-loader "fnl-module"
+    (existing-path-loader "fnl-module:" :file
+      (fn [path key]
+        (when (string.match path "%.fnl$")
+          (FnlModuleNode {:path path :key key})))))
+
+  (graph:register-key-loader "cpp-module"
+    (existing-path-loader "cpp-module:" :file
+      (fn [path key]
+        (when (or (string.match path "%.cpp$")
+                  (string.match path "%.cc$")
+                  (string.match path "%.cxx$")
+                  (string.match path "%.h$")
+                  (string.match path "%.hpp$")
+                  (string.match path "%.hh$"))
+          (CppModuleNode {:path path :key key})))))
+
+  (graph:register-key-loader "text-module"
+    (existing-path-loader "text-module:" :file
+      (fn [path key]
+        (TextModuleNode {:path path :key key}))))
 
   (graph:register-key-loader "table"
     (prefix-loader "table:"
@@ -282,10 +338,13 @@
   (graph:register-key-loader "world"
     (prefix-loader "world:"
       (fn [world-id key]
-        (when world-manager
+        (local world-entry (and world-manager
+                               (WorldData.resolve-world-entry world-manager world-id)))
+        (when world-entry
           (WorldNode {:world-id world-id
                       :world-manager world-manager
                       :asset-path-resolver asset-path-resolver
+                      :world-entry world-entry
                       :key key})))))
 
   (graph:register-key-loader "scene-panels"
@@ -358,11 +417,14 @@
           (local world-id (. parts 1))
           (local type-key (. parts 2))
           (local light-id (. parts 3))
-          (when world-manager
+          (local light-entry (and world-manager
+                                  (WorldData.find-light world-manager world-id type-key light-id)))
+          (when light-entry
             (LightNode {:world-id world-id
                         :world-manager world-manager
                         :type-key type-key
                         :light-id light-id
+                        :light-entry light-entry
                         :key key}))))))
 
   (graph:register-key-loader "scene-panel"
@@ -372,10 +434,13 @@
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local panel-index (tonumber (. parts 2)))
-          (when (and world-manager panel-index)
+          (local panel-entry (and world-manager panel-index
+                                  (WorldData.find-scene-panel world-manager world-id panel-index)))
+          (when panel-entry
             (ScenePanelNode {:world-id world-id
                              :world-manager world-manager
                              :panel-index panel-index
+                             :panel-entry panel-entry
                              :key key}))))))
 
   (graph:register-key-loader "hud-panel"
@@ -386,11 +451,14 @@
           (local world-id (. parts 1))
           (local layer (. parts 2))
           (local panel-index (tonumber (. parts 3)))
-          (when (and world-manager panel-index)
+          (local panel-entry (and world-manager panel-index
+                                  (WorldData.find-hud-panel world-manager world-id layer panel-index)))
+          (when panel-entry
             (HudPanelNode {:world-id world-id
                            :world-manager world-manager
                            :layer layer
                            :panel-index panel-index
+                           :panel-entry panel-entry
                            :key key}))))))
 
   (graph:register-key-loader "terrain"
@@ -400,10 +468,13 @@
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local terrain-id (. parts 2))
-          (when world-manager
+          (local terrain-entry (and world-manager
+                                    (WorldData.find-terrain world-manager world-id terrain-id)))
+          (when terrain-entry
             (TerrainNode {:world-id world-id
                           :world-manager world-manager
                           :terrain-id terrain-id
+                          :terrain-entry terrain-entry
                           :key key}))))))
 
 	  (graph:register-key-loader "terrain-editor"
@@ -413,10 +484,13 @@
         (when (>= (length parts) 2)
           (local world-id (. parts 1))
           (local terrain-id (. parts 2))
-          (when world-manager
+          (local terrain-entry (and world-manager
+                                    (WorldData.find-terrain world-manager world-id terrain-id)))
+          (when terrain-entry
 	            (TerrainEditors.create-editor-node {:world-id world-id
 	                                                :world-manager world-manager
 	                                                :terrain-id terrain-id
+                                                    :terrain-entry terrain-entry
 	                                                :key key}))))))
 	  (graph:register-key-loader "terrain-tool"
 	    (prefix-loader "terrain-tool:"

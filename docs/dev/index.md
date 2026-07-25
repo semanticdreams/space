@@ -34,6 +34,7 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Lifecycle Centralization](/dev/lifecycle-centralization)
 - [Reloadable Units And Hot Reload](/dev/reloadable-units)
 - [Repository Workbench](/dev/repository-workbench)
+- [Graph Maps](/dev/graph-maps)
 - [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown)
 - [Runtime Performance Modes](/dev/runtime-performance)
 - [Agent Preset Control Panel](/dev/agent-preset-control-panel)

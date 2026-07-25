@@ -2,8 +2,17 @@
   (or (and view view.selection view.selection.selected-nodes)
       []))
 
+(fn current-graph-map [fallback]
+  (local runtime app.active-world-runtime)
+  (or (and runtime
+           runtime.graph-map-manager
+           (runtime.graph-map-manager:get-active-map))
+      (and runtime runtime.graph-map)
+      app.graph-map
+      fallback))
+
 (fn show-link-entities-for-selection [context]
-  (local graph (and context.graph context.graph.graph))
+  (local graph (current-graph-map (and context.graph context.graph.graph-map)))
   (when (not graph)
     (lua "return nil"))
   (local selected (or (and context.graph context.graph.selected-nodes)
@@ -42,17 +51,38 @@
 
 (fn graph-root-actions [context]
   (local actions [])
-  (local graph (and context.graph context.graph.graph))
+  (local graph (and context.graph context.graph.graph-map))
+  (when (not graph)
+    (lua "return actions"))
   (local selected (or (and context.graph context.graph.selected-nodes) []))
   (local canvas-target (or (and context.targets context.targets.canvas)
-                           (and context.targets context.targets.hud)))
-    (table.insert actions
-                 {:name "Create String Entity"
-                  :icon "note_add"
+                            (and context.targets context.targets.hud)))
+  (table.insert actions
+                {:name "Add to Map"
+                 :icon "add"
+                 :fn (fn [_button _event]
+                        (local AddToMap (require :graph/add-to-map-dialog))
+                        (AddToMap.open-panel {:target (assert canvas-target
+                                                            "Add to Map requires canvas or HUD target")
+                                               :graph-map graph
+                                               :graph-map-provider (fn []
+                                                                     (local runtime app.active-world-runtime)
+                                                                     (or (and runtime
+                                                                              runtime.graph-map-manager
+                                                                              (runtime.graph-map-manager:get-active-map))
+                                                                         (and runtime runtime.graph-map)
+                                                                         app.graph-map
+                                                                         graph))}))})
+  (table.insert actions
+                {:name "Create String Entity"
+                 :icon "note_add"
                   :fn (fn [_button _event]
                         (local StringEntityStore (require :entities/string))
                         (local store (StringEntityStore.get-default))
-                        (store:create-entity {}))})
+                        (local entity (store:create-entity {}))
+                        (local active-graph-map (current-graph-map graph))
+                        (when (and active-graph-map entity active-graph-map.load-by-key)
+                          (active-graph-map:load-by-key (.. "string-entity:" (tostring entity.id)))))})
   (table.insert actions
                 {:name "Create Link Entity"
                  :icon "link"
@@ -64,12 +94,13 @@
                          (set opts.source-key (or (. selected 1 :key) ""))
                          (set opts.target-key (or (. selected 2 :key) ""))
                          nil)
-                       (local entity (store:create-entity opts))
-                       (when (and graph entity)
-                         (local {:LinkEntityNode LinkEntityNode} (require :graph/nodes/link-entity))
-                         (local node (LinkEntityNode {:entity-id entity.id
-                                                      :store store}))
-                         (graph:add-node node)))})
+                        (local entity (store:create-entity opts))
+                        (local active-graph-map (current-graph-map graph))
+                        (when (and active-graph-map entity)
+                          (local {:LinkEntityNode LinkEntityNode} (require :graph/nodes/link-entity))
+                          (local node (LinkEntityNode {:entity-id entity.id
+                                                       :store store}))
+                          (active-graph-map:add-node node)))})
   (table.insert actions
                 {:name "Show link entities"
                  :icon "link"
@@ -85,12 +116,13 @@
                        (each [_ node (ipairs selected)]
                          (when (and node node.key)
                            (table.insert items node.key)))
-                       (local entity (store:create-entity {:items items}))
-                       (when (and graph entity)
-                         (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
-                         (local node (ListEntityNode {:entity-id entity.id
-                                                      :store store}))
-                         (graph:add-node node)))})
+                        (local entity (store:create-entity {:items items}))
+                        (local active-graph-map (current-graph-map graph))
+                        (when (and active-graph-map entity)
+                          (local {:ListEntityNode ListEntityNode} (require :graph/nodes/list-entity))
+                          (local node (ListEntityNode {:entity-id entity.id
+                                                       :store store}))
+                          (active-graph-map:add-node node)))})
   (table.insert actions
                 {:name "Graph Control"
                  :icon "tune"
@@ -100,4 +132,5 @@
   actions)
 
 {:selected-graph-nodes selected-graph-nodes
+ :current-graph-map current-graph-map
  :graph-root-actions graph-root-actions}

@@ -5,6 +5,7 @@
 (local BuildContext (require :build-context))
 (local Hud (require :hud))
 (local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
 (local DemoDialogs (require :demo-dialogs))
 (local HeightfieldTargetCapture (require :graph/view/heightfield-target-capture))
 (local HeightfieldPaintCapture (require :graph/view/heightfield-paint-capture))
@@ -30,6 +31,21 @@
 (local tests [])
 
 (local approx (. MathUtils :approx))
+
+(fn register-graph-map-test-loaders [graph keys]
+  (local seen {})
+  (each [_ key (ipairs (or keys []))]
+    (local key-str (tostring key))
+    (local (colon-at _end) (string.find key-str ":" 1 true))
+    (local scheme (if colon-at (string.sub key-str 1 (- colon-at 1)) key-str))
+    (when (and (> (string.len scheme) 0)
+               (not (. seen scheme))
+               (not (graph:has-key-loader-for-key key-str)))
+      (set (. seen scheme) true)
+      (graph:register-key-loader scheme
+        (fn [loaded-key]
+          (Graph.GraphNode {:key loaded-key})))))
+  graph)
 
 (fn ensure-command-hints-hud! [states]
   (when (and states states.get-hud states.set-hud-provider (not (states:get-hud)))
@@ -3206,9 +3222,11 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-graph app.graph)
+  (local original-graph-map app.graph-map)
   (local graph (Graph {:with-start false}))
-  (set app.graph graph)
+  (register-graph-map-test-loaders graph ["cube-node"])
+  (local map (GraphMap.GraphMap {:graph graph :id "test-cube-action"}))
+  (set app.graph-map map)
 
   (let [(ok err)
         (pcall
@@ -3226,18 +3244,19 @@
                     "Graph node cube should create a runtime rigid body")
             (assert (and element.child element.child.open-graph)
                     "Graph node cube should expose an open-graph action")
-            (assert (not (graph:lookup "cube-node"))
-                    "Node should not exist in graph before graph action")
+            (assert (not (map:lookup "cube-node"))
+                    "Node should not exist in map before graph action")
             (element.child:open-graph nil nil)
-            (assert (graph:lookup "cube-node")
-                    "Graph action should add node to graph")
-            (graph:remove-nodes [(graph:lookup "cube-node")])
-            (assert (not (graph:lookup "cube-node"))
-                    "Node should be removable from graph")
+            (assert (map:lookup "cube-node")
+                    "Graph action should add node to map")
+            (map:remove-nodes [(map:lookup "cube-node")])
+            (assert (not (map:lookup "cube-node"))
+                    "Node should be removable from map")
             (element.child:open-graph nil nil)
-            (assert (graph:lookup "cube-node")
-                    "Graph action should re-add node after removal")))]
-    (set app.graph original-graph)
+            (assert (map:lookup "cube-node")
+                    "Graph action should re-add node to map after removal")))]
+    (set app.graph-map original-graph-map)
+    (map:drop)
     (graph:drop)
     (cleanup)
     (when (not ok)
@@ -3247,13 +3266,15 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-graph app.graph)
-  (set app.graph nil)
+  (local original-graph-map app.graph-map)
+  (set app.graph-map nil)
   (local graph (Graph {:with-start false}))
-  (scene:set-graph graph)
+  (register-graph-map-test-loaders graph ["test-node"])
+  (local map (GraphMap.GraphMap {:graph graph}))
+  (set scene.graph-map map)
   (local node (Graph.GraphNode {:key "test-node"
                                 :label "restore target"}))
-  (graph:add-node node {})
+  (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
   (local (ok err)
@@ -3267,27 +3288,30 @@
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
   (local final-count (length (or scene.entity.children [])))
-  (set app.graph original-graph)
+  (set app.graph-map original-graph-map)
+  (map:drop)
   (graph:drop)
   (cleanup)
   (assert ok
-          (.. "Expected scene restore to use scene.graph before app binding, got: "
+          (.. "Expected scene restore to use scene.graph-map before app binding, got: "
               (tostring err)))
   (assert (= final-count (+ initial-count 1))
-          "Scene restore should add graph node cube using scene-owned graph")
+          "Scene restore should add graph node cube using scene-owned graph-map")
   true)
 
 (fn scene-restore-graph-node-cube-sanitizes-poisoned-position []
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-graph app.graph)
-  (set app.graph nil)
+  (local original-graph-map app.graph-map)
+  (set app.graph-map nil)
   (local graph (Graph {:with-start false}))
-  (scene:set-graph graph)
+  (register-graph-map-test-loaders graph ["poisoned-node"])
+  (local map (GraphMap.GraphMap {:graph graph}))
+  (set scene.graph-map map)
   (local node (Graph.GraphNode {:key "poisoned-node"
                                 :label "poisoned restore target"}))
-  (graph:add-node node {})
+  (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
   (local (ok err)
@@ -3304,7 +3328,8 @@
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
   (local restored-layout (and restored-element restored-element.layout))
-  (set app.graph original-graph)
+  (set app.graph-map original-graph-map)
+  (map:drop)
   (graph:drop)
   (cleanup)
   (assert ok
@@ -3321,13 +3346,15 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-graph app.graph)
-  (set app.graph nil)
+  (local original-graph-map app.graph-map)
+  (set app.graph-map nil)
   (local graph (Graph {:with-start false}))
-  (scene:set-graph graph)
+  (register-graph-map-test-loaders graph ["poisoned-size-node"])
+  (local map (GraphMap.GraphMap {:graph graph}))
+  (set scene.graph-map map)
   (local node (Graph.GraphNode {:key "poisoned-size-node"
                                 :label "poisoned size restore target"}))
-  (graph:add-node node {})
+  (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
   (local (ok err)
@@ -3344,7 +3371,8 @@
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
   (local restored-layout (and restored-element restored-element.layout))
-  (set app.graph original-graph)
+  (set app.graph-map original-graph-map)
+  (map:drop)
   (graph:drop)
   (cleanup)
   (assert ok
@@ -3361,13 +3389,15 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-graph app.graph)
-  (set app.graph nil)
+  (local original-graph-map app.graph-map)
+  (set app.graph-map nil)
   (local graph (Graph {:with-start false}))
-  (scene:set-graph graph)
+  (register-graph-map-test-loaders graph ["legacy-skip-node"])
+  (local map (GraphMap.GraphMap {:graph graph}))
+  (set scene.graph-map map)
   (local node (Graph.GraphNode {:key "legacy-skip-node"
                                 :label "legacy skip target"}))
-  (graph:add-node node {})
+  (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
   (local (ok err)
@@ -3386,7 +3416,8 @@
                               :lights (LightSystemModule.default-state)}))))
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
-  (set app.graph original-graph)
+  (set app.graph-map original-graph-map)
+  (map:drop)
   (graph:drop)
   (cleanup)
   (assert ok
@@ -3539,7 +3570,138 @@
 (table.insert tests {:name "Scene restore graph node cube sanitizes poisoned position"
                      :fn scene-restore-graph-node-cube-sanitizes-poisoned-position})
 (table.insert tests {:name "Scene restore graph node cube sanitizes poisoned size"
-                     :fn scene-restore-graph-node-cube-sanitizes-poisoned-size})
+                      :fn scene-restore-graph-node-cube-sanitizes-poisoned-size})
+
+(fn scene-restore-graph-node-cube-respects-graph-map-id []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph-map app.graph-map)
+  (local original-graph-view app.graph-view)
+  (set app.graph-map nil)
+  (set app.graph-view {:extra-panels []})
+  (local graph (Graph {:with-start false}))
+  (register-graph-map-test-loaders graph ["test-scoped"])
+  (local map (GraphMap.GraphMap {:graph graph :id "main-map"}))
+  (local other-map (GraphMap.GraphMap {:graph graph :id "other-map"}))
+  (set scene.graph-map map)
+  (local node (Graph.GraphNode {:key "test-scoped"
+                                :label "scoped restore"}))
+  (map:add-node node {})
+  (local initial-count (length (or scene.entity.children [])))
+  (local (ok err)
+    (pcall
+      (fn []
+        (scene:restore-state {:panels [{:kind "graph-node-cube"
+                                        :node-key "test-scoped"
+                                        :label "scoped restore"
+                                        :size [4 4 4]
+                                        :position [0 16 0]
+                                        :rotation [1 0 0 0]
+                                        :graph-map-id "other-map"}]
+                              :lights (LightSystemModule.default-state)}))))
+  (local final-count (length (or scene.entity.children [])))
+  (local graph-view-extra-count (length (or app.graph-view.extra-panels [])))
+  (local queued-count (length (or scene.queued-cube-panels [])))
+  (local captured-scene (scene:capture-state))
+  (set app.graph-map original-graph-map)
+  (set app.graph-view original-graph-view)
+  (map:drop)
+  (other-map:drop)
+  (graph:drop)
+  (cleanup)
+  (assert ok
+          (.. "Expected scene restore to accept graph-node-cube panel with mismatched graph-map-id, got: "
+              (tostring err)))
+  (assert (= final-count initial-count)
+            "Scene restore should skip graph-node-cube from non-matching map")
+  (assert (= graph-view-extra-count 0)
+          "Wrong-map graph-node-cube panel should not be inserted into the active graph view")
+  (assert (= queued-count 1)
+          "Wrong-map graph-node-cube panel should be queued for map-correct scene persistence")
+  (assert (= (and (. captured-scene.panels 1) (. (. captured-scene.panels 1) :graph-map-id))
+             "other-map")
+          "Queued wrong-map graph-node-cube panel should survive scene capture")
+  true)
+
+(fn scene-restore-graph-node-cube-dedups-existing-panel []
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local original-graph-map app.graph-map)
+  (set app.graph-map nil)
+  (local graph (Graph {:with-start false}))
+  (register-graph-map-test-loaders graph ["test-dedup"])
+  (local map (GraphMap.GraphMap {:graph graph :id "dedup-map"}))
+  (set scene.graph-map map)
+  (local node (Graph.GraphNode {:key "test-dedup"
+                                :label "dedup restore"}))
+  (map:add-node node {})
+  (local initial-count (length (or scene.entity.children [])))
+  (var first nil)
+  (var second nil)
+  (local (ok err)
+    (pcall
+      (fn []
+        (set first (scene:add-graph-node-cube {:node-key "test-dedup"
+                                               :label "dedup restore"
+                                               :size (glm.vec3 4 4 4)
+                                               :position (glm.vec3 0 16 0)
+                                               :rotation (glm.quat 1 0 0 0)
+                                               :graph-map-id "dedup-map"
+                                               :restore? true}))
+        (set second (scene:add-graph-node-cube {:node-key "test-dedup"
+                                                 :label "dedup restore"
+                                                 :size (glm.vec3 6 7 8)
+                                                 :position (glm.vec3 1 22 3)
+                                                 :rotation (glm.quat 0.5 0.5 0.5 0.5)
+                                                 :graph-map-id "dedup-map"
+                                                 :restore? true}))
+        (local restored-layout (and second second.layout))
+        (var restored-metadata nil)
+        (each [_ metadata (ipairs (or scene.scene-children []))]
+            (local persistence (and metadata metadata.persistence))
+            (when (and persistence
+                       (= persistence.kind "graph-node-cube")
+                       (= persistence.node-key "test-dedup")
+                       (= persistence.graph-map-id "dedup-map"))
+                (set restored-metadata metadata)))
+        (assert (= second first)
+                "Second restored cube should return existing panel")
+        (assert restored-layout "Restored cube should keep a layout")
+        (assert (vec3-approx= restored-layout.position (glm.vec3 1 22 3))
+                "Duplicate restore should refresh existing cube position")
+        (assert (vec3-approx= restored-layout.size (glm.vec3 6 7 8))
+                "Duplicate restore should refresh existing cube size")
+        (assert (quat-approx= restored-layout.rotation (glm.quat 0.5 0.5 0.5 0.5))
+                "Duplicate restore should refresh existing cube rotation")
+        (assert restored-metadata "Duplicate restore should keep scene metadata")
+        (assert (= (. restored-metadata.persistence.size 1) 6)
+                "Duplicate restore should refresh persisted cube size x")
+        (assert (= (. restored-metadata.persistence.size 2) 7)
+                "Duplicate restore should refresh persisted cube size y")
+        (assert (= (. restored-metadata.persistence.size 3) 8)
+                "Duplicate restore should refresh persisted cube size z")
+        (scene.entity.layout:mark-measure-dirty)
+        (scene.layout-root:update)
+        (assert (vec3-approx= restored-layout.size (glm.vec3 6 7 8))
+                "Duplicate restore size should survive a parent layout pass"))))
+  (local final-count (length (or scene.entity.children [])))
+  (set app.graph-map original-graph-map)
+  (map:drop)
+  (graph:drop)
+  (cleanup)
+  (assert ok
+          (.. "Expected scene restore graph-node-cube dedup to succeed, got: "
+              (tostring err)))
+  (assert first "First restored cube should be created")
+  (assert (= final-count (+ initial-count 1))
+          "Restoring the same graph-node-cube twice should not duplicate scene children")
+  true)
+
+(table.insert tests {:name "Scene restore graph node cube respects graph-map-id" :fn scene-restore-graph-node-cube-respects-graph-map-id})
+(table.insert tests {:name "Scene restore graph node cube dedups existing panel"
+                     :fn scene-restore-graph-node-cube-dedups-existing-panel})
 (table.insert tests {:name "Scene restore skips legacy panel without restorer"
                      :fn scene-restore-state-skips-legacy-panel-without-restorer})
 (table.insert tests {:name "Scene restore does not hide registered restorer failures"

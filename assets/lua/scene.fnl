@@ -389,9 +389,11 @@
                :entity nil
                :builder nil
                :graph options.graph
-               :panel-restorers {}
-               :demo-browser nil
-               :scene-children nil
+               :graph-map options.graph-map
+                :panel-restorers {}
+                :demo-browser nil
+                :scene-children nil
+                :queued-cube-panels []
                :scene-terrains nil
                :physics-body-count 0
                :default-position (or options.position default-position)
@@ -985,11 +987,64 @@
     (local key (tostring (or options.node-key (and options.node options.node.key) "")))
     (assert (> (string.len key) 0)
             "Scene.add-graph-node-cube requires :node or :node-key")
-    (local graph (or self.graph app.graph))
+    (assert (or self.graph-map app.graph-map)
+            "Scene.add-graph-node-cube requires a graph-map on the scene or app")
+    (local graph (or self.graph-map app.graph-map))
+    (when options.restore?
+        (when (and options.graph-map-id graph.id
+                   (not= options.graph-map-id graph.id))
+            (lua "return nil"))
+        (local target-map-id (or options.graph-map-id graph.id))
+        (each [_ metadata (ipairs (or self.scene-children []))]
+            (local persistence (and metadata metadata.persistence))
+            (when (and persistence
+                        (= persistence.kind "graph-node-cube")
+                        (= persistence.node-key key)
+                        (= persistence.graph-map-id target-map-id))
+                (local element metadata.element)
+                (local layout (and element element.layout))
+                (local parent-layout (and self.entity self.entity.layout))
+                (local parent-position (or (and parent-layout parent-layout.position) (glm.vec3 0 0 0)))
+                (local parent-rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0)))
+                (local parent-inverse (parent-rotation:inverse))
+                (var repositioned? false)
+                (when options.position
+                    (set metadata.position
+                         (parent-inverse:rotate (- options.position parent-position)))
+                    (when layout
+                        (set layout.position options.position)))
+                (when options.rotation
+                    (set metadata.rotation (* parent-inverse options.rotation))
+                    (when layout
+                        (set layout.rotation options.rotation)))
+                (when options.size
+                    (set persistence.size (vec3->array options.size))
+                    (set metadata.size options.size)
+                    (when layout
+                        (set layout.size options.size)
+                        (set layout.measure options.size)))
+                (when options.label
+                    (set persistence.label options.label))
+                (when (and layout layout.layouter)
+                    (layout:layouter))
+                (when layout
+                    (set repositioned?
+                         (LayoutPhysicsBodies.reposition-element self.entity
+                                                                 element
+                                                                 (or options.position layout.position)
+                                                                 (or options.rotation layout.rotation))))
+                (when (not repositioned?)
+                    (self:sync-physics-bodies))
+                (lua "return element"))))
     (local node (or options.node
-                    (and graph graph.lookup (graph:lookup key))
-                    (and graph graph.load-by-key (graph:load-by-key key))))
-    (assert node (.. "Scene.add-graph-node-cube could not resolve node for key: " key))
+                     (and graph graph.lookup (graph:lookup key))
+                     (if options.restore?
+                        nil
+                        (and graph graph.load-by-key (graph:load-by-key key)))))
+    (when (not node)
+        (if options.restore?
+            (lua "return nil")
+            (error (.. "Scene.add-graph-node-cube could not resolve node for key: " key))))
     (local label (or options.label (and node node.label) key))
     (local size (or options.size (glm.vec3 4 4 4)))
     (local placement (resolve-camera-placement self))
@@ -999,20 +1054,19 @@
          (glm.vec3 0 (+ 6 (* stack-index 4)) 0)))
     (set self.physics-body-count (+ stack-index 1))
     (fn on-graph-action [_cube _button _event payload]
-      (local graph (or self.graph app.graph))
-      (when graph
-        (local node-key (or (and payload payload.node-key) key))
-        (local existing (and node-key (graph:lookup node-key)))
-        (when (not existing)
-          (local loaded
-            (if (and node-key graph.load-by-key)
-                (graph:load-by-key node-key)
-                nil))
-          (when (and (not loaded) node)
-            (graph:add-node
-              node
-              {:position (to-graph-position
-                           (and payload payload.cube-position))})))))
+      (local graph (or self.graph-map app.graph-map))
+      (local node-key (or (and payload payload.node-key) key))
+      (local existing (and node-key (graph:lookup node-key)))
+      (when (not existing)
+        (local loaded
+          (if (and node-key graph.load-by-key)
+              (graph:load-by-key node-key)
+              nil))
+        (when (and (not loaded) node)
+          (graph:add-node
+            node
+            {:position (to-graph-position
+                        (and payload payload.cube-position))}))))
     (local cube-builder
       (Sized {:size size
               :child (GraphNodeCube {:node node
@@ -1030,6 +1084,7 @@
                              :position spawn-layout-position
                              :rotation options.rotation
                              :persistence {:kind "graph-node-cube"
+                                           :graph-map-id graph.id
                                            :node-key key
                                            :label label
                                            :size (vec3->array size)}}))
@@ -1508,6 +1563,9 @@
           (set record.rotation layout-state.rotation)
           (set record.size (or layout-state.size record.size))
           (table.insert panels record))))
+    ;; Preserve queued cube panels from mismatched maps so they survive saves.
+    (each [_ panel (ipairs self.queued-cube-panels)]
+        (table.insert panels (clone-table panel)))
     (local captured {:panels panels
                      :terrains terrains
                      :lights lights})
@@ -1623,12 +1681,26 @@
                       "[scene] replacing invalid restored panel size at index %d (kind=%s)"
                       panel-idx
                       (tostring kind))))
-    (if (= kind "graph-node-cube")
-        (self:add-graph-node-cube {:node-key panel.node-key
-                                   :label panel.label
-                                   :size restored-size
-                                   :position restored-position
-                                   :rotation (array->quat panel.rotation)})
+     (if (= kind "graph-node-cube")
+         (do
+              (when (and panel.graph-map-id self.graph-map self.graph-map.id
+                         (not= panel.graph-map-id self.graph-map.id))
+                  ;; Put in queued scene panels so it survives save/load cycles.
+                  (table.insert self.queued-cube-panels (clone-table panel))
+                  (lua "return true"))
+             ;; Remove queued entry if one exists (dedup when map matches).
+             (for [i (length self.queued-cube-panels) 1 -1]
+                 (when (and (= (. self.queued-cube-panels i :kind) "graph-node-cube")
+                            (= (. self.queued-cube-panels i :node-key) panel.node-key)
+                            (= (. self.queued-cube-panels i :graph-map-id) panel.graph-map-id))
+                     (table.remove self.queued-cube-panels i)))
+             (self:add-graph-node-cube {:node-key panel.node-key
+                                        :label panel.label
+                                        :size restored-size
+                                        :position restored-position
+                                        :rotation (array->quat panel.rotation)
+                                        :graph-map-id panel.graph-map-id
+                                        :restore? true}))
         (= kind "physics-cuboid")
         (self:add-physics-body {:size restored-size
                                 :position restored-position
@@ -1715,6 +1787,45 @@
 (set self.add-physics-body add-physics-body)
 (set self.add-graph-node-cube add-graph-node-cube)
 (set self.set-graph (fn [_self graph] (set self.graph graph)))
+(set self.set-graph-map (fn [_self graph-map]
+                            (when (and self.graph-map graph-map
+                                       (not= self.graph-map.id (and graph-map graph-map.id)))
+                                (local to-remove [])
+                                (each [_ metadata (ipairs (or self.scene-children []))]
+                                    (when (and metadata metadata.persistence
+                                               (= metadata.persistence.kind "graph-node-cube"))
+                                        (table.insert to-remove metadata.element)))
+                                (each [_ element (ipairs to-remove)]
+                                    (self:remove-panel-child element)))
+                            (set self.graph-map graph-map)
+                            (when graph-map
+                              (set self.graph graph-map.graph))
+                            ;; Restore queued cube panels that match the new (now-active) map.
+                            (when (and self.graph-map self.graph-map.id
+                                       (> (length self.queued-cube-panels) 0))
+                                (local remaining [])
+                                (each [_ panel (ipairs self.queued-cube-panels)]
+                                    (if (and (= panel.graph-map-id self.graph-map.id)
+                                             (= panel.kind "graph-node-cube"))
+                                        (let [(ok-pos pos) (pcall array->vec3 panel.position)
+                                              (ok-sz sz) (pcall array->vec3 panel.size)
+                                              (ok-rot rot) (pcall array->quat panel.rotation)
+                                              restored-position (if (and ok-pos (safe-vec3? pos)) pos nil)
+                                              restored-size (if (and ok-sz (safe-vec3? sz)) sz (glm.vec3 4 4 4))
+                                              restored-rotation (if ok-rot rot nil)
+                                              element (self:add-graph-node-cube
+                                                        {:node-key panel.node-key
+                                                         :label panel.label
+                                                         :size restored-size
+                                                         :position restored-position
+                                                         :rotation (or restored-rotation (glm.quat 1 0 0 0))
+                                                         :graph-map-id panel.graph-map-id
+                                                         :restore? true})]
+                                            (if element
+                                                nil
+                                                (table.insert remaining (clone-table panel))))
+                                        (table.insert remaining (clone-table panel))))
+                                (set self.queued-cube-panels remaining))))
 (self:reset-projection)
 self)
 

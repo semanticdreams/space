@@ -66,11 +66,11 @@
        (fn [self]
          (WorldData.remove-terrain self.world-manager self.world-id self.terrain-id)))
   (set node.actions
-       [{:name "Remove"
+        [{:name "Delete Terrain"
          :fn (fn [_button _event]
                (when (node:remove-terrain)
-                 (when (and node.graph node.graph.remove-nodes)
-                   (node.graph:remove-nodes [node]))))}])
+                  (when (and node.graph node.graph.remove-nodes)
+                    (node.graph:remove-nodes [node] {:cause "shared-delete"}))))}])
   (var changed-handler nil)
   (set changed-handler
        (world-manager.changed:connect
@@ -80,8 +80,8 @@
                (do
                  (set node.terrain-record (clone-table (or current.record {})))
                  (node.changed:emit node.terrain-record))
-               (when (and node.graph node.graph.remove-nodes)
-                 (node.graph:remove-nodes [node]))))))
+                (when (and node.graph node.graph.remove-nodes)
+                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
          (when changed-handler

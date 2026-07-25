@@ -47,7 +47,7 @@
   (set ctx.height 100)
   (set ctx.units-per-pixel 1)
   (set ctx.focus focus)
-  (local view (GraphView {:graph graph :ctx ctx :data-dir dir}))
+  (local view (GraphView {:graph-map graph :ctx ctx :data-dir dir}))
   
   (local (ok result) (pcall f store graph view))
   (fs.remove-all dir)

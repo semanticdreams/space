@@ -37,10 +37,12 @@
 
     (var check-link-edges-for-node nil) ;; Forward declaration
 
+    (local entity-events? (if (= options.entity-events? nil) true options.entity-events?))
     (local self {:nodes nodes
                  :edges edges
                  :edge-map edge-map
                  :with-start (if (= options.with-start nil) true options.with-start)
+                 :entity-events? entity-events?
                  :node-added node-added
                  :node-removed node-removed
                  :node-replaced node-replaced
@@ -276,6 +278,21 @@
                 (add-node self node))
             node))
 
+    (set self.create-node-by-key
+        (fn [_self key]
+            (when (not key) (lua "return nil"))
+            (assert (= (type key) "string") "create-node-by-key requires string key")
+            (local scheme (key-scheme key))
+            (local loader (. key-loaders scheme))
+            (when (not loader) (lua "return nil"))
+            (local node (loader key))
+            (when node
+                (assert (. node :key) "create-node-by-key loader must return node with key")
+                (assert (= (. node :key) key)
+                        (.. "create-node-by-key loader returned mismatched key: expected " key
+                            " got " (tostring (. node :key)))))
+            node))
+
     (set self.has-key-loader-for-key
         (fn [_self key]
             (when (not key) (lua "return false"))
@@ -492,28 +509,6 @@
     (var link-deleted-handler nil)
     (var string-entity-created-handler nil)
 
-    (set link-created-handler
-        (link-store.link-entity-created:connect
-            (fn [entity]
-                (maybe-add-link-edge entity))))
-
-    (set link-updated-handler
-        (link-store.link-entity-updated:connect
-            (fn [entity]
-                (maybe-remove-link-edge entity)
-                (maybe-add-link-edge entity))))
-
-    (set link-deleted-handler
-        (link-store.link-entity-deleted:connect
-            (fn [entity]
-                (maybe-remove-link-edge entity))))
-
-    (set string-entity-created-handler
-        (string-store.string-entity-created:connect
-            (fn [entity]
-                (when (and entity entity.id)
-                    (self:load-by-key (.. "string-entity:" (tostring entity.id)))))))
-
     (fn refresh-link-edges-for-key [key]
         (local key-str (tostring (or key "")))
         (when (> (string.len key-str) 0)
@@ -526,33 +521,56 @@
     (var identity-deleted-handler nil)
     (var morph-handler nil)
 
-    (set identity-updated-handler
-        (identity-store.identity-updated:connect
-            (fn [entity]
-                (local key (.. "identity:" (tostring entity.id)))
-                (refresh-link-edges-for-key key))))
+    (when entity-events?
+        (set link-created-handler
+            (link-store.link-entity-created:connect
+                (fn [entity]
+                    (maybe-add-link-edge entity))))
 
-    (set identity-deleted-handler
-        (identity-store.identity-deleted:connect
-            (fn [entity]
-                (local key (.. "identity:" (tostring entity.id)))
-                (refresh-link-edges-for-key key))))
+        (set link-updated-handler
+            (link-store.link-entity-updated:connect
+                (fn [entity]
+                    (maybe-remove-link-edge entity)
+                    (maybe-add-link-edge entity))))
 
-    (when (and morphs morphs.morphed)
-        (set morph-handler
-            (morphs.morphed:connect
-                (fn [payload]
-                    (local result (or (and payload payload.result) {}))
-                    (local source-key (or payload.source-key result.source-key))
-                    (local target-key (or result.target-key result.code-key))
-                    (local source-node (and source-key (. nodes source-key)))
-                    (when (and source-node self.remove-nodes)
-                        (self:remove-nodes [source-node]))
-                    (when (and target-key self.load-by-key)
-                        (self:load-by-key target-key))
-                    (node-morphed:emit {:source-key source-key
-                                        :target-key target-key
-                                        :payload payload})))))
+        (set link-deleted-handler
+            (link-store.link-entity-deleted:connect
+                (fn [entity]
+                    (maybe-remove-link-edge entity))))
+
+        (set string-entity-created-handler
+            (string-store.string-entity-created:connect
+                (fn [entity]
+                    (when (and entity entity.id)
+                        (self:load-by-key (.. "string-entity:" (tostring entity.id)))))))
+
+        (set identity-updated-handler
+            (identity-store.identity-updated:connect
+                (fn [entity]
+                    (local key (.. "identity:" (tostring entity.id)))
+                    (refresh-link-edges-for-key key))))
+
+        (set identity-deleted-handler
+            (identity-store.identity-deleted:connect
+                (fn [entity]
+                    (local key (.. "identity:" (tostring entity.id)))
+                    (refresh-link-edges-for-key key))))
+
+        (when (and morphs morphs.morphed)
+            (set morph-handler
+                (morphs.morphed:connect
+                    (fn [payload]
+                        (local result (or (and payload payload.result) {}))
+                        (local source-key (or payload.source-key result.source-key))
+                        (local target-key (or result.target-key result.code-key))
+                        (local source-node (and source-key (. nodes source-key)))
+                        (when (and source-node self.remove-nodes)
+                            (self:remove-nodes [source-node]))
+                        (when (and target-key self.load-by-key)
+                            (self:load-by-key target-key))
+                        (node-morphed:emit {:source-key source-key
+                                            :target-key target-key
+                                            :payload payload}))))))
 
     ;; Removed node-added listener as it is now called directly in add-node
 

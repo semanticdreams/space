@@ -341,10 +341,10 @@
          (local graph self.graph)
          (local items (store:list-conversation-items self.llm-id))
          (when graph
-           (local nodes-to-remove (collect-loaded-item-nodes graph items))
-           (table.insert nodes-to-remove self)
-           (graph:remove-nodes nodes-to-remove))
-         (store:delete-conversation self.llm-id)))
+            (local nodes-to-remove (collect-loaded-item-nodes graph items))
+            (table.insert nodes-to-remove self)
+            (graph:remove-nodes nodes-to-remove {:cause "shared-delete"}))
+          (store:delete-conversation self.llm-id)))
 
   (set node.actions
        [{:name "Add Message"

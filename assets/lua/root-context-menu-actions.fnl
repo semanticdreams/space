@@ -50,6 +50,7 @@
                :hud app.hud}
      :scene {:scene app.scene}
      :graph {:graph app.graph
+             :graph-map app.graph-map
              :view app.graph-view}
      :drawing {}}))
 
@@ -66,6 +67,7 @@
                            :hud app.hud})
   (local scene-defaults {:scene app.scene})
   (local graph-defaults {:graph app.graph
+                         :graph-map app.graph-map
                          :view (or (and options.graph options.graph.view)
                                    app.graph-view)})
   (enrich-active-canvas-context!

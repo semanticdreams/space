@@ -14,12 +14,15 @@
      :key (tostring k)}))
 
 (fn maybe-focus-node [node-key]
-  (when (and app app.graph app.graph-view)
-    (local node (app.graph:lookup node-key))
-    (when node
-      (local focus-node (. app.graph-view.focus-nodes node))
-      (when (and focus-node focus-node.request-focus)
-        (focus-node:request-focus {:reason :list-entity})))))
+  (when (and app app.graph-view)
+    (local graph (or app.graph-map
+                    (and app.graph-view app.graph-view.graph-map)))
+    (when graph
+      (local node (and graph.lookup (graph:lookup node-key)))
+      (when node
+        (local focus-node (. app.graph-view.focus-nodes node))
+        (when (and focus-node focus-node.request-focus)
+          (focus-node:request-focus {:reason :list-entity}))))))
 
 (fn ListEntityNodeView [node opts]
   (local options (or opts {}))

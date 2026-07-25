@@ -3,6 +3,7 @@
 (local Signal (require :signal))
 
 (local Utils (require :graph/view/utils))
+(local MathUtils (require :math-utils))
 (local GraphViewEdge (require :graph/view/edge))
 (local GraphViewRegistry (require :graph/view/registry))
 (local GraphViewLayout (require :graph/view/layout))
@@ -18,12 +19,14 @@
 (local ensure-glm-vec3 Utils.ensure-glm-vec3)
 (local ensure-glm-vec4 Utils.ensure-glm-vec4)
 (local node-id NodeBase.node-id)
+(local array->vec3 MathUtils.array->vec3)
+(local array->quat MathUtils.array->quat)
 
 (local {:ForceLayout ForceLayout} (require :force-layout))
 (local Modifiers (require :input-modifiers))
 (local LinkEntityStore (require :entities/link))
 
-(fn expand-linked-frontier [graph keys]
+(fn expand-linked-frontier [graph-map keys]
     (local store (LinkEntityStore.get-default))
     (local next-frontier [])
     (each [_ key (ipairs keys)]
@@ -33,14 +36,15 @@
                 (if (= (tostring entity.source-key) (tostring key))
                     entity.target-key
                     entity.source-key))
-            (graph:load-by-key other-key)
+            (graph-map:load-by-key other-key)
             (table.insert next-frontier (tostring other-key))))
     next-frontier)
 
 (fn GraphView [opts]
     (local options (or opts {}))
-    (local graph options.graph)
-    (assert graph "GraphView requires a graph")
+    (local graph-map (or options.graph-map options.graph))
+    (assert graph-map "GraphView requires a graph-map")
+    (local graph-map-id (or graph-map.id "main"))
     (local ctx options.ctx)
     (assert ctx "GraphView requires a build context with triangle-vector and points")
     (local points (or ctx.points (and ctx ctx.points)))
@@ -78,6 +82,8 @@
     (local expanded-nodes {})
     (local pinned-before-expand {})
     (var toggle-node-presentation nil)
+    (var extra-panel-transfer-source nil)
+    (var extra-panel-transfer-handler nil)
     (var dropped? false)
     (assert points "GraphView requires ctx.points")
     (assert vector "GraphView requires ctx.triangle-vector")
@@ -88,7 +94,8 @@
                         (and appdirs (appdirs.user-data-dir "space"))))
     (assert data-dir "GraphView requires a data-dir for persistence")
     (local persistence (or options.persistence
-                           (GraphViewPersistence {:data-dir data-dir})))
+                           (GraphViewPersistence {:data-dir data-dir
+                                                   :map-id graph-map-id})))
     (local theme (and ctx ctx.theme))
     (local graph-theme (and theme theme.graph))
     (local resolved-label-color (or options.label-color (and graph-theme graph-theme.label-color)))
@@ -127,8 +134,8 @@
                                     :label-target-pixels resolved-label-target-pixels
                                     :label-min-scale resolved-label-min-scale
                                     :label-depth-offset (or options.label-depth-offset 1.0)}))
-    (local views (GraphViewNodeViews {:graph graph
-                                      :ctx ctx
+    (local views (GraphViewNodeViews {:graph-map graph-map
+                                       :ctx ctx
                                       :view-target view-target
                                       :view-context view-context}))
     (local selection (GraphViewSelection {:selector selector
@@ -196,11 +203,11 @@
             (when (and action action.name action.fn)
                 (table.insert actions action)))
         (table.insert actions
-                      {:name "Remove"
+                      {:name "Remove from Map"
                        :icon "close"
                        :fn (fn [_button _event]
-                               (when (and graph graph.remove-nodes)
-                                   (graph:remove-nodes [node])))})
+                               (when (and graph-map graph-map.remove-nodes)
+                                   (graph-map:remove-nodes [node])))})
         actions)
 
     (fn resolve-menu-position [event]
@@ -282,7 +289,7 @@
                                  (if continuing?
                                      expand-seq-frontier
                                      [(tostring node.key)]))
-                             (set expand-seq-frontier (expand-linked-frontier graph frontier))
+                             (set expand-seq-frontier (expand-linked-frontier graph-map frontier))
                              (set expand-seq-timestamp ts)
                              true)
                          (do (views:open node) true))))))
@@ -575,7 +582,7 @@
             (set presentation.on-double-click
                  (fn [_self event]
                      (if (Modifiers.alt-held? (and event event.mod))
-                         (expand-linked-frontier graph [(tostring node.key)])
+                         (expand-linked-frontier graph-map [(tostring node.key)])
                          (toggle-node-presentation node))))
             (set presentation.on-right-click
                  (fn [_self event]
@@ -670,6 +677,21 @@
         (views:drop-node node))
 
     (var handle-edge-added nil)
+    (var remove-extra-panel-entry! nil)
+
+    (fn remove-live-scene-cube-panel! [node-key]
+        (local scene (and app app.scene))
+        (when (and scene scene.scene-children scene.remove-panel-child)
+            (local to-remove [])
+            (each [_ metadata (ipairs scene.scene-children)]
+                (local persistence (and metadata metadata.persistence))
+                (when (and persistence
+                           (= persistence.kind "graph-node-cube")
+                           (= persistence.node-key node-key)
+                           (= persistence.graph-map-id graph-map-id))
+                    (table.insert to-remove metadata.element)))
+            (each [_ element (ipairs to-remove)]
+                (scene:remove-panel-child element))))
 
     (fn drain-pending-edges []
         (local remaining-edges [])
@@ -704,8 +726,11 @@
                           (registry:add-edge edge
                               (fn []
                                   (graph-layout:add-edge edge))))
-                    (when added?
-                        (queue-graph-layout-refresh! run-force?)))
+                    (if added?
+                        (queue-graph-layout-refresh! run-force?)
+                        (do
+                            (graph-layout:refresh-edge-line record)
+                            (graph-layout:update-lines))))
                 (do
                     ;; Queue pending edge
                     (table.insert pending-edges {:edge edge :opts edge-opts}))))
@@ -764,7 +789,7 @@
                 (set point.on-double-click
                      (fn [_self event]
                          (if (Modifiers.alt-held? (and event event.mod))
-                             (expand-linked-frontier graph [(tostring node.key)])
+                             (expand-linked-frontier graph-map [(tostring node.key)])
                              (toggle-node-presentation node))))
                 (set point.on-right-click
                      (fn [_self event]
@@ -928,9 +953,15 @@
                     (selector:set-selectables remaining-selectables)
                     (selector:set-selected []))
                 (each [node _ (pairs removal-set)]
+                    (when node.key
+                        (when remove-extra-panel-entry!
+                            (remove-extra-panel-entry! "graph-node-cube" node.key graph-map-id {:drop-panel? true}))
+                        (remove-live-scene-cube-panel! node.key))
                     (when (. expanded-nodes node)
                         (persistence:set-presentation node nil))
                     (persistence:set-size node nil)
+                    (when (and node node.key persistence.prune-node-key)
+                        (persistence:prune-node-key node.key))
                     (set (. expanded-nodes node) nil)
                     (set (. pinned-before-expand node) nil)
                     (local focus-node (. focus-nodes node))
@@ -959,37 +990,37 @@
     (var stabilized-handler nil)
 
     (fn attach-graph []
-        (when (and graph.node-added (not node-added-handler))
+        (when (and graph-map.node-added (not node-added-handler))
             (set node-added-handler
-                 (graph.node-added:connect handle-node-added)))
-        (when (and graph.node-removed (not node-removed-handler))
+                 (graph-map.node-added:connect handle-node-added)))
+        (when (and graph-map.node-removed (not node-removed-handler))
             (set node-removed-handler
-                 (graph.node-removed:connect handle-nodes-removed)))
-        (when (and graph.node-replaced (not node-replaced-handler))
+                 (graph-map.node-removed:connect handle-nodes-removed)))
+        (when (and graph-map.node-replaced (not node-replaced-handler))
             (set node-replaced-handler
-                 (graph.node-replaced:connect handle-node-replaced)))
-        (when (and graph.edge-added (not edge-added-handler))
+                 (graph-map.node-replaced:connect handle-node-replaced)))
+        (when (and graph-map.edge-added (not edge-added-handler))
             (set edge-added-handler
-                 (graph.edge-added:connect handle-edge-added)))
-        (when (and graph.edge-removed (not edge-removed-handler))
+                 (graph-map.edge-added:connect handle-edge-added)))
+        (when (and graph-map.edge-removed (not edge-removed-handler))
             (set edge-removed-handler
-                 (graph.edge-removed:connect handle-edge-removed))))
+                 (graph-map.edge-removed:connect handle-edge-removed))))
 
     (fn detach-graph []
-        (when (and graph.node-added node-added-handler)
-            (graph.node-added:disconnect node-added-handler true)
+        (when (and graph-map.node-added node-added-handler)
+            (graph-map.node-added:disconnect node-added-handler true)
             (set node-added-handler nil))
-        (when (and graph.node-removed node-removed-handler)
-            (graph.node-removed:disconnect node-removed-handler true)
+        (when (and graph-map.node-removed node-removed-handler)
+            (graph-map.node-removed:disconnect node-removed-handler true)
             (set node-removed-handler nil))
-        (when (and graph.node-replaced node-replaced-handler)
-            (graph.node-replaced:disconnect node-replaced-handler true)
+        (when (and graph-map.node-replaced node-replaced-handler)
+            (graph-map.node-replaced:disconnect node-replaced-handler true)
             (set node-replaced-handler nil))
-        (when (and graph.edge-added edge-added-handler)
-            (graph.edge-added:disconnect edge-added-handler true)
+        (when (and graph-map.edge-added edge-added-handler)
+            (graph-map.edge-added:disconnect edge-added-handler true)
             (set edge-added-handler nil))
-        (when (and graph.edge-removed edge-removed-handler)
-            (graph.edge-removed:disconnect edge-removed-handler true)
+        (when (and graph-map.edge-removed edge-removed-handler)
+            (graph-map.edge-removed:disconnect edge-removed-handler true)
             (set edge-removed-handler nil)))
 
     (when layout.stabilized
@@ -1011,12 +1042,25 @@
     (attach-graph)
     (with-batched-graph-updates
         (fn []
-            (each [_ node (pairs graph.nodes)]
+            (each [_ node (pairs graph-map.nodes)]
                 (handle-node-added {:node node}))
-            (each [_ edge (ipairs graph.edges)]
+            (each [_ edge (ipairs graph-map.edges)]
                 (handle-edge-added {:edge edge}))))
+    (when (and graph-map.selected_node_keys
+               (> (length graph-map.selected_node_keys) 0))
+        (local restored-selection [])
+        (each [_ key (ipairs graph-map.selected_node_keys)]
+            (local node (graph-map:lookup key))
+            (when node
+                (table.insert restored-selection node)))
+        (selection:set-selection restored-selection))
+    (when graph-map.focused_node_key
+        (local node (graph-map:lookup graph-map.focused_node_key))
+        (local focus-node (and node (. focus-nodes node)))
+        (when focus-node
+            (focus-node:request-focus)))
 
-    (local view {:graph graph
+    (local view {:graph-map graph-map
                  :ctx ctx
                  :layout layout
                  :points registry.points
@@ -1037,14 +1081,152 @@
                  :pinned pinned
                  :persistence persistence
                  :selection selection
-                 :graph-layout graph-layout})
+                 :graph-layout graph-layout
+                  :extra-panels []
+                  :extra-panel-runtimes []})
+
+    (fn extra-panel-persistence-matches? [persistence entry]
+        (and (= (type persistence) :table)
+             (= persistence.kind entry.kind)
+             (= persistence.node-key entry.node-key)
+             (= persistence.graph-map-id entry.graph-map-id)
+             (= persistence.graph-map-id graph-map-id)))
+
+    (fn find-extra-panel-runtime-by-entry [entry]
+        (var found nil)
+        (each [_ runtime (ipairs view.extra-panel-runtimes) &until found]
+            (when (and (= runtime.kind entry.kind)
+                       (= runtime.node-key entry.node-key)
+                       (= runtime.graph-map-id entry.graph-map-id))
+                (set found runtime)))
+        found)
+
+    (fn resolve-extra-panel-target-kind [target receiver-id]
+        (if receiver-id
+            (values "receiver" receiver-id)
+            (= target app.hud) "hud"
+            (= target app.scene) "scene"
+            (= target view-target) "canvas"
+            (not target) "canvas"
+            (and app.panel-transfer app.panel-transfer.find-receiver-for-target)
+            (do
+                (local receiver (app.panel-transfer:find-receiver-for-target target))
+                (if receiver
+                    (values "receiver" receiver.id)
+                    "canvas"))
+            "canvas"))
+
+    (fn handle-extra-panel-transferred [payload]
+        (local persistence (and payload payload.persistence))
+        (when (= (type persistence) :table)
+            (var matched-entry nil)
+            (each [_ entry (ipairs view.extra-panels) &until matched-entry]
+                (when (extra-panel-persistence-matches? persistence entry)
+                    (set matched-entry entry)))
+            (when matched-entry
+                (local target (or (and payload payload.target)
+                                  (and payload payload.destination payload.destination.target)))
+                (local (target-kind receiver-id)
+                    (resolve-extra-panel-target-kind target (and payload payload.receiver-id)))
+                (set matched-entry.target-kind target-kind)
+                (set matched-entry.target-receiver-id receiver-id)
+                (local runtime (find-extra-panel-runtime-by-entry matched-entry))
+                (when runtime
+                    (set runtime.target target)
+                    (set runtime.element (and payload payload.new-element))))))
+
+    (fn register-extra-panel-transfer-handler []
+        (local pt (and app app.panel-transfer))
+        (when (and pt pt.panel-transferred (not extra-panel-transfer-handler))
+            (set extra-panel-transfer-source pt)
+            (set extra-panel-transfer-handler
+                 (pt.panel-transferred:connect handle-extra-panel-transferred))))
+
+    (fn unregister-extra-panel-transfer-handler []
+        (local pt extra-panel-transfer-source)
+        (when (and pt pt.panel-transferred extra-panel-transfer-handler)
+            (pt.panel-transferred:disconnect extra-panel-transfer-handler true)
+            (set extra-panel-transfer-handler nil)
+            (set extra-panel-transfer-source nil)))
+
+    (register-extra-panel-transfer-handler)
+
+    (set remove-extra-panel-entry!
+         (fn [kind node-key graph-map-id opts]
+             (local options (or opts {}))
+             (for [i (length view.extra-panels) 1 -1]
+                 (local entry (. view.extra-panels i))
+                 (when (and (= entry.kind kind)
+                            (= entry.node-key node-key)
+                            (= entry.graph-map-id graph-map-id))
+                     (table.remove view.extra-panels i)))
+             (for [i (length view.extra-panel-runtimes) 1 -1]
+                 (local record (. view.extra-panel-runtimes i))
+                 (when (and (= record.kind kind)
+                            (= record.node-key node-key)
+                            (= record.graph-map-id graph-map-id))
+                     (when (and options.drop-panel? record.target record.element record.target.remove-panel-child)
+                         (record.target:remove-panel-child record.element))
+                     (table.remove view.extra-panel-runtimes i)))))
+
+    (fn find-extra-panel-entry [runtime]
+        (var found nil)
+        (each [_ entry (ipairs view.extra-panels) &until found]
+            (when (and (= entry.kind runtime.kind)
+                       (= entry.node-key runtime.node-key)
+                       (= entry.graph-map-id runtime.graph-map-id))
+                (set found entry)))
+        found)
+
+    (fn sync-extra-panel-runtime-state! [runtime]
+        (local entry (find-extra-panel-entry runtime))
+        (when (and entry runtime.target runtime.element runtime.target.capture-panel-element-state)
+            (local panel-state (runtime.target:capture-panel-element-state runtime.element))
+            (when panel-state
+                (set entry.panel panel-state)))
+        entry)
+
+    (fn sync-extra-panel-runtime-states! []
+        (each [_ runtime (ipairs view.extra-panel-runtimes)]
+            (sync-extra-panel-runtime-state! runtime))
+        view.extra-panels)
+
+    (fn drop-extra-panel-runtimes! []
+        (for [i (length view.extra-panel-runtimes) 1 -1]
+            (local record (. view.extra-panel-runtimes i))
+            (when (and record.target record.element record.target.remove-panel-child)
+                (record.target:remove-panel-child record.element))
+            (table.remove view.extra-panel-runtimes i)))
+
+    (set view.remove-extra-panel-entry!
+         (fn [_self kind node-key graph-map-id opts]
+             (assert-not-dropped "remove-extra-panel-entry!")
+             (remove-extra-panel-entry! kind node-key graph-map-id opts)
+             true))
+
+    (set view.register-extra-panel!
+         (fn [_self entry target element]
+             (assert-not-dropped "register-extra-panel!")
+             (assert (= (type entry) :table) "GraphView.register-extra-panel! requires entry")
+             (assert entry.kind "GraphView.register-extra-panel! requires entry.kind")
+             (assert entry.node-key "GraphView.register-extra-panel! requires entry.node-key")
+             (assert entry.graph-map-id "GraphView.register-extra-panel! requires entry.graph-map-id")
+             (remove-extra-panel-entry! entry.kind entry.node-key entry.graph-map-id {:drop-panel? true})
+             (table.insert view.extra-panels entry)
+             (when (and target element)
+                 (table.insert view.extra-panel-runtimes {:kind entry.kind
+                                                          :node-key entry.node-key
+                                                          :graph-map-id entry.graph-map-id
+                                                          :target target
+                                                          :element element}))
+             entry))
 
     (set view.remove-nodes (fn [_self nodes-to-remove]
                                (assert-not-dropped "remove-nodes")
-                               (graph:remove-nodes nodes-to-remove)))
+                               (graph-map:remove-nodes nodes-to-remove)))
     (set view.remove-selected-nodes (fn [_self]
                                         (assert-not-dropped "remove-selected-nodes")
-                                        (graph:remove-nodes selected-nodes)))
+                                        (graph-map:remove-nodes selected-nodes)))
     (set view.open-focused-node (fn [_self]
                                    (assert-not-dropped "open-focused-node")
                                    (when focused-node
@@ -1061,19 +1243,30 @@
              (assert (= (type cb) :function)
                      "GraphView.with-batched-updates requires callback")
              (with-batched-graph-updates cb)))
-    (set view.capture-state
-         (fn [_self]
-             (assert-not-dropped "capture-state")
-             {:views (and views views.capture-state (views:capture-state))
-              :selected-node-keys (icollect [_ node (ipairs selected-nodes)]
-                                   (and node node.key))}))
+     (set view.capture-state
+          (fn [_self]
+              (assert-not-dropped "capture-state")
+              (local keys (icollect [_ node (ipairs selected-nodes)]
+                               (and node node.key)))
+              (set graph-map.selected_node_keys keys)
+              (set graph-map.focused_node_key (and focused-node focused-node.key))
+              (sync-extra-panel-runtime-states!)
+              (local view-state (and views views.capture-state (views:capture-state)))
+              (when (and view-state view-state.open-views persistence.set-panels)
+                  (persistence:set-panels view-state.open-views))
+              (when persistence.set-extra-panels
+                  (persistence:set-extra-panels (or view.extra-panels [])))
+              (persistence:persist registry.points true)
+              {:views view-state
+               :selected_node_keys keys
+               :extra_panels view.extra-panels}))
     (set view.restore-graph-state
          (fn [self state]
              (assert-not-dropped "restore-graph-state")
-             (when (and graph graph.restore-state state)
+             (when (and graph-map graph-map.restore-state state)
                  (self:with-batched-updates
                    (fn []
-                       (graph:restore-state state))))
+                       (graph-map:restore-state state))))
              true))
     (set view.restore-views-state
          (fn [_self state]
@@ -1081,20 +1274,114 @@
              (when (and views views.restore-state state)
                  (views:restore-state state))
              true))
+    (fn resolve-extra-panel-target [entry]
+        (if (= entry.target-kind nil) view-target
+            (= entry.target-kind "canvas") view-target
+            (= entry.target-kind "hud")
+            (do
+                (assert app.hud
+                        "GraphView.restore-state extra panel target-kind hud requires app.hud")
+                app.hud)
+            (= entry.target-kind "scene")
+            (do
+                (assert app.scene
+                        "GraphView.restore-state extra panel target-kind scene requires app.scene")
+                app.scene)
+            (= entry.target-kind "receiver")
+            (do
+                (assert entry.target-receiver-id
+                        "GraphView.restore-state receiver extra panel requires target-receiver-id")
+                (assert app.panel-transfer
+                        "GraphView.restore-state receiver extra panel requires app.panel-transfer")
+                (local receiver (app.panel-transfer:find-receiver-by-id entry.target-receiver-id))
+                (assert receiver
+                        (.. "GraphView.restore-state receiver not found for extra panel: "
+                            entry.target-receiver-id))
+                (local target (receiver.target-fn))
+                (assert target
+                        (.. "GraphView.restore-state receiver target-fn returned nil for extra panel: "
+                            entry.target-receiver-id))
+                target)
+            (error (.. "GraphView.restore-state unknown extra panel target-kind: " entry.target-kind))))
     (set view.restore-state
          (fn [self state]
              (assert-not-dropped "restore-state")
              (local payload (or state {}))
-             (if payload.views
-                 (self:restore-views-state payload.views)
-                 (self:restore-views-state {}))
-             (when payload.selected-node-keys
+              (when payload.views
+                  (self:restore-views-state payload.views))
+             (when payload.selected_node_keys
                  (local restored-selection [])
-                 (each [_ key (ipairs payload.selected-node-keys)]
-                     (local node (and graph graph.lookup (graph:lookup key)))
+                 (each [_ key (ipairs payload.selected_node_keys)]
+                     (local node (and graph-map graph-map.lookup (graph-map:lookup key)))
                      (when node
                          (table.insert restored-selection node)))
                  (selection:set-selection restored-selection))
+              (when payload.extra_panels
+                  ;; Snapshot to avoid aliasing when payload.extra_panels is view.extra-panels.
+                  (local entries [])
+                  (each [_ e (ipairs payload.extra_panels)]
+                      (table.insert entries e))
+                   (drop-extra-panel-runtimes!)
+                   (set view.extra-panels [])
+                    (each [_ entry (ipairs entries)]
+                        (var restored? false)
+                        (assert (= (type entry.graph-map-id) :string)
+                                "GraphView.restore-state extra_panels entries require graph-map-id")
+                        (assert (= (type entry.kind) :string)
+                                 "GraphView.restore-state extra_panels entries require kind")
+                        (when (and (= entry.graph-map-id graph-map-id)
+                                    (= entry.kind "graph-node-cube"))
+                            (assert (and app.scene app.scene.add-graph-node-cube)
+                                    "GraphView.restore-state graph-node-cube extra panel requires app.scene.add-graph-node-cube")
+                            (local size (array->vec3 (or (and entry.panel entry.panel.size) [4 4 4])))
+                            (local position (array->vec3 (and entry.panel entry.panel.position)))
+                            (local rotation (array->quat (or (and entry.panel entry.panel.rotation) [1 0 0 0])))
+                             (local result
+                               (app.scene:add-graph-node-cube {:node-key entry.node-key
+                                                                :label (and entry.panel entry.panel.label)
+                                                               :size (or size (glm.vec3 4 4 4))
+                                                               :position position
+                                                               :rotation (or rotation (glm.quat 1 0 0 0))
+                                                                :graph-map-id entry.graph-map-id
+                                                                :restore? true}))
+                             (when result
+                                 (local restored-entry {})
+                                 (each [k v (pairs entry)]
+                                     (set (. restored-entry k) v))
+                                 (when (= restored-entry.target-kind nil)
+                                     (set restored-entry.target-kind "scene"))
+                                 (self:register-extra-panel! restored-entry app.scene result)
+                                 (set restored? true)))
+                      (when (and (= entry.graph-map-id graph-map-id)
+                                 entry.kind entry.restorer-module
+                                 (not= entry.kind "graph-node-cube"))
+                          (local (ok module-or-err) (pcall require entry.restorer-module))
+                          (assert ok
+                                  (.. "GraphView.restore-state failed requiring extra panel restorer module "
+                                      entry.restorer-module
+                                      ": "
+                                      (tostring module-or-err)))
+                          (assert (= (type module-or-err.open-panel) :function)
+                                  (.. "GraphView.restore-state extra panel restorer module "
+                                      entry.restorer-module
+                                      " must export function :open-panel"))
+                          (local target (resolve-extra-panel-target entry))
+                          (when target
+                              (local result
+                                (module-or-err.open-panel {:target target
+                                                            :restore? true
+                                                            :panel {:node-key entry.node-key
+                                                                    :graph-map-id entry.graph-map-id
+                                                                    :panel entry.panel}}))
+                              (when result
+                                  (set restored? true))))
+                     (when (and (= entry.graph-map-id graph-map-id)
+                                (not= entry.kind "graph-node-cube")
+                                (not entry.restorer-module))
+                         (error (.. "GraphView.restore-state extra panel kind "
+                                    entry.kind
+                                    " requires restorer-module")))
+                      restored?))
              true))
     (set view.drop
          (fn [_self]
@@ -1111,10 +1398,21 @@
              (when (and focus-manager focus-blur-handler)
                  (focus-manager.focus-blur:disconnect focus-blur-handler true)
                  (set focus-blur-handler nil))
-             (each [node point (pairs registry.points)]
-                 (when (and point point.position)
-                     (assert-valid-position point.position "GraphView.drop.persist" node point)))
-            (persistence:persist registry.points true)
+              (each [node point (pairs registry.points)]
+                  (when (and point point.position)
+                      (assert-valid-position point.position "GraphView.drop.persist" node point)))
+              (local (capture-ok capture-err)
+                (pcall
+                  (fn []
+                    (when (and views views.capture-state)
+                        (local view-state (views:capture-state))
+                        (when (and view-state view-state.open-views persistence.set-panels)
+                            (persistence:set-panels view-state.open-views)))
+                    (when (and persistence.set-extra-panels)
+                        (sync-extra-panel-runtime-states!)
+                        (persistence:set-extra-panels (or view.extra-panels [])))
+                    (persistence:persist registry.points true))))
+             (drop-extra-panel-runtimes!)
              (when (and layout.stabilized stabilized-handler)
                  (layout.stabilized:disconnect stabilized-handler true)
                  (set stabilized-handler nil))
@@ -1154,18 +1452,21 @@
              (set focused-node nil)
              (set drag-active? false)
              (set drag-node nil)
-             (clear-batched-graph-updates!)
-             (each [node _ (pairs expanded-nodes)]
-                 (set (. expanded-nodes node) nil))
+              (clear-batched-graph-updates!)
+              (unregister-extra-panel-transfer-handler)
+              (each [node _ (pairs expanded-nodes)]
+                  (set (. expanded-nodes node) nil))
              (each [node _ (pairs pinned-before-expand)]
                  (set (. pinned-before-expand node) nil))
              (set view.movable-targets (and movables-handler movables-handler.targets))
              (each [_ node (pairs nodes)]
                  (drop-node-artifacts node))
              (views:drop-all)
-             (layout:clear)
-             (each [node _ (pairs pinned)]
-                 (set (. pinned node) nil))))
+              (layout:clear)
+              (each [node _ (pairs pinned)]
+                  (set (. pinned node) nil))
+              (when (not capture-ok)
+                  (error capture-err))))
     view)
 
 

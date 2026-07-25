@@ -73,7 +73,7 @@
                         (WorldData.get-skybox world-manager world-id)))
                  (node.changed:emit node.skybox-record))
                (when (and node.graph node.graph.remove-nodes)
-                 (node.graph:remove-nodes [node]))))))
+                  (node.graph:remove-nodes [node] {:cause "shared-delete"}))))))
   (set node.drop
        (fn [self]
          (when changed-handler
