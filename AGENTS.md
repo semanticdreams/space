@@ -50,6 +50,14 @@ Clean design is important, refactor when reasonable.
 ## Build, Run & Test
 - `make cmake` primes the `build/` directory; rerun after editing CMake files.
 - `make build` compiles a Release build in `build/`.
+- **Build timeouts:** The bash tool defaults to a 2-minute timeout, but a cold `make build`
+  can take several hours on this project. Always pass an explicit `timeout` parameter
+  when running build commands (a generous timeout on an already-built tree is harmless —
+  the tool returns as soon as `make` exits):
+  - `make build`: `timeout: 14400000` (4 hours).
+  - `make cmake`: `timeout: 600000` (10 minutes).
+  - A killed build may leave partial artifacts; err on the high side rather than
+    restarting from scratch.
 - `make run` executes `space` with `SPACE_ASSETS_PATH=../assets` (via `./space -m main`).
 - When running Lua/Fennel tests from the CLI, always set `SPACE_ASSETS_PATH` to the absolute `assets` path (e.g. ``SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.fast:main``) so path-sensitive suites like `FsView` can resolve fixtures correctly.
 - Fennel macros live under `assets/lua`; when invoking tests directly with `./build/space -m ...` set `FENNEL_PATH` and `FENNEL_MACRO_PATH` to `$(pwd)/assets/lua/?.fnl;$(pwd)/assets/lua/?/init.fnl` to ensure `(import-macros ...)` resolves.
