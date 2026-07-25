@@ -10,9 +10,12 @@
 (local LinkEntityStore (require :entities/link))
 (local StringEntityStore (require :entities/string))
 (local StringEntityBoardWidget (require :board/string-entity-widget))
-(local CanvasModes (require :canvas-modes))
-(local BoardModeUnit (require :board-canvas-mode-unit))
+(local Activities (require :activities))
+(local BoardActivityUnit (require :board-activity-unit))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
+(local Canvas (require :canvas))
+(local Camera (require :camera))
+(local {: FocusManager} (require :focus))
 
 (local tests [])
 
@@ -30,6 +33,22 @@
   (local (ok result) (pcall f handle.path))
   (handle:drop)
   (if ok result (error result)))
+
+(fn make-activity-canvas [opts]
+  (local options (or opts {}))
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "board-activity-test"}))
+  (local canvas (Canvas {:camera camera
+                         :focus-manager focus-manager}))
+  (when options.screen-pos-ray
+    (set canvas.screen-pos-ray options.screen-pos-ray))
+  {:canvas canvas
+   :ctx canvas.build-context
+   :root canvas.layout-root
+   :drop (fn [_self]
+           (canvas:drop)
+           (focus-manager:drop)
+           (camera:drop))})
 
 (fn board-view-connects-items-with-semantic-link []
   (with-temp-dir
@@ -719,6 +738,9 @@
       (fn []
         (local root (LayoutRoot))
         (local ctx (BuildContext {:layout-root root}))
+        (local pointer-target {:interaction-surface :canvas
+                               :activity-slot {:interactive? true}})
+        (set ctx.pointer-target pointer-target)
         (local canvas {:layout-root root
                        :build-context ctx})
         (local board (Board {}))
@@ -733,8 +755,8 @@
         (local entry (. registered 1))
         (local target (assert entry.opts.target
                               "BoardView resizable registration requires a target"))
-        (assert (= entry.opts.pointer-target canvas)
-                "BoardView resizable registration should target the board canvas")
+        (assert (= entry.opts.pointer-target pointer-target)
+                "BoardView resizable registration should target the build context pointer target")
         (target:set-position (glm.vec3 9 10 0))
         (target:set-size (glm.vec3 20 12 0))
         (assert (= item.position.x 9)
@@ -864,28 +886,23 @@
   (local previous-canvas app.canvas)
   (local previous-board app.board)
   (local previous-board-view app.board-view)
-  (local previous-registry app.canvas-mode-registry)
-  (local previous-modes-changed app.canvas-modes-changed)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
-  (local root (LayoutRoot))
-  (local ctx (BuildContext {:layout-root root
-                            :clickables app.clickables
-                            :hoverables app.hoverables
-                            :system-cursors app.system-cursors}))
+  (local previous-registry app.activity-registry)
+  (local previous-activities-changed app.activities-changed)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (var ray-event nil)
-  (local canvas {:layout-root root
-                 :build-context ctx
-                 :screen-pos-ray (fn [_self event]
-                                   (set ray-event event)
-                                   {:origin (glm.vec3 (or event.x 0) (or event.y 0) 30)
-                                    :direction (glm.vec3 2 4 -10)})})
+  (local fixture (make-activity-canvas
+                   {:screen-pos-ray (fn [_self event]
+                                      (set ray-event event)
+                                      {:origin (glm.vec3 (or event.x 0) (or event.y 0) 30)
+                                       :direction (glm.vec3 2 4 -10)})}))
+  (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
-  (BoardModeUnit.load-board-canvas-mode!)
-  (CanvasModes.activate-mode "board")
-  (local actions (app.canvas-mode-root-actions {:event {:screen {:x 10 :y 20}}}))
+  (BoardActivityUnit.load-board-activity!)
+  (Activities.activate-activity "board")
+  (local actions (app.activity-root-actions {:event {:screen {:x 10 :y 20}}}))
   ((. (. actions 1) :fn) nil {:x 90 :y 100})
   (assert (= ray-event.x 10)
           "Board root action should extract pointer from context-menu event.screen")
@@ -898,13 +915,14 @@
           "Board root action should place items at the ray intersection with the z=0 plane")
   (assert (= item.position.y 32)
           "Board root action should use the ray direction when placing board items")
-  (BoardModeUnit.unload-board-canvas-mode!)
+  (BoardActivityUnit.unload-board-activity!)
   (set app.active-world-runtime previous-active-world-runtime)
   (set app.canvas previous-canvas)
   (set app.board previous-board)
   (set app.board-view previous-board-view)
-  (set app.canvas-mode-registry previous-registry)
-  (set app.canvas-modes-changed previous-modes-changed)
+  (set app.activity-registry previous-registry)
+  (set app.activities-changed previous-activities-changed)
+  (fixture:drop)
   true)
 
 (fn board-root-action-uses-explicit-event-ray []
@@ -912,29 +930,24 @@
   (local previous-canvas app.canvas)
   (local previous-board app.board)
   (local previous-board-view app.board-view)
-  (local previous-registry app.canvas-mode-registry)
-  (local previous-modes-changed app.canvas-modes-changed)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
-  (local root (LayoutRoot))
-  (local ctx (BuildContext {:layout-root root
-                            :clickables app.clickables
-                            :hoverables app.hoverables
-                            :system-cursors app.system-cursors}))
+  (local previous-registry app.activity-registry)
+  (local previous-activities-changed app.activities-changed)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (var screen-pos-ray-calls 0)
-  (local canvas {:layout-root root
-                 :build-context ctx
-                 :screen-pos-ray (fn [_self _event]
-                                   (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
-                                   (error "screen-pos-ray should not be called when event.ray is present"))})
+  (local fixture (make-activity-canvas
+                   {:screen-pos-ray (fn [_self _event]
+                                      (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
+                                      (error "screen-pos-ray should not be called when event.ray is present"))}))
+  (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
-  (BoardModeUnit.load-board-canvas-mode!)
-  (CanvasModes.activate-mode "board")
+  (BoardActivityUnit.load-board-activity!)
+  (Activities.activate-activity "board")
   (local explicit-ray {:origin (glm.vec3 50 60 30)
                        :direction (glm.vec3 2 4 -10)})
-  (local actions (app.canvas-mode-root-actions {:event {:ray explicit-ray
+  (local actions (app.activity-root-actions {:event {:ray explicit-ray
                                                          :screen {:x 10 :y 20}}}))
   ((. (. actions 1) :fn) nil {:x 90 :y 100})
   (assert (= screen-pos-ray-calls 0)
@@ -944,13 +957,14 @@
           "Board root action should place item from event.ray origin and direction")
   (assert (= item.position.y 72)
           "Board root action should compute z=0 plane intersection from the explicit ray")
-  (BoardModeUnit.unload-board-canvas-mode!)
+  (BoardActivityUnit.unload-board-activity!)
   (set app.active-world-runtime previous-active-world-runtime)
   (set app.canvas previous-canvas)
   (set app.board previous-board)
   (set app.board-view previous-board-view)
-  (set app.canvas-mode-registry previous-registry)
-  (set app.canvas-modes-changed previous-modes-changed)
+  (set app.activity-registry previous-registry)
+  (set app.activities-changed previous-activities-changed)
+  (fixture:drop)
   true)
 
 (table.insert tests {:name "BoardView hydrates existing items with view context"
@@ -1011,29 +1025,24 @@
   (local previous-canvas app.canvas)
   (local previous-board app.board)
   (local previous-board-view app.board-view)
-  (local previous-registry app.canvas-mode-registry)
-  (local previous-modes-changed app.canvas-modes-changed)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
-  (local root (LayoutRoot))
-  (local ctx (BuildContext {:layout-root root
-                            :clickables app.clickables
-                            :hoverables app.hoverables
-                            :system-cursors app.system-cursors}))
+  (local previous-registry app.activity-registry)
+  (local previous-activities-changed app.activities-changed)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (var screen-pos-ray-calls 0)
-  (local canvas {:layout-root root
-                 :build-context ctx
-                 :screen-pos-ray (fn [_self _event]
-                                   (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
-                                   (error "screen-pos-ray should not be called when event.ray is present"))})
+  (local fixture (make-activity-canvas
+                   {:screen-pos-ray (fn [_self _event]
+                                      (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
+                                      (error "screen-pos-ray should not be called when event.ray is present"))}))
+  (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
-  (BoardModeUnit.load-board-canvas-mode!)
-  (CanvasModes.activate-mode "board")
+  (BoardActivityUnit.load-board-activity!)
+  (Activities.activate-activity "board")
   (local explicit-ray {:origin (glm.vec3 50 60 30)
                        :direction (glm.vec3 2 4 -10)})
-  (local actions (app.canvas-mode-root-actions {:event {:ray explicit-ray}}))
+  (local actions (app.activity-root-actions {:event {:ray explicit-ray}}))
   ((. (. actions 1) :fn) nil nil)
   (assert (= screen-pos-ray-calls 0)
           "Board root action should prefer event.ray without event.screen present")
@@ -1042,13 +1051,14 @@
           "Board root action should place item from event.ray when only :ray is present")
   (assert (= item.position.y 72)
           "Board root action should compute z=0 plane intersection from ray-only event")
-  (BoardModeUnit.unload-board-canvas-mode!)
+  (BoardActivityUnit.unload-board-activity!)
   (set app.active-world-runtime previous-active-world-runtime)
   (set app.canvas previous-canvas)
   (set app.board previous-board)
   (set app.board-view previous-board-view)
-  (set app.canvas-mode-registry previous-registry)
-  (set app.canvas-modes-changed previous-modes-changed)
+  (set app.activity-registry previous-registry)
+  (set app.activities-changed previous-activities-changed)
+  (fixture:drop)
   true)
 
 (table.insert tests {:name "Board root action uses ray-only event"
@@ -1059,28 +1069,23 @@
   (local previous-canvas app.canvas)
   (local previous-board app.board)
   (local previous-board-view app.board-view)
-  (local previous-registry app.canvas-mode-registry)
-  (local previous-modes-changed app.canvas-modes-changed)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
-  (local root (LayoutRoot))
-  (local ctx (BuildContext {:layout-root root
-                            :clickables app.clickables
-                            :hoverables app.hoverables
-                            :system-cursors app.system-cursors}))
+  (local previous-registry app.activity-registry)
+  (local previous-activities-changed app.activities-changed)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (var screen-pos-ray-calls 0)
-  (local canvas {:layout-root root
-                 :build-context ctx
-                 :screen-pos-ray (fn [_self _event]
-                                   (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
-                                   {:origin (glm.vec3 0 0 0)
-                                    :direction (glm.vec3 0 0 1)})})
+  (local fixture (make-activity-canvas
+                   {:screen-pos-ray (fn [_self _event]
+                                      (set screen-pos-ray-calls (+ screen-pos-ray-calls 1))
+                                      {:origin (glm.vec3 0 0 0)
+                                       :direction (glm.vec3 0 0 1)})}))
+  (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
-  (BoardModeUnit.load-board-canvas-mode!)
-  (CanvasModes.activate-mode "board")
-  (local actions (app.canvas-mode-root-actions {:event {}}))
+  (BoardActivityUnit.load-board-activity!)
+  (Activities.activate-activity "board")
+  (local actions (app.activity-root-actions {:event {}}))
   (local (ok err) (pcall (fn []
                            ((. (. actions 1) :fn) nil nil))))
   (assert (not ok)
@@ -1089,19 +1094,20 @@
           "Board placement should explain what event shape is required")
   (assert (= screen-pos-ray-calls 0)
           "Board placement should not call canvas.screen-pos-ray with malformed event")
-  (BoardModeUnit.unload-board-canvas-mode!)
+  (BoardActivityUnit.unload-board-activity!)
   (set app.active-world-runtime previous-active-world-runtime)
   (set app.canvas previous-canvas)
   (set app.board previous-board)
   (set app.board-view previous-board-view)
-  (set app.canvas-mode-registry previous-registry)
-  (set app.canvas-modes-changed previous-modes-changed)
+  (set app.activity-registry previous-registry)
+  (set app.activities-changed previous-activities-changed)
+  (fixture:drop)
   true)
 
 (table.insert tests {:name "Board placement rejects malformed event"
                      :fn board-placement-rejects-malformed-event})
 
-(fn board-canvas-mode-drops-view-on-restore-failure []
+(fn board-activity-drops-view-on-restore-failure []
   (with-temp-dir
     (fn [dir]
       (local previous-active-world-runtime app.active-world-runtime)
@@ -1109,45 +1115,44 @@
       (local previous-canvas app.canvas)
       (local previous-board app.board)
       (local previous-board-view app.board-view)
-      (local previous-registry app.canvas-mode-registry)
-      (local previous-modes-changed app.canvas-modes-changed)
-      (set app.canvas-mode-registry nil)
-      (set app.canvas-modes-changed nil)
-      (local root (LayoutRoot))
-      (local ctx (BuildContext {:layout-root root}))
-      (local canvas {:layout-root root
-                     :build-context ctx})
+      (local previous-registry app.activity-registry)
+      (local previous-activities-changed app.activities-changed)
+      (set app.activity-registry nil)
+      (set app.activities-changed nil)
+      (local fixture (make-activity-canvas))
+      (local canvas fixture.canvas)
       (local runtime {:canvas canvas
-                      :board-state {:items [{:id "bad"
-                                             :type "missing-board-item-type"}]
+                       :board-state {:items [{:id "bad"
+                                              :type "missing-board-item-type"}]
                                     :connectors []}})
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime runtime)
       (set app.canvas canvas)
-      (BoardModeUnit.load-board-canvas-mode!)
+      (BoardActivityUnit.load-board-activity!)
       (local (ok _err)
         (pcall (fn []
-                 (CanvasModes.activate-mode "board"))))
+                 (Activities.activate-activity "board"))))
       (assert (not ok)
-              "Board mode activation should fail when restored item type is unknown")
+              "Board activity activation should fail when restored item type is unknown")
       (assert (not app.board-view)
-              "Board mode activation failure should clear app.board-view")
+              "Board activity activation failure should clear app.board-view")
       (assert (not runtime.board-view)
-              "Board mode activation failure should clear runtime.board-view")
-      (BoardModeUnit.unload-board-canvas-mode!)
+              "Board activity activation failure should clear runtime.board-view")
+      (BoardActivityUnit.unload-board-activity!)
       (set app.active-world-runtime previous-active-world-runtime)
       (set app.active-world-entry previous-active-world-entry)
       (set app.canvas previous-canvas)
       (set app.board previous-board)
       (set app.board-view previous-board-view)
-      (set app.canvas-mode-registry previous-registry)
-      (set app.canvas-modes-changed previous-modes-changed)
+      (set app.activity-registry previous-registry)
+      (set app.activities-changed previous-activities-changed)
+      (fixture:drop)
       true)))
 
-(table.insert tests {:name "Board canvas mode drops view on restore failure"
-                     :fn board-canvas-mode-drops-view-on-restore-failure})
+(table.insert tests {:name "Board activity drops view on restore failure"
+                     :fn board-activity-drops-view-on-restore-failure})
 
-(fn board-canvas-mode-owns-board-view-lifecycle []
+(fn board-activity-owns-board-view-lifecycle []
   (with-temp-dir
     (fn [dir]
       (local previous-active-world-runtime app.active-world-runtime)
@@ -1155,41 +1160,54 @@
       (local previous-canvas app.canvas)
       (local previous-board app.board)
       (local previous-board-view app.board-view)
-      (local previous-registry app.canvas-mode-registry)
-      (local previous-modes-changed app.canvas-modes-changed)
-      (set app.canvas-mode-registry nil)
-      (set app.canvas-modes-changed nil)
-      (local root (LayoutRoot))
-      (local ctx (BuildContext {:layout-root root}))
-      (local canvas {:layout-root root
-                     :build-context ctx})
+      (local previous-registry app.activity-registry)
+      (local previous-activities-changed app.activities-changed)
+      (set app.activity-registry nil)
+      (set app.activities-changed nil)
+      (local fixture (make-activity-canvas))
+      (local canvas fixture.canvas)
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime {:canvas canvas
-                                     :board-state {:items [] :connectors []}})
+                                      :board-state {:items [] :connectors []}})
       (set app.canvas canvas)
-      (BoardModeUnit.load-board-canvas-mode!)
-      (CanvasModes.activate-mode "board")
-      (assert app.board-view "Board mode activation should create app.board-view")
+      (BoardActivityUnit.load-board-activity!)
+      (Activities.activate-activity "board")
+      (local slot (canvas:activity-slot "board"))
+      (assert slot "Board activity should create a board canvas slot")
+      (assert (= canvas.active-activity-slot slot)
+              "Board activity should activate its canvas slot")
+      (assert (= slot.pointer-target.canvas-target-kind :board)
+              "Board activity slot should expose board target kind")
+      (assert app.board-view "Board activity activation should create app.board-view")
       (assert app.active-world-runtime.board-view
-              "Board mode activation should bind runtime.board-view")
-      (CanvasModes.deactivate-active-mode)
-      (assert (not app.board-view) "Board mode deactivation should clear app.board-view")
-      (assert (not app.active-world-runtime.board-view)
-              "Board mode deactivation should clear runtime.board-view")
-      (BoardModeUnit.unload-board-canvas-mode!)
+              "Board activity activation should bind runtime.board-view")
+      (assert (= app.board-view.ctx slot.ctx)
+              "Board view should be built with the board slot context")
+      (assert (= app.board-view.ctx.pointer-target slot.pointer-target)
+              "Board view context should route interactions through the board slot pointer target")
+      (assert (= (canvas:get-triangle-vector) slot.ctx.triangle-vector)
+              "Active board slot draw data should be exposed by the canvas")
+      (Activities.deactivate-active-activity)
+      (assert (not slot.visible?)
+              "Board activity deactivation should hide the board slot")
+      (assert (not app.board-view) "Board activity deactivation should clear app.board-view")
+      (assert app.active-world-runtime.board-view
+              "Board activity deactivation should retain runtime.board-view")
+      (BoardActivityUnit.unload-board-activity!)
       (set app.active-world-runtime previous-active-world-runtime)
       (set app.active-world-entry previous-active-world-entry)
       (set app.canvas previous-canvas)
       (set app.board previous-board)
       (set app.board-view previous-board-view)
-      (set app.canvas-mode-registry previous-registry)
-      (set app.canvas-modes-changed previous-modes-changed)
+      (set app.activity-registry previous-registry)
+      (set app.activities-changed previous-activities-changed)
+      (fixture:drop)
       true)))
 
-(table.insert tests {:name "Board canvas mode owns board view lifecycle"
-                     :fn board-canvas-mode-owns-board-view-lifecycle})
+(table.insert tests {:name "Board activity owns board view lifecycle"
+                     :fn board-activity-owns-board-view-lifecycle})
 
-(fn board-canvas-mode-restore-active-mode-uses-snapshot-state []
+(fn board-activity-restore-active-activity-uses-snapshot-state []
   (with-temp-dir
     (fn [dir]
       (local previous-active-world-runtime app.active-world-runtime)
@@ -1197,43 +1215,39 @@
       (local previous-canvas app.canvas)
       (local previous-board app.board)
       (local previous-board-view app.board-view)
-      (local previous-registry app.canvas-mode-registry)
-      (local previous-modes-changed app.canvas-modes-changed)
-      (set app.canvas-mode-registry nil)
-      (set app.canvas-modes-changed nil)
-      (local root (LayoutRoot))
-      (local ctx (BuildContext {:layout-root root
-                                :clickables app.clickables
-                                :hoverables app.hoverables
-                                :system-cursors app.system-cursors}))
-      (local canvas {:layout-root root
-                     :build-context ctx})
+      (local previous-registry app.activity-registry)
+      (local previous-activities-changed app.activities-changed)
+      (set app.activity-registry nil)
+      (set app.activities-changed nil)
+      (local fixture (make-activity-canvas))
+      (local canvas fixture.canvas)
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime {:canvas canvas
-                                     :board-state {:items [] :connectors []}})
+                                      :board-state {:items [] :connectors []}})
       (set app.canvas canvas)
-      (BoardModeUnit.load-board-canvas-mode!)
-      (CanvasModes.activate-mode "board")
+      (BoardActivityUnit.load-board-activity!)
+      (Activities.activate-activity "board")
       (app.board-view:add-string-entity {})
-      (local snapshot (CanvasModes.snapshot-active-mode))
+      (local snapshot (Activities.snapshot-active-activity))
       (app.board-view:add-string-entity {})
       (assert (= (length app.board.items-in-order) 2)
               "test setup should have two live board items before restore")
-      (CanvasModes.restore-active-mode snapshot)
+      (Activities.restore-active-activity snapshot)
       (assert (= (length app.board.items-in-order) 1)
-              "CanvasModes.restore-active-mode should pass snapshot state to board mode restore")
-      (BoardModeUnit.unload-board-canvas-mode!)
+              "Activities.restore-active-activity should pass snapshot state to board activity restore")
+      (BoardActivityUnit.unload-board-activity!)
       (set app.active-world-runtime previous-active-world-runtime)
       (set app.active-world-entry previous-active-world-entry)
       (set app.canvas previous-canvas)
       (set app.board previous-board)
       (set app.board-view previous-board-view)
-      (set app.canvas-mode-registry previous-registry)
-      (set app.canvas-modes-changed previous-modes-changed)
+      (set app.activity-registry previous-registry)
+      (set app.activities-changed previous-activities-changed)
+      (fixture:drop)
       true)))
 
-(table.insert tests {:name "Board canvas mode restore-active-mode uses snapshot state"
-                     :fn board-canvas-mode-restore-active-mode-uses-snapshot-state})
+(table.insert tests {:name "Board activity restore-active-activity uses snapshot state"
+                     :fn board-activity-restore-active-activity-uses-snapshot-state})
 
 (fn board-view-hydration-retargets-stale-connectors []
   (with-temp-dir
@@ -1443,31 +1457,36 @@
 (table.insert tests {:name "board restore-state reconciles stale semantic connectors on live view"
                      :fn board-restore-state-reconciles-stale-semantic-connectors-on-live-view})
 
-(fn with-board-mode-runtime [body opts]
+(fn with-board-activity-runtime [body opts]
   (local options (or opts {}))
   (local previous-surface app.active-interaction-surface)
-  (local previous-mode app.active-canvas-mode)
-  (local previous-registry app.canvas-mode-registry)
-  (local previous-modes-changed app.canvas-modes-changed)
-  (local previous-root app.canvas-mode-root-actions)
-  (local previous-selection app.canvas-mode-selection-actions)
-  (local previous-enricher app.canvas-mode-context-enricher)
-  (local previous-target-enabled app.canvas-mode-target-enabled?)
-  (local previous-mode-update app.canvas-mode-update)
+  (local previous-preferred-surface app.preferred-interaction-surface)
+  (local previous-active-pointer-controls app.active-pointer-controls)
+  (local previous-scene-interactive? app.scene-interactive?)
+  (local previous-canvas-interactive? app.canvas-interactive?)
+  (local previous-canvas-surface-interactive? app.canvas-surface-interactive?)
+  (local previous-canvas-visible? app.canvas-visible?)
+  (local previous-canvas-controls app.canvas-controls)
+  (local previous-first-person-controls app.first-person-controls)
+  (local previous-activity app.active-activity-id)
+  (local previous-registry app.activity-registry)
+  (local previous-activities-changed app.activities-changed)
+  (local previous-root app.activity-root-actions)
+  (local previous-selection app.activity-selection-actions)
+  (local previous-enricher app.activity-context-enricher)
+  (local previous-target-enabled app.activity-target-enabled?)
+  (local previous-activity-update app.activity-update)
   (local previous-canvas app.canvas)
   (local previous-active-world-runtime app.active-world-runtime)
   (local previous-active-world-entry app.active-world-entry)
   (local previous-board app.board)
   (local previous-board-view app.board-view)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
-  (local root (LayoutRoot))
-  (local ctx (BuildContext {:layout-root root
-                            :clickables app.clickables
-                            :hoverables app.hoverables
-                            :system-cursors app.system-cursors}))
-  (local canvas {:layout-root root
-                 :build-context ctx})
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (local fixture (make-activity-canvas))
+  (local canvas fixture.canvas)
+  (local ctx fixture.ctx)
+  (local root fixture.root)
   (set app.canvas canvas)
   (set app.active-interaction-surface :canvas)
   (local runtime {:canvas canvas
@@ -1483,30 +1502,39 @@
                                      :label "Test"
                                      :builder dummy-widget}
                                     owner)
-  (BoardModeUnit.load-board-canvas-mode!)
-  (CanvasModes.activate-mode "board")
+  (BoardActivityUnit.load-board-activity!)
+  (Activities.activate-activity "board")
   (local (ok err)
     (pcall (fn []
              (body {:board-view app.board-view
                     :canvas canvas
                     :ctx ctx
                     :root root}))))
-  (BoardModeUnit.unload-board-canvas-mode!)
+  (BoardActivityUnit.unload-board-activity!)
   (set app.active-interaction-surface previous-surface)
-  (set app.active-canvas-mode previous-mode)
-  (set app.canvas-mode-registry previous-registry)
-  (set app.canvas-modes-changed previous-modes-changed)
-  (set app.canvas-mode-root-actions previous-root)
-  (set app.canvas-mode-selection-actions previous-selection)
-  (set app.canvas-mode-context-enricher previous-enricher)
-  (set app.canvas-mode-target-enabled? previous-target-enabled)
-  (set app.canvas-mode-update previous-mode-update)
+  (set app.preferred-interaction-surface previous-preferred-surface)
+  (set app.active-pointer-controls previous-active-pointer-controls)
+  (set app.scene-interactive? previous-scene-interactive?)
+  (set app.canvas-interactive? previous-canvas-interactive?)
+  (set app.canvas-surface-interactive? previous-canvas-surface-interactive?)
+  (set app.canvas-visible? previous-canvas-visible?)
+  (set app.canvas-controls previous-canvas-controls)
+  (set app.first-person-controls previous-first-person-controls)
+  (set app.active-activity-id previous-activity)
+  (set app.activity-registry previous-registry)
+  (set app.activities-changed previous-activities-changed)
+  (set app.activity-root-actions previous-root)
+  (set app.activity-selection-actions previous-selection)
+  (set app.activity-context-enricher previous-enricher)
+  (set app.activity-target-enabled? previous-target-enabled)
+  (set app.activity-update previous-activity-update)
   (set app.canvas previous-canvas)
   (set app.active-world-runtime previous-active-world-runtime)
   (set app.board previous-board)
   (set app.board-view previous-board-view)
   (set app.active-world-entry previous-active-world-entry)
   (BoardRegistry.unregister-owner owner)
+  (fixture:drop)
   (when (not ok)
     (error err))
   true)
@@ -1834,10 +1862,10 @@
   (BoardRegistry.unregister-owner owner)
   true)
 
-(fn board-selection-action-through-canvas-mode-hooks []
+(fn board-selection-action-through-activity-hooks []
   (with-temp-dir
     (fn [dir]
-      (with-board-mode-runtime
+      (with-board-activity-runtime
         (fn [env]
           (local item-a (env.board-view:add-item {:type "test-item"
                                                    :subject-key "sk:a"
@@ -1846,11 +1874,11 @@
                                                    :subject-key "sk:b"
                                                    :position (glm.vec3 10 0 0)}))
           (set app.board-view.selected-items [item-a item-b])
-          (local actions (app.canvas-mode-selection-actions
+          (local actions (app.activity-selection-actions
                            {:surface :canvas
-                            :canvas-mode "board"}))
+                            :activity "board"}))
           (assert (= (length actions) 2)
-                  "canvas-mode-selection-actions should return Delete Selected + Connect Items for two items")
+                  "activity-selection-actions should return Delete Selected + Connect Items for two items")
           (assert (= (. actions 1 :name) "Delete Selected")
                   "first selection action should be Delete Selected")
           (assert (= (. actions 2 :name) "Connect Items")
@@ -1870,7 +1898,7 @@
 (fn board-selection-action-shows-connect-even-when-already-connected []
   (with-temp-dir
     (fn [dir]
-      (with-board-mode-runtime
+      (with-board-activity-runtime
         (fn [env]
           (local item-a (env.board-view:add-item {:type "test-item"
                                                    :subject-key "sk:a"
@@ -1882,9 +1910,9 @@
           (assert (= (length app.board.connectors-in-order) 1)
                   "First connect should create one connector")
           (set app.board-view.selected-items [item-a item-b])
-          (local actions (app.canvas-mode-selection-actions
+          (local actions (app.activity-selection-actions
                            {:surface :canvas
-                            :canvas-mode "board"}))
+                            :activity "board"}))
           (assert (= (length actions) 2)
                   "selection actions should include Delete Selected + Connect Items for two items")
           (assert (= (. actions 2 :name) "Connect Items")
@@ -1895,11 +1923,11 @@
         {:dir dir}))))
 
 (fn board-selection-action-enriches-context-with-selected-items []
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local context {})
-      (when app.canvas-mode-context-enricher
-        (app.canvas-mode-context-enricher context))
+      (when app.activity-context-enricher
+        (app.activity-context-enricher context))
       (assert context.board "Board context enricher should set context.board")
       (assert (= (length context.board.selected-items) 0)
               "Board context should initialize selected-items to empty list")
@@ -1910,7 +1938,7 @@
   (with-temp-dir
     (fn [dir]
       (local selector (mock-selector))
-      (with-board-mode-runtime
+      (with-board-activity-runtime
         (fn [env]
           (local item-a (env.board-view:add-item {:type "test-item"
                                                    :subject-key "sk:a"
@@ -1925,9 +1953,9 @@
           (selector.changed:emit selector.selectables)
           (assert (= (length app.board-view.selected-items) 2)
                   "BoardView should track selected items after selector.changed emit")
-          (local actions (app.canvas-mode-selection-actions
+          (local actions (app.activity-selection-actions
                            {:surface :canvas
-                            :canvas-mode "board"}))
+                            :activity "board"}))
           (assert (= (length actions) 2)
                   "selection actions should include Delete Selected + Connect Items for two items")
           (assert (= (. actions 2 :name) "Connect Items"))
@@ -1939,7 +1967,7 @@
 (fn board-view-remove-item-deletes-string-entity []
   (local owner {})
   (var entity-id nil)
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item (env.board-view:add-string-entity {:value "hello"}))
       (set entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
@@ -1957,7 +1985,7 @@
 (fn board-view-remove-item-rolls-back-entity-on-board-failure []
   (var entity-id nil)
   (var original-value nil)
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item (env.board-view:add-string-entity {:value "keep-me"}))
       (set entity-id (BuiltinStringEntity.entity-id-from-subject item.subject-key))
@@ -1985,7 +2013,7 @@
   true)
 
 (fn board-view-remove-selected-items-removes-all-selected []
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item-a (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
       (local item-b (env.board-view:add-item {:type "test-item" :subject-key "sk:b"}))
@@ -1999,24 +2027,24 @@
     {}))
 
 (fn board-delete-selection-hook-removes-selected-items []
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
       (set app.board-view.selected-items [item])
       (assert (= (length app.board.items-in-order) 1))
-      (assert app.canvas-mode-delete-selection "delete-selection hook should be registered")
-      (local result (app.canvas-mode-delete-selection))
+      (assert app.activity-delete-selection "delete-selection hook should be registered")
+      (local result (app.activity-delete-selection))
       (assert result "delete-selection should return truthy when items were removed")
       (assert (= (length app.board.items-in-order) 0) "Selected items should be removed"))
     {}))
 
 (fn board-selection-action-shows-delete-when-items-selected []
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
       (set app.board-view.selected-items [item])
-      (local actions (app.canvas-mode-selection-actions
-                       {:surface :canvas :canvas-mode "board"}))
+      (local actions (app.activity-selection-actions
+                       {:surface :canvas :activity "board"}))
       (assert (= (length actions) 1) "Should have one action for one selected item")
       (assert (= (. actions 1 :name) "Delete Selected") "Action should be Delete Selected")
       (assert (= (length app.board.items-in-order) 1))
@@ -2025,13 +2053,13 @@
     {}))
 
 (fn board-selection-action-shows-delete-and-connect-for-two-items []
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item-a (env.board-view:add-item {:type "test-item" :subject-key "sk:a"}))
       (local item-b (env.board-view:add-item {:type "test-item" :subject-key "sk:b"}))
       (set app.board-view.selected-items [item-a item-b])
-      (local actions (app.canvas-mode-selection-actions
-                       {:surface :canvas :canvas-mode "board"}))
+      (local actions (app.activity-selection-actions
+                       {:surface :canvas :activity "board"}))
       (assert (= (length actions) 2) "Should have Delete Selected and Connect Items for two items")
       (assert (= (. actions 1 :name) "Delete Selected") "First action should be Delete Selected")
       (assert (= (. actions 2 :name) "Connect Items") "Second action should be Connect Items"))
@@ -2044,12 +2072,12 @@
                                       :label "NoSubject"
                                       :builder dummy-widget}
                                      owner)
-  (with-board-mode-runtime
+  (with-board-activity-runtime
     (fn [env]
       (local item (env.board-view:add-item {:type "no-subject-item"}))
       (set app.board-view.selected-items [item])
-      (local actions (app.canvas-mode-selection-actions
-                       {:surface :canvas :canvas-mode "board"}))
+      (local actions (app.activity-selection-actions
+                       {:surface :canvas :activity "board"}))
       (assert (= (length actions) 1) "Should have Delete Selected for item without subject-key")
       (assert (= (. actions 1 :name) "Delete Selected") "Action should be Delete Selected")
       ((. actions 1 :fn) nil nil)
@@ -2073,8 +2101,8 @@
                      :fn board-view-connects-items-preserves-direction})
 (table.insert tests {:name "BoardView connector renders triangle line from source to target"
                      :fn board-view-connector-renders-triangle-line-from-source-to-target})
-(table.insert tests {:name "Board selection action through canvas mode hooks"
-                     :fn board-selection-action-through-canvas-mode-hooks})
+(table.insert tests {:name "Board selection action through activity hooks"
+                     :fn board-selection-action-through-activity-hooks})
 (table.insert tests {:name "Board selection action always shows connect (idempotent)"
                      :fn board-selection-action-shows-connect-even-when-already-connected})
 (table.insert tests {:name "Board context enricher sets selected-items"

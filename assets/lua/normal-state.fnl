@@ -29,7 +29,7 @@
                       :allow-touch-during-hover? true}}))
 
   (fn touch-allowed? [payload]
-    (if (= app.canvas-mode-drawing-enabled? true)
+    (if (= app.activity-drawing-enabled? true)
         (PenHandlers:touch-allowed? payload)
         true))
 
@@ -45,7 +45,7 @@
       {:active? (fn []
                   (and app.drawing-controller
                        (= app.canvas-interactive? true)
-                       (= app.canvas-mode-drawing-enabled? true)
+                       (= app.activity-drawing-enabled? true)
                        app.drawing-controller.active-layer
                        (app.drawing-controller:active-layer)))
        :get-tool (fn []
@@ -64,13 +64,15 @@
         false))
 
   (fn remove-selected-nodes []
-    (if app.canvas-mode-delete-selection
-        (app.canvas-mode-delete-selection)
+    (if (and (= app.canvas-interactive? true)
+             app.activity-delete-selection)
+        (app.activity-delete-selection)
         false))
 
   (fn maybe-open-focused-graph-node []
-    (if app.canvas-mode-activate-focused
-        (app.canvas-mode-activate-focused)
+    (if (and (= app.canvas-interactive? true)
+             app.activity-activate-focused)
+        (app.activity-activate-focused)
         false))
 
   (fn open-fennel-interpreter []
@@ -80,11 +82,11 @@
     (launchable.open-panel {:scene app.scene})
     true)
 
-  (fn dispatch-mode-input [event-name ctx payload]
+  (fn dispatch-activity-input [event-name ctx payload]
     (local handlers
       (normalize-handlers
-        (and app.canvas-mode-input-handlers
-             (. app.canvas-mode-input-handlers event-name))))
+        (and app.activity-input-handlers
+             (. app.activity-input-handlers event-name))))
     (var handled false)
     (each [_ handler (ipairs (or handlers []))]
       (local event-handler (resolve-handler handler event-name))
@@ -93,24 +95,24 @@
         (set handled true)))
     handled)
 
-  (local CanvasModeInput
+  (local ActivityInput
     {:key-down (fn [ctx payload]
-                 (dispatch-mode-input :key-down ctx payload))
+                 (dispatch-activity-input :key-down ctx payload))
      :key-up (fn [ctx payload]
-               (dispatch-mode-input :key-up ctx payload))
+               (dispatch-activity-input :key-up ctx payload))
      :mouse-button-down (fn [ctx payload]
-                          (dispatch-mode-input :mouse-button-down ctx payload))
+                          (dispatch-activity-input :mouse-button-down ctx payload))
      :mouse-button-up (fn [ctx payload]
-                        (dispatch-mode-input :mouse-button-up ctx payload))
+                        (dispatch-activity-input :mouse-button-up ctx payload))
      :mouse-motion (fn [ctx payload]
-                     (dispatch-mode-input :mouse-motion ctx payload))})
+                     (dispatch-activity-input :mouse-motion ctx payload))})
 
   (fn normal-command-sections [payload]
     (local entries [(entry "space" "leader" {:priority 10})])
     (local focus-manager (and payload payload.focus-manager))
     (local active-input (and payload payload.active-input))
     (when (or (and focus-manager focus-manager.activate-focused-from-payload)
-              app.canvas-mode-activate-focused)
+              app.activity-activate-focused)
       (table.insert entries (entry "enter" "activate" {:priority 20})))
     (when focus-manager
       (table.insert entries (entry "tab" "focus-next" {:priority 30 :show-collapsed? false}))
@@ -123,7 +125,7 @@
     (table.insert entries (entry "f4" f4-label {:priority 40}))
     (table.insert entries (entry "`" "fennel-repl" {:priority 50}))
     (local sections [(section :mode "MODE" entries)])
-    (local provider app.canvas-mode-command-hints-provider)
+    (local provider app.activity-command-hints-provider)
     (when provider
       (each [_ extra-section (ipairs (or (provider payload) []))]
         (table.insert sections extra-section)))
@@ -200,25 +202,25 @@
                 :text-input (Routes.FirstHandlerWins [TextInputHandlers.TextInputDispatch])
                 :text-editing (Routes.FirstHandlerWins [TextInputHandlers.TextEditingDispatch])
                 :key-down (Routes.FirstHandlerWins [FocusHandlers.InputKeyDownDispatch
-                                                   CanvasModeInput
+                                                   ActivityInput
                                                    NormalCommands
                                                    FocusHandlers.FocusTabKeyDown
                                                    FocusHandlers.FocusDirectionKeyDown
                                                    FocusHandlers.ActiveInputKeyBlock])
                 :key-up (Routes.FirstHandlerWins [FocusHandlers.InputKeyUpDispatch
-                                                 CanvasModeInput
+                                                 ActivityInput
                                                  FocusHandlers.ActiveInputKeyBlock])
                 :mouse-button-down (Routes.Chain [PointerHandlers.InputMouseButtonDownDispatch
                                                   PointerHandlers.ResizableMouseButtonDown
                                                   PointerHandlers.ClickableMouseButtonDown
-                                                  CanvasModeInput
+                                                  ActivityInput
                                                   PointerHandlers.MovableMouseButtonDown
                                                   PointerHandlers.SelectionMouseButtonDown
                                                   PointerHandlers.CameraMouseButtonDown])
                 :mouse-button-up (Routes.Chain [PointerHandlers.InputMouseButtonUpDispatch
                                                 PointerHandlers.ResizableMouseButtonUp
                                                 PointerHandlers.ClickableMouseButtonUp
-                                                CanvasModeInput
+                                                ActivityInput
                                                 PointerHandlers.MovableMouseButtonUp
                                                 PointerHandlers.SelectionMouseButtonUp
                                                 PointerHandlers.CameraMouseButtonUp
@@ -226,7 +228,7 @@
                 :mouse-motion (Routes.Chain [PointerHandlers.InputMouseMotionDispatch
                                              PointerHandlers.MovableMouseMotion
                                              PointerHandlers.ResizableMouseMotion
-                                             CanvasModeInput
+                                             ActivityInput
                                              PointerHandlers.CameraDragMouseMotion
                                              PointerHandlers.SelectionMouseMotion
                                              PointerHandlers.CameraMouseMotion

@@ -5,6 +5,15 @@
 (local SDL_BUTTON_LEFT 1)
 (local SDL_BUTTON_RIGHT 3)
 
+(fn pointer-target-enabled? [target]
+  (if (and target app app.pointer-target-enabled?)
+      (app.pointer-target-enabled? target)
+      true))
+
+(fn selector-pointer-target-enabled? [selector]
+  (local target (and selector selector.pointer-target (selector:pointer-target)))
+  (pointer-target-enabled? target))
+
 (fn trace-pointer [event payload]
   (logging.debug {:event event
                   :button (and payload payload.button)
@@ -60,12 +69,13 @@
 (local SelectionMouseButtonDown
   {:mouse-button-down
    (fn [ctx payload]
-     (local selector ((. Common :selector-from) ctx))
-     (when (and (not ((. ctx :event-consumed?)))
-                selector
-                (not ((. Common :pointer-blocked?)))
-                (= payload.button SDL_BUTTON_LEFT))
-       (selector:on-mouse-button payload)
+      (local selector ((. Common :selector-from) ctx))
+      (when (and (not ((. ctx :event-consumed?)))
+                 selector
+                 (selector-pointer-target-enabled? selector)
+                 (not ((. Common :pointer-blocked?)))
+                 (= payload.button SDL_BUTTON_LEFT))
+        (selector:on-mouse-button payload)
        ((. ctx :mark-event-consumed!))))})
 
 (local CameraMouseButtonDown
@@ -120,13 +130,17 @@
 (local SelectionMouseButtonUp
   {:mouse-button-up
    (fn [ctx payload]
-     (local selector ((. Common :selector-from) ctx))
-     (when (and (not ((. ctx :event-consumed?)))
-                selector
-                (not ((. Common :pointer-blocked?)))
-                (= payload.button SDL_BUTTON_LEFT))
-       (selector:on-mouse-button payload)
-       ((. ctx :mark-event-consumed!))))})
+      (local selector ((. Common :selector-from) ctx))
+      (when (and (not ((. ctx :event-consumed?)))
+                 selector
+                 (= payload.button SDL_BUTTON_LEFT))
+        (if (and (selector-pointer-target-enabled? selector)
+                 (not ((. Common :pointer-blocked?))))
+            (do
+              (selector:on-mouse-button payload)
+              ((. ctx :mark-event-consumed!)))
+            (when (and (Runtime.selection-active?) selector.cancel-selection)
+              (selector:cancel-selection)))))})
 
 (local CameraMouseButtonUp
   {:mouse-button-up
@@ -177,11 +191,15 @@
 (local SelectionMouseMotion
   {:mouse-motion
    (fn [ctx payload]
-     (local selector ((. Common :selector-from) ctx))
-     (local active? (and selector (Runtime.selection-active?)))
-     (when (and (not ((. ctx :event-consumed?))) active?)
-       (selector:on-mouse-motion payload)
-       ((. ctx :mark-event-consumed!))))})
+      (local selector ((. Common :selector-from) ctx))
+      (local active? (and selector (Runtime.selection-active?)))
+      (when (and (not ((. ctx :event-consumed?))) active?)
+        (if (selector-pointer-target-enabled? selector)
+            (do
+              (selector:on-mouse-motion payload)
+              ((. ctx :mark-event-consumed!)))
+            (when selector.cancel-selection
+              (selector:cancel-selection)))))})
 
 (local CameraMouseMotion
   {:mouse-motion

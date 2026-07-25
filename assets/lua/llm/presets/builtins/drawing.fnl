@@ -286,7 +286,7 @@
      :group "drawing"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.inspect" "drawing.set-tool" "drawing.insert-shape" "drawing.insert-line" "drawing.insert-stroke"]
      :system-prompt (.. "The user is editing vector drawing content. Use drawing tools for shape and stroke operations. "
                         canvas-coordinate-contract)})
@@ -296,7 +296,7 @@
      :group "drawing"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.add-layer" "drawing.duplicate-layer" "drawing.rename-layer" "drawing.set-active-layer"]
      :system-prompt "Use drawing layer tools to manage layer organization."})
 
@@ -305,7 +305,7 @@
      :group "drawing"
      :default-state :auto
      :risk :destructive
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.delete-layer"]})
 
   (mgr:register
@@ -313,7 +313,7 @@
      :group "drawing"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.set-defaults" "drawing.update-selection-style" "drawing.sample-color"]})
 
   (mgr:register
@@ -321,7 +321,7 @@
      :group "drawing"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.undo" "drawing.redo"]})
 
   (mgr:register
@@ -329,7 +329,7 @@
      :group "drawing"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.select" "drawing.transform-selection" "drawing.clear-selection"]})
 
   (mgr:register
@@ -337,7 +337,7 @@
      :group "drawing"
      :default-state :auto
      :risk :destructive
-     :contexts [{:surface :canvas :mode "drawing"}]
+     :contexts [{:surface :canvas :activity "drawing"}]
      :tool-ids ["drawing.delete-selected"]}))
 
 (fn register-drawing-adapters [adapters]

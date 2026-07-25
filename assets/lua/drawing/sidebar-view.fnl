@@ -90,7 +90,7 @@
     (var pending-rebuild? true)
     (var sidebar-state-token nil)
     (var changed-handler nil)
-    (var shell-changed-handler nil)
+    (var workspace-shell-changed-handler nil)
     (var rename-layer-id nil)
     (var rename-layer-name nil)
     (var rename-buffer "")
@@ -618,9 +618,9 @@
              (when (controller-change-rebuild? _payload)
                (request-rebuild!)))))
 
-    (when app.canvas-shell-changed
-      (set shell-changed-handler
-           (app.canvas-shell-changed:connect
+    (when app.workspace-shell-changed
+      (set workspace-shell-changed-handler
+           (app.workspace-shell-changed:connect
              (fn [_payload]
                (request-rebuild!)))))
 
@@ -638,9 +638,9 @@
              (when changed-handler
                (controller.changed:disconnect changed-handler true)
                (set changed-handler nil))
-             (when shell-changed-handler
-               (app.canvas-shell-changed:disconnect shell-changed-handler true)
-               (set shell-changed-handler nil))
+             (when workspace-shell-changed-handler
+                (app.workspace-shell-changed:disconnect workspace-shell-changed-handler true)
+               (set workspace-shell-changed-handler nil))
              (drop-content!)
              (root-layout:drop))})
 

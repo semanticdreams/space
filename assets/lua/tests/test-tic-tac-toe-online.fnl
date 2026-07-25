@@ -134,7 +134,7 @@
       :scene scene
       :layout-root layout-root
       :canvas-visible? false
-      :active-canvas-mode nil
+      :active-activity-id nil
       :active-interaction-surface nil
       :clickables {:register (fn [_] true) :unregister (fn [_] true)
                   :register-left-click-void-callback (fn [_ _cb] true)
@@ -148,7 +148,7 @@
      :movables {:register (fn [_] true) :unregister (fn [_] true)}
      :resizables {:register (fn [_] true) :unregister (fn [_] true)}
       :focus {:clear-focus (fn [_] true)}
-       :canvas-shell-changed (Signal)
+       :workspace-shell-changed (Signal)
        :test-app true})
    (set mock-app.set-canvas-visible
         (fn [visible?]
@@ -156,11 +156,11 @@
                   "set-canvas-visible expects boolean, not table (use dot-call)")
           (set mock-app.canvas-visible? (not (= visible? false)))
           true))
-   (set mock-app.set-active-canvas-mode
+   (set mock-app.set-active-activity
         (fn [mode-id]
           (assert (or (= mode-id nil) (= (type mode-id) :string))
-                  "set-active-canvas-mode expects string mode-id (use dot-call)")
-          (set mock-app.active-canvas-mode mode-id)
+                  "set-active-activity expects string mode-id (use dot-call)")
+          (set mock-app.active-activity-id mode-id)
           true))
    (set mock-app.set-active-interaction-surface
         (fn [surface opts]
@@ -647,19 +647,19 @@
             (local before-children (# app.scene.children))
             (local before-state (app.states:active-name))
             (local before-canvas-visible app.canvas-visible?)
-            (local before-canvas-mode app.active-canvas-mode)
+            (local before-activity-id app.active-activity-id)
             (local before-interaction-surface app.active-interaction-surface)
             (local (run-ok run-err) (pcall #(launchable.run)))
             (assert run-ok (.. "launchable run failed in mock app: " (tostring run-err)))
             (local after-children (# app.scene.children))
             (local after-state (app.states:active-name))
             (local after-canvas-visible app.canvas-visible?)
-            (local after-canvas-mode app.active-canvas-mode)
+            (local after-activity-id app.active-activity-id)
             (local after-interaction-surface app.active-interaction-surface)
             (assert (or (> after-children before-children)
                         (not= after-state before-state)
                         (not= after-canvas-visible before-canvas-visible)
-                        (not= after-canvas-mode before-canvas-mode)
+                        (not= after-activity-id before-activity-id)
                          (not= after-interaction-surface before-interaction-surface))
                      "launchable run should produce an observable app effect")
             (print "  [verify] launchable run: OK")

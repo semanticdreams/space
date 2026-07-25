@@ -6,10 +6,10 @@
 (local Hoverables (require :hoverables))
 (local MathUtils (require :math-utils))
 (local Signal (require :signal))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local DrawingController (require :drawing/controller))
 (local DrawingSidebarView (require :drawing/sidebar-view))
-(local CanvasModeDockView (require :canvas-mode-dock-view))
+(local ActivityDockView (require :activity-dock-view))
 (local Themes (require :themes))
 (local DarkTheme (require :dark-theme))
 (local LightTheme (require :light-theme))
@@ -43,24 +43,24 @@
       (controller:add-layer "vector")
       (f controller dir))))
 
-(fn ensure-built-in-canvas-modes! []
-  (local registry (CanvasModes.ensure-registry))
-  (when (not (. registry.modes "graph"))
-    (CanvasModes.register-mode
+(fn ensure-built-in-activities! []
+  (local registry (Activities.ensure-registry))
+  (when (not (. registry.activities "graph"))
+    (Activities.register-activity
       {:id "graph"
        :label "Graph"
        :icon "account_tree"
-       :button-name "graph-canvas-mode"
-       :show-in-sidebar? true
-       :activate (fn [_ctx] {:mode-id "graph"})
+       :button-name "graph-activity"
+       :show-in-switcher? true
+       :activate (fn [_ctx] {:activity-id "graph"})
        :deactivate (fn [_ctx _session] true)}))
-  (when (not (. registry.modes "drawing"))
-    (CanvasModes.register-mode
+  (when (not (. registry.activities "drawing"))
+    (Activities.register-activity
       {:id "drawing"
        :label "Draw"
        :icon "draw"
-       :button-name "drawing-canvas-mode"
-       :show-in-sidebar? true
+       :button-name "drawing-activity"
+       :show-in-switcher? true
        :activate (fn [ctx]
                    (ctx:set-drawing-enabled! true)
                    (ctx:set-left-dock-builder!
@@ -68,7 +68,7 @@
                        (if app.drawing-controller
                            ((DrawingSidebarView {:controller app.drawing-controller}) build-ctx)
                            nil)))
-                   {:mode-id "drawing"})
+                   {:activity-id "drawing"})
        :deactivate (fn [_ctx _session] true)}))
   true)
 
@@ -168,35 +168,35 @@
                    :canvas-visible? app.canvas-visible?
                    :preferred-interaction-surface app.preferred-interaction-surface
                    :active-interaction-surface app.active-interaction-surface
-                   :active-canvas-mode app.active-canvas-mode
-                   :canvas-mode-activate-focused app.canvas-mode-activate-focused
-                   :canvas-mode-command-hints-provider app.canvas-mode-command-hints-provider
-                   :canvas-mode-context-enricher app.canvas-mode-context-enricher
-                   :canvas-mode-delete-selection app.canvas-mode-delete-selection
-                   :canvas-mode-drawing-enabled? app.canvas-mode-drawing-enabled?
-                   :canvas-mode-input-handlers app.canvas-mode-input-handlers
-                   :canvas-mode-left-dock-builder app.canvas-mode-left-dock-builder
-                   :canvas-mode-registry app.canvas-mode-registry
-                   :canvas-mode-root-actions app.canvas-mode-root-actions
-                   :canvas-mode-selection-actions app.canvas-mode-selection-actions
-                   :canvas-mode-target-enabled? app.canvas-mode-target-enabled?
-                   :canvas-mode-update app.canvas-mode-update
-                   :canvas-modes-changed app.canvas-modes-changed
-                   :canvas-shell-changed app.canvas-shell-changed
-                   :canvas-mode-units app.canvas-mode-units
+                   :active-activity-id app.active-activity-id
+                   :activity-activate-focused app.activity-activate-focused
+                   :activity-command-hints-provider app.activity-command-hints-provider
+                   :activity-context-enricher app.activity-context-enricher
+                   :activity-delete-selection app.activity-delete-selection
+                   :activity-drawing-enabled? app.activity-drawing-enabled?
+                   :activity-input-handlers app.activity-input-handlers
+                   :activity-left-dock-builder app.activity-left-dock-builder
+                   :activity-registry app.activity-registry
+                   :activity-root-actions app.activity-root-actions
+                   :activity-selection-actions app.activity-selection-actions
+                   :activity-target-enabled? app.activity-target-enabled?
+                   :activity-update app.activity-update
+                   :activities-changed app.activities-changed
+                   :workspace-shell-changed app.workspace-shell-changed
+                   :activity-units app.activity-units
                    :themes app.themes})
   (set app.clickables (Clickables))
   (set app.hoverables (Hoverables))
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed (Signal))
-  (set app.canvas-shell-changed (Signal))
+  (set app.activity-registry nil)
+  (set app.activities-changed (Signal))
+  (set app.workspace-shell-changed (Signal))
   (set app.canvas {})
   (set app.canvas-visible? true)
   (set app.preferred-interaction-surface :canvas)
   (set app.active-interaction-surface :canvas)
-  (CanvasModes.clear-mode-runtime-hooks!)
-  (ensure-built-in-canvas-modes!)
-  (CanvasModes.activate-mode "graph")
+  (Activities.clear-activity-runtime-hooks!)
+  (ensure-built-in-activities!)
+  (Activities.activate-activity "graph")
   (local (ok result) (pcall body))
   (when (and app.clickables app.clickables.drop)
     (app.clickables:drop))
@@ -208,17 +208,17 @@
     (error result))
   result)
 
-(fn emit-canvas-shell-changed [reason]
-  (when app.canvas-shell-changed
-    (app.canvas-shell-changed:emit {:reason reason
+(fn emit-workspace-shell-changed [reason]
+  (when app.workspace-shell-changed
+    (app.workspace-shell-changed:emit {:reason reason
                                     :current {:interaction-surface app.active-interaction-surface
-                                              :canvas-mode app.active-canvas-mode
+                                              :activity app.active-activity-id
                                               :canvas-visible? app.canvas-visible?}})))
 
-(fn set-canvas-mode [mode-id]
-  (CanvasModes.activate-mode mode-id)
-  (set app.active-canvas-mode mode-id)
-  (emit-canvas-shell-changed "canvas-mode")
+(fn set-activity-id [mode-id]
+  (Activities.activate-activity mode-id)
+  (set app.active-activity-id mode-id)
+  (emit-workspace-shell-changed "activity")
   mode-id)
 
 (fn set-interaction-surface [surface]
@@ -228,20 +228,20 @@
         (set app.preferred-interaction-surface surface)
         (set app.active-interaction-surface surface)
         (set app.canvas-visible? (= surface :canvas))
-        (emit-canvas-shell-changed "interaction-surface"))))
+        (emit-workspace-shell-changed "interaction-surface"))))
 
-(fn sidebar-width-reflects-active-canvas-mode []
+(fn sidebar-width-reflects-active-activity-id []
   (with-sidebar-env
     (fn []
       (with-controller
         (fn [controller]
           (local original-controller app.drawing-controller)
           (set app.drawing-controller controller)
-          (local dock ((CanvasModeDockView {}) (make-ctx)))
+          (local dock ((ActivityDockView {}) (make-ctx)))
           (dock.layout:measurer)
           (local graph-width (. dock.layout.measure 1))
           (assert (> graph-width 0))
-          (set-canvas-mode "drawing")
+          (set-activity-id "drawing")
           (dock:update)
           (dock.layout:measurer)
           (local drawing-width (. dock.layout.measure 1))
@@ -274,7 +274,7 @@
         (fn [controller]
           (local original-controller app.drawing-controller)
           (set app.drawing-controller controller)
-          (local dock ((CanvasModeDockView {}) (make-ctx)))
+          (local dock ((ActivityDockView {}) (make-ctx)))
           (dock.layout:measurer)
           (set dock.layout.position (glm.vec3 0 0 0))
           (set dock.layout.size dock.layout.measure)
@@ -322,7 +322,7 @@
 (fn sidebar-rename-input-syncs-after-history []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -349,7 +349,7 @@
 (fn sidebar-keeps-fill-toggle-clickable []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -367,7 +367,7 @@
 (fn sidebar-disables-raster-move-without-selection []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-controller
         (fn [controller]
           (controller:add-layer "raster")
@@ -384,7 +384,7 @@
 (fn sidebar-empty-state-shows-create-actions-only []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -406,7 +406,7 @@
 (fn sidebar-ignores-gesture-only-controller-noise []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -427,7 +427,7 @@
 (fn sidebar-ignores-raster-edit-noise-when-visible-state-stays-stable []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-controller
         (fn [controller]
           (controller:add-layer "raster")
@@ -456,7 +456,7 @@
 (fn sidebar-rejects-untrimmed-rename-input []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -480,7 +480,7 @@
 (fn sidebar-enables-save-for-valid-rename-input []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-vector-controller
         (fn [controller]
           (local ctx (make-ctx))
@@ -507,7 +507,7 @@
 (fn sidebar-ignores-selection-count-noise-when-delete-stays-enabled []
   (with-sidebar-env
     (fn []
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (with-vector-controller
         (fn [controller]
           (controller:set-active-tool "rectangle")
@@ -534,16 +534,16 @@
                   "drawing sidebar should not rebuild when selection count changes but Delete stays enabled")
           (sidebar:drop))))))
 
-(fn sidebar-reconciles-on-canvas-mode-changes []
+(fn sidebar-reconciles-on-activity-changes []
   (with-sidebar-env
     (fn []
       (with-controller
         (fn [controller]
           (local original-controller app.drawing-controller)
           (set app.drawing-controller controller)
-          (local sidebar ((CanvasModeDockView {}) (make-ctx)))
+          (local sidebar ((ActivityDockView {}) (make-ctx)))
           (sidebar.layout:measurer)
-          (set-canvas-mode "drawing")
+          (set-activity-id "drawing")
           (local (ok err)
             (pcall
               (fn []
@@ -553,7 +553,7 @@
           (local drawing-content-layout (. sidebar.layout.children 1))
           (local drawing-panel-layout (and drawing-content-layout (. drawing-content-layout.children 2)))
           (assert drawing-panel-layout
-                  "canvas mode dock should rebuild to include the drawing panel after switching modes")
+                  "activity dock should rebuild to include the drawing panel after switching activities")
           (sidebar:drop)
           (set app.drawing-controller original-controller))))))
 
@@ -612,7 +612,7 @@
       (themes.add-theme :dark DarkTheme)
       (themes.add-theme :light LightTheme)
       (set app.themes themes)
-      (set app.active-canvas-mode "drawing")
+      (set app.active-activity-id "drawing")
       (themes.set-theme :dark)
       (with-vector-controller
         (fn [controller]
@@ -637,69 +637,69 @@
                   "drawing sidebar active tool button should use the light theme primary color")
           (light-sidebar:drop))))))
 
-(fn canvas-mode-dock-view-rebuilds-without-stale-layout-children []
+(fn activity-dock-view-rebuilds-without-stale-layout-children []
   (with-sidebar-env
     (fn []
       (with-controller
         (fn [controller]
           (local original-controller app.drawing-controller)
           (set app.drawing-controller controller)
-          (local dock ((CanvasModeDockView {}) (make-ctx)))
+          (local dock ((ActivityDockView {}) (make-ctx)))
           (dock.layout:measurer)
           (assert (= (length dock.layout.children) 1)
-                  "canvas mode dock should start with exactly one root child")
-          (set-canvas-mode "drawing")
+                  "activity dock should start with exactly one root child")
+          (set-activity-id "drawing")
           (dock:update)
           (dock.layout:measurer)
           (assert (= (length dock.layout.children) 1)
-                  "canvas mode dock should replace its root child when switching to drawing")
-          (set-canvas-mode "graph")
+                  "activity dock should replace its root child when switching to drawing")
+          (set-activity-id "graph")
           (dock:update)
           (dock.layout:measurer)
           (assert (= (length dock.layout.children) 1)
-                  "canvas mode dock should not accumulate stale root children when switching back")
+                  "activity dock should not accumulate stale root children when switching back")
           (dock:drop)
           (set app.drawing-controller original-controller))))))
 
-(fn canvas-mode-dock-view-rebuilds-when-modes-register-at-runtime []
+(fn activity-dock-view-rebuilds-when-activities-register-at-runtime []
   (with-sidebar-env
     (fn []
-      (local original-registry app.canvas-mode-registry)
-      (local original-signal app.canvas-modes-changed)
-      (set app.canvas-mode-registry nil)
-      (set app.canvas-modes-changed nil)
-      (CanvasModes.register-mode
+      (local original-registry app.activity-registry)
+      (local original-signal app.activities-changed)
+      (set app.activity-registry nil)
+      (set app.activities-changed nil)
+      (Activities.register-activity
         {:id "graph"
          :label "Graph"
          :icon "account_tree"
-         :button-name "graph-canvas-mode"
-         :show-in-sidebar? true
-         :activate (fn [_ctx] {:mode-id "graph"})
+         :button-name "graph-activity"
+         :show-in-switcher? true
+         :activate (fn [_ctx] {:activity-id "graph"})
          :deactivate (fn [_ctx _session] true)})
-      (CanvasModes.register-mode
+      (Activities.register-activity
         {:id "drawing"
          :label "Draw"
          :icon "draw"
-         :button-name "drawing-canvas-mode"
-         :show-in-sidebar? true
-         :activate (fn [_ctx] {:mode-id "drawing"})
+         :button-name "drawing-activity"
+         :show-in-switcher? true
+         :activate (fn [_ctx] {:activity-id "drawing"})
          :deactivate (fn [_ctx _session] true)})
-      (set app.active-canvas-mode "graph")
-      (set app.active-canvas-mode "graph")
-      (local dock ((CanvasModeDockView {}) (make-ctx)))
+      (set app.active-activity-id "graph")
+      (set app.active-activity-id "graph")
+      (local dock ((ActivityDockView {}) (make-ctx)))
       (dock.layout:measurer)
       (var content-layout (. dock.layout.children 1))
       (var rail-layout (and content-layout (. content-layout.children 1)))
       (var rail-flex-layout (and rail-layout (. rail-layout.children 2)))
       (assert (= (length rail-flex-layout.children) 2)
-              "canvas mode dock should start with two built-in mode buttons")
-      (CanvasModes.register-mode
+              "activity dock should start with two built-in activity buttons")
+      (Activities.register-activity
         {:id "custom-note"
          :label "Custom"
          :icon "draw"
-         :button-name "custom-note-mode"
-         :show-in-sidebar? true
-         :activate (fn [_ctx] {:mode-id "custom-note"})
+         :button-name "custom-note-activity"
+         :show-in-switcher? true
+         :activate (fn [_ctx] {:activity-id "custom-note"})
          :deactivate (fn [_ctx _session] true)})
       (dock:update)
       (dock.layout:measurer)
@@ -707,13 +707,13 @@
       (set rail-layout (and content-layout (. content-layout.children 1)))
       (set rail-flex-layout (and rail-layout (. rail-layout.children 2)))
       (assert (= (length rail-flex-layout.children) 3)
-              "canvas mode dock should rebuild when a new runtime mode is registered")
+              "activity dock should rebuild when a new runtime activity is registered")
       (dock:drop)
-      (set app.canvas-mode-registry original-registry)
-      (set app.canvas-modes-changed original-signal))))
+      (set app.activity-registry original-registry)
+      (set app.activities-changed original-signal))))
 
-(table.insert tests {:name "Drawing sidebar expands in drawing mode"
-                     :fn sidebar-width-reflects-active-canvas-mode})
+(table.insert tests {:name "Drawing sidebar expands in drawing activity"
+                     :fn sidebar-width-reflects-active-activity-id})
 (table.insert tests {:name "Drawing sidebar width follows panel measure"
                      :fn sidebar-width-follows-panel-measure})
 (table.insert tests {:name "Drawing sidebar feature buttons fill rail width"
@@ -736,18 +736,18 @@
                      :fn sidebar-enables-save-for-valid-rename-input})
 (table.insert tests {:name "Drawing sidebar ignores selection count noise when delete stays enabled"
                      :fn sidebar-ignores-selection-count-noise-when-delete-stays-enabled})
-(table.insert tests {:name "Drawing sidebar reconciles on canvas mode changes"
-                     :fn sidebar-reconciles-on-canvas-mode-changes})
+(table.insert tests {:name "Drawing sidebar reconciles on activity changes"
+                     :fn sidebar-reconciles-on-activity-changes})
 (table.insert tests {:name "Drawing sidebar appears when switching to canvas surface"
                      :fn sidebar-appears-when-switching-to-canvas-surface})
 (table.insert tests {:name "Drawing sidebar fills allocated dock height"
                      :fn sidebar-fills-allocated-dock-height})
 (table.insert tests {:name "Drawing sidebar adopts light theme colors"
                      :fn sidebar-adopts-light-theme-colors})
-(table.insert tests {:name "Canvas mode dock view rebuilds without stale layout children"
-                     :fn canvas-mode-dock-view-rebuilds-without-stale-layout-children})
-(table.insert tests {:name "Canvas mode dock view rebuilds when modes register at runtime"
-                     :fn canvas-mode-dock-view-rebuilds-when-modes-register-at-runtime})
+(table.insert tests {:name "Activity dock view rebuilds without stale layout children"
+                     :fn activity-dock-view-rebuilds-without-stale-layout-children})
+(table.insert tests {:name "Activity dock view rebuilds when activities register at runtime"
+                     :fn activity-dock-view-rebuilds-when-activities-register-at-runtime})
 
 (local main
   (fn []

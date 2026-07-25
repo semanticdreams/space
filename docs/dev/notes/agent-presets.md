@@ -58,7 +58,7 @@ Preset definitions are immutable after registration and contain no runtime closu
  :group "drawing"
  :default-state :auto
  :risk :normal
- :contexts [{:surface :canvas :mode "drawing"}]
+ :contexts [{:surface :canvas :activity "drawing"}]
  :tool-ids ["drawing.set-tool"
             "drawing.insert-shape"
             "drawing.insert-line"
@@ -80,27 +80,28 @@ Fields:
 
 ### Context Snapshot
 
-The manager stores a richer context than just surface/mode so tool exposure can follow the actual shell state.
+The manager stores a richer context than just surface/activity so tool exposure can follow the actual shell state.
 
 ```fennel
 {:surface :canvas
- :mode "drawing"
+ :activity "drawing"
  :canvas-visible? true
  :world-id "home"
  :selection-kind :drawing-object}
 ```
 
-Required fields are `:surface`, `:mode`, and `:canvas-visible?`. Other fields are optional facts supplied by app/runtime integrations. Context matchers ignore fields they do not mention.
+Required fields are `:surface` and `:canvas-visible?`. `:activity` is optional and nil when no activity is active. Other fields are optional facts supplied by app/runtime integrations. Context matchers ignore fields they do not mention.
 
 ### Context Matching
 
 A context pattern matches when every field in the pattern matches the current context.
 
 ```fennel
-{:surface :canvas :mode "drawing"}  ;; drawing mode only
+{:surface :canvas :activity "drawing"}  ;; drawing activity only
 {:surface :scene}                   ;; any scene context
 {:surface :any}                     ;; all surfaces
-{:mode :any}                        ;; any canvas mode
+{:activity :any}                    ;; any activity
+{:activity :none}                   ;; no active activity
 ```
 
 Rules:
@@ -108,9 +109,9 @@ Rules:
 - Missing fields in the pattern are wildcards.
 - `:any` is an explicit wildcard value.
 - Exact values otherwise compare with `=`.
-- `:mode nil` matches only a nil current mode.
+- Use `:activity :none` to match only a nil current activity; a nil table field is indistinguishable from a missing wildcard field.
 
-This avoids hard-coding "all four contexts" and keeps custom canvas modes compatible with general presets.
+This avoids hard-coding "all four contexts" and keeps custom activities compatible with general presets.
 
 ### Override State
 
@@ -279,21 +280,21 @@ Built-ins live under `assets/lua/llm/presets/builtins/`. Each module exports `(r
 
 ### Drawing
 
-Context: `{:surface :canvas :mode "drawing"}`
+Context: `{:surface :canvas :activity "drawing"}`
 
 | Preset | Default | Risk | MCP Tools |
 |--------|---------|------|-----------|
-| `drawing-shape-tools` | `:auto` | `:normal` | `space_drawing_set_tool`, `space_drawing_insert_shape`, `space_drawing_insert_line`, `space_drawing_insert_stroke` |
+| `drawing-shape-tools` | `:auto` | `:normal` | `space_drawing_inspect`, `space_drawing_set_tool`, `space_drawing_insert_shape`, `space_drawing_insert_line`, `space_drawing_insert_stroke` |
 | `drawing-layer-tools` | `:auto` | `:normal` | `space_drawing_add_layer`, `space_drawing_duplicate_layer`, `space_drawing_rename_layer`, `space_drawing_set_active_layer` |
 | `drawing-layer-destructive-tools` | `:off` | `:destructive` | `space_drawing_delete_layer` |
-| `drawing-color-tools` | `:auto` | `:normal` | `space_drawing_set_defaults`, `space_drawing_sample_color` |
+| `drawing-color-tools` | `:auto` | `:normal` | `space_drawing_set_defaults`, `space_drawing_update_selection_style`, `space_drawing_sample_color` |
 | `drawing-history-tools` | `:auto` | `:normal` | `space_drawing_undo`, `space_drawing_redo` |
-| `drawing-selection-tools` | `:auto` | `:normal` | `space_drawing_select_objects`, `space_drawing_clear_selection` |
+| `drawing-selection-tools` | `:auto` | `:normal` | `space_drawing_select`, `space_drawing_transform_selection`, `space_drawing_clear_selection` |
 | `drawing-selection-destructive-tools` | `:off` | `:destructive` | `space_drawing_delete_selected` |
 
 ### Graph
 
-Context: `{:surface :canvas :mode "graph"}`
+Context: `{:surface :canvas :activity "graph"}`
 
 | Preset | Default | Risk | MCP Tools |
 |--------|---------|------|-----------|
@@ -325,7 +326,7 @@ Context: `{:surface :any}`
 | Preset | Default | Risk | MCP Tools |
 |--------|---------|------|-----------|
 | `general-theme-tools` | `:auto` | `:normal` | `space_app_set_theme` |
-| `general-canvas-tools` | `:auto` | `:normal` | `space_app_set_canvas_visible`, `space_app_set_canvas_mode`, `space_app_switch_surface` |
+| `general-canvas-tools` | `:auto` | `:normal` | `space_app_set_canvas_visible`, `space_app_set_activity`, `space_app_switch_surface` |
 | `general-world-tools` | `:off` | `:destructive` | `space_app_create_world`, `space_app_switch_world`, `space_app_delete_world` |
 | `general-file-read-tools` | `:off` | `:filesystem-read` | `space_app_read_file`, `space_app_list_files` |
 | `general-file-write-tools` | `:off` | `:filesystem-write` | `space_app_write_file` |
@@ -335,21 +336,21 @@ High-risk general tools are not auto-active. A user or future agent strategy mus
 
 ## Integration Points
 
-### Canvas Shell Context
+### Workspace Shell Context
 
-`app.canvas-shell-changed` already emits `payload.current` with `:interaction-surface`, `:canvas-mode`, and `:canvas-visible?`. The integration should convert that payload to the preset context shape.
+`app.workspace-shell-changed` emits `payload.current` with `:interaction-surface`, `:activity`, and `:canvas-visible?`. The integration converts that payload to the preset context shape.
 
 ```fennel
-(app.canvas-shell-changed:connect
+(app.workspace-shell-changed:connect
   (fn [payload]
     (local current payload.current)
     (app.agent-presets:set-context
       {:surface current.interaction-surface
-       :mode current.canvas-mode
+       :activity current.activity
        :canvas-visible? current.canvas-visible?})))
 ```
 
-Mode-specific context enrichers can be added later by extending this context object before calling `set-context`.
+Activity-specific context enrichers can be added later by extending this context object before calling `set-context`.
 
 ### App Bootstrap
 
@@ -370,9 +371,9 @@ Mode-specific context enrichers can be added later by extending this context obj
      (PresetManager {:registry (PresetRegistry {})
                      :tool-adapters app.agent-tool-adapters
                      :app app
-                     :context {:surface :scene
-                               :mode nil
-                               :canvas-visible? false}}))
+                      :context {:surface :scene
+                                :activity nil
+                                :canvas-visible? false}}))
 
 (BuiltinDrawing.register app.agent-presets)
 (BuiltinGraph.register app.agent-presets)
@@ -410,7 +411,7 @@ Template variables in prompt fragments are resolved by the future prompt compose
 - `assets/lua/mcp/tool-registry.fnl`: add an ownership-aware helper or status API if `PresetMcpSync` needs to detect non-managed name collisions. At minimum, sync must track its own managed set and fail before replacing unknown names.
 - `assets/lua/llm/tools/*`: do not register these directly into MCP. Extract shared file/shell logic only behind `space_` MCP adapters with explicit risk-disabled presets.
 - `assets/lua/main.fnl`: wire `app.agent-presets`, `app.agent-tool-adapters`, and `app.agent-preset-mcp-sync` after MCP registry creation and before opencode-facing MCP server startup.
-- `assets/lua/canvas-modes.fnl`: no required refactor for v1. Later, expose a small context-enrichment hook if presets need selection/tool-target facts beyond shell state.
+- `assets/lua/activities.fnl`: expose activity context enrichment when presets need selection/tool-target facts beyond shell state.
 - `assets/lua/tests/fast.fnl`: add preset unit tests once modules land.
 
 ## Tests
@@ -419,7 +420,7 @@ Add `assets/lua/tests/test-agent-presets.fnl`:
 
 - validates preset schema and rejects duplicate preset names
 - validates `:default-state`, `:risk`, context patterns, override states, and unknown override names
-- resolves context matches, `:any` wildcards, missing-field wildcards, and nil mode matches
+- resolves context matches, `:any` wildcards, missing-field wildcards, and nil activity matches
 - confirms `:off` presets never auto-activate
 - confirms force `:on` and force `:off`
 - confirms prompt fragments are returned in registration order
@@ -471,7 +472,7 @@ Extend live MCP coverage later only after offline tests cover sync ownership and
 - [drawing architecture](./drawing-architecture)
 - [graph](./graph)
 - [composable states](./composable-states)
-- `assets/lua/canvas-modes.fnl`
+- `assets/lua/activities.fnl`
 - `assets/lua/mcp/tool-registry.fnl`
 - `assets/lua/llm/tools/init.fnl`
 

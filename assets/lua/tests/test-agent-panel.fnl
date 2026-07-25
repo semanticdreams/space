@@ -58,7 +58,7 @@
                   :app {}
                   :context (or opts.context
                                {:surface "canvas"
-                                :mode "drawing"
+                                :activity "drawing"
                                 :canvas-visible? true})
                   :overrides opts.overrides}))
 
@@ -605,7 +605,7 @@
     (make-real-presets
       {:presets [{:name "drawing" :group "drawing" :risk :normal
                   :default-state :auto
-                  :contexts [{:surface :canvas :mode :drawing}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["drawing.inspect"]}
                  {:name "shell" :group "general" :risk :shell
                   :default-state :off
@@ -670,7 +670,7 @@
     (make-real-presets
       {:presets [{:name "drawing" :group "drawing" :risk :normal
                   :default-state :auto
-                  :contexts [{:surface :canvas :mode :drawing}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["drawing.inspect"]}]}))
   (local controller (AgentPanelController {:runner runner
                                             :registry registry
@@ -725,7 +725,7 @@
     (make-real-presets
       {:presets [{:name "drawing" :group "drawing" :risk :normal
                   :default-state :auto
-                  :contexts [{:surface :canvas :mode :drawing}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["drawing.inspect"]}
                  {:name "shell" :group "general" :risk :shell
                   :default-state :off
@@ -752,7 +752,7 @@
     (make-real-presets
       {:presets [{:name "drawing" :group "drawing" :risk :normal
                   :default-state :auto
-                  :contexts [{:surface :canvas :mode :drawing}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["drawing.inspect"]}]}))
   (local controller (AgentPanelController {:runner runner
                                             :registry registry
@@ -782,7 +782,7 @@
     (make-real-presets
       {:presets [{:name "drawing" :group "drawing" :risk :normal
                   :default-state :auto
-                  :contexts [{:surface :canvas :mode :drawing}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["drawing.inspect"]}]}))
   (local controller (AgentPanelController {:runner runner
                                             :registry registry
@@ -805,7 +805,7 @@
     (make-real-presets
       {:presets [{:name "drawing" :group "drawing" :risk :normal
                   :default-state :auto
-                  :contexts [{:surface :canvas :mode :drawing}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["drawing.inspect"]}]}))
   (local controller (AgentPanelController {:runner runner
                                             :registry registry

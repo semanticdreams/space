@@ -11,9 +11,9 @@
 (local GraphKeyLoaders (require :graph/key-loaders))
 (local DrawingDocument (require :drawing/document))
 (local DrawingController (require :drawing/controller))
-(local CanvasModeDockView (require :canvas-mode-dock-view))
-(local CanvasModes (require :canvas-modes))
-(local CanvasShellState (require :home-world-canvas-shell-state))
+(local ActivityDockView (require :activity-dock-view))
+(local Activities (require :activities))
+(local WorkspaceShellState (require :home-world-workspace-shell-state))
 (local MathUtils (require :math-utils))
 (local CoordinateGuard (require :coordinate-guard))
 (local PhysicsContainment (require :physics-containment))
@@ -58,17 +58,18 @@
             (set (. out k) (clone-table v))))
         out)))
 
-(local resolve-runtime-interaction-surface CanvasShellState.resolve-runtime-interaction-surface)
-(local encode-interaction-surface CanvasShellState.encode-interaction-surface)
-(local capture-canvas-shell-state CanvasShellState.capture-canvas-shell-state)
+(local resolve-runtime-interaction-surface WorkspaceShellState.resolve-runtime-interaction-surface)
+(local encode-interaction-surface WorkspaceShellState.encode-interaction-surface)
+(local capture-activity-shell-state WorkspaceShellState.capture-activity-shell-state)
 
 (fn base-default-state []
   {:camera {:position [0 0 30]
             :rotation [1 0 0 0]}
+   :activity {:active_id nil
+              :preferred_interaction_surface "scene"
+              :sessions {}}
    :canvas {:camera {:position [0 0 100]}
             :scale_factor 1.0
-            :active_mode nil
-            :preferred_interaction_surface "scene"
             :panels []}
    :drawing (DrawingDocument.default-state)
    :physics {:containment default-containment-config}
@@ -305,16 +306,36 @@
           (set world.state (default-state))
           (set world.state.scene.terrains (TerrainRecords.default-records))))
     (local canvas-state (or (and world.state world.state.canvas) {}))
-    (local (normalized-canvas-mode repaired-mode? mode-repair-reason)
-      (CanvasModes.normalize-persisted canvas-state.active_mode))
-    (when repaired-mode?
+    (local activity-state (or (and world.state world.state.activity) {}))
+    (when (and (= activity-state.active_id nil)
+               (not (= canvas-state.active_mode nil)))
+      (set activity-state.active_id canvas-state.active_mode)
+      (set repaired-persisted-state? true))
+    (when (and (= activity-state.preferred_interaction_surface nil)
+               (not (= canvas-state.preferred_interaction_surface nil)))
+      (set activity-state.preferred_interaction_surface
+           canvas-state.preferred_interaction_surface)
+      (set repaired-persisted-state? true))
+    (when (= activity-state.active_id nil)
+      (set activity-state.active_id nil))
+    (local (normalized-activity-id repaired-activity? activity-repair-reason)
+      (Activities.normalize-persisted-activity-id activity-state.active_id))
+    (when repaired-activity?
       (logging.warn (string.format "[world] %s %s"
                                    world.id
-                                   mode-repair-reason))
+                                   activity-repair-reason))
       (set repaired-persisted-state? true))
-    (set canvas-state.active_mode normalized-canvas-mode)
-    (set canvas-state.preferred_interaction_surface
-         (encode-interaction-surface canvas-state.preferred_interaction_surface))
+    (set activity-state.active_id normalized-activity-id)
+    (set activity-state.preferred_interaction_surface
+         (encode-interaction-surface (or activity-state.preferred_interaction_surface "scene")))
+    (when (not activity-state.sessions)
+      (set activity-state.sessions {}))
+    (set world.state.activity activity-state)
+    (when (or (not (= canvas-state.active_mode nil))
+              (not (= canvas-state.preferred_interaction_surface nil)))
+      (set repaired-persisted-state? true))
+    (set canvas-state.active_mode nil)
+    (set canvas-state.preferred_interaction_surface nil)
     (set world.state.canvas canvas-state)
     (local camera-state (or (and world.state world.state.camera) {}))
     (local raw-position camera-state.position)
@@ -598,7 +619,14 @@
           (canvas:capture-state)
           (and next-state next-state.canvas)))
     (when canvas-state
-      (set next-state.canvas (capture-canvas-shell-state world runtime canvas-state)))
+      (set next-state.canvas canvas-state)
+      (set next-state.activity
+            (capture-activity-shell-state world runtime
+                                          (or (and next-state next-state.activity) {}))))
+    (when (and runtime
+               (= app.active-world-runtime runtime)
+               Activities.snapshot-activity-sessions)
+      (set next-state.activity.sessions (Activities.snapshot-activity-sessions)))
     (when (and runtime runtime.drawing-controller)
       (set next-state.drawing
            (runtime.drawing-controller:snapshot)))
@@ -640,6 +668,7 @@
 
     (local controls (FirstPersonControls {:camera camera}))
     (local canvas-state (or (and world.state world.state.canvas) {}))
+    (local activity-state (or (and world.state world.state.activity) {}))
     (local canvas-camera-state (or canvas-state.camera {}))
     (local (ok-canvas parsed-canvas-position) (pcall array->vec3 canvas-camera-state.position))
     (local loaded-canvas-position (if ok-canvas parsed-canvas-position nil))
@@ -705,11 +734,15 @@
        :scene scene
        :graph graph
        :drawing-controller drawing-controller
-       :active-canvas-mode nil
-       :requested-canvas-mode-id canvas-state.active_mode
-       :requested-canvas-mode-known? true
-       :preferred-interaction-surface
-       (resolve-runtime-interaction-surface canvas-state.preferred_interaction_surface)
+         :active-activity-id nil
+         :requested-activity-id activity-state.active_id
+         :requested-activity-known? true
+         :activity-session-state (clone-table (or activity-state.sessions {}))
+         :graph-view-state (clone-table (and activity-state.sessions
+                                             activity-state.sessions.graph
+                                             activity-state.sessions.graph.graph-view-state))
+         :preferred-interaction-surface
+         (resolve-runtime-interaction-surface (or activity-state.preferred_interaction_surface "scene"))
         :pending-canvas-state (clone-table world.state.canvas)
         :pending-hud-state (clone-table world.state.hud)
         :board-state (clone-table (or world.state.board {:items [] :connectors []}))
@@ -736,10 +769,10 @@
          (fn [rt state]
            (assert (= rt runtime) "HomeWorld.restore-canvas-unit-state called with wrong runtime")
            ((. (current-canvas-runtime-module) :restore-runtime-canvas-unit-state!) runtime state)))
-    (set runtime.restore-canvas-shell-state
+    (set runtime.restore-workspace-shell-state
          (fn [rt canvas-target]
-           (when (and canvas-target rt.pending-canvas-state)
-             (canvas-target:restore-shell-state rt.pending-canvas-state))))
+            (when (and canvas-target rt.pending-canvas-state)
+              (canvas-target:restore-shell-state rt.pending-canvas-state))))
     (set runtime.restore-surface-state
          (fn [rt canvas-target hud]
            (when (and canvas-target canvas-target.restore-state rt.pending-canvas-state)
@@ -853,11 +886,11 @@
     (when (and active? runtime runtime.hydration)
       (update-runtime-hydration! world runtime))
     (when (and active?
-                runtime
-                app.canvas-mode-update)
-      (app.canvas-mode-update {:world world
-                               :runtime runtime
-                               :delta delta}))
+                 runtime
+                 app.activity-update)
+      (app.activity-update {:world world
+                            :runtime runtime
+                            :delta delta}))
     nil)
 
   (fn get-runtime [world]
@@ -866,7 +899,7 @@
   (fn get-hud-contrib [world]
     (local runtime world.runtime)
     (if runtime
-        {:left_dock_builder (CanvasModeDockView {})}
+        {:left_dock_builder (ActivityDockView {})}
         nil))
 
   (set self.init init)

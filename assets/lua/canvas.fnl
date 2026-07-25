@@ -82,11 +82,15 @@
                    :focus-manager focus-manager
                    :focus-parent focus-root
                    :focus-scope focus-scope}))
+
   (local float ((FloatLayer {:name "canvas-float"
                              :depth-layer-step panel-depth-layer-step})
                 ctx))
   (local self {:layout-root layout-root
                :build-context ctx
+               :activity-slots {}
+               :active-activity-slot-id nil
+               :active-activity-slot nil
                :camera camera
                :projection nil
                :projection-version 0
@@ -101,6 +105,45 @@
                :focus-scope focus-scope
                :interaction-surface :canvas
                :default-panel-location "float"})
+
+  (fn make-slot-focus-scope [activity-id]
+    (and focus-manager
+         (focus-manager:create-scope {:name (.. "canvas:" activity-id)
+                                      :directional-traversal-boundary? true})))
+
+  (fn make-slot-pointer-target [slot]
+    {:interaction-surface :canvas
+     :activity-slot slot
+     :canvas-target-kind nil
+     :screen-pos-ray (fn [_target pos opts]
+                       (self:screen-pos-ray pos opts))})
+
+  (fn make-slot-build-context [slot slot-layout-root]
+    (local slot-focus-scope slot.focus-scope)
+    (local slot-ctx
+      (BuildContext {:theme (resolve-active-theme)
+                     :quad-unlit? true
+                     :clickables app.clickables
+                     :hoverables app.hoverables
+                     :touch-gesture-targets app.touch-gesture-targets
+                     :system-cursors app.system-cursors
+                     :icons options.icons
+                     :states options.states
+                     :layout-root slot-layout-root
+                     :movables options.movables
+                     :focus-manager focus-manager
+                     :focus-parent focus-scope
+                     :focus-scope slot-focus-scope}))
+    (set slot-ctx.pointer-target slot.pointer-target)
+    (set slot-ctx.panel-target self)
+    (apply-active-theme slot-ctx)
+    slot-ctx)
+
+  (fn apply-active-theme-to-contexts [_canvas]
+    (apply-active-theme self.build-context)
+    (each [_ slot (pairs self.activity-slots)]
+      (apply-active-theme slot.ctx))
+    true)
 
   (set ctx.pointer-target self)
   (set ctx.panel-target self)
@@ -306,40 +349,154 @@
   (fn get-lighting-view-state [_canvas]
     (LightingViewState.orthographic (glm.vec3 0.0 0.0 1.0)))
 
+  (fn active-render-context []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.ctx
+        self.build-context))
+
+  (fn get-render-contexts [_canvas]
+    (local contexts [])
+    (when (and self.active-activity-slot
+               self.active-activity-slot.visible?)
+      (table.insert contexts self.active-activity-slot.ctx))
+    (table.insert contexts self.build-context)
+    contexts)
+
   (fn get-triangle-vector [_canvas]
-    self.build-context.triangle-vector)
+    (. (active-render-context) :triangle-vector))
 
   (fn get-triangle-batches [_canvas]
-    (and self.build-context
-         self.build-context.get-triangle-batches
-         (self.build-context:get-triangle-batches)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-triangle-batches
+         (render-ctx:get-triangle-batches)))
 
   (fn get-line-vector [_canvas]
-    self.build-context.line-vector)
+    (. (active-render-context) :line-vector))
 
   (fn get-point-vector [_canvas]
-    self.build-context.point-vector)
+    (. (active-render-context) :point-vector))
 
   (fn get-line-strips [_canvas]
-    self.build-context.line-strips)
+    (. (active-render-context) :line-strips))
 
   (fn get-image-batches [_canvas]
-    self.build-context.image-batches)
+    (. (active-render-context) :image-batches))
+
+  (fn get-mesh-batches [_canvas]
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-mesh-batches
+         (render-ctx:get-mesh-batches)))
 
   (fn get-instanced-color-mesh-batches [_canvas]
-    (and self.build-context
-         self.build-context.get-instanced-color-mesh-batches
-         (self.build-context:get-instanced-color-mesh-batches)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-instanced-color-mesh-batches
+         (render-ctx:get-instanced-color-mesh-batches)))
 
   (fn get-quad-draw-list [_canvas]
-    (and self.build-context
-         self.build-context.get-quad-draw-list
-         (self.build-context:get-quad-draw-list)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-quad-draw-list
+         (render-ctx:get-quad-draw-list)))
 
   (fn get-text-ssbo-draw-list [_canvas]
-    (and self.build-context
-         self.build-context.get-text-ssbo-draw-list
-         (self.build-context:get-text-ssbo-draw-list)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-text-ssbo-draw-list
+         (render-ctx:get-text-ssbo-draw-list)))
+
+  (fn ensure-activity-slot [_canvas activity-id]
+    (assert (= (type activity-id) :string)
+            "Canvas.ensure-activity-slot requires string activity id")
+    (assert (> (# activity-id) 0)
+            "Canvas.ensure-activity-slot requires non-empty activity id")
+    (local existing (. self.activity-slots activity-id))
+    (if existing
+        existing
+        (do
+          (local slot-layout-root (LayoutRoot))
+          (local slot
+            {:activity-id activity-id
+             :surface :canvas
+             :ctx nil
+             :layout-root slot-layout-root
+             :focus-scope (make-slot-focus-scope activity-id)
+             :pointer-target nil
+             :root nil
+             :visible? false
+             :interactive? false})
+          (set slot.pointer-target (make-slot-pointer-target slot))
+          (set slot.ctx (make-slot-build-context slot slot-layout-root))
+          (set slot.set-canvas-target-kind!
+               (fn [slot-self target-kind]
+                 (set slot-self.pointer-target.canvas-target-kind target-kind)
+                 slot-self))
+          (set slot.activate
+               (fn [slot-self]
+                 (when (and focus-manager
+                            focus-scope
+                            slot-self.focus-scope
+                            (not slot-self.focus-scope.parent))
+                   (focus-manager:attach slot-self.focus-scope focus-scope))
+                 (set slot-self.visible? true)
+                 (set slot-self.interactive? true)
+                 slot-self))
+          (set slot.deactivate
+               (fn [slot-self]
+                 (set slot-self.visible? false)
+                 (set slot-self.interactive? false)
+                 (when (and focus-manager
+                            slot-self.focus-scope
+                            slot-self.focus-scope.parent)
+                   (focus-manager:detach slot-self.focus-scope))
+                 slot-self))
+          (set slot.drop
+               (fn [slot-self]
+                 (slot-self:deactivate)
+                 (when (and slot-self.root slot-self.root.drop)
+                   (slot-self.root:drop))
+                 (set slot-self.root nil)
+                 true))
+          (slot:deactivate)
+          (set (. self.activity-slots activity-id) slot)
+          slot)))
+
+  (fn activity-slot [_canvas activity-id]
+    (assert (= (type activity-id) :string)
+            "Canvas.activity-slot requires string activity id")
+    (. self.activity-slots activity-id))
+
+  (fn activate-activity-slot [canvas activity-id]
+    (local slot (canvas:ensure-activity-slot activity-id))
+    (when (and self.active-activity-slot
+               (not (= self.active-activity-slot slot)))
+      (self.active-activity-slot:deactivate))
+    (slot:activate)
+    (set self.active-activity-slot-id activity-id)
+    (set self.active-activity-slot slot)
+    slot)
+
+  (fn deactivate-activity-slot [_canvas activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:deactivate)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil)))
+    slot)
+
+  (fn drop-activity-slot [_canvas activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:drop)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil))
+      (set (. self.activity-slots activity-id) nil))
+    true)
 
   (fn screen-pos-ray [_canvas pos opts]
     (local ray-opts (or opts {}))
@@ -399,9 +556,17 @@
     (self:update-projection viewport))
 
   (fn update [_canvas]
-    (self.layout-root:update))
+    (self.layout-root:update)
+    (when (and self.active-activity-slot
+               self.active-activity-slot.layout-root)
+      (self.active-activity-slot.layout-root:update)))
 
   (fn drop [_canvas]
+    (local activity-slot-ids [])
+    (each [activity-id _slot (pairs self.activity-slots)]
+      (table.insert activity-slot-ids activity-id))
+    (each [_ activity-id (ipairs activity-slot-ids)]
+      (drop-activity-slot self activity-id))
     (each [_ metadata (ipairs (or self.float.children []))]
       (local element (and metadata metadata.element))
       (when element
@@ -421,9 +586,17 @@
   (set self.get-point-vector get-point-vector)
   (set self.get-line-strips get-line-strips)
   (set self.get-image-batches get-image-batches)
+  (set self.get-mesh-batches get-mesh-batches)
   (set self.get-instanced-color-mesh-batches get-instanced-color-mesh-batches)
   (set self.get-quad-draw-list get-quad-draw-list)
   (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
+  (set self.get-render-contexts get-render-contexts)
+  (set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
+  (set self.ensure-activity-slot ensure-activity-slot)
+  (set self.activity-slot activity-slot)
+  (set self.activate-activity-slot activate-activity-slot)
+  (set self.deactivate-activity-slot deactivate-activity-slot)
+  (set self.drop-activity-slot drop-activity-slot)
   (set self.add-panel-child add-panel-child)
   (set self.remove-panel-child remove-panel-child)
   (set self.find-panel-persistence find-panel-persistence)

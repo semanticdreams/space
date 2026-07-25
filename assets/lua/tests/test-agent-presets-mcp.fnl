@@ -15,7 +15,7 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (values reg adapters mgr))
 
 (fn register-preset-and-adapter [mgr adapters preset-name tool-id mcp-name]
@@ -153,7 +153,7 @@
   (assert (not s.started?) "failed start should not leave sync marked started")
   (assert (= s.managed-tool-count 0) "failed start should not claim managed tools")
   (local before-count (# (tool-reg:list)))
-  (mgr:set-context {:surface :canvas :mode "drawing" :canvas-visible? true})
+  (mgr:set-context {:surface :canvas :activity "drawing" :canvas-visible? true})
   (assert (= (# (tool-reg:list)) before-count)
           "failed start should remove manager change listener"))
 

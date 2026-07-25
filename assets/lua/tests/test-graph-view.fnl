@@ -2864,12 +2864,18 @@
             (local original-movables app.movables)
             (local original-ray app.screen-pos-ray)
             (local original-camera app.camera)
+            (local original-active-surface app.active-interaction-surface)
+            (local original-scene-interactive? app.scene-interactive?)
+            (local original-canvas-interactive? app.canvas-interactive?)
             (set app.movables movables)
             (set app.screen-pos-ray
                  (fn [pointer]
-                     {:origin (glm.vec3 (or (and pointer pointer.x) 0) 0 10)
-                      :direction (glm.vec3 0 0 -1)}))
+                      {:origin (glm.vec3 (or (and pointer pointer.x) 0) 0 10)
+                       :direction (glm.vec3 0 0 -1)}))
             (set app.camera nil)
+            (set app.active-interaction-surface :scene)
+            (set app.scene-interactive? true)
+            (set app.canvas-interactive? false)
             (local graph (Graph {:with-start false}))
             (local view (GraphView {:graph graph
                                     :ctx ctx
@@ -2895,7 +2901,10 @@
             (movables:drop)
             (set app.movables original-movables)
             (set app.screen-pos-ray original-ray)
-            (set app.camera original-camera))))
+            (set app.camera original-camera)
+            (set app.active-interaction-surface original-active-surface)
+            (set app.scene-interactive? original-scene-interactive?)
+            (set app.canvas-interactive? original-canvas-interactive?))))
 
 (fn graph-drag-respects-force-layout-position []
     (with-temp-data-dir
@@ -2905,13 +2914,19 @@
             (local movables (Movables {:intersectables intersector}))
             (local original-movables app.movables)
             (local original-ray app.screen-pos-ray)
+            (local original-active-surface app.active-interaction-surface)
+            (local original-scene-interactive? app.scene-interactive?)
+            (local original-canvas-interactive? app.canvas-interactive?)
             (set app.movables movables)
             (set app.screen-pos-ray
                  (fn [pointer]
                      {:origin (glm.vec3 (or (and pointer pointer.x) 0)
                                     (or (and pointer pointer.y) 0)
-                                    10)
-                      :direction (glm.vec3 0 0 -1)}))
+                                     10)
+                       :direction (glm.vec3 0 0 -1)}))
+            (set app.active-interaction-surface :scene)
+            (set app.scene-interactive? true)
+            (set app.canvas-interactive? false)
             (local graph (Graph {:with-start false}))
             (local view (GraphView {:graph graph
                                     :ctx ctx
@@ -2935,7 +2950,10 @@
             (view:drop)
             (graph:drop)
             (set app.movables original-movables)
-            (set app.screen-pos-ray original-ray))))
+            (set app.screen-pos-ray original-ray)
+            (set app.active-interaction-surface original-active-surface)
+            (set app.scene-interactive? original-scene-interactive?)
+            (set app.canvas-interactive? original-canvas-interactive?))))
 
 (fn graph-persistence-class-saves-and-restores []
     (with-temp-data-dir

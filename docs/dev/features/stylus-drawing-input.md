@@ -15,7 +15,7 @@ updated: 2026-07-14
 
 ## Summary
 
-Pressure-sensitive stylus input routed through explicit pen routing to the Drawing canvas mode. Supports vector strokes and raster layer painting with pressure-based width/opacity.
+Pressure-sensitive stylus input routed through explicit pen routing to the Drawing activity. Supports vector strokes and raster layer painting with pressure-based width/opacity.
 
 ## Motivation
 
@@ -38,5 +38,5 @@ Drawing on a canvas surface needed stylus-aware input handling distinct from mou
 ## Related
 
 - Goal: [Core Platform](/dev/features/core-platform)
-- Depends on: [Canvas Mode System](/dev/features/canvas-mode-system)
+- Depends on: [Activities Architecture](/dev/features/activities)
 - See: [Drawing Architecture](/dev/notes/drawing-architecture), [Drawing Raster Implementation](/dev/notes/drawing-raster-implementation)

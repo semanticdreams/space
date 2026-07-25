@@ -4,8 +4,9 @@ Detailed design and implementation notes for major feature systems.
 
 - [Agent Runner System](./agent-runner-system)
 - [Agent Tools](./agent-tools)
-- [Board Canvas Mode](./board-canvas-mode)
-- [Canvas Mode System](./canvas-mode-system)
+- [Activities Architecture](./activities)
+- [Board Canvas Mode](./board-canvas-mode) (legacy, migrated to [Activities Architecture](./activities))
+- [Canvas Mode System](./canvas-mode-system) (legacy, migrated to [Activities Architecture](./activities))
 - [CEF In-World Browser](./cef-in-world-browser)
 - [Core Platform](./core-platform)
 - [Development Tooling](./development-tooling)

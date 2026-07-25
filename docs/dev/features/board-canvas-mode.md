@@ -1,6 +1,6 @@
 ---
 type: feature
-status: shipped
+status: legacy
 parent-goal: core-platform
 tags:
   - feature
@@ -11,15 +11,17 @@ created: 2026-07-14
 updated: 2026-07-14
 ---
 
-# Board canvas mode
+# Board activity
+
+This page documents the original board canvas-mode implementation. The current runtime exposes board through the HomeWorld [Activities Architecture](/dev/features/activities).
 
 ## Summary
 
-Semantic board surface for structured visual thinking. Items can be placed, resized, connected with directed edges, and selected. Built on the canvas mode system.
+Semantic board surface for structured visual thinking. Items can be placed, resized, connected with directed edges, and selected. Built as a retained HomeWorld activity.
 
 ## Motivation
 
-Unlike freeform drawing, a board needs structured items with typed relationships — think mind maps, flowcharts, dependency diagrams. Board mode provides this with item types, connector edges, selection, and resize handles.
+Unlike freeform drawing, a board needs structured items with typed relationships — think mind maps, flowcharts, dependency diagrams. The board activity provides this with item types, connector edges, selection, and resize handles.
 
 ## Design
 
@@ -40,5 +42,5 @@ Unlike freeform drawing, a board needs structured items with typed relationships
 ## Related
 
 - Goal: [Core Platform](/dev/features/core-platform)
-- Depends on: [Canvas Mode System](/dev/features/canvas-mode-system)
+- Depends on: [Activities Architecture](/dev/features/activities)
 - See: commits `f554cadf`, `108311a1` (2026-06/07)

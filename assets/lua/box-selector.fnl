@@ -4,14 +4,16 @@
 
 (fn BoxSelector [opts]
     (local options (or opts {}))
-    (local ctx options.ctx)
+    (local ctx-provider options.ctx-provider)
+    (fn resolve-ctx []
+        (or (and ctx-provider (ctx-provider))
+            options.ctx))
     (local rectangle-builder
       (or options.rectangle-builder
-          (and ctx
-               (RawRectangle {:color (or options.color (glm.vec4 0 0 0 0.3))
-                              :position (glm.vec3 0 0 0)
-                              :size (glm.vec2 0 0)}))))
-    (local hud (or options.hud (and ctx ctx.pointer-target)))
+          (RawRectangle {:color (or options.color (glm.vec4 0 0 0 0.3))
+                         :position (glm.vec3 0 0 0)
+                         :size (glm.vec2 0 0)})))
+    (local hud options.hud)
     (local changed (Signal))
     (local exited (Signal))
     (var rectangle nil)
@@ -20,6 +22,7 @@
     (var end-pos nil)
 
     (fn resolve-pointer-target []
+        (local ctx (resolve-ctx))
         (local pointer-target (or hud (and ctx ctx.pointer-target)))
         (assert pointer-target "BoxSelector requires a pointer target")
         (assert pointer-target.screen-pos-ray
@@ -46,6 +49,7 @@
             (+ ray.origin (* ray.direction t))))
 
     (fn create-rectangle []
+        (local ctx (resolve-ctx))
         (when (and (not rectangle) rectangle-builder ctx)
             (set rectangle (if (= (type rectangle-builder) :function)
                                (rectangle-builder ctx)

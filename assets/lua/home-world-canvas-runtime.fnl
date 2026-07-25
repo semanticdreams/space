@@ -2,9 +2,8 @@
 (local Canvas (require :canvas))
 (local CanvasControls (require :canvas-controls))
 (local ObjectSelector (require :object-selector))
-(local {:DrawingRender DrawingRender} (require :drawing/render))
-(local CanvasModes (require :canvas-modes))
-(local CanvasShellState (require :home-world-canvas-shell-state))
+(local Activities (require :activities))
+(local WorkspaceShellState (require :home-world-workspace-shell-state))
 (local viewport-utils (require :viewport-utils))
 
 (fn clone-table [value]
@@ -16,8 +15,8 @@
         out)
       value))
 
-(local resolve-runtime-interaction-surface CanvasShellState.resolve-runtime-interaction-surface)
-(local capture-canvas-shell-state CanvasShellState.capture-canvas-shell-state)
+(local resolve-runtime-interaction-surface WorkspaceShellState.resolve-runtime-interaction-surface)
+(local capture-activity-shell-state WorkspaceShellState.capture-activity-shell-state)
 
 (fn project-canvas-position [canvas position opts]
   (local options (or opts {}))
@@ -47,15 +46,33 @@
     (set runtime.canvas.build-context.object-selector runtime.object-selector))
   true)
 
+(fn selector-build-context [canvas]
+  (or (and canvas canvas.active-activity-slot canvas.active-activity-slot.ctx)
+      (and canvas canvas.build-context)))
+
+(fn clear-runtime-activity-sessions! [runtime]
+  (each [activity-id _session (pairs (or runtime.activity-sessions {}))]
+    (set (. runtime.activity-sessions activity-id) nil))
+  true)
+
 (fn drop-runtime-canvas-surface! [runtime]
-  (when (= app.active-world-runtime runtime)
-    (CanvasModes.deactivate-active-mode))
+  (if (= app.active-world-runtime runtime)
+      (Activities.with-workspace-shell-change-suppressed
+        (fn []
+          (Activities.deactivate-active-activity)
+          (Activities.drop-all-activity-sessions!)))
+      (clear-runtime-activity-sessions! runtime))
+  (set runtime.activity-sessions nil)
   (when runtime.drawing-render
     (runtime.drawing-render:drop)
     (set runtime.drawing-render nil))
   (when runtime.graph-view
     (runtime.graph-view:drop)
     (set runtime.graph-view nil))
+  (when runtime.board-view
+    (runtime.board-view:drop)
+    (set runtime.board-view nil))
+  (set runtime.board nil)
   (when runtime.object-selector
     (runtime.object-selector:drop)
     (set runtime.object-selector nil))
@@ -89,20 +106,17 @@
     (CanvasControls {:canvas canvas
                      :camera runtime.canvas-camera}))
   (local object-selector
-    (ObjectSelector {:ctx (and canvas canvas.build-context)
-                      :project (fn [position opts]
-                                 (project-canvas-position canvas position opts))
+    (ObjectSelector {:ctx-provider (fn []
+                                     (selector-build-context canvas))
+                     :project (fn [position opts]
+                                (project-canvas-position canvas position opts))
                       :enabled? true}))
-  (local drawing-render
-    (DrawingRender {:ctx (and canvas canvas.build-context)
-                    :controller runtime.drawing-controller
-                    :canvas canvas}))
   (set runtime.canvas canvas)
   (set runtime.canvas-controls canvas-controls)
   (set runtime.canvas-scope canvas.focus-scope)
   (set runtime.object-selector object-selector)
   (set runtime.graph-view nil)
-  (set runtime.drawing-render drawing-render)
+  (set runtime.drawing-render nil)
   (bind-runtime-canvas-selector! runtime)
   true)
 
@@ -111,20 +125,30 @@
     (if (and runtime runtime.canvas runtime.canvas.capture-state)
         (runtime.canvas:capture-state)
         (clone-table (and world.state world.state.canvas))))
-  (capture-canvas-shell-state world runtime canvas-state))
+  (local activity-state (capture-activity-shell-state world runtime {}))
+  (when (and runtime
+             (= app.active-world-runtime runtime)
+             Activities.snapshot-activity-sessions)
+    (set activity-state.sessions (Activities.snapshot-activity-sessions)))
+  {:canvas canvas-state
+   :activity activity-state})
 
 (fn restore-runtime-canvas-unit-state! [runtime state]
-  (local canvas-state (clone-table (or state {})))
-  (local (normalized-mode)
-    (CanvasModes.normalize-persisted canvas-state.active_mode))
+  (local unit-state (or state {}))
+  (local canvas-state (clone-table (or unit-state.canvas {})))
+  (local activity-state (clone-table (or unit-state.activity {})))
+  (local (normalized-activity-id)
+    (Activities.normalize-persisted-activity-id (and activity-state activity-state.active_id)))
   (set runtime.pending-canvas-state canvas-state)
-  (set runtime.requested-canvas-mode-id normalized-mode)
-  (set runtime.requested-canvas-mode-known? true)
-  (set runtime.active-canvas-mode nil)
+  (set runtime.requested-activity-id normalized-activity-id)
+  (set runtime.requested-activity-known? true)
+  (set runtime.active-activity-id nil)
+  (set runtime.activity-session-state (clone-table (or activity-state.sessions {})))
+  (set runtime.activity-sessions {})
   (set runtime.preferred-interaction-surface
        (resolve-runtime-interaction-surface
-         (or canvas-state.preferred_interaction_surface
-             "scene")))
+          (or (and activity-state activity-state.preferred_interaction_surface)
+              "scene")))
   true)
 
 {:load-runtime-canvas-surface! load-runtime-canvas-surface!

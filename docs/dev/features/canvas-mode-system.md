@@ -1,6 +1,6 @@
 ---
 type: feature
-status: shipped
+status: legacy
 parent-goal: core-platform
 tags:
   - feature
@@ -13,7 +13,9 @@ created: 2026-07-14
 updated: 2026-07-14
 ---
 
-# Canvas mode system
+# Canvas mode system (legacy)
+
+This page documents the pre-activity design. Runtime graph, drawing, and board workflows have migrated to [Activities Architecture](/dev/features/activities).
 
 ## Summary
 

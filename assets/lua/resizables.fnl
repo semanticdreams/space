@@ -2,6 +2,11 @@
 (local SDL_BUTTON_RIGHT 3)
 (local Intersectables (require :intersectables))
 
+(fn pointer-target-enabled? [target]
+  (if (and target app app.pointer-target-enabled?)
+      (app.pointer-target-enabled? target)
+      true))
+
 (local default-drag-threshold 16) ; squared pixels
 
 (fn square [v]
@@ -265,28 +270,6 @@
           (set self.drag nil)
           false)))
 
-  (fn update-resize [self payload]
-    (local drag self.drag)
-    (when (and drag drag.started?)
-      (local pointer (self.intersector:pointer payload))
-      (local ray (self.intersector:resolve-ray pointer drag.pointer-target))
-      (local hit (ray-plane-intersection ray drag.plane))
-      (when (and hit drag.entry drag.entry.target)
-        (local rotation drag.rotation)
-        (local inverse (rotation:inverse))
-        (local local-hit (inverse:rotate (- hit drag.position)))
-        (local min-size drag.min-size)
-        (local max-size drag.max-size)
-        (local (size-x offset-x)
-          (update-axis drag.edge-x local-hit.x drag.size.x min-size.x (and max-size max-size.x)))
-        (local (size-y offset-y)
-          (update-axis drag.edge-y local-hit.y drag.size.y min-size.y (and max-size max-size.y)))
-        (local size (glm.vec3 size-x size-y (. drag.size 3)))
-        (local offset (glm.vec3 offset-x offset-y 0))
-        (local world-position (+ drag.position (rotation:rotate offset)))
-        (apply-target-transform drag.entry.target {:position world-position
-                                                   :size size}))))
-
   (fn end-resize [self]
     (when self.drag
       (local entry self.drag.entry)
@@ -294,6 +277,31 @@
       (set self.drag nil)
       (when (and started? entry entry.on-resize-end)
         (entry.on-resize-end entry))))
+
+  (fn update-resize [self payload]
+    (local drag self.drag)
+    (when (and drag drag.started?)
+      (if (not (pointer-target-enabled? drag.pointer-target))
+          (end-resize self)
+          (do
+            (local pointer (self.intersector:pointer payload))
+            (local ray (self.intersector:resolve-ray pointer drag.pointer-target))
+            (local hit (ray-plane-intersection ray drag.plane))
+            (when (and hit drag.entry drag.entry.target)
+              (local rotation drag.rotation)
+              (local inverse (rotation:inverse))
+              (local local-hit (inverse:rotate (- hit drag.position)))
+              (local min-size drag.min-size)
+              (local max-size drag.max-size)
+              (local (size-x offset-x)
+                (update-axis drag.edge-x local-hit.x drag.size.x min-size.x (and max-size max-size.x)))
+              (local (size-y offset-y)
+                (update-axis drag.edge-y local-hit.y drag.size.y min-size.y (and max-size max-size.y)))
+              (local size (glm.vec3 size-x size-y (. drag.size 3)))
+              (local offset (glm.vec3 offset-x offset-y 0))
+              (local world-position (+ drag.position (rotation:rotate offset)))
+              (apply-target-transform drag.entry.target {:position world-position
+                                                         :size size}))))))
 
   (fn on-mouse-button-down [self payload]
     (when (and payload (= payload.button SDL_BUTTON_RIGHT))
@@ -305,10 +313,13 @@
 
   (fn on-mouse-motion [self payload]
     (when self.drag
-      (local pointer (self.intersector:pointer payload))
-      (ensure-resize-started self pointer)
-      (when (and self.drag self.drag.started?)
-        (update-resize self payload))))
+      (if (not (pointer-target-enabled? self.drag.pointer-target))
+          (end-resize self)
+          (do
+            (local pointer (self.intersector:pointer payload))
+            (ensure-resize-started self pointer)
+            (when (and self.drag self.drag.started?)
+              (update-resize self payload))))))
 
   (fn drag-active? [self]
     (and self.drag self.drag.started?))

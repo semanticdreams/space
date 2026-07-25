@@ -124,14 +124,14 @@
       (local base-depth (or self.depth-offset-index 0))
       (local height (or (and self.size self.size.y) 0))
       (when active-panel-entity
-        (set active-panel-entity.layout.position (glm.vec3 (- (base-position.x) panel-width) (base-position.y) (base-position.z)))
+        (set active-panel-entity.layout.position (glm.vec3 (- base-position.x panel-width) base-position.y base-position.z))
         (set active-panel-entity.layout.size (glm.vec3 panel-width height 0))
         (set active-panel-entity.layout.rotation base-rotation)
         (set active-panel-entity.layout.clip-region self.clip-region)
         (set active-panel-entity.layout.depth-offset-index (+ base-depth 1))
         (active-panel-entity.layout:layouter))
       (when rail-entity
-        (set rail-entity.layout.position (glm.vec3 (base-position.x) (base-position.y) (base-position.z)))
+        (set rail-entity.layout.position (glm.vec3 base-position.x base-position.y base-position.z))
         (set rail-entity.layout.size (glm.vec3 rail-width height 0))
         (set rail-entity.layout.rotation base-rotation)
         (set rail-entity.layout.clip-region self.clip-region)

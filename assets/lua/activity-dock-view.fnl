@@ -5,7 +5,7 @@
 (local Stack (require :stack))
 (local {: Flex : FlexChild} (require :flex))
 (local Button (require :button))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local {: adjust} (require :widget-theme-utils))
 
 (fn panel-shell [content-builder background-color opts]
@@ -43,15 +43,15 @@
       (adjust base (if (and theme (= theme.name :light)) -0.06 -0.04))
       (adjust base (if (and theme (= theme.name :light)) -0.03 0.0))))
 
-(fn CanvasModeDockView [_opts]
+(fn ActivityDockView [_opts]
   (local build
     (fn [ctx]
     (var root-layout nil)
     (var content-entity nil)
     (var active-dock-entity nil)
     (var pending-rebuild? true)
-    (var shell-changed-handler nil)
-    (var modes-changed-handler nil)
+    (var workspace-shell-changed-handler nil)
+    (var activities-changed-handler nil)
     (local theme (and ctx ctx.theme))
 
     (fn drop-content! []
@@ -71,23 +71,23 @@
       true)
 
     (fn current-left-dock-builder []
-      app.canvas-mode-left-dock-builder)
+      app.activity-left-dock-builder)
 
     (fn build-feature-rail []
       (local feature-children [])
-      (each [_ mode-spec (ipairs (CanvasModes.sidebar-mode-specs))]
+      (each [_ activity-spec (ipairs (Activities.switcher-activity-specs))]
         (table.insert feature-children
                       (FlexChild
                         (fn [child-ctx]
-                          ((feature-button (. mode-spec :icon)
-                                           (. mode-spec :button-name)
-                                           (. mode-spec :label)
-                                           (CanvasModes.matches-id? app.active-canvas-mode
-                                                                   (. mode-spec :id))
+                          ((feature-button (. activity-spec :icon)
+                                           (. activity-spec :button-name)
+                                           (. activity-spec :label)
+                                           (Activities.matches-id? app.active-activity-id
+                                                                   (. activity-spec :id))
                                            (fn [_button _event]
-                                             (assert app.set-active-canvas-mode
-                                                     "CanvasModeDockView requires app.set-active-canvas-mode")
-                                             (app.set-active-canvas-mode (. mode-spec :id))))
+                                             (assert app.set-active-activity
+                                                     "ActivityDockView requires app.set-active-activity")
+                                             (app.set-active-activity (. activity-spec :id))))
                            child-ctx))
                         0)))
       (panel-shell
@@ -159,19 +159,19 @@
         (content-entity.layout:layouter)))
 
     (set root-layout
-         (Layout {:name "canvas-mode-dock"
+         (Layout {:name "activity-dock"
                   :measurer measurer
                   :layouter layouter
                   :children []}))
 
-    (when app.canvas-shell-changed
-      (set shell-changed-handler
-           (app.canvas-shell-changed:connect
+    (when app.workspace-shell-changed
+      (set workspace-shell-changed-handler
+           (app.workspace-shell-changed:connect
              (fn [_payload]
                (request-rebuild!)))))
-    (when app.canvas-modes-changed
-      (set modes-changed-handler
-           (app.canvas-modes-changed:connect
+    (when app.activities-changed
+      (set activities-changed-handler
+           (app.activities-changed:connect
              (fn [_payload]
                (request-rebuild!)))))
 
@@ -188,15 +188,15 @@
                (when (and active-dock-entity active-dock-entity.update)
                  (active-dock-entity:update)))
      :drop (fn [_self]
-             (when shell-changed-handler
-               (app.canvas-shell-changed:disconnect shell-changed-handler true)
-               (set shell-changed-handler nil))
-             (when modes-changed-handler
-               (app.canvas-modes-changed:disconnect modes-changed-handler true)
-               (set modes-changed-handler nil))
+             (when workspace-shell-changed-handler
+               (app.workspace-shell-changed:disconnect workspace-shell-changed-handler true)
+               (set workspace-shell-changed-handler nil))
+             (when activities-changed-handler
+               (app.activities-changed:disconnect activities-changed-handler true)
+               (set activities-changed-handler nil))
              (drop-content!)
              (root-layout:drop))}))
 
   build)
 
-CanvasModeDockView
+ActivityDockView

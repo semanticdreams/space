@@ -17,8 +17,9 @@
 (fn validate-context [ctx]
   (assert (= (type ctx) "table") "context must be a table")
   (assert (= (type ctx.surface) "string") "context.surface must be a string")
-  (when (not (= ctx.mode nil))
-    (assert (= (type ctx.mode) "string") "context.mode must be a string or nil"))
+  (assert (= ctx.mode nil) "context.mode is not supported; use context.activity")
+  (when (not (= ctx.activity nil))
+    (assert (= (type ctx.activity) "string") "context.activity must be a string or nil"))
   (assert (not (= ctx.canvas-visible? nil)) "context.canvas-visible? must not be nil")
   true)
 
@@ -42,7 +43,11 @@
   (assert (= (type preset.contexts) "table") (.. "preset '" preset.name "' contexts must be a table"))
   (assert (> (# preset.contexts) 0) (.. "preset '" preset.name "' must have at least one context"))
   (each [_ ctx (ipairs preset.contexts)]
-    (assert (= (type ctx) "table") (.. "preset '" preset.name "' context entry must be a table")))
+    (assert (= (type ctx) "table") (.. "preset '" preset.name "' context entry must be a table"))
+    (assert (= ctx.mode nil) (.. "preset '" preset.name "' context.mode is not supported; use context.activity"))
+    (when (not (= ctx.activity nil))
+      (assert (or (= ctx.activity :any) (= ctx.activity :none) (= (type ctx.activity) "string"))
+              (.. "preset '" preset.name "' context.activity must be a string, :any, :none, or nil"))))
   (assert (= (type preset.tool-ids) "table") (.. "preset '" preset.name "' tool-ids must be a table"))
   (assert (> (# preset.tool-ids) 0) (.. "preset '" preset.name "' tool-ids must not be empty"))
   (each [_ tid (ipairs preset.tool-ids)]
@@ -55,6 +60,8 @@
 (fn context-field-matches? [pattern-val actual-val]
   (if (= pattern-val :any)
       true
+      (= pattern-val :none)
+      (= actual-val nil)
       (= pattern-val actual-val)))
 
 (fn context-matches? [pattern ctx]

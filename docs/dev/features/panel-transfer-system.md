@@ -40,4 +40,4 @@ Panels (scene panels, dialogs, tool windows) needed to move between different su
 ## Related
 
 - Goal: [Core Platform](/dev/features/core-platform)
-- Used by: [Canvas Mode System](/dev/features/canvas-mode-system) — canvas modes register as panel receivers
+- Used by: [Activities Architecture](/dev/features/activities) — activity surfaces register as panel receivers

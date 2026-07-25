@@ -21,6 +21,7 @@
 (local KEY_Z_LOWER (string.byte "z"))
 (local KEY_Y_LOWER (string.byte "y"))
 (local CTRL-MOD 64)
+(local ALT-MOD 256)
 (local SDL_BUTTON_LEFT 1)
 
 (fn with-app-bindings [bindings body]
@@ -57,9 +58,9 @@
   (var delete-calls 0)
   (var open-calls 0)
   (with-app-bindings
-    {:active-canvas-mode "drawing"
+    {:active-activity-id "drawing"
      :canvas-interactive? true
-     :canvas-mode-drawing-enabled? true
+     :activity-drawing-enabled? true
      :drawing-controller {:on-delete-selection (fn [_self] false)}
      :graph-view {:remove-selected-nodes (fn [_self]
                                            (set delete-calls (+ delete-calls 1))
@@ -83,9 +84,9 @@
                      :cancel 0})
   (local input-events [])
   (with-app-bindings
-    {:active-canvas-mode "drawing"
+    {:active-activity-id "drawing"
      :canvas-interactive? true
-     :canvas-mode-drawing-enabled? true
+     :activity-drawing-enabled? true
      :drawing-controller {:on-delete-selection (fn [_self]
                                                  (set draw-calls.delete (+ draw-calls.delete 1))
                                                  true)
@@ -124,12 +125,12 @@
                       :direction (glm.vec3 1 1 1)})})
 
 (fn draw-mode-input-bindings [controller-methods]
-  {:active-canvas-mode "drawing"
+  {:active-activity-id "drawing"
    :canvas-interactive? true
-   :canvas-mode-drawing-enabled? true
+   :activity-drawing-enabled? true
    :canvas (mock-canvas)
    :drawing-controller controller-methods
-   :canvas-mode-input-handlers {:mouse-button-down (. DrawingInput :DrawingMouseButtonDown)
+   :activity-input-handlers {:mouse-button-down (. DrawingInput :DrawingMouseButtonDown)
                                 :mouse-motion (. DrawingInput :DrawingMouseMotion)
                                 :mouse-button-up (. DrawingInput :DrawingMouseButtonUp)}
    :clickables nil
@@ -171,15 +172,34 @@
       (with-normal-state
         (fn [state]
           (set gesture-called false)
-          (state:on-mouse-button-down {:button SDL_BUTTON_LEFT :x 0 :y 0 :timestamp 0})
-          (assert (not gesture-called) "expected select tool to NOT begin gesture"))))))
+            (state:on-mouse-button-down {:button SDL_BUTTON_LEFT :x 0 :y 0 :timestamp 0})
+            (assert (not gesture-called) "expected select tool to NOT begin gesture"))))))
+
+(fn drawing-alt-left-mouse-down-does-not-begin-gesture []
+  (var gesture-called false)
+  (with-app-bindings
+    (draw-mode-input-bindings
+      {:active-tool (fn [_self] "pen")
+       :begin-gesture (fn [_self _tool _point _opts]
+                        (set gesture-called true)
+                        true)
+       :active-layer (fn [_self] {:kind "vector"})})
+    (fn []
+      (with-normal-state
+        (fn [state]
+          (set gesture-called false)
+          (state:on-mouse-button-down {:button SDL_BUTTON_LEFT :x 0 :y 0 :mod ALT-MOD :timestamp 0})
+          (assert (not gesture-called)
+                  "expected Alt-left mouse down to remain available for canvas panel movement"))))))
 
 (table.insert tests {:name "Pen tool mouse-down dispatches to begin-gesture"
                      :fn drawing-pen-mouse-down-begins-gesture})
 (table.insert tests {:name "Select tool mouse-down does not begin gesture"
                      :fn drawing-select-mouse-down-does-not-begin-gesture})
+(table.insert tests {:name "Alt-left mouse-down does not begin drawing gesture"
+                     :fn drawing-alt-left-mouse-down-does-not-begin-gesture})
 
-(table.insert tests {:name "Drawing mode blocks graph keyboard actions"
+(table.insert tests {:name "Drawing activity blocks graph keyboard actions"
                      :fn drawing-mode-blocks-graph-keyboard-actions})
 (table.insert tests {:name "Active inputs block drawing shortcuts in normal state"
                      :fn active-input-blocks-drawing-shortcuts})

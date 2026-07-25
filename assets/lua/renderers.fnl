@@ -83,16 +83,25 @@
                  (target:get-lighting-view-state)
                  "Render target lighting view state")))
         lighting-view-state)
-      (when draw-geometry
-        (local triangle-vector (and target.get-triangle-vector (target:get-triangle-vector)))
-        (local triangle-batches (and target.get-triangle-batches (target:get-triangle-batches)))
+      (fn render-sources []
+        (if target.get-render-contexts
+            (target:get-render-contexts)
+            [target]))
+      (fn source-field-or-method [source method-name field-name]
+        (local method (. source method-name))
+        (if method
+            (method source)
+            (. source field-name)))
+      (fn draw-source-geometry [source]
+        (local triangle-vector (source-field-or-method source :get-triangle-vector :triangle-vector))
+        (local triangle-batches (source-field-or-method source :get-triangle-batches :triangle-batches))
         (when (RenderBatchPredicates.vector-has-elements? triangle-vector)
           (triangle-renderer:render triangle-vector
                                     projection
                                     view
                                     (require-lighting-view-state)
                                     triangle-batches))
-        (local mesh-batches (and target.get-mesh-batches (target:get-mesh-batches)))
+        (local mesh-batches (source-field-or-method source :get-mesh-batches :mesh-batches))
         (when (and mesh-batches (> (length mesh-batches) 0))
           (mesh-renderer:render mesh-batches
                                 projection
@@ -101,8 +110,7 @@
                                     (require-lighting-view-state)
                                     nil)))
         (local instanced-color-mesh-batches
-          (and target.get-instanced-color-mesh-batches
-               (target:get-instanced-color-mesh-batches)))
+          (source-field-or-method source :get-instanced-color-mesh-batches :instanced-color-mesh-batches))
         (when (and instanced-color-mesh-batches (> (length instanced-color-mesh-batches) 0))
           (instanced-color-mesh-renderer:render instanced-color-mesh-batches
                                                 projection
@@ -111,10 +119,10 @@
                                                       instanced-color-mesh-batches)
                                                     (require-lighting-view-state)
                                                     nil)))
-        (local image-batches (and target.get-image-batches (target:get-image-batches)))
+        (local image-batches (source-field-or-method source :get-image-batches :image-batches))
         (when image-batches
           (image-renderer:render image-batches projection view))
-        (local quad-draw-list (and target.get-quad-draw-list (target:get-quad-draw-list)))
+        (local quad-draw-list (source-field-or-method source :get-quad-draw-list :quad-draw-list))
         (when quad-draw-list
           (local quad-lighting-view-state
             (if (RenderBatchPredicates.quad-draw-list-require-lighting? quad-draw-list)
@@ -130,19 +138,18 @@
                                     entry.clip-vector
                                     entry.clip-group-vector
                                     entry.unlit))))
-        (local line-vector (and target.get-line-vector (target:get-line-vector)))
+        (local line-vector (source-field-or-method source :get-line-vector :line-vector))
         (when line-vector
           (line-renderer:render-lines line-vector projection view))
-        (local line-strips (and target.get-line-strips (target:get-line-strips)))
+        (local line-strips (source-field-or-method source :get-line-strips :line-strips))
         (when (and line-strips (> (length line-strips) 0))
           (line-renderer:render-line-strips line-strips projection view))
-        (local point-vector (and target.get-point-vector (target:get-point-vector)))
+        (local point-vector (source-field-or-method source :get-point-vector :point-vector))
         (when point-vector
           (point-renderer:render point-vector projection view)))
-      (when draw-text
+      (fn draw-source-text [source]
         (local text-ssbo-draw-list
-          (and target.get-text-ssbo-draw-list
-               (target:get-text-ssbo-draw-list)))
+          (source-field-or-method source :get-text-ssbo-draw-list :text-ssbo-draw-list))
         (when text-ssbo-draw-list
           (each [_ entry (ipairs text-ssbo-draw-list)]
             (assert entry "text ssbo draw entry is nil")
@@ -163,7 +170,12 @@
                                        entry.font
                                        projection
                                        view
-                                       entry.batches))))))
+                                       entry.batches))))
+      (each [_ source (ipairs (render-sources))]
+        (when draw-geometry
+          (draw-source-geometry source))
+        (when draw-text
+          (draw-source-text source)))))
 
   (fn prerender-sub-apps [_self]
     (when (> (length sub-apps) 0)

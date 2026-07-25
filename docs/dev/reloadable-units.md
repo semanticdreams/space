@@ -380,42 +380,42 @@ The current design is coherent and usable, but it is not perfect.
 
 These are the main imperfections we are knowingly carrying:
 
-### Units and modes are trusted imperative code
+### Units and activities are trusted imperative code
 
-The unit system and the canvas mode system both assume trusted in-process code.
+The unit system and the activity system both assume trusted in-process code.
 
 That means:
 
 - units can mutate global `app` directly
-- modes can mutate shared runtime directly
-- rollback can only reliably undo what goes through explicit unit unload paths or mode-context cleanup helpers
+- activities can mutate shared runtime directly
+- rollback can only reliably undo what goes through explicit unit unload paths or activity-context cleanup helpers
 
 This is a deliberate tradeoff for development speed, but it means lifecycle safety is not guaranteed by construction.
 
-### Built-in mode units are still bootstrapped explicitly
+### Built-in activity units are still bootstrapped explicitly
 
-Graph and drawing canvas modes now behave like ordinary registered modes at runtime, but their unit loading is still wired by a built-in list in `main`.
+Graph, drawing, and board activities behave like ordinary registered activities at runtime, but their unit loading is still wired by a built-in list in `main`.
 
 That means:
 
-- built-in mode units are not discovered dynamically
-- external or user-loaded mode units are not yet part of startup or reload configuration by default
-- the host still knows which built-in mode units should exist at boot time
+- built-in activity units are not discovered dynamically
+- external or user-loaded activity units are not yet part of startup or reload configuration by default
+- the host still knows which built-in activity units should exist at boot time
 
-This is cleaner than hardcoding mode behavior in the host, but it is still not the final external-unit model.
+This is cleaner than hardcoding activity behavior in the host, but it is still not the final external-unit model.
 
 ### The system is consistent, but not yet fully generalized
 
 The current model is now internally consistent:
 
 - units own code lifetime
-- modes own active canvas behavior
-- persistence preserves explicit mode ids without inventing built-in defaults
+- activities own active workspace behavior
+- persistence preserves explicit activity ids without inventing built-in defaults
 
 But some surrounding code is still shaped around the built-in development workflow:
 
-- tests commonly seed graph and drawing modes directly
-- built-in mode units are still the only ones exercised by startup
+- tests commonly seed graph and drawing activities directly
+- built-in activity units are still the only ones exercised by startup
 - external unit discovery, loading, and configuration are still future work
 
 So the architecture is clean for the built-ins we have, but it is not yet the full user-extensible story.

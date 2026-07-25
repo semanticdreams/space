@@ -43,7 +43,7 @@
   {:name (or name "test-preset")
    :default-state :auto
    :risk :normal
-   :contexts [{:surface :canvas :mode "drawing"}]
+   :contexts [{:surface :canvas :activity "drawing"}]
    :tool-ids [(.. (or name "test-preset") ".tool1")]})
 
 (fn dummy-adapter-factory [id mcp-name]
@@ -70,7 +70,7 @@
   (reg:register {:name "test-preset"
                   :default-state :auto
                   :risk :normal
-                  :contexts [{:surface :canvas :mode "drawing"}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["t1" "t2"]
                   :system-prompt "Hello"})
   (local presets (reg:list))
@@ -228,9 +228,9 @@
 (fn test-resolution-exact-match []
   (local reg (PresetRegistry {}))
   (reg:register {:name "drawing-tools" :default-state :auto :risk :normal
-                  :contexts [{:surface :canvas :mode "drawing"}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :canvas :mode "drawing" :canvas-visible? true} nil))
+  (local result (reg:resolve {:surface :canvas :activity "drawing" :canvas-visible? true} nil))
   (assert (= (# result.active-presets) 1) "should have 1 active preset")
   (assert (= (. result.active-presets 1 :name) "drawing-tools"))
   (assert (= (. result.active-presets 1 :reason) :context)))
@@ -242,9 +242,9 @@
 (fn test-resolution-no-match []
   (local reg (PresetRegistry {}))
   (reg:register {:name "drawing-tools" :default-state :auto :risk :normal
-                  :contexts [{:surface :canvas :mode "drawing"}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :scene :mode nil :canvas-visible? false} nil))
+  (local result (reg:resolve {:surface :scene :activity nil :canvas-visible? false} nil))
   (assert (= (# result.active-presets) 0) "should have 0 active presets when no context matches"))
 
 (table.insert tests {:name "agent-presets: no context match" :fn test-resolution-no-match})
@@ -256,9 +256,9 @@
   (reg:register {:name "general-tools" :default-state :auto :risk :normal
                   :contexts [{:surface :any}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :scene :mode nil :canvas-visible? false} nil))
+  (local result (reg:resolve {:surface :scene :activity nil :canvas-visible? false} nil))
   (assert (= (# result.active-presets) 1) ":any should match scene")
-  (local result2 (reg:resolve {:surface :canvas :mode "graph" :canvas-visible? true} nil))
+  (local result2 (reg:resolve {:surface :canvas :activity "graph" :canvas-visible? true} nil))
   (assert (= (# result2.active-presets) 1) ":any should match canvas"))
 
 (table.insert tests {:name "agent-presets: :any wildcard" :fn test-resolution-any-wildcard})
@@ -270,22 +270,24 @@
   (reg:register {:name "scene-tools" :default-state :auto :risk :normal
                   :contexts [{:surface :scene}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :scene :mode "drawing" :canvas-visible? false} nil))
-  (assert (= (# result.active-presets) 1) "missing mode field should be wildcard match"))
+  (local result (reg:resolve {:surface :scene :activity "drawing" :canvas-visible? false} nil))
+  (assert (= (# result.active-presets) 1) "missing activity field should be wildcard match"))
 
 (table.insert tests {:name "agent-presets: missing field wildcard" :fn test-resolution-missing-field})
 
-;; ── Resolution: nil mode match ──
+;; ── Resolution: nil activity match ──
 
-(fn test-resolution-nil-mode []
+(fn test-resolution-nil-activity []
   (local reg (PresetRegistry {}))
-  (reg:register {:name "nil-mode-tools" :default-state :auto :risk :normal
-                  :contexts [{:surface :scene :mode nil}]
+  (reg:register {:name "nil-activity-tools" :default-state :auto :risk :normal
+                  :contexts [{:surface :scene :activity :none}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :scene :mode nil :canvas-visible? false} nil))
-  (assert (= (# result.active-presets) 1) "nil mode should match nil mode"))
+  (local result (reg:resolve {:surface :scene :activity nil :canvas-visible? false} nil))
+  (assert (= (# result.active-presets) 1) ":none activity should match nil activity")
+  (local result2 (reg:resolve {:surface :scene :activity "drawing" :canvas-visible? false} nil))
+  (assert (= (# result2.active-presets) 0) ":none activity should not match active activity"))
 
-(table.insert tests {:name "agent-presets: nil mode match" :fn test-resolution-nil-mode})
+(table.insert tests {:name "agent-presets: nil activity match" :fn test-resolution-nil-activity})
 
 ;; ── Resolution: :off preset never auto-activates ──
 
@@ -294,7 +296,7 @@
   (reg:register {:name "destructive-tools" :default-state :off :risk :destructive
                   :contexts [{:surface :any}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :canvas :mode nil :canvas-visible? true} nil))
+  (local result (reg:resolve {:surface :canvas :activity nil :canvas-visible? true} nil))
   (assert (= (# result.active-presets) 0) ":off preset should never auto-activate"))
 
 (table.insert tests {:name "agent-presets: :off never auto-activates" :fn test-resolution-off-never-auto})
@@ -306,12 +308,12 @@
   (reg:register {:name "destructive-tools" :default-state :off :risk :destructive
                   :contexts [{:surface :any}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :scene :mode nil :canvas-visible? false}
+  (local result (reg:resolve {:surface :scene :activity nil :canvas-visible? false}
                               {"destructive-tools" {:state :on}}))
   (assert (= (# result.active-presets) 1) "force on should activate :off preset")
   (assert (= (. result.active-presets 1 :reason) :override))
 
-  (local result2 (reg:resolve {:surface :canvas :mode "drawing" :canvas-visible? true}
+  (local result2 (reg:resolve {:surface :canvas :activity "drawing" :canvas-visible? true}
                                {"destructive-tools" {:state :on}}))
   (assert (= (# result2.active-presets) 1) "force on should work regardless of context"))
 
@@ -322,9 +324,9 @@
 (fn test-resolution-force-off []
   (local reg (PresetRegistry {}))
   (reg:register {:name "drawing-tools" :default-state :auto :risk :normal
-                  :contexts [{:surface :canvas :mode "drawing"}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["t1"]})
-  (local result (reg:resolve {:surface :canvas :mode "drawing" :canvas-visible? true}
+  (local result (reg:resolve {:surface :canvas :activity "drawing" :canvas-visible? true}
                               {"drawing-tools" {:state :off}}))
   (assert (= (# result.active-presets) 0) "force off should deactivate auto preset"))
 
@@ -342,7 +344,7 @@
                   :contexts [{:surface :any}]
                   :tool-ids ["t2"]
                   :system-prompt "Second prompt"})
-  (local result (reg:resolve {:surface :scene :mode nil :canvas-visible? false} nil))
+  (local result (reg:resolve {:surface :scene :activity nil :canvas-visible? false} nil))
   (assert (= (# result.prompt-fragments) 2) "should have 2 prompt fragments")
   (assert (= (. result.prompt-fragments 1 :prompt) "First prompt") "first fragment matches registration order")
   (assert (= (. result.prompt-fragments 2 :prompt) "Second prompt") "second fragment matches registration order")
@@ -362,7 +364,7 @@
   (reg:register {:name "b" :default-state :auto :risk :normal
                   :contexts [{:surface :any}]
                   :tool-ids ["shared-tool"]})
-  (local (ok err) (pcall reg.resolve reg {:surface :scene :mode nil :canvas-visible? false} nil))
+  (local (ok err) (pcall reg.resolve reg {:surface :scene :activity nil :canvas-visible? false} nil))
   (assert (not ok) "should reject duplicate tool-id")
   (assert (string.find (tostring err) "duplicate") "error should mention duplicate"))
 (table.insert tests {:name "agent-presets: reject duplicate resolved tool-id"
@@ -373,11 +375,11 @@
 (fn test-resolution-or-match []
   (local reg (PresetRegistry {}))
   (reg:register {:name "multi-surface" :default-state :auto :risk :normal
-                  :contexts [{:surface :canvas :mode "drawing"} {:surface :scene}]
+                  :contexts [{:surface :canvas :activity "drawing"} {:surface :scene}]
                   :tool-ids ["t1"]})
-  (local result1 (reg:resolve {:surface :canvas :mode "drawing" :canvas-visible? true} nil))
+  (local result1 (reg:resolve {:surface :canvas :activity "drawing" :canvas-visible? true} nil))
   (assert (= (# result1.active-presets) 1) "should match first context pattern")
-  (local result2 (reg:resolve {:surface :scene :mode nil :canvas-visible? false} nil))
+  (local result2 (reg:resolve {:surface :scene :activity nil :canvas-visible? false} nil))
   (assert (= (# result2.active-presets) 1) "should match second context pattern"))
 
 (table.insert tests {:name "agent-presets: OR-match across context patterns"
@@ -398,7 +400,7 @@
   (local reg (PresetRegistry {}))
   (reg:register {:name "test" :default-state :auto :risk :normal
                   :contexts [{:surface :any}] :tool-ids ["t1"]})
-  (local (ok err) (pcall reg.resolve reg {:surface :scene :mode nil :canvas-visible? false}
+  (local (ok err) (pcall reg.resolve reg {:surface :scene :activity nil :canvas-visible? false}
                            {"test" {:state :invalid}}))
   (assert (not ok) "should reject invalid override state"))
 
@@ -410,7 +412,7 @@
   (local reg (PresetRegistry {}))
   (reg:register {:name "known" :default-state :auto :risk :normal
                   :contexts [{:surface :any}] :tool-ids ["t1"]})
-  (local (ok err) (pcall reg.resolve reg {:surface :scene :mode nil :canvas-visible? false}
+  (local (ok err) (pcall reg.resolve reg {:surface :scene :activity nil :canvas-visible? false}
                           {"typo" {:state :on}}))
   (assert (not ok) "should reject unknown override names")
   (assert (string.find (tostring err) "typo") "error should mention unknown override name"))
@@ -468,7 +470,7 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (assert mgr "manager should be created"))
 (table.insert tests {:name "agent-presets: manager create" :fn test-manager-create})
 
@@ -478,9 +480,9 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (assert (= (. (mgr:get-context) :surface) :scene) "initial context should be scene")
-  (mgr:set-context {:surface :canvas :mode "drawing" :canvas-visible? true})
+  (mgr:set-context {:surface :canvas :activity "drawing" :canvas-visible? true})
   (assert (= (. (mgr:get-context) :surface) :canvas) "context should be updated"))
 (table.insert tests {:name "agent-presets: set/get context" :fn test-manager-context})
 
@@ -492,7 +494,7 @@
                   :contexts [{:surface :scene}] :tool-ids ["t1"]})
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (local context (mgr:get-context))
   (set context.surface :canvas)
   (assert (= (. (mgr:get-context) :surface) :scene)
@@ -516,7 +518,7 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (local (ok err) (pcall mgr.set-override mgr "nonexistent" :on))
   (assert (not ok) "should reject unknown preset in override"))
 (table.insert tests {:name "agent-presets: reject unknown override name" :fn test-manager-override-unknown})
@@ -532,7 +534,7 @@
   (adapters:register (dummy-adapter-factory "t1" "space_t1"))
   (adapters:register (dummy-adapter-factory "t2" "space_t2"))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (local defs (mgr:get-tool-defs))
   (assert (= (# defs) 2) "should have 2 tool defs")
   (assert (= (. defs 1 :name) "space_t1") "first def should be space_t1")
@@ -553,7 +555,7 @@
   (adapters:register (dummy-adapter-factory "t1" "space_same"))
   (adapters:register (dummy-adapter-factory "t2" "space_same"))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (local (ok err) (pcall mgr.get-tool-defs mgr))
   (assert (not ok) "should reject duplicate MCP tool names"))
 (table.insert tests {:name "agent-presets: reject duplicate MCP tool names" :fn test-manager-get-tool-defs-duplicate})
@@ -563,15 +565,15 @@
 (fn test-manager-on-change-context []
   (local reg (PresetRegistry {}))
   (reg:register {:name "test" :default-state :auto :risk :normal
-                  :contexts [{:surface :canvas :mode "drawing"}]
+                  :contexts [{:surface :canvas :activity "drawing"}]
                   :tool-ids ["t1"]})
   (local adapters (ToolAdapterRegistry {}))
   (adapters:register (dummy-adapter-factory "t1" "space_t1"))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (var count 0)
   (mgr:add-on-change (fn [] (set count (+ count 1))))
-  (mgr:set-context {:surface :canvas :mode "drawing" :canvas-visible? true})
+  (mgr:set-context {:surface :canvas :activity "drawing" :canvas-visible? true})
   (assert (= count 1) "on-change should fire on context change"))
 (table.insert tests {:name "agent-presets: on-change fires on context change" :fn test-manager-on-change-context})
 
@@ -581,10 +583,10 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (var count 0)
   (mgr:add-on-change (fn [] (set count (+ count 1))))
-  (mgr:set-context {:surface :scene :mode nil :canvas-visible? false})
+  (mgr:set-context {:surface :scene :activity nil :canvas-visible? false})
   (assert (= count 0) "on-change should NOT fire when context is unchanged"))
 (table.insert tests {:name "agent-presets: on-change does not fire on same context"
                      :fn test-manager-on-change-same-context})
@@ -595,7 +597,7 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (BuiltinDrawing.register mgr)
   (BuiltinGraph.register mgr)
   (BuiltinScene.register mgr)
@@ -614,7 +616,7 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
+                              :context {:surface :canvas :activity "drawing" :canvas-visible? true}}))
   (BuiltinDrawing.register mgr)
   (local defs (mgr:get-tool-defs))
   (local prompts (mgr:get-prompt-fragments))
@@ -652,7 +654,7 @@
       (local reg (PresetRegistry {}))
       (local adapters (ToolAdapterRegistry {}))
       (local mgr (PresetManager {:registry reg :tool-adapters adapters :app app
-                                  :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
+                                  :context {:surface :canvas :activity "drawing" :canvas-visible? true}}))
       (BuiltinDrawing.register mgr)
       (local defs {})
       (each [_ def (ipairs (mgr:get-tool-defs))]
@@ -700,7 +702,7 @@
       (local reg (PresetRegistry {}))
       (local adapters (ToolAdapterRegistry {}))
       (local mgr (PresetManager {:registry reg :tool-adapters adapters :app app
-                                  :context {:surface :canvas :mode "drawing" :canvas-visible? true}}))
+                                  :context {:surface :canvas :activity "drawing" :canvas-visible? true}}))
       (BuiltinDrawing.register mgr)
       (local defs {})
       (each [_ def (ipairs (mgr:get-tool-defs))]
@@ -773,7 +775,7 @@
   (local reg (PresetRegistry {}))
   (local adapters (ToolAdapterRegistry {}))
   (local mgr (PresetManager {:registry reg :tool-adapters adapters :app (make-dummy-app)
-                              :context {:surface :scene :mode nil :canvas-visible? false}}))
+                              :context {:surface :scene :activity nil :canvas-visible? false}}))
   (var sync-ok? true)
   (var sync-err nil)
   (mgr:add-on-change

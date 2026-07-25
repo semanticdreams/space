@@ -14,7 +14,7 @@ updated: 2026-07-14
 
 ## Summary
 
-The underlying runtime platform that all other features are built on: the C++ engine with its rendering/physics/audio pipeline, the Fennel widget and layout engine, in-world surfaces (browser, video), developer tooling (hot-reload, panel transfer), and interaction surfaces (canvas modes, drawing, board). These are the foundational capabilities that shipped during the early phases and Milestone 0.
+The underlying runtime platform that all other features are built on: the C++ engine with its rendering/physics/audio pipeline, the Fennel widget and layout engine, in-world surfaces (browser, video), developer tooling (hot-reload, panel transfer), and HomeWorld activities (graph, drawing, board). These are the foundational capabilities that shipped during the early phases and Milestone 0.
 
 ## Why
 
@@ -26,13 +26,13 @@ Before higher-level features like graph browsing, world building, or agent tools
 - Widget system: layout primitives (flex, stack, grid), leaf widgets (rectangle, text, image, button, input, list), composition — declarative and composable
 - In-world surfaces: CEF browser, FFmpeg video playback renderable on arbitrary 3D geometry
 - Developer tooling: hot-reload with snapshot/restore, panel transfer between surfaces, file watching
-- Interaction surfaces: canvas modes (graph-surface, drawing, board), stylus input, touch routing
+- Interaction surfaces: HomeWorld activities (graph, drawing, board), stylus input, touch routing
 
 ## Features implementing this goal
 
 - [Layout Widget Engine](/dev/features/layout-widget-engine) — constraint-based layout and widget system
-- [Canvas Mode System](/dev/features/canvas-mode-system) — pluggable virtual surfaces (graph, drawing, board)
-- [Board Canvas Mode](/dev/features/board-canvas-mode) — semantic board with connectors, selection, resizable items
+- [Activities Architecture](/dev/features/activities) — retained HomeWorld workflows for graph, drawing, and board
+- [Board Canvas Mode](/dev/features/board-canvas-mode) — legacy implementation notes for the board activity
 - [Stylus Drawing Input](/dev/features/stylus-drawing-input) — pressure-sensitive stylus with vector and raster layers
 - [CEF In-World Browser](/dev/features/cef-in-world-browser) — CEF browser surfaces on 3D geometry
 - [FFmpeg Video Playback](/dev/features/ffmpeg-video-playback) — in-world video with positional audio

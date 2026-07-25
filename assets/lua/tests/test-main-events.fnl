@@ -1,5 +1,6 @@
 (local Main (require :main))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
+(local ThemeActions (require :theme-actions))
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
@@ -19,26 +20,27 @@
                           :drop (fn [_] nil)})
     app.renderers))
 
-(fn ensure-built-in-canvas-modes! []
-  (local registry (CanvasModes.ensure-registry))
-  (when (not (. registry.modes "graph"))
-    (CanvasModes.register-mode {:id "graph"
+(fn ensure-built-in-activities! []
+  (local registry (Activities.ensure-registry))
+  (when (not (. registry.activities "graph"))
+    (Activities.register-activity {:id "graph"
                                 :label "Graph"
                                 :icon "account_tree"
-                                :button-name "graph-canvas-mode"
-                                :show-in-sidebar? true
+                                :button-name "graph-activity"
+                                :show-in-switcher? true
                                 :activate (fn [_ctx] nil)}))
-  (when (not (. registry.modes "drawing"))
-    (CanvasModes.register-mode {:id "drawing"
+  (when (not (. registry.activities "drawing"))
+    (Activities.register-activity {:id "drawing"
                                 :label "Draw"
                                 :icon "draw"
-                                :button-name "drawing-canvas-mode"
-                                :show-in-sidebar? true
+                                :button-name "drawing-activity"
+                                :show-in-switcher? true
                                 :activate (fn [_ctx] nil)}))
   true)
 
 (local bind-state-keys
-  [:active-canvas-mode
+  [:__active-activation-count
+   :active-activity-id
    :active-interaction-surface
    :active-pointer-controls
    :active-world-entry
@@ -49,53 +51,61 @@
    :board
    :board-registry
    :board-view
-   :camera
-   :canvas
-   :canvas-controls
-   :canvas-focus-scope
-   :canvas-interactive?
-   :canvas-mode-activate-focused
-   :canvas-mode-command-hints-provider
-   :canvas-mode-context-enricher
-   :canvas-mode-delete-selection
-   :canvas-mode-drawing-enabled?
-   :canvas-mode-input-handlers
-   :canvas-mode-left-dock-builder
-   :canvas-mode-target-enabled?
-   :canvas-mode-update
-   :canvas-mode-units
-   :canvas-mode-registry
-   :canvas-mode-root-actions
-   :canvas-mode-selection-actions
-   :canvas-modes-changed
-   :canvas-shell-changed
+    :camera
+    :canvas
+    :canvas-controls
+    :canvas-focus-scope
+    :canvas-interactive?
+    :canvas-surface-interactive?
+   :activity-activate-focused
+   :activity-command-hints-provider
+   :activity-context-enricher
+   :activity-delete-selection
+   :activity-drawing-enabled?
+   :activity-input-handlers
+   :activity-left-dock-builder
+   :activity-target-enabled?
+   :activity-update
+   :activity-units
+   :activity-registry
+   :activity-root-actions
+   :activity-selection-actions
+   :activities-changed
+   :workspace-shell-changed
    :canvas-visible?
    :drawing-controller
    :drawing-render
    :first-person-controls
-   :graph
-   :graph-view
-   :hud
-   :install-app-shell!
-   :layout-root
-   :mark-active-world-hud-dirty
-   :object-selector
-   :pointer-target-enabled?
-   :preferred-interaction-surface
-   :projection
-   :reset-projection
-   :scene
-   :scene-focus-scope
-   :scene-interactive?
-   :set-active-canvas-mode
-   :set-active-interaction-surface
-   :set-canvas-visible
-   :terrain-paint-previous-state
-   :terrain-paint-session
-   :terrain-rect-pick-previous-state
-   :terrain-rect-pick-session
-   :toggle-active-interaction-surface
-   :world-manager])
+    :graph
+    :graph-view
+    :hud
+    :install-app-shell!
+    :layout-root
+    :mark-active-world-hud-dirty
+    :object-selector
+    :physics-containment-config
+    :physics-containment-scene
+    :pointer-target-enabled?
+    :preferred-interaction-surface
+    :projection
+    :renderers
+    :reset-projection
+    :scene
+    :settings
+    :scene-focus-scope
+    :scene-interactive?
+     :suppress-workspace-shell-change?
+     :set-active-activity
+    :set-active-interaction-surface
+    :set-canvas-visible
+    :sync-interaction-surface-state
+     :terrain-paint-previous-state
+    :terrain-paint-session
+    :terrain-rect-pick-previous-state
+    :terrain-rect-pick-session
+    :themes
+    :toggle-active-interaction-surface
+    :world-manager])
 
 (fn capture-app-fields [keys]
   (local snapshot {})
@@ -150,6 +160,48 @@
     (app.set-viewport {:width 0 :height 0})
     (set app.layout-root nil)))
 
+(fn activity-policy-can-show-noninteractive-canvas []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (pcall (fn [] (Activities.unregister-activity "surface-policy-test")))
+      (local first-person-controls {:id :scene-controls})
+      (local canvas-controls {:id :canvas-controls})
+      (set app.canvas {:build-context {}})
+      (set app.first-person-controls first-person-controls)
+      (set app.canvas-controls canvas-controls)
+      (set app.preferred-interaction-surface :scene)
+      (set app.active-interaction-surface :scene)
+      (set app.scene-interactive? true)
+      (set app.canvas-interactive? false)
+      (set app.canvas-surface-interactive? true)
+      (set app.canvas-visible? false)
+      (local (ok result)
+        (pcall
+          (fn []
+            (Activities.register-activity
+              {:id "surface-policy-test"
+               :activate (fn [ctx _retained]
+                           (ctx:set-surface-state! {:canvas {:visible? true
+                                                             :interactive? false}})
+                           (ctx:set-preferred-interaction-surface! :canvas)
+                           {})})
+            (Activities.activate-activity "surface-policy-test")
+            (assert (= app.canvas-visible? true)
+                    "Activity policy should be able to show the canvas")
+            (assert (= app.preferred-interaction-surface :canvas)
+                    "Activity policy should preserve the preferred canvas surface")
+            (assert (= app.active-interaction-surface :scene)
+                    "Noninteractive canvas policy should keep input on the scene")
+            (assert (= app.canvas-interactive? false)
+                    "Noninteractive canvas policy should disable canvas input")
+            (assert (= app.active-pointer-controls first-person-controls)
+                    "Noninteractive canvas policy should keep scene pointer controls active")
+            true)))
+      (pcall (fn [] (Activities.unregister-activity "surface-policy-test")))
+      (if ok result (error result)))))
+
 (fn window-resize-updates-viewport-and-layout-root []
   (reset-state)
   (ensure-renderers)
@@ -168,6 +220,7 @@
   (var fired false)
   (app.engine.events.key-down.connect (fn [_] (set fired true)))
   (set app.layout-root {:mark-measure-dirty (fn [_])})
+  (set app.active-world-runtime {:id :stale-runtime})
   (Main.drop)
   (when (not app.intersectables)
     (set app.intersectables (or original-intersectables (Intersectables))))
@@ -176,6 +229,8 @@
   (when (not app.hoverables)
     (set app.hoverables (or original-hoverables (Hoverables {:intersectables app.intersectables}))))
   (assert (= app.layout-root nil))
+  (assert (= app.active-world-runtime nil)
+          "app.drop should clear stale active-world-runtime")
   (app.engine.events.key-down.emit {:key 10})
   (assert fired))
 
@@ -201,9 +256,9 @@
     (fn []
       (reset-state)
       (Main.install-app-shell!)
-      (ensure-built-in-canvas-modes!)
+      (ensure-built-in-activities!)
       (var restored false)
-      (var active-canvas-mode nil)
+      (var active-activity-id nil)
       (var preferred-surface nil)
       (var active-surface nil)
       (var canvas-visible? nil)
@@ -225,7 +280,7 @@
         (set app.reset-projection (fn [] true))
         (Main.bind-active-world-runtime
           {:id "world-a"}
-          {:active-canvas-mode "drawing"
+          {:active-activity-id "drawing"
            :preferred-interaction-surface :canvas
            :restore-surface-state (fn [_self _canvas _hud]
                                     (set restored true))
@@ -234,130 +289,226 @@
            :scene nil
            :canvas {:build-context {}
                     :restore-state (fn [_self _state] true)}})
-        (set active-canvas-mode app.active-canvas-mode)
+        (set active-activity-id app.active-activity-id)
         (set preferred-surface app.preferred-interaction-surface)
         (set active-surface app.active-interaction-surface)
         (set canvas-visible? app.canvas-visible?)
         (set canvas-interactive? app.canvas-interactive?)
       (assert restored "bind-active-world-runtime should restore target surface state before shell sync")
-      (assert (= active-canvas-mode "drawing")
-              "bind-active-world-runtime should restore active canvas mode from runtime")
+      (assert (= active-activity-id "drawing")
+              "bind-active-world-runtime should restore active activity id from runtime")
       (assert (= preferred-surface :canvas)
               "bind-active-world-runtime should adopt runtime interaction surface preference")
       (assert (= active-surface :canvas)
               "bind-active-world-runtime should restore canvas as the active interaction surface")
       (assert (= canvas-visible? true)
-              "bind-active-world-runtime should restore canvas visibility when canvas mode was persisted")
+              "bind-active-world-runtime should restore canvas visibility when activity was persisted")
       (assert (= canvas-interactive? true)
-              "bind-active-world-runtime should re-enable canvas interaction when canvas mode was persisted")
+              "bind-active-world-runtime should re-enable canvas interaction when activity was persisted")
       true)))
 
-(fn bind-active-world-runtime-preserves-explicit-nil-canvas-mode []
+(fn bind-active-world-runtime-preserves-explicit-nil-activity-id []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
       (Main.install-app-shell!)
-      (ensure-built-in-canvas-modes!)
-      (CanvasModes.activate-mode "drawing")
+      (ensure-built-in-activities!)
+      (Activities.activate-activity "drawing")
       (local runtime
-        {:requested-canvas-mode-id nil
-         :requested-canvas-mode-known? true
-         :active-canvas-mode "drawing"
+        {:requested-activity-id nil
+         :requested-activity-known? true
+         :active-activity-id "drawing"
          :preferred-interaction-surface :canvas
          :restore-surface-state (fn [_self _canvas _hud] true)})
       (app.bind-active-world-runtime {:id "test-world"} runtime)
-      (assert (= app.active-canvas-mode nil)
-              "bind-active-world-runtime should preserve an explicit nil requested canvas mode")
-      (assert (= runtime.active-canvas-mode nil)
-              "bind-active-world-runtime should clear stale runtime active mode when requested mode is nil")
+      (assert (= app.active-activity-id nil)
+              "bind-active-world-runtime should preserve an explicit nil requested activity id")
+      (assert (= runtime.active-activity-id nil)
+              "bind-active-world-runtime should clear stale runtime active activity when requested is nil")
       true)))
 
-(fn bind-active-world-runtime-defers-canvas-mode-without-canvas []
+(fn bind-active-world-runtime-clears-inactive-retained-presentations []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
       (Main.install-app-shell!)
-      (set app.canvas-mode-registry nil)
-      (CanvasModes.clear-mode-runtime-hooks!)
+      (local retained-graph-view {:id :graph-view})
+      (local retained-board {:id :board})
+      (local retained-board-view {:id :board-view})
+      (local retained-drawing-render {:id :drawing-render})
+      (local runtime {:requested-activity-id nil
+                      :requested-activity-known? true
+                      :active-activity-id nil
+                      :graph-view retained-graph-view
+                      :board retained-board
+                      :board-view retained-board-view
+                      :drawing-render retained-drawing-render
+                      :restore-surface-state (fn [_self _canvas _hud] true)})
+      (set app.graph-view retained-graph-view)
+      (set app.board retained-board)
+      (set app.board-view retained-board-view)
+      (set app.drawing-render retained-drawing-render)
+      (app.bind-active-world-runtime {:id "test-world"} runtime)
+      (assert (= app.graph-view nil)
+              "bind-active-world-runtime should not expose inactive retained graph view")
+      (assert (= app.board nil)
+              "bind-active-world-runtime should not expose inactive retained board")
+      (assert (= app.board-view nil)
+              "bind-active-world-runtime should not expose inactive retained board view")
+      (assert (= app.drawing-render nil)
+              "bind-active-world-runtime should not expose inactive retained drawing render")
+      true)))
+
+(fn bind-active-world-runtime-defers-activity-id-without-canvas []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (Activities.clear-activity-runtime-hooks!)
       (var activated? false)
-      (CanvasModes.register-mode
+      (Activities.register-activity
         {:id "graph"
          :label "Graph"
          :icon "account_tree"
-         :button-name "graph-canvas-mode"
-         :show-in-sidebar? true
+         :button-name "graph-activity"
+         :show-in-switcher? true
          :activate (fn [_ctx]
                      (set activated? true)
                      (assert (and app.active-world-runtime app.active-world-runtime.canvas)
-                             "test graph mode requires runtime.canvas"))})
-      (local runtime {:requested-canvas-mode-id "graph"
-                      :requested-canvas-mode-known? true
-                      :active-canvas-mode "graph"
+                              "test graph activity requires runtime.canvas"))})
+      (local runtime {:requested-activity-id "graph"
+                      :requested-activity-known? true
+                      :active-activity-id "graph"
                       :preferred-interaction-surface :canvas
                       :restore-surface-state (fn [_self _canvas _hud] true)})
       (app.bind-active-world-runtime {:id "test-world"} runtime)
       (assert (not activated?)
-              "bind-active-world-runtime should not activate canvas modes without runtime.canvas")
-      (assert (= app.active-canvas-mode nil)
-              "bind-active-world-runtime should clear active mode while canvas is absent")
-      (assert (= runtime.active-canvas-mode nil)
-              "bind-active-world-runtime should clear stale runtime active mode while canvas is absent")
-      (assert (= runtime.requested-canvas-mode-id "graph")
-               "bind-active-world-runtime should preserve requested mode for later canvas reload")
+              "bind-active-world-runtime should not activate activities without runtime.canvas")
+      (assert (= app.active-activity-id nil)
+              "bind-active-world-runtime should clear active activity while canvas is absent")
+      (assert (= runtime.active-activity-id nil)
+              "bind-active-world-runtime should clear stale runtime active activity while canvas is absent")
+      (assert (= runtime.requested-activity-id "graph")
+               "bind-active-world-runtime should preserve requested activity for later canvas reload")
       true)))
 
-(fn bind-active-world-runtime-preserves-active-canvas-mode-as-requested []
+(fn bind-active-world-runtime-preserves-active-activity-id-as-requested []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
       (Main.install-app-shell!)
-      (set app.canvas-mode-registry nil)
-      (CanvasModes.clear-mode-runtime-hooks!)
+      (set app.activity-registry nil)
+      (Activities.clear-activity-runtime-hooks!)
       (var activated? false)
-      (CanvasModes.register-mode
+      (Activities.register-activity
         {:id "graph"
          :label "Graph"
          :icon "account_tree"
-         :button-name "graph-canvas-mode"
-         :show-in-sidebar? true
+         :button-name "graph-activity"
+         :show-in-switcher? true
          :activate (fn [_ctx]
                      (set activated? true)
                      (assert (and app.active-world-runtime app.active-world-runtime.canvas)
-                             "test graph mode requires runtime.canvas"))})
-      (local runtime {:active-canvas-mode "graph"
+                              "test graph activity requires runtime.canvas"))})
+      (local runtime {:active-activity-id "graph"
                       :preferred-interaction-surface :canvas
                       :restore-surface-state (fn [_self _canvas _hud] true)})
       (app.bind-active-world-runtime {:id "test-world"} runtime)
       (assert (not activated?)
-              "bind-active-world-runtime should not activate canvas modes without runtime.canvas")
-      (assert (= app.active-canvas-mode nil)
-              "bind-active-world-runtime should clear active mode while canvas is absent")
-      (assert (= runtime.active-canvas-mode nil)
-              "bind-active-world-runtime should clear stale runtime active mode while canvas is absent")
-      (assert (= runtime.requested-canvas-mode-id "graph")
-              "bind-active-world-runtime should promote active-canvas-mode to requested-mode-id")
-      (assert (= runtime.requested-canvas-mode-known? true)
-              "bind-active-world-runtime should mark requested mode as known when preserving it")
+              "bind-active-world-runtime should not activate activities without runtime.canvas")
+      (assert (= app.active-activity-id nil)
+              "bind-active-world-runtime should clear active activity while canvas is absent")
+      (assert (= runtime.active-activity-id nil)
+              "bind-active-world-runtime should clear stale runtime active activity while canvas is absent")
+      (assert (= runtime.requested-activity-id "graph")
+              "bind-active-world-runtime should promote active-activity-id to requested-activity-id")
+      (assert (= runtime.requested-activity-known? true)
+              "bind-active-world-runtime should mark requested activity as known when preserving it")
       true)))
 
-(fn bind-active-world-runtime-restores-panels-after-mode-activation []
+(fn bind-active-world-runtime-preserves-previous-runtime-requested-activity []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
       (Main.install-app-shell!)
-      (local saved-registry app.canvas-mode-registry)
-      (set app.canvas-mode-registry nil)
-      (CanvasModes.ensure-registry)
+      (set app.activity-registry nil)
+      (Activities.clear-activity-runtime-hooks!)
+      (var activation-count 0)
+      (Activities.register-activity
+        {:id "graph"
+         :label "Graph"
+         :icon "account_tree"
+         :button-name "graph-activity"
+         :show-in-switcher? true
+         :activate (fn [_ctx]
+                     (set activation-count (+ activation-count 1))
+                     {})})
+      (set app.world-manager {:active-world (fn [_self]
+                                              {:world {:get-hud-contrib (fn [_world] {})}})})
+      (set app.hud {:build-context {}
+                    :build-default (fn [_self _opts] true)
+                    :add-overlay-child (fn [_self _opts] :overlay)
+                    :remove-overlay-child (fn [_self _overlay] true)
+                    :on-viewport-changed (fn [_self _viewport] true)})
+      (set app.reset-projection (fn [] true))
+      (local runtime-a {:requested-activity-id "graph"
+                        :requested-activity-known? true
+                        :preferred-interaction-surface :canvas
+                        :first-person-controls {:id :scene-controls-a}
+                        :canvas-controls {:id :canvas-controls-a}
+                        :scene nil
+                        :canvas {:build-context {}
+                                 :restore-state (fn [_self _state] true)
+                                 :restore-shell-state (fn [_self _state] true)}
+                        :restore-workspace-shell-state (fn [_self _canvas] true)
+                        :restore-surface-state (fn [_self _canvas _hud] true)})
+      (local runtime-b {:requested-activity-id nil
+                        :requested-activity-known? true
+                        :preferred-interaction-surface :scene
+                        :first-person-controls {:id :scene-controls-b}
+                        :canvas-controls {:id :canvas-controls-b}
+                        :scene nil
+                        :canvas {:build-context {}
+                                 :restore-state (fn [_self _state] true)
+                                 :restore-shell-state (fn [_self _state] true)}
+                        :restore-workspace-shell-state (fn [_self _canvas] true)
+                        :restore-surface-state (fn [_self _canvas _hud] true)})
+      (app.bind-active-world-runtime {:id "world-a"} runtime-a)
+      (assert (= app.active-activity-id "graph")
+              "Initial runtime bind should activate its requested activity")
+      (app.bind-active-world-runtime {:id "world-b"} runtime-b)
+      (assert (= runtime-a.requested-activity-id "graph")
+              "Switching away should preserve the previous runtime requested activity")
+      (assert (= runtime-a.requested-activity-known? true)
+              "Switching away should preserve previous runtime requested activity knowledge")
+      (assert (= runtime-a.active-activity-id nil)
+              "Switching away should still clear previous runtime active activity")
+      (app.bind-active-world-runtime {:id "world-a"} runtime-a)
+      (assert (= app.active-activity-id "graph")
+              "Rebinding the retained runtime should restore its requested activity")
+      (assert (= activation-count 2)
+              "Retained runtime activity should reactivate after switching away and back")
+      true)))
+
+(fn bind-active-world-runtime-restores-panels-after-activity-activation []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (local saved-registry app.activity-registry)
+      (set app.activity-registry nil)
+      (Activities.ensure-registry)
       (var activation-log [])
-      (CanvasModes.register-mode
+      (Activities.register-activity
         {:id "graph"
          :label "Graph"
          :icon "account_tree"
-         :button-name "graph-canvas-mode"
-         :show-in-sidebar? true
+         :button-name "graph-activity"
+         :show-in-switcher? true
          :activate (fn [_ctx]
                      (table.insert activation-log :activate)
-                     {:mode-id "graph"})})
+                     {:activity-id "graph"})})
       (set app.preferred-interaction-surface :scene)
       (set app.active-interaction-surface :scene)
       (set app.canvas-visible? false)
@@ -372,7 +523,7 @@
                     :on-viewport-changed (fn [_self _viewport] true)
                     :restore-state (fn [_self _state] true)})
       (set app.reset-projection (fn [] true))
-      (local runtime {:active-canvas-mode "graph"
+      (local runtime {:active-activity-id "graph"
                       :preferred-interaction-surface :canvas
                       :first-person-controls {:id :scene-controls}
                       :canvas-controls {:id :canvas-controls}
@@ -380,31 +531,31 @@
                       :canvas {:build-context {}
                                :restore-state (fn [_self _state] true)
                                :restore-shell-state (fn [_self _state] true)}
-                      :restore-canvas-shell-state (fn [_self _canvas]
+                      :restore-workspace-shell-state (fn [_self _canvas]
                                                     (table.insert activation-log :shell))
                       :restore-surface-state (fn [_self _canvas _hud]
                                                (table.insert activation-log :panels)
-                                               (assert app.active-canvas-mode
-                                                       "Active canvas mode should be set before panel restore"))})
+                                                (assert app.active-activity-id
+                                                        "Active activity should be set before panel restore"))})
       (local (ok result)
         (pcall
           (fn []
             (app.bind-active-world-runtime {:id "test-world"} runtime)
-            (assert (= app.active-canvas-mode "graph")
-                    "bind-active-world-runtime should activate the canvas mode")
+            (assert (= app.active-activity-id "graph")
+                    "bind-active-world-runtime should activate the activity")
             (assert (= (. activation-log 1) :shell)
-                    "Canvas shell state should be restored before mode activation")
+                    "Workspace shell state should be restored before activity activation")
             (assert (= (. activation-log 2) :activate)
-                    "Canvas mode should activate after shell restore")
+                    "Activity should activate after shell restore")
             (assert (= (. activation-log 3) :panels)
-                    "Panel state should be restored after mode activation")
+                    "Panel state should be restored after activity activation")
             true)))
-      (set app.canvas-mode-registry saved-registry)
+      (set app.activity-registry saved-registry)
       (when (not ok)
         (error result))
       result)))
 
-(fn set-active-canvas-mode-rejects-unknown-mode []
+(fn set-active-activity-rejects-unknown []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
@@ -412,70 +563,70 @@
       (local (ok err)
         (pcall
           (fn []
-            (app.set-active-canvas-mode "bogus"))))
+            (app.set-active-activity "bogus"))))
       (assert (not ok)
-              "set-active-canvas-mode should reject unknown canvas modes")
-      (assert (and err (string.find err "Unknown canvas mode"))
-              "set-active-canvas-mode should report the invalid mode id clearly")
+              "set-active-activity should reject unknown activities")
+      (assert (and err (string.find err "Unknown activity"))
+              "set-active-activity should report the invalid activity id clearly")
       true)))
 
-(fn canvas-modes-ordered-specs-preserve-registration-order []
-  (local original-registry app.canvas-mode-registry)
-  (set app.canvas-mode-registry nil)
-  (CanvasModes.register-mode {:id "graph"
+(fn activities-ordered-specs-preserve-registration-order []
+  (local original-registry app.activity-registry)
+  (set app.activity-registry nil)
+  (Activities.register-activity {:id "graph"
                               :label "Graph"
                               :icon "account_tree"
-                              :button-name "graph-canvas-mode"
-                              :show-in-sidebar? true
+                              :button-name "graph-activity"
+                              :show-in-switcher? true
                               :activate (fn [_ctx] nil)})
-  (CanvasModes.register-mode {:id "drawing"
+  (Activities.register-activity {:id "drawing"
                               :label "Draw"
                               :icon "draw"
-                              :button-name "drawing-canvas-mode"
-                              :show-in-sidebar? true
+                              :button-name "drawing-activity"
+                              :show-in-switcher? true
                               :activate (fn [_ctx] nil)})
-  (local specs (CanvasModes.mode-specs-in-order))
+  (local specs (Activities.activity-specs-in-order))
   (assert (= (length specs) 2)
-          "Canvas mode registry should preserve both registered mode specs")
+          "Activity registry should preserve both registered activity specs")
   (assert (= (. (. specs 1) :id) "graph")
-          "Canvas mode registry should preserve registration order for the first mode")
+          "Activity registry should preserve registration order for the first activity")
   (assert (= (. (. specs 2) :id) "drawing")
-          "Canvas mode registry should preserve registration order for the second mode")
-  (set app.canvas-mode-registry original-registry)
+          "Activity registry should preserve registration order for the second activity")
+  (set app.activity-registry original-registry)
   true)
 
-(fn invalid-persisted-canvas-mode-clears-to-nil []
+(fn invalid-persisted-activity-id-clears-to-nil []
   (local (normalized repaired? reason)
-    (CanvasModes.normalize-persisted 42))
+    (Activities.normalize-persisted-activity-id 42))
   (assert (= normalized nil)
-          "CanvasModes.normalize-persisted should clear invalid persisted mode values to nil")
+          "Activities.normalize-persisted-activity-id should clear invalid persisted activity values to nil")
   (assert repaired?
-          "CanvasModes.normalize-persisted should report repaired invalid persisted mode values")
+          "Activities.normalize-persisted-activity-id should report repaired invalid persisted activity values")
   (assert (and reason (string.find reason "clearing to nil"))
-          "CanvasModes.normalize-persisted should report that invalid persisted mode values were cleared")
+          "Activities.normalize-persisted-activity-id should report that invalid persisted activity values were cleared")
   true)
 
-(fn canvas-mode-activation-failure-restores-previous-mode []
+(fn activity-activation-failure-restores-previous-activity []
   (with-restored-app-fields bind-state-keys
     (fn []
       (reset-state)
-      (set app.canvas-mode-registry nil)
-      (CanvasModes.clear-mode-runtime-hooks!)
-      (CanvasModes.register-mode
+      (set app.activity-registry nil)
+      (Activities.clear-activity-runtime-hooks!)
+      (Activities.register-activity
         {:id "graph"
          :label "Graph"
          :icon "account_tree"
-         :button-name "graph-canvas-mode"
-         :show-in-sidebar? true
+         :button-name "graph-activity"
+         :show-in-switcher? true
          :activate (fn [ctx]
                      (ctx:set-root-actions! (fn [_context] []))
-                     {:mode-id "graph"})})
-      (CanvasModes.register-mode
+                     {:activity-id "graph"})})
+      (Activities.register-activity
         {:id "broken"
          :label "Broken"
          :icon "draw"
-         :button-name "broken-canvas-mode"
-         :show-in-sidebar? true
+         :button-name "broken-activity"
+         :show-in-switcher? true
          :activate (fn [ctx]
                      (set app.__broken-mode-side-effect "armed")
                      (ctx:defer-cleanup! (fn []
@@ -483,28 +634,503 @@
                      (ctx:set-root-actions! (fn [_context]
                                               [{:name "broken"}]))
                      (error "boom"))})
-      (CanvasModes.activate-mode "graph")
-      (local previous-root-actions app.canvas-mode-root-actions)
+      (Activities.activate-activity "graph")
+      (local previous-root-actions app.activity-root-actions)
       (local (ok err)
         (pcall
           (fn []
-            (CanvasModes.activate-mode "broken"))))
+            (Activities.activate-activity "broken"))))
       (assert (not ok)
-              "CanvasModes.activate-mode should fail loudly when the new mode activation throws")
-      (assert (and err (string.find err "Canvas mode activation failed for broken"))
-              "CanvasModes.activate-mode should report the failing mode id")
-      (assert (= (CanvasModes.active-mode-id) "graph")
-              "CanvasModes.activate-mode should restore the previous active mode on failure")
-      (assert (= app.active-canvas-mode "graph")
-              "Canvas mode activation rollback should restore app.active-canvas-mode")
-      (assert (= (type app.canvas-mode-root-actions) :function)
-              "Canvas mode activation rollback should restore a root action hook")
-      (assert (not (= app.canvas-mode-root-actions previous-root-actions nil))
-              "Canvas mode activation rollback should not leave the root action hook cleared")
-      (assert (= (length (app.canvas-mode-root-actions {})) 0)
-              "Canvas mode activation rollback should restore the previous root action behavior")
+              "Activities.activate-activity should fail loudly when the new activity activation throws")
+      (assert (and err (string.find err "Activity activation failed for broken"))
+              "Activities.activate-activity should report the failing activity id")
+      (assert (= (Activities.active-activity-id) "graph")
+              "Activities.activate-activity should restore the previous active activity on failure")
+      (assert (= app.active-activity-id "graph")
+              "Activity activation rollback should restore app.active-activity-id")
+      (assert (= (type app.activity-root-actions) :function)
+              "Activity activation rollback should restore a root action hook")
+      (assert (not (= app.activity-root-actions previous-root-actions nil))
+              "Activity activation rollback should not leave the root action hook cleared")
+      (assert (= (length (app.activity-root-actions {})) 0)
+              "Activity activation rollback should restore the previous root action behavior")
       (assert (= app.__broken-mode-side-effect nil)
-              "Canvas mode activation rollback should run deferred cleanup for failed activation side effects")
+              "Activity activation rollback should run deferred cleanup for failed activation side effects")
+      true)))
+
+(fn direct-activity-activation-emits-workspace-shell-change []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.active-activity-id nil)
+      (set app.active-world-runtime {})
+      (var events [])
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [payload]
+            (table.insert events payload))))
+      (local (ok result)
+        (pcall
+          (fn []
+            (Activities.register-activity
+              {:id "direct-test"
+               :label "Direct Test"
+               :activate (fn [_ctx] {})})
+            (Activities.register-activity
+              {:id "direct-two"
+               :label "Direct Two"
+               :activate (fn [_ctx] {})})
+            (Activities.activate-activity "direct-test")
+            (assert (= (# events) 1)
+                    "Direct Activities.activate-activity should emit workspace-shell-changed")
+            (local event (. events 1))
+            (assert (= event.reason "activity")
+                    "Direct activity activation shell event should identify the activity reason")
+            (assert (= event.previous.activity nil)
+                    "Direct activity activation shell event should include previous activity")
+            (assert (= event.current.activity "direct-test")
+                    "Direct activity activation shell event should include current activity")
+            (assert (= app.active-world-runtime.requested-activity-id "direct-test")
+                    "Direct activity activation should sync runtime requested activity")
+            (set events [])
+            (Activities.activate-activity "direct-two")
+            (assert (= (# events) 1)
+                    "Direct activity switching should emit one final workspace-shell-changed event")
+            (local switch-event (. events 1))
+            (assert (= switch-event.previous.activity "direct-test")
+                    "Direct activity switching should not emit an intermediate nil activity event")
+            (assert (= switch-event.current.activity "direct-two")
+                    "Direct activity switching should emit the final active activity")
+            true)))
+      (app.workspace-shell-changed:disconnect handler true)
+      (pcall (fn [] (Activities.unregister-activity "direct-test")))
+      (pcall (fn [] (Activities.unregister-activity "direct-two")))
+      (if ok result (error result)))))
+
+(fn direct-activity-deactivation-emits-one-shell-change []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.canvas {:build-context {}})
+      (set app.canvas-visible? false)
+      (set app.preferred-interaction-surface :scene)
+      (set app.active-interaction-surface :scene)
+      (var events [])
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [payload]
+            (table.insert events payload))))
+      (local (ok result)
+        (pcall
+          (fn []
+            (Activities.register-activity
+              {:id "direct-deactivate"
+               :label "Direct Deactivate"
+               :activate (fn [ctx]
+                           (ctx:set-surface-state! {:canvas {:visible? true
+                                                             :interactive? true}})
+                           (ctx:set-preferred-interaction-surface! :canvas)
+                           {})})
+            (Activities.activate-activity "direct-deactivate")
+            (set events [])
+            (Activities.deactivate-active-activity)
+            (assert (= (# events) 1)
+                    "Direct activity deactivation should emit one final workspace-shell-changed event")
+            (local event (. events 1))
+            (assert (= event.previous.activity "direct-deactivate")
+                    "Direct activity deactivation event should include previous activity")
+            (assert (= event.current.activity nil)
+                    "Direct activity deactivation event should include nil current activity")
+            true)))
+      (app.workspace-shell-changed:disconnect handler true)
+      (pcall (fn [] (Activities.unregister-activity "direct-deactivate")))
+      (if ok result (error result)))))
+
+(fn active-activity-unregister-emits-one-shell-change []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.canvas {:build-context {}})
+      (set app.canvas-visible? false)
+      (set app.preferred-interaction-surface :scene)
+      (set app.active-interaction-surface :scene)
+      (var events [])
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [payload]
+            (table.insert events payload))))
+      (local (ok result)
+        (pcall
+          (fn []
+            (Activities.register-activity
+              {:id "unregister-active"
+               :label "Unregister Active"
+               :activate (fn [ctx]
+                           (ctx:set-surface-state! {:canvas {:visible? true
+                                                             :interactive? true}})
+                           (ctx:set-preferred-interaction-surface! :canvas)
+                           {})})
+            (Activities.activate-activity "unregister-active")
+            (set events [])
+            (Activities.unregister-activity "unregister-active")
+            (assert (= (# events) 1)
+                    "Unregistering the active activity should emit one final workspace-shell-changed event")
+            (local event (. events 1))
+            (assert (= event.previous.activity "unregister-active")
+                    "Active unregister event should include previous activity")
+            (assert (= event.current.activity nil)
+                    "Active unregister event should include nil current activity")
+            true)))
+      (app.workspace-shell-changed:disconnect handler true)
+      (pcall (fn [] (Activities.unregister-activity "unregister-active")))
+      (if ok result (error result)))))
+
+(fn failed-activity-deactivate-restores-shell-suppression []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.suppress-workspace-shell-change? false)
+      (Activities.register-activity
+        {:id "active"
+         :label "Active"
+         :activate (fn [_ctx]
+                     (set app.__active-activation-count
+                          (+ (or app.__active-activation-count 0) 1))
+                     {})
+         :deactivate (fn [_ctx _session]
+                       (error "deactivate boom"))})
+      (Activities.register-activity
+        {:id "next"
+         :label "Next"
+         :activate (fn [_ctx] {})})
+      (Activities.activate-activity "active")
+      (local registry app.activity-registry)
+      (local (ok _err)
+        (pcall
+          (fn []
+            (Activities.activate-activity "next"))))
+      (assert (not ok)
+              "Activity switch should fail when previous activity deactivation fails")
+      (assert (= app.suppress-workspace-shell-change? false)
+              "Failed previous deactivation should restore global shell suppression")
+      (assert (= registry.suppress-workspace-shell-change? false)
+              "Failed previous deactivation should restore registry shell suppression")
+      (assert (= app.active-activity-id "active")
+              "Failed previous deactivation should leave the previous activity active")
+      (assert (= app.__active-activation-count 1)
+              "Failed previous deactivation should not reactivate an activity that never deactivated")
+      true)))
+
+(fn theme-reapply-does-not-emit-transient-activity-events []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.suppress-workspace-shell-change? false)
+      (set app.themes {:set-theme (fn [_theme] true)
+                       :get-active-theme (fn [] {})})
+      (set app.mark-active-world-hud-dirty (fn [] true))
+      (var events [])
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [payload]
+            (table.insert events payload))))
+      (Activities.register-activity
+        {:id "graph"
+         :label "Graph"
+         :activate (fn [_ctx] {})})
+      (Activities.activate-activity "graph")
+      (set events [])
+      (ThemeActions.apply-theme :dark)
+      (app.workspace-shell-changed:disconnect handler true)
+      (assert (= (# events) 0)
+              "Theme reapply should suppress transient activity nil/reactivate shell events when final shell is unchanged")
+      (assert (= app.active-activity-id "graph")
+              "Theme reapply should restore the previously active graph activity")
+      true)))
+
+(fn failed-activity-cleanup-restores-shell-suppression []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.suppress-workspace-shell-change? false)
+      (var earlier-cleanup-ran? false)
+      (Activities.register-activity
+        {:id "active"
+         :label "Active"
+         :activate (fn [_ctx] {})})
+      (Activities.register-activity
+        {:id "broken"
+         :label "Broken"
+         :activate (fn [ctx]
+                     (ctx:defer-cleanup! (fn []
+                                           (set earlier-cleanup-ran? true)))
+                     (ctx:defer-cleanup! (fn []
+                                           (error "cleanup boom")))
+                     (error "activate boom"))})
+      (Activities.activate-activity "active")
+      (local registry app.activity-registry)
+      (local (ok _err)
+        (pcall
+          (fn []
+            (Activities.activate-activity "broken"))))
+      (assert (not ok)
+              "Activity switch should fail when failed activation cleanup fails")
+      (assert (= app.suppress-workspace-shell-change? false)
+              "Failed activation cleanup should restore global shell suppression")
+      (assert (= registry.suppress-workspace-shell-change? false)
+              "Failed activation cleanup should restore registry shell suppression")
+      (assert (= app.active-activity-id "active")
+              "Failed activation cleanup should still roll back to the previous activity")
+      (assert earlier-cleanup-ran?
+              "Failed activation cleanup should continue running older cleanup callbacks after one throws")
+      true)))
+
+(fn failed-activity-prepare-restores-previous-activity []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.suppress-workspace-shell-change? false)
+      (Activities.register-activity
+        {:id "active"
+         :label "Active"
+         :activate (fn [ctx]
+                     (ctx:set-root-actions! (fn [_context] []))
+                     {})})
+      (Activities.register-activity
+        {:id "next"
+         :label "Next"
+         :activate (fn [_ctx] {})})
+      (Activities.activate-activity "active")
+      (set app.sync-interaction-surface-state
+           (fn [_reason _previous]
+             (error "prepare boom")))
+      (local (ok err)
+        (pcall
+          (fn []
+            (Activities.activate-activity "next"))))
+      (assert (not ok)
+              "Activity switch should fail when prepare-time hook clearing throws")
+      (assert (and err (string.find err "prepare boom"))
+              "Prepare failure should report the original failure")
+      (assert (= app.suppress-workspace-shell-change? false)
+              "Prepare failure should restore global shell suppression")
+      (assert (= app.active-activity-id "active")
+              "Prepare failure should roll back to previous app activity")
+      (assert (= (Activities.active-activity-id) "active")
+              "Prepare failure should roll back to previous registry activity")
+      (assert (= (type app.activity-root-actions) :function)
+              "Prepare failure should restore previous activity hooks")
+      true)))
+
+(fn failed-activity-commit-restores-previous-activity []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.suppress-workspace-shell-change? false)
+      (Activities.register-activity
+        {:id "active"
+         :label "Active"
+         :activate (fn [ctx]
+                     (ctx:set-root-actions! (fn [_context] []))
+                     {})})
+      (Activities.register-activity
+        {:id "broken"
+         :label "Broken"
+         :activate (fn [ctx]
+                     (ctx:set-root-actions! (fn [_context]
+                                              [{:name "broken"}]))
+                     (ctx:set-preferred-interaction-surface! :canvas)
+                     {})})
+      (Activities.activate-activity "active")
+      (local registry app.activity-registry)
+      (var events [])
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [payload]
+            (table.insert events payload))))
+      (set app.set-active-interaction-surface
+           (fn [_surface _opts]
+             (error "surface boom")))
+      (local (ok err)
+        (pcall
+          (fn []
+            (Activities.activate-activity "broken"))))
+      (app.workspace-shell-changed:disconnect handler true)
+      (assert (not ok)
+              "Activity switch should fail when commit-time surface policy throws")
+      (assert (and err (string.find err "surface boom"))
+              "Activity switch commit failure should report the original failure")
+      (assert (= app.suppress-workspace-shell-change? false)
+              "Commit failure should restore global shell suppression")
+      (assert (= registry.suppress-workspace-shell-change? false)
+              "Commit failure should restore registry shell suppression")
+      (assert (= app.active-activity-id "active")
+              "Commit failure should roll back to the previous app activity")
+      (assert (= (Activities.active-activity-id) "active")
+              "Commit failure should roll back to the previous registry activity")
+      (assert (= (type app.activity-root-actions) :function)
+              "Commit failure should restore previous activity hooks")
+      (assert (= (length (app.activity-root-actions {})) 0)
+              "Commit failure should restore previous root action behavior")
+      (assert (= (# events) 0)
+              "Commit failure should not emit workspace-shell-changed")
+      true)))
+
+(fn failed-retained-activity-reactivation-invalidates-target-session []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.suppress-workspace-shell-change? false)
+      (var retained-arg-on-retry :unset)
+      (var retained-resource nil)
+      (Activities.register-activity
+        {:id "active"
+         :label "Active"
+         :activate (fn [_ctx] {})})
+      (Activities.register-activity
+        {:id "retained"
+         :label "Retained"
+         :activate (fn [ctx retained]
+                     (set retained-arg-on-retry retained)
+                     (local resource (or retained {:valid? true}))
+                     (set retained-resource resource)
+                     (ctx:defer-cleanup! (fn []
+                                           (set resource.valid? false)))
+                     (ctx:set-preferred-interaction-surface! :canvas)
+                     resource)})
+      (Activities.activate-activity "retained")
+      (local first-resource retained-resource)
+      (Activities.activate-activity "active")
+      (set app.set-active-interaction-surface
+           (fn [_surface _opts]
+             (error "surface boom")))
+      (local (ok _err)
+        (pcall
+          (fn []
+            (Activities.activate-activity "retained"))))
+      (assert (not ok)
+              "Retained activity reactivation should fail when commit-time surface policy throws")
+      (assert (= (. app.activity-registry.sessions "retained") nil)
+              "Failed retained reactivation should invalidate the retained target session after cleanup")
+      (assert (= first-resource.valid? false)
+              "Failed retained reactivation cleanup should mark the retained resource invalid")
+      (set app.set-active-interaction-surface nil)
+      (Activities.activate-activity "retained")
+      (assert (= retained-arg-on-retry nil)
+              "Retry after failed retained reactivation should not receive the invalidated retained session")
+      (assert (not (= retained-resource first-resource))
+              "Retry after failed retained reactivation should create a fresh retained resource")
+      true)))
+
+(fn bind-active-world-runtime-emits-shell-once-for-surface-sync []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.canvas {:build-context {}})
+      (set app.preferred-interaction-surface :scene)
+      (set app.active-interaction-surface :scene)
+      (set app.canvas-visible? false)
+      (var event-count 0)
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [_payload]
+            (set event-count (+ event-count 1)))))
+      (app.bind-active-world-runtime {:id "test-world"}
+                                     {:requested-activity-id nil
+                                      :requested-activity-known? true
+                                      :preferred-interaction-surface :canvas
+                                      :canvas {:build-context {}}
+                                      :restore-surface-state (fn [_self _canvas _hud] true)})
+      (app.workspace-shell-changed:disconnect handler true)
+      (assert (= event-count 1)
+              "bind-active-world-runtime should not duplicate shell events for interaction surface sync")
+      true)))
+
+(fn bind-active-world-runtime-respects-shell-suppression []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.canvas {:build-context {}})
+      (set app.preferred-interaction-surface :scene)
+      (set app.active-interaction-surface :scene)
+      (set app.canvas-visible? false)
+      (set app.suppress-workspace-shell-change? true)
+      (var event-count 0)
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [_payload]
+            (set event-count (+ event-count 1)))))
+      (app.bind-active-world-runtime {:id "test-world"}
+                                     {:requested-activity-id nil
+                                      :requested-activity-known? true
+                                      :preferred-interaction-surface :canvas
+                                      :canvas {:build-context {}}
+                                      :restore-surface-state (fn [_self _canvas _hud] true)})
+      (app.workspace-shell-changed:disconnect handler true)
+      (assert (= event-count 0)
+              "bind-active-world-runtime should respect global shell suppression")
+      true)))
+
+(fn failed-pending-activity-restore-does-not-emit-shell-change []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (reset-state)
+      (Main.install-app-shell!)
+      (set app.activity-registry nil)
+      (set app.active-world-runtime {:activity-session-state {:restore-test {:value 1}}})
+      (set app.suppress-workspace-shell-change? false)
+      (var events [])
+      (local handler
+        (app.workspace-shell-changed:connect
+          (fn [payload]
+            (table.insert events payload))))
+      (Activities.register-activity
+        {:id "restore-test"
+         :label "Restore Test"
+         :activate (fn [_ctx] {})
+         :restore (fn [_ctx _session _state]
+                    (error "restore boom"))})
+      (local (ok _err)
+        (pcall
+          (fn []
+            (Activities.activate-activity "restore-test"))))
+      (app.workspace-shell-changed:disconnect handler true)
+      (assert (not ok)
+              "Activity activation should fail when pending session restore fails")
+      (assert (= (# events) 0)
+              "Failed pending activity restore should not emit workspace-shell-changed")
+      (assert (= app.suppress-workspace-shell-change? false)
+              "Failed pending activity restore should restore global shell suppression")
+      (assert (= app.active-activity-id nil)
+              "Failed pending activity restore should roll back active app activity")
+      (assert (= (Activities.active-activity-id) nil)
+              "Failed pending activity restore should roll back registry active activity")
+      (assert (= (. app.activity-registry.sessions "restore-test") nil)
+              "Failed pending activity restore should drop the newly-created failed session")
+      (assert app.active-world-runtime.activity-session-state.restore-test
+              "Failed pending activity restore should leave pending restore state available for retry")
       true)))
 
 (table.insert tests {:name "Window resize updates viewport and layout root" :fn window-resize-updates-viewport-and-layout-root})
@@ -513,22 +1139,52 @@
 (table.insert tests {:name "Non-resize events leave viewport unchanged" :fn other-events-leave-viewport-untouched})
 (table.insert tests {:name "bind-active-world-runtime restores runtime interaction surface"
                      :fn bind-active-world-runtime-restores-runtime-interaction-surface})
-(table.insert tests {:name "bind-active-world-runtime preserves explicit nil canvas mode"
-                     :fn bind-active-world-runtime-preserves-explicit-nil-canvas-mode})
-(table.insert tests {:name "bind-active-world-runtime defers canvas mode without canvas"
-                      :fn bind-active-world-runtime-defers-canvas-mode-without-canvas})
-(table.insert tests {:name "bind-active-world-runtime promotes active-canvas-mode to requested"
-                      :fn bind-active-world-runtime-preserves-active-canvas-mode-as-requested})
-(table.insert tests {:name "bind-active-world-runtime restores panels after mode activation"
-                     :fn bind-active-world-runtime-restores-panels-after-mode-activation})
-(table.insert tests {:name "set-active-canvas-mode rejects unknown modes"
-                     :fn set-active-canvas-mode-rejects-unknown-mode})
-(table.insert tests {:name "Canvas modes ordered specs preserve registration order"
-                     :fn canvas-modes-ordered-specs-preserve-registration-order})
-(table.insert tests {:name "Invalid persisted canvas mode clears to nil"
-                     :fn invalid-persisted-canvas-mode-clears-to-nil})
-(table.insert tests {:name "Canvas mode activation failure restores previous mode"
-                     :fn canvas-mode-activation-failure-restores-previous-mode})
+(table.insert tests {:name "Activity policy can show noninteractive canvas"
+                     :fn activity-policy-can-show-noninteractive-canvas})
+(table.insert tests {:name "bind-active-world-runtime preserves explicit nil activity id"
+                     :fn bind-active-world-runtime-preserves-explicit-nil-activity-id})
+(table.insert tests {:name "bind-active-world-runtime clears inactive retained presentations"
+                     :fn bind-active-world-runtime-clears-inactive-retained-presentations})
+(table.insert tests {:name "bind-active-world-runtime defers activity id without canvas"
+                      :fn bind-active-world-runtime-defers-activity-id-without-canvas})
+(table.insert tests {:name "bind-active-world-runtime promotes active-activity-id to requested"
+                       :fn bind-active-world-runtime-preserves-active-activity-id-as-requested})
+(table.insert tests {:name "bind-active-world-runtime preserves previous runtime requested activity"
+                       :fn bind-active-world-runtime-preserves-previous-runtime-requested-activity})
+(table.insert tests {:name "bind-active-world-runtime restores panels after activity activation"
+                      :fn bind-active-world-runtime-restores-panels-after-activity-activation})
+(table.insert tests {:name "set-active-activity rejects unknown activities"
+                     :fn set-active-activity-rejects-unknown})
+(table.insert tests {:name "Activities ordered specs preserve registration order"
+                     :fn activities-ordered-specs-preserve-registration-order})
+(table.insert tests {:name "Invalid persisted activity id clears to nil"
+                     :fn invalid-persisted-activity-id-clears-to-nil})
+(table.insert tests {:name "Activity activation failure restores previous activity"
+                      :fn activity-activation-failure-restores-previous-activity})
+(table.insert tests {:name "Direct activity activation emits workspace shell change"
+                     :fn direct-activity-activation-emits-workspace-shell-change})
+(table.insert tests {:name "Direct activity deactivation emits one shell change"
+                     :fn direct-activity-deactivation-emits-one-shell-change})
+(table.insert tests {:name "Active activity unregister emits one shell change"
+                     :fn active-activity-unregister-emits-one-shell-change})
+(table.insert tests {:name "Failed activity deactivate restores shell suppression"
+                     :fn failed-activity-deactivate-restores-shell-suppression})
+(table.insert tests {:name "Theme reapply does not emit transient activity events"
+                     :fn theme-reapply-does-not-emit-transient-activity-events})
+(table.insert tests {:name "Failed activity cleanup restores shell suppression"
+                     :fn failed-activity-cleanup-restores-shell-suppression})
+(table.insert tests {:name "Failed activity prepare restores previous activity"
+                     :fn failed-activity-prepare-restores-previous-activity})
+(table.insert tests {:name "Failed activity commit restores previous activity"
+                     :fn failed-activity-commit-restores-previous-activity})
+(table.insert tests {:name "Failed retained activity reactivation invalidates target session"
+                     :fn failed-retained-activity-reactivation-invalidates-target-session})
+(table.insert tests {:name "Failed pending activity restore does not emit shell change"
+                     :fn failed-pending-activity-restore-does-not-emit-shell-change})
+(table.insert tests {:name "bind-active-world-runtime emits shell once for surface sync"
+                     :fn bind-active-world-runtime-emits-shell-once-for-surface-sync})
+(table.insert tests {:name "bind-active-world-runtime respects shell suppression"
+                     :fn bind-active-world-runtime-respects-shell-suppression})
 
 (local main
   (fn []

@@ -19,7 +19,7 @@ Keyboard, mouse, gamepad, touch, and stylus input handling. Composable state arc
 ## Dependencies
 
 - Depends on: [Core Platform](/dev/features/core-platform)
-- Depended on by: [Layout Widget Engine](/dev/features/layout-widget-engine), [Canvas Mode System](/dev/features/canvas-mode-system)
+- Depended on by: [Layout Widget Engine](/dev/features/layout-widget-engine), [Activities Architecture](/dev/features/activities)
 
 ## Dev notes
 

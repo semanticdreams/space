@@ -46,10 +46,10 @@ See [Concepts](/dev/concepts) for the VitePress concept docs, and [Dev Notes](/d
 - **Primitives** — Rectangle, text span, image, button, input, combo box, label, icon, disclosure row, scroll area, tab view, list view
 - **Composition** — Higher-order widgets composed from primitives (cards, containers, status badges, search views)
 - **Raw renderers** — Rectangle, gradient triangle, image, polyhedron, sphere primitives
-- **Canvas** — Virtual canvas for in-world panels with pluggable modes
+- **Canvas** — Virtual canvas for in-world panels and retained activity slots
 - **Graph views** — View layer for graph nodes, decoupled from node state. See [Graph View As Widget](/dev/notes/graph-view-as-widget)
 - **Drawing** — Vector drawing with stylus/pressure input, history/undo, raster layer. See [Stylus Drawing Input](/dev/features/stylus-drawing-input), [Drawing Architecture](/dev/notes/drawing-architecture)
-- **Board** — Structured board canvas mode with connectors, selection, resizable items. See [Board Canvas Mode](/dev/features/board-canvas-mode)
+- **Board** — Structured board activity with connectors, selection, resizable items. See [Activities Architecture](/dev/features/activities); legacy notes: [Board Canvas Mode](/dev/features/board-canvas-mode)
 - **Terrain** — Heightfield terrain with physics, painting, selection tools. See [Terrain Heightfield System](/dev/features/terrain-heightfield-system)
 - **HUD** — Heads-up display with control panel, status panel, command hints, panel persistence
 - **Theming** — Dark/light theme system with widget-level utilities

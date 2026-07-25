@@ -64,8 +64,12 @@
     :tests.test-cuboid
     :tests.test-main-events
     :tests.test-states
-    :tests.test-canvas-controls
-    :tests.test-board
+     :tests.test-canvas-controls
+      :tests.test-canvas-activity-slots
+      :tests.test-activity-retention
+      :tests.test-graph-activity-slots
+     :tests.test-drawing-activity-slots
+     :tests.test-board
     :tests.test-first-person-controls
     :tests.test-screen-pos-ray
     :tests.test-terrain-query

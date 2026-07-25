@@ -4,6 +4,11 @@
 (local default-double-click-window 500) ; milliseconds
 (local Intersectables (require :intersectables))
 
+(fn pointer-target-enabled? [target]
+  (if (and target app app.pointer-target-enabled?)
+      (app.pointer-target-enabled? target)
+      true))
+
 (fn square [v]
   (* v v))
 
@@ -130,8 +135,10 @@
   (fn dispatch-click [self payload screen-pos pointer]
     (local entry self.active-entry)
     (local obj (and entry entry.object))
-    (when obj
-      (local ray (intersector:resolve-ray pointer (or entry.pointer-target obj.pointer-target)))
+    (local pointer-target (or (and entry entry.pointer-target)
+                              (and obj obj.pointer-target)))
+    (when (and obj (pointer-target-enabled? pointer-target))
+      (local ray (intersector:resolve-ray pointer pointer-target))
       (when ray
         (local event (build-event payload screen-pos ray entry))
         (if (= payload.button SDL_BUTTON_LEFT)

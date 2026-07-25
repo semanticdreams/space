@@ -31,6 +31,7 @@
   (local link-store (or options.link-store (LinkEntityStore.get-default)))
   (local layer ((FloatLayer {:name "board-layer"
                              :depth-layer-step 8}) ctx))
+  (local pointer-target (or (and ctx ctx.pointer-target) canvas))
   (local item-records {})
   (local connector-records {})
   (local selector (or options.selector (and ctx ctx.object-selector)))
@@ -39,14 +40,15 @@
   (var dropped? false)
   (var self nil)
 
-  (layer.layout:set-root canvas.layout-root)
+  (layer.layout:set-root (or (and ctx ctx.layout-root) canvas.layout-root))
 
   (fn assert-not-dropped [context]
     (assert (not dropped?) (.. "BoardView " context " called after drop")))
 
   (fn create-selectable [item]
     {:item item
-     :position (item-center item)})
+     :position (item-center item)
+     :pointer-target pointer-target})
 
   (fn find-existing-semantic-connector [source-item target-item]
     (var found nil)
@@ -125,9 +127,9 @@
     (when (and app.movables metadata)
       (local target (ensure-board-transform-target item metadata))
       (app.movables:register metadata.element {:target target
-                                               :handle metadata.element.layout
-                                               :key metadata.element
-                                               :pointer-target canvas})))
+                                                :handle metadata.element.layout
+                                                :key metadata.element
+                                                :pointer-target pointer-target})))
 
   (fn unregister-movable [record]
     (when (and app.movables record record.element)
@@ -137,10 +139,10 @@
     (when (and app.resizables metadata)
       (local target (ensure-board-transform-target item metadata))
       (app.resizables:register metadata.element {:target target
-                                                 :handle metadata.element.layout
-                                                 :key metadata.element
-                                                 :min-size metadata.element.layout.min-size
-                                                 :pointer-target canvas})))
+                                                  :handle metadata.element.layout
+                                                  :key metadata.element
+                                                  :min-size metadata.element.layout.min-size
+                                                  :pointer-target pointer-target})))
 
   (fn unregister-resizable [record]
     (when (and app.resizables record record.element)
