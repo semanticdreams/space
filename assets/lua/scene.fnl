@@ -381,30 +381,33 @@
                        :focus-parent focus-root
                        :focus-scope focus-scope}))
   (local self {:layout-root layout-root
-               :build-context ctx
-               :debug-id (or options.debug-id "scene")
-               :projection nil
-               :projection-version 0
-               :viewport nil
-               :entity nil
-               :builder nil
-               :graph options.graph
-               :graph-map options.graph-map
-                :panel-restorers {}
-                :demo-browser nil
-                :scene-children nil
-                :queued-cube-panels []
-               :scene-terrains nil
-               :physics-body-count 0
-               :default-position (or options.position default-position)
-               :default-rotation (or options.rotation default-rotation)
-               :on-terrains-changed options.on-terrains-changed
-               :reference-point default-position
-               :focus-manager focus-manager
-               :focus-scope focus-scope
-               :camera options.camera
-               :interaction-surface :scene
-               :default-panel-location "float"})
+                :build-context ctx
+                :activity-slots {}
+                :active-activity-slot-id nil
+                :active-activity-slot nil
+                :debug-id (or options.debug-id "scene")
+                :projection nil
+                :projection-version 0
+                :viewport nil
+                :entity nil
+                :builder nil
+                :graph options.graph
+                :graph-map options.graph-map
+                 :panel-restorers {}
+                 :demo-browser nil
+                 :scene-children nil
+                 :queued-cube-panels []
+                :scene-terrains nil
+                :physics-body-count 0
+                :default-position (or options.position default-position)
+                :default-rotation (or options.rotation default-rotation)
+                :on-terrains-changed options.on-terrains-changed
+                :reference-point default-position
+                :focus-manager focus-manager
+                :focus-scope focus-scope
+                :camera options.camera
+                :interaction-surface :scene
+                :default-panel-location "float"})
 
   (set ctx.pointer-target self)
   (set ctx.panel-target self)
@@ -518,6 +521,123 @@
       (when self.on-terrains-changed
         (self.on-terrains-changed self))))
   (apply-active-theme ctx)
+
+  ;; Activity slot infrastructure
+  (fn make-slot-pointer-target [slot]
+    {:interaction-surface :scene
+     :activity-slot slot
+     :screen-pos-ray (fn [_target pos opts]
+                       (self:screen-pos-ray pos opts))})
+
+  (fn make-slot-build-context [slot slot-layout-root]
+    (local slot-ctx
+      (BuildContext {:theme (resolve-active-theme)
+                     :clickables app.clickables
+                     :hoverables app.hoverables
+                     :touch-gesture-targets app.touch-gesture-targets
+                     :system-cursors app.system-cursors
+                     :icons options.icons
+                     :states options.states
+                     :object-selector options.object-selector
+                     :layout-root slot-layout-root
+                     :movables options.movables
+                     :focus-manager focus-manager
+                     :focus-parent focus-root
+                     :focus-scope focus-scope}))
+    (set slot-ctx.pointer-target slot.pointer-target)
+    (set slot-ctx.panel-target slot)
+    (apply-active-theme slot-ctx)
+    slot-ctx)
+
+  (fn make-activity-slot [activity-id]
+    (local slot-layout-root (LayoutRoot {:log-dirt? true}))
+    (local slot
+      {:activity-id activity-id
+       :interaction-surface :scene
+       :surface :scene
+       :ctx nil
+       :build-context nil
+       :layout-root slot-layout-root
+       :pointer-target nil
+       :root nil
+       :entity nil
+       :visible? false
+       :interactive? false})
+    (set slot.pointer-target (make-slot-pointer-target slot))
+    (set slot.ctx (make-slot-build-context slot slot-layout-root))
+    (set slot.build-context slot.ctx)
+    (set slot.activate
+         (fn [slot-self]
+           (set slot-self.visible? true)
+           (set slot-self.interactive? true)
+           slot-self))
+    (set slot.deactivate
+         (fn [slot-self]
+           (set slot-self.visible? false)
+           (set slot-self.interactive? false)
+           slot-self))
+    (set slot.drop
+         (fn [slot-self]
+           (slot-self:deactivate)
+           (when (and slot-self.root slot-self.root.drop)
+             (slot-self.root:drop))
+           (set slot-self.root nil)
+           true))
+    (slot:deactivate)
+    slot)
+
+  (fn active-render-context []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.ctx
+        self.build-context))
+
+  (fn ensure-activity-slot [_scene activity-id]
+    (assert (= (type activity-id) :string)
+            "Scene.ensure-activity-slot requires string activity id")
+    (assert (> (# activity-id) 0)
+            "Scene.ensure-activity-slot requires non-empty activity id")
+    (local existing (. self.activity-slots activity-id))
+    (if existing
+        existing
+        (do
+          (local slot (make-activity-slot activity-id))
+          (set (. self.activity-slots activity-id) slot)
+          slot)))
+
+  (fn activity-slot [_scene activity-id]
+    (assert (= (type activity-id) :string)
+            "Scene.activity-slot requires string activity id")
+    (. self.activity-slots activity-id))
+
+  (fn activate-activity-slot [scene activity-id]
+    (local slot (ensure-activity-slot scene activity-id))
+    (when (and self.active-activity-slot
+               (not (= self.active-activity-slot slot)))
+      (self.active-activity-slot:deactivate))
+    (slot:activate)
+    (set self.active-activity-slot-id activity-id)
+    (set self.active-activity-slot slot)
+    slot)
+
+  (fn deactivate-activity-slot [_scene activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:deactivate)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil)))
+    slot)
+
+  (fn drop-activity-slot [_scene activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:drop)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil))
+      (set (. self.activity-slots activity-id) nil))
+    true)
 
   (fn normalize-movable-entry [_self entry]
     (if (not entry)
@@ -1347,44 +1467,49 @@
   (LightingViewState.perspective self.camera.position))
 
 (fn get-triangle-vector [self]
-  self.build-context.triangle-vector)
+  (. (active-render-context) :triangle-vector))
 
 (fn get-triangle-batches [self]
-  (and self.build-context
-       self.build-context.get-triangle-batches
-       (self.build-context:get-triangle-batches)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-triangle-batches
+       (render-ctx:get-triangle-batches)))
 
 (fn get-line-vector [self]
-  self.build-context.line-vector)
+  (. (active-render-context) :line-vector))
 
 (fn get-point-vector [self]
-  self.build-context.point-vector)
+  (. (active-render-context) :point-vector))
 
 (fn get-line-strips [self]
-  self.build-context.line-strips)
+  (. (active-render-context) :line-strips))
 
 (fn get-image-batches [self]
-  self.build-context.image-batches)
+  (. (active-render-context) :image-batches))
 
 (fn get-quad-draw-list [self]
-  (and self.build-context
-       self.build-context.get-quad-draw-list
-       (self.build-context:get-quad-draw-list)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-quad-draw-list
+       (render-ctx:get-quad-draw-list)))
 
 (fn get-text-ssbo-draw-list [self]
-  (and self.build-context
-       self.build-context.get-text-ssbo-draw-list
-       (self.build-context:get-text-ssbo-draw-list)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-text-ssbo-draw-list
+       (render-ctx:get-text-ssbo-draw-list)))
 
 (fn get-mesh-batches [self]
-  (and self.build-context
-       self.build-context.get-mesh-batches
-       (self.build-context:get-mesh-batches)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-mesh-batches
+       (render-ctx:get-mesh-batches)))
 
 (fn get-instanced-color-mesh-batches [self]
-  (and self.build-context
-       self.build-context.get-instanced-color-mesh-batches
-       (self.build-context:get-instanced-color-mesh-batches)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-instanced-color-mesh-batches
+       (render-ctx:get-instanced-color-mesh-batches)))
 
 (fn get-reference-point [self]
   self.reference-point)
@@ -1734,6 +1859,11 @@
 (set self.drop drop)
 (set self.sync-physics-bodies sync-physics-bodies)
 (set self.sync-scene-objects sync-scene-objects)
+(set self.ensure-activity-slot ensure-activity-slot)
+(set self.activity-slot activity-slot)
+(set self.activate-activity-slot activate-activity-slot)
+(set self.deactivate-activity-slot deactivate-activity-slot)
+(set self.drop-activity-slot drop-activity-slot)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)

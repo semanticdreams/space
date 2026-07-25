@@ -1109,6 +1109,13 @@
              (= app.canvas.active-activity-slot activity-slot)
              (= activity-slot.interactive? true))
         true))
+  (local slot (and target target.activity-slot (= (type target.activity-slot) :table) target.activity-slot))
+  (local scene-slot-enabled?
+    (or (not slot)
+        (and (= target.interaction-surface :scene)
+             app.scene
+             (= app.scene.active-activity-slot slot)
+             (= slot.interactive? true))))
   (local canvas-enabled?
     (and (= app.canvas-interactive? true)
          activity-slot-enabled?
@@ -1116,7 +1123,8 @@
              (canvas-target-enabled? target)
              (= (and target target.canvas-target-kind) nil))))
   (if (= surface :scene)
-      (= app.scene-interactive? true)
+      (and (= app.scene-interactive? true)
+           scene-slot-enabled?)
       (if (= surface :canvas)
           canvas-enabled?
           true)))
