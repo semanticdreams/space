@@ -13,6 +13,9 @@
 (local BuiltinUnits (require :llm/presets/builtins/units))
 (local BuiltinGeneral (require :llm/presets/builtins/general))
 (local tempfile (require :tempfile))
+(local sysinfo (require :sysinfo))
+(local platform-os (. (sysinfo.platform) :os))
+(local is-windows (= platform-os "windows"))
 
 (fn with-temp-dir [f]
   (local handle (tempfile.TemporaryDirectory {:prefix "agent-units-test-"}))
@@ -420,6 +423,9 @@
                       :fn test-space-app-list-files-returns-entries})
 
 (fn test-space-app-search-returns-limited-rg-output []
+  (when is-windows
+    (print "Skipping space_app_search test on Windows: rg not available and repo layout differs")
+    (lua "return true"))
   (local adapters (ToolAdapterRegistry {}))
   (BuiltinGeneral.register {:tool-adapters adapters})
   (local def (adapters:resolve "app.search" app))
@@ -435,6 +441,9 @@
                       :fn test-space-app-search-returns-limited-rg-output})
 
 (fn test-space-app-search-rejects-symlink-path []
+  (when is-windows
+    (print "Skipping symlink search test on Windows: ln -s not available")
+    (lua "return true"))
   (local process (require :process))
   (local tmp (tempfile.TemporaryDirectory {:prefix "agent-search-"
                                            :dir (fs.join-path (fs.cwd) "build")}))

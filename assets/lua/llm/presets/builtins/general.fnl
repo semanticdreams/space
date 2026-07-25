@@ -45,8 +45,10 @@
   (local root (and assets-root (fs.parent assets-root)))
   (if (fs.exists (fs.join-path cwd "assets" "lua"))
       cwd
-      (and root (fs.exists root))
+      (and root (fs.exists (fs.join-path root "assets" "lua")))
       root
+      assets-root
+      assets-root
       cwd))
 
 (fn search-result-with-limit [stdout limit]

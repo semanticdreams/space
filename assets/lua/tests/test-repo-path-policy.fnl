@@ -2,6 +2,9 @@
 (local fs (require :fs))
 (local tempfile (require :tempfile))
 (local PathPolicy (require :repo/path-policy))
+(local sysinfo (require :sysinfo))
+(local platform-os (. (sysinfo.platform) :os))
+(local is-windows (= platform-os "windows"))
 
 (var temp-counter 0)
 (local test-root "/tmp/space/tests/repo-path-policy")
@@ -107,10 +110,15 @@
 
 (local main
   (fn []
+    (when is-windows
+      (print "Skipping repo path policy tests on Windows: worktree operations not supported")
+      (lua "return true"))
     (local runner (require :tests/runner))
     (runner.run-tests {:name "repo-path-policy"
                        :tests tests})))
 
+(local module-tests (if is-windows [] tests))
+
 {:name "repo-path-policy"
- :tests tests
+ :tests module-tests
  :main main}

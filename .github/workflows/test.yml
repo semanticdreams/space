@@ -51,7 +51,21 @@ jobs:
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' README.md | sed -n 's/^sudo apt install //p')
-          sudo apt-get install -y ${deps} xvfb ccache
+          sudo apt-get install -y ${deps} ccache
+
+      - name: Configure git for test directories
+        run: |
+          git config --global --add safe.directory /tmp/space/tests
+          git config --global --add safe.directory '*'
+          git config --global protocol.file.allow always
+          echo "=== git config safe.directory ==="
+          git config --global --get-all safe.directory || echo "(none)"
+          echo "=== git config protocol.file.allow ==="
+          git config --global protocol.file.allow || echo "(none)"
+          echo "=== GIT_CONFIG env vars ==="
+          echo "GIT_CONFIG_NOSYSTEM=${GIT_CONFIG_NOSYSTEM:-unset}"
+          echo "GIT_CONFIG_GLOBAL=${GIT_CONFIG_GLOBAL:-unset}"
+          echo "HOME=$HOME"
 
       - name: Build
         env:
