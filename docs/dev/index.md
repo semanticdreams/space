@@ -32,7 +32,9 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Concepts](/dev/concepts)
 - [Lifecycle Invariants](/dev/lifecycle-invariants)
 - [Lifecycle Centralization](/dev/lifecycle-centralization)
+- [Profiling](/dev/profiling)
 - [Reloadable Units And Hot Reload](/dev/reloadable-units)
+- [Remote Control (Debugging)](/dev/remote-control)
 - [Repository Workbench](/dev/repository-workbench)
 - [Graph Maps](/dev/graph-maps)
 - [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown)
@@ -41,7 +43,9 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Building](/dev/building)
 - [Video Playback (FFmpeg)](/dev/video-playback)
 - [SQL Builder (SQLite)](/dev/sql-builder)
+- [Terminal Widget](/dev/terminal)
 - [Devlog](/dev/devlog)
+- [E2E Snapshot Tests](/dev/e2e-testing)
 
 ## Feature Pages
 
