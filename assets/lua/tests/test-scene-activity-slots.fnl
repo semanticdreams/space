@@ -169,44 +169,86 @@
   (drop-fixture fixture))
 
 (fn active-slot-batch-accessors-route-correctly []
-  ;; R1-4: Exercise all renderer-facing batch accessors in active/inactive/switch routing.
-  ;; Batch methods return computed values, so we verify they are callable and produce
-  ;; distinct per-context results by checking they don't throw.
+  ;; R1-4: Exercise all renderer-facing batch accessors with sentinel monkeypatching.
+  ;; Each context gets distinct sentinels so we can assert exact routing through the
+  ;; active-render-context path: surface before activation, Sandbox when active,
+  ;; Graph after switch, surface after deactivation.
   (local fixture (make-scene))
   (local scene fixture.scene)
   (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+  (local graph-slot (scene:ensure-activity-slot "graph"))
 
-  ;; Inactive: all batch accessors are callable and return non-nil from surface context
-  (assert (not (= (scene:get-triangle-batches) nil))
-          "get-triangle-batches should be callable when inactive")
-  (assert (not (= (scene:get-quad-draw-list) nil))
-          "get-quad-draw-list should be callable when inactive")
-  (assert (not (= (scene:get-text-ssbo-draw-list) nil))
-          "get-text-ssbo-draw-list should be callable when inactive")
-  (assert (not (= (scene:get-mesh-batches) nil))
-          "get-mesh-batches should be callable when inactive")
-  (assert (not (= (scene:get-instanced-color-mesh-batches) nil))
-          "get-instanced-color-mesh-batches should be callable when inactive")
+  ;; Sentinels: surface context
+  (set scene.build-context.get-triangle-batches (fn [_ctx] :surface-triangle-batches))
+  (set scene.build-context.get-quad-draw-list (fn [_ctx] :surface-quad-draw-list))
+  (set scene.build-context.get-text-ssbo-draw-list (fn [_ctx] :surface-text-ssbo-draw-list))
+  (set scene.build-context.get-mesh-batches (fn [_ctx] :surface-mesh-batches))
+  (set scene.build-context.get-instanced-color-mesh-batches (fn [_ctx] :surface-instanced-color-mesh-batches))
 
-  ;; Activate sandbox: all batch accessors still callable and non-nil
+  ;; Sentinels: sandbox slot context
+  (set sandbox-slot.ctx.get-triangle-batches (fn [_ctx] :sandbox-triangle-batches))
+  (set sandbox-slot.ctx.get-quad-draw-list (fn [_ctx] :sandbox-quad-draw-list))
+  (set sandbox-slot.ctx.get-text-ssbo-draw-list (fn [_ctx] :sandbox-text-ssbo-draw-list))
+  (set sandbox-slot.ctx.get-mesh-batches (fn [_ctx] :sandbox-mesh-batches))
+  (set sandbox-slot.ctx.get-instanced-color-mesh-batches (fn [_ctx] :sandbox-instanced-color-mesh-batches))
+
+  ;; Sentinels: graph slot context
+  (set graph-slot.ctx.get-triangle-batches (fn [_ctx] :graph-triangle-batches))
+  (set graph-slot.ctx.get-quad-draw-list (fn [_ctx] :graph-quad-draw-list))
+  (set graph-slot.ctx.get-text-ssbo-draw-list (fn [_ctx] :graph-text-ssbo-draw-list))
+  (set graph-slot.ctx.get-mesh-batches (fn [_ctx] :graph-mesh-batches))
+  (set graph-slot.ctx.get-instanced-color-mesh-batches (fn [_ctx] :graph-instanced-color-mesh-batches))
+
+  ;; Before activation: surface sentinels
+  (assert (= (scene:get-triangle-batches) :surface-triangle-batches)
+          "Inactive: triangle batches route to surface")
+  (assert (= (scene:get-quad-draw-list) :surface-quad-draw-list)
+          "Inactive: quad draw list routes to surface")
+  (assert (= (scene:get-text-ssbo-draw-list) :surface-text-ssbo-draw-list)
+          "Inactive: text SSBO draw list routes to surface")
+  (assert (= (scene:get-mesh-batches) :surface-mesh-batches)
+          "Inactive: mesh batches route to surface")
+  (assert (= (scene:get-instanced-color-mesh-batches) :surface-instanced-color-mesh-batches)
+          "Inactive: instanced color mesh batches route to surface")
+
+  ;; Activate sandbox: sandbox sentinels
   (scene:activate-activity-slot "sandbox")
-  (assert (not (= (scene:get-triangle-batches) nil))
-          "Active slot triangle batches should be non-nil")
-  (assert (not (= (scene:get-quad-draw-list) nil))
-          "Active slot quad draw list should be non-nil")
-  (assert (not (= (scene:get-text-ssbo-draw-list) nil))
-          "Active slot text SSBO draw list should be non-nil")
-  (assert (not (= (scene:get-mesh-batches) nil))
-          "Active slot mesh batches should be non-nil")
-  (assert (not (= (scene:get-instanced-color-mesh-batches) nil))
-          "Active slot instanced color mesh batches should be non-nil")
+  (assert (= (scene:get-triangle-batches) :sandbox-triangle-batches)
+          "Sandbox active: triangle batches route to sandbox slot")
+  (assert (= (scene:get-quad-draw-list) :sandbox-quad-draw-list)
+          "Sandbox active: quad draw list routes to sandbox slot")
+  (assert (= (scene:get-text-ssbo-draw-list) :sandbox-text-ssbo-draw-list)
+          "Sandbox active: text SSBO draw list routes to sandbox slot")
+  (assert (= (scene:get-mesh-batches) :sandbox-mesh-batches)
+          "Sandbox active: mesh batches route to sandbox slot")
+  (assert (= (scene:get-instanced-color-mesh-batches) :sandbox-instanced-color-mesh-batches)
+          "Sandbox active: instanced color mesh batches route to sandbox slot")
 
-  ;; Deactivate: fall back to surface context, all still callable
-  (scene:deactivate-activity-slot "sandbox")
-  (assert (not (= (scene:get-triangle-batches) nil))
-          "Deactivated get-triangle-batches should fall back to surface")
-  (assert (not (= (scene:get-mesh-batches) nil))
-          "Deactivated get-mesh-batches should fall back to surface")
+  ;; Switch to graph: graph sentinels
+  (scene:activate-activity-slot "graph")
+  (assert (= (scene:get-triangle-batches) :graph-triangle-batches)
+          "Graph active: triangle batches route to graph slot")
+  (assert (= (scene:get-quad-draw-list) :graph-quad-draw-list)
+          "Graph active: quad draw list routes to graph slot")
+  (assert (= (scene:get-text-ssbo-draw-list) :graph-text-ssbo-draw-list)
+          "Graph active: text SSBO draw list routes to graph slot")
+  (assert (= (scene:get-mesh-batches) :graph-mesh-batches)
+          "Graph active: mesh batches route to graph slot")
+  (assert (= (scene:get-instanced-color-mesh-batches) :graph-instanced-color-mesh-batches)
+          "Graph active: instanced color mesh batches route to graph slot")
+
+  ;; Deactivate: fall back to surface sentinels
+  (scene:deactivate-activity-slot "graph")
+  (assert (= (scene:get-triangle-batches) :surface-triangle-batches)
+          "Deactivated: triangle batches fall back to surface")
+  (assert (= (scene:get-quad-draw-list) :surface-quad-draw-list)
+          "Deactivated: quad draw list falls back to surface")
+  (assert (= (scene:get-text-ssbo-draw-list) :surface-text-ssbo-draw-list)
+          "Deactivated: text SSBO draw list falls back to surface")
+  (assert (= (scene:get-mesh-batches) :surface-mesh-batches)
+          "Deactivated: mesh batches fall back to surface")
+  (assert (= (scene:get-instanced-color-mesh-batches) :surface-instanced-color-mesh-batches)
+          "Deactivated: instanced color mesh batches fall back to surface")
 
   (drop-fixture fixture))
 
