@@ -569,6 +569,66 @@
       ;; Cleanup
       (entity:drop))))
 
+(fn restore-terrain-no-duplicates-on-active-slot []
+  ;; R1-2 focused: restore-activity-slot-state on an already-active empty slot
+  ;; must build terrain exactly once with no duplicates.
+  ;; The existing environment-isolation test restores before activation;
+  ;; this exercises the active-slot restore path directly.
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Mock renderer skybox / background for apply-state-to-services
+      (var skybox-state {:enabled? false
+                         :name "lake"
+                         :brightness 0.1
+                         :tint-color [1.0 1.0 1.0]})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                     :set-state (fn [_ state]
+                                  (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state]
+                                     (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+
+      ;; Mock physics for containment
+      (var installed-bodies [])
+      (set app.engine {:physics {:addRigidBody (fn [_phys body] (table.insert installed-bodies body))
+                                  :removeRigidBody (fn [_phys _body])}})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local slot (scene:ensure-activity-slot "sandbox"))
+
+      ;; (1) Activate an empty Scene slot (no terrain built yet)
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Slot should be active before restore")
+
+      ;; (2) Build a complete canonical state with exactly one terrain record
+      (local state (ActivitySceneState.empty-state))
+      (set state.terrains [{:kind "heightfield-terrain"}])
+
+      ;; Call restore-activity-slot-state for the already-active slot
+      (assert (scene:restore-activity-slot-state "sandbox" state)
+              "restore-activity-slot-state on active slot should return true")
+
+      ;; (3) Immediately assert slot.scene-terrains has exactly one entry
+      (assert slot.scene-terrains
+              "Active slot should have runtime terrain after restore")
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "Active slot should have exactly one runtime terrain after restore, got "
+                  (tostring (length slot.scene-terrains))))
+
+      (drop-fixture fixture))))
+
 (fn containment-enabled-flag-controls-install []
   ;; Task 2: Containment :enabled? false should clear and install nothing.
   (with-restored-app-fields
@@ -657,6 +717,8 @@
                        :fn containment-enabled-flag-controls-install})
 (table.insert tests {:name "Scene content mutation asserts without active slot"
                        :fn no-active-slot-mutation-asserts})
+(table.insert tests {:name "Scene restore terrain no duplicates on active slot"
+                       :fn restore-terrain-no-duplicates-on-active-slot})
 
 (local main
   (fn []

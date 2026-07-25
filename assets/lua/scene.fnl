@@ -876,7 +876,16 @@
             (do
               (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
               (each [_ entry (ipairs entries)]
-                (self:add-terrain-record entry.record))))))
+                (self:add-terrain-record entry.record)))))
+      ;; After terrain rebuild, update slot fields so the slot owns the
+      ;; newly built content (not just the service state).
+      (set slot.entity self.entity)
+      (set slot.scene-children self.scene-children)
+      (set slot.scene-terrains self.scene-terrains)
+      (set slot.queued-cube-panels self.queued-cube-panels)
+      (set slot.panel-restorers self.panel-restorers)
+      (set slot.demo-browser self.demo-browser)
+      (set slot.physics-body-count self.physics-body-count))
     true)
 
   (fn deactivate-activity-slot [_scene activity-id]
