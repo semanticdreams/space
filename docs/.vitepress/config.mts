@@ -111,6 +111,7 @@ export default defineConfig({
         {
           text: 'Internals',
           items: [
+            { text: 'Building', link: '/dev/building' },
             { text: 'Reloadable Units', link: '/dev/reloadable-units' },
             { text: 'Repository Workbench', link: '/dev/repository-workbench' },
             { text: 'Runtime Performance', link: '/dev/runtime-performance' },

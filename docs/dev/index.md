@@ -38,6 +38,7 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 - [Widget Ownership And Teardown](/dev/widget-ownership-and-teardown)
 - [Runtime Performance Modes](/dev/runtime-performance)
 - [Agent Preset Control Panel](/dev/agent-preset-control-panel)
+- [Building](/dev/building)
 - [Video Playback (FFmpeg)](/dev/video-playback)
 - [SQL Builder (SQLite)](/dev/sql-builder)
 - [Devlog](/dev/devlog)
