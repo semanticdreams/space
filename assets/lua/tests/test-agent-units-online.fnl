@@ -1,5 +1,5 @@
-;; Live E2E test: agent builds a production canvas mode (bubbles) from scratch.
-;; Verifies the agent can explore the codebase, understand canvas mode architecture,
+;; Live E2E test: agent builds a production activity (bubbles) from scratch.
+;; Verifies the agent can explore the codebase, understand activity architecture,
 ;; create multi-file folder-structured units, and test its own work.
 ;;
 ;; Run: SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH=$(pwd)/assets ./build/space -m tests.test-agent-units-online:main
@@ -28,7 +28,7 @@
 (local Signal (require :signal))
 (local json (require :json))
 (local tempfile (require :tempfile))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local {:VectorBuffer VectorBuffer} (require :vector-buffer))
 (local glm (require :glm))
 
@@ -75,7 +75,7 @@
   {:path handle.path :handle handle})
 
 (fn make-mock-app [code-dir unit-manager assets-path]
-  "Build a realistic-enough app that a canvas mode unit can activate in."
+  "Build a realistic-enough app that an activity unit can activate in."
   (local tri-vec (VectorBuffer 1024))
   (local fake-build-context
     {:triangle-vector tri-vec
@@ -90,7 +90,7 @@
                        {:origin (glm.vec3 0 0 0) :direction (glm.vec3 0 0 -1)})
      :get-view-matrix (fn [_self] (glm.mat4))})
   (local fake-focus-manager {:clear-focus (fn [_] true)})
-  (var fake-active-mode nil)
+  (var fake-active-activity nil)
   (local app
     {:unit-manager unit-manager
      :code-dir code-dir
@@ -101,20 +101,20 @@
                   :unregister-left-click-void-callback (fn [_self _cb] true)}
      :hoverables {:register (fn [_] true)}
      :intersectables {:register (fn [_] true)}
-     :active-canvas-mode nil
-     :canvas-shell-changed (Signal)
-     :canvas-modes-changed (Signal)
-     :canvas-mode-root-actions nil
-     :canvas-mode-selection-actions nil
-     :canvas-mode-update nil
-     :canvas-mode-input-handlers nil
-     :canvas-mode-left-dock-builder nil
-     :canvas-mode-command-hints-provider nil
-     :canvas-mode-delete-selection nil
-     :canvas-mode-activate-focused nil
-     :canvas-mode-drawing-enabled? true
-     :canvas-mode-context-enricher nil
-     :canvas-mode-target-enabled? nil
+     :active-activity-id nil
+     :workspace-shell-changed (Signal)
+     :activities-changed (Signal)
+     :activity-root-actions nil
+     :activity-selection-actions nil
+     :activity-update nil
+     :activity-input-handlers nil
+     :activity-left-dock-builder nil
+     :activity-command-hints-provider nil
+     :activity-delete-selection nil
+     :activity-activate-focused nil
+     :activity-drawing-enabled? true
+     :activity-context-enricher nil
+     :activity-target-enabled? nil
      :test-app true})
   app)
 
@@ -259,10 +259,10 @@
   found)
 
 ;; ═══════════════════════════════════════
-;; Test: Agent builds bubbles canvas mode
+;; Test: Agent builds bubbles activity
 ;; ═══════════════════════════════════════
 
-(fn test-bubbles-canvas-mode []
+(fn test-bubbles-activity []
   (local root (fresh-root))
   (var handles {})
   (set handles.root root)
@@ -299,18 +299,18 @@
       ;; Build a realistic mock app with canvas infrastructure
       (local app (make-mock-app code-dir mgr assets-path))
 
-      ;; Set app as global so CanvasModes and other modules can access it
+      ;; Set app as global so Activities and other modules can access it
       (set _G.app app)
 
       ;; Register a sample mode so the agent can explore how modes work
       (var sample-mode-activated false)
       (var sample-activated-session nil)
-      (CanvasModes.register-mode
+      (Activities.register-activity
         {:id "sample-mode"
          :label "Sample"
          :icon "star"
          :button-name "sample-mode-btn"
-         :show-in-sidebar? true
+         :show-in-switcher? true
          :activate (fn [ctx]
                      (set sample-mode-activated true)
                      (ctx:set-root-actions! (fn [_c] []))
@@ -337,19 +337,19 @@
                          pipeline.preset-manager pipeline.surface pipeline.approvals app))
       (set handles.runner runner)
 
-      ;; 2. Run turn: agent builds bubbles mode
+      ;; 2. Run turn: agent builds bubbles activity
       (local session (runner:create-session "space-agent"))
 
       (local prompt
         (.. "Do these steps in order:\n"
             "1. Call space_unit_list to see registered units and check if any bubbles unit exists.\n"
-            "2. Explore the drawing canvas mode to understand how canvas modes work. Use space_app_run_bash "
-            "with rg to search for CanvasModes.register-mode, then read drawing-canvas-mode-unit.fnl.\n"
+            "2. Explore the drawing activity to understand how activities work. Use space_app_run_bash "
+            "with rg to search for Activities.register-activity, then read drawing-activity-unit.fnl.\n"
             "3. Read drawing/render.fnl to understand the DynamicTriangleBuffer pattern.\n"
             "4. Read drawing/input.fnl to understand how input handlers convert screen coords to world coords.\n"
-            "5. Build a new canvas mode called \"bubbles\" as a multi-file unit under the code directory.\n"
+            "5. Build a new activity called \"bubbles\" as a multi-file unit under the code directory.\n"
             "   Create the folders with mkdir, write the files with space_app_write_file.\n"
-            "   The mode should:\n"
+            "   The activity should:\n"
             "   - Show continuously spawning floating bubbles of various sizes (0.5-2.0 world units)\n"
             "     and colors at random positions within the canvas bounds\n"
             "   - Bubbles float upward slowly, new ones spawn at edges periodically\n"
@@ -365,7 +365,7 @@
             "   If the file already exists, use space_unit_edit instead.\n"
             "7. Use space_unit_list to confirm the unit is loaded.\n"
             "8. Use space_unit_eval to verify the mode registers without errors:\n"
-            "   (CanvasModes.register-mode {:id \"bubbles\" :activate (fn [ctx] (ctx:set-target-enabled! (fn [t] true)) true) :deactivate (fn [c s] true)})\n"
+            "   (Activities.register-activity {:id \"bubbles\" :activate (fn [ctx] (ctx:set-target-enabled! (fn [t] true)) true) :deactivate (fn [c s] true)})\n"
             "9. Reply with exactly DONE when everything is verified."))
 
       (print "\n  == Agent: build bubbles mode ==")
@@ -401,8 +401,8 @@
       (each [line (string.gmatch init-src "[^\n]+")] (print (.. "  | " line)))
       (print "  --- end ---")
 
-      (assert (string.find init-src "CanvasModes.register-mode" 1 true)
-              "init.fnl should call CanvasModes.register-mode")
+      (assert (string.find init-src "Activities.register-activity" 1 true)
+              "init.fnl should call Activities.register-activity")
       (assert (string.find init-src ":init" 1 true) "init.fnl should export :init")
       (assert (string.find init-src ":drop" 1 true) "init.fnl should export :drop")
       (assert (string.find init-src ":snapshot" 1 true) "init.fnl should export :snapshot")
@@ -457,10 +457,10 @@
 ;; ═══════════════════════════════════════
 
 (fn main []
-  (print "Agent Units Online: Bubbles Canvas Mode")
+  (print "Agent Units Online: Bubbles Activity")
   (print "=======================================")
   (math.randomseed (math.floor (now-ms)))
-  (run-test "build bubbles canvas mode" test-bubbles-canvas-mode)
+  (run-test "build bubbles activity" test-bubbles-activity)
   (print "")
   (print "==========================")
   (print (.. "Results: " passed " passed, " failed " failed"))

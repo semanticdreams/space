@@ -4,6 +4,11 @@
 (local Intersectables (require :intersectables))
 (local {: shift-held?} (require :input-modifiers))
 
+(fn pointer-target-enabled? [target]
+  (if (and target app app.pointer-target-enabled?)
+      (app.pointer-target-enabled? target)
+      true))
+
 (fn safe-offset [target-point hit-point]
   (if (and target-point hit-point)
       (- target-point hit-point)
@@ -228,22 +233,25 @@
   (fn update-drag [self payload]
     (local drag self.drag)
     (when (and drag drag.started?)
-      (local pointer (self.intersector:pointer payload))
-      (local ray (self.intersector:resolve-ray pointer drag.pointer-target))
-      (local desired-mode (resolve-plane-mode payload))
-      (when (and ray drag.entry drag.entry.target)
-        (when (and drag.plane-mode (not (= drag.plane-mode desired-mode)))
-          (local current-hit (ray-plane-intersection ray drag.plane))
-          (local anchor (or current-hit drag.entry.target.position drag.hit-point))
-          (when anchor
-            (set drag.plane (make-plane anchor desired-mode))
-            (set drag.offset (safe-offset drag.entry.target.position anchor))
-            (set drag.plane-mode desired-mode)))
-        (local hit (ray-plane-intersection ray drag.plane))
-        (when hit
-          (local new-position (+ hit drag.offset))
-          (assert-finite-vec3 new-position "drag position")
-          (drag.entry.target:set-position new-position)))))
+      (if (not (pointer-target-enabled? drag.pointer-target))
+          (end-drag self)
+          (do
+            (local pointer (self.intersector:pointer payload))
+            (local ray (self.intersector:resolve-ray pointer drag.pointer-target))
+            (local desired-mode (resolve-plane-mode payload))
+            (when (and ray drag.entry drag.entry.target)
+              (when (and drag.plane-mode (not (= drag.plane-mode desired-mode)))
+                (local current-hit (ray-plane-intersection ray drag.plane))
+                (local anchor (or current-hit drag.entry.target.position drag.hit-point))
+                (when anchor
+                  (set drag.plane (make-plane anchor desired-mode))
+                  (set drag.offset (safe-offset drag.entry.target.position anchor))
+                  (set drag.plane-mode desired-mode)))
+              (local hit (ray-plane-intersection ray drag.plane))
+              (when hit
+                (local new-position (+ hit drag.offset))
+                (assert-finite-vec3 new-position "drag position")
+                (drag.entry.target:set-position new-position)))))))
 
   (fn on-mouse-button-down [self payload]
     (when (and payload (= payload.button SDL_BUTTON_LEFT))
@@ -255,9 +263,12 @@
 
   (fn on-mouse-motion [self payload]
     (when self.drag
-      (ensure-drag-started self payload)
-      (when (and self.drag self.drag.started?)
-        (update-drag self payload))))
+      (if (not (pointer-target-enabled? self.drag.pointer-target))
+          (end-drag self)
+          (do
+            (ensure-drag-started self payload)
+            (when (and self.drag self.drag.started?)
+              (update-drag self payload))))))
 
   (fn drag-active? [self]
     (and self.drag self.drag.started?))

@@ -1,0 +1,654 @@
+(local glm (require :glm))
+(local fs (require :fs))
+(local Activities (require :activities))
+(local Graph (require :graph/init))
+(local GraphMap (require :graph/map))
+(local Canvas (require :canvas))
+(local Camera (require :camera))
+(local ObjectSelector (require :object-selector))
+(local DrawingController (require :drawing/controller))
+(local GraphActivityUnit (require :graph-activity-unit))
+(local DrawingActivityUnit (require :drawing-activity-unit))
+(local BoardActivityUnit (require :board-activity-unit))
+(local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
+(local {: FocusManager} (require :focus))
+
+(local tests [])
+
+(fn snapshot-app-fields [keys]
+  (local snapshot {:keys keys
+                   :values {}})
+  (each [_ key (ipairs keys)]
+    (set (. snapshot.values key) (. app key)))
+  snapshot)
+
+(fn restore-app-fields! [snapshot]
+  (each [_ key (ipairs snapshot.keys)]
+    (set (. app key) (. snapshot.values key)))
+  true)
+
+(fn activity-switching-retains-presentations []
+  (local app-keys [:active-world-runtime
+                    :canvas
+                    :graph
+                    :graph-map
+                    :graph-map-manager
+                    :graph-view
+                   :drawing-controller
+                   :drawing-render
+                   :board
+                   :board-view
+                   :activity-registry
+                   :activities-changed
+                     :active-activity-id
+                     :canvas-visible?
+                     :active-interaction-surface
+                     :active-pointer-controls
+                     :preferred-interaction-surface
+                     :scene-interactive?
+                     :canvas-interactive?
+                     :canvas-surface-interactive?
+                     :canvas-controls
+                     :first-person-controls
+                     :set-canvas-visible
+                    :set-active-interaction-surface
+                    :viewport
+                    :themes])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.canvas-visible? false)
+  (set app.active-interaction-surface :scene)
+  (set app.preferred-interaction-surface :scene)
+  (set app.set-canvas-visible
+       (fn [visible?]
+         (set app.canvas-visible? (and app.canvas (not (= visible? false))))))
+  (set app.set-active-interaction-surface
+       (fn [surface _opts]
+         (set app.preferred-interaction-surface surface)
+         (set app.active-interaction-surface
+              (if (and (= surface :canvas) app.canvas-visible?) :canvas :scene))))
+  (set app.themes {:get-active-theme
+                   (fn []
+                     {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)
+                              :label-color (glm.vec4 1 1 1 1)
+                              :label-target-pixels 13.0
+                              :label-min-scale 4.0
+                              :edge-color (glm.vec4 0.6 0.6 0.6 1)}
+                      :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})})
+  (local data-dir "/tmp/space/tests/activity-retention")
+  (when (fs.exists data-dir)
+    (fs.remove-all data-dir))
+  (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "activity-retention-test"}))
+  (local canvas (Canvas {:camera camera
+                         :focus-manager focus-manager}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local object-selector (ObjectSelector {:ctx-provider (fn []
+                                                        (or (and canvas.active-activity-slot
+                                                                 canvas.active-activity-slot.ctx)
+                                                            canvas.build-context))
+                                          :enabled? true}))
+  (local controller (DrawingController {:data_dir data-dir}))
+  (controller:add-layer "vector")
+  (local runtime {:canvas canvas
+                  :graph graph
+                  :graph-map graph-map
+                  :object-selector object-selector
+                  :movables app.movables
+                  :canvas-camera camera
+                  :world-dir data-dir
+                  :drawing-controller controller
+                  :board-state {:items [] :connectors []}})
+  (set app.active-world-runtime runtime)
+  (set app.canvas canvas)
+  (set app.graph graph)
+  (set app.graph-map graph-map)
+  (set app.drawing-controller controller)
+  (local (ok result)
+    (pcall
+      (fn []
+        (GraphActivityUnit.load-graph-activity!)
+        (DrawingActivityUnit.load-drawing-activity!)
+        (BoardActivityUnit.load-board-activity!)
+
+        (Activities.activate-activity "graph")
+        (local graph-view app.graph-view)
+        (local graph-slot (canvas:activity-slot "graph"))
+        (assert graph-view "Graph activity should create graph view")
+        (assert graph-slot.visible? "Graph slot should be visible while graph is active")
+        (assert (= app.canvas-visible? true)
+                "Graph activity should request canvas visibility")
+        (assert (= app.active-interaction-surface :canvas)
+                "Graph activity should request canvas interaction")
+
+        (Activities.activate-activity "drawing")
+        (local drawing-render app.drawing-render)
+        (local drawing-slot (canvas:activity-slot "drawing"))
+        (assert drawing-render "Drawing activity should create drawing render")
+        (assert drawing-slot.visible? "Drawing slot should be visible while drawing is active")
+        (assert (not graph-slot.visible?) "Graph slot should hide when drawing becomes active")
+        (assert (= runtime.graph-view graph-view)
+                "Graph view should remain retained after switching away")
+        (assert (= app.graph-view nil)
+                "Inactive graph activity should not expose app.graph-view")
+
+        (Activities.activate-activity "board")
+        (local board app.board)
+        (local board-view app.board-view)
+        (local board-slot (canvas:activity-slot "board"))
+        (assert board-view "Board activity should create board view")
+        (assert board-slot.visible? "Board slot should be visible while board is active")
+        (assert (not drawing-slot.visible?) "Drawing slot should hide when board becomes active")
+        (assert (= runtime.drawing-render drawing-render)
+                "Drawing render should remain retained after switching away")
+        (assert (= app.drawing-render nil)
+                "Inactive drawing activity should not expose app.drawing-render")
+
+        (Activities.activate-activity "graph")
+        (assert (= app.graph-view graph-view)
+                "Switching back to graph should reuse the retained graph view")
+        (assert graph-slot.visible? "Graph slot should reactivate")
+        (assert (not board-slot.visible?) "Board slot should hide when graph becomes active")
+        (assert (= runtime.board board)
+                "Board state owner should remain retained after switching away")
+        (assert (= runtime.board-view board-view)
+                "Board view should remain retained after switching away")
+        (assert (= app.board nil)
+                "Inactive board activity should not expose app.board")
+        (assert (= app.board-view nil)
+                "Inactive board activity should not expose app.board-view")
+
+        (Activities.activate-activity "drawing")
+        (assert (= app.drawing-render drawing-render)
+                "Switching back to drawing should reuse the retained drawing render")
+        (assert drawing-slot.visible? "Drawing slot should reactivate")
+
+        (Activities.activate-activity "board")
+        (assert (= app.board board)
+                "Switching back to board should reuse the retained board")
+        (assert (= app.board-view board-view)
+                "Switching back to board should reuse the retained board view")
+        (assert board-slot.visible? "Board slot should reactivate")
+        (local session-state (Activities.snapshot-activity-sessions))
+        (assert session-state.graph
+                "Retained graph activity session should be snapshotted")
+        (assert session-state.drawing
+                "Retained drawing activity session should be snapshotted")
+        (assert session-state.board
+                "Retained board activity session should be snapshotted")
+        true)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (pcall DrawingActivityUnit.unload-drawing-activity!)
+  (pcall BoardActivityUnit.unload-board-activity!)
+  (object-selector:drop)
+  (graph-map:drop)
+  (graph:drop)
+  (canvas:drop)
+  (focus-manager:drop)
+  (camera:drop)
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Activity switching retains presentation sessions"
+                      :fn activity-switching-retains-presentations})
+
+(fn activity-sessions-are-runtime-scoped []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (local runtime-a {})
+  (local runtime-b {})
+  (var activation-count 0)
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [_ctx retained]
+                       (if retained
+                           retained
+                           (do
+                             (set activation-count (+ activation-count 1))
+                             {:runtime app.active-world-runtime
+                              :activation activation-count})))})
+        (set app.active-world-runtime runtime-a)
+        (local session-a (Activities.activate-activity "test"))
+        (Activities.deactivate-active-activity)
+        (set app.active-world-runtime runtime-b)
+        (local session-b (Activities.activate-activity "test"))
+        (assert (not (= session-a session-b))
+                "Activity sessions should not be shared across world runtimes")
+        (assert (= session-a.runtime runtime-a)
+                "First activity session should belong to runtime A")
+        (assert (= session-b.runtime runtime-b)
+                "Second activity session should belong to runtime B")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Activity sessions are runtime scoped"
+                      :fn activity-sessions-are-runtime-scoped})
+
+(fn retained-activity-reactivation-preserves-cleanup-stack []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {})
+  (local cleanup-order [])
+  (local session {:id :retained})
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [ctx retained]
+                       (ctx:defer-cleanup! (fn []
+                                             (table.insert cleanup-order
+                                                           (if retained :second :first))))
+                       (or retained session))})
+        (Activities.register-activity
+          {:id "other"
+           :label "Other"
+           :activate (fn [_ctx] {})})
+        (assert (= (Activities.activate-activity "test") session)
+                "Initial activation should create the retained session")
+        (Activities.activate-activity "other")
+        (assert (= (Activities.activate-activity "test") session)
+                "Reactivation should reuse the retained session")
+        (Activities.drop-activity-session! "test")
+        (assert (= (length cleanup-order) 2)
+                "Dropping a reactivated retained session should run both cleanup closures")
+        (assert (= (. cleanup-order 1) :second)
+                "Cleanup stack should remain LIFO after retained reactivation")
+        (assert (= (. cleanup-order 2) :first)
+                "Original cleanup closure should not be overwritten on retained reactivation")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (pcall (fn [] (Activities.unregister-activity "other")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Retained activity reactivation preserves cleanup stack"
+                     :fn retained-activity-reactivation-preserves-cleanup-stack})
+
+(fn pending-activity-session-state-restores-on-first-activation []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (local runtime {:activity-session-state {:test {:value 7}}})
+  (set app.active-world-runtime runtime)
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [_ctx retained]
+                       (assert (= retained nil)
+                               "Pending snapshot state should not be passed as the live retained session")
+                       {:value 0})
+           :restore (fn [_ctx session state]
+                      (set session.value state.value))
+           :snapshot (fn [_ctx session]
+                       {:value session.value})})
+        (local session (Activities.activate-activity "test"))
+        (assert (= session.value 7)
+                "First activation should restore pending persisted session state")
+        (assert (= runtime.activity-session-state.test nil)
+                "Restored pending session state should be consumed after activation")
+        (assert (= (Activities.activate-activity "test") session)
+                "Reactivating the active activity should return the user session, not the wrapper")
+        (local snapshot (Activities.snapshot-activity-sessions))
+        (assert (= snapshot.test.value 7)
+                "Live restored activity session should snapshot restored state")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(fn inactive-pending-activity-session-state-is-preserved []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (local runtime {:activity-session-state {:test {:value 9}}})
+  (set app.active-world-runtime runtime)
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [_ctx] {:value 0})
+           :snapshot (fn [_ctx session]
+                       {:value session.value})})
+        (local snapshot (Activities.snapshot-activity-sessions))
+        (assert (= snapshot.test.value 9)
+                "Inactive pending persisted activity session state should survive snapshots")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(fn deactivation-clears-activity-surface-policy []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id
+                   :active-interaction-surface
+                   :preferred-interaction-surface
+                   :canvas
+                   :canvas-visible?
+                   :canvas-surface-interactive?
+                   :canvas-interactive?
+                   :set-active-interaction-surface
+                   :sync-interaction-surface-state])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {})
+  (set app.canvas {})
+  (set app.canvas-visible? true)
+  (set app.canvas-surface-interactive? true)
+  (set app.canvas-interactive? true)
+  (set app.preferred-interaction-surface :canvas)
+  (set app.active-interaction-surface :canvas)
+  (set app.set-active-interaction-surface
+       (fn [surface _opts]
+         (set app.preferred-interaction-surface surface)
+         (set app.canvas-interactive?
+              (and (= app.canvas-visible? true)
+                   (not (= app.canvas-surface-interactive? false))
+                   (= surface :canvas)))
+         (set app.active-interaction-surface
+              (if app.canvas-interactive? :canvas :scene))))
+  (set app.sync-interaction-surface-state
+       (fn [_reason _previous]
+         (set app.canvas-interactive?
+              (and (= app.canvas-visible? true)
+                   (not (= app.canvas-surface-interactive? false))
+                   (= app.preferred-interaction-surface :canvas)))
+         (set app.active-interaction-surface
+              (if app.canvas-interactive? :canvas :scene))))
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [ctx]
+                       (ctx:set-surface-state! {:canvas {:visible? true
+                                                         :interactive? false}})
+                       (ctx:set-preferred-interaction-surface! :canvas)
+                       {})})
+        (Activities.activate-activity "test")
+        (assert (= app.canvas-surface-interactive? false)
+                "Activity policy should be able to disable canvas interaction")
+        (Activities.deactivate-active-activity)
+        (assert (= app.canvas-surface-interactive? true)
+                "Activity deactivation should clear activity surface interactivity policy")
+        (assert (= app.canvas-interactive? true)
+                "Clearing activity surface policy should resync canvas interaction")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Pending activity session state restores on first activation"
+                     :fn pending-activity-session-state-restores-on-first-activation})
+(table.insert tests {:name "Inactive pending activity session state is preserved"
+                     :fn inactive-pending-activity-session-state-is-preserved})
+(table.insert tests {:name "Activity deactivation clears surface policy"
+                      :fn deactivation-clears-activity-surface-policy})
+
+(fn activity-surface-policy-rejects-underscore-alias []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id
+                   :activity-preferred-interaction-surface
+                   :preferred-interaction-surface
+                   :set-active-interaction-surface])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {})
+  (set app.activity-preferred-interaction-surface nil)
+  (set app.preferred-interaction-surface :scene)
+  (set app.set-active-interaction-surface
+       (fn [surface _opts]
+         (set app.preferred-interaction-surface surface)))
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [ctx]
+                       (ctx:set-surface-state! {:preferred_interaction_surface :canvas})
+                       {})})
+        (Activities.activate-activity "test")
+        (assert (= app.activity-preferred-interaction-surface nil)
+                "Activity surface policy should ignore underscored preferred_interaction_surface")
+        (assert (= app.preferred-interaction-surface :scene)
+                "Underscored surface policy alias should not switch the app surface")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Activity surface policy rejects underscore alias"
+                     :fn activity-surface-policy-rejects-underscore-alias})
+
+(fn canvas-unit-state-keeps-activity-shell-separate []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (local runtime {:requested-activity-id "test"
+                  :requested-activity-known? true
+                  :preferred-interaction-surface :canvas
+                  :canvas {:capture-state (fn [_self]
+                                           {:panels []})}})
+  (local world {:state {:activity {:sessions {}}
+                        :canvas {:panels []}}})
+  (set app.active-world-runtime runtime)
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "test"
+           :label "Test"
+           :activate (fn [_ctx] {:value 3})
+           :snapshot (fn [_ctx session]
+                       {:value session.value})})
+        (Activities.activate-activity "test")
+        (local unit-state (HomeWorldCanvasRuntime.capture-runtime-canvas-unit-state world runtime))
+        (assert unit-state.canvas
+                "Canvas unit snapshot should include a canvas payload")
+        (assert unit-state.activity
+                "Canvas unit snapshot should include a separate activity shell payload")
+        (assert (= unit-state.canvas.active_id nil)
+                "Canvas unit snapshot should not write activity id into canvas payload")
+        (assert (= unit-state.activity.active_id "test")
+                "Canvas unit snapshot should write active activity id into activity payload")
+        (HomeWorldCanvasRuntime.restore-runtime-canvas-unit-state! runtime unit-state)
+        (assert (= runtime.requested-activity-id "test")
+                "Canvas unit restore should recover requested activity from activity payload")
+        (assert (= runtime.pending-canvas-state.active_id nil)
+                "Canvas unit restore should keep pending canvas state free of activity id")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Canvas unit state keeps activity shell separate"
+                      :fn canvas-unit-state-keeps-activity-shell-separate})
+
+(fn flat-canvas-unit-state-is-not-restored-as-activity-shell []
+  (local runtime {})
+  (HomeWorldCanvasRuntime.restore-runtime-canvas-unit-state!
+    runtime
+    {:active_mode "drawing"
+     :preferred_interaction_surface "canvas"
+     :scale_factor 2
+     :panels [{:id "left"}]})
+  (assert (= runtime.requested-activity-id nil)
+          "Flat canvas unit state should not migrate active_mode into requested activity")
+  (assert (= runtime.preferred-interaction-surface :scene)
+          "Flat canvas unit state should not migrate preferred_interaction_surface")
+  (assert (= runtime.pending-canvas-state.scale_factor nil)
+          "Flat canvas unit state should not be treated as canonical canvas payload")
+  true)
+
+(table.insert tests {:name "Flat canvas unit state is not restored as activity shell"
+                     :fn flat-canvas-unit-state-is-not-restored-as-activity-shell})
+
+(fn inactive-runtime-canvas-surface-drops-board-resources []
+  (local app-snapshot (snapshot-app-fields [:active-world-runtime]))
+  (set app.active-world-runtime {:id :other-runtime})
+  (var dropped? false)
+  (local runtime {:board {:id :board}
+                  :board-view {:drop (fn [_self]
+                                       (set dropped? true))}})
+  (local (ok result)
+    (pcall
+      (fn []
+        (HomeWorldCanvasRuntime.drop-runtime-canvas-surface! runtime)
+        (assert dropped?
+                "Dropping an inactive runtime canvas surface should drop retained board view")
+        (assert (= runtime.board nil)
+                "Dropping an inactive runtime canvas surface should clear retained board")
+        (assert (= runtime.board-view nil)
+                "Dropping an inactive runtime canvas surface should clear retained board view")
+        true)))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Inactive runtime canvas surface drops board resources"
+                     :fn inactive-runtime-canvas-surface-drops-board-resources})
+
+(fn snapshot-activity-sessions-preserves-unregistered-pending-state []
+  (local app-snapshot (snapshot-app-fields [:active-world-runtime :activity-registry]))
+  (set app.activity-registry nil)
+  (set app.active-world-runtime {:activity-sessions {}
+                                 :activity-session-state {:user-activity {:value 7}}})
+  (local (ok result)
+    (pcall
+      (fn []
+        (local snapshot (Activities.snapshot-activity-sessions))
+        (assert (= snapshot.user-activity.value 7)
+                "Pending session state for an unregistered activity should survive snapshot capture")
+        true)))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Snapshot activity sessions preserves unregistered pending state"
+                     :fn snapshot-activity-sessions-preserves-unregistered-pending-state})
+
+(fn inactive-runtime-canvas-surface-clears-activity-sessions-without-active-cleanup []
+  (local app-snapshot (snapshot-app-fields [:active-world-runtime :activity-registry :graph-view]))
+  (local active-view {:id :active-view})
+  (local active-runtime {:id :active-runtime
+                         :graph-view active-view})
+  (set app.active-world-runtime active-runtime)
+  (set app.graph-view active-view)
+  (set app.activity-registry nil)
+  (var cleanup-ran? false)
+  (local runtime {:activity-sessions {:retained {:user-session {:id :retained}
+                                                  :cleanup [(fn []
+                                                              (set cleanup-ran? true)
+                                                              (set app.active-world-runtime.graph-view nil)
+                                                              (set app.graph-view nil))]}}})
+  (local (ok result)
+    (pcall
+      (fn []
+        (HomeWorldCanvasRuntime.drop-runtime-canvas-surface! runtime)
+        (assert (not cleanup-ran?)
+                "Dropping an inactive runtime canvas surface should not run active-runtime cleanup closures")
+        (assert (= active-runtime.graph-view active-view)
+                "Inactive runtime activity cleanup should not corrupt the active runtime")
+        (assert (= app.graph-view active-view)
+                "Inactive runtime activity cleanup should not clear active app graph view")
+        (assert (= runtime.activity-sessions nil)
+                "Dropping an inactive runtime canvas surface should clear retained activity session table")
+        true)))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Inactive runtime canvas surface clears activity sessions without active cleanup"
+                     :fn inactive-runtime-canvas-surface-clears-activity-sessions-without-active-cleanup})
+
+(fn inactive-runtime-canvas-surface-does-not-double-drop-slot-root []
+  (local app-snapshot (snapshot-app-fields [:active-world-runtime]))
+  (set app.active-world-runtime {:id :other-runtime})
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local canvas (Canvas {:camera camera}))
+  (local slot (canvas:activate-activity-slot "graph"))
+  (var drop-count 0)
+  (local view {:drop (fn [_self]
+                       (set drop-count (+ drop-count 1))
+                       (assert (= drop-count 1)
+                               "Inactive runtime graph view should only be dropped once"))})
+  (set slot.root view)
+  (local runtime {:canvas canvas
+                  :graph-view view})
+  (local (ok result)
+    (pcall
+      (fn []
+        (HomeWorldCanvasRuntime.drop-runtime-canvas-surface! runtime)
+        (assert (= drop-count 1)
+                "Dropping inactive runtime canvas surface should not double-drop slot root")
+        (assert (= runtime.canvas nil)
+                "Dropping inactive runtime canvas surface should clear runtime canvas")
+        true)))
+  (camera:drop)
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Inactive runtime canvas surface does not double-drop slot root"
+                     :fn inactive-runtime-canvas-surface-does-not-double-drop-slot-root})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "activity-retention"
+                       :tests tests})))
+
+{:name "activity-retention"
+ :tests tests
+ :main main}

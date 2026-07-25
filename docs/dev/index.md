@@ -46,8 +46,9 @@ Recent entries are on the [Journal page](/dev/journal/). The compiled [Devlog](/
 
 - [Agent Runner System](/dev/features/agent-runner-system)
 - [Agent Tools](/dev/features/agent-tools)
-- [Board Canvas Mode](/dev/features/board-canvas-mode)
-- [Canvas Mode System](/dev/features/canvas-mode-system)
+- [Activities Architecture](/dev/features/activities)
+- [Board Canvas Mode](/dev/features/board-canvas-mode) (legacy, migrated to [Activities](/dev/features/activities))
+- [Canvas Mode System](/dev/features/canvas-mode-system) (legacy, migrated to [Activities](/dev/features/activities))
 - [CEF In-World Browser](/dev/features/cef-in-world-browser)
 - [Core Platform](/dev/features/core-platform)
 - [Development Tooling](/dev/features/development-tooling)

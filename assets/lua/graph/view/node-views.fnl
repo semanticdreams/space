@@ -130,6 +130,13 @@
         (when (and target
                    target.register-panel-restorer
                    target.unregister-panel-restorer)
+            (fn restore-target []
+                (or (and (= target app.canvas)
+                         app.canvas
+                         app.canvas.active-activity-slot
+                         app.canvas.active-activity-slot.visible?
+                         app.canvas.active-activity-slot)
+                    target))
             (var exists? false)
             (each [_ existing (ipairs restorer-targets)]
                 (when (= existing target)
@@ -147,8 +154,8 @@
                                 "graph-node-view restorer requires string :node-key")
                         (local node (resolve-restored-node key))
                         (when node
-                            (open-node-view nil node {:target target
-                                                      :panel panel}))
+                            (open-node-view nil node {:target (restore-target)
+                                                       :panel panel}))
                         (when (not node)
                             (record-unresolved-open-view {:node-key key
                                                           :graph-map-id panel.graph-map-id

@@ -60,8 +60,9 @@
   (assert app "PresetManager requires :app")
   (assert context "PresetManager requires :context")
   (assert (= (type context.surface) "string") "context must have string surface")
-  (when (not (= context.mode nil))
-    (assert (= (type context.mode) "string") "context.mode must be string or nil"))
+  (assert (= context.mode nil) "context.mode is not supported; use context.activity")
+  (when (not (= context.activity nil))
+    (assert (= (type context.activity) "string") "context.activity must be string or nil"))
   (assert (not (= context.canvas-visible? nil)) "context.canvas-visible? must not be nil")
 
   (var current-context (clone-table context))
@@ -108,8 +109,9 @@
   (fn set-context [self ctx]
     (assert (= (type ctx) "table") "context must be a table")
     (assert (= (type ctx.surface) "string") "context.surface must be a string")
-    (when (not (= ctx.mode nil))
-      (assert (= (type ctx.mode) "string") "context.mode must be a string or nil"))
+    (assert (= ctx.mode nil) "context.mode is not supported; use context.activity")
+    (when (not (= ctx.activity nil))
+      (assert (= (type ctx.activity) "string") "context.activity must be a string or nil"))
     (assert (not (= ctx.canvas-visible? nil)) "context.canvas-visible? must not be nil")
     (when (not (deep-equal? current-context ctx))
       (local previous-signature (select 2 (refresh-cache)))

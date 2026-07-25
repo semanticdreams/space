@@ -5,7 +5,7 @@
 (local HotReload (require :hot-reload))
 (local LauncherLaunchable (require :launchables/launcher))
 (local runtime (require :runtime))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local Units (require :units))
 
 (local tests [])
@@ -63,9 +63,9 @@
       (set count (+ count 1))))
   count)
 
-(fn canvas-mode-unit [mode-id]
-  (and app.canvas-mode-units
-       (. app.canvas-mode-units mode-id)))
+(fn activity-unit [mode-id]
+  (and app.activity-units
+       (. app.activity-units mode-id)))
 
 ;; Slow full-app / hot-reload integration tests moved from tests.test-units.
 
@@ -199,7 +199,7 @@
             ((. Main :install-app-shell!))
             ((. Main :init))
             (app.agent-presets:set-context {:surface :canvas
-                                             :mode "stale-mode"
+                                             :activity "stale-mode"
                                              :canvas-visible? true})
             ((. Main :drop))
             ((. Main :install-app-shell!))
@@ -207,11 +207,11 @@
             (local reset-context (app.agent-presets:get-context))
             (assert (= reset-context.surface app.active-interaction-surface)
                     "Expected app init to refresh preset surface from current shell state")
-            (assert (= reset-context.mode app.active-canvas-mode)
-                    "Expected app init to refresh preset mode from current shell state")
+            (assert (= reset-context.activity app.active-activity-id)
+                    "Expected app init to refresh preset activity from current shell state")
             (assert (= reset-context.canvas-visible? (= app.canvas-visible? true))
                     "Expected app init to refresh preset canvas visibility from current shell state")
-            (assert (not (= reset-context.mode "stale-mode"))
+            (assert (not (= reset-context.activity "stale-mode"))
                     "Expected app init to overwrite stale preset context")
             true)))
       (when (= (type (. (require :main) :drop)) :function)
@@ -382,8 +382,9 @@
             (assert app.canvas-unit "Expected app.canvas-unit after app init")
             (assert app.canvas "Expected app.canvas after app init")
             (assert app.canvas-controls "Expected app.canvas-controls after app init")
+            (app.set-active-activity nil)
             (assert (not app.graph-view)
-                    "Graph view should not exist before graph mode is active")
+                     "Graph view should not exist before graph activity is active")
             (assert app.object-selector "Expected app.object-selector after app init")
             (local old-canvas app.canvas)
             (local old-scope app.canvas-focus-scope)
@@ -398,7 +399,7 @@
                        :position [6 7 0]
                        :rotation [1 0 0 0]
                        :size [16 10 0]}})
-            (app.set-active-canvas-mode "drawing")
+            (app.set-active-activity "drawing")
             (app.set-active-interaction-surface :canvas
                                                 {:sync-canvas-visibility true})
             (app.canvas:update)
@@ -415,7 +416,7 @@
             (assert (not (= app.canvas-controls old-controls))
                     "Canvas unit reload should replace canvas controls")
             (assert (not app.graph-view)
-                    "Canvas unit reload should not create graph view while drawing mode is active")
+                    "Canvas unit reload should not create graph view while drawing activity is active")
             (assert (not (= app.object-selector old-object-selector))
                     "Canvas unit reload should replace object selector")
             (assert (= app.graph old-graph)
@@ -424,8 +425,8 @@
                     "Canvas unit reload should preserve drawing controller")
             (assert (= app.world-manager old-world-manager)
                     "Canvas unit reload should avoid reloading world manager")
-            (assert (= app.active-canvas-mode "drawing")
-                    "Canvas unit reload should preserve active canvas mode")
+            (assert (= app.active-activity-id "drawing")
+                    "Canvas unit reload should preserve active activity")
             (assert (= app.active-interaction-surface :canvas)
                     "Canvas unit reload should preserve active interaction surface")
             (assert (= app.canvas-visible? true)
@@ -500,7 +501,7 @@
                        :position [8 9 0]
                        :rotation [1 0 0 0]
                        :size [18 11 0]}})
-            (app.set-active-canvas-mode "drawing")
+            (app.set-active-activity "drawing")
             (app.set-active-interaction-surface :canvas
                                                 {:sync-canvas-visibility true})
             (app.canvas:update)
@@ -519,8 +520,8 @@
                     "Expected routed canvas reload to avoid reloading app root")
             (assert (= app.graph old-graph)
                     "Expected routed canvas reload to preserve graph owner")
-            (assert (= app.active-canvas-mode "drawing")
-                    "Expected routed canvas reload to preserve active canvas mode")
+            (assert (= app.active-activity-id "drawing")
+                    "Expected routed canvas reload to preserve active activity")
             (assert (= app.active-interaction-surface :canvas)
                     "Expected routed canvas reload to preserve interaction surface")
             (app.canvas:update)
@@ -540,7 +541,7 @@
           result
           (error result)))))
 
-(fn hot-reload-routes-canvas-shell-state-file-changes-to-canvas-unit []
+(fn hot-reload-routes-workspace-shell-state-file-changes-to-app-root []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
@@ -578,18 +579,18 @@
                                     "hot-reload"
                                     "tests.test-hot-reload-integration"
                                     "units"]}))
-            (local old-canvas app.canvas)
+            (local old-world-manager app.world-manager)
             (assert (controller:reload-now!
-                      {:changes [{:path (fs.join-path watch-root
-                                                      "home-world-canvas-shell-state.fnl")
-                                  :action "modified"}]})
-                    "Expected canvas shell state change to reload successfully")
+                       {:changes [{:path (fs.join-path watch-root
+                                                       "home-world-workspace-shell-state.fnl")
+                                   :action "modified"}]})
+                    "Expected workspace shell state change to reload successfully")
             (local debug-state (controller:debug-state))
-            (assert (= debug-state.last-target-unit-id "canvas")
-                    "Expected canvas shell state change to target canvas unit")
-            (assert app.canvas "Expected app.canvas after routed canvas helper reload")
-            (assert (not (= app.canvas old-canvas))
-                    "Expected routed canvas helper reload to replace app.canvas")
+            (assert (= debug-state.last-target-unit-id "app-root")
+                    "Expected workspace shell state change to target app root")
+            (assert app.world-manager "Expected app.world-manager after app-root reload")
+            (assert (not (= app.world-manager old-world-manager))
+                    "Expected workspace shell helper reload to replace app root ownership")
             true)))
       (when controller
         (controller:drop)
@@ -617,8 +618,8 @@
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (app.set-active-canvas-mode "graph")
-            (assert app.graph-view "Expected graph mode to create graph view before shared renderer reload")
+            (app.set-active-activity "graph")
+            (assert app.graph-view "Expected graph activity to create graph view before shared renderer reload")
             (local root-unit
               (Units.ModuleUnit
                 {:id "app-root"
@@ -635,8 +636,8 @@
                  :units-fn (fn [_root-unit]
                              [app.canvas-unit
                               app.hud-unit
-                              (canvas-mode-unit "graph")
-                              (canvas-mode-unit "board")])
+                              (activity-unit "graph")
+                              (activity-unit "board")])
                  :root-unit-id "app-root"
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
@@ -649,11 +650,11 @@
                     "Expected shared triangle-line change to reload successfully")
             (local debug-state (controller:debug-state))
             (assert (= debug-state.last-target-unit-id "canvas")
-                    "Shared triangle-line changes should target the canvas shell unit")
-            (assert (= app.active-canvas-mode "graph")
-                    "Canvas shell reload should preserve active graph mode for shared triangle-line changes")
+                    "Shared triangle-line changes should target the canvas unit")
+            (assert (= app.active-activity-id "graph")
+                    "Canvas unit reload should preserve active graph activity for shared triangle-line changes")
             (assert app.graph-view
-                    "Canvas shell reload should recreate graph view for shared triangle-line changes")
+                    "Canvas unit reload should recreate graph view for shared triangle-line changes")
             true)))
       (when controller
         (controller:drop)
@@ -666,7 +667,7 @@
           result
           (error result)))))
 
-(fn hot-reload-routes-drawing-mode-file-changes-to-drawing-mode-unit []
+(fn hot-reload-routes-drawing-render-file-changes-to-drawing-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
@@ -681,13 +682,13 @@
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (assert (canvas-mode-unit "drawing")
-                    "Expected drawing canvas mode unit after app init")
-            (app.set-active-canvas-mode "drawing")
-            (assert (= app.active-canvas-mode "drawing")
-                    "Expected drawing mode to become active before routed reload")
-            (assert (= app.canvas-mode-drawing-enabled? true)
-                    "Expected drawing mode hooks before routed reload")
+            (assert (activity-unit "drawing")
+                    "Expected drawing canvas activity unit after app init")
+            (app.set-active-activity "drawing")
+            (assert (= app.active-activity-id "drawing")
+                    "Expected drawing activity to become active before routed reload")
+            (assert (= app.activity-drawing-enabled? true)
+                    "Expected drawing activity hooks before routed reload")
             (local root-unit
               (Units.ModuleUnit
                 {:id "app-root"
@@ -704,7 +705,7 @@
                  :units-fn (fn [_root-unit]
                              [app.canvas-unit
                               app.hud-unit
-                              (canvas-mode-unit "drawing")])
+                              (activity-unit "drawing")])
                  :root-unit-id "app-root"
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
@@ -713,19 +714,19 @@
                                     "units"]}))
             (assert (controller:reload-now!
                       {:changes [{:path (fs.join-path watch-root
-                                                      "drawing"
-                                                      "input.fnl")
-                                  :action "modified"}]})
-                    "Expected drawing mode file change to reload successfully")
+                                                       "drawing"
+                                                       "render.fnl")
+                                   :action "modified"}]})
+                    "Expected drawing render file change to reload successfully")
             (local debug-state (controller:debug-state))
-            (assert (= debug-state.last-target-unit-id "drawing-canvas-mode")
-                    "Expected drawing mode file change to target drawing mode unit")
-            (assert (= app.active-canvas-mode "drawing")
-                    "Expected drawing mode unit reload to preserve active mode")
-            (assert (= app.canvas-mode-drawing-enabled? true)
-                    "Expected drawing mode unit reload to restore drawing hooks")
-            (assert app.canvas-mode-command-hints-provider
-                    "Expected drawing mode unit reload to restore command hints hook")
+            (assert (= debug-state.last-target-unit-id "drawing-activity")
+                    "Expected drawing render file change to target drawing activity unit")
+            (assert (= app.active-activity-id "drawing")
+                    "Expected drawing activity unit reload to preserve active activity")
+            (assert (= app.activity-drawing-enabled? true)
+                    "Expected drawing activity unit reload to restore drawing hooks")
+            (assert app.activity-command-hints-provider
+                    "Expected drawing activity unit reload to restore command hints hook")
             true)))
       (when controller
         (controller:drop)
@@ -738,7 +739,7 @@
           result
            (error result)))))
 
-(fn hot-reload-routes-graph-view-file-changes-to-graph-mode-unit []
+(fn hot-reload-routes-graph-view-file-changes-to-graph-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
@@ -753,10 +754,10 @@
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (assert (canvas-mode-unit "graph")
-                    "Expected graph canvas mode unit after app init")
-            (app.set-active-canvas-mode "graph")
-            (assert app.graph-view "Expected graph mode to create graph view")
+            (assert (activity-unit "graph")
+                    "Expected graph canvas activity unit after app init")
+            (app.set-active-activity "graph")
+            (assert app.graph-view "Expected graph activity to create graph view")
             (local root-unit
               (Units.ModuleUnit
                 {:id "app-root"
@@ -773,7 +774,7 @@
                  :units-fn (fn [_root-unit]
                              [app.canvas-unit
                               app.hud-unit
-                              (canvas-mode-unit "graph")])
+                              (activity-unit "graph")])
                  :root-unit-id "app-root"
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
@@ -788,12 +789,12 @@
                                   :action "modified"}]})
                     "Expected graph view file change to reload successfully")
             (local debug-state (controller:debug-state))
-            (assert (= debug-state.last-target-unit-id "graph-canvas-mode")
-                    "Expected graph view file change to target graph mode unit")
-            (assert (= app.active-canvas-mode "graph")
-                    "Expected graph mode unit reload to preserve active mode")
+            (assert (= debug-state.last-target-unit-id "graph-activity")
+                    "Expected graph view file change to target graph activity unit")
+            (assert (= app.active-activity-id "graph")
+                    "Expected graph activity unit reload to preserve active activity")
             (assert app.graph-view
-                    "Expected graph mode unit reload to restore graph view")
+                    "Expected graph activity unit reload to restore graph view")
             true)))
       (when controller
         (controller:drop)
@@ -806,7 +807,7 @@
           result
           (error result)))))
 
-(fn graph-mode-registers-active-mode-snapshot-hooks []
+(fn graph-activity-registers-active-activity-snapshot-hooks []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
@@ -820,16 +821,16 @@
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (app.set-active-canvas-mode "graph")
-            (assert app.graph-view "Expected graph mode to create graph view")
-            (local snapshot (CanvasModes.snapshot-active-mode))
+            (app.set-active-activity "graph")
+            (assert app.graph-view "Expected graph activity to create graph view")
+            (local snapshot (Activities.snapshot-active-activity))
             (assert (and snapshot snapshot.active?)
-                    "Graph mode snapshot should report active graph mode")
+                    "Graph activity snapshot should report active graph activity")
             (assert (and snapshot.graph-view-state snapshot.graph-view-state.views)
-                    "Graph mode snapshot should include graph-view state")
-            (CanvasModes.restore-active-mode snapshot)
+                    "Graph activity snapshot should include graph-view state")
+            (Activities.restore-active-activity snapshot)
             (assert app.graph-view
-                    "Graph mode restore-active-mode should keep graph view active")
+                    "Graph activity restore-active-activity should keep graph view active")
             true)))
       (when controller
         (controller:drop)
@@ -842,7 +843,7 @@
           result
           (error result)))))
 
-(fn hot-reload-routes-board-file-changes-to-board-mode-unit []
+(fn hot-reload-routes-board-file-changes-to-board-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
@@ -857,10 +858,10 @@
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (assert (canvas-mode-unit "board")
-                    "Expected board canvas mode unit after app init")
-            (app.set-active-canvas-mode "board")
-            (assert app.board-view "Expected board mode to create board view")
+            (assert (activity-unit "board")
+                    "Expected board canvas activity unit after app init")
+            (app.set-active-activity "board")
+            (assert app.board-view "Expected board activity to create board view")
             (local root-unit
               (Units.ModuleUnit
                 {:id "app-root"
@@ -877,7 +878,7 @@
                  :units-fn (fn [_root-unit]
                              [app.canvas-unit
                               app.hud-unit
-                              (canvas-mode-unit "board")])
+                              (activity-unit "board")])
                  :root-unit-id "app-root"
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
@@ -891,12 +892,12 @@
                                   :action "modified"}]})
                     "Expected board file change to reload successfully")
             (local debug-state (controller:debug-state))
-            (assert (= debug-state.last-target-unit-id "board-canvas-mode")
-                    "Expected board file change to target board mode unit")
-            (assert (= app.active-canvas-mode "board")
-                    "Expected board mode unit reload to preserve active mode")
+            (assert (= debug-state.last-target-unit-id "board-activity")
+                    "Expected board file change to target board activity unit")
+            (assert (= app.active-activity-id "board")
+                    "Expected board activity unit reload to preserve active activity")
             (assert app.board-view
-                    "Expected board mode unit reload to restore board view")
+                    "Expected board activity unit reload to restore board view")
             true)))
       (when controller
         (controller:drop)
@@ -909,7 +910,7 @@
           result
           (error result)))))
 
-(fn unloading-active-drawing-mode-updates-shell-state []
+(fn unloading-active-drawing-activity-updates-shell-state []
   (local Main (require-main!))
   (local original-init-renderers AppBootstrap.init-renderers)
   (set AppBootstrap.init-renderers
@@ -920,19 +921,22 @@
       (fn []
         ((. Main :install-app-shell!))
         ((. Main :init))
-        (assert (canvas-mode-unit "drawing")
-                "Expected drawing canvas mode unit after app init")
-        (app.set-active-canvas-mode "drawing")
-        (assert (= app.active-canvas-mode "drawing")
-                "Expected drawing mode active before unloading its unit")
-        (local drawing-mode-unit (canvas-mode-unit "drawing"))
-        (drawing-mode-unit:unload)
-        (assert (= app.active-canvas-mode nil)
-                "Expected unloading active drawing mode to clear the active mode")
-        (assert (= (CanvasModes.active-mode-id) nil)
-                "Expected CanvasModes registry to clear the active mode on unload")
-        (assert (not (= app.canvas-mode-drawing-enabled? true))
-                "Expected drawing-only hooks to clear after unloading drawing mode")
+        (assert (activity-unit "drawing")
+                "Expected drawing canvas activity unit after app init")
+        (app.set-active-activity "drawing")
+        (assert (= app.active-activity-id "drawing")
+                "Expected drawing activity active before unloading its unit")
+        (local drawing-activity-unit (activity-unit "drawing"))
+        (local runtime app.active-world-runtime)
+        (drawing-activity-unit:unload)
+        (assert (= app.active-activity-id nil)
+                "Expected unloading active drawing activity to clear the active activity")
+        (assert (= (Activities.active-activity-id) nil)
+                "Expected Activities registry to clear the active activity on unload")
+        (assert (= runtime.requested-activity-id nil)
+                "Expected unloading active drawing activity to clear requested activity persistence")
+        (assert (not (= app.activity-drawing-enabled? true))
+                "Expected drawing-only hooks to clear after unloading drawing activity")
         true)))
   (when (and (= (type (. (require :main) :drop)) :function)
              app.engine)
@@ -942,7 +946,7 @@
       result
       (error result)))
 
-(fn hot-reload-routes-drawing-mode-actions-file-changes-to-drawing-mode-unit []
+(fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit []
   (with-temp-dir
     (fn [_dir]
       (local Main (require-main!))
@@ -957,9 +961,9 @@
           (fn []
             ((. Main :install-app-shell!))
             ((. Main :init))
-            (assert (canvas-mode-unit "drawing")
-                    "Expected drawing canvas mode unit after app init")
-            (app.set-active-canvas-mode "drawing")
+            (assert (activity-unit "drawing")
+                    "Expected drawing canvas activity unit after app init")
+            (app.set-active-activity "drawing")
             (local root-unit
               (Units.ModuleUnit
                 {:id "app-root"
@@ -976,7 +980,7 @@
                  :units-fn (fn [_root-unit]
                              [app.canvas-unit
                               app.hud-unit
-                              (canvas-mode-unit "drawing")])
+                              (activity-unit "drawing")])
                  :root-unit-id "app-root"
                  :watch-paths [watch-root]
                  :preserve-modules ["app-bootstrap"
@@ -985,12 +989,12 @@
                                     "units"]}))
             (assert (controller:reload-now!
                       {:changes [{:path (fs.join-path watch-root
-                                                      "drawing-canvas-mode-actions.fnl")
+                                                      "drawing-activity-actions.fnl")
                                   :action "modified"}]})
-                    "Expected drawing mode actions file change to reload successfully")
+                    "Expected drawing activity actions file change to reload successfully")
             (local debug-state (controller:debug-state))
-            (assert (= debug-state.last-target-unit-id "drawing-canvas-mode")
-                    "Expected drawing mode actions file change to target drawing mode unit")
+            (assert (= debug-state.last-target-unit-id "drawing-activity")
+                    "Expected drawing activity actions file change to target drawing activity unit")
             true)))
       (when controller
         (controller:drop)
@@ -1017,22 +1021,22 @@
                      :fn canvas-unit-reload-roundtrips-surface-state})
 (table.insert tests {:name "hot reload routes canvas file changes to canvas unit"
                      :fn hot-reload-routes-canvas-file-changes-to-canvas-unit})
-(table.insert tests {:name "hot reload routes canvas shell state file changes to canvas unit"
-                     :fn hot-reload-routes-canvas-shell-state-file-changes-to-canvas-unit})
+(table.insert tests {:name "hot reload routes workspace shell state file changes to app root"
+                      :fn hot-reload-routes-workspace-shell-state-file-changes-to-app-root})
 (table.insert tests {:name "hot reload routes shared triangle-line to canvas unit"
                      :fn hot-reload-routes-shared-triangle-line-to-canvas-unit})
-(table.insert tests {:name "hot reload routes drawing mode file changes to drawing mode unit"
-                     :fn hot-reload-routes-drawing-mode-file-changes-to-drawing-mode-unit})
-(table.insert tests {:name "hot reload routes graph view file changes to graph mode unit"
-                     :fn hot-reload-routes-graph-view-file-changes-to-graph-mode-unit})
-(table.insert tests {:name "graph mode registers active mode snapshot hooks"
-                     :fn graph-mode-registers-active-mode-snapshot-hooks})
-(table.insert tests {:name "hot reload routes board file changes to board mode unit"
-                     :fn hot-reload-routes-board-file-changes-to-board-mode-unit})
-(table.insert tests {:name "unloading active drawing mode updates shell state"
-                     :fn unloading-active-drawing-mode-updates-shell-state})
-(table.insert tests {:name "hot reload routes drawing mode actions file changes to drawing mode unit"
-                     :fn hot-reload-routes-drawing-mode-actions-file-changes-to-drawing-mode-unit})
+(table.insert tests {:name "hot reload routes drawing render file changes to drawing activity unit"
+                     :fn hot-reload-routes-drawing-render-file-changes-to-drawing-activity-unit})
+(table.insert tests {:name "hot reload routes graph view file changes to graph activity unit"
+                     :fn hot-reload-routes-graph-view-file-changes-to-graph-activity-unit})
+(table.insert tests {:name "graph activity registers active activity snapshot hooks"
+                     :fn graph-activity-registers-active-activity-snapshot-hooks})
+(table.insert tests {:name "hot reload routes board file changes to board activity unit"
+                     :fn hot-reload-routes-board-file-changes-to-board-activity-unit})
+(table.insert tests {:name "unloading active drawing activity updates shell state"
+                     :fn unloading-active-drawing-activity-updates-shell-state})
+(table.insert tests {:name "hot reload routes drawing activity actions file changes to drawing activity unit"
+                     :fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit})
 
 (local main
   (fn []

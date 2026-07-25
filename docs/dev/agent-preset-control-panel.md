@@ -29,7 +29,7 @@ Current preset shape:
  :group "drawing"
  :default-state :auto
  :risk :normal
- :contexts [{:surface :canvas :mode "drawing"}]
+ :contexts [{:surface :canvas :activity "drawing"}]
  :tool-ids ["drawing.inspect" "drawing.set-tool"]
  :system-prompt "Use drawing tools for shape and stroke operations."}
 ```

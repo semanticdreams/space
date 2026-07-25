@@ -26,7 +26,7 @@
 (local EngineModule (require :engine))
 (local AppConfig (require :app-config))
 (local CliArgs (require :cli-args))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local Launcher (require :launcher))
 
 (set app.engine-autocreated false)
@@ -753,7 +753,7 @@
 (set app.hud nil)
 (set app.canvas-unit nil)
 (set app.hud-unit nil)
-(set app.canvas-mode-units nil)
+(set app.activity-units nil)
 (set app.profiler nil)
 (set app.movables nil)
 (set app.focus nil)
@@ -764,9 +764,10 @@
 (set app.active-pointer-controls nil)
 (set app.preferred-interaction-surface :scene)
 (set app.active-interaction-surface :scene)
-(set app.active-canvas-mode nil)
+(set app.active-activity-id nil)
 (set app.scene-interactive? true)
 (set app.canvas-interactive? false)
+(set app.canvas-surface-interactive? true)
 (set app.canvas-visible? false)
 (set app.graph-map nil)
 (set app.graph-map-manager nil)
@@ -817,7 +818,8 @@
 (set app.world-tabs-builder nil)
 (set app.active-world-hud-contrib nil)
 (set app.active-world-hud-overlay nil)
-(set app.canvas-shell-changed (Signal))
+(set app.active-world-runtime nil)
+(set app.workspace-shell-changed (Signal))
 
 (fn app.next-frame [cb]
   (assert cb "app.next-frame requires callback")
@@ -829,9 +831,9 @@
   (each [_ cb (ipairs pending)]
     (cb)))
 
-(fn canvas-shell-state []
+(fn workspace-shell-state []
   {:interaction-surface app.active-interaction-surface
-   :canvas-mode app.active-canvas-mode
+   :activity app.active-activity-id
    :canvas-visible? (= app.canvas-visible? true)})
 
 (fn agent-preset-context []
@@ -844,23 +846,24 @@
         (when (= (type parsed) :table)
           (not= (next parsed) nil)))))
   {:surface (or app.active-interaction-surface :scene)
-   :mode app.active-canvas-mode
+   :activity app.active-activity-id
    :canvas-visible? (= app.canvas-visible? true)
    :repos-available? (= (repos-available?*) true)})
 
-(fn canvas-shell-state= [a b]
+(fn workspace-shell-state= [a b]
   (and a b
        (= a.interaction-surface b.interaction-surface)
-       (= a.canvas-mode b.canvas-mode)
+       (= a.activity b.activity)
        (= a.canvas-visible? b.canvas-visible?)))
 
-(fn emit-canvas-shell-changed [reason previous]
-  (local current (canvas-shell-state))
-  (when (and app.canvas-shell-changed
-             (not (canvas-shell-state= previous current)))
-    (app.canvas-shell-changed:emit {:reason reason
-                                    :previous previous
-                                    :current current}))
+(fn emit-workspace-shell-changed [reason previous]
+  (local current (workspace-shell-state))
+  (when (and app.workspace-shell-changed
+             (not app.suppress-workspace-shell-change?)
+             (not (workspace-shell-state= previous current)))
+    (app.workspace-shell-changed:emit {:reason reason
+                                       :previous previous
+                                       :current current}))
   current)
 
 (fn collect-cli-args []
@@ -1009,14 +1012,14 @@
       (if app.canvas :canvas :scene)
       :scene))
 
-(fn effective-interaction-surface [preferred-surface canvas-visible?]
+(fn effective-interaction-surface [preferred-surface canvas-available?]
   (if (and (= preferred-surface :canvas)
-           canvas-visible?)
+           canvas-available?)
       :canvas
       :scene))
 
-(fn resolve-canvas-mode [mode-id]
-  (CanvasModes.resolve mode-id))
+(fn resolve-activity [activity-id]
+  (Activities.resolve activity-id))
 
 (fn mark-active-world-hud-dirty []
   (when (and app.hud app.hud.entity app.hud.entity.layout)
@@ -1029,29 +1032,35 @@
 (fn sync-interaction-surface-state [reason previous]
   (local preferred-surface (resolve-interaction-surface app.preferred-interaction-surface))
   (local canvas-visible? (and app.canvas (= app.canvas-visible? true)))
-  (local surface (effective-interaction-surface preferred-surface canvas-visible?))
+  (local canvas-surface-interactive? (not (= app.canvas-surface-interactive? false)))
+  (local canvas-available? (and canvas-visible? canvas-surface-interactive?))
+  (local surface (effective-interaction-surface preferred-surface canvas-available?))
   (set app.preferred-interaction-surface preferred-surface)
   (set app.active-interaction-surface surface)
   (set app.canvas-visible? canvas-visible?)
+  (set app.canvas-surface-interactive? canvas-surface-interactive?)
   (set app.scene-interactive? (= surface :scene))
   (set app.canvas-interactive? (and canvas-visible?
-                                     (= surface :canvas)))
+                                       canvas-surface-interactive?
+                                       (= surface :canvas)))
   (if app.canvas-interactive?
       (set app.active-pointer-controls app.canvas-controls)
       (set app.active-pointer-controls app.first-person-controls))
-  (emit-canvas-shell-changed (or reason "interaction-surface") previous)
+  (emit-workspace-shell-changed (or reason "interaction-surface") previous)
   (mark-active-world-hud-dirty)
   surface)
 
+(set app.sync-interaction-surface-state sync-interaction-surface-state)
+
 (fn app.set-canvas-visible [visible?]
-  (local previous (canvas-shell-state))
+  (local previous (workspace-shell-state))
   (set app.canvas-visible? (and app.canvas
                                 (not (= visible? false))))
   (sync-interaction-surface-state "canvas-visibility" previous))
 
 (fn app.set-active-interaction-surface [surface opts]
   (local options (or opts {}))
-  (local previous (canvas-shell-state))
+  (local previous (workspace-shell-state))
   (set app.preferred-interaction-surface (resolve-interaction-surface surface))
   (when (or (= options.sync-canvas-visibility nil)
             options.sync-canvas-visibility)
@@ -1062,16 +1071,9 @@
          app.preferred-interaction-surface))
   (sync-interaction-surface-state "interaction-surface" previous))
 
-(fn app.set-active-canvas-mode [mode-id]
-  (local previous (canvas-shell-state))
-  (local resolved (resolve-canvas-mode mode-id))
-  (CanvasModes.activate-mode resolved)
-  (set app.active-canvas-mode resolved)
-  (when app.active-world-runtime
-    (set app.active-world-runtime.requested-canvas-mode-id resolved)
-    (set app.active-world-runtime.requested-canvas-mode-known? true)
-    (set app.active-world-runtime.active-canvas-mode resolved))
-  (emit-canvas-shell-changed "canvas-mode" previous)
+(fn app.set-active-activity [activity-id]
+  (local resolved (resolve-activity activity-id))
+  (Activities.activate-activity resolved)
   (mark-active-world-hud-dirty)
   resolved)
 
@@ -1099,9 +1101,17 @@
 
 (fn app.pointer-target-enabled? [target]
   (local surface (pointer-target-surface target))
-  (local canvas-target-enabled? app.canvas-mode-target-enabled?)
+  (local canvas-target-enabled? app.activity-target-enabled?)
+  (local activity-slot (and target target.activity-slot))
+  (local activity-slot-enabled?
+    (if activity-slot
+        (and app.canvas
+             (= app.canvas.active-activity-slot activity-slot)
+             (= activity-slot.interactive? true))
+        true))
   (local canvas-enabled?
     (and (= app.canvas-interactive? true)
+         activity-slot-enabled?
          (if canvas-target-enabled?
              (canvas-target-enabled? target)
              (= (and target target.canvas-target-kind) nil))))
@@ -1113,10 +1123,21 @@
 
 (fn bind-active-world-runtime [entry runtime]
   (local previous-runtime app.active-world-runtime)
-  (local previous-shell (canvas-shell-state))
+  (local previous-shell (workspace-shell-state))
   (when (and previous-runtime
-             (not (= previous-runtime runtime)))
-    (CanvasModes.deactivate-active-mode))
+               (not (= previous-runtime runtime)))
+    (local previous-requested-known? previous-runtime.requested-activity-known?)
+    (local previous-requested-id
+      (if previous-requested-known?
+          previous-runtime.requested-activity-id
+          previous-runtime.active-activity-id))
+    (Activities.with-workspace-shell-change-suppressed
+      (fn []
+        (Activities.deactivate-active-activity)))
+    (set previous-runtime.requested-activity-id previous-requested-id)
+    (set previous-runtime.requested-activity-known?
+         (or previous-requested-known?
+             (not (= previous-requested-id nil)))))
   (set app.active-world-entry entry)
   (set app.active-world-runtime runtime)
   (set app.camera (and runtime runtime.camera))
@@ -1135,11 +1156,11 @@
   (set app.graph-map (or (and runtime runtime.graph-map-manager (runtime.graph-map-manager:get-active-map))
                          (and runtime runtime.graph-map)))
   (set app.graph-map-manager (and runtime runtime.graph-map-manager))
-  (set app.graph-view (and runtime runtime.graph-view))
-  (set app.board (and runtime runtime.board))
-  (set app.board-view (and runtime runtime.board-view))
+  (set app.graph-view nil)
+  (set app.board nil)
+  (set app.board-view nil)
   (set app.drawing-controller (and runtime runtime.drawing-controller))
-  (set app.drawing-render (and runtime runtime.drawing-render))
+  (set app.drawing-render nil)
   (set app.layout-root (and app.scene app.scene.layout-root))
   (when (and app.scene app.scene.set-camera)
     (app.scene:set-camera app.camera))
@@ -1149,36 +1170,40 @@
   (when (and app.scene app.scene.build-context)
     (set app.scene.build-context.object-selector app.object-selector)
     (set app.scene.build-context.layout-root app.layout-root))
-  (when (and runtime runtime.restore-canvas-shell-state)
-    (runtime:restore-canvas-shell-state app.canvas))
-  (local requested-mode-id
-    (if (and runtime runtime.requested-canvas-mode-known?)
-        runtime.requested-canvas-mode-id
-        (and runtime runtime.active-canvas-mode)))
-  (var mode-emitted? false)
+  (when (and runtime runtime.restore-workspace-shell-state)
+    (runtime:restore-workspace-shell-state app.canvas))
+  (local requested-activity-id
+    (if (and runtime runtime.requested-activity-known?)
+        runtime.requested-activity-id
+        (and runtime runtime.active-activity-id)))
+  (var activity-emitted? false)
   (if (and app.canvas
-           (CanvasModes.mode-registered? requested-mode-id))
+           (Activities.activity-registered? requested-activity-id))
       (do
-        (app.set-active-canvas-mode requested-mode-id)
-        (set mode-emitted? true))
+        (when (= (Activities.active-activity-id) requested-activity-id)
+          (Activities.with-workspace-shell-change-suppressed
+            (fn []
+              (Activities.deactivate-active-activity))))
+        (app.set-active-activity requested-activity-id)
+        (set activity-emitted? true))
       (do
-        (CanvasModes.activate-mode nil)
-        (set app.active-canvas-mode nil)
+        (Activities.with-workspace-shell-change-suppressed
+          (fn []
+            (Activities.activate-activity nil)))
+        (set app.active-activity-id nil)
         (when runtime
-          (set runtime.requested-canvas-mode-id requested-mode-id)
-          (set runtime.requested-canvas-mode-known? true)
-          (set runtime.active-canvas-mode nil))))
+          (set runtime.requested-activity-id requested-activity-id)
+          (set runtime.requested-activity-known? true)
+          (set runtime.active-activity-id nil))))
   (when (and runtime runtime.restore-surface-state)
     (runtime:restore-surface-state app.canvas app.hud))
+  (local shell-before-interaction-sync (workspace-shell-state))
+  (when (and (not activity-emitted?)
+             (not (workspace-shell-state= previous-shell shell-before-interaction-sync)))
+    (emit-workspace-shell-changed "bind-runtime" previous-shell))
   (app.set-active-interaction-surface (or (and runtime runtime.preferred-interaction-surface)
                                           app.preferred-interaction-surface)
-                                      {:sync-canvas-visibility true})
-  (when (and app.canvas-shell-changed
-             (not mode-emitted?)
-             (not (canvas-shell-state= previous-shell (canvas-shell-state))))
-    (app.canvas-shell-changed:emit {:reason "bind-runtime"
-                                    :previous previous-shell
-                                    :current (canvas-shell-state)})))
+                                      {:sync-canvas-visibility true}))
 
 (fn ensure-hud-unit []
   (when (not app.hud-unit)
@@ -1212,60 +1237,60 @@
     (app.unit-manager:register app.canvas-unit))
   app.canvas-unit)
 
-(local built-in-canvas-mode-unit-specs
-  [{:mode-id "graph"
-    :unit-id "graph-canvas-mode"
-    :module-name "graph-canvas-mode-unit"
-    :owned-paths-export "graph-mode-owned-paths"
-    :load-export "load-graph-canvas-mode!"
-    :unload-export "unload-graph-canvas-mode!"
-    :snapshot-export "snapshot-graph-canvas-mode!"
-    :restore-export "restore-graph-canvas-mode!"}
-   {:mode-id "drawing"
-    :unit-id "drawing-canvas-mode"
-    :module-name "drawing-canvas-mode-unit"
-    :owned-paths-export "drawing-mode-owned-paths"
-    :load-export "load-drawing-canvas-mode!"
-    :unload-export "unload-drawing-canvas-mode!"
-    :snapshot-export "snapshot-drawing-canvas-mode!"
-    :restore-export "restore-drawing-canvas-mode!"}
-   {:mode-id "board"
-    :unit-id "board-canvas-mode"
-    :module-name "board-canvas-mode-unit"
-    :owned-paths-export "board-mode-owned-paths"
-    :load-export "load-board-canvas-mode!"
-    :unload-export "unload-board-canvas-mode!"
-    :snapshot-export "snapshot-board-canvas-mode!"
-    :restore-export "restore-board-canvas-mode!"}])
+(local built-in-activity-unit-specs
+  [{:activity-id "graph"
+    :unit-id "graph-activity"
+    :module-name "graph-activity-unit"
+    :owned-paths-export "graph-activity-owned-paths"
+    :load-export "load-graph-activity!"
+    :unload-export "unload-graph-activity!"
+    :snapshot-export "snapshot-graph-activity!"
+    :restore-export "restore-graph-activity!"}
+   {:activity-id "drawing"
+    :unit-id "drawing-activity"
+    :module-name "drawing-activity-unit"
+    :owned-paths-export "drawing-activity-owned-paths"
+    :load-export "load-drawing-activity!"
+    :unload-export "unload-drawing-activity!"
+    :snapshot-export "snapshot-drawing-activity!"
+    :restore-export "restore-drawing-activity!"}
+   {:activity-id "board"
+    :unit-id "board-activity"
+    :module-name "board-activity-unit"
+    :owned-paths-export "board-activity-owned-paths"
+    :load-export "load-board-activity!"
+    :unload-export "unload-board-activity!"
+    :snapshot-export "snapshot-board-activity!"
+    :restore-export "restore-board-activity!"}])
 
-(fn ensure-canvas-mode-units []
-  (set app.canvas-mode-units (or app.canvas-mode-units {}))
-  app.canvas-mode-units)
+(fn ensure-activity-units []
+  (set app.activity-units (or app.activity-units {}))
+  app.activity-units)
 
-(fn ensure-built-in-canvas-mode-unit [unit-spec]
-  (local units (ensure-canvas-mode-units))
-  (local existing (. units unit-spec.mode-id))
+(fn ensure-built-in-activity-unit [unit-spec]
+  (local units (ensure-activity-units))
+  (local existing (. units unit-spec.activity-id))
   (if existing
       existing
       (do
-        (local ModeUnitModule (require unit-spec.module-name))
+        (local ActivityUnitModule (require unit-spec.module-name))
         (local unit
           (Units.ModuleUnit {:id unit-spec.unit-id
                              :parent-id "app-root"
                              :source :builtin
                              :module-name unit-spec.module-name
-                             :owned-paths ((. ModeUnitModule unit-spec.owned-paths-export))
+                             :owned-paths ((. ActivityUnitModule unit-spec.owned-paths-export))
                              :load-export unit-spec.load-export
                              :unload-export unit-spec.unload-export
                              :snapshot-export unit-spec.snapshot-export
                              :restore-export unit-spec.restore-export}))
-        (set (. units unit-spec.mode-id) unit)
+        (set (. units unit-spec.activity-id) unit)
         (app.unit-manager:register unit)
         unit)))
 
-(fn load-built-in-canvas-mode-units! []
-  (each [_ unit-spec (ipairs built-in-canvas-mode-unit-specs)]
-    (local unit (ensure-built-in-canvas-mode-unit unit-spec))
+(fn load-built-in-activity-units! []
+  (each [_ unit-spec (ipairs built-in-activity-unit-specs)]
+    (local unit (ensure-built-in-activity-unit unit-spec))
     (unit:load))
   true)
 
@@ -1320,22 +1345,24 @@
 (local installable-set-viewport app.set-viewport)
 (local installable-create-default-projection app.create-default-projection)
 (local installable-mark-active-world-hud-dirty app.mark-active-world-hud-dirty)
+(local installable-sync-interaction-surface-state app.sync-interaction-surface-state)
 (local installable-set-canvas-visible app.set-canvas-visible)
 (local installable-set-active-interaction-surface app.set-active-interaction-surface)
-(local installable-set-active-canvas-mode app.set-active-canvas-mode)
+(local installable-set-active-activity app.set-active-activity)
 (local installable-toggle-active-interaction-surface app.toggle-active-interaction-surface)
 (local installable-pointer-target-enabled? app.pointer-target-enabled?)
 (local installable-bind-active-world-runtime bind-active-world-runtime)
 
 (fn install-app-shell! []
-  (set app.canvas-shell-changed (or app.canvas-shell-changed (Signal)))
+  (set app.workspace-shell-changed (or app.workspace-shell-changed (Signal)))
   (set app.set-viewport installable-set-viewport)
   (set app.create-default-projection installable-create-default-projection)
   (set app.reset-projection installable-reset-projection)
   (set app.mark-active-world-hud-dirty installable-mark-active-world-hud-dirty)
+  (set app.sync-interaction-surface-state installable-sync-interaction-surface-state)
   (set app.set-canvas-visible installable-set-canvas-visible)
   (set app.set-active-interaction-surface installable-set-active-interaction-surface)
-  (set app.set-active-canvas-mode installable-set-active-canvas-mode)
+  (set app.set-active-activity installable-set-active-activity)
   (set app.toggle-active-interaction-surface installable-toggle-active-interaction-surface)
   (set app.pointer-target-enabled? installable-pointer-target-enabled?)
   (set app.bind-active-world-runtime installable-bind-active-world-runtime)
@@ -1591,6 +1618,7 @@
     (app.clickables:register-left-click-void-callback app.focus-void-callback))
   (set app.scene nil)
   (set app.canvas nil)
+  (set app.active-world-runtime nil)
   (set app.camera nil)
   (set app.first-person-controls nil)
   (set app.canvas-controls nil)
@@ -1599,6 +1627,7 @@
   (set app.active-interaction-surface :scene)
   (set app.scene-interactive? true)
   (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
   (set app.canvas-visible? false)
   (set app.graph nil)
   (set app.graph-map nil)
@@ -1615,11 +1644,11 @@
   (set app.hud nil)
   (set app.launcher (Launcher {}))
   (app.launcher:clear-runtime)
-  (CanvasModes.clear-mode-runtime-hooks!)
+  (Activities.clear-activity-runtime-hooks!)
   (ensure-canvas-unit)
   (local hud-unit (ensure-hud-unit))
   (hud-unit:load)
-  (load-built-in-canvas-mode-units!)
+  (load-built-in-activity-units!)
   (ensure-user-code-units!)
   (init-world-manager)
   (when app.world-manager
@@ -1645,6 +1674,12 @@
   (when app.panel-transfer
     (set app.panel-transfer nil))
   (set app.panel-transfer (PanelTransfer))
+  (fn active-canvas-panel-target []
+    (or (and app.canvas
+             app.canvas.active-activity-slot
+             app.canvas.active-activity-slot.visible?
+             app.canvas.active-activity-slot)
+        app.canvas))
   (app.panel-transfer:register-receiver
     {:id :hud
      :label "HUD"
@@ -1654,8 +1689,6 @@
                  (var removed false)
                  (when (and app.hud app.hud.remove-panel-child)
                    (set removed (app.hud:remove-panel-child el)))
-                 (when (and removed el el.drop)
-                   (el:drop))
                  removed)})
   (app.panel-transfer:register-receiver
     {:id :scene
@@ -1669,14 +1702,13 @@
     {:id :canvas
      :label "Canvas"
      :icon "space_dashboard"
-     :target-fn (fn [] app.canvas)
+     :target-fn active-canvas-panel-target
      :rollback (fn [_r el]
-                 (var removed false)
-                 (when (and app.canvas app.canvas.remove-panel-child)
-                   (set removed (app.canvas:remove-panel-child el)))
-                 (when (and removed el el.drop)
-                   (el:drop))
-                 removed)})
+                  (var removed false)
+                  (local target (active-canvas-panel-target))
+                  (when (and target target.remove-panel-child)
+                    (set removed (target:remove-panel-child el)))
+                  removed)})
 
   (when app.system-cursors
     (app.system-cursors:reset))
@@ -1757,9 +1789,9 @@
            {:tools app.mcp-tools
             :data-dir (fs.join-path app.user-data-dir "agent-opencode")}))
     (app.agent-opencode-mcp-bridge:start))
-  (when (and app.canvas-shell-changed (not app.agent-presets-canvas-handler))
-    (set app.agent-presets-canvas-handler
-         (app.canvas-shell-changed:connect
+  (when (and app.workspace-shell-changed (not app.agent-presets-workspace-handler))
+    (set app.agent-presets-workspace-handler
+         (app.workspace-shell-changed:connect
            (fn [_payload]
              (app.agent-presets:set-context (agent-preset-context))))))
 
@@ -1804,7 +1836,7 @@
           (local log-path (logging.get-output-path))
           (table.insert parts (.. "Log file: " log-path))
           (table.insert parts
-            "Available signals on app: canvas-shell-changed, canvas-modes-changed")
+             "Available signals on app: workspace-shell-changed, activities-changed")
           (table.insert parts
             "Use space_unit_read_log to check for runtime errors after unit operations.")
           ;; Scan for existing test modules
@@ -1889,7 +1921,7 @@
              (app.world-manager:active-world-id))))
   (local snapshot
     {:active-world-id active-world-id
-     :active-canvas-mode app.active-canvas-mode
+     :active-activity-id app.active-activity-id
      :preferred-interaction-surface app.preferred-interaction-surface
      :active-interaction-surface app.active-interaction-surface
      :canvas-visible? app.canvas-visible?
@@ -1902,8 +1934,8 @@
              app.world-manager
              app.world-manager.activate-world-id)
     (app.world-manager:activate-world-id snapshot.active-world-id))
-  (when app.set-active-canvas-mode
-    (app.set-active-canvas-mode snapshot.active-canvas-mode))
+  (when app.set-active-activity
+    (app.set-active-activity snapshot.active-activity-id))
   (when (and snapshot.preferred-interaction-surface app.set-active-interaction-surface)
     (app.set-active-interaction-surface snapshot.preferred-interaction-surface
                                         {:sync-canvas-visibility false}))
@@ -1971,9 +2003,9 @@
   (when app.agent-mcp-sync
     (app.agent-mcp-sync:stop)
     (set app.agent-mcp-sync nil))
-  (when (and app.agent-presets-canvas-handler app.canvas-shell-changed)
-    (app.canvas-shell-changed:disconnect app.agent-presets-canvas-handler true)
-    (set app.agent-presets-canvas-handler nil))
+  (when (and app.agent-presets-workspace-handler app.workspace-shell-changed)
+    (app.workspace-shell-changed:disconnect app.agent-presets-workspace-handler true)
+    (set app.agent-presets-workspace-handler nil))
   (set app.agent-tool-surface nil)
   (set app.agent-approvals nil)
   (set app.agent-registry nil)
@@ -2030,11 +2062,12 @@
   (when (and app.world-manager app.world-manager.drop)
     (app.world-manager:drop)
     (set app.world-manager nil))
-  (CanvasModes.clear-mode-runtime-hooks!)
+  (Activities.clear-activity-runtime-hooks!)
   (when app.unit-manager
     (app.unit-manager:clear))
   (set app.canvas-unit nil)
   (set app.active-world-entry nil)
+  (set app.active-world-runtime nil)
   (set app.first-person-controls nil)
   (set app.canvas-controls nil)
   (set app.active-pointer-controls nil)
@@ -2054,14 +2087,15 @@
   (set app.canvas nil)
   (set app.preferred-interaction-surface :scene)
   (set app.active-interaction-surface :scene)
-  (set app.active-canvas-mode nil)
+  (set app.active-activity-id nil)
   (set app.scene-interactive? true)
   (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
   (set app.canvas-visible? false)
   (set app.world-tabs-builder nil)
   (set app.active-world-hud-contrib nil)
   (set app.active-world-hud-overlay nil)
-  (set app.canvas-mode-units nil)
+  (set app.activity-units nil)
   (set app.hud-unit nil)
   (when app.hoverables
     (app.hoverables:drop)

@@ -8,13 +8,10 @@
   (icollect [_ path (ipairs [(fs.join-path lua-root "canvas-unit.fnl")
                              (fs.join-path lua-root "canvas.fnl")
                              (fs.join-path lua-root "canvas-controls.fnl")
-                             (fs.join-path lua-root "canvas-mode-dock-view.fnl")
-                             (fs.join-path lua-root "canvas-modes.fnl")
+                             (fs.join-path lua-root "activity-dock-view.fnl")
                              (fs.join-path lua-root "object-selector.fnl")
                              (fs.join-path lua-root "triangle-line.fnl")
-                              (fs.join-path (fs.join-path lua-root "drawing") "render.fnl")
-                              (fs.join-path lua-root "home-world-canvas-runtime.fnl")
-                              (fs.join-path lua-root "home-world-canvas-shell-state.fnl")])]
+                             (fs.join-path lua-root "home-world-canvas-runtime.fnl")])]
     path))
 
 (fn resolve-runtime []

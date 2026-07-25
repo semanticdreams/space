@@ -2,10 +2,10 @@
 (local _ (require :main))
 (local Menu (require :menu))
 (local MenuManager (require :menu-manager))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local RootContextMenuActions (require :root-context-menu-actions))
-(local GraphCanvasModeActions (require :graph-canvas-mode-actions))
-(local DrawingCanvasModeActions (require :drawing-canvas-mode-actions))
+(local GraphActivityActions (require :graph-activity-actions))
+(local DrawingActivityActions (require :drawing-activity-actions))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local {: Layout} (require :layout))
 (local fs (require :fs))
@@ -71,36 +71,44 @@
       result
       (error result)))
 
-(fn ensure-built-in-canvas-modes! []
-  (local registry (CanvasModes.ensure-registry))
-  (when (not (. registry.modes "graph"))
-    (CanvasModes.register-mode
+(fn ensure-built-in-activities! []
+  (local registry (Activities.ensure-registry))
+  (when (and (. registry.activities "graph")
+             (not (. (. registry.activities "graph") :menu-test?)))
+    (Activities.unregister-activity "graph"))
+  (when (not (. registry.activities "graph"))
+    (Activities.register-activity
       {:id "graph"
+       :menu-test? true
        :label "Graph"
        :icon "account_tree"
-       :button-name "graph-canvas-mode"
-       :show-in-sidebar? true
-        :activate (fn [ctx]
+       :button-name "graph-activity"
+       :show-in-switcher? true
+       :activate (fn [ctx]
                     (ctx:set-context-enricher!
                       (fn [context]
                         (set context.graph
                              {:graph app.graph
                               :graph-map app.graph-map
                               :view app.graph-view
-                              :selected-nodes (GraphCanvasModeActions.selected-graph-nodes app.graph-view)})
+                              :selected-nodes (GraphActivityActions.selected-graph-nodes app.graph-view)})
                         context))
-                   (ctx:set-root-actions! (. GraphCanvasModeActions :graph-root-actions))
-                   (ctx:set-selection-actions! nil)
-                   {:mode-id "graph"})
+                    (ctx:set-root-actions! (. GraphActivityActions :graph-root-actions))
+                    (ctx:set-selection-actions! nil)
+                   {:activity-id "graph"})
        :deactivate (fn [_ctx _session]
                      true)}))
-  (when (not (. registry.modes "drawing"))
-    (CanvasModes.register-mode
+  (when (and (. registry.activities "drawing")
+             (not (. (. registry.activities "drawing") :menu-test?)))
+    (Activities.unregister-activity "drawing"))
+  (when (not (. registry.activities "drawing"))
+    (Activities.register-activity
       {:id "drawing"
+       :menu-test? true
        :label "Draw"
        :icon "draw"
-       :button-name "drawing-canvas-mode"
-       :show-in-sidebar? true
+       :button-name "drawing-activity"
+       :show-in-switcher? true
        :activate (fn [ctx]
                    (ctx:set-context-enricher!
                      (fn [context]
@@ -119,18 +127,21 @@
                                               0)
                              :has-selection? (> selection-count 0)})
                        context))
-                   (ctx:set-root-actions! (. DrawingCanvasModeActions :drawing-root-actions))
-                   (ctx:set-selection-actions! (. DrawingCanvasModeActions :drawing-selection-actions))
+                   (ctx:set-root-actions! (. DrawingActivityActions :drawing-root-actions))
+                   (ctx:set-selection-actions! (. DrawingActivityActions :drawing-selection-actions))
                    (ctx:set-drawing-enabled! true)
-                   {:mode-id "drawing"})
+                   {:activity-id "drawing"})
        :deactivate (fn [_ctx _session]
                      true)}))
   true)
 
-(fn activate-canvas-mode! [mode-id]
-  (ensure-built-in-canvas-modes!)
-  (CanvasModes.activate-mode mode-id)
-  (set app.active-canvas-mode mode-id)
+(fn activate-activity! [mode-id]
+  (ensure-built-in-activities!)
+  (when (= (Activities.active-activity-id) mode-id)
+    (Activities.deactivate-active-activity))
+  (Activities.activate-activity mode-id)
+  (set app.active-activity-id mode-id)
+  (set app.active-interaction-surface :canvas)
   mode-id)
 
 (fn make-vector-buffer []
@@ -340,7 +351,7 @@
   (with-temp-dir
     (fn [root]
       (reset-engine-events)
-      (ensure-built-in-canvas-modes!)
+      (ensure-built-in-activities!)
       (local clickables (make-clickables-stub))
       (local hoverables (make-hoverables-stub))
       (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
@@ -373,7 +384,7 @@
       (set app.graph-map map)
       (set app.graph-view {:selection {:selected-nodes [a]}})
       (set app.active-interaction-surface :canvas)
-      (activate-canvas-mode! "graph")
+      (activate-activity! "graph")
 
       (local manager
         (MenuManager {:clickables clickables
@@ -468,7 +479,7 @@
                              (fn [key]
                                (Graph.GraphNode {:key key})))
   (local graph-map (GraphMap.GraphMap {:graph graph :id "test-add-to-map"}))
-  (local actions (GraphCanvasModeActions.graph-root-actions
+  (local actions (GraphActivityActions.graph-root-actions
                    {:graph {:graph-map graph-map}
                     :targets {:canvas target}}))
   (local action (find-action-by-name actions "Add to Map"))
@@ -522,7 +533,7 @@
       (fn []
         (set app.graph-map first-map)
         (set app.active-world-runtime {:graph-map first-map})
-        (local actions (GraphCanvasModeActions.graph-root-actions
+        (local actions (GraphActivityActions.graph-root-actions
                          {:graph {:graph-map first-map}
                           :targets {:canvas target}}))
         (local action (find-action-by-name actions "Add to Map"))
@@ -561,7 +572,7 @@
       (fn []
         (set app.graph-map first-map)
         (set app.active-world-runtime {:graph-map first-map})
-        (local actions (GraphCanvasModeActions.graph-root-actions
+        (local actions (GraphActivityActions.graph-root-actions
                          {:graph {:graph-map first-map}
                           :targets {}}))
         (local action (find-action-by-name actions "Create String Entity"))
@@ -814,9 +825,9 @@
   (when (not ok)
     (error err)))
 
-(fn menu-manager-root-drawing-actions-follow-canvas-mode []
+(fn menu-manager-root-drawing-actions-follow-activity []
   (reset-engine-events)
-  (ensure-built-in-canvas-modes!)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
@@ -826,10 +837,10 @@
                 :duplicate 0
                 :delete-layer 0})
   (local original-surface app.active-interaction-surface)
-  (local original-mode app.active-canvas-mode)
+  (local original-mode app.active-activity-id)
   (local original-controller app.drawing-controller)
   (set app.active-interaction-surface :canvas)
-  (activate-canvas-mode! "drawing")
+  (activate-activity! "drawing")
   (set app.drawing-controller
        {:active-layer (fn [_self]
                         {:id "layer-1"
@@ -885,7 +896,7 @@
 
   (manager:drop)
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-mode original-mode)
+  (set app.active-activity-id original-mode)
   (set app.drawing-controller original-controller)
 
   (when (not ok)
@@ -893,17 +904,17 @@
 
 (fn menu-manager-root-drawing-selection-actions-follow-selection-state []
   (reset-engine-events)
-  (ensure-built-in-canvas-modes!)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:delete-selection 0})
   (local original-surface app.active-interaction-surface)
-  (local original-mode app.active-canvas-mode)
+  (local original-mode app.active-activity-id)
   (local original-controller app.drawing-controller)
   (set app.active-interaction-surface :canvas)
-  (activate-canvas-mode! "drawing")
+  (activate-activity! "drawing")
   (set app.drawing-controller
        {:active-layer (fn [_self]
                         {:id "layer-1"
@@ -940,20 +951,20 @@
 
   (manager:drop)
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-mode original-mode)
+  (set app.active-activity-id original-mode)
   (set app.drawing-controller original-controller)
 
   (when (not ok)
     (error err)))
 
 (fn root-context-menu-actions-normalize-partial-context []
-  (ensure-built-in-canvas-modes!)
+  (ensure-built-in-activities!)
   (local original-surface app.active-interaction-surface)
-  (local original-mode app.active-canvas-mode)
+  (local original-mode app.active-activity-id)
   (local original-controller app.drawing-controller)
   (local original-engine app.engine)
   (set app.active-interaction-surface :canvas)
-  (activate-canvas-mode! "graph")
+  (activate-activity! "graph")
   (set app.engine {:quit (fn [] nil)})
   (set app.drawing-controller
        {:active-layer (fn [_self]
@@ -968,9 +979,9 @@
   (local (ok actions)
     (pcall RootContextMenuActions.actions-for-context
            {:surface :canvas
-            :canvas-mode "drawing"}))
+            :activity "drawing"}))
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-mode original-mode)
+  (set app.active-activity-id original-mode)
   (set app.drawing-controller original-controller)
   (set app.engine original-engine)
   (assert ok
@@ -988,18 +999,18 @@
           "normalized partial drawing context should still include shared actions"))
 
 (fn root-context-menu-actions-does-not-switch-active-mode-for_partial_context []
-  (ensure-built-in-canvas-modes!)
+  (ensure-built-in-activities!)
   (local original-surface app.active-interaction-surface)
-  (local original-mode app.active-canvas-mode)
+  (local original-mode app.active-activity-id)
   (local original-controller app.drawing-controller)
-  (local original-set-active-canvas-mode app.set-active-canvas-mode)
+  (local original-set-active-activity app.set-active-activity)
   (var calls 0)
   (set app.active-interaction-surface :canvas)
-  (activate-canvas-mode! "graph")
-  (set app.set-active-canvas-mode
+  (activate-activity! "graph")
+  (set app.set-active-activity
        (fn [_mode-id]
          (set calls (+ calls 1))
-         (error "actions-for-context should not switch the active mode")))
+          (error "actions-for-context should not switch the active activity")))
   (set app.drawing-controller
        {:active-layer (fn [_self]
                         {:id "layer-1"
@@ -1013,78 +1024,78 @@
   (local (ok actions)
     (pcall RootContextMenuActions.actions-for-context
            {:surface :canvas
-            :canvas-mode "drawing"}))
+            :activity "drawing"}))
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-mode original-mode)
+  (set app.active-activity-id original-mode)
   (set app.drawing-controller original-controller)
-  (set app.set-active-canvas-mode original-set-active-canvas-mode)
+  (set app.set-active-activity original-set-active-activity)
   (assert ok
-          "actions-for-context should build partial drawing context without switching the active mode")
+          "actions-for-context should build partial drawing context without switching the active activity")
   (assert (= calls 0)
-          "actions-for-context should not call set-active-canvas-mode for a hypothetical context")
+          "actions-for-context should not call set-active-activity for a hypothetical context")
   (var found false)
   (each [_ action (ipairs actions)]
     (when (= action.name "Add Vector Layer")
       (set found true)))
   (assert (not found)
-          "partial drawing context should not expose drawing actions without switching the active mode"))
+          "partial drawing context should not expose drawing actions without switching the active activity"))
 
-(fn root-context-menu-actions-support-active-custom-canvas-mode []
+(fn root-context-menu-actions-support-active-custom-activity []
   (local original-surface app.active-interaction-surface)
-  (local original-mode app.active-canvas-mode)
-  (local original-registry app.canvas-mode-registry)
-  (local original-root-actions app.canvas-mode-root-actions)
-  (local original-selection-actions app.canvas-mode-selection-actions)
-  (local original-left-dock-builder app.canvas-mode-left-dock-builder)
-  (local original-command-hints-provider app.canvas-mode-command-hints-provider)
-  (local original-delete-selection app.canvas-mode-delete-selection)
-  (local original-activate-focused app.canvas-mode-activate-focused)
-  (local original-drawing-enabled app.canvas-mode-drawing-enabled?)
-  (local original-target-enabled app.canvas-mode-target-enabled?)
-  (local original-mode-update app.canvas-mode-update)
-  (set app.canvas-mode-registry nil)
-  (CanvasModes.clear-mode-runtime-hooks!)
-  (CanvasModes.register-mode
+  (local original-mode app.active-activity-id)
+  (local original-registry app.activity-registry)
+  (local original-root-actions app.activity-root-actions)
+  (local original-selection-actions app.activity-selection-actions)
+  (local original-left-dock-builder app.activity-left-dock-builder)
+  (local original-command-hints-provider app.activity-command-hints-provider)
+  (local original-delete-selection app.activity-delete-selection)
+  (local original-activate-focused app.activity-activate-focused)
+  (local original-drawing-enabled app.activity-drawing-enabled?)
+  (local original-target-enabled app.activity-target-enabled?)
+  (local original-mode-update app.activity-update)
+  (set app.activity-registry nil)
+  (Activities.clear-activity-runtime-hooks!)
+  (Activities.register-activity
     {:id "custom-note"
      :label "Custom"
      :icon "draw"
-     :button-name "custom-note-mode"
-     :show-in-sidebar? true
+     :button-name "custom-note-activity"
+     :show-in-switcher? true
      :activate (fn [ctx]
                  (ctx:set-root-actions!
                    (fn [_context]
                      [{:name "Custom Action"
                        :fn (fn [_button _event] true)}]))
-                 {:mode-id "custom-note"})
+                 {:activity-id "custom-note"})
      :deactivate (fn [_ctx _session]
                    true)})
-  (CanvasModes.activate-mode "custom-note")
+  (Activities.activate-activity "custom-note")
   (set app.active-interaction-surface :canvas)
-  (set app.active-canvas-mode "custom-note")
+  (set app.active-activity-id "custom-note")
   (local (ok actions)
     (pcall RootContextMenuActions.actions-for-context
            {:surface :canvas
-            :canvas-mode "custom-note"}))
+            :activity "custom-note"}))
   (set app.active-interaction-surface original-surface)
-  (set app.active-canvas-mode original-mode)
-  (set app.canvas-mode-registry original-registry)
-  (set app.canvas-mode-root-actions original-root-actions)
-  (set app.canvas-mode-selection-actions original-selection-actions)
-  (set app.canvas-mode-left-dock-builder original-left-dock-builder)
-  (set app.canvas-mode-command-hints-provider original-command-hints-provider)
-  (set app.canvas-mode-delete-selection original-delete-selection)
-  (set app.canvas-mode-activate-focused original-activate-focused)
-  (set app.canvas-mode-drawing-enabled? original-drawing-enabled)
-  (set app.canvas-mode-target-enabled? original-target-enabled)
-  (set app.canvas-mode-update original-mode-update)
+  (set app.active-activity-id original-mode)
+  (set app.activity-registry original-registry)
+  (set app.activity-root-actions original-root-actions)
+  (set app.activity-selection-actions original-selection-actions)
+  (set app.activity-left-dock-builder original-left-dock-builder)
+  (set app.activity-command-hints-provider original-command-hints-provider)
+  (set app.activity-delete-selection original-delete-selection)
+  (set app.activity-activate-focused original-activate-focused)
+  (set app.activity-drawing-enabled? original-drawing-enabled)
+  (set app.activity-target-enabled? original-target-enabled)
+  (set app.activity-update original-mode-update)
   (assert ok
-          "actions-for-context should support active custom canvas modes")
+          "actions-for-context should support active custom activities")
   (var found false)
   (each [_ action (ipairs actions)]
     (when (= action.name "Custom Action")
       (set found true)))
   (assert found
-          "active custom canvas mode should contribute its root actions"))
+          "active custom activity should contribute its root actions"))
 
 (table.insert tests {:name "Menu actions and depth offset" :fn menu-actions-fire-and-increment-depth})
 (table.insert tests {:name "Menu grows downward from click" :fn menu-grows-downward-from-click})
@@ -1109,16 +1120,16 @@
                      :fn menu-manager-root-light-ball-invokes-scene})
 (table.insert tests {:name "Menu root recover terrain-bound objects invokes scene"
                      :fn menu-manager-root-recover-terrain-bound-objects-invokes-scene})
-(table.insert tests {:name "Menu root drawing actions follow canvas mode"
-                     :fn menu-manager-root-drawing-actions-follow-canvas-mode})
+(table.insert tests {:name "Menu root drawing actions follow activity"
+                     :fn menu-manager-root-drawing-actions-follow-activity})
 (table.insert tests {:name "Menu root drawing selection actions follow selection state"
                      :fn menu-manager-root-drawing-selection-actions-follow-selection-state})
 (table.insert tests {:name "Root context menu actions normalize partial context"
                      :fn root-context-menu-actions-normalize-partial-context})
-(table.insert tests {:name "Root context menu actions stay side-effect free for partial mode context"
+(table.insert tests {:name "Root context menu actions stay side-effect free for partial activity context"
                      :fn root-context-menu-actions-does-not-switch-active-mode-for_partial_context})
-(table.insert tests {:name "Root context menu actions support active custom canvas mode"
-                     :fn root-context-menu-actions-support-active-custom-canvas-mode})
+(table.insert tests {:name "Root context menu actions support active custom activity"
+                     :fn root-context-menu-actions-support-active-custom-activity})
 
 (local main
   (fn []

@@ -15,7 +15,7 @@ updated: 2026-07-14
 
 ## Summary
 
-The April 2026 push to replace implicit, signal-driven ownership with explicit, centralized lifecycle management. A prerequisite for hot-reload, canvas modes, and reliable teardown.
+The April 2026 push to replace implicit, signal-driven ownership with explicit, centralized lifecycle management. A prerequisite for hot-reload, activities, and reliable teardown.
 
 ## What was done
 
@@ -23,13 +23,13 @@ The April 2026 push to replace implicit, signal-driven ownership with explicit, 
 2. **Signal lifecycle hardening** — signals disconnect when owners drop; graph views explicitly cleaned up before rebuild (`2026-04-16`)
 3. **Double-drop fix** — composite view children teardown clarified (`2026-04-16`)
 4. **UnitManager** — explicit unit registry, SourceUnit, and runtime unit lifecycle (`2026-05-08`)
-5. **Canvas mode centralization** — mode shell owns activate/deactivate lifecycle (`2026-04-30`)
+5. **Activity lifecycle centralization** — workspace shell owns activate/deactivate lifecycle (`2026-04-30`, migrated from canvas modes in July 2026)
 
 ## Results
 
 - Eliminated the most common runtime crash class (stale callbacks after drop)
 - Enabled hot-reload: units can be safely unloaded and reloaded
-- Enabled canvas mode switching: modes activate/deactivate with clean transitions
+- Enabled activity switching: activities activate/deactivate with clean transitions
 - Enabled panel transfer: panels move between surfaces with transaction safety
 
 ## Related
@@ -39,7 +39,7 @@ The April 2026 push to replace implicit, signal-driven ownership with explicit, 
 - [Lifecycle Invariants](/dev/lifecycle-invariants) — the finalized rules
 - [Widget Ownership](/dev/widget-ownership-and-teardown) — teardown ownership model
 - [Hot Reload Units](/dev/features/hot-reload-units) — dependent on lifecycle safety
-- [Canvas Mode System](/dev/features/canvas-mode-system) — dependent on lifecycle safety
+- [Activities Architecture](/dev/features/activities) — dependent on lifecycle safety
 
 ## See also
 

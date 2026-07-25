@@ -82,11 +82,15 @@
                    :focus-manager focus-manager
                    :focus-parent focus-root
                    :focus-scope focus-scope}))
+
   (local float ((FloatLayer {:name "canvas-float"
                              :depth-layer-step panel-depth-layer-step})
                 ctx))
   (local self {:layout-root layout-root
                :build-context ctx
+               :activity-slots {}
+               :active-activity-slot-id nil
+               :active-activity-slot nil
                :camera camera
                :projection nil
                :projection-version 0
@@ -102,18 +106,60 @@
                :interaction-surface :canvas
                :default-panel-location "float"})
 
+  (fn make-slot-focus-scope [activity-id]
+    (and focus-manager
+         (focus-manager:create-scope {:name (.. "canvas:" activity-id)
+                                      :directional-traversal-boundary? true})))
+
+  (fn make-slot-pointer-target [slot]
+    {:interaction-surface :canvas
+     :activity-slot slot
+     :canvas-target-kind nil
+     :screen-pos-ray (fn [_target pos opts]
+                       (self:screen-pos-ray pos opts))})
+
+  (fn make-slot-build-context [slot slot-layout-root]
+    (local slot-focus-scope slot.focus-scope)
+    (local slot-ctx
+      (BuildContext {:theme (resolve-active-theme)
+                     :quad-unlit? true
+                     :clickables app.clickables
+                     :hoverables app.hoverables
+                     :touch-gesture-targets app.touch-gesture-targets
+                     :system-cursors app.system-cursors
+                     :icons options.icons
+                     :states options.states
+                     :layout-root slot-layout-root
+                     :movables options.movables
+                     :focus-manager focus-manager
+                     :focus-parent focus-scope
+                     :focus-scope slot-focus-scope}))
+    (set slot-ctx.pointer-target slot.pointer-target)
+    (set slot-ctx.panel-target slot)
+    (apply-active-theme slot-ctx)
+    slot-ctx)
+
+  (fn apply-active-theme-to-contexts [_canvas]
+    (apply-active-theme self.build-context)
+    (each [_ slot (pairs self.activity-slots)]
+      (apply-active-theme slot.ctx))
+    true)
+
   (set ctx.pointer-target self)
   (set ctx.panel-target self)
   (apply-active-theme ctx)
   (float.layout:set-root layout-root)
 
-  (fn find-panel-metadata [element]
+  (fn find-panel-metadata-in-layer [layer element]
     (var found nil)
-    (each [_ metadata (ipairs (or self.float.children []))]
+    (each [_ metadata (ipairs (or (and layer layer.children) []))]
       (when (and (not found)
                  (= (and metadata metadata.element) element))
         (set found metadata)))
     found)
+
+  (fn find-panel-metadata [element]
+    (find-panel-metadata-in-layer self.float element))
 
   (fn unregister-panel-interactions [element]
     (when (and element app.movables)
@@ -121,30 +167,30 @@
     (when (and element app.resizables)
       (app.resizables:unregister element)))
 
-  (fn register-panel-interactions [metadata]
+  (fn register-panel-interactions [target metadata]
     (local element (and metadata metadata.element))
     (local layout (and element element.layout))
     (when (and element layout app.movables)
-      (local target (self.float:ensure-movable-target metadata))
-      (app.movables:register element {:target target
-                                      :handle layout
-                                      :key element
-                                      :pointer-target self}))
+      (local transform-target (target.float:ensure-movable-target metadata))
+      (app.movables:register element {:target transform-target
+                                       :handle layout
+                                       :key element
+                                       :pointer-target (or target.pointer-target target)}))
     (when (and element layout app.resizables)
       (local min-size (resolve-min-size layout))
-      (local target (self.float:ensure-resize-target metadata))
-      (app.resizables:register element {:target target
-                                        :handle layout
-                                        :key element
-                                        :min-size min-size
-                                        :pointer-target self})))
+      (local transform-target (target.float:ensure-resize-target metadata))
+      (app.resizables:register element {:target transform-target
+                                         :handle layout
+                                         :key element
+                                         :min-size min-size
+                                         :pointer-target (or target.pointer-target target)})))
 
-  (fn add-panel-child [canvas opts]
+  (fn add-panel-child-to-target [target opts]
     (local panel-opts (or opts {}))
     (local destination (or panel-opts.location panel-opts.layer :float))
     (when (or (= destination :tiles) (= destination "tiles"))
-      (error "Canvas.add-panel-child only supports float panels"))
-    (local builder (assert panel-opts.builder "Canvas.add-panel-child requires :builder"))
+      (error "Canvas panel targets only support float panels"))
+    (local builder (assert panel-opts.builder "Canvas panel target requires :builder"))
     (local builder-options {})
     (each [key value (pairs (or panel-opts.builder-options {}))]
       (set (. builder-options key) value))
@@ -157,27 +203,45 @@
         (when user-on-close
           (user-on-close dialog button event))
         (when element
-          (canvas:remove-panel-child element))))
+          (target:remove-panel-child element))))
     (set builder-options.on-close handle-close)
-    (set element (builder self.build-context builder-options))
+    (set element (builder target.build-context builder-options))
     (local default-position (or (and camera camera.position) (glm.vec3 0 0 0)))
     (local metadata
-      (self.float:attach-child element {:position (or panel-opts.position default-position)
-                                        :rotation panel-opts.rotation
-                                        :size panel-opts.size
-                                        :depth-offset-index panel-opts.depth-offset-index}))
+      (target.float:attach-child element {:position (or panel-opts.position default-position)
+                                          :rotation panel-opts.rotation
+                                          :size panel-opts.size
+                                          :depth-offset-index panel-opts.depth-offset-index}))
     (when metadata
       (set metadata.persistence (and panel-opts.persistence
                                      (clone-table panel-opts.persistence)))
-      (register-panel-interactions metadata))
+      (register-panel-interactions target metadata))
     element)
 
-  (fn remove-panel-child [_canvas element]
-    (local metadata (find-panel-metadata element))
+  (fn remove-panel-child-from-target [target element]
+    (local metadata (find-panel-metadata-in-layer target.float element))
     (when metadata
       (unregister-panel-interactions element)
-      (self.float:remove-child element)
+      (target.float:remove-child element)
       true))
+
+  (fn capture-panel-element-state-from-target [target element]
+    (local metadata (find-panel-metadata-in-layer target.float element))
+    (if (not metadata)
+        nil
+        (do
+          (local layout-state (capture-panel-layout-state metadata))
+          (when layout-state
+            {:layer "float"
+             :position layout-state.position
+             :rotation layout-state.rotation
+             :size layout-state.size}))))
+
+  (fn add-panel-child [canvas opts]
+    (add-panel-child-to-target canvas opts))
+
+  (fn remove-panel-child [_canvas element]
+    (remove-panel-child-from-target self element))
 
   (fn find-panel-persistence [_canvas element]
     (local metadata (find-panel-metadata element))
@@ -201,16 +265,7 @@
     true)
 
   (fn capture-panel-element-state [_canvas element]
-    (local metadata (find-panel-metadata element))
-    (if (not metadata)
-        nil
-        (do
-          (local layout-state (capture-panel-layout-state metadata))
-          (when layout-state
-            {:layer "float"
-             :position layout-state.position
-             :rotation layout-state.rotation
-             :size layout-state.size}))))
+    (capture-panel-element-state-from-target self element))
 
   (fn capture-state [_canvas]
     (local panels [])
@@ -306,40 +361,208 @@
   (fn get-lighting-view-state [_canvas]
     (LightingViewState.orthographic (glm.vec3 0.0 0.0 1.0)))
 
+  (fn active-render-context []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.ctx
+        self.build-context))
+
+  (fn get-render-contexts [_canvas]
+    (local contexts [])
+    (when (and self.active-activity-slot
+               self.active-activity-slot.visible?)
+      (table.insert contexts self.active-activity-slot.ctx))
+    (table.insert contexts self.build-context)
+    contexts)
+
   (fn get-triangle-vector [_canvas]
-    self.build-context.triangle-vector)
+    (. (active-render-context) :triangle-vector))
 
   (fn get-triangle-batches [_canvas]
-    (and self.build-context
-         self.build-context.get-triangle-batches
-         (self.build-context:get-triangle-batches)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-triangle-batches
+         (render-ctx:get-triangle-batches)))
 
   (fn get-line-vector [_canvas]
-    self.build-context.line-vector)
+    (. (active-render-context) :line-vector))
 
   (fn get-point-vector [_canvas]
-    self.build-context.point-vector)
+    (. (active-render-context) :point-vector))
 
   (fn get-line-strips [_canvas]
-    self.build-context.line-strips)
+    (. (active-render-context) :line-strips))
 
   (fn get-image-batches [_canvas]
-    self.build-context.image-batches)
+    (. (active-render-context) :image-batches))
+
+  (fn get-mesh-batches [_canvas]
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-mesh-batches
+         (render-ctx:get-mesh-batches)))
 
   (fn get-instanced-color-mesh-batches [_canvas]
-    (and self.build-context
-         self.build-context.get-instanced-color-mesh-batches
-         (self.build-context:get-instanced-color-mesh-batches)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-instanced-color-mesh-batches
+         (render-ctx:get-instanced-color-mesh-batches)))
 
   (fn get-quad-draw-list [_canvas]
-    (and self.build-context
-         self.build-context.get-quad-draw-list
-         (self.build-context:get-quad-draw-list)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-quad-draw-list
+         (render-ctx:get-quad-draw-list)))
 
   (fn get-text-ssbo-draw-list [_canvas]
-    (and self.build-context
-         self.build-context.get-text-ssbo-draw-list
-         (self.build-context:get-text-ssbo-draw-list)))
+    (local render-ctx (active-render-context))
+    (and render-ctx
+         render-ctx.get-text-ssbo-draw-list
+         (render-ctx:get-text-ssbo-draw-list)))
+
+  (fn ensure-activity-slot [_canvas activity-id]
+    (assert (= (type activity-id) :string)
+            "Canvas.ensure-activity-slot requires string activity id")
+    (assert (> (# activity-id) 0)
+            "Canvas.ensure-activity-slot requires non-empty activity id")
+    (local existing (. self.activity-slots activity-id))
+    (if existing
+        existing
+        (do
+          (local slot-layout-root (LayoutRoot))
+          (local slot
+            {:activity-id activity-id
+             :interaction-surface :canvas
+             :surface :canvas
+             :ctx nil
+             :build-context nil
+             :layout-root slot-layout-root
+             :focus-scope (make-slot-focus-scope activity-id)
+             :pointer-target nil
+             :float nil
+             :panel-restorers {}
+             :camera camera
+             :default-panel-location "float"
+             :root nil
+             :visible? false
+             :interactive? false})
+          (set slot.pointer-target (make-slot-pointer-target slot))
+          (set slot.ctx (make-slot-build-context slot slot-layout-root))
+          (set slot.build-context slot.ctx)
+          (set slot.float ((FloatLayer {:name (.. "canvas-" activity-id "-float")
+                                        :depth-layer-step panel-depth-layer-step})
+                            slot.ctx))
+          (slot.float.layout:set-root slot-layout-root)
+          (set slot.set-canvas-target-kind!
+               (fn [slot-self target-kind]
+                 (set slot-self.pointer-target.canvas-target-kind target-kind)
+                 slot-self))
+          (set slot.screen-pos-ray
+               (fn [_slot pos opts]
+                 (self:screen-pos-ray pos opts)))
+          (set slot.add-panel-child
+               (fn [slot-self opts]
+                 (add-panel-child-to-target slot-self opts)))
+          (set slot.remove-panel-child
+               (fn [slot-self element]
+                 (remove-panel-child-from-target slot-self element)))
+          (set slot.find-panel-persistence
+               (fn [slot-self element]
+                 (local metadata (find-panel-metadata-in-layer slot-self.float element))
+                 (and metadata metadata.persistence)))
+          (set slot.capture-panel-element-state
+               (fn [slot-self element]
+                 (capture-panel-element-state-from-target slot-self element)))
+          (set slot.register-panel-restorer
+               (fn [slot-self kind restorer owner]
+                 (assert (= (type kind) :string)
+                         "Canvas activity slot register-panel-restorer requires string kind")
+                 (assert (= (type restorer) :function)
+                         "Canvas activity slot register-panel-restorer requires function restorer")
+                 (set (. slot-self.panel-restorers kind) {:restore restorer
+                                                          :owner owner})
+                 true))
+          (set slot.unregister-panel-restorer
+               (fn [slot-self kind owner]
+                 (assert (= (type kind) :string)
+                         "Canvas activity slot unregister-panel-restorer requires string kind")
+                 (local current (. slot-self.panel-restorers kind))
+                 (when current
+                   (when (or (= owner nil)
+                             (= current.owner nil)
+                             (= current.owner owner))
+                     (set (. slot-self.panel-restorers kind) nil)))
+                 true))
+          (set slot.activate
+               (fn [slot-self]
+                 (when (and focus-manager
+                            focus-scope
+                            slot-self.focus-scope
+                            (not slot-self.focus-scope.parent))
+                   (focus-manager:attach slot-self.focus-scope focus-scope))
+                 (set slot-self.visible? true)
+                 (set slot-self.interactive? true)
+                 slot-self))
+          (set slot.deactivate
+               (fn [slot-self]
+                 (set slot-self.visible? false)
+                 (set slot-self.interactive? false)
+                 (when (and focus-manager
+                            slot-self.focus-scope
+                            slot-self.focus-scope.parent)
+                   (focus-manager:detach slot-self.focus-scope))
+                 slot-self))
+          (set slot.drop
+               (fn [slot-self]
+                 (slot-self:deactivate)
+                 (when (and slot-self.root slot-self.root.drop)
+                   (slot-self.root:drop))
+                 (set slot-self.root nil)
+                 (each [_ metadata (ipairs (or (and slot-self.float slot-self.float.children) []))]
+                   (local element (and metadata metadata.element))
+                   (when element
+                     (unregister-panel-interactions element)))
+                 (when slot-self.float
+                   (slot-self.float:drop)
+                   (set slot-self.float nil))
+                 true))
+          (slot:deactivate)
+          (set (. self.activity-slots activity-id) slot)
+          slot)))
+
+  (fn activity-slot [_canvas activity-id]
+    (assert (= (type activity-id) :string)
+            "Canvas.activity-slot requires string activity id")
+    (. self.activity-slots activity-id))
+
+  (fn activate-activity-slot [canvas activity-id]
+    (local slot (canvas:ensure-activity-slot activity-id))
+    (when (and self.active-activity-slot
+               (not (= self.active-activity-slot slot)))
+      (self.active-activity-slot:deactivate))
+    (slot:activate)
+    (set self.active-activity-slot-id activity-id)
+    (set self.active-activity-slot slot)
+    slot)
+
+  (fn deactivate-activity-slot [_canvas activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:deactivate)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil)))
+    slot)
+
+  (fn drop-activity-slot [_canvas activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:drop)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil))
+      (set (. self.activity-slots activity-id) nil))
+    true)
 
   (fn screen-pos-ray [_canvas pos opts]
     (local ray-opts (or opts {}))
@@ -399,9 +622,17 @@
     (self:update-projection viewport))
 
   (fn update [_canvas]
-    (self.layout-root:update))
+    (self.layout-root:update)
+    (when (and self.active-activity-slot
+               self.active-activity-slot.layout-root)
+      (self.active-activity-slot.layout-root:update)))
 
   (fn drop [_canvas]
+    (local activity-slot-ids [])
+    (each [activity-id _slot (pairs self.activity-slots)]
+      (table.insert activity-slot-ids activity-id))
+    (each [_ activity-id (ipairs activity-slot-ids)]
+      (drop-activity-slot self activity-id))
     (each [_ metadata (ipairs (or self.float.children []))]
       (local element (and metadata metadata.element))
       (when element
@@ -421,9 +652,17 @@
   (set self.get-point-vector get-point-vector)
   (set self.get-line-strips get-line-strips)
   (set self.get-image-batches get-image-batches)
+  (set self.get-mesh-batches get-mesh-batches)
   (set self.get-instanced-color-mesh-batches get-instanced-color-mesh-batches)
   (set self.get-quad-draw-list get-quad-draw-list)
   (set self.get-text-ssbo-draw-list get-text-ssbo-draw-list)
+  (set self.get-render-contexts get-render-contexts)
+  (set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
+  (set self.ensure-activity-slot ensure-activity-slot)
+  (set self.activity-slot activity-slot)
+  (set self.activate-activity-slot activate-activity-slot)
+  (set self.deactivate-activity-slot deactivate-activity-slot)
+  (set self.drop-activity-slot drop-activity-slot)
   (set self.add-panel-child add-panel-child)
   (set self.remove-panel-child remove-panel-child)
   (set self.find-panel-persistence find-panel-persistence)

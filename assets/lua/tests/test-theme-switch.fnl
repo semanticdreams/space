@@ -7,7 +7,7 @@
 (local PhysicsContainment (require :physics-containment))
 (local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 
 (fn with-settings [value f]
   (local previous app.settings)
@@ -130,13 +130,13 @@
   (local original-themes app.themes)
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
-  (local original-registry app.canvas-mode-registry)
-  (local original-modes-changed app.canvas-modes-changed)
+  (local original-registry app.activity-registry)
+  (local original-modes-changed app.activities-changed)
   (var hud-rebuild-calls 0)
   (local themes {:set-theme (fn [_theme] true)
                   :get-active-theme (fn [] {:name :light})})
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (set app.graph {})
   (set app.graph-view nil)
   (set app.canvas {:build-context {}})
@@ -170,8 +170,8 @@
   (set app.themes original-themes)
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
-  (set app.canvas-mode-registry original-registry)
-  (set app.canvas-modes-changed original-modes-changed)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
   (when (not ok)
     (error err))
   true)
@@ -188,15 +188,15 @@
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
   (local original-active-world-runtime app.active-world-runtime)
-  (local original-registry app.canvas-mode-registry)
-  (local original-modes-changed app.canvas-modes-changed)
-  (local original-active-canvas-mode app.active-canvas-mode)
+  (local original-registry app.activity-registry)
+  (local original-modes-changed app.activities-changed)
+  (local original-active-activity-id app.active-activity-id)
   (var activate-calls 0)
   (var deactivate-calls 0)
   (var hud-rebuild-calls 0)
   (var canvas-theme nil)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (local runtime {})
   (set app.graph {})
   (set app.canvas {:build-context {:theme {:name :dark}
@@ -221,7 +221,7 @@
   (set app.active-world-runtime runtime)
   (set app.active-world-entry {:world {:runtime runtime
                                         :state {:scene {:terrains []}}}})
-  (CanvasModes.register-mode
+  (Activities.register-activity
     {:id "graph"
      :label "Graph"
      :activate (fn [_ctx]
@@ -234,7 +234,7 @@
                    (set runtime.graph-view nil)
                    (set app.graph-view nil)
                    true)})
-  (CanvasModes.activate-mode "graph")
+  (Activities.activate-activity "graph")
   (set activate-calls 0)
   (set deactivate-calls 0)
   (local (ok err)
@@ -262,9 +262,9 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
   (set app.active-world-runtime original-active-world-runtime)
-  (set app.canvas-mode-registry original-registry)
-  (set app.canvas-modes-changed original-modes-changed)
-  (set app.active-canvas-mode original-active-canvas-mode)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
   (when (not ok)
     (error err))
   true)
@@ -522,15 +522,15 @@
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
   (local original-active-world-runtime app.active-world-runtime)
-  (local original-registry app.canvas-mode-registry)
-  (local original-modes-changed app.canvas-modes-changed)
-  (local original-active-canvas-mode app.active-canvas-mode)
+  (local original-registry app.activity-registry)
+  (local original-modes-changed app.activities-changed)
+  (local original-active-activity-id app.active-activity-id)
   (local original-board-view app.board-view)
   (local original-board app.board)
   (var activate-calls 0)
   (var deactivate-calls 0)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (set app.graph {})
   (set app.graph-view nil)
   (set app.canvas {:build-context {:theme {:name :dark}
@@ -549,7 +549,7 @@
   (set app.active-world-runtime runtime)
   (set app.active-world-entry {:world {:runtime runtime
                                         :state {:scene {:terrains []}}}})
-  (CanvasModes.register-mode
+  (Activities.register-activity
     {:id "board"
      :label "Board"
      :activate (fn [_ctx]
@@ -562,7 +562,7 @@
                    (set runtime.board-view nil)
                    (set app.board-view nil)
                    true)})
-  (CanvasModes.activate-mode "board")
+  (Activities.activate-activity "board")
   (set activate-calls 0)
   (set deactivate-calls 0)
   (local (ok err)
@@ -586,9 +586,9 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
   (set app.active-world-runtime original-active-world-runtime)
-  (set app.canvas-mode-registry original-registry)
-  (set app.canvas-modes-changed original-modes-changed)
-  (set app.active-canvas-mode original-active-canvas-mode)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
   (set app.board-view original-board-view)
   (set app.board original-board)
   (when (not ok)
@@ -630,11 +630,11 @@
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
   (local original-active-world-runtime app.active-world-runtime)
-  (local original-registry app.canvas-mode-registry)
-  (local original-modes-changed app.canvas-modes-changed)
-  (local original-active-canvas-mode app.active-canvas-mode)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
+  (local original-registry app.activity-registry)
+  (local original-modes-changed app.activities-changed)
+  (local original-active-activity-id app.active-activity-id)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (set app.graph {})
   (set app.graph-view nil)
   (set app.canvas {:build-context {:theme {:name :dark}
@@ -654,7 +654,7 @@
   (set app.active-world-entry {:world {:runtime runtime
                                         :state {:scene {:terrains []}}}})
   (var activate-fails? false)
-  (CanvasModes.register-mode
+  (Activities.register-activity
     {:id "graph"
      :label "Graph"
      :activate (fn [_ctx]
@@ -662,13 +662,13 @@
                      (error "reactivation failed")
                      {:mode-owned? true}))
      :deactivate (fn [_ctx _session] true)})
-  (CanvasModes.activate-mode "graph")
+  (Activities.activate-activity "graph")
   (set activate-fails? true)
   (local (ok err)
     (pcall
       (fn []
         (ThemeActions.apply-theme :light))))
-  (CanvasModes.unregister-mode "graph")
+  (Activities.unregister-activity "graph")
   (set app.settings original-settings)
   (set app.themes original-themes)
   (set app.scene original-scene)
@@ -680,12 +680,12 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
   (set app.active-world-runtime original-active-world-runtime)
-  (set app.canvas-mode-registry original-registry)
-  (set app.canvas-modes-changed original-modes-changed)
-  (set app.active-canvas-mode original-active-canvas-mode)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
   (assert (not ok)
           "apply-theme should surface reactivation failure even when theme rebuild succeeds")
-  (assert (and err (string.find err "Failed to reactivate canvas mode" 1 true))
+  (assert (and err (string.find err "Failed to reactivate activity" 1 true))
           "apply-theme should report reactivation failure when theme succeeds")
   (assert (not (string.find (tostring err) "theme rebuild" 1 true))
           "apply-theme should not report a theme rebuild failure when theme succeeded")
@@ -706,11 +706,11 @@
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
   (local original-active-world-runtime app.active-world-runtime)
-  (local original-registry app.canvas-mode-registry)
-  (local original-modes-changed app.canvas-modes-changed)
-  (local original-active-canvas-mode app.active-canvas-mode)
-  (set app.canvas-mode-registry nil)
-  (set app.canvas-modes-changed nil)
+  (local original-registry app.activity-registry)
+  (local original-modes-changed app.activities-changed)
+  (local original-active-activity-id app.active-activity-id)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (set app.graph {})
   (set app.graph-view nil)
   (set app.canvas {:build-context {:theme {:name :dark}
@@ -730,7 +730,7 @@
   (set app.active-world-entry {:world {:runtime runtime
                                         :state {:scene {:terrains []}}}})
   (var activate-fails? false)
-  (CanvasModes.register-mode
+  (Activities.register-activity
     {:id "graph"
      :label "Graph"
      :activate (fn [_ctx]
@@ -738,13 +738,13 @@
                      (error "reactivation failed")
                      {:mode-owned? true}))
      :deactivate (fn [_ctx _session] true)})
-  (CanvasModes.activate-mode "graph")
+  (Activities.activate-activity "graph")
   (set activate-fails? true)
   (local (ok err)
     (pcall
       (fn []
         (ThemeActions.apply-theme :light))))
-  (CanvasModes.unregister-mode "graph")
+  (Activities.unregister-activity "graph")
   (set app.settings original-settings)
   (set app.themes original-themes)
   (set app.scene original-scene)
@@ -756,9 +756,9 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
   (set app.active-world-runtime original-active-world-runtime)
-  (set app.canvas-mode-registry original-registry)
-  (set app.canvas-modes-changed original-modes-changed)
-  (set app.active-canvas-mode original-active-canvas-mode)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
   (assert (not ok)
           "apply-theme should surface original error when mode reactivation also fails")
   (assert (and err (string.find err "theme rebuild failed" 1 true))

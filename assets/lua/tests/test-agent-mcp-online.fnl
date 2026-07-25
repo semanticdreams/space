@@ -96,7 +96,7 @@
       {:registry preset-registry
        :tool-adapters adapter-registry
        :app app
-       :context {:surface "drawing" :mode "drawing" :canvas-visible? true}}))
+       :context {:surface "drawing" :activity "drawing" :canvas-visible? true}}))
 
   (local approvals (AgentApprovalsMod.AgentApprovals {:policy {:normal :auto}}))
 

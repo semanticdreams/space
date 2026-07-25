@@ -5,7 +5,7 @@
 (local FileWatch (require :file-watch))
 (local HotReload (require :hot-reload))
 (local runtime (require :runtime))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local Units (require :units))
 
 (local tests [])
@@ -54,7 +54,7 @@
                        :timeout-ms (or options.timeout-ms 2000)
                        :until predicate}))
 
-;; Fast unit tests for file-watch, module units, hot-reload controller, and canvas-mode registry.
+;; Fast unit tests for file-watch, module units, hot-reload controller, and activity registry.
 
 (fn file-watch-detects-basic-events []
   (with-temp-dir
@@ -244,52 +244,52 @@
               result
               (error result)))))))
 
-(fn canvas-modes-require-registration-before-activation []
-  (local previous-registry app.canvas-mode-registry)
-  (local previous-root-actions app.canvas-mode-root-actions)
-  (local previous-selection-actions app.canvas-mode-selection-actions)
-  (local previous-left-dock-builder app.canvas-mode-left-dock-builder)
-  (local previous-command-hints-provider app.canvas-mode-command-hints-provider)
-  (local previous-delete-selection app.canvas-mode-delete-selection)
-  (local previous-activate-focused app.canvas-mode-activate-focused)
-  (local previous-drawing-enabled app.canvas-mode-drawing-enabled?)
-  (local previous-target-enabled app.canvas-mode-target-enabled?)
-  (local previous-mode-update app.canvas-mode-update)
-  (set app.canvas-mode-registry nil)
-  (CanvasModes.clear-mode-runtime-hooks!)
+(fn activities-require-registration-before-activation []
+  (local previous-registry app.activity-registry)
+  (local previous-root-actions app.activity-root-actions)
+  (local previous-selection-actions app.activity-selection-actions)
+  (local previous-left-dock-builder app.activity-left-dock-builder)
+  (local previous-command-hints-provider app.activity-command-hints-provider)
+  (local previous-delete-selection app.activity-delete-selection)
+  (local previous-activate-focused app.activity-activate-focused)
+  (local previous-drawing-enabled app.activity-drawing-enabled?)
+  (local previous-target-enabled app.activity-target-enabled?)
+  (local previous-mode-update app.activity-update)
+  (set app.activity-registry nil)
+  (Activities.clear-activity-runtime-hooks!)
   (local (resolve-ok _resolve-err)
-    (pcall CanvasModes.resolve "graph"))
+    (pcall Activities.resolve "graph"))
   (assert (not resolve-ok)
-          "CanvasModes.resolve should reject built-in ids before they are registered")
-  (CanvasModes.register-mode
+          "Activities.resolve should reject built-in ids before they are registered")
+  (Activities.register-activity
     {:id "graph"
      :label "Graph"
      :icon "account_tree"
-     :button-name "graph-canvas-mode"
-     :show-in-sidebar? true
+     :button-name "graph-activity"
+     :show-in-switcher? true
      :activate (fn [ctx]
                  (ctx:set-root-actions! (fn [_context] []))
-                 {:mode-id "graph"})
+                 {:activity-id "graph"})
      :deactivate (fn [_ctx _session]
                    true)})
-  (CanvasModes.activate-mode "graph")
-  (assert (= (CanvasModes.active-mode-id) "graph")
-          "CanvasModes.activate-mode should activate a registered mode")
-  (CanvasModes.unregister-mode "graph")
+  (Activities.activate-activity "graph")
+  (assert (= (Activities.active-activity-id) "graph")
+          "Activities.activate-activity should activate a registered mode")
+  (Activities.unregister-activity "graph")
   (local (activate-ok _activate-err)
-    (pcall CanvasModes.activate-mode "graph"))
-  (set app.canvas-mode-registry previous-registry)
-  (set app.canvas-mode-root-actions previous-root-actions)
-  (set app.canvas-mode-selection-actions previous-selection-actions)
-  (set app.canvas-mode-left-dock-builder previous-left-dock-builder)
-  (set app.canvas-mode-command-hints-provider previous-command-hints-provider)
-  (set app.canvas-mode-delete-selection previous-delete-selection)
-  (set app.canvas-mode-activate-focused previous-activate-focused)
-  (set app.canvas-mode-drawing-enabled? previous-drawing-enabled)
-  (set app.canvas-mode-target-enabled? previous-target-enabled)
-  (set app.canvas-mode-update previous-mode-update)
+    (pcall Activities.activate-activity "graph"))
+  (set app.activity-registry previous-registry)
+  (set app.activity-root-actions previous-root-actions)
+  (set app.activity-selection-actions previous-selection-actions)
+  (set app.activity-left-dock-builder previous-left-dock-builder)
+  (set app.activity-command-hints-provider previous-command-hints-provider)
+  (set app.activity-delete-selection previous-delete-selection)
+  (set app.activity-activate-focused previous-activate-focused)
+  (set app.activity-drawing-enabled? previous-drawing-enabled)
+  (set app.activity-target-enabled? previous-target-enabled)
+  (set app.activity-update previous-mode-update)
   (assert (not activate-ok)
-          "CanvasModes.activate-mode should reject modes once they are unregistered"))
+          "Activities.activate-activity should reject modes once they are unregistered"))
 
 (table.insert tests {:name "file-watch detects write/delete events"
                      :fn file-watch-detects-basic-events})
@@ -297,8 +297,8 @@
                      :fn module-unit-reload-applies-edited-implementation})
 (table.insert tests {:name "hot reload clears deleted modules by known source path"
                      :fn hot-reload-clears-deleted-modules-by-known-source-path})
-(table.insert tests {:name "canvas modes require registration before activation"
-                     :fn canvas-modes-require-registration-before-activation})
+(table.insert tests {:name "activities require registration before activation"
+                     :fn activities-require-registration-before-activation})
 
 (fn path-separator-rejects-backslash-on-posix []
   (local path-utils (require :path-utils))

@@ -162,8 +162,8 @@
                           target.last-add-panel-opts.persistence
                           target.last-add-panel-opts.persistence.kind)
                      "graph-node-view")))}
- {:name "graph view node-views legacy open-node-keys restore uses map id"
-  :fn (fn []
+  {:name "graph view node-views legacy open-node-keys restore uses map id"
+   :fn (fn []
           (local ctx (make-ctx))
           (local target (make-view-target ctx))
           (local node {:key "legacy-open-node"
@@ -182,11 +182,47 @@
                   "legacy open-node-keys should restore node view on active map")
           (local state (views:capture-state))
           (local captured (. state.open-views 1))
-          (assert (= captured.graph-map-id "legacy-map")
-                  "legacy open-node-keys restore should capture active graph-map-id")
-          (views:drop-all))}
- {:name "graph view node-views restore skips unresolved nodes"
-  :fn (fn []
+           (assert (= captured.graph-map-id "legacy-map")
+                   "legacy open-node-keys restore should capture active graph-map-id")
+           (views:drop-all))}
+  {:name "graph view node-views canvas restorer redirects to active slot"
+   :fn (fn []
+           (local saved-canvas app.canvas)
+           (local ctx (make-ctx))
+           (local slot-target (make-view-target ctx))
+           (local canvas-target (make-view-target ctx))
+           (set canvas-target.active-activity-slot slot-target)
+           (set slot-target.visible? true)
+           (set app.canvas canvas-target)
+           (local node {:key "slot-restore-node"
+                        :label "Slot Restore Node"
+                        :view (fn [_node]
+                                  (fn [_builder-ctx _opts]
+                                      (make-simple-view)))})
+           (local graph {:id "main" :nodes {}})
+           (set (. graph.nodes node.key) node)
+           (set graph.lookup (fn [_self key] (. graph.nodes key)))
+           (local (ok err)
+             (pcall
+               (fn []
+                 (local views (GraphViewNodeViews {:ctx ctx
+                                                   :graph-map graph
+                                                   :view-target slot-target}))
+                 (assert (and canvas-target.restorer canvas-target.restorer.restorer)
+                         "graph node views should register legacy canvas restorer")
+                 ((. canvas-target.restorer :restorer) {:node-key node.key
+                                                        :graph-map-id "main"
+                                                        :layer "float"})
+                 (assert (= (length slot-target.children) 1)
+                         "legacy canvas restorer should restore graph panel into active slot")
+                 (assert (= (length canvas-target.children) 0)
+                         "legacy canvas restorer should not restore graph panel into base canvas")
+                 (views:drop-all))))
+           (set app.canvas saved-canvas)
+           (when (not ok)
+             (error err)))}
+  {:name "graph view node-views restore skips unresolved nodes"
+   :fn (fn []
           (local ctx (make-ctx))
           (local target (make-view-target ctx))
            (local graph {:id "main"

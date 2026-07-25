@@ -4,7 +4,7 @@
 (local bt (require :bt))
 (local WorldManager (require :world-manager))
 (local HomeWorld (require :home-world))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local PhysicsContainment (require :physics-containment))
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
@@ -17,24 +17,24 @@
   (set temp-counter (+ temp-counter 1))
   (fs.join-path temp-root (.. "world-manager-" (os.time) "-" temp-counter)))
 
-(fn ensure-built-in-canvas-modes! []
-  (local registry (CanvasModes.ensure-registry))
-  (when (not (. registry.modes "graph"))
-    (CanvasModes.register-mode
+(fn ensure-built-in-activities! []
+  (local registry (Activities.ensure-registry))
+  (when (not (. registry.activities "graph"))
+    (Activities.register-activity
       {:id "graph"
        :label "Graph"
        :icon "account_tree"
-       :button-name "graph-canvas-mode"
-       :show-in-sidebar? true
-       :activate (fn [_ctx] {:mode-id "graph"})
+       :button-name "graph-activity"
+       :show-in-switcher? true
+       :activate (fn [_ctx] {:activity-id "graph"})
        :deactivate (fn [_ctx _session] true)}))
-  (when (not (. registry.modes "drawing"))
-    (CanvasModes.register-mode
+  (when (not (. registry.activities "drawing"))
+    (Activities.register-activity
       {:id "drawing"
        :label "Draw"
        :icon "draw"
-       :button-name "drawing-canvas-mode"
-       :show-in-sidebar? true
+       :button-name "drawing-activity"
+       :show-in-switcher? true
        :activate (fn [ctx]
                    (ctx:set-update!
                      (fn [payload]
@@ -42,12 +42,12 @@
                        (when (and runtime runtime.drawing-render)
                          (runtime.drawing-render:update))
                        nil))
-                   {:mode-id "drawing"})
+                   {:activity-id "drawing"})
        :deactivate (fn [_ctx _session] true)}))
   true)
 
 (fn with-temp-dir [f]
-  (ensure-built-in-canvas-modes!)
+  (ensure-built-in-activities!)
   (local dir (make-temp-dir))
   (when (fs.exists dir)
     (fs.remove-all dir))
@@ -421,7 +421,7 @@
               "Invalid containment should reset to default min-y")
       true)))
 
-(fn home-world-update-drives-active-canvas-mode-hook []
+(fn home-world-update-drives-active-activity-id-hook []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -432,8 +432,8 @@
                                :dir world-dir}))
       (var graph-view-updates [])
       (var drawing-render-updates 0)
-      (local previous-mode-update app.canvas-mode-update)
-      (set app.canvas-mode-update
+      (local previous-mode-update app.activity-update)
+      (set app.activity-update
            (fn [payload]
              (when (and payload payload.runtime payload.runtime.graph-view)
                (payload.runtime.graph-view:update payload.delta))))
@@ -442,24 +442,24 @@
                            :drawing-render {:update (fn [_self]
                                                       (set drawing-render-updates
                                                            (+ drawing-render-updates 1)))}
-                           :active-canvas-mode "graph"})
+                           :active-activity-id "graph"})
       (world:update 0.25 {:active? false})
       (world:update 0.5 {:active? true})
-      (set app.canvas-mode-update previous-mode-update)
+      (set app.activity-update previous-mode-update)
       (assert (= (length graph-view-updates) 1)
-              "HomeWorld should only tick canvas mode hook while active")
+              "HomeWorld should only tick activity hook while active")
       (assert (= (. graph-view-updates 1) 0.5)
               "HomeWorld should pass the frame delta through to graph-view")
       (assert (= drawing-render-updates 0)
-              "HomeWorld should skip drawing-render updates while graph is the active canvas mode")
-      (set app.canvas-mode-update
+              "HomeWorld should skip drawing-render updates while graph is the active activity")
+      (set app.activity-update
            (fn [_payload]
              (set drawing-render-updates (+ drawing-render-updates 1))))
       (world:update 0.6 {:active? false})
       (assert (= drawing-render-updates 0)
-              "HomeWorld should skip drawing-render updates while inactive even if drawing was the last active canvas mode")
+              "HomeWorld should skip drawing-render updates while inactive even if drawing was the last active activity")
       (world:update 0.75 {:active? true})
-      (set app.canvas-mode-update previous-mode-update)
+      (set app.activity-update previous-mode-update)
       (assert (= drawing-render-updates 1)
               "HomeWorld should resume drawing-render updates when drawing becomes active")
       true)))
@@ -561,22 +561,22 @@
            {:camera {:position [0 0 0]
                      :rotation [1 0 0 0]}
             :preferred-interaction-surface :canvas
-            :active-canvas-mode "drawing"
-            :requested-canvas-mode-id "drawing"
-            :requested-canvas-mode-known? true
+            :active-activity-id "drawing"
+            :requested-activity-id "drawing"
+            :requested-activity-known? true
             :canvas {:capture-state (fn [_self]
                                       {:panels []})}})
       (world:deactivate {:canvas {:capture-state (fn [_self]
                                                    {:panels []})}}
                         "switch")
-      (local canvas-state (and world.state world.state.canvas))
-      (assert (= canvas-state.preferred_interaction_surface "canvas")
-              "World deactivate should persist preferred interaction surface")
-      (assert (= canvas-state.active_mode "drawing")
-              "World deactivate should keep active canvas mode alongside interaction surface")
+       (local activity-state (and world.state world.state.activity))
+       (assert (= activity-state.preferred_interaction_surface "canvas")
+               "World deactivate should persist preferred interaction surface")
+       (assert (= activity-state.active_id "drawing")
+               "World deactivate should keep active activity id alongside interaction surface")
       true)))
 
-(fn home-world-preserves-unregistered-persisted-canvas-mode []
+(fn home-world-preserves-unregistered-persisted-activity-id []
   (with-temp-dir
     (fn [root]
       (local world-dir (fs.join-path root "world-a"))
@@ -600,13 +600,17 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local canvas-state (and world.state world.state.canvas))
-      (assert (= canvas-state.active_mode "bogus")
-              "HomeWorld should preserve unregistered persisted canvas mode ids")
+      (local activity-state (and world.state world.state.activity))
+      (assert (= activity-state.active_id "bogus")
+              "HomeWorld should preserve unregistered persisted activity ids")
+      (world:save-state)
       (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
-      (local persisted-canvas-state (and persisted.canvas persisted.canvas))
-      (assert (= persisted-canvas-state.active_mode "bogus")
-              "HomeWorld should not rewrite unregistered persisted canvas mode ids during load")
+      (local persisted-activity (and persisted persisted.activity))
+      (assert (= persisted-activity.active_id "bogus")
+              "HomeWorld should persist migrated unregistered activity id under activity.active_id")
+      (local persisted-canvas (and persisted persisted.canvas))
+      (assert (= persisted-canvas.active_mode nil)
+              "HomeWorld should clear legacy canvas.active_mode after migration")
       true)))
 
 (fn home-world-new-state-seeds-default-terrain []
@@ -1591,8 +1595,8 @@
                      :fn home-world-strips-legacy-persisted-containment-color})
 (table.insert tests {:name "HomeWorld sanitizes invalid physics containment"
                      :fn home-world-sanitizes-invalid-physics-containment})
-(table.insert tests {:name "HomeWorld update drives active canvas mode hook"
-                     :fn home-world-update-drives-active-canvas-mode-hook})
+(table.insert tests {:name "HomeWorld update drives active activity hook"
+                     :fn home-world-update-drives-active-activity-id-hook})
 (table.insert tests {:name "HomeWorld activate reapplies runtime containment"
                      :fn home-world-activate-reapplies-runtime-containment})
 (table.insert tests {:name "HomeWorld captures runtime containment on drop"
@@ -1601,8 +1605,8 @@
                      :fn home-world-deactivate-queues-canvas-and-hud-restore-state})
 (table.insert tests {:name "HomeWorld deactivate persists preferred interaction surface"
                      :fn home-world-deactivate-persists-preferred-interaction-surface})
-(table.insert tests {:name "HomeWorld preserves unregistered persisted canvas mode"
-                     :fn home-world-preserves-unregistered-persisted-canvas-mode})
+(table.insert tests {:name "HomeWorld preserves unregistered persisted activity id"
+                     :fn home-world-preserves-unregistered-persisted-activity-id})
 (table.insert tests {:name "HomeWorld new state seeds default terrain"
                      :fn home-world-new-state-seeds-default-terrain})
 (table.insert tests {:name "HomeWorld new state seeds default lights"

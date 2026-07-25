@@ -25,6 +25,14 @@
     (or (and selectable selectable.position)
         (and selectable selectable.layout selectable.layout.position)))
 
+(fn pointer-target-enabled? [target]
+    (if (and target app app.pointer-target-enabled?)
+        (app.pointer-target-enabled? target)
+        true))
+
+(fn selectable-enabled? [selectable]
+    (pointer-target-enabled? (and selectable selectable.pointer-target)))
+
 (fn replace-contents [target source]
     (for [i (length target) 1 -1]
         (table.remove target i))
@@ -75,6 +83,7 @@
     (local provided-box (or options.box_selector
                             (rawget options "box-selector")
                             (BoxSelector {:ctx options.ctx
+                                          :ctx-provider options.ctx-provider
                                           :color options.color
                                           :depth-offset-index options.depth-offset-index
                                           :plane-z options.plane-z
@@ -91,6 +100,13 @@
     (var selectables [])
     (local selected [])
     (var enabled? (not (= options.enabled? false)))
+
+    (fn resolve-pointer-target []
+        (local ctx (or (and options.ctx-provider (options.ctx-provider))
+                       options.ctx))
+        (or options.pointer-target
+            (and ctx ctx.pointer-target)
+            app.canvas))
 
     (fn format-selectable [item]
         (or (and item item.label)
@@ -120,7 +136,7 @@
           (when normalized-bounds
             (each [_ selectable (ipairs selectables)]
               (local position (resolve-position selectable))
-              (when position
+              (when (and position (selectable-enabled? selectable))
                 (local screen (project position options))
                 (when (and screen
                            (>= screen.x normalized-bounds.min-x)
@@ -255,9 +271,10 @@
      :box box
      :enable enable
      :disable disable
-     :toggle toggle
-     :enabled? (fn [_self] enabled?)
-     :active? (fn [_self] (box:active?))
+      :toggle toggle
+      :enabled? (fn [_self] enabled?)
+      :pointer-target (fn [_self] (resolve-pointer-target))
+      :active? (fn [_self] (box:active?))
       :set-selectables set-selectables
       :add-selectables add-selectables
       :replace-selectable replace-selectable

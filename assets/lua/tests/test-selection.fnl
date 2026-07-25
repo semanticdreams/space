@@ -159,6 +159,56 @@
     (assert (= fp-state.motions 1) "First-person controls should receive drag motion for non-selection buttons")
     (assert (= fp-state.updates 1) "First-person controls should continue updating while selection is enabled"))
 
+(fn selection-input-ignores-disabled-pointer-target []
+    (local state (State {:name :selection-disabled-target-test
+                         :routes {:mouse-button-down (Routes.Chain [PointerHandlers.SelectionMouseButtonDown
+                                                                   PointerHandlers.CameraMouseButtonDown])
+                                  :mouse-button-up (Routes.Chain [PointerHandlers.SelectionMouseButtonUp
+                                                                 PointerHandlers.CameraMouseButtonUp])}}))
+    (local original-selector app.object-selector)
+    (local original-first-person app.first-person-controls)
+    (local original-clickables app.clickables)
+    (local original-movables app.movables)
+    (local original-resizables app.resizables)
+    (local original-pointer-target-enabled? app.pointer-target-enabled?)
+    (local target {:interaction-surface :canvas})
+    (local selector-state {:buttons 0 :active false :cancels 0})
+    (local selector
+      {:active? (fn [_self] selector-state.active)
+       :pointer-target (fn [_self] target)
+       :on-mouse-button (fn [_self payload]
+                          (set selector-state.buttons (+ selector-state.buttons 1))
+                          (set selector-state.active payload.state))
+       :cancel-selection (fn [_self]
+                           (set selector-state.active false)
+                           (set selector-state.cancels (+ selector-state.cancels 1)))})
+    (local fp-state {:buttons 0})
+    (local fp {:on-mouse-button-down (fn [_self _payload]
+                                       (set fp-state.buttons (+ fp-state.buttons 1)))
+               :on-mouse-button-up (fn [_self _payload]
+                                     (set fp-state.buttons (+ fp-state.buttons 1)))})
+    (set app.object-selector selector)
+    (set app.first-person-controls fp)
+    (set app.clickables {:active? false})
+    (set app.movables nil)
+    (set app.resizables nil)
+    (set app.pointer-target-enabled? (fn [_target] false))
+    (state.on-mouse-button-down {:button 1 :state true :x 0 :y 0})
+    (set selector-state.active true)
+    (state.on-mouse-button-up {:button 1 :state false :x 0 :y 0})
+    (set app.object-selector original-selector)
+    (set app.first-person-controls original-first-person)
+    (set app.clickables original-clickables)
+    (set app.movables original-movables)
+    (set app.resizables original-resizables)
+    (set app.pointer-target-enabled? original-pointer-target-enabled?)
+    (assert (= selector-state.buttons 0)
+            "Selection should not receive mouse buttons for disabled pointer targets")
+    (assert (= selector-state.cancels 1)
+            "Selection release should cancel an active disabled pointer target gesture")
+    (assert (= fp-state.buttons 2)
+            "Disabled selection pointer target should leave mouse buttons for camera controls"))
+
 (fn box-selector-renders-in-hud-space []
     (local hud {:screen-pos-ray (fn [_self point _opts]
                                   {:origin (glm.vec3 (- (or point.x 0) 5)
@@ -461,6 +511,8 @@
 
 (table.insert tests {:name "ObjectSelector projects to screen bounds" :fn object-selector-selects-by-projecting})
 (table.insert tests {:name "Selection only blocks conflicting first-person input" :fn selection-input-prefers-selection-only-for-primary-button})
+(table.insert tests {:name "Selection input ignores disabled pointer target"
+                     :fn selection-input-ignores-disabled-pointer-target})
 (table.insert tests {:name "Selection box renders in HUD space" :fn box-selector-renders-in-hud-space})
 (table.insert tests {:name "Selection box respects configured depth offset"
                      :fn selection-box-respects-configured-depth-offset})

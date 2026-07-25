@@ -40,6 +40,6 @@ Currently objects exist and are visible in the graph, but navigating between the
 ## Related
 
 - Goal: [Graph Foundation](/dev/features/graph-foundation)
-- Depends on: [Canvas Mode System](/dev/features/canvas-mode-system) — graph-surface mode is a canvas mode
+- Depends on: [Activities Architecture](/dev/features/activities) — graph browsing is exposed through the HomeWorld graph activity
 - ADRs: [Graph as Universal Interface](/dev/adrs/adr-graph-as-universal-model), [Composable States](/dev/adrs/adr-composable-states)
 - See: [Graph Identity](/dev/notes/graph-identity), [Graph View As Widget](/dev/notes/graph-view-as-widget), [Graph Vs Entities](/dev/notes/graph-vs-entities)

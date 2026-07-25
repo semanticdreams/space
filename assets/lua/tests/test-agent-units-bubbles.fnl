@@ -28,7 +28,7 @@
 (local json (require :json))
 (local glm (require :glm))
 (local VectorBufferMod (require :vector-buffer))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 
 (local TEST_CONFIG
   {:opencode-path "opencode"
@@ -91,20 +91,20 @@
                   :unregister-left-click-void-callback (fn [_self _cb] true)}
      :hoverables {:register (fn [_] true)}
      :intersectables {:register (fn [_] true)}
-     :active-canvas-mode nil
-     :canvas-shell-changed (Signal)
-     :canvas-modes-changed (Signal)
-     :canvas-mode-root-actions nil
-     :canvas-mode-selection-actions nil
-     :canvas-mode-update nil
-     :canvas-mode-input-handlers nil
-     :canvas-mode-left-dock-builder nil
-     :canvas-mode-command-hints-provider nil
-     :canvas-mode-delete-selection nil
-     :canvas-mode-activate-focused nil
-     :canvas-mode-drawing-enabled? true
-     :canvas-mode-context-enricher nil
-     :canvas-mode-target-enabled? nil
+     :active-activity-id nil
+     :workspace-shell-changed (Signal)
+     :activities-changed (Signal)
+     :activity-root-actions nil
+     :activity-selection-actions nil
+     :activity-update nil
+     :activity-input-handlers nil
+     :activity-left-dock-builder nil
+     :activity-command-hints-provider nil
+     :activity-delete-selection nil
+     :activity-activate-focused nil
+     :activity-drawing-enabled? true
+     :activity-context-enricher nil
+     :activity-target-enabled? nil
      :test-app true})
   app)
 
@@ -297,7 +297,7 @@
       (local session (runner:create-session "space-agent"))
 
       (local prompt
-        (.. "The bubbles canvas mode unit is registered in " code-dir "/bubbles/.\n"
+        (.. "The bubbles activity unit is registered in " code-dir "/bubbles/.\n"
             "It currently has NO tests. Your job:\n"
             "\n"
             "1. Inspect the unit: call space_unit_inspect for id \"bubbles\" to see what files exist.\n"

@@ -1,7 +1,28 @@
 (local PanelUtils (require :target-panel-utils))
 (local SkyboxState (require :skybox-state))
 (local PhysicsContainment (require :physics-containment))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
+
+(fn workspace-shell-state []
+  {:interaction-surface app.active-interaction-surface
+   :activity app.active-activity-id
+   :canvas-visible? (= app.canvas-visible? true)})
+
+(fn workspace-shell-state= [a b]
+  (and a b
+       (= a.interaction-surface b.interaction-surface)
+       (= a.activity b.activity)
+       (= a.canvas-visible? b.canvas-visible?)))
+
+(fn emit-workspace-shell-changed [reason previous]
+  (local current (workspace-shell-state))
+  (when (and app.workspace-shell-changed
+             (not app.suppress-workspace-shell-change?)
+             (not (workspace-shell-state= previous current)))
+    (app.workspace-shell-changed:emit {:reason reason
+                                       :previous previous
+                                       :current current}))
+  current)
 
 (fn reapply-active-world-skybox [theme-name]
   (local entry (and app app.active-world-entry))
@@ -38,8 +59,10 @@
   (local active-theme (and app.themes app.themes.get-active-theme
                            (app.themes.get-active-theme)))
   (local canvas-ctx (and app.canvas app.canvas.build-context))
-  (when (and canvas-ctx canvas-ctx.set-theme)
-    (canvas-ctx:set-theme active-theme))
+  (if (and app.canvas app.canvas.apply-active-theme-to-contexts)
+      (app.canvas:apply-active-theme-to-contexts)
+      (when (and canvas-ctx canvas-ctx.set-theme)
+        (canvas-ctx:set-theme active-theme)))
   (local scene-ctx (and app.scene app.scene.build-context))
   (when (and scene-ctx scene-ctx.set-theme)
     (scene-ctx:set-theme active-theme))
@@ -49,14 +72,14 @@
   active-theme)
 
 (fn apply-theme [theme-name]
-  (local graph-active? (= (CanvasModes.active-mode-id) "graph"))
-  (local board-active? (= (CanvasModes.active-mode-id) "board"))
+  (local graph-active? (= (Activities.active-activity-id) "graph"))
+  (local board-active? (= (Activities.active-activity-id) "board"))
   (local previous-shell-state (when (or graph-active? board-active?)
-                                {:interaction-surface app.active-interaction-surface
-                                 :canvas-mode app.active-canvas-mode
-                                 :canvas-visible? (= app.canvas-visible? true)}))
+                                (workspace-shell-state)))
   (when (or graph-active? board-active?)
-    (CanvasModes.deactivate-active-mode))
+    (Activities.with-workspace-shell-change-suppressed
+      (fn []
+        (Activities.deactivate-active-activity))))
   (local (ok err)
     (pcall
       (fn []
@@ -85,51 +108,31 @@
     (pcall
       (fn []
         (when board-active?
-          (CanvasModes.activate-mode "board"))
+          (Activities.with-workspace-shell-change-suppressed
+            (fn []
+              (Activities.activate-activity "board"))))
         (when graph-active?
-          (CanvasModes.activate-mode "graph")))))
+          (Activities.with-workspace-shell-change-suppressed
+            (fn []
+              (Activities.activate-activity "graph")))))))
   (when reactivate-ok
     (when (or graph-active? board-active?)
-      (local current {:interaction-surface app.active-interaction-surface
-                      :canvas-mode app.active-canvas-mode
-                      :canvas-visible? (= app.canvas-visible? true)})
-      (local previous (or previous-shell-state {}))
-      (when (and app.canvas-shell-changed
-                 (not (and (= previous.interaction-surface current.interaction-surface)
-                          (= previous.canvas-mode current.canvas-mode)
-                          (= previous.canvas-visible? current.canvas-visible?))))
-        (app.canvas-shell-changed:emit {:reason "canvas-mode"
-                                        :previous previous
-                                        :current current}))
+      (emit-workspace-shell-changed "activity" previous-shell-state)
       (when app.mark-active-world-hud-dirty
         (app.mark-active-world-hud-dirty))))
   (if (not ok)
       (if reactivate-ok
           (error err)
           (do
-            (when (and app.canvas-shell-changed (or graph-active? board-active?))
-              (app.canvas-shell-changed:emit {:reason "canvas-mode"
-                                              :previous (or previous-shell-state {})
-                                              :current {:interaction-surface app.active-interaction-surface
-                                                        :canvas-mode app.active-canvas-mode
-                                                        :canvas-visible? (= app.canvas-visible? true)}}))
+            (when (or graph-active? board-active?)
+              (emit-workspace-shell-changed "activity" previous-shell-state))
             (error (.. (tostring err)
-                       " (also failed to reactivate canvas mode: "
+                       " (also failed to reactivate activity: "
                        (tostring reactivate-err) ")"))))
       (not reactivate-ok)
       (do
-        (local current {:interaction-surface app.active-interaction-surface
-                        :canvas-mode app.active-canvas-mode
-                        :canvas-visible? (= app.canvas-visible? true)})
-        (local previous (or previous-shell-state {}))
-        (when (and app.canvas-shell-changed
-                   (not (and (= previous.interaction-surface current.interaction-surface)
-                            (= previous.canvas-mode current.canvas-mode)
-                            (= previous.canvas-visible? current.canvas-visible?))))
-          (app.canvas-shell-changed:emit {:reason "canvas-mode"
-                                          :previous previous
-                                          :current current}))
-        (error (.. "Failed to reactivate canvas mode after theme change: "
+        (emit-workspace-shell-changed "activity" previous-shell-state)
+        (error (.. "Failed to reactivate activity after theme change: "
                    (tostring reactivate-err))))))
 
 (fn request-theme [theme-name]

@@ -35,7 +35,7 @@
      :group "graph"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "graph"}]
+     :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.add-node" "graph.load-node"]
      :system-prompt "Use graph node tools to create and load nodes in the knowledge graph."})
 
@@ -43,8 +43,8 @@
     {:name "graph-node-map-tools"
      :group "graph"
      :default-state :auto
-     :risk :normal
-     :contexts [{:surface :canvas :mode "graph"}]
+     :risk :destructive
+     :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.remove-nodes"]
            :system-prompt "Removing nodes from the graph map. This is non-destructive; backing objects are not deleted."})
 
@@ -53,7 +53,7 @@
      :group "graph"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "graph"}]
+     :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.add-edge"]})
 
   (mgr:register
@@ -61,7 +61,7 @@
      :group "graph"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "graph"}]
+     :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.focus-node" "graph.open-node" "graph.search-nodes"]
      :system-prompt "Use graph navigation tools to focus, open, and search nodes in the knowledge graph."})
 
@@ -70,7 +70,7 @@
      :group "graph"
      :default-state :auto
      :risk :normal
-     :contexts [{:surface :canvas :mode "graph"}]
+     :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.create-identity"]
      :system-prompt "Use identity tools to create identity nodes (entity-backed, exposed through the graph)."})
 
@@ -79,7 +79,7 @@
      :group "graph"
      :default-state :auto
      :risk :destructive
-     :contexts [{:surface :canvas :mode "graph"}]
+     :contexts [{:surface :canvas :activity "graph"}]
      :tool-ids ["graph.get-state" "graph.restore-state"]
      :system-prompt "Graph topology state operations can overwrite current node/edge keys and require approval."}))
 

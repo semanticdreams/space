@@ -169,8 +169,8 @@
 (fn triangle-vector-length []
   (local vector
     (and app.canvas
-         app.canvas.build-context
-         (. app.canvas.build-context :triangle-vector)))
+         app.canvas.get-triangle-vector
+         (app.canvas:get-triangle-vector)))
   (and vector (vector:length)))
 
 (fn raster-tile-count []
@@ -188,8 +188,8 @@
 (fn image-batch-vertex-count []
   (local batches
     (and app.canvas
-         app.canvas.build-context
-         (. app.canvas.build-context :image-batches)))
+         app.canvas.get-image-batches
+         (app.canvas:get-image-batches)))
   (var count 0)
   (each [_ batch (pairs (or batches {}))]
     (when (and batch batch.vector batch.vector.length)
@@ -270,15 +270,15 @@
                        :mark-active-world-hud-dirty app.mark-active-world-hud-dirty
                        :reset-projection app.reset-projection
                        :set-active-interaction-surface app.set-active-interaction-surface
-                       :set-active-canvas-mode app.set-active-canvas-mode
+                       :set-active-activity app.set-active-activity
                        :bind-active-world-runtime app.bind-active-world-runtime
                        :world-manager app.world-manager
                        :active-world-entry app.active-world-entry
                        :active-world-runtime app.active-world-runtime
                        :preferred-interaction-surface app.preferred-interaction-surface
                        :active-interaction-surface app.active-interaction-surface
-                       :active-canvas-mode app.active-canvas-mode
-                       :canvas-shell-changed app.canvas-shell-changed
+                       :active-activity-id app.active-activity-id
+                       :workspace-shell-changed app.workspace-shell-changed
                        :canvas-visible? app.canvas-visible?
                        :scene-interactive? app.scene-interactive?
                        :canvas-interactive? app.canvas-interactive?
@@ -299,7 +299,7 @@
             (set app.world-manager world-manager-stub)
             (local JsonUtils (require :json-utils))
             (JsonUtils.write-json! (fs.join-path dir "world.json")
-                                   {:canvas {:active_mode "graph"}})
+                                   {:activity {:active_id "graph"}})
             (world:activate runtime-context)
             (local runtime (assert (world:get-runtime)
                                    "drawing workflow e2e expected active runtime"))
@@ -333,13 +333,13 @@
     ctx
     (fn [env]
       (env.set-stage "assert start graph")
-      (assert (= app.active-canvas-mode "graph")
-              "drawing workflow e2e should start in graph mode")
+      (assert (= app.active-activity-id "graph")
+              "drawing workflow e2e should start in graph activity")
       (env.set-stage "click draw")
       (click-button-icon env "draw")
       (env.set-stage "assert drawing mode")
-      (assert (= app.active-canvas-mode "drawing")
-              "drawing workflow e2e should enter drawing mode")
+      (assert (= app.active-activity-id "drawing")
+              "drawing workflow e2e should enter drawing activity")
       (env.set-stage "add vector layer")
       (click-button env "+ Vector")
       (env.set-stage "assert vector layer active")
@@ -363,13 +363,13 @@
       (env.set-stage "click graph")
       (click-button-icon env "account_tree")
       (env.set-stage "assert graph mode")
-      (assert (= app.active-canvas-mode "graph")
-              "drawing workflow e2e should switch back to graph mode")
+      (assert (= app.active-activity-id "graph")
+              "drawing workflow e2e should switch back to graph activity")
       (env.set-stage "click draw again")
       (click-button-icon env "draw")
       (env.set-stage "assert drawing mode again")
-      (assert (= app.active-canvas-mode "drawing")
-              "drawing workflow e2e should switch back to drawing mode")
+      (assert (= app.active-activity-id "drawing")
+              "drawing workflow e2e should switch back to drawing activity")
       (env.set-stage "click select")
       (click-button env "Select")
       (env.set-stage "assert select tool")

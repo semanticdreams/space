@@ -3,17 +3,17 @@
 (local fs (require :fs))
 (local runtime (require :runtime))
 (local glm (require :glm))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local {:Board Board} (require :board/core))
 (local BoardView (require :board/view))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
 
 (local owner {})
 
-(fn board-mode-owned-paths []
+(fn board-activity-owned-paths []
   (local lua-root (fs.join-path runtime.assets-path "lua"))
   (local board-root (fs.join-path lua-root "board"))
-  [(fs.join-path lua-root "board-canvas-mode-unit.fnl")
+  [(fs.join-path lua-root "board-activity-unit.fnl")
    board-root])
 
 (fn ensure-board-state [world-runtime]
@@ -40,35 +40,38 @@
   (local point (+ ray.origin (* ray.direction t)))
   (glm.vec3 point.x point.y 0))
 
-(fn create-board-view! []
+(fn activate-board-view! []
   (local world-runtime (assert app.active-world-runtime
-                               "Board canvas mode requires app.active-world-runtime"))
+                                "Board activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                        "Board canvas mode requires runtime.canvas"))
-  (when world-runtime.board-view
-    (world-runtime.board-view:drop)
-    (set world-runtime.board-view nil))
+                          "Board activity requires runtime.canvas"))
+  (local slot (canvas:activate-activity-slot "board"))
+  (slot:set-canvas-target-kind! :board)
   (BuiltinStringEntity.register owner)
-  (local board (Board {}))
+  (local retained-view? (not (= world-runtime.board-view nil)))
+  (local board (or world-runtime.board (Board {})))
   (local selector (and world-runtime world-runtime.object-selector))
-  (local view (BoardView {:board board
-                           :canvas canvas
-                           :ctx canvas.build-context
-                           :selector selector}))
+  (local view (or world-runtime.board-view
+                  (BoardView {:board board
+                              :canvas canvas
+                              :ctx slot.ctx
+                              :selector selector})))
+  (set slot.root view)
   (set world-runtime.board board)
   (set world-runtime.board-view view)
   (set app.board board)
   (set app.board-view view)
-  (local (ok err)
-    (pcall (fn []
-             (board:restore-state (ensure-board-state world-runtime)))))
-  (when (not ok)
-    (view:drop)
-    (set world-runtime.board nil)
-    (set world-runtime.board-view nil)
-    (set app.board nil)
-    (set app.board-view nil)
-    (error err))
+  (when (not retained-view?)
+    (local (ok err)
+      (pcall (fn []
+               (board:restore-state (ensure-board-state world-runtime)))))
+    (when (not ok)
+      (view:drop)
+      (set world-runtime.board nil)
+      (set world-runtime.board-view nil)
+      (set app.board nil)
+      (set app.board-view nil)
+      (error err)))
   view)
 
 (fn capture-board-state! []
@@ -78,13 +81,29 @@
     (set world-runtime.board-state (view:capture-state)))
   (and world-runtime world-runtime.board-state))
 
+(fn deactivate-board-view! []
+  (capture-board-state!)
+  (local world-runtime app.active-world-runtime)
+  (local canvas (and world-runtime world-runtime.canvas))
+  (when canvas
+    (canvas:deactivate-activity-slot "board"))
+  (set app.board nil)
+  (set app.board-view nil)
+  true)
+
 (fn drop-board-view! []
   (capture-board-state!)
   (local world-runtime app.active-world-runtime)
   (local view (or (and world-runtime world-runtime.board-view)
-                  app.board-view))
+                   app.board-view))
+  (local canvas (and world-runtime world-runtime.canvas))
+  (local slot (and canvas (canvas:activity-slot "board")))
+  (when slot
+    (set slot.root nil))
   (when view
     (view:drop))
+  (when canvas
+    (canvas:deactivate-activity-slot "board"))
   (when world-runtime
     (set world-runtime.board nil)
     (set world-runtime.board-view nil))
@@ -92,7 +111,7 @@
   (set app.board-view nil)
   true)
 
-(fn board-mode-update [payload]
+(fn board-activity-update [payload]
   (local view (and payload payload.runtime payload.runtime.board-view))
   (when view
     (view:update (and payload payload.delta)))
@@ -127,15 +146,15 @@
                    :fn (fn [_button _event]
                          (view:remove-selected-items))}))
   (when (and (= (length selected) 2)
-             (connectable? (. selected 1))
-             (connectable? (. selected 2)))
-    (let [source (. selected 1)
-          target (. selected 2)]
-      (table.insert actions
-                    {:name "Connect Items"
-                     :icon "link"
-                     :fn (fn [_button _event]
-                           (view:connect-items source target))})))
+              (connectable? (. selected 1))
+              (connectable? (. selected 2)))
+    (local source (. selected 1))
+    (local target (. selected 2))
+    (table.insert actions
+                  {:name "Connect Items"
+                   :icon "link"
+                   :fn (fn [_button _event]
+                         (view:connect-items source target))}))
   actions)
 
 (fn enrich-board-context! [context]
@@ -151,76 +170,82 @@
   (or (= target-kind nil)
       (= target-kind :board)))
 
-(fn activate-mode! [ctx]
+(fn activate-activity! [ctx]
   (ctx:defer-cleanup! drop-board-view!)
-  (local view (create-board-view!))
+  (local view (activate-board-view!))
   (ctx:set-root-actions! board-root-actions)
   (ctx:set-selection-actions! board-selection-actions)
   (ctx:set-delete-selection! delete-selection)
   (ctx:set-command-hints-provider! (fn [_payload] []))
   (ctx:set-context-enricher! enrich-board-context!)
   (ctx:set-target-enabled! board-target-enabled?)
-  (ctx:set-update! board-mode-update)
-  {:mode-id "board"
+  (ctx:set-update! board-activity-update)
+  (ctx:set-surface-state! {:canvas {:visible? true :interactive? true}})
+  (ctx:set-preferred-interaction-surface! :canvas)
+  {:activity-id "board"
    :board-view view})
 
-(fn deactivate-mode! [_ctx _session]
-  (drop-board-view!))
+(fn deactivate-activity! [_ctx _session]
+  (deactivate-board-view!))
 
-(fn snapshot-board-canvas-mode! []
-  {:active? (= (CanvasModes.active-mode-id) "board")
+(fn snapshot-board-activity! []
+  {:active? (= (Activities.active-activity-id) "board")
    :board-state (capture-board-state!)})
 
 (fn restore-state-arg [first _session maybe-state]
-  (if (and first (. first :mode))
+  (if (and first (. first :activity))
       maybe-state
       first))
 
-(fn restore-board-canvas-mode! [first session maybe-state]
+(fn restore-board-activity! [first session maybe-state]
   (local state (restore-state-arg first session maybe-state))
   (when (and app.active-world-runtime state state.board-state)
     (set app.active-world-runtime.board-state state.board-state))
   (when (and state state.active?)
     (if (and state.board-state
-             (= (CanvasModes.active-mode-id) "board")
+             (= (Activities.active-activity-id) "board")
              app.active-world-runtime
              app.active-world-runtime.board)
         (app.active-world-runtime.board:restore-state state.board-state)
-        (CanvasModes.activate-mode "board")))
+        (if app.set-active-activity
+            (app.set-active-activity "board")
+            (Activities.activate-activity "board"))))
   true)
 
-(fn mode-registered? [mode-id]
-  (local (ok _resolved) (pcall CanvasModes.resolve mode-id))
+(fn activity-registered? [activity-id]
+  (local (ok _resolved) (pcall Activities.resolve activity-id))
   ok)
 
-(fn load-board-canvas-mode! []
+(fn load-board-activity! []
   (BuiltinStringEntity.register owner)
-  (when (not (mode-registered? "board"))
-    (CanvasModes.register-mode
+  (when (not (activity-registered? "board"))
+    (Activities.register-activity
       {:id "board"
        :label "Board"
        :icon "dashboard_customize"
-       :button-name "board-canvas-mode"
-       :show-in-sidebar? true
-       :activate activate-mode!
-       :deactivate deactivate-mode!
-       :snapshot snapshot-board-canvas-mode!
-       :restore restore-board-canvas-mode!}))
+       :button-name "board-activity"
+       :show-in-switcher? true
+       :activate activate-activity!
+       :deactivate deactivate-activity!
+       :snapshot snapshot-board-activity!
+       :restore restore-board-activity!}))
   true)
 
-(fn unload-board-canvas-mode! []
-  (local registered? (mode-registered? "board"))
+(fn unload-board-activity! []
+  (local registered? (activity-registered? "board"))
   (local active? (and registered?
-                      (= (CanvasModes.active-mode-id) "board")))
+                      (= (Activities.active-activity-id) "board")))
   (when active?
-    (CanvasModes.deactivate-active-mode))
+    (if app.set-active-activity
+        (app.set-active-activity nil)
+        (Activities.deactivate-active-activity)))
   (when registered?
-    (CanvasModes.unregister-mode "board"))
+    (Activities.unregister-activity "board"))
   (BuiltinStringEntity.unregister owner)
   true)
 
-{:board-mode-owned-paths board-mode-owned-paths
- :load-board-canvas-mode! load-board-canvas-mode!
- :unload-board-canvas-mode! unload-board-canvas-mode!
- :snapshot-board-canvas-mode! snapshot-board-canvas-mode!
- :restore-board-canvas-mode! restore-board-canvas-mode!}
+{:board-activity-owned-paths board-activity-owned-paths
+ :load-board-activity! load-board-activity!
+ :unload-board-activity! unload-board-activity!
+ :snapshot-board-activity! snapshot-board-activity!
+ :restore-board-activity! restore-board-activity!}

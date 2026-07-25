@@ -77,8 +77,8 @@
      :default-state :auto
      :risk :normal
      :contexts [{:surface :any}]
-     :tool-ids ["app.set-canvas-visible" "app.set-canvas-mode" "app.switch-surface"]
-     :system-prompt "Use canvas control tools to manage the canvas visibility, mode, and surface switching."})
+     :tool-ids ["app.set-canvas-visible" "app.set-activity" "app.switch-surface"]
+     :system-prompt "Use canvas control tools to manage canvas visibility, activity, and surface switching."})
 
   (mgr:register
     {:name "general-world-tools"
@@ -150,15 +150,15 @@
                    (.. "canvas visible: " (tostring args.visible))))})
 
   (adapters:register
-    {:id "app.set-canvas-mode"
-     :mcp-name "space_app_set_canvas_mode"
-     :description "Set the active canvas mode."
-     :inputSchema {:type "object" :properties {:mode {:type "string" :description "Canvas mode name (drawing, graph, etc.)"}} :required ["mode"]}
+    {:id "app.set-activity"
+     :mcp-name "space_app_set_activity"
+     :description "Set the active activity."
+     :inputSchema {:type "object" :properties {:activity {:type "string" :description "Activity name (drawing, graph, etc.)"}} :required ["activity"]}
      :make-run (fn [app]
                  (fn [args]
-                   (assert app.set-active-canvas-mode "space_app_set_canvas_mode requires app.set-active-canvas-mode")
-                   (app.set-active-canvas-mode args.mode)
-                   (.. "canvas mode: " args.mode)))})
+                   (assert app.set-active-activity "space_app_set_activity requires app.set-active-activity")
+                   (app.set-active-activity args.activity)
+                   (.. "activity: " args.activity)))})
 
   (adapters:register
     {:id "app.switch-surface"

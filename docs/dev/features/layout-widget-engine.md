@@ -45,7 +45,7 @@ The Python prototype had a manual layout system where nodes were assembled by ha
 ## Related
 
 - Goal: [Core Platform](/dev/features/core-platform)
-- Used by: [Canvas Mode System](/dev/features/canvas-mode-system), [CEF In-World Browser](/dev/features/cef-in-world-browser), [Board Canvas Mode](/dev/features/board-canvas-mode)
+- Used by: [Activities Architecture](/dev/features/activities), [CEF In-World Browser](/dev/features/cef-in-world-browser), [Board Canvas Mode legacy notes](/dev/features/board-canvas-mode)
 - ADR: [SSBO Quad Pipeline](/dev/adrs/adr-ssbo-quad-pipeline)
 - See: [Widget Ownership](/dev/widget-ownership-and-teardown)
 - See: [Mystery Layout Error](/dev/notes/mystery-layout-error), [Resize Bugs](/dev/notes/resize-bugs)

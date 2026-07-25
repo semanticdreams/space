@@ -1,6 +1,6 @@
 (local Ball (require :ball))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
-(local CanvasModes (require :canvas-modes))
+(local Activities (require :activities))
 (local Modifiers (require :input-modifiers))
 
 (fn append-actions [target source]
@@ -17,36 +17,43 @@
       (set (. merged k) v)))
   merged)
 
-(fn resolve-context-canvas-mode [mode-id]
-  (if (= mode-id nil)
-      app.active-canvas-mode
-      (CanvasModes.resolve mode-id)))
+(fn resolve-context-activity [activity-id]
+  (if (= activity-id nil)
+      app.active-activity-id
+      (Activities.resolve activity-id)))
 
-(fn enrich-active-canvas-context! [context]
+(fn canvas-panel-target []
+  (or (and app.canvas
+           app.canvas.active-activity-slot
+           app.canvas.active-activity-slot.visible?
+           app.canvas.active-activity-slot)
+      app.canvas))
+
+(fn enrich-active-activity-context! [context]
   (if (and (= context.surface :canvas)
-           app.canvas-mode-context-enricher
-           (= (CanvasModes.active-mode-id) context.canvas-mode))
+           app.activity-context-enricher
+           (= (Activities.active-activity-id) context.activity))
       (do
-        (app.canvas-mode-context-enricher context)
+        (app.activity-context-enricher context)
         context)
       context))
 
 (fn build-context [event]
   (local surface (or app.active-interaction-surface :scene))
-  (local canvas-mode
+  (local activity
     (if (= surface :canvas)
-        (resolve-context-canvas-mode
-          app.active-canvas-mode)
+        (resolve-context-activity
+          app.active-activity-id)
         nil))
-  (enrich-active-canvas-context!
+  (enrich-active-activity-context!
     {:event event
      :surface surface
-     :canvas-mode canvas-mode
+     :activity activity
      :modifiers {:shift? (Modifiers.shift-held? (and event event.mod))
                  :ctrl? (Modifiers.ctrl-held? (and event event.mod))
                  :alt? (Modifiers.alt-held? (and event event.mod))}
      :engine app.engine
-     :targets {:canvas app.canvas
+     :targets {:canvas (canvas-panel-target)
                :hud app.hud}
      :scene {:scene app.scene}
      :graph {:graph app.graph
@@ -57,25 +64,25 @@
 (fn empty-context [surface opts]
   (local options (or opts {}))
   (local resolved-surface (or surface :scene))
-  (local resolved-canvas-mode
+  (local resolved-activity
     (if (= resolved-surface :canvas)
-        (resolve-context-canvas-mode
-          (or options.canvas-mode
-              app.active-canvas-mode))
+        (resolve-context-activity
+          (or options.activity
+              app.active-activity-id))
         nil))
-  (local targets-defaults {:canvas app.canvas
+  (local targets-defaults {:canvas (canvas-panel-target)
                            :hud app.hud})
   (local scene-defaults {:scene app.scene})
   (local graph-defaults {:graph app.graph
                          :graph-map app.graph-map
                          :view (or (and options.graph options.graph.view)
                                    app.graph-view)})
-  (enrich-active-canvas-context!
+  (enrich-active-activity-context!
     {:event (or options.event nil)
      :surface resolved-surface
-     :canvas-mode (if (= resolved-surface :canvas)
-                      resolved-canvas-mode
-                      nil)
+     :activity (if (= resolved-surface :canvas)
+                  resolved-activity
+                  nil)
      :modifiers (merge-context-part {:shift? false
                                      :ctrl? false
                                      :alt? false}
@@ -90,7 +97,7 @@
   (local raw (or context {}))
   (empty-context (or raw.surface :scene)
                  {:event raw.event
-                  :canvas-mode raw.canvas-mode
+                  :activity raw.activity
                   :modifiers raw.modifiers
                   :engine raw.engine
                   :targets raw.targets
@@ -141,16 +148,16 @@
                          (SceneTerrainRecovery.recover scene)))})
   actions)
 
-(fn canvas-mode-root-actions [context]
-  (if (and app.canvas-mode-root-actions
-           (= (CanvasModes.active-mode-id) context.canvas-mode))
-      (app.canvas-mode-root-actions context)
+(fn activity-root-actions [context]
+  (if (and app.activity-root-actions
+           (= (Activities.active-activity-id) context.activity))
+      (app.activity-root-actions context)
       []))
 
-(fn canvas-mode-selection-actions [context]
-  (if (and app.canvas-mode-selection-actions
-           (= (CanvasModes.active-mode-id) context.canvas-mode))
-      (app.canvas-mode-selection-actions context)
+(fn activity-selection-actions [context]
+  (if (and app.activity-selection-actions
+           (= (Activities.active-activity-id) context.activity))
+      (app.activity-selection-actions context)
       []))
 
 (local contributors
@@ -158,12 +165,12 @@
     :mode :replace
     :matches (fn [context]
                (= context.surface :canvas))
-    :actions canvas-mode-root-actions}
+    :actions activity-root-actions}
    {:name :canvas-selection
     :mode :append
     :matches (fn [context]
                (= context.surface :canvas))
-    :actions canvas-mode-selection-actions}
+    :actions activity-selection-actions}
    {:name :scene-root
     :mode :replace
     :matches (fn [context]

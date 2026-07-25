@@ -18,7 +18,7 @@
 (fn active-controller []
   (and app.drawing-controller
        (= app.canvas-interactive? true)
-       (= app.canvas-mode-drawing-enabled? true)
+       (= app.activity-drawing-enabled? true)
        app.drawing-controller))
 
 (fn active-canvas-point [payload]
@@ -93,9 +93,10 @@
      (local controller (active-controller))
      (local point (and controller (active-canvas-point payload)))
      (when (and controller
-                point
-                (= payload.button SDL_BUTTON_LEFT)
-                (not ((. Common :pointer-blocked?))))
+                 point
+                 (= payload.button SDL_BUTTON_LEFT)
+                 (not (Runtime.alt-held? payload))
+                 (not ((. Common :pointer-blocked?))))
        (local tool (controller:active-tool))
        (local layer (active-layer))
        (if (= tool "select")

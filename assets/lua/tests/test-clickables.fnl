@@ -140,11 +140,30 @@
       (assert (= hud.state.clicks 1) "hud target should receive click when overlapping scene")
       (assert (= scene.state.clicks 0) "scene target should not receive click when hud hit"))))
 
+(fn clickables-suppress-release-for-disabled-pointer-target []
+  (with-pointer-target-rays
+    (fn []
+      (local original-enabled app.pointer-target-enabled?)
+      (var enabled? true)
+      (set app.pointer-target-enabled? (fn [_target] enabled?))
+      (local clickables (Clickables))
+      (local target {:screen-pos-ray app.scene.screen-pos-ray})
+      (local stub (make-pointer-target-clickable target 1))
+      (clickables:register stub.object)
+      (clickables:on-mouse-button-down {:button 1 :x 1 :y 1 :timestamp 42})
+      (set enabled? false)
+      (clickables:on-mouse-button-up {:button 1 :x 1 :y 1 :timestamp 43})
+      (set app.pointer-target-enabled? original-enabled)
+      (assert (= stub.state.clicks 0)
+              "Clickables should not dispatch release to a disabled pointer target"))))
+
 (table.insert tests {:name "Clickables send on-click to targets" :fn clickables-dispatches-on-click})
 (table.insert tests {:name "Clickables trigger void callback when nothing hit" :fn void-callback-fires-when-no-hit})
 (table.insert tests {:name "Clickables ignore suppressed releases" :fn suppressed-release-does-not-fire-void-callback})
 (table.insert tests {:name "Clickables detect double clicks for registered widgets" :fn double-click-requires-registration})
 (table.insert tests {:name "Clickables prioritize HUD intersections" :fn clickables-prefer-hud-intersection})
+(table.insert tests {:name "Clickables suppress disabled pointer target release"
+                     :fn clickables-suppress-release-for-disabled-pointer-target})
 
 (local main
   (fn []

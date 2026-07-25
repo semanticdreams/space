@@ -54,15 +54,24 @@
   (local original-set app.set-viewport)
   (local original-viewport app.viewport)
   (local original-create app.create-default-projection)
+  (local original-scene-interactive? app.scene-interactive?)
+  (local original-canvas-interactive? app.canvas-interactive?)
+  (local original-active-surface app.active-interaction-surface)
   (when (not original-set)
     (set app.set-viewport (fn [value] (set app.viewport value))))
   (when (not original-create)
     (set app.create-default-projection AppProjection.create-default-projection))
+  (set app.scene-interactive? true)
+  (set app.canvas-interactive? false)
+  (set app.active-interaction-surface :scene)
   (app.set-viewport viewport)
   (let [(ok result) (pcall body)]
     (set app.set-viewport original-set)
     (set app.viewport original-viewport)
     (set app.create-default-projection original-create)
+    (set app.scene-interactive? original-scene-interactive?)
+    (set app.canvas-interactive? original-canvas-interactive?)
+    (set app.active-interaction-surface original-active-surface)
     (when (not ok)
       (error result))
     result))
@@ -98,6 +107,36 @@
   (assert (approx layout.size.y 10) "Resize should clamp to min Y")
   (assert (approx layout.position.x 0) "Resize should keep min edge fixed")
   (assert (approx layout.position.y 0) "Resize should keep min edge fixed"))
+
+(fn resizable-stops-drag-when-pointer-target-disabled []
+  (local original-enabled app.pointer-target-enabled?)
+  (var enabled? true)
+  (var ended false)
+  (set app.pointer-target-enabled? (fn [_target] enabled?))
+  (local intersector (make-intersector))
+  (local resizables (Resizables {:intersectables intersector :drag-threshold 0}))
+  (local layout (make-layout (glm.vec3 10 10 0)))
+  (local target {:interaction-surface :canvas})
+  (resizables:register layout {:target layout
+                               :handle layout
+                               :pointer-target target
+                               :min-size layout.measure
+                               :on-resize-end (fn [_entry]
+                                                (set ended true))})
+  (set intersector.selection-point (glm.vec3 9 9 0))
+  (resizables:on-mouse-button-down {:button 3 :x 0 :y 0})
+  (set enabled? false)
+  (set intersector.next-ray {:origin (glm.vec3 14 14 5)
+                             :direction (glm.vec3 0 0 -1)})
+  (resizables:on-mouse-motion {:x 14 :y 14})
+  (set app.pointer-target-enabled? original-enabled)
+  (assert (approx layout.size.x 10)
+          "Disabled pointer target resize should not update width")
+  (assert (approx layout.size.y 10)
+          "Disabled pointer target resize should not update height")
+  (assert ended "Disabled pointer target resize should end the active resize")
+  (assert (not (resizables:drag-engaged?))
+          "Disabled pointer target resize should clear drag state"))
 
 (fn resizable-fires-hooks []
   (local intersector (make-intersector))
@@ -245,6 +284,8 @@
 
 (table.insert tests {:name "Resizables wait for threshold" :fn resizable-waits-for-threshold})
 (table.insert tests {:name "Resizables clamp to min size" :fn resizable-respects-min-size})
+(table.insert tests {:name "Resizables stop drag when pointer target disabled"
+                     :fn resizable-stops-drag-when-pointer-target-disabled})
 (table.insert tests {:name "Resizables fire hooks" :fn resizable-fires-hooks})
 (table.insert tests {:name "Resizables integrate with intersectables" :fn resizable-works-with-intersectables})
 (table.insert tests {:name "Resizables prefer atomic transform target"
