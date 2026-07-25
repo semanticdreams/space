@@ -4,6 +4,10 @@ Be extra rigorous; I'm at risk of losing my job at my hospital.
 Don't be afraid; Hesitancy will hold us back.
 Clean design is important, refactor when reasonable.
 
+## Branch Convention
+
+The default base branch for pull requests and merges is `main`.
+
 ## Project Structure & Modules
 - `src/` holds the C++17 engine modules (rendering, physics, audio, bindings). Add new systems as matching `.cpp`/`.h` pairs. Engine Lua bindings live in `src/lua_engine.cpp`.
 - `apps/space/main.cpp` is the executable entry point; bootstrap other front ends here.
