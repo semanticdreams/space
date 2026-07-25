@@ -61,6 +61,8 @@ jobs:
 
       - name: Configure git for test directories
         run: |
+          git config --global user.name "CI Test"
+          git config --global user.email "ci@test.local"
           git config --global --add safe.directory /tmp/space/tests
           git config --global --add safe.directory '*'
           git config --global protocol.file.allow always
