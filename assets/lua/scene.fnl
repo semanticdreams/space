@@ -568,6 +568,7 @@
        :pointer-target nil
        :root nil
        :entity nil
+       :scene-state nil
        :visible? false
        :interactive? false})
     (set slot.pointer-target (make-slot-pointer-target slot))
@@ -620,7 +621,9 @@
     (if existing
         existing
         (do
+          (local ActivitySceneState (require :activity-scene-state))
           (local slot (make-activity-slot activity-id))
+          (set slot.scene-state (ActivitySceneState.empty-state))
           (set (. self.activity-slots activity-id) slot)
           slot)))
 
@@ -629,15 +632,129 @@
             "Scene.activity-slot requires string activity id")
     (. self.activity-slots activity-id))
 
+  (fn capture-active-service-state [scene]
+    (local lights
+      (if (and app app.lights app.lights.get-state)
+          (app.lights:get-state)
+          nil))
+    (local skybox
+      (if (and app app.renderers app.renderers.skybox app.renderers.skybox.get-state)
+          (scene:get-skybox-state)
+          nil))
+    (local background
+      (if (and app app.renderers app.renderers.get-background-state)
+          (scene:get-background-state)
+          nil))
+    (local PhysicsContainment (require :physics-containment))
+    (local containment
+      (if app.physics-containment-config
+          (PhysicsContainment.serialize-config app.physics-containment-config)
+          {:enabled? false}))
+    {:lights lights
+     :skybox skybox
+     :background background
+     :containment containment})
+
+  (fn apply-state-to-services [scene state]
+    (assert state "Scene.apply-state-to-services requires state")
+    (when (and state.lights
+               app app.lights app.lights.set-state)
+      (app.lights:set-state state.lights))
+    (when (and state.skybox
+               app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+      (app.renderers.skybox:set-state state.skybox))
+    (when (and state.background
+               app app.renderers app.renderers.set-background-state)
+      (app.renderers:set-background-state state.background))
+    (when state.containment
+      (local PhysicsContainment (require :physics-containment))
+      (local enabled? (if (= state.containment.enabled? nil)
+                          true
+                          state.containment.enabled?))
+      (PhysicsContainment.ensure-installed {:config {:enabled? enabled?} :scene scene}))
+    true)
+
+  (fn reset-services-to-empty [scene]
+    (local ActivitySceneState (require :activity-scene-state))
+    (local empty (ActivitySceneState.empty-state))
+    (apply-state-to-services scene empty))
+
   (fn activate-activity-slot [scene activity-id]
     (local slot (ensure-activity-slot scene activity-id))
-    (when (and self.active-activity-slot
-               (not (= self.active-activity-slot slot)))
+    (local was-different-slot
+      (and self.active-activity-slot
+           (not (= self.active-activity-slot slot))))
+    (when was-different-slot
+      ;; Capture old active services state onto the old slot
+      (set self.active-activity-slot.scene-state
+           (capture-active-service-state self))
+      ;; Deactivate old physics bodies
+      (when (and self.active-activity-slot.entity
+                 (pcall require :layout-physics-bodies))
+        (local LayoutPhysicsBodies (require :layout-physics-bodies))
+        (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
       (self.active-activity-slot:deactivate))
+    ;; Reset engine services to empty before applying target state
+    (reset-services-to-empty self)
+    ;; Activate target slot
     (slot:activate)
     (set self.active-activity-slot-id activity-id)
     (set self.active-activity-slot slot)
+    ;; Apply target slot's stored scene state to engine services
+    (when slot.scene-state
+      (apply-state-to-services self slot.scene-state))
+    ;; Activate target physics bodies
+    (when (and slot.entity
+               (pcall require :layout-physics-bodies))
+      (local LayoutPhysicsBodies (require :layout-physics-bodies))
+      (pcall LayoutPhysicsBodies.activate slot.entity))
     slot)
+
+  (fn capture-activity-slot-state [scene activity-id]
+    (local slot (ensure-activity-slot scene activity-id))
+    ;; Capture current scene content
+    (local panels [])
+    (when self.scene-children
+      (each [_ metadata (ipairs (or self.scene-children []))]
+        (local persistence (and metadata metadata.persistence))
+        (when persistence
+          (local capture-state (capture-panel-layout-state metadata))
+          (when capture-state
+            (local record (clone-table persistence))
+            (set record.position capture-state.position)
+            (set record.rotation capture-state.rotation)
+            (set record.size (or capture-state.size record.size))
+            (table.insert panels record)))))
+    (local terrains
+      (if (= self.scene-terrains nil)
+          nil
+          (SceneWorldState.capture-terrains self.scene-terrains)))
+    ;; Capture current service state
+    (local services (capture-active-service-state self))
+    ;; Build canonical state
+    (local ActivitySceneState (require :activity-scene-state))
+    (local state
+      {:panels panels
+       :terrains (or terrains [])
+       :lights services.lights
+       :skybox services.skybox
+       :background services.background
+       :containment services.containment})
+    (local canonical (ActivitySceneState.normalize-state state "Scene.capture-activity-slot-state"))
+    (set slot.scene-state canonical)
+    canonical)
+
+  (fn restore-activity-slot-state [scene activity-id state]
+    (assert (= (type state) :table)
+            "Scene.restore-activity-slot-state requires a state table")
+    (local ActivitySceneState (require :activity-scene-state))
+    (local canonical (ActivitySceneState.normalize-state state "Scene.restore-activity-slot-state"))
+    (local slot (ensure-activity-slot scene activity-id))
+    (set slot.scene-state canonical)
+    ;; If this slot is currently active, apply state immediately
+    (when (= self.active-activity-slot slot)
+      (apply-state-to-services self canonical))
+    true)
 
   (fn deactivate-activity-slot [_scene activity-id]
     (local slot (activity-slot self activity-id))
@@ -1892,6 +2009,8 @@
 (set self.activate-activity-slot activate-activity-slot)
 (set self.deactivate-activity-slot deactivate-activity-slot)
 (set self.drop-activity-slot drop-activity-slot)
+(set self.capture-activity-slot-state capture-activity-slot-state)
+(set self.restore-activity-slot-state restore-activity-slot-state)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)

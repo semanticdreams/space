@@ -542,6 +542,21 @@
            (table.insert existing entry)))
        (set entity.movables existing)))
 
+(fn deactivate [entity]
+  (local entries (get-entries entity))
+  (each [_ entry (ipairs entries)]
+    (when (and entry.body entry.body-active? (physics-available?))
+      (remove-body entry)))
+  true)
+
+(fn activate [entity]
+  (local entries (get-entries entity))
+  (each [_ entry (ipairs entries)]
+    (ensure-body-matches-layout-size entry)
+    (when (and entry.body (not entry.body-active?) (physics-available?))
+      (add-body entry)))
+  true)
+
 (fn sync [entity]
   (local entries (get-entries entity))
   (when (and entries (> (length entries) 0))
@@ -559,4 +574,6 @@
  :remove-runtime-layout-body-for-element remove-runtime-layout-body-for-element
  :reposition-element reposition-element
  :collect-movables collect-movables
+ :deactivate deactivate
+ :activate activate
  :sync sync}

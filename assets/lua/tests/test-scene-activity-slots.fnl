@@ -338,6 +338,234 @@
           "Scene.drop should drop graph slot root")
   (fixture.camera:drop))
 
+(fn slot-environment-isolated-on-activation []
+  ;; Task 2: Restore environment state on activation; empty state clears services.
+  ;; Requires: ActivitySceneState, capture-activity-slot-state, restore-activity-slot-state,
+  ;; and activation applying lights/skybox/background/containment.
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local LightingViewState (require :lighting-view-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Mock renderer skybox
+      (var skybox-state {:enabled? false
+                         :name "lake"
+                         :brightness 0.1
+                         :tint-color [1.0 1.0 1.0]})
+      (set app.renderers {:skybox {:get-state (fn [_] skybox-state)
+                                   :set-state (fn [_ state]
+                                                (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+                          :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+                          :set-background-state (fn [_ state]
+                                                   (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+      (local graph-slot (scene:ensure-activity-slot "graph"))
+
+      ;; Non-default sandbox state: enabled ambient, enabled skybox with custom brightness, custom background, enabled containment.
+      (local sandbox-state
+        {:panels []
+         :terrains []
+         :lights {:ambient {:enabled? true :color [1.0 1.0 1.0] :intensity 1.0}
+                  :directional []
+                  :point []
+                  :spot []}
+         :skybox {:enabled? true
+                  :name "lake"
+                  :brightness 0.5
+                  :tint-color [1.0 1.0 1.0]}
+         :background {:color [0.2 0.3 0.4]}
+         :containment {:enabled? true}})
+
+      (local empty-state (ActivitySceneState.empty-state))
+
+      ;; Restore sandbox slot with non-default state
+      (assert (scene:restore-activity-slot-state "sandbox" sandbox-state)
+              "restore-activity-slot-state should return true for valid state")
+
+      ;; Activate sandbox: services should reflect sandbox state
+      (scene:activate-activity-slot "sandbox")
+      (local lights-state (app.lights:get-state))
+      (assert lights-state.ambient.enabled?
+              "Sandbox activation should enable ambient light")
+      (assert skybox-state.enabled?
+              "Sandbox activation should enable skybox")
+      (assert (= skybox-state.brightness 0.5)
+              "Sandbox activation should apply skybox brightness")
+      (assert (and app.background-state
+                   (= (. app.background-state.color 1) 0.2)
+                   (= (. app.background-state.color 2) 0.3)
+                   (= (. app.background-state.color 3) 0.4))
+              "Sandbox activation should apply custom background color")
+
+      ;; Restore graph with empty state
+      (assert (scene:restore-activity-slot-state "graph" empty-state)
+              "restore-activity-slot-state with empty-state should return true")
+
+      ;; Activate graph: services should clear to empty
+      (scene:activate-activity-slot "graph")
+      (local graph-lights (app.lights:get-state))
+      (assert (not graph-lights.ambient.enabled?)
+              "Graph activation with empty state should disable ambient light")
+      (assert (not skybox-state.enabled?)
+              "Graph activation with empty state should disable skybox")
+      (assert (and app.background-state
+                   (= (. app.background-state.color 1) 0.0)
+                   (= (. app.background-state.color 2) 0.0)
+                   (= (. app.background-state.color 3) 0.0))
+              "Graph activation with empty state should set neutral background")
+
+      ;; Capture graph state: should have empty terrain/panels
+      (local graph-captured (scene:capture-activity-slot-state "graph"))
+      (assert graph-captured "capture-activity-slot-state should return state")
+      (assert (= (type graph-captured.panels) :table)
+              "Captured graph state should have panels table")
+      (assert (= (length graph-captured.panels) 0)
+              "Graph activation with empty state should leave no panels")
+      (assert (= (type graph-captured.terrains) :table)
+              "Captured graph state should have terrains table")
+      (assert (= (length graph-captured.terrains) 0)
+              "Graph activation with empty state should leave no terrains")
+
+      ;; Switch back to sandbox: services should reflect sandbox state again
+      (scene:activate-activity-slot "sandbox")
+      (local sandbox-lights (app.lights:get-state))
+      (assert sandbox-lights.ambient.enabled?
+              "Switching back to sandbox should re-enable ambient light")
+      (assert skybox-state.enabled?
+              "Switching back to sandbox should re-enable skybox")
+      (assert (= skybox-state.brightness 0.5)
+              "Switching back to sandbox should restore skybox brightness")
+
+      (drop-fixture fixture))))
+
+(fn physics-bodies-suspend-and-resume []
+  ;; Task 2: LayoutPhysicsBodies.deactivate/activate remove and restore Bullet bodies
+  ;; without dropping the entity.
+  (with-restored-app-fields
+    [:engine :movables]
+    (fn []
+      (local bt (require :bt))
+      (local LayoutPhysicsBodies (require :layout-physics-bodies))
+      (local BuildContext (require :build-context))
+      (local Container (require :container))
+
+      ;; Mock a minimal physics world
+      (var added-bodies [])
+      (var removed-bodies [])
+      (set app.engine
+           {:physics
+            {:addRigidBody (fn [_physics body] (table.insert added-bodies body))
+             :removeRigidBody (fn [_physics body] (table.insert removed-bodies body))
+             :syncMovedRigidBody (fn [_physics _body])}})
+      (set app.movables {:register (fn [_movables _widget _opts])})
+
+      ;; Create a simple entity
+      (local ctx (BuildContext {:layout-root {:children []
+                                              :__root true}}))
+      (local builder (Container {:children []}))
+      (local entity (builder ctx))
+      (set entity.layout.position (glm.vec3 0 0 0))
+      (set entity.layout.rotation (glm.quat 1 0 0 0))
+      (set entity.children [])
+      (set entity.movables [])
+
+      ;; Create a physics entry
+      (local element {:layout {:position (glm.vec3 0 5 0)
+                               :rotation (glm.quat 1 0 0 0)
+                               :size (glm.vec3 4 4 4)
+                               :measure (glm.vec3 4 4 4)
+                               :children []
+                               :parent entity.layout
+                               :root entity.layout
+                               :depth-offset-index 0
+                               :mark-measure-dirty (fn [_layout])}})
+      (local entry (LayoutPhysicsBodies.add-runtime-layout-body entity {:element element}))
+      (assert entry.body "LayoutPhysicsBodies should create a Bullet body")
+
+      ;; Deactivate: remove bodies without dropping entity
+      (LayoutPhysicsBodies.deactivate entity)
+      (assert (not entry.body-active?)
+              "LayoutPhysicsBodies.deactivate should mark bodies inactive")
+      (assert (> (length removed-bodies) 0)
+              "LayoutPhysicsBodies.deactivate should remove Bullet bodies")
+
+      ;; Reactivate: restore bodies
+      (LayoutPhysicsBodies.activate entity)
+      (assert entry.body-active?
+              "LayoutPhysicsBodies.activate should restore body active state")
+
+      ;; Cleanup
+      (entity:drop))))
+
+(fn containment-enabled-flag-controls-install []
+  ;; Task 2: Containment :enabled? false should clear and install nothing.
+  (with-restored-app-fields
+    [:physics-containment-config :physics-containment-scene
+     :__physics-global-containment :__physics_containment_refresh_debouncer
+     :engine]
+    (fn []
+      (local PhysicsContainment (require :physics-containment))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Verify enabled? is in normalized config
+      (local enabled-config (PhysicsContainment.normalize-config {:enabled? true}))
+      (assert enabled-config.enabled?
+              "normalize-config should preserve :enabled? true")
+
+      (local disabled-config (PhysicsContainment.normalize-config {:enabled? false}))
+      (assert (not disabled-config.enabled?)
+              "normalize-config should preserve :enabled? false")
+
+      ;; Verify serialize includes enabled?
+      (local serialized (PhysicsContainment.serialize-config {:enabled? true}))
+      (assert serialized.enabled?
+              "serialize-config should include :enabled?")
+
+      ;; Mock physics for ensure-installed
+      (var installed-planes [])
+      (var cleared? false)
+      ;; Capture original clear to use within mock
+      (local original-clear PhysicsContainment.clear)
+      (set app.engine {:physics {:addRigidBody (fn [_phys body] (table.insert installed-planes body))}})
+      ;; Override clear for test to detect it was called
+      (var ensure-installed-calls [])
+      (local orig-ensure-installed PhysicsContainment.ensure-installed)
+
+      ;; Setup: install enabled containment
+      (orig-ensure-installed {:config {:enabled? true}})
+      (assert (> (length installed-planes) 0)
+              "ensure-installed with enabled? true should install containment planes")
+      (assert (not (= app.physics-containment-config nil))
+              "ensure-installed should set physics-containment-config")
+
+      ;; Clean up and test disabled
+      (original-clear)
+      (set installed-planes [])
+
+      ;; Install disabled containment: should clear and install nothing
+      (local result (orig-ensure-installed {:config {:enabled? false}}))
+      ;; When enabled? is false, ensure-installed clears and returns false
+      (assert (= result false)
+              "ensure-installed with enabled? false should return false")
+      (assert (= (length installed-planes) 0)
+              "ensure-installed with enabled? false should not install planes")
+
+      ;; Clean up
+      (original-clear))))
+
 (table.insert tests {:name "Scene activity slots return same slot on repeat"
                      :fn ensure-activity-slot-returns-same-slot})
 (table.insert tests {:name "Scene activity slots have distinct context and root"
@@ -359,7 +587,13 @@
 (table.insert tests {:name "Scene slot focus scope follows activation"
                      :fn slot-focus-scope-follows-activation})
 (table.insert tests {:name "Scene drop disposes retained slots"
-                     :fn scene-drop-disposes-retained-slots})
+                      :fn scene-drop-disposes-retained-slots})
+(table.insert tests {:name "Scene slot environment isolated on activation"
+                      :fn slot-environment-isolated-on-activation})
+(table.insert tests {:name "Scene physics bodies suspend and resume"
+                      :fn physics-bodies-suspend-and-resume})
+(table.insert tests {:name "Scene containment enabled flag controls install"
+                      :fn containment-enabled-flag-controls-install})
 
 (local main
   (fn []
