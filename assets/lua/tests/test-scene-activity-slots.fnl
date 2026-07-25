@@ -184,6 +184,7 @@
   (set scene.build-context.get-text-ssbo-draw-list (fn [_ctx] :surface-text-ssbo-draw-list))
   (set scene.build-context.get-mesh-batches (fn [_ctx] :surface-mesh-batches))
   (set scene.build-context.get-instanced-color-mesh-batches (fn [_ctx] :surface-instanced-color-mesh-batches))
+  (set scene.build-context.image-batches :surface-image-batches)
 
   ;; Sentinels: sandbox slot context
   (set sandbox-slot.ctx.get-triangle-batches (fn [_ctx] :sandbox-triangle-batches))
@@ -191,6 +192,7 @@
   (set sandbox-slot.ctx.get-text-ssbo-draw-list (fn [_ctx] :sandbox-text-ssbo-draw-list))
   (set sandbox-slot.ctx.get-mesh-batches (fn [_ctx] :sandbox-mesh-batches))
   (set sandbox-slot.ctx.get-instanced-color-mesh-batches (fn [_ctx] :sandbox-instanced-color-mesh-batches))
+  (set sandbox-slot.ctx.image-batches :sandbox-image-batches)
 
   ;; Sentinels: graph slot context
   (set graph-slot.ctx.get-triangle-batches (fn [_ctx] :graph-triangle-batches))
@@ -198,6 +200,7 @@
   (set graph-slot.ctx.get-text-ssbo-draw-list (fn [_ctx] :graph-text-ssbo-draw-list))
   (set graph-slot.ctx.get-mesh-batches (fn [_ctx] :graph-mesh-batches))
   (set graph-slot.ctx.get-instanced-color-mesh-batches (fn [_ctx] :graph-instanced-color-mesh-batches))
+  (set graph-slot.ctx.image-batches :graph-image-batches)
 
   ;; Before activation: surface sentinels
   (assert (= (scene:get-triangle-batches) :surface-triangle-batches)
@@ -210,6 +213,8 @@
           "Inactive: mesh batches route to surface")
   (assert (= (scene:get-instanced-color-mesh-batches) :surface-instanced-color-mesh-batches)
           "Inactive: instanced color mesh batches route to surface")
+  (assert (= (scene:get-image-batches) :surface-image-batches)
+          "Inactive: image batches route to surface")
 
   ;; Activate sandbox: sandbox sentinels
   (scene:activate-activity-slot "sandbox")
@@ -223,6 +228,8 @@
           "Sandbox active: mesh batches route to sandbox slot")
   (assert (= (scene:get-instanced-color-mesh-batches) :sandbox-instanced-color-mesh-batches)
           "Sandbox active: instanced color mesh batches route to sandbox slot")
+  (assert (= (scene:get-image-batches) :sandbox-image-batches)
+          "Sandbox active: image batches route to sandbox slot")
 
   ;; Switch to graph: graph sentinels
   (scene:activate-activity-slot "graph")
@@ -236,6 +243,8 @@
           "Graph active: mesh batches route to graph slot")
   (assert (= (scene:get-instanced-color-mesh-batches) :graph-instanced-color-mesh-batches)
           "Graph active: instanced color mesh batches route to graph slot")
+  (assert (= (scene:get-image-batches) :graph-image-batches)
+          "Graph active: image batches route to graph slot")
 
   ;; Deactivate: fall back to surface sentinels
   (scene:deactivate-activity-slot "graph")
@@ -249,6 +258,8 @@
           "Deactivated: mesh batches fall back to surface")
   (assert (= (scene:get-instanced-color-mesh-batches) :surface-instanced-color-mesh-batches)
           "Deactivated: instanced color mesh batches fall back to surface")
+  (assert (= (scene:get-image-batches) :surface-image-batches)
+          "Deactivated: image batches fall back to surface")
 
   (drop-fixture fixture))
 
