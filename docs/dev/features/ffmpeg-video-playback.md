@@ -42,4 +42,4 @@ In-world video complements the browser — recorded content, tutorials, demos, a
 
 - Goal: [Core Platform](/dev/features/core-platform)
 - See: [Video Playback](/dev/video-playback)
-- See: [README](https://github.com/semanticdreams/space) (in-world video section)
+- See: [Video Playback (FFmpeg)](/dev/video-playback)

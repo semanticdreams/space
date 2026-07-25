@@ -41,5 +41,5 @@ Spatial computing benefits from in-world web content — reference documentation
 
 - Goal: [Core Platform](/dev/features/core-platform)
 - Depends on: [Layout Widget Engine](/dev/features/layout-widget-engine) — CEF surfaces use the layout engine
-- See: [README](https://github.com/semanticdreams/space) (CEF build setup)
+- See: [Building space](/dev/building) (CEF build setup)
 - See: [Cef In World Browsing](/dev/notes/cef-in-world-browsing), [Cef Icu Fd Crash](/dev/notes/cef-icu-fd-crash)
