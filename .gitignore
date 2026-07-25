@@ -2,6 +2,7 @@
 gl.log
 .env
 /prof
+.superpowers/
 
 # Python
 __pycache__/
