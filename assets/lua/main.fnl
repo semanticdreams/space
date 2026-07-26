@@ -1246,7 +1246,15 @@
   app.canvas-unit)
 
 (local built-in-activity-unit-specs
-  [{:activity-id "graph"
+  [{:activity-id "sandbox"
+    :unit-id "sandbox-activity"
+    :module-name "sandbox-activity-unit"
+    :owned-paths-export "sandbox-activity-owned-paths"
+    :load-export "load-sandbox-activity!"
+    :unload-export "unload-sandbox-activity!"
+    :snapshot-export "snapshot-sandbox-activity!"
+    :restore-export "restore-sandbox-activity!"}
+   {:activity-id "graph"
     :unit-id "graph-activity"
     :module-name "graph-activity-unit"
     :owned-paths-export "graph-activity-owned-paths"

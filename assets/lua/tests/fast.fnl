@@ -67,8 +67,9 @@
       :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
       :tests.test-scene-activity-slots
-      :tests.test-activity-retention
-      :tests.test-graph-activity-slots
+     :tests.test-activity-retention
+     :tests.test-home-world-scene-activity-state
+     :tests.test-graph-activity-slots
      :tests.test-drawing-activity-slots
      :tests.test-board
     :tests.test-first-person-controls

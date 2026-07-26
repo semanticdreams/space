@@ -140,6 +140,127 @@
      :containment (normalize-containment state.containment (.. label ".containment"))})
   cloned)
 
+(fn ensure-session-scene! [activity-state id state-factory]
+  "Ensure an activity session has a :scene entry. When one already exists, return
+it unchanged. Otherwise, create it from state-factory (a function accepting the
+activity-state and id, returning a canonical scene state table)."
+  (assert (= (type activity-state) :table) "ActivitySceneState.ensure-session-scene! requires activity-state table")
+  (assert (= (type id) :string) (.. "ActivitySceneState.ensure-session-scene! requires string id, got " (type id)))
+  (assert (= (type state-factory) :function) "ActivitySceneState.ensure-session-scene! requires state-factory function")
+  (when (not activity-state.sessions)
+    (set activity-state.sessions {}))
+  (when (not (. activity-state.sessions id))
+    (set (. activity-state.sessions id) {}))
+  (local session (. activity-state.sessions id))
+  (when (not session.scene)
+    (set session.scene (state-factory activity-state id)))
+  session.scene)
+
+(fn scene-state [activity-state id]
+  "Return the canonical scene state for activity id, or nil."
+  (when (and (= (type activity-state) :table)
+             (= (type id) :string)
+             (= (type activity-state.sessions) :table)
+             (= (type (. activity-state.sessions id)) :table))
+    (. activity-state.sessions id :scene)))
+
+(fn remove-legacy-keys! [world-state]
+  "Remove migrated legacy keys from top-level scene and physics. Returns true if
+any keys were removed."
+  (var changed? false)
+  ;; Clear scene content keys
+  (when (= (type world-state.scene) :table)
+    (when (not (= world-state.scene.panels nil))
+      (set world-state.scene.panels nil)
+      (set changed? true))
+    (when (not (= world-state.scene.terrains nil))
+      (set world-state.scene.terrains nil)
+      (set changed? true))
+    (when (not (= world-state.scene.lights nil))
+      (set world-state.scene.lights nil)
+      (set changed? true))
+    (when (not (= world-state.scene.skybox nil))
+      (set world-state.scene.skybox nil)
+      (set changed? true))
+    (when (not (= world-state.scene.background nil))
+      (set world-state.scene.background nil)
+      (set changed? true)))
+  ;; Clear physics containment
+  (when (= (type world-state.physics) :table)
+    (when (not (= world-state.physics.containment nil))
+      (set world-state.physics.containment nil)
+      (set changed? true)))
+  changed?)
+
+(fn migrate-legacy-world-state! [world-state]
+  "Migrate legacy top-level scene and physics content into canonical activity
+session slots. Idempotent: when canonical sandbox state already exists, it
+is preserved and legacy keys are only cleaned up. Returns true if the world
+state was changed and should be persisted."
+  ;; 1. Ensure activity structure
+  (when (not (= (type world-state.activity) :table))
+    (set world-state.activity {}))
+  (local activity-state world-state.activity)
+  ;; default active_id to "sandbox" only when nil
+  (when (= activity-state.active_id nil)
+    (set activity-state.active_id "sandbox"))
+  ;; 2. Migrate legacy scene/physics content into sandbox session
+  (when (not (= (type activity-state.sessions) :table))
+    (set activity-state.sessions {}))
+  ;; Only create sandbox session scene from legacy if it doesn't already exist
+  (when (not (. activity-state.sessions "sandbox"))
+    (set (. activity-state.sessions "sandbox") {}))
+  (local sandbox-session (. activity-state.sessions "sandbox"))
+  (var changed? false)
+  (when (not sandbox-session.scene)
+    ;; Build sandbox scene from legacy values, falling back to defaults
+    (local legacy-scene (or world-state.scene {}))
+    (local legacy-physics (or world-state.physics {}))
+    (local defaults (default-sandbox-state))
+    (local panels (or legacy-scene.panels (clone-array defaults.panels)))
+    (local terrains (or legacy-scene.terrains (clone-array defaults.terrains)))
+    (local lights (if (= (type legacy-scene.lights) :table)
+                      (normalize-lights legacy-scene.lights "ActivitySceneState.migrate")
+                      defaults.lights))
+    (local skybox (if (= (type legacy-scene.skybox) :table)
+                      (normalize-skybox legacy-scene.skybox "ActivitySceneState.migrate")
+                      defaults.skybox))
+    (local background (if (= (type legacy-scene.background) :table)
+                          (normalize-background legacy-scene.background "ActivitySceneState.migrate")
+                          defaults.background))
+    (local containment (if (= (type legacy-physics.containment) :table)
+                            (normalize-containment legacy-physics.containment "ActivitySceneState.migrate")
+                            defaults.containment))
+    (set sandbox-session.scene
+         {:panels (clone-array panels)
+          :terrains (clone-array terrains)
+          :lights lights
+          :skybox skybox
+          :background background
+          :containment containment})
+    (set changed? true))
+  ;; Normalize existing sandbox scene state (flatten skybox.default etc.)
+  (when sandbox-session.scene
+    (set sandbox-session.scene
+         (normalize-state sandbox-session.scene "ActivitySceneState.migrate")))
+  ;; 3. Create empty scene states for Graph, Drawing, Board
+  (local other-activity-ids [:graph :drawing :board])
+  (each [_ activity-id (ipairs other-activity-ids)]
+    (when (not (. activity-state.sessions activity-id))
+      (set (. activity-state.sessions activity-id) {}))
+    (local session (. activity-state.sessions activity-id))
+    (when (not session.scene)
+      (set session.scene (empty-state))
+      (set changed? true)))
+  ;; 4. Remove migrated fields from top-level
+  (local removed-legacy? (remove-legacy-keys! world-state))
+  (when removed-legacy?
+    (set changed? true))
+  changed?)
+
 {:empty-state empty-state
  :default-sandbox-state default-sandbox-state
- :normalize-state normalize-state}
+ :normalize-state normalize-state
+ :ensure-session-scene! ensure-session-scene!
+ :scene-state scene-state
+ :migrate-legacy-world-state! migrate-legacy-world-state!}

@@ -23,6 +23,7 @@
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
+(local ActivitySceneState (require :activity-scene-state))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -43,6 +44,14 @@
           (set (. out k) (clone-table v)))
         out)
       value))
+
+(fn resolve-sandbox-scene-state [world]
+  "Return the canonical sandbox scene session state, or nil."
+  (and world.state
+       world.state.activity
+       world.state.activity.sessions
+       world.state.activity.sessions.sandbox
+       world.state.activity.sessions.sandbox.scene))
 
 (fn merge-state-defaults [defaults persisted]
   (if (not (= (type defaults) :table))
@@ -238,21 +247,16 @@
             :scale_factor 1.0
             :panels []}
    :drawing (DrawingDocument.default-state)
-   :physics {:containment default-containment-config}
+   :physics {}
    :graph {:graph {:nodes []
-                   :edges []}}
+                    :edges []}}
    :board {:items []
            :connectors []}
-   :scene {:panels []
-           :terrains []
-           :skybox (SkyboxState.default-state)
-           :background (BackgroundState.default-state)}
+   :scene {}
    :hud {:panels []}})
 
 (fn default-state []
-  (local state (base-default-state))
-  (set state.scene.lights (LightSystemModule.default-state))
-  state)
+  (base-default-state))
 
 (fn resolve-graph-core-state [state]
   (local payload (or state {}))
@@ -384,7 +388,13 @@
   (local valid-terrain-ids {})
   (var invalid-keys [])
   (local seen-invalid {})
-  (each [_ record (ipairs (or (and payload.scene payload.scene.terrains) []))]
+  (each [_ record (ipairs (or (and payload.activity
+                                   payload.activity.sessions
+                                   payload.activity.sessions.sandbox
+                                   payload.activity.sessions.sandbox.scene
+                                   payload.activity.sessions.sandbox.scene.terrains)
+                              (and payload.scene payload.scene.terrains)
+                              []))]
     (local terrain-id (and record record.id))
     (when terrain-id
       (set (. valid-terrain-ids terrain-id) true)))
@@ -426,7 +436,13 @@
     (validate-panel-node-key! panel "graph-node-view"))
   (each [_ panel (ipairs (or (and payload.hud payload.hud.panels) []))]
     (validate-panel-node-key! panel "graph-node-view"))
-  (each [_ panel (ipairs (or (and payload.scene payload.scene.panels) []))]
+  (each [_ panel (ipairs (or (and payload.activity
+                                   payload.activity.sessions
+                                   payload.activity.sessions.sandbox
+                                   payload.activity.sessions.sandbox.scene
+                                   payload.activity.sessions.sandbox.scene.panels)
+                              (and payload.scene payload.scene.panels)
+                              []))]
     (validate-panel-node-key! panel "graph-node-cube"))
   invalid-keys)
 
@@ -523,10 +539,9 @@
                 (table.concat stale-terrain-graph-keys ", ")))))
         (do
           (TerrainIssueLog.warn (string.format
-                                  "[world] %s persisted state missing/invalid; resetting world.state and seeding default terrain"
+                                  "[world] %s persisted state missing/invalid; resetting world.state"
                                   world.id))
-          (set world.state (default-state))
-          (set world.state.scene.terrains (TerrainRecords.default-records))))
+          (set world.state (default-state))))
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local activity-state (or (and world.state world.state.activity) {}))
     (when (and (= activity-state.active_id nil)
@@ -597,6 +612,10 @@
            (PhysicsContainment.normalize-config containment)))
     (set physics-state.floor-y nil)
     (set world.state.physics physics-state)
+    ;; Migrate legacy top-level scene/physics state into canonical activity sessions
+    (local migrated-scene-state? (ActivitySceneState.migrate-legacy-world-state! world.state))
+    (when (or migrated-scene-state? repaired-persisted-state?)
+      (set repaired-persisted-state? true))
     (when repaired-persisted-state?
       (persist-loaded-state! world)))
 
@@ -610,7 +629,8 @@
   (fn resolve-runtime-containment-config [world]
     (local runtime world.runtime)
     (local runtime-config (and runtime runtime.physics-containment-config))
-    (local state-config (and world.state world.state.physics world.state.physics.containment))
+    (local sandbox-scene (resolve-sandbox-scene-state world))
+    (local state-config (and sandbox-scene sandbox-scene.containment))
     (PhysicsContainment.serialize-config
       (PhysicsContainment.normalize-config (or runtime-config state-config default-containment-config))))
 
@@ -620,9 +640,10 @@
         (PhysicsContainment.normalize-config (or config default-containment-config))))
     (set app.physics-containment-config serialized)
     (when world.state
-      (when (not world.state.physics)
-        (set world.state.physics {}))
-      (set world.state.physics.containment serialized))
+      ;; Write to sandbox activity session scene
+      (local sandbox-scene (resolve-sandbox-scene-state world))
+      (when sandbox-scene
+        (set sandbox-scene.containment serialized)))
     (when world.runtime
       (set world.runtime.physics-containment-config serialized))
     serialized)
@@ -664,14 +685,14 @@
   (fn apply-runtime-light-state! [world]
     (local runtime world.runtime)
     (local scene (and runtime runtime.scene))
-    (local scene-state (and world.state world.state.scene))
+    (local sandbox-scene (resolve-sandbox-scene-state world))
     (when (and scene scene.set-light-state)
-      (scene:set-light-state (and scene-state scene-state.lights))))
+      (scene:set-light-state (and sandbox-scene sandbox-scene.lights))))
 
   (fn apply-runtime-skybox-state! [world]
     (local runtime world.runtime)
     (local scene (and runtime runtime.scene))
-    (local scene-state (and world.state world.state.scene))
+    (local sandbox-scene (resolve-sandbox-scene-state world))
     (local theme-key
       (if (and app app.themes app.themes.get-active-theme-name)
           (SkyboxState.normalize-theme-key
@@ -681,19 +702,19 @@
     (when (and scene scene.set-skybox-state)
       (scene:set-skybox-state
         (SkyboxState.resolve-for-theme
-          (assert (and scene-state scene-state.skybox)
-                  (string.format "HomeWorld %s requires scene.skybox" world.id))
+          (assert (and sandbox-scene sandbox-scene.skybox)
+                  (string.format "HomeWorld %s requires sandbox scene.skybox" world.id))
           theme-key))))
 
   (fn apply-runtime-background-state! [world]
     (local runtime world.runtime)
     (local scene (and runtime runtime.scene))
-    (local scene-state (and world.state world.state.scene))
+    (local sandbox-scene (resolve-sandbox-scene-state world))
     (when (and scene scene.set-background-state)
       (scene:set-background-state
         (BackgroundState.normalize-complete-state
-          (assert (and scene-state scene-state.background)
-                  (string.format "HomeWorld %s requires scene.background" world.id))
+          (assert (and sandbox-scene sandbox-scene.background)
+                  (string.format "HomeWorld %s requires sandbox scene.background" world.id))
           (string.format "HomeWorld.apply-runtime-background-state %s" world.id)))))
 
   (fn hydration-now-ms []
@@ -827,7 +848,15 @@
             (set next-state.board (clone-table runtime.board-state)))))
     (when (and scene scene.capture-state)
       (local captured-scene (scene:capture-state))
-      (local existing-scene (or next-state.scene {}))
+      ;; Ensure the sandbox session exists in next-state
+      (when (not (= (type next-state.activity) :table))
+        (set next-state.activity {}))
+      (when (not (= (type next-state.activity.sessions) :table))
+        (set next-state.activity.sessions {}))
+      (when (not (= (type next-state.activity.sessions.sandbox) :table))
+        (set next-state.activity.sessions.sandbox {}))
+      (local existing-sandbox-scene (or next-state.activity.sessions.sandbox.scene
+                                        (ActivitySceneState.empty-state)))
       (set captured-scene.panels
            (merge-panel-state
              captured-scene.panels
@@ -840,18 +869,32 @@
                                 (tostring (and scene scene.debug-id)))))
       (set captured-scene.terrains
            (TerrainRecords.merge-preserved-records
-             existing-scene.terrains
+             existing-sandbox-scene.terrains
              captured-scene.terrains))
       (assert captured-scene.lights "HomeWorld.capture-runtime-state requires scene lights")
       (assert captured-scene.skybox "HomeWorld.capture-runtime-state requires scene skybox")
       (assert captured-scene.background "HomeWorld.capture-runtime-state requires scene background")
       (set captured-scene.skybox
            (SkyboxState.normalize-complete-state
-             (assert existing-scene.skybox
-                     "HomeWorld.capture-runtime-state requires persisted scene skybox policy")
+             (assert existing-sandbox-scene.skybox
+                     "HomeWorld.capture-runtime-state requires persisted sandbox scene skybox policy")
              "HomeWorld.capture-runtime-state persisted skybox"))
       (drop-graph-node-view-panels! captured-scene)
-      (set next-state.scene captured-scene))
+      (set captured-scene.containment (resolve-runtime-containment-config world))
+      ;; Write captured scene state into the sandbox activity session
+      (set next-state.activity.sessions.sandbox.scene captured-scene))
+    ;; Always capture runtime containment config into the sandbox session,
+    ;; even when the scene surface is not available for state capture.
+    (when (not next-state.activity)
+      (set next-state.activity {}))
+    (when (not next-state.activity.sessions)
+      (set next-state.activity.sessions {}))
+    (when (not next-state.activity.sessions.sandbox)
+      (set next-state.activity.sessions.sandbox {}))
+    (when (not next-state.activity.sessions.sandbox.scene)
+      (set next-state.activity.sessions.sandbox.scene (ActivitySceneState.empty-state)))
+    (set next-state.activity.sessions.sandbox.scene.containment
+         (resolve-runtime-containment-config world))
     (local canvas-state
       (if (and canvas canvas.capture-state)
           (canvas:capture-state)
@@ -873,9 +916,6 @@
       (local hud-state (hud:capture-state))
       (drop-graph-node-view-panels! hud-state)
       (set next-state.hud hud-state))
-    (local physics-state (or next-state.physics {}))
-    (set physics-state.containment (resolve-runtime-containment-config world))
-    (set next-state.physics physics-state)
     (set world.state next-state))
 
   (fn queue-runtime-restore-state [world]
@@ -962,8 +1002,9 @@
       (DrawingController {:document drawing-state.document
                           :ui drawing-state.ui
                           :data_dir world.dir}))
-    (local scene-state (or world.state.scene {}))
-    (scene:build-default {:terrains scene-state.terrains})
+    ;; Create an empty Scene surface; sandbox activity activation will populate it.
+    (local sandbox-scene-state (resolve-sandbox-scene-state world))
+    (scene:ensure-activity-slot "sandbox")
     (local containment-config
       (apply-runtime-containment! world {:scene scene}))
     (local runtime
@@ -1003,7 +1044,7 @@
                    :started? false
                    :completed? false
                    :start-scheduled? false
-                   :scene-panels (clone-table scene-state.panels)
+                   :scene-panels (clone-table (and sandbox-scene-state sandbox-scene-state.panels []))
         :scene-panel-index 1}})
     (local sync-active-graph-map!
       (fn []
