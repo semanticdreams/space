@@ -412,6 +412,87 @@
 (table.insert tests {:name "skybox node view theme override inherits default tint"
                      :fn skybox-node-view-theme-override-inherits-default-tint})
 
+;; ── R2-2 ──────────────────────────────────────────────────────────────
+
+(fn world-data-update-skybox-preserves-by-theme-override []
+  "R2-2: WorldData.update-skybox must accept and preserve a complete
+  skybox state with :default and :by-theme policy fields.  The canonical
+  session state must store the complete policy, NOT a flattened/resolved
+  format."
+  (local WorldData (require :graph/world-data))
+  (local SkyboxState (require :skybox-state))
+  (local skybox-with-override
+    (SkyboxState.normalize-complete-state
+      {:enabled? true
+       :default {:name "lake"
+                 :brightness 0.2
+                 :tint-color [1.0 1.0 1.0]}
+       :by-theme {:dark {:name "desert"
+                          :brightness 0.5
+                          :tint-color [0.9 0.8 0.7]}}}
+      "R2-2 test skybox"))
+  ;; Build a world state with sandbox session scene.
+  ;; The initial skybox is a simple complete state.
+  (local initial-skybox
+    (SkyboxState.normalize-complete-state
+      {:enabled? true
+       :default {:name "lake"
+                 :brightness 0.1
+                 :tint-color [1.0 1.0 1.0]}
+       :by-theme {}}
+      "R2-2 initial skybox"))
+  (local state
+    {:scene {:panels [] :terrains []}
+     :hud {:panels []}
+     :activity {:active_id "sandbox"
+                :sessions {:sandbox
+                           {:scene {:panels []
+                                    :terrains []
+                                    :lights (LightSystemModule.default-state)
+                                    :skybox initial-skybox
+                                    :background {:color [0 0 0]}
+                                    :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? false
+                :world {:state state
+                        :get-runtime (fn [_self] nil)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; Call update-skybox with the complete state containing a by-theme override.
+  (local result
+    (WorldData.update-skybox manager "test-world" skybox-with-override))
+  (assert result "update-skybox should return normalized skybox state")
+  ;; Verify the canonical session state now contains the complete policy.
+  (local sandbox-scene
+    (and state.activity
+         state.activity.sessions
+         state.activity.sessions.sandbox
+         state.activity.sessions.sandbox.scene))
+  (assert sandbox-scene "sandbox scene must exist after update-skybox")
+  (assert (= sandbox-scene.skybox.enabled? true)
+          "enabled? must survive update-skybox")
+  (assert (= (type sandbox-scene.skybox.default) :table)
+          "skybox.default must exist (not flattened)")
+  (assert (= sandbox-scene.skybox.default.brightness 0.2)
+          "skybox.default.brightness must survive update-skybox")
+  (assert (= (type sandbox-scene.skybox.by-theme) :table)
+          "skybox.by-theme must exist (not flattened)")
+  (assert sandbox-scene.skybox.by-theme.dark
+          "dark theme override must survive update-skybox")
+  (assert (= sandbox-scene.skybox.by-theme.dark.name "desert")
+          "dark theme override name must survive")
+  (assert (= sandbox-scene.skybox.by-theme.dark.brightness 0.5)
+          "dark theme override brightness must survive")
+  ;; Also verify the returned result has the complete policy.
+  (assert (= result.default.brightness 0.2)
+          "returned result must have default brightness")
+  (assert (= (. result.by-theme.dark.tint-color 2) 0.8)
+          "returned result must have dark theme tint"))
+
+(table.insert tests {:name "WorldData.update-skybox preserves by-theme override"
+                     :fn world-data-update-skybox-preserves-by-theme-override})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

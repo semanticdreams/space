@@ -245,9 +245,9 @@
       ;; Skybox
       (assert (= sandbox-scene.skybox.enabled? false)
               "Expected migrated skybox disabled flag")
-      (assert (= sandbox-scene.skybox.name "ocean")
+      (assert (= sandbox-scene.skybox.default.name "ocean")
               "Expected migrated skybox name")
-      (assert (= sandbox-scene.skybox.brightness 0.5)
+      (assert (= sandbox-scene.skybox.default.brightness 0.5)
               "Expected migrated skybox brightness")
       ;; Background
       (assert (= (. sandbox-scene.background.color 1) 0.1)
@@ -454,9 +454,9 @@
       ;; Skybox: canonical wins
       (assert (= sandbox-scene.skybox.enabled? true)
               "Expected canonical skybox enabled (true, not legacy false)")
-      (assert (= sandbox-scene.skybox.name "desert")
+      (assert (= sandbox-scene.skybox.default.name "desert")
               "Expected canonical skybox name (desert, not legacy)")
-      (assert (= sandbox-scene.skybox.brightness 0.75)
+      (assert (= sandbox-scene.skybox.default.brightness 0.75)
               "Expected canonical skybox brightness (0.75, not legacy 0.01)")
       ;; Background: canonical wins
       (assert (= (. sandbox-scene.background.color 1) 0.5)
@@ -845,7 +845,96 @@
       true)))
 
 (table.insert tests {:name "canonical load does not produce legacy fields"
-                     :fn canonical-load-does-not-produce-legacy-fields})
+                      :fn canonical-load-does-not-produce-legacy-fields})
+
+;; ── R2-2 ──────────────────────────────────────────────────────────────
+
+(fn skybox-by-theme-override-survives-normalization-and-reload []
+  "R2-2: When the canonical sandbox scene state includes a by-theme skybox
+  override, the complete policy (:default, :by-theme, enabled?) must survive
+  HomeWorld normalization and a full save/reload cycle.  Normalization must
+  NOT flatten the state to the resolved format."
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      ;; Build a canonical skybox state with a by-theme override.
+      (local complete-skybox
+        (SkyboxState.normalize-complete-state
+          {:enabled? true
+           :default {:name "lake"
+                     :brightness 0.1
+                     :tint-color [1.0 1.0 1.0]}
+           :by-theme {:dark {:name "night"
+                              :brightness 0.3
+                              :tint-color [0.8 0.8 1.0]}}}
+          "test-skybox-override"))
+      (local sandbox-scene (ActivitySceneState.empty-state))
+      (set sandbox-scene.skybox complete-skybox)
+      ;; Write a world.json with this complete skybox in canonical state.
+      (write-world-json! world-dir
+        {:camera {:position [0 0 30] :rotation [1 0 0 0]}
+         :activity {:active_id "sandbox"
+                    :preferred_interaction_surface "scene"
+                    :sessions {:sandbox {:scene sandbox-scene}
+                               :graph {:scene (ActivitySceneState.empty-state)}
+                               :drawing {:scene (ActivitySceneState.empty-state)}
+                               :board {:scene (ActivitySceneState.empty-state)}}}
+         :canvas {:camera {:position [0 0 100]} :scale_factor 1.0 :panels []}
+         :drawing (let [DrawingDocument (require :drawing/document)]
+                    (DrawingDocument.default-state))
+         :physics {}
+         :graph {:graph {:nodes [] :edges []}}
+         :board {:items [] :connectors []}
+         :scene {}
+         :hud {:panels []}})
+      ;; Load the world (triggers normalization via normalize-state).
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      ;; Verify the loaded sandbox scene skybox preserves the complete policy.
+      (local loaded-sandbox-scene (sandbox-scene-state world))
+      (assert loaded-sandbox-scene "Expected sandbox scene after load")
+      (assert loaded-sandbox-scene.skybox "Sandbox scene must have skybox")
+      (assert (= loaded-sandbox-scene.skybox.enabled? true)
+              "skybox.enabled? must survive normalization")
+      (assert (= (type loaded-sandbox-scene.skybox.default) :table)
+              "skybox.default must be present (not flattened)")
+      (assert (= loaded-sandbox-scene.skybox.default.name "lake")
+              "default skybox name must survive normalization")
+      (assert (= (type loaded-sandbox-scene.skybox.by-theme) :table)
+              "skybox.by-theme must be present (not flattened)")
+      (assert loaded-sandbox-scene.skybox.by-theme.dark
+              "dark theme override must exist")
+      (assert (= loaded-sandbox-scene.skybox.by-theme.dark.name "night")
+              "dark theme override name must survive normalization")
+      (assert (= loaded-sandbox-scene.skybox.by-theme.dark.brightness 0.3)
+              "dark theme override brightness must survive normalization")
+      ;; Save and reload to verify persistence of the complete format.
+      (world:save-state)
+      (local reloaded (HomeWorld {:id "world-a"
+                                  :name "home"
+                                  :type "home"
+                                  :dir world-dir}))
+      (reloaded:init {})
+      (local reloaded-scene (sandbox-scene-state reloaded))
+      (assert reloaded-scene "Reloaded world must have sandbox scene")
+      (assert (= (type reloaded-scene.skybox.default) :table)
+              "reloaded skybox.default must still be present")
+      (assert (= reloaded-scene.skybox.default.name "lake")
+              "reloaded default skybox name must match")
+      (assert reloaded-scene.skybox.by-theme.dark
+              "reloaded dark theme override must exist")
+      (assert (= reloaded-scene.skybox.by-theme.dark.brightness 0.3)
+              "reloaded dark theme override brightness must match")
+      true)))
+
+(table.insert tests {:name "skybox by-theme override survives normalization and reload"
+                     :fn skybox-by-theme-override-survives-normalization-and-reload})
 
 (local main
   (fn []

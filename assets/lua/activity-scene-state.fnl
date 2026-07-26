@@ -47,17 +47,23 @@
 
 (fn empty-skybox []
   (local base (SkyboxState.default-state))
-  {:enabled? false
-   :name base.default.name
-   :brightness base.default.brightness
-   :tint-color (icollect [_ v (ipairs base.default.tint-color)] v)})
+  (SkyboxState.normalize-complete-state
+    {:enabled? false
+     :default {:name base.default.name
+               :brightness base.default.brightness
+               :tint-color (icollect [_ v (ipairs base.default.tint-color)] v)}
+     :by-theme {}}
+    "ActivitySceneState.empty-skybox"))
 
 (fn default-sandbox-skybox []
   (local base (SkyboxState.default-state))
-  {:enabled? true
-   :name base.default.name
-   :brightness base.default.brightness
-   :tint-color (icollect [_ v (ipairs base.default.tint-color)] v)})
+  (SkyboxState.normalize-complete-state
+    {:enabled? true
+     :default {:name base.default.name
+               :brightness base.default.brightness
+               :tint-color (icollect [_ v (ipairs base.default.tint-color)] v)}
+     :by-theme {}}
+    "ActivitySceneState.default-sandbox-skybox"))
 
 (fn empty-background []
   (BackgroundState.default-state))
@@ -116,7 +122,9 @@
    :spot (clone-array (or lights.spot []))})
 
 (fn normalize-skybox [skybox path]
-  (SkyboxState.normalize-resolved-state skybox (.. (or path "ActivitySceneState") ".skybox")))
+  ;; R2-2: Preserve complete SkyboxState policy (:default, :by-theme) in
+  ;; canonical state.  Resolve only when applying to the renderer/theme.
+  (SkyboxState.normalize-complete-state skybox (.. (or path "ActivitySceneState") ".skybox")))
 
 (fn normalize-background [background path]
   (BackgroundState.normalize-complete-state background (.. (or path "ActivitySceneState") ".background")))

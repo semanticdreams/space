@@ -676,7 +676,13 @@
                         (app.lights:set-state state.lights))
                       (when (and state.skybox
                                  app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-                        (app.renderers.skybox:set-state state.skybox))
+                        ;; R2-2: Resolve complete skybox state to renderer-ready
+                        ;; flat format.  Canonical storage preserves :default and
+                        ;; :by-theme policy; the renderer receives only name,
+                        ;; brightness, tint-color, and enabled?.
+                        (local resolved-skybox
+                          (SkyboxState.resolve-for-theme state.skybox nil))
+                        (app.renderers.skybox:set-state resolved-skybox))
                       (when (and state.background
                                  app app.renderers app.renderers.set-background-state)
                         (app.renderers:set-background-state state.background))
@@ -693,7 +699,9 @@
               (when (and app app.lights app.lights.set-state)
                 (app.lights:set-state empty.lights))
               (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-                (app.renderers.skybox:set-state empty.skybox))
+                ;; R2-2: Resolve empty.skybox from complete to renderer format.
+                (app.renderers.skybox:set-state
+                  (SkyboxState.resolve-for-theme empty.skybox nil)))
               (when (and app app.renderers app.renderers.set-background-state)
                 (app.renderers:set-background-state empty.background))
               (when app.engine
@@ -721,9 +729,19 @@
     (local previous-slot self.active-activity-slot)
     (local previous-slot-id self.active-activity-slot-id)
     (when was-different-slot
-      ;; Capture old active services state onto the old slot
-      (set self.active-activity-slot.scene-state
-           (capture-active-service-state self))
+      ;; Capture old active services state onto the old slot.
+      ;; Merge services into existing scene-state to preserve terrain
+      ;; and panel records (R2-1).
+      (local current-state (or self.active-activity-slot.scene-state
+                                (do
+                                  (local ActivitySceneState (require :activity-scene-state))
+                                  (ActivitySceneState.empty-state))))
+      (local services (capture-active-service-state self))
+      (set current-state.lights services.lights)
+      (set current-state.skybox services.skybox)
+      (set current-state.background services.background)
+      (set current-state.containment services.containment)
+      (set self.active-activity-slot.scene-state current-state)
       ;; Capture old slot's content state back to its slot fields
       (set self.active-activity-slot.entity self.entity)
       (set self.active-activity-slot.scene-children self.scene-children)
@@ -786,12 +804,42 @@
     (slot:activate)
     (set self.active-activity-slot-id activity-id)
     (set self.active-activity-slot slot)
-    ;; Build terrain from stored records if slot has no terrain yet and has records
-    (when (and slot.scene-state
-               slot.scene-state.terrains
-               (> (length slot.scene-state.terrains) 0)
-               (not self.scene-terrains))
-      (pcall (fn [] (self:build-default {:terrains slot.scene-state.terrains}))))
+    ;; R2-1: Reconcile self.scene-terrains with authoritative
+    ;; slot.scene-state.terrains.  When the slot was inactive, WorldData
+    ;; mutations may have changed the canonical records without updating
+    ;; the stale runtime slot.scene-terrains.  Apply add/update/remove
+    ;; differences so activation always reflects the canonical state.
+    (let [canonical-terrains (and slot.scene-state slot.scene-state.terrains)]
+      (when (and canonical-terrains (> (length canonical-terrains) 0))
+        (local canonical-ids {})
+        (each [_ record (ipairs canonical-terrains)]
+          (when (and record record.id)
+            (tset canonical-ids record.id true)))
+        ;; Remove stale runtime entries whose record id is absent from
+        ;; canonical state.  Collect ids first to avoid index-shift bugs.
+        (when self.scene-terrains
+          (local stale-ids [])
+          (for [idx (length self.scene-terrains) 1 -1]
+            (local entry (. self.scene-terrains idx))
+            (local record-id (and entry entry.record entry.record.id))
+            (when (and record-id (not (. canonical-ids record-id)))
+              (table.insert stale-ids record-id)))
+          (each [_ stale-id (ipairs stale-ids)]
+            (self:remove-terrain stale-id)))
+        ;; Build or add terrain from canonical records.
+        (if (not self.entity)
+            (pcall (fn [] (self:build-default {:terrains canonical-terrains})))
+            (do
+              (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+              (each [_ entry (ipairs entries)]
+                (local record-id (and entry.record entry.record.id))
+                (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                    nil  ;; already present — idempotent skip
+                    (self:add-terrain-record entry.record)))
+              ;; Capture runtime terrain ids back for stable reconciliation
+              (when self.scene-terrains
+                (set (. slot.scene-state :terrains)
+                     (SceneWorldState.capture-terrains self.scene-terrains)))))))
     ;; Sync slot entity with scene entity so deactivate-activity-slot
     ;; can deactivate layout physics bodies for the final slot.
     (set slot.entity self.entity)
@@ -830,14 +878,17 @@
           slot.queued-cube-panels))
     (each [_ panel (ipairs (or source-queued []))]
       (table.insert panels (clone-table panel)))
-    (local source-terrains
-      (if is-active
-          self.scene-terrains
-          slot.scene-terrains))
+    ;; R2-1: For inactive slots, use authoritative slot.scene-state.terrains
+    ;; instead of stale slot.scene-terrains. For active slots, capture from
+    ;; live runtime terrain entries as before.
     (local terrains
-      (if (= source-terrains nil)
-          nil
-          (SceneWorldState.capture-terrains source-terrains)))
+      (if is-active
+          (if (= self.scene-terrains nil)
+              nil
+              (SceneWorldState.capture-terrains self.scene-terrains))
+          (or (and (= (type slot.scene-state) :table)
+                   slot.scene-state.terrains)
+              [])))
     ;; Capture service state: for active slot, read from live engine;
     ;; for inactive slot, use stored scene-state services.
     (local services
@@ -847,13 +898,22 @@
               (do
                 (local ActivitySceneState (require :activity-scene-state))
                 (ActivitySceneState.empty-state)))))
+    ;; R2-2: For active slots, preserve the slot's complete (policy-preserving)
+    ;; skybox from scene-state instead of the resolved renderer skybox.  For
+    ;; inactive slots, services already carries the authoritative scene-state.
+    (local skybox
+      (if (and is-active
+               (= (type slot.scene-state) :table)
+               (= (type slot.scene-state.skybox) :table))
+          slot.scene-state.skybox
+          services.skybox))
     ;; Build canonical state
     (local ActivitySceneState (require :activity-scene-state))
     (local state
       {:panels panels
        :terrains (or terrains [])
        :lights services.lights
-       :skybox services.skybox
+       :skybox skybox
        :background services.background
        :containment services.containment})
     (local canonical (ActivitySceneState.normalize-state state "Scene.capture-activity-slot-state"))

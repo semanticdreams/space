@@ -7,6 +7,29 @@
 
 (local tests [])
 
+;; ── Terrain record helpers for R2-1 tests ──────────────────────────────
+
+(fn make-heightfield-terrain-record [opts]
+  (local options (or opts {}))
+  (local chunk-samples (or options.chunk-samples [17 17]))
+  (local default-height (or options.default-height 0.0))
+  (local heights [])
+  (for [_ 1 (* (. chunk-samples 1) (. chunk-samples 2))]
+    (table.insert heights default-height))
+  {:id (or options.id "heightfield-1")
+   :name options.name
+   :kind "heightfield-terrain"
+   :options {:position (or options.position [-160 -100 -160])
+             :rotation (or options.rotation [1 0 0 0])
+             :opacity (or options.opacity 1.0)
+             :physics (if (= options.physics nil) true options.physics)
+             :sample-spacing (or options.sample-spacing [20 20])
+             :chunk-samples chunk-samples
+             :default-height default-height}
+   :chunks (or options.chunks [{:coord [0 0]
+                                :size chunk-samples
+                                :heights heights}])})
+
 (fn make-scene []
   (when (not app.create-default-projection)
     (set app.create-default-projection AppProjection.create-default-projection))
@@ -865,6 +888,146 @@
                         :fn restore-terrain-adds-missing-while-active})
 (table.insert tests {:name "Scene activate-activity-slot fails on unknown"
                         :fn activate-activity-slot-fails-on-unknown})
+
+;; ── R2-1 ──────────────────────────────────────────────────────────────
+
+(fn inactive-capture-uses-authoritative-terrains []
+  "R2-1: When a slot is inactive, capture-activity-slot-state must use the
+  authoritative slot.scene-state.terrains, NOT stale slot.scene-terrains.
+  This prevents stale runtime terrain from overwriting canonical state
+  during inactive capture."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      ;; Mock renderer services for apply-state-to-services
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Ensure and activate sandbox
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      ;; Restore a valid state with exactly one terrain record
+      (local canonical (ActivitySceneState.empty-state))
+      (set canonical.terrains [(make-heightfield-terrain-record {:id "t1-legit"})])
+      (scene:restore-activity-slot-state "sandbox" canonical)
+      ;; Now switch to Graph (deactivates sandbox)
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      (assert (= scene.active-activity-slot-id "graph")
+              "Graph should be the active slot after switch")
+      (assert (not slot.visible?)
+              "Sandbox slot should be inactive after graph activation")
+      ;; Simulate stale runtime terrain: set slot.scene-terrains to
+      ;; something different from the canonical scene-state.terrains.
+      ;; This represents the stale state that existed before inactive
+      ;; WorldData mutations.
+      (set slot.scene-terrains [{:record {:id "t-stale-runtime"
+                                          :kind "heightfield-terrain"}}])
+      ;; Meanwhile, add a second terrain to the canonical scene-state
+      ;; (simulating WorldData.add-terrain while sandbox is inactive).
+      (table.insert slot.scene-state.terrains
+                    (make-heightfield-terrain-record {:id "t2-added-while-inactive"}))
+      ;; Capture the sandbox slot state.  The fix ensures this reads from
+      ;; slot.scene-state.terrains, NOT from slot.scene-terrains.
+      (local captured (scene:capture-activity-slot-state "sandbox"))
+      (assert captured "capture-activity-slot-state should return a state table")
+      (assert (= (type captured.terrains) :table) "captured state must have terrains")
+      (assert (= (length captured.terrains) 2)
+              (.. "Expected exactly 2 terrains in captured state (one original + one added while inactive), got "
+                  (tostring (length captured.terrains))))
+      ;; Verify the correct terrain ids are present (not the stale runtime id)
+      (local captured-ids {})
+      (each [_ rec (ipairs captured.terrains)]
+        (set (. captured-ids rec.id) true))
+      (assert (. captured-ids "t1-legit")
+              "Captured state must contain the original terrain t1-legit")
+      (assert (. captured-ids "t2-added-while-inactive")
+              "Captured state must contain the terrain added while inactive")
+      (assert (not (. captured-ids "t-stale-runtime"))
+              "Captured state must NOT contain the stale runtime terrain id")
+      (drop-fixture fixture))))
+
+(fn sandbox-activation-reconciles-terrains []
+  "R2-1: When sandbox is reactivated after WorldData terrain mutations,
+  the stale runtime slot.scene-terrains must be reconciled against the
+  authoritative slot.scene-state.terrains.  Stale terrains should be
+  removed and new canonical terrains should be added."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      ;; Mock renderer services
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Activate sandbox and restore with one terrain, then switch away
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      (local original-state (ActivitySceneState.empty-state))
+      (set original-state.terrains [(make-heightfield-terrain-record {:id "t-a"})])
+      (scene:restore-activity-slot-state "sandbox" original-state)
+      ;; Switch to Graph (deactivates sandbox)
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      (assert (not slot.visible?) "Sandbox should be inactive after graph activation")
+      ;; Simulate WorldData mutation while inactive: add a second terrain
+      ;; to the canonical scene-state.  This is what refresh-sandbox-slot-if-inactive
+      ;; would do after a WorldData.add-terrain call.
+      (table.insert slot.scene-state.terrains
+                    (make-heightfield-terrain-record {:id "t-b"}))
+      ;; NOTE: the stale slot.scene-terrains from before the switch is
+      ;; what would be restored on reactivation.  Our fix in
+      ;; activate-activity-slot reconciles this against slot.scene-state.terrains.
+      ;; Reactivate sandbox
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Sandbox should be active after reactivation")
+      ;; After reactivation, the canonical scene-state should still have 2 records
+      (assert (= (length slot.scene-state.terrains) 2)
+              (.. "slot.scene-state.terrains should have 2 entries after reactivation, got "
+                  (tostring (length slot.scene-state.terrains))))
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "inactive capture uses authoritative terrains"
+                     :fn inactive-capture-uses-authoritative-terrains})
+(table.insert tests {:name "sandbox activation reconciles terrains"
+                     :fn sandbox-activation-reconciles-terrains})
 
 (local main
   (fn []

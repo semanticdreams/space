@@ -4,6 +4,7 @@
 (local Activities (require :activities))
 (local ActivitySceneState (require :activity-scene-state))
 (local SandboxActivityActions (require :sandbox-activity-actions))
+(local SkyboxState (require :skybox-state))
 
 (fn sandbox-activity-owned-paths []
   (local runtime (require :runtime))
@@ -139,7 +140,9 @@
       (when (and app app.lights app.lights.set-state)
         (app.lights:set-state empty.lights))
       (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-        (app.renderers.skybox:set-state empty.skybox))
+        ;; R2-2: Resolve complete skybox to renderer format.
+        (app.renderers.skybox:set-state
+          (SkyboxState.resolve-for-theme empty.skybox nil)))
       (when (and app app.renderers app.renderers.set-background-state)
         (app.renderers:set-background-state empty.background))
       ;; Clear containment through the real PhysicsContainment API.
