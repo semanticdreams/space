@@ -6,7 +6,6 @@
 (local Button (require :button))
 (local {: adjust} (require :widget-theme-utils))
 
-(local rail-width 6)
 (local panel-width 38)
 
 (fn panel-background [theme kind]
@@ -29,6 +28,17 @@
     (var cached-panels {})
     (var pending-rebuild? true)
     (var changed-handler nil)
+
+    (fn rail-measure []
+      (or (and rail-entity rail-entity.layout rail-entity.layout.measure)
+          (glm.vec3 0 0 0)))
+
+    (fn rail-measured-width []
+      (. (rail-measure) 1))
+
+    (fn allocated-root-width [self]
+      (math.max (or (and self.measure self.measure.x) 0)
+                (or (and self.size self.size.x) 0)))
 
     (fn drop-rail! []
       (when rail-entity
@@ -71,10 +81,10 @@
         (table.insert rail-children
                       (FlexChild
                         (fn [child-ctx]
-                          ((Button {:padding [0.4 0.2]
+                          ((Button {:padding [0.4 0.25]
                                     :focusable? false
                                     :icon entry.icon
-                                    :icon-style {:scale 2.4}
+                                    :icon-style {:scale 3.2}
                                     :name (.. "extended-sidebar-" id)
                                     :focus-name entry.label
                                     :on-click (fn [_button _event]
@@ -117,9 +127,10 @@
     (fn measurer [self]
       (each [_ child (ipairs (or self.children []))]
         (child:measurer))
+      (local current-rail-width (rail-measured-width))
       (local total-width (if (and sidebar.expanded? sidebar.active-id active-panel-entity)
-                             (+ rail-width panel-width)
-                             rail-width))
+                             (+ panel-width current-rail-width)
+                             current-rail-width))
       (set self.measure (glm.vec3 total-width 0 0)))
 
     (fn layouter [self]
@@ -127,16 +138,22 @@
       (local base-rotation self.rotation)
       (local base-depth (or self.depth-offset-index 0))
       (local height (or (and self.size self.size.y) 0))
+      (local current-rail-width (rail-measured-width))
+      (local allocated-width (allocated-root-width self))
+      (set self.size (glm.vec3 allocated-width height 0))
+      (local rail-offset (glm.vec3 (- allocated-width current-rail-width) 0 0))
+      (local rail-position (+ base-position (base-rotation:rotate rail-offset)))
       (when active-panel-entity
-        (set active-panel-entity.layout.position (glm.vec3 (- base-position.x panel-width) base-position.y base-position.z))
+        (local panel-offset (glm.vec3 (- allocated-width current-rail-width panel-width) 0 0))
+        (set active-panel-entity.layout.position (+ base-position (base-rotation:rotate panel-offset)))
         (set active-panel-entity.layout.size (glm.vec3 panel-width height 0))
         (set active-panel-entity.layout.rotation base-rotation)
         (set active-panel-entity.layout.clip-region self.clip-region)
         (set active-panel-entity.layout.depth-offset-index (+ base-depth 1))
         (active-panel-entity.layout:layouter))
       (when rail-entity
-        (set rail-entity.layout.position (glm.vec3 base-position.x base-position.y base-position.z))
-        (set rail-entity.layout.size (glm.vec3 rail-width height 0))
+        (set rail-entity.layout.position rail-position)
+        (set rail-entity.layout.size (glm.vec3 current-rail-width height 0))
         (set rail-entity.layout.rotation base-rotation)
         (set rail-entity.layout.clip-region self.clip-region)
         (set rail-entity.layout.depth-offset-index (+ base-depth 1))
