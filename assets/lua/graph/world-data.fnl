@@ -9,10 +9,19 @@
 ;; ── Canonical sandbox session helpers ──────────────────────────────
 
 (fn resolve-sandbox-scene-state [world context]
-  "Return the canonical sandbox session scene state for a HomeWorld, or nil."
+  "Return the canonical sandbox session scene state for a HomeWorld.
+  Fails loudly when world.state exists but the sandbox session scene
+  is missing (corrupt or uninitialized state).
+  Returns nil only when world itself is nil (truly missing entry)."
   (when world
     (assert world.state (.. (or context "WorldData") " requires world.state"))
-    (ActivitySceneState.scene-state world.state.activity "sandbox")))
+    (assert (= (type world.state.activity) :table)
+            (.. (or context "WorldData") " requires world.state.activity"))
+    (local scene (ActivitySceneState.scene-state world.state.activity "sandbox"))
+    (assert scene
+            (.. (or context "WorldData")
+                " requires activity.sessions.sandbox.scene"))
+    scene))
 
 (fn ensure-sandbox-scene-state [world]
   "Ensure the sandbox session scene state exists and return it."
@@ -158,6 +167,22 @@
     (world:save-state))
   world)
 
+(fn refresh-sandbox-slot-if-inactive [scene world-manager world-id]
+  "When the active Scene slot is NOT sandbox, refresh the retained sandbox
+  slot's scene-state from canonical session state so mutations survive until
+  the next sandbox activation.  Does nothing when sandbox is already active
+  (the direct runtime sync handles that case)."
+  (when (and scene (not (= scene.active-activity-slot-id "sandbox")))
+    (local sandbox-slot (and scene.activity-slot
+                             (scene:activity-slot "sandbox")))
+    (when (and sandbox-slot sandbox-slot.scene-state)
+      (local world (resolve-world world-manager world-id))
+      (local canonical (resolve-sandbox-scene-state world))
+      (when canonical
+        ;; Refresh retained slot state in place from canonical.
+        (each [k v (pairs canonical)]
+          (tset sandbox-slot.scene-state k v))))))
+
 (fn require-active-scene-light-method [scene method-name]
   (assert (. scene method-name)
           (.. "Active scene is missing " method-name " for world light sync")))
@@ -169,23 +194,32 @@
 (fn sync-active-terrain-record [world-manager world-id terrain-id record]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-method scene terrain-id :replace-terrain-record)
-    (assert (scene:replace-terrain-record terrain-id record)
-            (.. "Active scene failed to replace terrain " terrain-id))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-method scene terrain-id :replace-terrain-record)
+          (assert (scene:replace-terrain-record terrain-id record)
+                  (.. "Active scene failed to replace terrain " terrain-id)))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-terrain-removal [world-manager world-id terrain-id]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-method scene terrain-id :remove-terrain)
-    (assert (scene:remove-terrain terrain-id)
-            (.. "Active scene failed to remove terrain " terrain-id))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-method scene terrain-id :remove-terrain)
+          (assert (scene:remove-terrain terrain-id)
+                  (.. "Active scene failed to remove terrain " terrain-id)))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-terrain-addition [world-manager world-id record]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-method scene record.id :add-terrain-record)
-    (assert (scene:add-terrain-record record)
-            (.. "Active scene failed to add terrain " record.id))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-method scene record.id :add-terrain-record)
+          (assert (scene:add-terrain-record record)
+                  (.. "Active scene failed to add terrain " record.id)))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn scene-state-lights [world-manager world-id]
   (local world (resolve-world world-manager world-id))
@@ -217,23 +251,32 @@
 (fn sync-active-light-state [world-manager world-id lights]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-light-method scene :set-light-state)
-    (scene:set-light-state lights)))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-light-method scene :set-light-state)
+          (scene:set-light-state lights))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-skybox-state [world-manager world-id skybox]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (assert scene.set-skybox-state
-            "Active scene is missing set-skybox-state for world skybox sync")
-    (scene:set-skybox-state
-      (SkyboxState.resolve-for-theme skybox (active-theme-key)))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (assert scene.set-skybox-state
+                  "Active scene is missing set-skybox-state for world skybox sync")
+          (scene:set-skybox-state
+            (SkyboxState.resolve-for-theme skybox (active-theme-key))))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-background-state [world-manager world-id background]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (assert scene.set-background-state
-            "Active scene is missing set-background-state for world background sync")
-    (scene:set-background-state background)))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (assert scene.set-background-state
+                  "Active scene is missing set-background-state for world background sync")
+          (scene:set-background-state background))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn list-light-types [world-manager world-id]
   (local lights (scene-state-lights world-manager world-id))

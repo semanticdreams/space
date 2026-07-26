@@ -68,7 +68,8 @@
 (fn make-scene-runtime [opts]
   (local options (or opts {}))
   (var background (or options.background (make-background-state)))
-  {:scene {:capture-state (fn [_self]
+  {:scene {:active-activity-slot-id "sandbox"
+           :capture-state (fn [_self]
                             {:panels []
                              :terrains []
                              :lights (LightSystemModule.default-state)

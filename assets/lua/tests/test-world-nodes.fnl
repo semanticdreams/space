@@ -168,7 +168,8 @@
   (var lights (or options.lights (LightSystemModule.default-state)))
   (var skybox (or options.skybox (make-skybox-state)))
   (var background (or options.background (make-background-state)))
-  (local scene {:capture-state (fn [_self]
+  (local scene {:active-activity-slot-id "sandbox"
+                :capture-state (fn [_self]
                                  {:panels (or options.panels [])
                                   :terrains (or options.terrains [])
                                   :lights lights
@@ -756,7 +757,7 @@
   (local terrain-record (make-flat-terrain-record {:id "terrain-a" :width 50}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
-  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :replace-terrain-record (fn [_self _terrain-id _record] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -859,7 +860,7 @@
   (local terrain-record (make-perlin-terrain-record {:id "terrain-a" :seed 7}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
-  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :replace-terrain-record (fn [_self _terrain-id _record] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -960,7 +961,7 @@
   (local terrain-record (make-heightfield-terrain-record {:id "terrain-a" :default-height 0.0}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
-  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :replace-terrain-record (fn [_self _terrain-id _record] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -1781,7 +1782,7 @@
   (local state {:scene {:panels []
                         :terrains [(make-flat-terrain-record {:id "terrain-a"})]}
                 :hud {:panels []}})
-  (local runtime {:scene {:remove-terrain (fn [_self _terrain-id] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :remove-terrain (fn [_self _terrain-id] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -1842,7 +1843,7 @@
   (local state {:scene {:panels []
                         :terrains [(make-perlin-terrain-record {:id "terrain-a"})]}
                 :hud {:panels []}})
-  (local runtime {:scene {:remove-terrain (fn [_self _terrain-id] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :remove-terrain (fn [_self _terrain-id] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime

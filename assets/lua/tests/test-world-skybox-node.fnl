@@ -69,7 +69,8 @@
        (SkyboxState.resolve-for-theme
          (or options.skybox (make-skybox-state))
          (or options.theme-key nil)))
-  {:scene {:capture-state (fn [_self]
+  {:scene {:active-activity-slot-id "sandbox"
+           :capture-state (fn [_self]
                             {:panels []
                              :terrains []
                              :lights lights

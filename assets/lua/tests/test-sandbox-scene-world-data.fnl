@@ -268,6 +268,174 @@
   (local background (WorldData.get-background manager "test-world"))
   (assert background "should read background from sandbox session"))
 
+(fn test-sandbox-skybox-reads-from-sandbox-session []
+  "Skybox reads from sandbox session when legacy scene.skybox is absent."
+  (local WorldData (require :graph/world-data))
+  (local sandbox-skybox (make-skybox-state {:enabled? false :name "night" :brightness 0.5}))
+  ;; Legacy scene has NO skybox key; sandbox session has the real data.
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels []
+                                               :terrains []
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox sandbox-skybox
+                                               :background (make-background-state)
+                                               :containment {:enabled? false}}}}}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local skybox (WorldData.get-skybox manager "test-world"))
+  (assert skybox "should read skybox from sandbox session")
+  (assert (= skybox.enabled? false) "sandbox skybox should report disabled")
+  (assert (= skybox.default.name "night") "sandbox skybox should use custom name"))
+
+(fn test-sandbox-skybox-edit-persists-to-sandbox-session []
+  "Skybox edits persist to sandbox session, not to legacy scene."
+  (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
+  (local sandbox-skybox (make-skybox-state {:enabled? true :name "lake" :brightness 0.1}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels []
+                                               :terrains []
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox sandbox-skybox
+                                               :background (make-background-state)
+                                               :containment {:enabled? false}}}}}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (SkyboxNode {:world-id "test-world"
+                           :world-manager manager
+                           :asset-path-resolver (fn [path] (.. (assert (os.getenv "SPACE_ASSETS_PATH") "SPACE_ASSETS_PATH required") "/" path))}))
+  (node:apply-values {:enabled? false
+                      :default {:name "night"
+                                :brightness 0.5
+                                :tint-color [0.8 0.8 1.0]}
+                      :by-theme {}})
+  (local sandbox-scene state.activity.sessions.sandbox.scene)
+  (assert (= sandbox-scene.skybox.enabled? false)
+          "skybox edit should persist to sandbox session")
+  (assert (= sandbox-scene.skybox.default.brightness 0.5)
+          "skybox edit should update brightness in sandbox session")
+  (node:drop))
+
+(fn test-sandbox-background-reads-from-sandbox-session []
+  "Background reads from sandbox session when legacy scene.background is absent."
+  (local WorldData (require :graph/world-data))
+  (local sandbox-bg (make-background-state {:color [0.1 0.2 0.3]}))
+  ;; Legacy scene has NO background key; sandbox session has the real data.
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels []
+                                               :terrains []
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state)
+                                               :background sandbox-bg
+                                               :containment {:enabled? false}}}}}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local background (WorldData.get-background manager "test-world"))
+  (assert background "should read background from sandbox session")
+  (assert (= (. background.color 1) 0.1) "sandbox background should use custom red")
+  (assert (= (. background.color 2) 0.2) "sandbox background should use custom green"))
+
+(fn test-sandbox-background-edit-persists-to-sandbox-session []
+  "Background edits persist to sandbox session, not to legacy scene."
+  (local {:BackgroundNode BackgroundNode} (require :graph/nodes/background))
+  (local sandbox-bg (make-background-state {:color [0.0 0.0 0.0]}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels []
+                                               :terrains []
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state)
+                                               :background sandbox-bg
+                                               :containment {:enabled? false}}}}}})
+  (local entry (make-world-entry {:id "test-world" :state state}))
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  (local node (BackgroundNode {:world-id "test-world"
+                               :world-manager manager}))
+  (node:apply-values {:color [0.4 0.5 0.6]})
+  (local sandbox-scene state.activity.sessions.sandbox.scene)
+  (assert (= (. sandbox-scene.background.color 1) 0.4)
+          "background edit should persist to sandbox session")
+  (assert (= (. sandbox-scene.background.color 3) 0.6)
+          "background edit should update blue in sandbox session")
+  (node:drop))
+
+(fn test-runtime-sync-ignores-non-sandbox-active-slot []
+  "When a non-sandbox activity slot is active, sandbox world-data mutations
+  must not contaminate the runtime scene. They persist to canonical state only."
+  (local WorldData (require :graph/world-data))
+  ;; Build a mock runtime Scene with Graph as the active slot.
+  ;; The sandbox sync functions must detect this and skip direct scene mutation.
+  (var call-log [])
+  (local mock-scene
+    {:active-activity-slot-id "graph"
+     :activity-slot (fn [_self activity-id]
+                      (when (= activity-id "sandbox")
+                        {:scene-state {:panels [] :terrains [] :lights {}
+                                       :skybox {} :background {} :containment {}}}))
+     :set-light-state (fn [_self _lights]
+                        (table.insert call-log "set-light-state-called"))
+     :set-skybox-state (fn [_self _skybox]
+                         (table.insert call-log "set-skybox-state-called"))
+     :set-background-state (fn [_self _bg]
+                            (table.insert call-log "set-background-state-called"))
+     :replace-terrain-record (fn [_self _tid _rec]
+                               (table.insert call-log "replace-terrain-record-called"))
+     :add-terrain-record (fn [_self _rec]
+                           (table.insert call-log "add-terrain-record-called"))
+     :remove-terrain (fn [_self _tid]
+                       (table.insert call-log "remove-terrain-called"))})
+  (local runtime {:scene mock-scene})
+  (local terrain-record (make-heightfield-terrain-record {:id "t1"}))
+  (local state {:scene {:panels [{:kind "alpha"}] :terrains [terrain-record]}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels [{:kind "alpha"}]
+                                               :terrains [terrain-record]
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state)
+                                               :background (make-background-state)
+                                               :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? true
+                :world {:state state
+                        :get-runtime (fn [_self] runtime)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; Mutate terrain: should NOT call runtime scene methods when graph is active.
+  (WorldData.add-terrain manager "test-world" "heightfield-terrain")
+  (assert (= (length call-log) 0)
+          "add-terrain should not touch runtime scene when sandbox is inactive")
+  (WorldData.update-terrain-record manager "test-world" "t1"
+    (fn [record] (set record.name "updated")))
+  (assert (= (length call-log) 0)
+          "update-terrain should not touch runtime scene when sandbox is inactive")
+  ;; Mutate light: should NOT call runtime scene.
+  (WorldData.add-light manager "test-world" "point")
+  (assert (= (length call-log) 0)
+          "add-light should not touch runtime scene when sandbox is inactive")
+  ;; Mutate skybox: should NOT call runtime scene.
+  (WorldData.update-skybox manager "test-world"
+    (make-skybox-state {:enabled? false :name "night" :brightness 0.5}))
+  (assert (= (length call-log) 0)
+          "update-skybox should not touch runtime scene when sandbox is inactive")
+  ;; Mutate background: should NOT call runtime scene.
+  (WorldData.update-background manager "test-world"
+    (make-background-state {:color [0.1 0.2 0.3]}))
+  (assert (= (length call-log) 0)
+          "update-background should not touch runtime scene when sandbox is inactive"))
+
 (table.insert tests {:name "sandbox scene panels enumerate from sandbox session"
                      :fn test-sandbox-scene-panels-enumerate-from-sandbox-session})
 (table.insert tests {:name "sandbox terrains enumerate from sandbox session"
@@ -280,6 +448,16 @@
                      :fn test-sandbox-light-edit-persists-to-sandbox-session})
 (table.insert tests {:name "graph activity slot scene not treated as sandbox world content"
                      :fn test-graph-activity-slot-scene-not-treated-as-sandbox-world-content})
+(table.insert tests {:name "sandbox skybox reads from sandbox session"
+                     :fn test-sandbox-skybox-reads-from-sandbox-session})
+(table.insert tests {:name "sandbox skybox edit persists to sandbox session"
+                     :fn test-sandbox-skybox-edit-persists-to-sandbox-session})
+(table.insert tests {:name "sandbox background reads from sandbox session"
+                     :fn test-sandbox-background-reads-from-sandbox-session})
+(table.insert tests {:name "sandbox background edit persists to sandbox session"
+                     :fn test-sandbox-background-edit-persists-to-sandbox-session})
+(table.insert tests {:name "runtime sync ignores non-sandbox active slot"
+                     :fn test-runtime-sync-ignores-non-sandbox-active-slot})
 
 (local main
   (fn []
