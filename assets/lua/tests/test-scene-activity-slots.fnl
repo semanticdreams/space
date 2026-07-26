@@ -1818,10 +1818,8 @@
                     :set-state (fn [_ state] (set renderer-skybox state))}
             :get-background-state (fn [_] {:color [0 0 0]})
             :set-background-state (fn [_ state])})
-      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
-                                  :removeRigidBody (fn [_phys _body])}})
-      (set app.lights {:get-state (fn [_] {:ambient {:enabled? false :color [0 0 0] :intensity 0} :directional [] :point [] :spot []})
-                       :set-state (fn [_ _state])})
+       (set app.lights {:get-state (fn [_] {:ambient {:enabled? false :color [0 0 0] :intensity 0} :directional [] :point [] :spot []})
+                        :set-state (fn [_ _state])})
       ;; Suppress containment
       (local orig-ensure-installed PhysicsContainment.ensure-installed)
       (set PhysicsContainment.ensure-installed (fn [_opts] true))
@@ -1842,6 +1840,8 @@
          :mark-measure-dirty (fn [])
          :position (glm.vec3 0 0 0)
          :rotation (glm.quat 1 0 0 0)})
+      ;; Track whether entity.drop was called — must NOT be called during rollback
+      (var entity-dropped false)
       (local mock-entity
         {:layout entity-layout
          :children []
@@ -1849,7 +1849,7 @@
          :scene-terrains []
          :scene-objects []
          :movables []
-         :drop (fn [_])})
+         :drop (fn [_] (set entity-dropped true))})
       ;; Give the entity a physics entry so deactivate has something to act on
       (var physics-deactivate-called false)
       (local orig-deactivate LayoutPhysicsBodies.deactivate)
@@ -1858,6 +1858,11 @@
              (when (= ent mock-entity)
                (set physics-deactivate-called true))
              (orig-deactivate ent)))
+      ;; Track removeRigidBody calls to prove actual body removal
+      (var remove-rigid-body-called false)
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body]
+                                                     (set remove-rigid-body-called true))}})
       ;; Create a runtime physics entry on the entity
       (local element
         {:layout {:position (glm.vec3 0 5 0)
@@ -1873,16 +1878,18 @@
         (LayoutPhysicsBodies.add-runtime-layout-body mock-entity {:element element}))
       ;; entry was created; may or may not have a live body depending on bt availability
 
-      ;; Seed slot with retained content
+      ;; Seed slot with retained content — save exact references for identity check
       (set sandbox-slot.entity mock-entity)
-      (set sandbox-slot.scene-children
-           [{:element element
-             :persistence {:kind "physics-cuboid"
-                           :size [4 4 4]}
-             :position (glm.vec3 0 0 0)
-             :rotation (glm.quat 1 0 0 0)}])
-      (set sandbox-slot.scene-terrains
-           [{:element element :record {:id "t-retained" :kind "heightfield-terrain"}}])
+      (local retained-child-metadata
+        {:element element
+         :persistence {:kind "physics-cuboid"
+                       :size [4 4 4]}
+         :position (glm.vec3 0 0 0)
+         :rotation (glm.quat 1 0 0 0)})
+      (local retained-terrain-metadata
+        {:element element :record {:id "t-retained" :kind "heightfield-terrain"}})
+      (set sandbox-slot.scene-children [retained-child-metadata])
+      (set sandbox-slot.scene-terrains [retained-terrain-metadata])
 
       ;; (2) Inject corrupt terrain into slot's scene-state
       (local complete-skybox
@@ -1913,39 +1920,47 @@
       (assert (not ok) "Activation with corrupt terrain must fail")
 
       ;; (5) Rollback assertions for retained content preservation:
-      ;;     (a) Slot-owned content must be intact
+      ;;     (a) Slot-owned content must be intact — exact table identity
       (assert (= sandbox-slot.entity mock-entity)
               "Slot.entity must still reference the pre-seeded entity")
       (assert sandbox-slot.scene-children
               "Slot.scene-children must still exist")
-      (assert (= (length sandbox-slot.scene-children) 1)
-              (.. "Slot.scene-children must have 1 entry, got "
-                  (tostring (length (or sandbox-slot.scene-children [])))))
+      (assert (= (. sandbox-slot.scene-children 1) retained-child-metadata)
+              "Slot.scene-children[1] must be the exact same table reference")
       (assert sandbox-slot.scene-terrains
               "Slot.scene-terrains must still exist")
-      (assert (= (length sandbox-slot.scene-terrains) 1)
-              (.. "Slot.scene-terrains must have 1 entry, got "
-                  (tostring (length (or sandbox-slot.scene-terrains [])))))
-      ;;     (b) Slot is invisible/inactive
+      (assert (= (. sandbox-slot.scene-terrains 1) retained-terrain-metadata)
+              "Slot.scene-terrains[1] must be the exact same table reference")
+      ;;     (b) entity:drop must NOT have been called (slot content preserved)
+      (assert (not entity-dropped)
+              "mock-entity.drop must NOT have been called during rollback")
+      ;;     (c) Slot is invisible/inactive
       (assert (not sandbox-slot.visible?)
               "Slot must be invisible after failed activation")
       (assert (not sandbox-slot.interactive?)
               "Slot must be non-interactive after failed activation")
-      ;;     (c) Scene surface aliases are cleared
+      ;;     (d) Scene surface aliases are cleared
       (assert (= scene.entity nil)
               "Scene.entity must be nil after rollback")
       (assert (= scene.scene-children nil)
               "Scene.scene-children must be nil after rollback")
       (assert (= scene.scene-terrains nil)
               "Scene.scene-terrains must be nil after rollback")
-      ;;     (d) Active slot binding is nil
+      ;;     (e) Active slot binding is nil
       (assert (= scene.active-activity-slot nil)
               "Scene.active-activity-slot must be nil after rollback")
       (assert (= scene.active-activity-slot-id nil)
               "Scene.active-activity-slot-id must be nil after rollback")
-      ;;     (e) Layout physics deactivation occurred
+      ;;     (f) Layout physics deactivation occurred:
+      ;;         wrapper was invoked AND (if bt available) removeRigidBody fired
       (assert physics-deactivate-called
               "LayoutPhysicsBodies.deactivate must have been called during rollback")
+      ;; If bt is available, removeRigidBody proves actual body removal
+      (when entry.body
+        (assert remove-rigid-body-called
+                "app.engine.physics:removeRigidBody must have been called during physics deactivation")
+        (assert (not entry.body-active?)
+                "Entry.body-active? must be false after deactivation"))
 
       ;; Restore mock
       (set LayoutPhysicsBodies.deactivate orig-deactivate)
