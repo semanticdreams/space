@@ -499,6 +499,155 @@
               "actions should include 'Demo Browser'")
       true)))
 
+;; ---------------------------------------------------------------------------
+;; R1-1: snapshot preserves remaining hydration queue panels
+;; ---------------------------------------------------------------------------
+(fn sandbox-snapshot-preserves-remaining-hydration-panels []
+  "When snapshotted mid-hydration, the sandbox session scene must include
+  both already-hydrated panels and the panels still queued in runtime.hydration."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :engine]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      ;; Mock scene capture: return the currently accumulated scene-state
+      (local empty-svc (ActivitySceneState.empty-state))
+      (var captured-state {:panels [{:kind "hydrated-panel-0" :position [0 0 0]}]
+                           :lights empty-svc.lights
+                           :skybox empty-svc.skybox
+                           :background empty-svc.background
+                           :containment empty-svc.containment
+                           :terrains []})
+      (set mock-scene.capture-activity-slot-state
+           (fn [_self _activity-id]
+             captured-state))
+      ;; Mock engine for timing
+      (var now-ms 0)
+      (set app.engine {:now-ms (fn [_self] (set now-ms (+ now-ms 16)) now-ms)})
+      ;; Set up runtime with partially-consumed hydration queue:
+      ;; 3 panels total, index 3 means panels 1-2 are hydrated, panel 3 is remaining
+      (set app.active-world-runtime
+           {:scene mock-scene
+            :hydration {:scene-panels [{:kind "queued-panel-1" :position [1 0 0]}
+                                       {:kind "queued-panel-2" :position [2 0 0]}
+                                       {:kind "queued-panel-3" :position [3 0 0]}]
+                        :scene-panel-index 3
+                        :phase "scene-panels"
+                        :ready? true
+                        :started? true
+                        :completed? false}})
+      (set app.scene mock-scene)
+      (when (not (= (Activities.active-activity-id) nil))
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      ;; Snapshot mid-hydration
+      (local snapshot-result (sandbox-unit.snapshot-sandbox-activity!))
+      (assert (= (type snapshot-result) :table)
+              "Snapshot must return a table")
+      (assert (= (type snapshot-result.scene) :table)
+              "Snapshot must have :scene key")
+      (assert (= (type snapshot-result.scene.panels) :table)
+              "Snapshot scene must have panels")
+      ;; Should contain: the already-hydrated panel (from captured-state)
+      ;; PLUS the remaining hydration panel (queued-panel-3 at index 3)
+      (assert (>= (length snapshot-result.scene.panels) 2)
+              (.. "Expected at least 2 panels in snapshot (hydrated + remaining), got "
+                  (tostring (length snapshot-result.scene.panels))))
+      (local kinds {})
+      (each [_ panel (ipairs snapshot-result.scene.panels)]
+        (set (. kinds panel.kind) true))
+      (assert (. kinds "hydrated-panel-0")
+              "Snapshot must preserve already-hydrated panel")
+      (assert (. kinds "queued-panel-3")
+              "Snapshot must include remaining hydration panel at current index")
+      true)))
+
+;; ---------------------------------------------------------------------------
+;; R1-2: sandbox deactivation resets services to empty when no successor slot
+;; ---------------------------------------------------------------------------
+(fn sandbox-deactivation-resets-services-when-no-successor []
+  "When sandbox deactivates and no successor Scene slot activates,
+  the global lights/skybox/background/containment must be reset to empty
+  so they don't leak sandbox state into other activities."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :lights
+     :renderers
+     :physics-containment-config
+     :physics-containment-scene
+     :engine]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      ;; Track calls to service resets
+      (var lights-reset-calls [])
+      (var skybox-reset-calls [])
+      (var background-reset-calls [])
+      ;; Install mock global services that record reset calls
+      (set app.lights {:set-state (fn [_self state] (table.insert lights-reset-calls state))})
+      (set app.renderers
+           {:skybox {:set-state (fn [_self state] (table.insert skybox-reset-calls state))}
+            :set-background-state (fn [_self state] (table.insert background-reset-calls state))})
+      ;; Set up runtime with sandbox session
+      (set app.active-world-runtime
+           {:scene mock-scene
+            :activity-session-state
+            {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (not (= (Activities.active-activity-id) nil))
+        (Activities.deactivate-active-activity))
+      ;; Activate sandbox
+      (Activities.activate-activity "sandbox")
+      (assert (. mock-scene.slots "sandbox" :visible?)
+              "Sandbox slot must be active")
+      ;; Track calls before deactivation
+      (local pre-lights-count (length lights-reset-calls))
+      (local pre-skybox-count (length skybox-reset-calls))
+      (local pre-background-count (length background-reset-calls))
+      ;; Deactivate sandbox
+      (Activities.deactivate-active-activity)
+      ;; After deactivation WITHOUT a successor Scene slot:
+      ;; services must have been reset to empty.
+      (assert (> (length lights-reset-calls) pre-lights-count)
+              "Deactivation must reset lights to empty")
+      (assert (> (length skybox-reset-calls) pre-skybox-count)
+              "Deactivation must reset skybox to empty")
+      (assert (> (length background-reset-calls) pre-background-count)
+              "Deactivation must reset background to empty")
+      ;; Verify the reset state is empty (not sandbox state)
+      (local last-lights (. lights-reset-calls (length lights-reset-calls)))
+      (when last-lights
+        (assert (= last-lights.ambient.enabled? false)
+                "Reset lights must have ambient disabled"))
+      (local last-skybox (. skybox-reset-calls (length skybox-reset-calls)))
+      (when last-skybox
+        (assert (= last-skybox.enabled? false)
+                "Reset skybox must be disabled"))
+      (local last-background (. background-reset-calls (length background-reset-calls)))
+      (when last-background
+        (assert (= (type last-background.color) :table)
+                "Reset background must be valid"))
+      true)))
+
 (table.insert tests {:name "sandbox activity unit registers spec"
                      :fn sandbox-activity-unit-registers-spec})
 (table.insert tests {:name "sandbox activation sets scene interaction surface"
@@ -517,6 +666,10 @@
                      :fn sandbox-activity-actions-includes-scene-root-actions})
 (table.insert tests {:name "root context menu delegates scene actions to sandbox"
                      :fn root-context-menu-delegates-scene-actions-to-sandbox})
+(table.insert tests {:name "snapshot preserves remaining hydration queue panels"
+                     :fn sandbox-snapshot-preserves-remaining-hydration-panels})
+(table.insert tests {:name "deactivation resets services when no successor slot"
+                     :fn sandbox-deactivation-resets-services-when-no-successor})
 
 (local main
   (fn []

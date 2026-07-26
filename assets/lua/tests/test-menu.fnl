@@ -4,6 +4,7 @@
 (local MenuManager (require :menu-manager))
 (local Activities (require :activities))
 (local RootContextMenuActions (require :root-context-menu-actions))
+(local SandboxActivityActions (require :sandbox-activity-actions))
 (local GraphActivityActions (require :graph-activity-actions))
 (local DrawingActivityActions (require :drawing-activity-actions))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
@@ -85,7 +86,7 @@
        :button-name "sandbox-activity"
        :show-in-switcher? true
        :activate (fn [ctx]
-                   (ctx:set-root-actions! RootContextMenuActions.scene-root-actions)
+                   (ctx:set-root-actions! SandboxActivityActions.sandbox-root-actions)
                    (ctx:set-preferred-interaction-surface! :scene)
                    (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
                    (ctx:set-target-enabled! (fn [target] true))

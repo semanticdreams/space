@@ -110,16 +110,58 @@
   (ctx:set-update! sandbox-activity-update)
   {:activity-id "sandbox"})
 
+(fn slice-array-from [entries start-index]
+  "Return a new array containing entries from start-index onward."
+  (local out [])
+  (each [idx entry (ipairs (or entries []))]
+    (when (>= idx start-index)
+      (table.insert out entry)))
+  out)
+
+(fn merge-panel-arrays [restored pending]
+  "Concatenate two panel arrays."
+  (local panels [])
+  (each [_ panel (ipairs (or restored []))]
+    (table.insert panels panel))
+  (each [_ panel (ipairs (or pending []))]
+    (table.insert panels panel))
+  panels)
+
 (fn deactivate-sandbox-activity! [_ctx _session]
   (when (and app.active-world-runtime app.active-world-runtime.scene)
-    (app.active-world-runtime.scene:deactivate-activity-slot "sandbox"))
+    (local scene app.active-world-runtime.scene)
+    (scene:deactivate-activity-slot "sandbox")
+    ;; R1-2: After deactivating the Scene slot, if no successor Scene slot
+    ;; is active, reset shared lights/skybox/background/containment to empty
+    ;; so they don't leak sandbox state into other activities.
+    (when (not (= (type scene.active-activity-slot-id) :string))
+      (local empty (ActivitySceneState.empty-state))
+      (when (and app app.lights app.lights.set-state)
+        (app.lights:set-state empty.lights))
+      (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+        (app.renderers.skybox:set-state empty.skybox))
+      (when (and app app.renderers app.renderers.set-background-state)
+        (app.renderers:set-background-state empty.background))
+      (when scene.containment-set
+        (scene:containment-set empty.containment))))
   true)
 
 (fn snapshot-sandbox-activity! []
   ;; Return the canonical *session* shape {:scene <state>} because
   ;; Activities.snapshot-activity-sessions writes this as sessions.sandbox.
   (if (and app.active-world-runtime app.active-world-runtime.scene)
-      {:scene (app.active-world-runtime.scene:capture-activity-slot-state "sandbox")}
+      (let [captured (app.active-world-runtime.scene:capture-activity-slot-state "sandbox")
+            runtime app.active-world-runtime
+            hydration (and runtime runtime.hydration)]
+        ;; R1-1: Merge remaining hydration queue panels into captured state.
+        ;; Without this, switching/suspending mid-hydration discards unhydrated panels.
+        (when (and hydration captured
+                   (= (type captured.panels) :table)
+                   (> (length (or hydration.scene-panels [])) 0)
+                   (not hydration.completed?))
+          (local remaining (slice-array-from hydration.scene-panels hydration.scene-panel-index))
+          (set captured.panels (merge-panel-arrays captured.panels remaining)))
+        {:scene captured})
       nil))
 
 (fn restore-sandbox-activity! [ctx session state]
