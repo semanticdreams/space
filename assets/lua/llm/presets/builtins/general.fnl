@@ -69,6 +69,19 @@
       assets-root
       cwd))
 
+(fn is-assets-directory? [path]
+  "Return true if the final path component of path is exactly 'assets'."
+  (local normalized (string.gsub (string.gsub path "\\" "/") "/+" "/"))
+  ;; Strip trailing slash unless this is the root directory "/"
+  (local stripped (if (and (> (# normalized) 1) (= (string.sub normalized -1) "/"))
+                     (string.sub normalized 1 (- (# normalized) 1))
+                     normalized))
+  ;; Extract the last component after the final separator
+  (or (= stripped "assets")
+      (let [slash-pos (string.find stripped "/[^/]+$")]
+        (and slash-pos
+             (= (string.sub stripped (+ slash-pos 1)) "assets")))))
+
 (fn search-result-with-limit [stdout limit]
   (local max-lines (math.max 1 (math.floor (or limit 200))))
   (local lines [])
@@ -308,11 +321,18 @@
                           project-root))
                     (when (and args.path
                                (not (fs.exists search-root))
-                               (or (= (string.sub args.path 1 7) "assets/")
+                               (is-assets-directory? project-root)
+                               (or (= args.path "assets")
+                                   (= (string.sub args.path 1 7) "assets/")
                                    (= (string.sub args.path 1 7) "assets\\")))
-                      (local collapsed-root (string.gsub search-root "([/\\])assets[/\\]assets([/\\])" "%1assets%2" 1))
-                      (when (and (not (= collapsed-root search-root)) (fs.exists collapsed-root))
-                        (set search-root collapsed-root)))
+                      (local remainder (if (= args.path "assets")
+                                           ""
+                                           (string.sub args.path 8)))
+                      (local alternate (if (= remainder "")
+                                           project-root
+                                           (fs.join-path project-root remainder)))
+                      (when (fs.exists alternate)
+                        (set search-root alternate)))
                     (assert (fs.exists search-root)
                             (.. "search path not found: " search-root))
                    (assert (path-under-root? search-root project-root)
