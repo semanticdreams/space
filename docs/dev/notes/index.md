@@ -28,6 +28,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Drawing Architecture](./drawing-architecture)
 - [Drawing Raster Implementation](./drawing-raster-implementation)
 - [Entity Store](./entity-store)
+- [External Unit Mcp](./external-unit-mcp)
 - [Focus Change Ordering](./focus-change-ordering)
 - [Force Layout Barnes Hut](./force-layout-barnes-hut)
 - [Gccjit](./gccjit)

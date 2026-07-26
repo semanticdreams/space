@@ -175,8 +175,9 @@
     :tests.test-repo-store
     :tests.test-repo-checks
     :tests.test-repo-presets
-    :tests.test-repo-display
-    :tests.test-panel-transfer]})
+     :tests.test-repo-display
+     :tests.test-panel-transfer
+     :tests.test-external-unit-mcp]})
 
 (local main
   (fn []
