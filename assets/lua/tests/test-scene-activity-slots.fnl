@@ -1809,6 +1809,8 @@
       (local BackgroundState (require :background-state))
       (local LayoutPhysicsBodies (require :layout-physics-bodies))
       (local PhysicsContainment (require :physics-containment))
+      ;; Ensure bt is loaded so physics-available? in layout-physics-bodies resolves
+      (pcall require :bt)
 
       ;; Mock services
       (var renderer-skybox
@@ -1876,7 +1878,21 @@
                   :mark-measure-dirty (fn [_layout])}})
       (local entry
         (LayoutPhysicsBodies.add-runtime-layout-body mock-entity {:element element}))
-      ;; entry was created; may or may not have a live body depending on bt availability
+      ;; Force the entry into an unquestionably active state so the
+      ;; deactivate path during rollback exercises real body removal.
+      ;; If bt created a live body it's already active; otherwise give it a
+      ;; sentinel body and mark it active so remove-body fires and flips
+      ;; body-active? false (and removeRigidBody if physics-available?).
+      (when (not entry.body)
+        (set entry.body {:__mock_body true}))
+      (set entry.body-active? true)
+      ;; Reset the removeRigidBody tracker after setup so only
+      ;; rollback-triggered calls are counted.
+      (set remove-rigid-body-called false)
+
+      ;; (pre-condition) Verify the entry is active before the corrupt activation
+      (assert entry.body "Entry must have a body before activation")
+      (assert entry.body-active? "Entry.body-active? must be true before activation")
 
       ;; Seed slot with retained content — save exact references for identity check
       (set sandbox-slot.entity mock-entity)
@@ -1952,15 +1968,13 @@
       (assert (= scene.active-activity-slot-id nil)
               "Scene.active-activity-slot-id must be nil after rollback")
       ;;     (f) Layout physics deactivation occurred:
-      ;;         wrapper was invoked AND (if bt available) removeRigidBody fired
+      ;;         wrapper was invoked AND removeRigidBody fired (body was active)
       (assert physics-deactivate-called
               "LayoutPhysicsBodies.deactivate must have been called during rollback")
-      ;; If bt is available, removeRigidBody proves actual body removal
-      (when entry.body
-        (assert remove-rigid-body-called
-                "app.engine.physics:removeRigidBody must have been called during physics deactivation")
-        (assert (not entry.body-active?)
-                "Entry.body-active? must be false after deactivation"))
+      (assert remove-rigid-body-called
+              "app.engine.physics:removeRigidBody must have been called during physics deactivation")
+      (assert (not entry.body-active?)
+              "Entry.body-active? must be false after deactivation")
 
       ;; Restore mock
       (set LayoutPhysicsBodies.deactivate orig-deactivate)
