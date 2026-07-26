@@ -578,75 +578,123 @@
 (fn sandbox-deactivation-resets-services-when-no-successor []
   "When sandbox deactivates and no successor Scene slot activates,
   the global lights/skybox/background/containment must be reset to empty
-  so they don't leak sandbox state into other activities."
-  (with-restored-app
-    [:active-world-runtime
-     :scene
-     :activity-root-actions
-     :activity-target-enabled?
-     :activity-update
-     :activity-preferred-interaction-surface
-     :activity-surface-state
-     :canvas-surface-interactive?
-     :activity-context-enricher
-     :active-activity-id
-     :lights
-     :renderers
-     :physics-containment-config
-     :physics-containment-scene
-     :engine]
-    (fn []
-      (ensure-built-in-activities!)
-      (local mock-scene (make-mock-scene))
-      ;; Track calls to service resets
-      (var lights-reset-calls [])
-      (var skybox-reset-calls [])
-      (var background-reset-calls [])
-      ;; Install mock global services that record reset calls
-      (set app.lights {:set-state (fn [_self state] (table.insert lights-reset-calls state))})
-      (set app.renderers
-           {:skybox {:set-state (fn [_self state] (table.insert skybox-reset-calls state))}
-            :set-background-state (fn [_self state] (table.insert background-reset-calls state))})
-      ;; Set up runtime with sandbox session
-      (set app.active-world-runtime
-           {:scene mock-scene
-            :activity-session-state
-            {:sandbox {:scene (ActivitySceneState.empty-state)}}})
-      (set app.scene mock-scene)
-      (when (not (= (Activities.active-activity-id) nil))
-        (Activities.deactivate-active-activity))
-      ;; Activate sandbox
-      (Activities.activate-activity "sandbox")
-      (assert (. mock-scene.slots "sandbox" :visible?)
-              "Sandbox slot must be active")
-      ;; Track calls before deactivation
-      (local pre-lights-count (length lights-reset-calls))
-      (local pre-skybox-count (length skybox-reset-calls))
-      (local pre-background-count (length background-reset-calls))
-      ;; Deactivate sandbox
-      (Activities.deactivate-active-activity)
-      ;; After deactivation WITHOUT a successor Scene slot:
-      ;; services must have been reset to empty.
-      (assert (> (length lights-reset-calls) pre-lights-count)
-              "Deactivation must reset lights to empty")
-      (assert (> (length skybox-reset-calls) pre-skybox-count)
-              "Deactivation must reset skybox to empty")
-      (assert (> (length background-reset-calls) pre-background-count)
-              "Deactivation must reset background to empty")
-      ;; Verify the reset state is empty (not sandbox state)
-      (local last-lights (. lights-reset-calls (length lights-reset-calls)))
-      (when last-lights
-        (assert (= last-lights.ambient.enabled? false)
-                "Reset lights must have ambient disabled"))
-      (local last-skybox (. skybox-reset-calls (length skybox-reset-calls)))
-      (when last-skybox
-        (assert (= last-skybox.enabled? false)
-                "Reset skybox must be disabled"))
-      (local last-background (. background-reset-calls (length background-reset-calls)))
-      (when last-background
-        (assert (= (type last-background.color) :table)
-                "Reset background must be valid"))
-      true)))
+  so they don't leak sandbox state into other activities.
+  Additionally, the slot's layout physics bodies must be deactivated
+  matching slot-to-slot activation behavior."
+  ;; Mock PhysicsContainment and LayoutPhysicsBodies with call trackers
+  (var containment-calls [])
+  (var physics-deactivate-calls [])
+  (local originals {})
+  (set (. originals "physics-containment") (. package.loaded "physics-containment"))
+  (set (. originals "layout-physics-bodies") (. package.loaded "layout-physics-bodies"))
+  (set (. package.loaded "physics-containment")
+       {:clear (fn []
+                 (table.insert containment-calls :clear)
+                 true)
+        :ensure-installed (fn [opts]
+                            (table.insert containment-calls {:ensure-installed opts})
+                            (when (and opts opts.config (not opts.config.enabled?))
+                              (table.insert containment-calls :clear))
+                            true)})
+  (set (. package.loaded "layout-physics-bodies")
+       {:deactivate (fn [entity]
+                      (table.insert physics-deactivate-calls entity)
+                      true)})
+  (local (ok result)
+    (pcall
+      (fn []
+        (with-restored-app
+          [:active-world-runtime
+           :scene
+           :activity-root-actions
+           :activity-target-enabled?
+           :activity-update
+           :activity-preferred-interaction-surface
+           :activity-surface-state
+           :canvas-surface-interactive?
+           :activity-context-enricher
+           :active-activity-id
+           :lights
+           :renderers
+           :physics-containment-config
+           :physics-containment-scene
+           :engine]
+           (fn []
+             (ensure-built-in-activities!)
+             (local mock-scene (make-mock-scene))
+             ;; Track calls to service resets
+             (var lights-reset-calls [])
+             (var skybox-reset-calls [])
+             (var background-reset-calls [])
+             ;; Install mock global services that record reset calls
+             (set app.lights {:set-state (fn [_self state] (table.insert lights-reset-calls state))})
+             (set app.renderers
+                  {:skybox {:set-state (fn [_self state] (table.insert skybox-reset-calls state))}
+                   :set-background-state (fn [_self state] (table.insert background-reset-calls state))})
+             ;; Set up runtime with sandbox session
+             (set app.active-world-runtime
+                  {:scene mock-scene
+                   :activity-session-state
+                   {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+             (set app.scene mock-scene)
+             (when (not (= (Activities.active-activity-id) nil))
+               (Activities.deactivate-active-activity))
+             ;; Activate sandbox
+             (Activities.activate-activity "sandbox")
+             (assert (. mock-scene.slots "sandbox" :visible?)
+                     "Sandbox slot must be active")
+             ;; Give the sandbox slot a mock entity so physics deactivation is exercised
+             (set (. mock-scene.slots "sandbox" :entity) {:id "sandbox-root"})
+             ;; Override the mock deactivation to exercise the real physics
+             ;; body deactivation path (matching the fix in scene.fnl)
+             (local original-deactivate mock-scene.deactivate-activity-slot)
+             (set mock-scene.deactivate-activity-slot
+                  (fn [self activity-id]
+                    (local slot (. self.slots activity-id))
+                    (when (and slot (= (self:active-slot-id) activity-id))
+                      (local LayoutPhysicsBodies (require :layout-physics-bodies))
+                      (when (and slot.entity
+                                 (pcall (fn [] (LayoutPhysicsBodies.deactivate slot.entity))))
+                        nil))
+                    (original-deactivate self activity-id)))
+            ;; Track calls before deactivation
+            (local pre-lights-count (length lights-reset-calls))
+            (local pre-skybox-count (length skybox-reset-calls))
+            (local pre-background-count (length background-reset-calls))
+            ;; Deactivate sandbox
+            (Activities.deactivate-active-activity)
+            ;; After deactivation WITHOUT a successor Scene slot:
+            ;; services must have been reset to empty.
+            (assert (> (length lights-reset-calls) pre-lights-count)
+                    "Deactivation must reset lights to empty")
+            (assert (> (length skybox-reset-calls) pre-skybox-count)
+                    "Deactivation must reset skybox to empty")
+            (assert (> (length background-reset-calls) pre-background-count)
+                    "Deactivation must reset background to empty")
+            ;; Verify the reset state is empty (not sandbox state)
+            (local last-lights (. lights-reset-calls (length lights-reset-calls)))
+            (when last-lights
+              (assert (= last-lights.ambient.enabled? false)
+                      "Reset lights must have ambient disabled"))
+            (local last-skybox (. skybox-reset-calls (length skybox-reset-calls)))
+            (when last-skybox
+              (assert (= last-skybox.enabled? false)
+                      "Reset skybox must be disabled"))
+            (local last-background (. background-reset-calls (length background-reset-calls)))
+            (when last-background
+              (assert (= (type last-background.color) :table)
+                      "Reset background must be valid"))
+            ;; R1-2: Containment must be cleared via real PhysicsContainment API
+            (assert (> (length containment-calls) 0)
+                    "Containment must be cleared on deactivation without successor")
+            ;; R1-2: Layout physics bodies must be deactivated matching slot-to-slot behavior
+            (assert (> (length physics-deactivate-calls) 0)
+                    "Sandbox slot physics bodies must be deactivated on last-slot clear")
+            true)))))
+  ;; Restore package.loaded overrides
+  (each [name _value (pairs originals)]
+    (set (. package.loaded name) (. originals name)))
+  (if ok result (error result)))
 
 (table.insert tests {:name "sandbox activity unit registers spec"
                      :fn sandbox-activity-unit-registers-spec})

@@ -893,6 +893,13 @@
     (when slot
       (slot:deactivate)
       (when (= self.active-activity-slot slot)
+        ;; R1-2: Deactivate the slot's layout physics bodies when there
+        ;; is no successor slot, matching the per-slot physics lifecycle
+        ;; in activate-activity-slot.
+        (when (and self.active-activity-slot.entity
+                   (pcall require :layout-physics-bodies))
+          (local LayoutPhysicsBodies (require :layout-physics-bodies))
+          (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
         ;; Unbind content aliases; slot retains ownership
         (set self.entity nil)
         (set self.scene-children nil)

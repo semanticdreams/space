@@ -142,8 +142,10 @@
         (app.renderers.skybox:set-state empty.skybox))
       (when (and app app.renderers app.renderers.set-background-state)
         (app.renderers:set-background-state empty.background))
-      (when scene.containment-set
-        (scene:containment-set empty.containment))))
+      ;; Clear containment through the real PhysicsContainment API.
+      ;; ensure-installed with enabled? false calls clear() internally.
+      (local PhysicsContainment (require :physics-containment))
+      (PhysicsContainment.ensure-installed {:config {:enabled? false} :scene scene})))
   true)
 
 (fn snapshot-sandbox-activity! []
