@@ -1657,61 +1657,91 @@
 (fn corrupt-terrain-activation-no-previous-slot-consistent-cleanup []
   "R4-3: When activate-activity-slot fails with corrupt terrain and there
   was no previous active slot, the content aliases must be cleared to
-  match the nil/empty values used by deactivate-activity-slot: scene.entity
-  nil, scene-children/terrains nil, queued-cube-panels [], panel-restorers {},
-  demo-browser nil, physics-body-count 0. The target slot must be inactive."
+  match the nil/empty values used by deactivate-activity-slot, and engine
+  services must be reset to empty/disabled.  Uses non-empty services
+  on the corrupt slot to verify rollback resets everything."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :renderers
-     :engine :physics-containment-config]
+    [:lights-state :skybox-state :background-state :renderers
+     :engine :physics-containment-config :physics-containment-scene
+     :__physics-global-containment :lights]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
+      (local PhysicsContainment (require :physics-containment))
+
+      ;; Mock lights — captures the last set state
+      (var lights-state {:ambient {:enabled? false :color [0 0 0] :intensity 0.0}
+                         :directional []
+                         :point []
+                         :spot []})
+      (set app.lights {:get-state (fn [_] lights-state)
+                       :set-state (fn [_ state] (set lights-state state))})
+      ;; Mock renderer skybox / background — captures last set state
       (var renderer-skybox
         {:enabled? false :name "lake" :brightness 0.1 :tint-color [1.0 1.0 1.0]})
+      (var background-state {:color [0 0 0]})
       (set app.renderers
            {:skybox {:get-state (fn [_] renderer-skybox)
                     :set-state (fn [_ state] (set renderer-skybox state))}
-            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
-            :set-background-state (fn [_ state] (set app.background-state state))})
+            :get-background-state (fn [_] background-state)
+            :set-background-state (fn [_ state] (set background-state state))})
       (set app.engine {:physics {:addRigidBody (fn [_phys _body])
                                   :removeRigidBody (fn [_phys _body])}})
+      ;; Track containment config
+      (var containment-installed? nil)
+      (local orig-ensure-installed PhysicsContainment.ensure-installed)
+      (set PhysicsContainment.ensure-installed
+           (fn [opts]
+             (set containment-installed? (and opts.config opts.config.enabled?))
+             (orig-ensure-installed opts)))
+      (set app.__physics-global-containment nil)
+
       (local fixture (make-scene))
       (local scene fixture.scene)
-      ;; (1) Create sandbox slot with corrupt terrain; no slot was ever active
+      ;; (1) Create sandbox slot with corrupt terrain AND non-empty services
+      ;;     so we can verify the rollback resets them to empty/disabled.
       (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
       (local complete-skybox
         (SkyboxState.normalize-complete-state
-          {:enabled? false
-           :default {:name "lake" :brightness 0.1 :tint-color [1 1 1]}
+          {:enabled? true
+           :default {:name "ocean" :brightness 0.75 :tint-color [0.8 0.9 1.0]}
            :by-theme {}}
           "test-r4-3c-skybox"))
+      ;; Non-empty services distinguishable from empty/disabled
       (set sandbox-slot.scene-state {:panels []
                                      :terrains [{:kind ""}]
-                                     :lights {:ambient {:enabled? false :color [1 1 1] :intensity 0}
+                                     :lights {:ambient {:enabled? true
+                                                         :color [0.5 0.3 0.1]
+                                                         :intensity 2.5}
                                               :directional []
                                               :point []
                                               :spot []}
                                      :skybox complete-skybox
-                                     :background {:color [0 0 0]}
-                                     :containment {:enabled? false}})
+                                     :background {:color [0.1 0.2 0.3]}
+                                     :containment {:enabled? true}})
       ;; (2) Verify no active slot before the attempt
       (assert (= scene.active-activity-slot nil)
               "Scene should have no active slot before activation attempt")
       (assert (not sandbox-slot.visible?)
               "Sandbox slot should be invisible before activation attempt")
+      ;; Services should be at defaults before activation
+      (assert (not lights-state.ambient.enabled?)
+              "Lights should be disabled before activation")
+
       ;; (3) Attempt to activate corrupt sandbox — must fail
       (local (ok err) (pcall (fn [] (scene:activate-activity-slot "sandbox"))))
       (assert (not ok)
               "Activation with corrupt terrain must fail when no previous slot exists")
       (assert (and err (string.find (tostring err) "activate-activity-slot failed" 1 true))
               (.. "Error must report activate-activity-slot failure, got: " (tostring err)))
+
       ;; (4) No-previous-slot rollback assertions:
-      ;;     (a) Target slot must be inactive
+      ;;     (a) Target slot must be invisible/inactive (retains scene-state but not active)
       (assert (not sandbox-slot.visible?)
               "Sandbox slot must be invisible after failed activation")
       (assert (not sandbox-slot.interactive?)
               "Sandbox slot must be non-interactive after failed activation")
-      ;;     (b) Active slot binding must be nil
+      ;;     (b) Scene active slot binding must be nil
       (assert (= scene.active-activity-slot nil)
               "Scene.active-activity-slot must be nil after failed activation")
       (assert (= scene.active-activity-slot-id nil)
@@ -1725,7 +1755,6 @@
               "Scene.scene-terrains must be nil after failed activation")
       (assert (= (length scene.queued-cube-panels) 0)
               "Scene.queued-cube-panels must be empty after failed activation")
-      ;; panel-restorers starts as {} in Scene constructor, check it's empty
       (var panel-restorer-count 0)
       (each [_ _ (pairs (or scene.panel-restorers {}))]
         (set panel-restorer-count (+ panel-restorer-count 1)))
@@ -1735,6 +1764,26 @@
               "Scene.demo-browser must be nil after failed activation")
       (assert (= scene.physics-body-count 0)
               "Scene.physics-body-count must be 0 after failed activation")
+
+      ;; (5) Service rollback: all services must be reset to empty/disabled
+      ;;     (a) Lights: ambient disabled, default color/intensity
+      (assert (not lights-state.ambient.enabled?)
+              "Lights ambient must be disabled after rollback")
+      ;;     (b) Skybox: disabled
+      (assert (not renderer-skybox.enabled?)
+              "Renderer skybox must be disabled after rollback")
+      ;;     (c) Background: default color [0 0 0]
+      (assert (and background-state background-state.color
+                   (= (. background-state.color 1) 0.0)
+                   (= (. background-state.color 2) 0.0)
+                   (= (. background-state.color 3) 0.0))
+              "Background must be reset to default [0 0 0] after rollback")
+      ;;     (d) Containment: disabled
+      (assert (not containment-installed?)
+              "Physics containment must be not-installed/disabled after rollback")
+
+      ;; Restore PhysicsContainment.ensure-installed
+      (set PhysicsContainment.ensure-installed orig-ensure-installed)
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3c corrupt terrain activation no-previous-slot consistent cleanup"

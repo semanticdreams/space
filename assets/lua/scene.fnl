@@ -946,13 +946,15 @@
                            (pcall require :layout-physics-bodies))
                   (local LayoutPhysicsBodies (require :layout-physics-bodies))
                   (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
-              ;; No previous slot: drop any partially-built entity created
-              ;; during the failed activation, then clear content aliases
-              ;; consistent with deactivate-activity-slot behavior.
+              ;; No previous slot: clear content aliases to match
+              ;; deactivate-activity-slot behavior.  Deactivate any
+              ;; partially-built physics bodies but preserve the
+              ;; target slot's retained fields and entity ownership.
               (do
-                (when self.entity
-                  (self:unregister-entity self.entity)
-                  (self.entity:drop))
+                (when (and self.entity
+                           (pcall require :layout-physics-bodies))
+                  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+                  (pcall LayoutPhysicsBodies.deactivate self.entity))
                 (set self.entity nil)
                 (set self.scene-children nil)
                 (set self.scene-terrains nil)
