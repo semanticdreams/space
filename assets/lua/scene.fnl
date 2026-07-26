@@ -550,7 +550,7 @@
                      :focus-parent focus-scope
                      :focus-scope slot-focus-scope}))
     (set slot-ctx.pointer-target slot.pointer-target)
-    (set slot-ctx.panel-target slot)
+    (set slot-ctx.panel-target self)
     (apply-active-theme slot-ctx)
     slot-ctx)
 
