@@ -502,15 +502,30 @@
             (migrate-legacy-graph-node-view-panels! world))
           (when migrated-legacy-panels?
             (set repaired-persisted-state? true))
-          (local persisted-lights (and persisted.scene persisted.scene.lights))
-          (local persisted-skybox (and persisted.scene persisted.scene.skybox))
-          (local persisted-background (and persisted.scene persisted.scene.background))
+          ;; Only run legacy scene repair when persisted data has no canonical
+          ;; sandbox session yet.  If activity.sessions.sandbox.scene already
+          ;; exists the migration below is the only normalizer and we skip
+          ;; synthesizing old top-level fields.
+          (local has-canonical-sandbox?
+            (and (= (type persisted.activity) :table)
+                 (= (type persisted.activity.sessions) :table)
+                 (= (type persisted.activity.sessions.sandbox) :table)
+                 (= (type persisted.activity.sessions.sandbox.scene) :table)))
+          (local persisted-lights (and (not has-canonical-sandbox?)
+                                       persisted.scene
+                                       persisted.scene.lights))
+          (local persisted-skybox (and (not has-canonical-sandbox?)
+                                       persisted.scene
+                                       persisted.scene.skybox))
+          (local persisted-background (and (not has-canonical-sandbox?)
+                                           persisted.scene
+                                           persisted.scene.background))
           (if persisted-lights
               (set world.state.scene.lights
                    (LightSystemModule.normalize-complete-state persisted-lights
                                                               (string.format "HomeWorld.load-state %s"
                                                                              world.id)))
-              (do
+              (when (not has-canonical-sandbox?)
                 (set world.state.scene.lights (LightSystemModule.default-state))
                 (set repaired-persisted-state? true)))
           (if persisted-skybox
@@ -518,7 +533,7 @@
                    (SkyboxState.normalize-complete-state persisted-skybox
                                                         (string.format "HomeWorld.load-state %s"
                                                                        world.id)))
-              (do
+              (when (not has-canonical-sandbox?)
                 (set world.state.scene.skybox (SkyboxState.default-state))
                 (set repaired-persisted-state? true)))
           (if persisted-background
@@ -526,7 +541,7 @@
                    (BackgroundState.normalize-complete-state persisted-background
                                                             (string.format "HomeWorld.load-state %s"
                                                                            world.id)))
-              (do
+              (when (not has-canonical-sandbox?)
                 (set world.state.scene.background (BackgroundState.default-state))
                 (set repaired-persisted-state? true)))
           (local stale-terrain-graph-keys
@@ -1139,14 +1154,8 @@
       (set world.runtime (create-runtime world ctx))
       (set created-runtime? true))
     (apply-runtime-physics-policy!)
-    (set-runtime-containment-config! world (resolve-runtime-containment-config world))
-    (apply-runtime-light-state! world)
-    (apply-runtime-skybox-state! world)
-    (apply-runtime-background-state! world)
     (when created-runtime?
       (schedule-runtime-hydration-start! world world.runtime))
-    (when (not created-runtime?)
-      (apply-runtime-containment! world))
     (set world.active? true)
     (when (hydration-pending? world.runtime)
       (schedule-runtime-hydration-start! world world.runtime))
@@ -1170,14 +1179,8 @@
       (set world.runtime (create-runtime world ctx))
       (set created-runtime? true))
     (apply-runtime-physics-policy!)
-    (set-runtime-containment-config! world (resolve-runtime-containment-config world))
-    (apply-runtime-light-state! world)
-    (apply-runtime-skybox-state! world)
-    (apply-runtime-background-state! world)
     (when created-runtime?
       (schedule-runtime-hydration-start! world world.runtime))
-    (when (not created-runtime?)
-      (apply-runtime-containment! world))
     (set world.active? true)
     (when (hydration-pending? world.runtime)
       (schedule-runtime-hydration-start! world world.runtime))

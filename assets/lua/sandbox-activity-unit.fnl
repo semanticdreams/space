@@ -14,16 +14,11 @@
                                 "Sandbox activity requires app.active-world-runtime"))
   (local scene (assert world-runtime.scene
                        "Sandbox activity requires runtime.scene"))
-  ;; Resolve the canonical scene state from the runtime's activity session state
-  ;; (which is cloned from world.state.activity.sessions on world creation).
-  (local canonical-scene-state
-    (or (and world-runtime.activity-session-state
-             (. world-runtime.activity-session-state "sandbox")
-             (. world-runtime.activity-session-state "sandbox" :scene))
-        (ActivitySceneState.default-sandbox-state)))
-  ;; Ensure the sandbox scene slot exists and restore its state
-  (scene:restore-activity-slot-state "sandbox" canonical-scene-state)
-  ;; Activate the sandbox slot (populates services and builds terrain)
+  ;; Ensure the slot exists but do NOT overwrite its retained scene-state.
+  ;; Pending session state (restored by Activities after activation) or the
+  ;; existing retained state provides the canonical scene data.
+  (scene:ensure-activity-slot "sandbox")
+  ;; Activate the sandbox slot (populates services and builds terrain from retained state).
   (scene:activate-activity-slot "sandbox")
   ;; Sandbox is the primary 3D workspace; canvas is not visible by default
   (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
@@ -36,9 +31,9 @@
   true)
 
 (fn snapshot-sandbox-activity! []
-  (when (and app.active-world-runtime app.active-world-runtime.scene)
-    (app.active-world-runtime.scene:capture-activity-slot-state "sandbox"))
-  nil)
+  (if (and app.active-world-runtime app.active-world-runtime.scene)
+      (app.active-world-runtime.scene:capture-activity-slot-state "sandbox")
+      nil))
 
 (fn restore-sandbox-activity! [state]
   (when (and app.active-world-runtime app.active-world-runtime.scene state)

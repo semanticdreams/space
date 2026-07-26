@@ -515,8 +515,11 @@
                                            :bounds {:min [-500 -777 -500]
                                                     :max [500 500 500]}})
       (world:activate {})
-      (assert (= (. (. app.physics-containment-config.bounds.min) 2) -1450)
-              "World activation should reapply runtime containment config")
+      ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
+      ;; containment is supplied by Scene slot activation (sandbox activity).
+      ;; The runtime config is not written back into sandbox session or app.
+      (assert (= (. (. app.physics-containment-config.bounds.min) 2) -777)
+              "World activation should not overwrite app containment from world state")
       true)))
 
 (fn home-world-captures-runtime-containment-on-drop []
@@ -1045,9 +1048,9 @@
                                                      (set applied lights)
                                                      true)}})
       (world:activate {})
-      (assert applied "World activation should reapply persisted light state to runtime scene")
-      (assert (= (. (. applied.ambient.color) 3) 0.75) "Applied ambient light should match world state")
-      (assert (= (. (. applied.point 1) :linear) 0.3) "Applied point light should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world activate.
+      (assert (= applied nil)
+              "World activation should not directly apply scene light state")
       true)))
 
 (fn home-world-activate-reapplies-runtime-skybox-state []
@@ -1070,10 +1073,9 @@
                                                       (set applied skybox)
                                                       true)}})
       (world:activate {})
-      (assert applied "World activation should reapply persisted skybox state to runtime scene")
-      (assert (= applied.enabled? false) "Applied skybox enabled flag should match world state")
-      (assert (= applied.name "lake") "Applied skybox name should match world state")
-      (assert (= applied.brightness 0.25) "Applied skybox brightness should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world activate.
+      (assert (= applied nil)
+              "World activation should not directly apply scene skybox state")
       true)))
 
 (fn home-world-activate-reapplies-runtime-background-state []
@@ -1094,10 +1096,9 @@
                                                           (set applied background)
                                                           true)}})
       (world:activate {})
-      (assert applied "World activation should reapply persisted background state to runtime scene")
-      (assert (= (. applied.color 1) 0.1) "Applied background red should match world state")
-      (assert (= (. applied.color 2) 0.2) "Applied background green should match world state")
-      (assert (= (. applied.color 3) 0.3) "Applied background blue should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world activate.
+      (assert (= applied nil)
+              "World activation should not directly apply scene background state")
       true)))
 
 (fn home-world-resume-reapplies-runtime-light-and-skybox-state []
@@ -1136,13 +1137,13 @@
                                                          (set applied-background background)
                                                       true)}})
       (world:resume {})
-      (assert applied-lights "World resume should reapply persisted light state to runtime scene")
-      (assert applied-skybox "World resume should reapply persisted skybox state to runtime scene")
-      (assert applied-background "World resume should reapply persisted background state to runtime scene")
-      (assert (= (. (. applied-lights.ambient.color) 2) 0.5) "Resumed ambient light should match world state")
-      (assert (= applied-skybox.enabled? false) "Resumed skybox enabled flag should match world state")
-      (assert (= applied-skybox.brightness 0.25) "Resumed skybox brightness should match world state")
-      (assert (= (. applied-background.color 2) 0.2) "Resumed background should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world resume.
+      (assert (= applied-lights nil)
+              "World resume should not directly apply scene light state")
+      (assert (= applied-skybox nil)
+              "World resume should not directly apply scene skybox state")
+      (assert (= applied-background nil)
+              "World resume should not directly apply scene background state")
       true)))
 
 (fn home-world-deactivate-requires-scene-lights []

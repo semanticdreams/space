@@ -72,8 +72,16 @@
        :button-name "board-activity"
        :show-in-switcher? true
        :activate (fn [_ctx] {:activity-id "board"})
-       :deactivate (fn [_ctx _session] true)}))
+        :deactivate (fn [_ctx _session] true)}))
   true)
+
+(fn sandbox-scene-state [world]
+  "Return the sandbox scene session state from world.state."
+  (and world.state
+       world.state.activity
+       world.state.activity.sessions
+       world.state.activity.sessions.sandbox
+       world.state.activity.sessions.sandbox.scene))
 
 (fn with-temp-dir [f]
   (ensure-built-in-activities!)
@@ -502,6 +510,209 @@
                      :fn canonical-sandbox-state-wins-over-legacy})
 (table.insert tests {:name "fresh world can resolve default sandbox activity"
                      :fn fresh-world-can-resolve-default-sandbox-activity})
+
+(fn sandbox-snapshot-returns-captured-canonical-state []
+  ;; R1-1: snapshot-sandbox-activity! must return the captured canonical
+  ;; state so that Activities.snapshot-activity-sessions cannot overwrite
+  ;; the sandbox session with nil.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      ;; Set up a minimal mock runtime so snapshot finds the scene.
+      (local sandbox-scene (and world.state.activity
+                                world.state.activity.sessions
+                                world.state.activity.sessions.sandbox
+                                world.state.activity.sessions.sandbox.scene))
+      (assert (= (type sandbox-scene) :table)
+              "Expected sandbox scene state for snapshot test")
+      ;; Verify the sandbox session's scene state is present and canonical
+      ;; before snapshot.
+      (assert (= (type sandbox-scene.lights) :table)
+              "Sandbox scene must have lights before snapshot")
+      (var captured nil)
+      (local runtime {:scene {:capture-activity-slot-state
+                               (fn [_scene _activity-id]
+                                 (set captured sandbox-scene)
+                                 sandbox-scene)}
+                      :activity-session-state
+                      {:sandbox {:scene sandbox-scene}}})
+      (set world.runtime runtime)
+      (local previous-runtime app.active-world-runtime)
+      (set app.active-world-runtime world.runtime)
+      (local snapshot-result
+        ((. (require :sandbox-activity-unit) :snapshot-sandbox-activity!)))
+      (set app.active-world-runtime previous-runtime)
+      (assert (= (type snapshot-result) :table)
+              "Snapshot must return captured canonical scene state (not nil)")
+      (assert (= (type snapshot-result.lights) :table)
+              "Snapshot result must contain lights")
+      (assert (= (type snapshot-result.containment) :table)
+              "Snapshot result must contain containment")
+      (assert (= (type snapshot-result.terrains) :table)
+              "Snapshot result must contain terrains")
+      (assert (= snapshot-result captured)
+              "Snapshot must return the exact captured state from the slot")
+      true)))
+
+(table.insert tests {:name "sandbox snapshot returns captured canonical state"
+                     :fn sandbox-snapshot-returns-captured-canonical-state})
+
+(fn sandbox-activation-preserves-retained-slot-state []
+  ;; R1-2: Sandbox activation must not overwrite a retained slot's scene-state
+  ;; when no pending session state is present.  Activate, capture, deactivate,
+  ;; then activate again — the retained state must survive.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local canonical-scene (and world.state.activity
+                                  world.state.activity.sessions
+                                  world.state.activity.sessions.sandbox
+                                  world.state.activity.sessions.sandbox.scene))
+      (assert canonical-scene "Expected canonical sandbox scene")
+      ;; Simulate first activation: the slot gets the canonical state.
+      (local scene-simulator
+        {:slots {}
+         :active-activity-slot nil
+         :active-activity-slot-id nil})
+      (fn scene-simulator.ensure-activity-slot [_self activity-id]
+        (when (not (. scene-simulator.slots activity-id))
+          (set (. scene-simulator.slots activity-id)
+               {:activity-id activity-id
+                :scene-state nil
+                :visible? false
+                :interactive? false}))
+        (. scene-simulator.slots activity-id))
+      (fn scene-simulator.activate-activity-slot [_self activity-id]
+        (local slot (scene-simulator:ensure-activity-slot activity-id))
+        (set scene-simulator.active-activity-slot slot)
+        (set scene-simulator.active-activity-slot-id activity-id)
+        (set slot.visible? true)
+        (set slot.interactive? true)
+        slot)
+      (fn scene-simulator.deactivate-activity-slot [_self activity-id]
+        (local slot (. scene-simulator.slots activity-id))
+        (when slot
+          (set slot.visible? false)
+          (set slot.interactive? false))
+        (set scene-simulator.active-activity-slot nil)
+        (set scene-simulator.active-activity-slot-id nil))
+      (fn scene-simulator.restore-activity-slot-state [_self activity-id state]
+        (local slot (scene-simulator:ensure-activity-slot activity-id))
+        (set slot.scene-state state)
+        true)
+      (fn scene-simulator.capture-activity-slot-state [_self activity-id]
+        (local slot (. scene-simulator.slots activity-id))
+        (or slot.scene-state canonical-scene))
+      ;; First activation cycle: restore state, activate, capture, deactivate
+      (scene-simulator:restore-activity-slot-state "sandbox" canonical-scene)
+      (scene-simulator:activate-activity-slot "sandbox")
+      (local first-capture (scene-simulator:capture-activity-slot-state "sandbox"))
+      (assert (= (type first-capture.lights) :table) "First capture must have lights")
+      (scene-simulator:deactivate-activity-slot "sandbox")
+      ;; Second activation WITHOUT restoring state (like the fix in R1-2):
+      ;; just activate the slot — the retained state must still be there.
+      (scene-simulator:activate-activity-slot "sandbox")
+      (local second-capture (scene-simulator:capture-activity-slot-state "sandbox"))
+      (assert (= (type second-capture.lights) :table)
+              "Second capture after reactivation must retain lights")
+      (assert (= (type second-capture.containment) :table)
+              "Second capture after reactivation must retain containment")
+      true)))
+
+(table.insert tests {:name "sandbox activation preserves retained slot state"
+                     :fn sandbox-activation-preserves-retained-slot-state})
+
+(fn canonical-load-does-not-produce-legacy-fields []
+  ;; R1-4: Loading a canonical world (already-migrated) must not synthesize
+  ;; legacy top-level scene/physics fields and must not report a spurious
+  ;; migration.  The load must be idempotent.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      ;; Write a canonical world.json (already migrated)
+      (local ActivitySceneState (require :activity-scene-state))
+      (local canonical-scene (ActivitySceneState.default-sandbox-state))
+      (write-world-json! world-dir
+        {:camera {:position [0 0 30] :rotation [1 0 0 0]}
+         :activity {:active_id "sandbox"
+                    :preferred_interaction_surface "scene"
+                    :sessions {:sandbox {:scene canonical-scene}
+                               :graph {:scene (ActivitySceneState.empty-state)}
+                               :drawing {:scene (ActivitySceneState.empty-state)}
+                               :board {:scene (ActivitySceneState.empty-state)}}}
+         :canvas {:camera {:position [0 0 100]} :scale_factor 1.0 :panels []}
+         :drawing (let [DrawingDocument (require :drawing/document)]
+                    (DrawingDocument.default-state))
+         :physics {}
+         :graph {:graph {:nodes [] :edges []}}
+         :board {:items [] :connectors []}
+         :scene {}
+         :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      ;; After load, top-level scene must have no canonical content keys.
+      (local top-scene world.state.scene)
+      (when (= (type top-scene) :table)
+        (assert (= top-scene.panels nil)
+                "Canonical load must not synthesize legacy scene.panels")
+        (assert (= top-scene.terrains nil)
+                "Canonical load must not synthesize legacy scene.terrains")
+        (assert (= top-scene.lights nil)
+                "Canonical load must not synthesize legacy scene.lights")
+        (assert (= top-scene.skybox nil)
+                "Canonical load must not synthesize legacy scene.skybox")
+        (assert (= top-scene.background nil)
+                "Canonical load must not synthesize legacy scene.background"))
+      ;; Top-level physics must not have containment
+      (local physics-state world.state.physics)
+      (when physics-state
+        (assert (= physics-state.containment nil)
+                "Canonical load must not synthesize legacy physics.containment"))
+      ;; The sandbox session must exist with the original canonical state.
+      (local sandbox-scene (sandbox-scene-state world))
+      (assert sandbox-scene "Canonical load must preserve sandbox scene session")
+      (assert (= sandbox-scene.containment.enabled? true)
+              "Canonical load must preserve containment")
+      (assert (= sandbox-scene.skybox.enabled? true)
+              "Canonical load must preserve skybox enabled flag")
+      ;; Save and reload — must be identical (no spurious migration rewrites).
+      (world:save-state)
+      (local reloaded (HomeWorld {:id "world-a"
+                                  :name "home"
+                                  :type "home"
+                                  :dir world-dir}))
+      (reloaded:init {})
+      (local reloaded-sandbox-scene (and reloaded.state.activity
+                                         reloaded.state.activity.sessions
+                                         reloaded.state.activity.sessions.sandbox
+                                         reloaded.state.activity.sessions.sandbox.scene))
+      (assert reloaded-sandbox-scene "Reload must preserve sandbox scene session")
+      (assert (= reloaded-sandbox-scene.skybox.enabled? true)
+              "Reload must preserve skybox enabled flag without spurious migration")
+      (local reloaded-top-scene reloaded.state.scene)
+      (when (= (type reloaded-top-scene) :table)
+        (assert (= reloaded-top-scene.lights nil)
+                "Reload must not synthesize legacy scene.lights"))
+      true)))
+
+(table.insert tests {:name "canonical load does not produce legacy fields"
+                     :fn canonical-load-does-not-produce-legacy-fields})
 
 (local main
   (fn []
