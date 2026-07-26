@@ -675,9 +675,6 @@
 (fn built-in-activity-scene-slots-are-isolated-from-sandbox []
   ;; Every built-in activity (Graph, Drawing, Board) owns an empty Scene slot
   ;; and must not inherit Sandbox content/environment/interaction.
-  (local AppProjection (require :app-projection))
-  (when (not app.create-default-projection)
-    (set app.create-default-projection AppProjection.create-default-projection))
   (local ActivitySceneState (require :activity-scene-state))
   (local SkyboxState (require :skybox-state))
   (local BackgroundState (require :background-state))
@@ -722,6 +719,9 @@
                     :scene
                     :create-default-projection])
   (local app-snapshot (snapshot-app-fields app-keys))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
   (set app.active-activity-id nil)
