@@ -931,6 +931,100 @@
 (table.insert tests {:name "Activity restore fails loudly without runtime.scene"
                       :fn activity-restore-fails-loudly-without-runtime-scene})
 
+(fn drawing-snapshot-fails-loudly-without-runtime-scene []
+  ;; R1-2: Drawing snapshot must assert runtime.scene.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :drawing-render])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {:canvas {} :world-dir "/tmp/space/tests/drawing-snapshot-no-scene"})
+  (DrawingActivityUnit.load-drawing-activity!)
+  (local (ok err) (pcall DrawingActivityUnit.snapshot-drawing-activity!))
+  (assert (not ok)
+          "Drawing snapshot should fail loudly when runtime.scene is missing")
+  (assert (or (string.find (tostring err) "requires runtime.scene")
+              (string.find (tostring err) "requires app.active-world-runtime"))
+          (.. "Snapshot error should mention missing runtime/scene, got: " (tostring err)))
+  (pcall DrawingActivityUnit.unload-drawing-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Drawing activity snapshot fails loudly without runtime.scene"
+                      :fn drawing-snapshot-fails-loudly-without-runtime-scene})
+
+(fn drawing-restore-fails-loudly-without-runtime-scene []
+  ;; R1-2: Drawing restore must assert runtime.scene when state.scene is present.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :drawing-render])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {:canvas {} :world-dir "/tmp/space/tests/drawing-restore-no-scene"})
+  (DrawingActivityUnit.load-drawing-activity!)
+  (local pending-state {:scene {:panels [] :terrains [] :lights {} :skybox {} :background {} :containment {:enabled? false}}})
+  (local (ok err) (pcall DrawingActivityUnit.restore-drawing-activity! pending-state))
+  (assert (not ok)
+          "Drawing restore should fail loudly when runtime.scene is missing but state.scene is present")
+  (assert (or (string.find (tostring err) "requires runtime.scene")
+              (string.find (tostring err) "requires app.active-world-runtime"))
+          (.. "Restore error should mention missing runtime/scene, got: " (tostring err)))
+  (pcall DrawingActivityUnit.unload-drawing-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Drawing activity restore fails loudly without runtime.scene"
+                      :fn drawing-restore-fails-loudly-without-runtime-scene})
+
+(fn board-snapshot-fails-loudly-without-runtime-scene []
+  ;; R1-2: Board snapshot must assert runtime.scene.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :board :board-view])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {:canvas {} :world-dir "/tmp/space/tests/board-snapshot-no-scene"})
+  (BoardActivityUnit.load-board-activity!)
+  (local (ok err) (pcall BoardActivityUnit.snapshot-board-activity!))
+  (assert (not ok)
+          "Board snapshot should fail loudly when runtime.scene is missing")
+  (assert (or (string.find (tostring err) "requires runtime.scene")
+              (string.find (tostring err) "requires app.active-world-runtime"))
+          (.. "Snapshot error should mention missing runtime/scene, got: " (tostring err)))
+  (pcall BoardActivityUnit.unload-board-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Board activity snapshot fails loudly without runtime.scene"
+                      :fn board-snapshot-fails-loudly-without-runtime-scene})
+
+(fn board-restore-fails-loudly-without-runtime-scene []
+  ;; R1-2: Board restore must assert runtime.scene when state.scene is present.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :board :board-view])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {:canvas {} :world-dir "/tmp/space/tests/board-restore-no-scene"})
+  (BoardActivityUnit.load-board-activity!)
+  (local pending-state {:scene {:panels [] :terrains [] :lights {} :skybox {} :background {} :containment {:enabled? false}}})
+  (local (ok err) (pcall BoardActivityUnit.restore-board-activity! pending-state))
+  (assert (not ok)
+          "Board restore should fail loudly when runtime.scene is missing but state.scene is present")
+  (assert (or (string.find (tostring err) "requires runtime.scene")
+              (string.find (tostring err) "requires app.active-world-runtime"))
+          (.. "Restore error should mention missing runtime/scene, got: " (tostring err)))
+  (pcall BoardActivityUnit.unload-board-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Board activity restore fails loudly without runtime.scene"
+                      :fn board-restore-fails-loudly-without-runtime-scene})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

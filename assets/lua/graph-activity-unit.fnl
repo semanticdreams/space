@@ -349,13 +349,15 @@
     (when state.graph-view-states
       (set app.active-world-runtime.graph-view-states (clone-table state.graph-view-states)))
     (when state.graph-view-state
-      (set app.active-world-runtime.graph-view-state state.graph-view-state))
-    (when state.scene
-      (let [runtime (assert app.active-world-runtime
-                             "Graph activity restore requires app.active-world-runtime")
-            scene (assert runtime.scene
-                           "Graph activity restore requires runtime.scene")]
-        (scene:restore-activity-slot-state "graph" state.scene))))
+      (set app.active-world-runtime.graph-view-state state.graph-view-state)))
+  ;; Scene restore asserts runtime.scene even when app.active-world-runtime is nil,
+  ;; matching Drawing and Board restore behaviour.
+  (when state.scene
+    (let [runtime (assert app.active-world-runtime
+                           "Graph activity restore requires app.active-world-runtime")
+          scene (assert runtime.scene
+                         "Graph activity restore requires runtime.scene")]
+      (scene:restore-activity-slot-state "graph" state.scene)))
   (when (and state state.active?)
         (if (and (= (Activities.active-activity-id) "graph")
                   app.graph-view
