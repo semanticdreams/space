@@ -1086,27 +1086,46 @@
     ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
       (apply-state-to-services self canonical)
-      ;; Rebuild terrain runtime from stored records (panels deferred to Task 5).
-      ;; Each canonical terrain record is built exactly once; per-record
-      ;; id checking prevents duplicates on repeated restores.
-      (when (and canonical.terrains (> (length canonical.terrains) 0))
-        (if (not self.entity)
-            ;; No base entity yet — build-default creates entity and all terrains
-            (self:build-default {:terrains canonical.terrains})
-            ;; Entity already exists — add only missing terrain records
-            (do
-              (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
-              (each [_ entry (ipairs entries)]
-                (local record-id (and entry.record entry.record.id))
-                (if (and record-id (find-terrain-entry self.scene-terrains record-id))
-                    ;; idempotent: skip terrain records that already exist in the runtime
-                    nil
-                    (self:add-terrain-record entry.record)))))
-        ;; Capture runtime terrain ids back into the slot's scene-state
-        ;; so that subsequent restores can match existing terrains by stable id.
+      ;; R7-1: Reconcile runtime terrains exactly to canonical state,
+      ;; using the same logic as activation: remove stale entries, replace
+      ;; updated records, add missing records, and handle empty canonical
+      ;; list by clearing all runtime terrains.
+      (let [canonical-terrains (or canonical.terrains [])
+            canonical-ids {}]
+        (each [_ record (ipairs canonical-terrains)]
+          (when (and record record.id)
+            (tset canonical-ids record.id true)))
+        ;; Remove stale runtime entries whose record id is absent from
+        ;; canonical state.  Collect ids first to avoid index-shift bugs.
         (when self.scene-terrains
-          (set (. slot.scene-state :terrains)
-               (SceneWorldState.capture-terrains self.scene-terrains))))
+          (local stale-ids [])
+          (for [idx (length self.scene-terrains) 1 -1]
+            (local entry (. self.scene-terrains idx))
+            (local record-id (and entry entry.record entry.record.id))
+            (when (and record-id (not (. canonical-ids record-id)))
+              (table.insert stale-ids record-id)))
+          (each [_ stale-id (ipairs stale-ids)]
+            (self:remove-terrain stale-id)))
+        ;; Build or add terrain from canonical records (only when non-empty).
+        (when (> (length canonical-terrains) 0)
+          (if (not self.entity)
+              ;; No base entity yet — build-default creates entity and all terrains
+              (self:build-default {:terrains canonical-terrains})
+              ;; Entity already exists — add missing terrain records, replace changed ones
+              (do
+                (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+                (each [_ entry (ipairs entries)]
+                  (local record-id (and entry.record entry.record.id))
+                  ;; Replace stale runtime terrain with canonical record,
+                  ;; or add if it doesn't exist yet.
+                  (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                      (self:replace-terrain-record record-id entry.record)
+                      (self:add-terrain-record entry.record)))
+                ;; Capture runtime terrain ids back into the slot's scene-state
+                ;; so that subsequent restores can match existing terrains by stable id.
+                (when self.scene-terrains
+                  (set (. slot.scene-state :terrains)
+                       (SceneWorldState.capture-terrains self.scene-terrains)))))))
       ;; After terrain rebuild, update slot fields so the slot owns the
       ;; newly built content (not just the service state).
       (set slot.entity self.entity)
@@ -2424,6 +2443,7 @@
 (set self.capture-activity-slot-state capture-activity-slot-state)
 (set self.restore-activity-slot-state restore-activity-slot-state)
 (set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
+(set self.resolve-active-build-context resolve-active-build-context)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)

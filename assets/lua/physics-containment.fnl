@@ -259,7 +259,12 @@
         [0.2 0.6 1.0 0.3])))
 
 (fn create-visualization [scene bounds config]
-  (local lines (and scene scene.build-context scene.build-context.lines))
+  ;; R7-2: Use the active slot's build context when a slot is active/visible,
+  ;; falling back to scene.build-context only when no active slot exists.
+  (local build-ctx (or (and scene scene.resolve-active-build-context
+                            (scene:resolve-active-build-context))
+                        (and scene scene.build-context)))
+  (local lines (and build-ctx build-ctx.lines))
   (if (or (not lines)
           (not config.visualization.enabled))
       nil

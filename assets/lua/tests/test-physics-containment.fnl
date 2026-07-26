@@ -437,6 +437,62 @@
 (table.insert tests {:name "Scene slot deactivation retains slot state while removing active bodies"
                      :fn scene-slot-deactivation-retains-slot-state})
 
+;; ── R7-2 visualization line batches on active slot context ──────────────
+
+(fn visualization-uses-active-slot-build-context []
+  "R7-2: Physics containment visualization must register line batches on the
+  active scene slot build context when a slot is active/visible, falling back
+  to scene.build-context only when no active slot exists."
+  (local original-themes app.themes)
+  (local original-scene app.physics-containment-scene)
+  (local original-config app.physics-containment-config)
+  (local (ok err)
+    (pcall
+      (fn []
+        (PhysicsContainment.clear)
+        (var slot-ctx-used false)
+        (var fallback-ctx-used false)
+        (local slot-build-context
+          {:lines {:create-line-batch
+                   (fn [_self params]
+                     (set slot-ctx-used true)
+                     {:drop (fn [_batch])})}})
+        (local scene-build-context
+          {:lines {:create-line-batch
+                   (fn [_self params]
+                     (set fallback-ctx-used true)
+                     {:drop (fn [_batch])})}})
+        ;; Mock scene with both scene.build-context and a resolve-active-build-context
+        ;; that returns the active slot's build context.
+        (local mock-scene
+          {:update (fn [_self])
+           :build-context scene-build-context
+           :resolve-active-build-context
+           (fn [_self]
+             slot-build-context)})
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene mock-scene})
+          "Expected containment install to succeed with active slot context")
+        ;; R7-2: The line batch must have been created on the slot's build context,
+        ;; NOT the fallback scene.build-context.
+        (assert slot-ctx-used
+                "Line batch must be created on active slot's build context")
+        (assert (not fallback-ctx-used)
+                "Line batch must NOT be created on fallback scene.build-context when slot is active"))))
+  (PhysicsContainment.clear)
+  (set app.themes original-themes)
+  (set app.physics-containment-scene original-scene)
+  (set app.physics-containment-config original-config)
+  (when (not ok)
+    (error err)))
+
+(table.insert tests {:name "R7-2 containment visualization registers line batches on active slot context"
+                     :fn visualization-uses-active-slot-build-context})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

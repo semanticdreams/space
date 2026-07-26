@@ -2164,6 +2164,105 @@
 (table.insert tests {:name "R4-3d corrupt activation preserves retained slot content"
                      :fn corrupt-activation-preserves-retained-slot-content})
 
+;; ── R7-1 active restore reconciles terrains ─────────────────────────────
+
+(fn active-restore-removes-stale-terrains []
+  "R7-1: When an active slot is restored with canonical terrain state
+  that has fewer terrains than runtime, the absent terrains must be
+  removed from runtime.  When a terrain record changes (different data
+  for the same id), the runtime entry must be replaced."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Mock renderer services
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local slot (scene:ensure-activity-slot "sandbox"))
+
+      ;; Activate empty slot
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Slot should be active before restore")
+
+      ;; (1) Restore state with two terrains: A and B
+      (local state-1 (ActivitySceneState.empty-state))
+      (set state-1.terrains
+           [(make-heightfield-terrain-record {:id "t-a"})
+            (make-heightfield-terrain-record {:id "t-b"})])
+      (assert (scene:restore-activity-slot-state "sandbox" state-1)
+              "First restore should return true")
+      (assert (= (length slot.scene-terrains) 2)
+              (.. "After first restore: expected 2 terrains, got "
+                  (tostring (length slot.scene-terrains))))
+
+      ;; (2) Restore state with only terrain B (A removed)
+      (local state-2 (ActivitySceneState.empty-state))
+      (set state-2.terrains [(make-heightfield-terrain-record {:id "t-b"})])
+      (assert (scene:restore-activity-slot-state "sandbox" state-2)
+              "Second restore (remove A) should return true")
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "After second restore (remove A): expected 1 terrain, got "
+                  (tostring (length slot.scene-terrains))))
+      ;; Verify that terrain A is gone and terrain B remains
+      (local remaining-id (and (. slot.scene-terrains 1)
+                               (. (. slot.scene-terrains 1) :record)
+                               (. (. (. slot.scene-terrains 1) :record) :id)))
+      (assert (= remaining-id "t-b")
+              (.. "After second restore, remaining terrain should be t-b, got "
+                  (tostring remaining-id)))
+
+      ;; (3) Restore state with terrain B but with different height (changed record)
+      (local state-3 (ActivitySceneState.empty-state))
+      (set state-3.terrains
+           [(make-heightfield-terrain-record {:id "t-b" :default-height 5.0})])
+      (assert (scene:restore-activity-slot-state "sandbox" state-3)
+              "Third restore (change B) should return true")
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "After third restore (change B): expected 1 terrain, got "
+                  (tostring (length slot.scene-terrains))))
+      ;; Verify that the record was captured with the new height
+      (assert slot.scene-state.terrains
+              "slot.scene-state.terrains should exist after restore")
+      (local captured-record (. slot.scene-state.terrains 1))
+      (assert captured-record "Captured terrain record should exist")
+      (assert (= (. (or captured-record.options {}) :default-height) 5.0)
+              (.. "Captured terrain should have updated height 5.0, got "
+                  (tostring (. (or captured-record.options {}) :default-height))))
+
+      ;; (4) Restore with empty terrain list — all runtime terrains must be cleared
+      (local state-4 (ActivitySceneState.empty-state))
+      (set state-4.terrains [])
+      (assert (scene:restore-activity-slot-state "sandbox" state-4)
+              "Fourth restore (empty) should return true")
+      (assert (or (not slot.scene-terrains) (= (length (or slot.scene-terrains [])) 0))
+              (.. "After fourth restore (empty): expected 0 runtime terrains, got "
+                  (tostring (length (or slot.scene-terrains [])))))
+
+      (drop-fixture fixture))))
+(table.insert tests {:name "R7-1 active restore removes stale and replaces changed terrains"
+                     :fn active-restore-removes-stale-terrains})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
