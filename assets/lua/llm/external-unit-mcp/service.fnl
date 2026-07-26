@@ -1,6 +1,5 @@
-;; External Unit MCP Service — loader-neutral unit discovery, handles, inspect, and resolve.
-;; This is a read-only facade over the UnitManager that presents units in a loader-neutral
-;; interface. It does not mutate units or expose raw filesystem paths directly.
+;; External Unit MCP Service — loader-neutral unit discovery, handles, inspect, resolve,
+;; source read, patch, create, and reload operations.
 
 (local fs (require :fs))
 (local Sha256 (require :repo/sha256))
@@ -77,6 +76,86 @@
 
 (fn build-commit-capability [_loader]
   "none")
+
+;; ── Task 2: Source resolution and mutation helpers ──
+
+(fn hash-file [path]
+  (.. "sha256:" (Sha256.hash-file path)))
+
+(fn validate-source-id [source-id operation]
+  (assert (= (type source-id) "string")
+          (.. operation " requires a string :source_id"))
+  (assert (> (# source-id) 0)
+          (.. operation " :source_id must not be empty"))
+  (assert (not (string.find source-id "\0" 1 true))
+          (.. operation " :source_id contains a NUL byte"))
+  (assert (not (or (string.match source-id "^/")
+                   (string.match source-id "^%a:[\\/]")))
+          (.. operation " :source_id must be relative, not absolute"))
+  (assert (not (or (string.match source-id "%f[^/]%.%./")
+                   (string.match source-id "%.%.$")
+                   (= source-id "..")))
+          (.. operation " :source_id must not contain .. segments")))
+
+(fn get-unit-root-dir [unit]
+  ;; Find the unit root directory from owned-paths (first directory entry).
+  (local paths (or unit.owned-paths []))
+  (var root nil)
+  (each [_ path (ipairs paths) &until root]
+    (when (and path (fs.exists path))
+      (local st (fs.stat path))
+      (when (and st st.is-dir)
+        (set root path))))
+  root)
+
+(fn is-directory-unit? [unit]
+  (not= (get-unit-root-dir unit) nil))
+
+(fn get-primary-source-path [unit]
+  ;; Find the first .fnl file in owned-paths.
+  (local paths (or unit.owned-paths []))
+  (var primary nil)
+  (each [_ path (ipairs paths) &until primary]
+    (when (and path (path-has-fnl-extension? path))
+      (set primary path)))
+  primary)
+
+(fn get-primary-source-basename [unit]
+  (local primary-path (get-primary-source-path unit))
+  (when primary-path
+    (path-basename primary-path)))
+
+(fn assert-filesystem-unit [unit operation]
+  (assert (not (= unit.source :builtin))
+          (.. operation ": cannot modify built-in unit " unit.id))
+  (assert (= (classify-loader unit) "filesystem")
+          (.. operation ": unit " unit.id " loader does not support write operations")))
+
+(fn assert-directory-unit [unit operation]
+  (assert-filesystem-unit unit operation)
+  (assert (is-directory-unit? unit)
+          (.. operation ": unit " unit.id " is a flat unit and cannot create new source artifacts")))
+
+(fn resolve-source-path [unit source-id operation]
+  ;; Resolve a source_id to an absolute file path for a filesystem unit.
+  ;; Rejects invalid source_ids and validates against unit structure.
+  (validate-source-id source-id operation)
+  (if (is-directory-unit? unit)
+      (let [root (get-unit-root-dir unit)]
+        (fs.join-path root source-id))
+      (let [primary-basename (get-primary-source-basename unit)]
+        (assert primary-basename
+                (.. operation ": unit " unit.id " has no primary source file"))
+        (assert (= source-id primary-basename)
+                (.. operation ": flat unit " unit.id " only accepts source_id " primary-basename))
+        (get-primary-source-path unit))))
+
+(fn validate-fnl-source [path source]
+  (when (path-has-fnl-extension? path)
+    (local fennel (require :fennel))
+    (local (compile-ok compile-err) (pcall fennel.compile-string source
+                                           {:filename path}))
+    (assert compile-ok (.. "source does not compile: " (tostring compile-err)))))
 
 ;; ── Handle construction ──
 
@@ -197,10 +276,170 @@
         (table.remove candidates)))
     {:candidates candidates})
 
+  ;; ── Task 2: Source read, patch, create, and reload ──
+
+  (fn read-source [_ args]
+    (local unit-id (or args.unit_id (error "read-source requires :unit_id")))
+    (local source-id (or args.source_id (error "read-source requires :source_id")))
+    (local unit (mgr:get unit-id))
+    (assert unit (.. "unit not found: " unit-id))
+    (local target-path (resolve-source-path unit source-id "read-source"))
+    (assert (fs.exists target-path)
+            (.. "read-source: source file not found: " source-id))
+    (local content (fs.read-file target-path))
+    {:unit-id unit.id
+     :source-id source-id
+     :content content
+     :hash (hash-file target-path)})
+
+  (fn apply-patch [_ args]
+    (local unit-id (or args.unit_id (error "apply-patch requires :unit_id")))
+    (local source-id (or args.source_id (error "apply-patch requires :source_id")))
+    (local unit (mgr:get unit-id))
+    (assert unit (.. "unit not found: " unit-id))
+    (assert-filesystem-unit unit "apply-patch")
+    (local target-path (resolve-source-path unit source-id "apply-patch"))
+    (assert (fs.exists target-path)
+            (.. "apply-patch: source file not found: " source-id))
+
+    ;; Stale-content protection via expected_hash
+    (when args.expected_hash
+      (local current-hash (hash-file target-path))
+      (assert (= current-hash args.expected_hash)
+              (.. "apply-patch rejected: expected hash " args.expected_hash
+                  " but current hash is " current-hash)))
+
+    ;; Save original content for rollback
+    (local old-source (fs.read-file target-path))
+
+    ;; Determine patch mode: unified diff or exact replacement
+    (local has-patch (not= args.patch nil))
+    (local has-old (not= args.old nil))
+    (local has-new (not= args.new nil))
+    (assert (not (and has-patch (or has-old has-new)))
+            "apply-patch: provide either :patch or :old/:new, not both")
+    (assert (or has-patch (and has-old has-new))
+            "apply-patch: provide either :patch or both :old and :new")
+    (assert (or has-patch (= has-old has-new))
+            "apply-patch: both :old and :new are required for exact replacement")
+
+    (if has-patch
+        ;; Unified diff patch mode
+        (do
+          (assert (= (type args.patch) "string") "apply-patch :patch must be a string")
+          (local ApplyPatch (require :llm/tools/apply-patch))
+          (local root (or (get-unit-root-dir unit) (fs.parent target-path)))
+          (local (patch-ok patch-err)
+            (pcall ApplyPatch.call
+                   {:path source-id :patch args.patch :allow_create false}
+                   {:cwd root}))
+          (when (not patch-ok)
+            ;; Restore original source on patch failure
+            (pcall fs.write-file target-path old-source)
+            (error (.. "apply-patch failed, source restored: " (tostring patch-err))))
+          ;; Validate the result and reload; restore on failure
+          (local (validate-ok validate-err)
+            (pcall (fn []
+                     (local current-source (fs.read-file target-path))
+                     (validate-fnl-source target-path current-source)
+                     (mgr:reload-unit unit-id {}))))
+          (if validate-ok
+              {:unit-id unit.id
+               :source-id source-id
+               :reloaded true
+               :hash (hash-file target-path)}
+              (do
+                ;; Rollback: restore old source
+                (pcall fs.write-file target-path old-source)
+                ;; Attempt recovery reload with old source
+                (pcall #(mgr:reload-unit unit-id {}))
+                (error (.. "apply-patch reload failed, source restored: " (tostring validate-err))))))
+        ;; Exact replacement mode
+        (do
+          (assert (= (type args.old) "string") "apply-patch :old must be a string")
+          (assert (= (type args.new) "string") "apply-patch :new must be a string")
+          (assert (> (# args.old) 0) "apply-patch :old must not be empty")
+          (local (start-pos end-pos) (string.find old-source args.old 1 true))
+          (assert start-pos "apply-patch: :old text was not found in source")
+          (local (next-pos) (string.find old-source args.old (+ end-pos 1) true))
+          (assert (not next-pos) "apply-patch: :old text matched more than once")
+          (local new-source (.. (string.sub old-source 1 (- start-pos 1))
+                                args.new
+                                (string.sub old-source (+ end-pos 1))))
+          ;; Validate Fennel source before writing
+          (validate-fnl-source target-path new-source)
+          ;; Write the new source
+          (local (write-ok write-err) (pcall fs.write-file target-path new-source))
+          (when (not write-ok)
+            (error (.. "apply-patch failed to write: " (tostring write-err))))
+          ;; Reload the unit; on failure, restore old source and re-raise
+          (local (reload-ok reload-err) (pcall #(mgr:reload-unit unit-id {})))
+          (if reload-ok
+              {:unit-id unit.id
+               :source-id source-id
+               :reloaded true
+               :hash (hash-file target-path)}
+              (do
+                ;; Rollback: restore old source
+                (pcall fs.write-file target-path old-source)
+                ;; Attempt recovery reload with old source
+                (pcall #(mgr:reload-unit unit-id {}))
+                (error (.. "apply-patch reload failed, source restored: " (tostring reload-err))))))))
+
+  (fn create-source [_ args]
+    (local unit-id (or args.unit_id (error "create-source requires :unit_id")))
+    (local source-id (or args.source_id (error "create-source requires :source_id")))
+    (local source (or args.source (error "create-source requires :source")))
+    (assert (= (type source) "string") "create-source :source must be a string")
+    (local unit (mgr:get unit-id))
+    (assert unit (.. "unit not found: " unit-id))
+    (assert-directory-unit unit "create-source")
+    (validate-source-id source-id "create-source")
+    (local root (get-unit-root-dir unit))
+    (local target-path (fs.join-path root source-id))
+    ;; Check file does not already exist if expected_absent is true
+    (when args.expected_absent
+      (assert (not (fs.exists target-path))
+              (.. "create-source: file already exists: " source-id)))
+    ;; Validate Fennel source before creating
+    (validate-fnl-source target-path source)
+    ;; Create parent directories if needed
+    (local parent-dir (fs.parent target-path))
+    (when (and parent-dir (not (fs.exists parent-dir)))
+      (fs.create-dirs parent-dir))
+    ;; Write the new file
+    (local (write-ok write-err) (pcall fs.write-file target-path source))
+    (when (not write-ok)
+      (error (.. "create-source failed to write: " (tostring write-err))))
+    ;; Reload the unit; on failure, remove new file and re-raise
+    (local (reload-ok reload-err) (pcall #(mgr:reload-unit unit-id {})))
+    (if reload-ok
+        {:unit-id unit.id
+         :source-id source-id
+         :created true
+         :reloaded true
+         :hash (hash-file target-path)}
+        (do
+          ;; Rollback: remove the newly created file
+          (pcall fs.remove-all target-path)
+          (error (.. "create-source reload failed, new file removed: " (tostring reload-err))))))
+
+  (fn reload [_ args]
+    (local unit-id (or args.unit_id (error "reload requires :unit_id")))
+    (local unit (mgr:get unit-id))
+    (assert unit (.. "unit not found: " unit-id))
+    (mgr:reload-unit unit-id {})
+    {:unit-id unit.id
+     :reloaded true})
+
   (set self.unit-handle unit-handle)
   (set self.list list)
   (set self.inspect inspect)
   (set self.resolve resolve)
+  (set self.read-source read-source)
+  (set self.apply-patch apply-patch)
+  (set self.create-source create-source)
+  (set self.reload reload)
 
   self)
 

@@ -390,6 +390,230 @@
 (table.insert tests {:name "external-unit-mcp: source artifacts have sha256: prefix"
                      :fn test-source-artifacts-have-sha256-prefix})
 
+;; ── Task 2: Source Read, Patch, Create, and Reload ──
+
+(fn test-read-source-returns-content-and-hash []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local result (service:read-source {:unit_id "user-bubble-overlay"
+                                               :source_id "bubble-overlay.fnl"}))
+          (assert result.unit-id "read-source missing unit_id")
+          (assert (= result.unit-id "user-bubble-overlay") "unit_id mismatch")
+          (assert result.source-id "read-source missing source_id")
+          (assert (= result.source-id "bubble-overlay.fnl") "source_id mismatch")
+          (assert result.content "read-source missing content")
+          (assert (= (type result.content) "string") "content should be a string")
+          (assert (> (# result.content) 0) "content should not be empty")
+          (assert result.hash "read-source missing hash")
+          (assert (= (string.sub result.hash 1 7) "sha256:")
+                  "hash should be sha256: prefixed")
+          (assert (> (# result.hash) 7) "hash should contain digest"))))))
+
+(table.insert tests {:name "external-unit-mcp: read-source returns content and hash"
+                     :fn test-read-source-returns-content-and-hash})
+
+(fn test-apply-patch-exact-replacement-reloads-unit []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local original-content (fs.read-file bubble-path))
+          ;; Perform an exact text replacement
+          (local old-text "(fn init [] (set app.__bubble-loaded true) true)")
+          (local new-text "(fn init [] (set app.__bubble-loaded true) 42)")
+          (local result (service:apply-patch
+                          {:unit_id "user-bubble-overlay"
+                           :source_id "bubble-overlay.fnl"
+                           :old old-text
+                           :new new-text}))
+          (assert result.unit-id "apply-patch missing unit_id")
+          (assert result.source-id "apply-patch missing source_id")
+          (assert result.reloaded "apply-patch should report reloaded")
+          (assert (= result.reloaded true) "reloaded should be true")
+          (assert result.hash "apply-patch missing hash")
+          (assert (= (string.sub result.hash 1 7) "sha256:") "hash should be sha256: prefixed")
+          ;; Verify the file was actually changed
+          (local updated-content (fs.read-file bubble-path))
+          (assert (not= updated-content original-content) "file should be changed")
+          (assert (string.find updated-content "42" 1 true)
+                  "file should contain the new text"))))))
+
+(table.insert tests {:name "external-unit-mcp: apply-patch exact replacement reloads unit"
+                     :fn test-apply-patch-exact-replacement-reloads-unit})
+
+(fn test-apply-patch-rejects-stale-expected-hash []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local original-content (fs.read-file bubble-path))
+          (local (ok err) (pcall #(service:apply-patch
+                                    {:unit_id "user-bubble-overlay"
+                                     :source_id "bubble-overlay.fnl"
+                                     :old "(fn init [] (set app.__bubble-loaded true) true)"
+                                     :new "(fn init [] (set app.__bubble-loaded true) 42)"
+                                     :expected_hash "sha256:0000000000000000000000000000000000000000000000000000000000000000"})))
+          (assert (not ok) "should reject stale expected hash")
+          (assert (string.find err "hash" 1 true)
+                  "error should mention hash")
+          ;; Verify the file was NOT changed
+          (local current-content (fs.read-file bubble-path))
+          (assert (= current-content original-content) "file should remain unchanged"))))))
+
+(table.insert tests {:name "external-unit-mcp: apply-patch rejects stale expected hash"
+                     :fn test-apply-patch-rejects-stale-expected-hash})
+
+(fn test-apply-patch-unified-diff-reloads-unit []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local original-content (fs.read-file bubble-path))
+          ;; Construct a unified diff patch that appends :version 2 to the module table
+          (local patch-text
+            (.. "*** Begin Patch\n"
+                "*** Update File: bubble-overlay.fnl\n"
+                "@@ -4,2 +4,2 @@\n"
+                " (fn restore [state] (set app.__restored state) true)\n"
+                "-{:init init :drop drop :snapshot snapshot :restore restore}\n"
+                "+{:init init :drop drop :snapshot snapshot :restore restore :version 2}\n"
+                "*** End Patch\n"))
+          (local result (service:apply-patch
+                          {:unit_id "user-bubble-overlay"
+                           :source_id "bubble-overlay.fnl"
+                           :patch patch-text}))
+          (assert result.unit-id "apply-patch missing unit_id")
+          (assert result.source-id "apply-patch missing source_id")
+          (assert result.reloaded "apply-patch should report reloaded")
+          (assert (= result.reloaded true) "reloaded should be true")
+          (assert result.hash "apply-patch missing hash")
+          ;; Verify the file was actually changed
+          (local updated-content (fs.read-file bubble-path))
+          (assert (not= updated-content original-content) "file should be changed")
+          (assert (string.find updated-content ":version 2" 1 true)
+                  "file should contain :version 2"))))))
+
+(table.insert tests {:name "external-unit-mcp: apply-patch unified diff reloads unit"
+                     :fn test-apply-patch-unified-diff-reloads-unit})
+
+(fn test-create-source-creates-directory-unit-artifact-and-reloads []
+  (with-temp-dir
+    (fn [dir]
+      (local unit-dir (fs.join-path dir "dir-unit"))
+      (fs.create-dirs unit-dir)
+      (local init-path (fs.join-path unit-dir "init.fnl"))
+      (fs.write-file init-path
+        (.. "(fn init [] true)\n"
+            "(fn drop [] true)\n"
+            "{:init init :drop drop}"))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;" dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-dir-unit"
+                         :module-name "dir-unit"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [unit-dir init-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local new-source "(fn helper [] \"hello\")\n{:helper helper}")
+          (local result (service:create-source
+                          {:unit_id "user-dir-unit"
+                           :source_id "helper.fnl"
+                           :source new-source
+                           :expected_absent true}))
+          (assert result.unit-id "create-source missing unit_id")
+          (assert (= result.unit-id "user-dir-unit") "unit_id mismatch")
+          (assert result.source-id "create-source missing source_id")
+          (assert (= result.source-id "helper.fnl") "source_id mismatch")
+          (assert result.created "create-source should report created")
+          (assert result.reloaded "create-source should report reloaded")
+          (assert (= result.reloaded true) "reloaded should be true")
+          (assert result.hash "create-source missing hash")
+          (assert (= (string.sub result.hash 1 7) "sha256:") "hash should be sha256: prefixed")
+          ;; Verify the file exists and has correct content
+          (local new-path (fs.join-path unit-dir "helper.fnl"))
+          (assert (fs.exists new-path) "new file should exist")
+          (assert (= (fs.read-file new-path) new-source) "file content should match"))))))
+
+(table.insert tests {:name "external-unit-mcp: create-source creates directory-unit artifact and reloads"
+                     :fn test-create-source-creates-directory-unit-artifact-and-reloads})
+
+(fn test-create-source-fails-for-flat-unit []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local (ok err) (pcall #(service:create-source
+                                    {:unit_id "user-bubble-overlay"
+                                     :source_id "new-file.fnl"
+                                     :source "(fn init [] true)\n(fn drop [] true)\n{:init init :drop drop}"})))
+          (assert (not ok) "should reject create for flat unit")
+          (assert (string.find (or err "") "create" 1 true)
+                  "error should mention create"))))))
+
+(table.insert tests {:name "external-unit-mcp: create-source fails loudly for flat unit without create capability"
+                     :fn test-create-source-fails-for-flat-unit})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
