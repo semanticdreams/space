@@ -4,6 +4,7 @@
 (local tests [])
 (local fs (require :fs))
 (local fennel (require :fennel))
+(local logging (require :logging))
 (local Units (require :units))
 (local UnitManager (require :unit-manager))
 (local tempfile (require :tempfile))
@@ -1224,11 +1225,20 @@
         (fn [_mgr service]
           (local registry (ExternalUnitMcpTools.make-tool-registry {:app {}}))
           (ExternalUnitMcpTools.register-tools registry service)
-          ;; Calling create-source on a flat unit should error
+          ;; Calling create-source on a flat unit should error.
+          ;; Temporarily stub logging.error to capture the expected failure
+          ;; without polluting test output.
+          (local orig-error logging.error)
+          (local captured-errors [])
+          (set logging.error (fn [msg] (table.insert captured-errors msg)))
           (local result (registry:call "space_unit_create_source"
                                         {:unit_id "user-bubble-overlay"
                                          :source_id "new.fnl"
                                          :source "(fn init [] true)\n(fn drop [] true)\n{:init init :drop drop}"}))
+          (set logging.error orig-error)
+          (assert (= (# captured-errors) 1) "expected one tool error to be captured")
+          (assert (string.find (. captured-errors 1) "create-source" 1 true)
+                  "captured error should mention create-source")
           (assert (= result.isError true) "write tool on unsupported loader should return isError == true")
           (assert (= (length result.content) 1) "error should have one content item")
           (assert (= (. result.content 1 :type) "text") "error content should be text")
