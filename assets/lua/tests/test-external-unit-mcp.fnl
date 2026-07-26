@@ -784,6 +784,118 @@
 (table.insert tests {:name "external-unit-mcp: create-source rejects symlinked ancestor directory"
                      :fn test-create-source-rejects-symlinked-ancestor})
 
+;; ── Task 3: External Unit Test, Log, and Snapshot Operations ──
+
+(fn test-snapshot-returns-unit-state-with-capability-metadata []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]
+                                :snapshot-export "snapshot"}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local result (service:snapshot {:unit_id "user-bubble-overlay"}))
+          (assert result.unit-id "snapshot missing unit-id")
+          (assert (= result.unit-id "user-bubble-overlay") "unit-id mismatch")
+          (assert (= result.supported true) "snapshot should be supported")
+          (assert (not= result.state nil) "snapshot state should not be nil for unit with snapshot export")
+          ;; The bubble unit's snapshot returns whether bubble was loaded
+          (assert (= (type result.state) "boolean")
+                  (.. "state should be boolean, got " (type result.state))))))))
+
+(table.insert tests {:name "external-unit-mcp: snapshot returns unit state with capability metadata"
+                     :fn test-snapshot-returns-unit-state-with-capability-metadata})
+
+(fn test-read-log-returns-filtered-recent-lines []
+  ;; read-log should work against the current application log file.
+  ;; It returns structured lines, total-lines, and log-path.
+  (with-temp-dir
+    (fn [dir]
+      (with-service dir
+        (fn [mgr _dir] nil)  ;; no units needed
+        (fn [_mgr service]
+          (local logging (require :logging))
+          ;; Write a distinctive log marker so we can find it
+          (logging.info "TEST-MARKER-READ-LOG: hello from external-unit-mcp test")
+          (logging.flush)
+          (local result (service:read-log {:lines 50}))
+          (assert result.lines "read-log missing lines")
+          (assert (= (type result.lines) "table") "lines should be a table")
+          (assert result.total-lines "read-log missing total-lines")
+          (assert (= (type result.total-lines) "number") "total-lines should be a number")
+          (assert (>= result.total-lines 0) "total-lines should be non-negative")
+          (assert result.log-path "read-log missing log-path")
+          (assert (= (type result.log-path) "string") "log-path should be a string")
+          ;; Verify grep filtering
+          (local grep-result (service:read-log {:lines 200 :grep "TEST-MARKER-READ-LOG"}))
+          (assert (> (length grep-result.lines) 0)
+                  "grep should find the marker line")
+          (each [_ line (ipairs grep-result.lines)]
+            (assert (string.find line "TEST-MARKER-READ-LOG" 1 true)
+                    (.. "grep-filtered line should contain marker: " line))))))))
+
+(table.insert tests {:name "external-unit-mcp: read-log returns filtered recent lines"
+                     :fn test-read-log-returns-filtered-recent-lines})
+
+(fn test-run-tests-executes-unit-test-module []
+  (with-temp-dir
+    (fn [dir]
+      ;; Create a directory-based unit with a test module
+      (local unit-dir (fs.join-path dir "run-tests-unit"))
+      (fs.create-dirs unit-dir)
+      (local init-path (fs.join-path unit-dir "init.fnl"))
+      (fs.write-file init-path
+        (.. "(fn init [] true)\n"
+            "(fn drop [] true)\n"
+            "{:init init :drop drop}"))
+      ;; Create the test module: run-tests-unit/test-init.fnl
+      (local test-dir (fs.join-path unit-dir "run-tests-unit"))
+      (fs.create-dirs test-dir)
+      (local test-path (fs.join-path test-dir "test-init.fnl"))
+      (fs.write-file test-path
+        (.. "(fn main []\n"
+            "  (print \"ALL TESTS PASSED\")\n"
+            "  (print \"1/1 passing\"))\n"
+            "(fn tests [])\n"
+            "{:main main :tests tests}"))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;"
+                                  dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-run-tests-unit"
+                         :module-name "run-tests-unit"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [unit-dir init-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local result (service:run-tests {:unit_id "user-run-tests-unit"
+                                             :test_name "init"}))
+          (assert (= result.passed true) "tests should pass")
+          (assert (= result.exit-code 0)
+                  (.. "exit-code should be 0, got " result.exit-code
+                      " stdout: " (or result.stdout "")
+                      " stderr: " (or result.stderr "")))
+          (assert result.stdout "run-tests missing stdout")
+          (assert (or (string.find result.stdout "PASS" 1 true)
+                      (string.find result.stdout "passing" 1 true)
+                      (string.find result.stdout "ALL TESTS" 1 true))
+                  (.. "stdout should contain success indicator: " result.stdout)))))))
+
+(table.insert tests {:name "external-unit-mcp: run-tests executes unit test module"
+                     :fn test-run-tests-executes-unit-test-module})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

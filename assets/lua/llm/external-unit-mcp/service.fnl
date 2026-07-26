@@ -460,6 +460,123 @@
     {:unit-id unit.id
      :reloaded true})
 
+  ;; ── Task 3: External Unit Test, Log, and Snapshot Operations ──
+
+  (fn get-unit-fennel-root [unit]
+    ;; Return the directory that serves as the Fennel path base for this unit.
+    ;; For directory units, this is the unit directory itself.
+    ;; For flat units, this is the parent directory of the primary source file.
+    (local paths (or unit.owned-paths []))
+    (var root nil)
+    (each [_ path (ipairs paths) &until root]
+      (when (and path (fs.exists path))
+        (local st (fs.stat path))
+        (if (and st st.is-dir)
+            (set root path)
+            (set root (fs.parent path)))))
+    root)
+
+  (fn run-tests [self args]
+    (local unit-id (or args.unit_id (error "run-tests requires :unit_id")))
+    (local unit (mgr:get unit-id))
+    (assert unit (.. "unit not found: " unit-id))
+    (assert (not (= unit.source :builtin))
+            "run-tests: cannot run tests for built-in unit")
+    (local test-name (or args.test_name "init"))
+    (local name (or unit.module-name unit.id))
+    (local test-module (.. name ".test-" test-name))
+    (local Process (require :process))
+    (local runtime (require :runtime))
+    (local fs (require :fs))
+    (local assets-path (or (os.getenv "SPACE_ASSETS_PATH") runtime.assets-path))
+    ;; Resolve the space binary
+    (local space-bin
+      (if (os.getenv "SPACE_BIN")
+          (os.getenv "SPACE_BIN")
+          (let [cwd (fs.cwd)
+                base-candidates [(fs.join-path cwd "build" "space")
+                                 (fs.join-path cwd "build" "dist" "windows" "space")
+                                 (fs.join-path cwd "space")
+                                 (fs.join-path cwd ".." "build" "space")]]
+            (var resolved nil)
+            (each [_ candidate (ipairs base-candidates) &until resolved]
+              (when (fs.exists candidate)
+                (set resolved candidate))
+              (when (and (not resolved) (fs.exists (.. candidate ".exe")))
+                (set resolved (.. candidate ".exe"))))
+            (assert resolved
+                    (.. "run-tests: could not locate space binary from cwd " cwd))
+            resolved)))
+    ;; Build Fennel paths from the unit's directory, falling back to app.code-dir
+    (local unit-root (or (get-unit-fennel-root unit)
+                         (and app app.code-dir)))
+    (local unit-fennel-path
+      (if unit-root
+          (.. (fs.join-path unit-root "?" "init.fnl")
+              ";" (fs.join-path unit-root "?.fnl"))
+          ""))
+    (local fennel-path
+      (if (> (# unit-fennel-path) 0)
+          (.. unit-fennel-path ";" runtime.fennel-path)
+          runtime.fennel-path))
+    (local result (Process.run
+                    {:args [space-bin "-m" (.. test-module ":main")]
+                     :env {:FENNEL_PATH fennel-path
+                           :FENNEL_MACRO_PATH fennel-path
+                           :SPACE_ASSETS_PATH assets-path
+                           :SPACE_DISABLE_AUDIO "1"}
+                     :timeout 30}))
+    {:passed (= result.exit-code 0)
+     :exit-code result.exit-code
+     :stdout (or result.stdout "")
+     :stderr result.stderr})
+
+  (fn read-log [self args]
+    (local logging (require :logging))
+    (local log-path (logging.get-output-path))
+    (local fs (require :fs))
+    (when (not (fs.exists log-path))
+      (error (.. "read-log: log file not found: " log-path)))
+    (var content (fs.read-file log-path))
+    (when (or (not content) (= content ""))
+      (error "read-log: log file is empty"))
+    (local all-lines [])
+    (each [line (_G.string.gmatch content "([^\n]*)\n?")]
+      (table.insert all-lines line))
+    (local total-count (# all-lines))
+    (when (= total-count 0)
+      (error "read-log: log file is empty"))
+    ;; Drop trailing empty string from final \n
+    (when (and (> (# all-lines) 0) (= (. all-lines (# all-lines)) ""))
+      (table.remove all-lines))
+    (local grep (and args.grep (> (# args.grep) 0) args.grep))
+    (var result-lines [])
+    (var i (or args.offset 1))
+    (var remaining (or args.limit (or (and args.offset 200) (or args.lines 100))))
+    (when (< i 1) (set i 1))
+    (when args.lines
+      (set i (math.max 1 (- (# all-lines) args.lines -1))))
+    (while (and (<= i (# all-lines)) (> remaining 0))
+      (local line (. all-lines i))
+      (when (or (not grep) (string.find line grep 1 true))
+        (table.insert result-lines (.. i ": " line))
+        (set remaining (- remaining 1)))
+      (set i (+ i 1)))
+    {:lines result-lines
+     :total-lines total-count
+     :log-path log-path})
+
+  (fn snapshot [self args]
+    (local unit-id (or args.unit_id (error "snapshot requires :unit_id")))
+    (local unit (mgr:get unit-id))
+    (assert unit (.. "unit not found: " unit-id))
+    (local (ok state) (pcall #(unit:snapshot {})))
+    (if ok
+        {:unit-id unit.id
+         :supported true
+         :state state}
+        (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))
+
   (set self.unit-handle unit-handle)
   (set self.list list)
   (set self.inspect inspect)
@@ -468,6 +585,9 @@
   (set self.apply-patch apply-patch)
   (set self.create-source create-source)
   (set self.reload reload)
+  (set self.run-tests run-tests)
+  (set self.read-log read-log)
+  (set self.snapshot snapshot)
 
   self)
 
