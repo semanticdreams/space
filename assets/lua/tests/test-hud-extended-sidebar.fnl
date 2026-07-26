@@ -12,6 +12,8 @@
 (local Button (require :button))
 (local MathUtils (require :math-utils))
 (local approx (. MathUtils :approx))
+(local Stack (require :stack))
+(local Rectangle (require :rectangle))
 
 (local tests [])
 
@@ -40,6 +42,52 @@
                  :hoverables hoverables
                  :icons (make-icons-stub)
                  :theme (make-test-theme)}))
+
+(fn vec4-approx [a b]
+  (and (approx a.x b.x)
+       (approx a.y b.y)
+       (approx a.z b.z)
+       (approx a.w b.w)))
+
+(fn make-spy-quad-batcher []
+  (var entries {})
+  (var active-count 0)
+  {   :upsert-quad (fn [self key opts]
+                  (when (not (. entries key))
+                    (set active-count (+ active-count 1)))
+                  (set (. entries key) {:color (or (and opts opts.color) (glm.vec4 0 0 0 0))})
+                  nil)
+   :remove-quad (fn [self key]
+                  (when (. entries key)
+                    (set active-count (- active-count 1))
+                    (set (. entries key) nil))
+                  nil)
+   :color-active? (fn [self color]
+                    (each [_ entry (pairs entries)]
+                      (when (and entry entry.color (vec4-approx entry.color color))
+                        (lua "return true")))
+                    false)
+   :get-instance-count (fn [self] active-count)
+   :begin-frame (fn [self]) :end-frame (fn [self])
+   :clear (fn [self] (set entries {}) (set active-count 0))
+   :get-vector (fn [self] nil) :get-batches (fn [self] [])
+   :get-clip-vector (fn [self] nil) :get-clip-group-vector (fn [self] nil)
+   :drop (fn [self])})
+
+(fn make-widget-ctx-with-spy []
+  (local ctx (make-widget-ctx))
+  (local spy (make-spy-quad-batcher))
+  (set ctx.get-rectangle-quad-batcher (fn [_] spy))
+  (values ctx spy))
+
+(fn make-rect-panel [color]
+  (fn [ctx]
+    (local entity
+      ((Stack {:children [(fn [inner-ctx]
+                            ((Rectangle {:color color}) inner-ctx))]})
+       ctx))
+    {:layout entity.layout
+     :drop (fn [self] (entity:drop))}))
 
 (fn make-test-panel [name size]
   (var dropped? false)
@@ -670,6 +718,76 @@
           "expanded panel width should remain fixed at 38 HUD units")
   (entity:drop))
 
+(fn view-collapse-removes-panel-render-resources []
+  (local sidebar (HudExtendedSidebar))
+  (local panel-color (glm.vec4 0.9 0.1 0.1 1.0))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (make-rect-panel panel-color)})
+  (local (ctx spy) (make-widget-ctx-with-spy))
+  (sidebar:select :test)
+  (local view (HudExtendedSidebarView sidebar))
+  (local entity (view ctx))
+  (entity:update)
+  (entity:update)
+  ;; Run a full measure + layout pass so the panel Rectangle writes to the batcher.
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.size (glm.vec3 200 100 0))
+  (entity.layout:layouter)
+  (assert (spy:color-active? panel-color)
+          "panel Rectangle should be in batcher after expand and layout")
+  ;; Collapse.
+  (sidebar:toggle)
+  (entity:update)
+  (entity:update)
+  (entity.layout:measurer)
+  (entity.layout:layouter)
+  (assert (not (spy:color-active? panel-color))
+          "panel Rectangle should be removed from batcher after collapse")
+  (entity:drop))
+
+(fn view-switch-removes-previous-panel-render-resources []
+  (local sidebar (HudExtendedSidebar))
+  (local color-a (glm.vec4 0.9 0.1 0.1 1.0))
+  (local color-b (glm.vec4 0.1 0.9 0.1 1.0))
+  (sidebar:register-entry {:id :a
+                            :icon :icon_a
+                            :label "A"
+                            :build-panel (make-rect-panel color-a)})
+  (sidebar:register-entry {:id :b
+                            :icon :icon_b
+                            :label "B"
+                            :build-panel (make-rect-panel color-b)})
+  (local (ctx spy) (make-widget-ctx-with-spy))
+  (sidebar:select :a)
+  (local view (HudExtendedSidebarView sidebar))
+  (local entity (view ctx))
+  (entity:update)
+  (entity:update)
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.size (glm.vec3 200 100 0))
+  (entity.layout:layouter)
+  (assert (spy:color-active? color-a)
+          "panel A Rectangle should be in batcher")
+  (assert (not (spy:color-active? color-b))
+          "panel B Rectangle should NOT be in batcher yet")
+  ;; Switch to B.
+  (sidebar:select :b)
+  (entity:update)
+  (entity:update)
+  (entity.layout:measurer)
+  (entity.layout:layouter)
+  (assert (not (spy:color-active? color-a))
+          "panel A Rectangle should be removed from batcher after switch")
+  (assert (spy:color-active? color-b)
+          "panel B Rectangle should be in batcher after switch")
+  (entity:drop))
+
 (table.insert tests {:name "hud capture-restore pending sidebar state" :fn hud-capture-restore-pending-sidebar-state})
 (table.insert tests {:name "hud pending retained on active-id mismatch" :fn hud-capture-restore-pending-retained-on-mismatch})
 (table.insert tests {:name "view rail button matches activity button metrics"
@@ -680,6 +798,10 @@
                      :fn view-expanded-width-equals-panel-plus-measured-rail-width})
 (table.insert tests {:name "view expanded layout anchors rail to right edge"
                      :fn view-expanded-layout-anchors-rail-to-right-edge})
+(table.insert tests {:name "view collapse removes panel render resources"
+                     :fn view-collapse-removes-panel-render-resources})
+(table.insert tests {:name "view switch removes previous panel render resources"
+                     :fn view-switch-removes-previous-panel-render-resources})
 
 (local main
   (fn []
