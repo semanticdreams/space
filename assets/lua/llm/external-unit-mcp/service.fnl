@@ -578,18 +578,27 @@
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
     ;; Call unit:snapshot to detect actual snapshot support.
-    ;; A nil return means there is no real snapshot implementation
+    ;; A nil state means there is no real snapshot implementation
     ;; (noop-snapshot default or missing optional export).
-    ;; A non-nil return means an actual snapshot implementation produced state.
-    ;; Errors from a real implementation are propagated as unexpected failures.
+    ;; A non-nil state means an actual snapshot implementation produced data.
+    ;; If the call throws, we inspect the loaded module to distinguish
+    ;; "missing export" (no capability) from a runtime error in a real
+    ;; snapshot function (unexpected failure that must propagate).
     (local (ok state) (pcall #(unit:snapshot {})))
     (if (not ok)
-        ;; Distinguish "missing function" (no capability) from unexpected errors.
-        (if (string.find (tostring state) "missing function" 1 true)
-            {:unit-id unit.id
-             :supported false
-             :state nil}
-            (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state))))
+        ;; Check structurally: did the export function exist on the module?
+        (let [export-name unit.snapshot-export
+              module-name unit.module-name
+              loaded-module (and module-name (. package.loaded module-name))
+              export-fn (and loaded-module export-name (. loaded-module export-name))]
+          (if (and export-name loaded-module (not= (type export-fn) "function"))
+              ;; Module loaded but export function does not exist — missing capability
+              {:unit-id unit.id
+               :supported false
+               :state nil}
+              ;; Export function exists and threw, or we cannot determine —
+              ;; propagate as an unexpected error
+              (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))
         (= state nil)
         {:unit-id unit.id
          :supported false

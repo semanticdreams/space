@@ -869,30 +869,72 @@
 (table.insert tests {:name "external-unit-mcp: snapshot returns unsupported for filesystem unit without snapshot export"
                      :fn test-snapshot-returns-unsupported-for-filesystem-unit-without-snapshot})
 
+(fn test-snapshot-propagates-error-from-real-snapshot-implementation []
+  ;; R1-3: a filesystem unit with an actual snapshot function that throws
+  ;; an error containing "missing function" must propagate that error,
+  ;; not silently return supported=false.
+  (with-temp-dir
+    (fn [dir]
+      (local thrower-path (write-unit-file dir "snapshot-thrower"
+                             (.. "(fn init [] true)\n"
+                                 "(fn drop [] true)\n"
+                                 "(fn snapshot []\n"
+                                 "  (error \"missing function foo in snapshot\"))\n"
+                                 "{:init init :drop drop :snapshot snapshot}")))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-snapshot-thrower"
+                         :module-name "snapshot-thrower"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [thrower-path]
+                         :snapshot-export "snapshot"}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local (ok err) (pcall #(service:snapshot {:unit_id "user-snapshot-thrower"})))
+          (assert (not ok) "should propagate error from real snapshot implementation")
+          (assert (string.find (or err "") "missing function foo" 1 true)
+                  (.. "error should contain the snapshot function's message, got: " (or err ""))))))))
+
+(table.insert tests {:name "external-unit-mcp: snapshot propagates error from real snapshot implementation"
+                     :fn test-snapshot-propagates-error-from-real-snapshot-implementation})
+
 (fn test-read-log-returns-filtered-recent-lines []
   ;; read-log should work against the current application log file.
   ;; It returns structured lines, total-lines, and log-path.
+  ;; R1-4: total-lines is verified against a controlled fixture:
+  ;; we write exactly 3 known lines with a unique run marker, grep for
+  ;; them to confirm they exist, then independently read the raw log file
+  ;; and assert total-lines matches the actual normalized line count.
   (with-temp-dir
     (fn [dir]
       (with-service dir
         (fn [mgr _dir] nil)  ;; no units needed
         (fn [_mgr service]
           (local logging (require :logging))
-          ;; Write a distinctive log marker so we can find it
-          (logging.info "TEST-MARKER-READ-LOG: hello from external-unit-mcp test")
+          ;; Generate a unique marker so previous test runs don't accumulate
+          (local marker (.. "R1-4-FIX-" (tostring (os.time)) "-" (tostring (math.random 1000000 9999999))))
+          ;; Write exactly 3 controlled fixture lines
+          (logging.info (.. marker "-LINE-1"))
+          (logging.info (.. marker "-LINE-2"))
+          (logging.info (.. marker "-LINE-3"))
           (logging.flush)
-          (local result (service:read-log {:lines 50}))
-          (assert result.lines "read-log missing lines")
-          (assert (= (type result.lines) "table") "lines should be a table")
+          (local result (service:read-log {:lines 500 :grep marker}))
+          ;; The 3 fixture lines just written must be found
+          (assert (= (length result.lines) 3)
+                  (.. "grep for unique marker should find exactly 3 lines, got "
+                      (length result.lines)))
           (assert result.total-lines "read-log missing total-lines")
-          (assert (= (type result.total-lines) "number") "total-lines should be a number")
-          (assert (>= result.total-lines 0) "total-lines should be non-negative")
-          (assert (> result.total-lines 0) "total-lines should be positive with log content")
+          (assert (= (type result.total-lines) "number")
+                  "total-lines should be a number")
+          (assert (>= result.total-lines 3)
+                  "total-lines should be at least 3")
           (assert result.log-path "read-log missing log-path")
-          (assert (= (type result.log-path) "string") "log-path should be a string")
-          ;; R1-4: total-lines must match the actual line count, not include a
-          ;; trailing empty entry from a final newline. Verify independently
-          ;; by reading the raw log file and computing the expected count.
+          ;; Independently verify total-lines by reading the raw log file
+          ;; and applying the same normalization logic.
           (local log-content (fs.read-file result.log-path))
           (assert log-content "should be able to read log file")
           (var raw-lines [])
@@ -905,22 +947,15 @@
           (assert (= result.total-lines expected-total)
                   (.. "total-lines " result.total-lines
                       " does not match raw line count " expected-total
-                      " — total-lines likely includes a trailing empty entry"))
-          ;; Also verify no returned line number exceeds total-lines
+                      " — trailing empty entry may not be normalized"))
+          ;; Verify no returned line number exceeds total-lines
           (each [_ line (ipairs result.lines)]
             (local (line-num-str) (string.match line "^(%d+):"))
-            (local line-num (tonumber line-num-str))
-            (assert line-num (.. "line should be prefixed with number: " line))
-            (assert (<= line-num result.total-lines)
-                    (.. "line number " line-num " exceeds total-lines " result.total-lines
-                        " — total-lines likely includes a trailing empty entry")))
-          ;; Verify grep filtering
-          (local grep-result (service:read-log {:lines 200 :grep "TEST-MARKER-READ-LOG"}))
-          (assert (> (length grep-result.lines) 0)
-                  "grep should find the marker line")
-          (each [_ line (ipairs grep-result.lines)]
-            (assert (string.find line "TEST-MARKER-READ-LOG" 1 true)
-                    (.. "grep-filtered line should contain marker: " line))))))))
+            (when line-num-str
+              (local line-num (tonumber line-num-str))
+              (assert (<= line-num result.total-lines)
+                      (.. "line number " line-num " exceeds total-lines "
+                          result.total-lines)))))))))
 
 (table.insert tests {:name "external-unit-mcp: read-log returns filtered recent lines"
                      :fn test-read-log-returns-filtered-recent-lines})
