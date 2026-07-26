@@ -78,13 +78,16 @@ The middle band becomes:
 left dock | main middle stack | right dock
 ```
 
-The right dock should receive a stable width from HUD logical units. It should
-not resize based on session names, tool names, or message text.
+The right dock is an extended sidebar: a naturally measured rail on the right and,
+when expanded, a fixed-width panel immediately to the rail's left. The rail width
+comes from its activity-style icon buttons; message text, session names, and tool
+names do not affect rail width. The expanded panel keeps the HUD sidebar panel
+width contract owned by `hud-extended-sidebar-view.fnl`.
 
 Initial sizing:
 
-- Desktop: right dock width around 26-32 logical HUD units.
-- Minimum: clamp to a compact width that still fits icon buttons and status text.
+- Rail: measured from icon button contents.
+- Expanded panel: fixed HUD logical width from `hud-extended-sidebar-view.fnl`.
 - Height: fill the middle band between the existing control panel and status panel.
 - Depth: use the same dock depth layer pattern as the left dock; transcript rows
   should use child depth offsets instead of fighting with the dock background.

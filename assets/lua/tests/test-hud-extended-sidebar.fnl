@@ -9,6 +9,9 @@
 (local Intersectables (require :intersectables))
 (local Clickables (require :clickables))
 (local Hoverables (require :hoverables))
+(local Button (require :button))
+(local MathUtils (require :math-utils))
+(local approx (. MathUtils :approx))
 
 (local tests [])
 
@@ -294,7 +297,7 @@
   (assert (= update-count after-visible) "hidden panel should not receive updates")
   (entity:drop))
 
-(fn view-hidden-panel-layout-is-culled []
+(fn view-hidden-panel-layout-is-not-in-tree []
   (local sidebar (HudExtendedSidebar))
   (sidebar:register-entry {:id :test
                             :icon :test_icon
@@ -314,8 +317,7 @@
   (each [_ child (ipairs entity.layout.children)]
     (when (= child.name "test-panel")
       (set panel-layout child)))
-  (assert panel-layout "panel layout should still be a child of root")
-  (assert (panel-layout:effective-culled?) "collapsed panel layout should be culled")
+  (assert (not panel-layout) "collapsed panel layout should not be in layout tree")
   (entity:drop))
 
 (fn hud-capture-includes-extended-sidebar []
@@ -450,7 +452,7 @@
   (assert (= (length sidebar.entry-ids) 3) "re-registration should not grow entry-ids")
   (assert (= (. sidebar.entry-ids 1) :first) "first entry-id should remain :first"))
 
-(fn view-culled-layout-does-not-intersect []
+(fn view-hidden-panel-layout-does-not-intersect []
   (local sidebar (HudExtendedSidebar))
   (sidebar:register-entry {:id :test
                             :icon :test_icon
@@ -463,16 +465,21 @@
   (local entity (view ctx))
   (entity:update)
   (entity:update)
-  (sidebar:toggle)
-  (entity:update)
-  (entity:update)
+  ;; Cache the layout while it's still in the tree (visible).
   (var panel-layout nil)
   (each [_ child (ipairs entity.layout.children)]
     (when (= child.name "test-panel")
       (set panel-layout child)))
-  (assert (panel-layout:effective-culled?) "layout should be culled")
-  (var (hit _point _dist) (panel-layout:intersect {:origin (glm.vec3 0 0 1) :direction (glm.vec3 0 0 -1)}))
-  (assert (not hit) "culled layout should not intersect")
+  (assert panel-layout "panel layout should be in tree while visible")
+  (sidebar:toggle)
+  (entity:update)
+  (entity:update)
+  ;; After toggling, the panel is removed from the layout tree entirely.
+  (var panel-in-tree-after-toggle? false)
+  (each [_ child (ipairs entity.layout.children)]
+    (when (= child.name "test-panel")
+      (set panel-in-tree-after-toggle? true)))
+  (assert (not panel-in-tree-after-toggle?) "hidden panel should not be in layout tree")
   (entity:drop))
 
 (fn hud-capture-restore-pending-sidebar-state []
@@ -515,7 +522,7 @@
 (table.insert tests {:name "view panel survives collapse" :fn view-panel-survives-collapse})
 (table.insert tests {:name "view panel survives switch" :fn view-panel-survives-switch})
 (table.insert tests {:name "view hidden panel not updated" :fn view-hidden-panel-not-updated})
-(table.insert tests {:name "view hidden panel layout is culled" :fn view-hidden-panel-layout-is-culled})
+(table.insert tests {:name "view hidden panel layout is not in tree" :fn view-hidden-panel-layout-is-not-in-tree})
 (table.insert tests {:name "hud capture includes extended-sidebar" :fn hud-capture-includes-extended-sidebar})
 (table.insert tests {:name "hud restore includes extended-sidebar" :fn hud-restore-includes-extended-sidebar})
 (table.insert tests {:name "view rail is always visible" :fn view-rail-is-always-visible})
@@ -524,7 +531,7 @@
 (table.insert tests {:name "sidebar select rejects invalid id" :fn sidebar-select-rejects-invalid-id})
 (table.insert tests {:name "sidebar restore ignores invalid active-id" :fn sidebar-restore-ignores-invalid-active-id})
 (table.insert tests {:name "sidebar entries ordered by registration" :fn sidebar-entries-ordered-by-registration})
-(table.insert tests {:name "view culled layout does not intersect" :fn view-culled-layout-does-not-intersect})
+(table.insert tests {:name "view hidden panel layout does not intersect" :fn view-hidden-panel-layout-does-not-intersect})
 (fn hud-capture-restore-pending-retained-on-mismatch []
   (set app.extended-sidebar nil)
   (set app.pending-extended-sidebar-state nil)
@@ -562,8 +569,117 @@
   (hud:drop)
   (set app.extended-sidebar nil))
 
+(fn view-rail-button-matches-activity-button-metrics []
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fn [ctx]
+                                           ((make-test-panel "test-panel" (glm.vec3 1 1 0)) ctx))})
+  (local ctx (make-widget-ctx))
+  (local entity ((HudExtendedSidebarView sidebar) ctx))
+  (entity.layout:measurer)
+  (local rail-button (. ctx.clickables.left-click-objects 1))
+  (assert rail-button "right rail should register a clickable button")
+  (assert (= rail-button.icon :test_icon) "right rail button should keep the entry icon")
+  (assert (= rail-button.text.child.style.scale 3.2)
+          "right rail icon style should match activity dock icon scale")
+  (local reference-button
+    ((Button {:padding [0.4 0.25]
+              :focusable? false
+              :icon :test_icon
+              :icon-style {:scale 3.2}
+              :name "reference-extended-sidebar-test"
+              :focus-name "Test"
+              :on-click (fn [_button _event] nil)
+              :variant :secondary})
+     ctx))
+  (reference-button.layout:measurer)
+  (assert (approx rail-button.layout.measure.x reference-button.layout.measure.x)
+          "right rail button width should match the activity-style reference button")
+  (assert (approx rail-button.layout.measure.y reference-button.layout.measure.y)
+          "right rail button height should match the activity-style reference button")
+  (reference-button:drop)
+  (entity:drop))
+
+(fn view-collapsed-width-equals-measured-rail-width []
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fn [ctx]
+                                           ((make-test-panel "test-panel" (glm.vec3 1 1 0)) ctx))})
+  (local ctx (make-widget-ctx))
+  (local entity ((HudExtendedSidebarView sidebar) ctx))
+  (entity.layout:measurer)
+  (local rail-layout (. entity.layout.children 1))
+  (assert rail-layout "collapsed sidebar should contain the rail layout")
+  (assert (approx entity.layout.measure.x rail-layout.measure.x)
+          "collapsed sidebar width should equal measured rail width")
+  (entity:drop))
+
+(fn view-expanded-width-equals-panel-plus-measured-rail-width []
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fn [ctx]
+                                           ((make-test-panel "test-panel" (glm.vec3 1 1 0)) ctx))})
+  (sidebar:select :test)
+  (local ctx (make-widget-ctx))
+  (local entity ((HudExtendedSidebarView sidebar) ctx))
+  (entity.layout:measurer)
+  (local panel-layout (. entity.layout.children 1))
+  (local rail-layout (. entity.layout.children 2))
+  (assert panel-layout "expanded sidebar should contain the active panel layout")
+  (assert rail-layout "expanded sidebar should contain the rail layout")
+  (assert (approx entity.layout.measure.x (+ 38 rail-layout.measure.x))
+          "expanded sidebar width should equal panel width plus measured rail width")
+  (entity:drop))
+
+(fn view-expanded-layout-anchors-rail-to-right-edge []
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fn [ctx]
+                                           ((make-test-panel "test-panel" (glm.vec3 1 1 0)) ctx))})
+  (sidebar:select :test)
+  (local ctx (make-widget-ctx))
+  (local entity ((HudExtendedSidebarView sidebar) ctx))
+  (entity.layout:measurer)
+  (local panel-layout (. entity.layout.children 1))
+  (local rail-layout (. entity.layout.children 2))
+  (local allocated-width (+ entity.layout.measure.x 5))
+  (set entity.layout.position (glm.vec3 10 20 0))
+  (set entity.layout.size (glm.vec3 allocated-width 12 0))
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (local rail-width rail-layout.measure.x)
+  (local expected-rail-x (+ 10 (- allocated-width rail-width)))
+  (local expected-panel-x (- expected-rail-x 38))
+  (assert (approx rail-layout.position.x expected-rail-x)
+          "rail should be positioned at the right edge of the allocated sidebar area")
+  (assert (approx rail-layout.size.x rail-width)
+          "rail layout width should equal measured rail width")
+  (assert (approx panel-layout.position.x expected-panel-x)
+          "panel should be immediately left of the rail")
+  (assert (approx panel-layout.size.x 38)
+          "expanded panel width should remain fixed at 38 HUD units")
+  (entity:drop))
+
 (table.insert tests {:name "hud capture-restore pending sidebar state" :fn hud-capture-restore-pending-sidebar-state})
 (table.insert tests {:name "hud pending retained on active-id mismatch" :fn hud-capture-restore-pending-retained-on-mismatch})
+(table.insert tests {:name "view rail button matches activity button metrics"
+                     :fn view-rail-button-matches-activity-button-metrics})
+(table.insert tests {:name "view collapsed width equals measured rail width"
+                     :fn view-collapsed-width-equals-measured-rail-width})
+(table.insert tests {:name "view expanded width equals panel plus measured rail width"
+                     :fn view-expanded-width-equals-panel-plus-measured-rail-width})
+(table.insert tests {:name "view expanded layout anchors rail to right edge"
+                     :fn view-expanded-layout-anchors-rail-to-right-edge})
 
 (local main
   (fn []
