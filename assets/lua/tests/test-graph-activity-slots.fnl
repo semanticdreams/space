@@ -217,6 +217,7 @@
                    :viewport
                    :themes
                    :renderers
+                   :lights
                    :engine])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
