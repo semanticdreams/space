@@ -429,8 +429,8 @@ app bootstrap's `app.mcp-tools` registry.
 
 Do not add Space-specific user-unit behavior to global `~/.config/opencode`. The
 external unit MCP bridge writes an isolated config and prints
-`OPENCODE_XDG_CONFIG_HOME` so external OpenCode sessions can consume Space unit
-tools without polluting the user's global configuration.
+`OPENCODE_XDG_CONFIG_HOME=<path>` as a label; external OpenCode sessions
+consume it by setting `XDG_CONFIG_HOME` to the printed path.
 
 ## Tests
 

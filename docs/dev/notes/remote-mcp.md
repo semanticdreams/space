@@ -110,7 +110,8 @@ transport, but they serve different audiences with different tool sets.
   `space_unit_read_log`, `space_unit_snapshot`, `space_unit_list`.
 - Uses `ExternalUnitMcpBridge` (`llm/external-unit-mcp/bridge.fnl`) which
   writes an **isolated** OpenCode config into a temporary directory and prints
-  `OPENCODE_XDG_CONFIG_HOME` for the external session.
+  `OPENCODE_XDG_CONFIG_HOME=<path>` (a label; the caller must set
+  `XDG_CONFIG_HOME` to that path).
 - Does **not** mutate global `~/.config/opencode`.
 - Denies all native tool permissions (filesystem, shell, web, etc.) in the
   generated config so external sessions can only use `space_unit_*` MCP tools.

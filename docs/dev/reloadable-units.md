@@ -479,7 +479,7 @@ a Space-reported local filesystem source handle.
 The external unit MCP subsystem lives under `assets/lua/llm/external-unit-mcp/`
 with a standalone entrypoint at `assets/lua/tools/external-unit-mcp-server.fnl`.
 It boots a headless engine, creates an isolated OpenCode config, and exposes
-loader-neutral unit tools on loopback. See [External Unit MCP](./external-unit-mcp)
+loader-neutral unit tools on loopback. See [External Unit MCP](./notes/external-unit-mcp)
 for the full workflow.
 
 

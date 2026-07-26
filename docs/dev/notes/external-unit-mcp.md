@@ -62,13 +62,19 @@ MCP_URL=http://127.0.0.1:<port>/mcp
 OPENCODE_XDG_CONFIG_HOME=/tmp/ext-unit-mcp-server-<...>/external-unit-opencode-config
 ```
 
+The server prints `OPENCODE_XDG_CONFIG_HOME=` as a label; the OpenCode process
+itself reads the standard `XDG_CONFIG_HOME` environment variable. See the next
+section for how to connect.
+
 ## Connecting an External OpenCode Session
 
-Point an external OpenCode session at the printed config root without modifying
-global `~/.config/opencode`:
+The server prints `OPENCODE_XDG_CONFIG_HOME=<path>` as a label; the actual
+environment variable OpenCode consumes is `XDG_CONFIG_HOME`. Point an
+external OpenCode session at the printed config root without modifying global
+`~/.config/opencode`:
 
 ```bash
-OPENCODE_XDG_CONFIG_HOME=<printed-config-root> opencode ...
+XDG_CONFIG_HOME=<printed-config-root> opencode ...
 ```
 
 The bridge writes an isolated `opencode.json` inside that directory that:
