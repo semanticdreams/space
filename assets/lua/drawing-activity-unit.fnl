@@ -139,10 +139,11 @@
     (scene:deactivate-activity-slot "drawing")))
 
 (fn snapshot-drawing-activity! []
-  (let [scene-state
-         (if (and app.active-world-runtime app.active-world-runtime.scene)
-             (app.active-world-runtime.scene:capture-activity-slot-state "drawing")
-             nil)]
+  (let [runtime (assert app.active-world-runtime
+                         "Drawing activity snapshot requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Drawing activity snapshot requires runtime.scene")
+        scene-state (scene:capture-activity-slot-state "drawing")]
     {:active? (= (Activities.active-activity-id) "drawing")
      :scene scene-state}))
 
@@ -153,8 +154,12 @@
 
 (fn restore-drawing-activity! [first session maybe-state]
   (local state (restore-state-arg first session maybe-state))
-  (when (and app.active-world-runtime state state.scene app.active-world-runtime.scene)
-    (app.active-world-runtime.scene:restore-activity-slot-state "drawing" state.scene))
+  (when (and state state.scene)
+    (let [runtime (assert app.active-world-runtime
+                           "Drawing activity restore requires app.active-world-runtime")
+          scene (assert runtime.scene
+                         "Drawing activity restore requires runtime.scene")]
+      (scene:restore-activity-slot-state "drawing" state.scene)))
   (when (and state state.active?)
     (if app.set-active-activity
         (app.set-active-activity "drawing")

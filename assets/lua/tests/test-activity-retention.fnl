@@ -880,6 +880,57 @@
 (table.insert tests {:name "Built-in activity scene slots are isolated from Sandbox"
                       :fn built-in-activity-scene-slots-are-isolated-from-sandbox})
 
+(fn activity-snapshot-fails-loudly-without-runtime-scene []
+  ;; R1-2: snapshot must assert runtime.scene, not silently return nil.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :graph-view :graph-view-states])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  ;; Runtime without scene
+  (set app.active-world-runtime {:canvas {} :world-dir "/tmp/space/tests/snapshot-no-scene"})
+  (GraphActivityUnit.load-graph-activity!)
+  (local (ok err) (pcall GraphActivityUnit.snapshot-graph-activity!))
+  (assert (not ok)
+          "Graph snapshot should fail loudly when runtime.scene is missing")
+  (assert (or (string.find (tostring err) "requires runtime.scene")
+              (string.find (tostring err) "requires app.active-world-runtime"))
+          (.. "Snapshot error should mention missing runtime/scene, got: " (tostring err)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Activity snapshot fails loudly without runtime.scene"
+                      :fn activity-snapshot-fails-loudly-without-runtime-scene})
+
+(fn activity-restore-fails-loudly-without-runtime-scene []
+  ;; R1-2: restore must assert runtime.scene when state.scene is present,
+  ;; not silently skip.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :graph-view :graph-view-states])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  ;; Runtime without scene but with pending state containing scene
+  (set app.active-world-runtime {:canvas {} :world-dir "/tmp/space/tests/restore-no-scene"})
+  (GraphActivityUnit.load-graph-activity!)
+  ;; restore-state-arg: when first arg lacks :activity key, it is treated as state
+  (local pending-state {:scene {:panels [] :terrains [] :lights {} :skybox {} :background {} :containment {:enabled? false}}})
+  (local (ok err) (pcall GraphActivityUnit.restore-graph-activity! pending-state))
+  (assert (not ok)
+          "Graph restore should fail loudly when runtime.scene is missing but state.scene is present")
+  (assert (or (string.find (tostring err) "requires runtime.scene")
+              (string.find (tostring err) "requires app.active-world-runtime"))
+          (.. "Restore error should mention missing runtime/scene, got: " (tostring err)))
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Activity restore fails loudly without runtime.scene"
+                      :fn activity-restore-fails-loudly-without-runtime-scene})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
