@@ -837,6 +837,38 @@
 (table.insert tests {:name "external-unit-mcp: snapshot returns unsupported for unknown loader"
                      :fn test-snapshot-returns-unsupported-for-unknown-loader})
 
+(fn test-snapshot-returns-unsupported-for-filesystem-unit-without-snapshot []
+  ;; R1-3 remaining: a filesystem unit without an actual snapshot export
+  ;; must return supported=false, not supported=true with nil state.
+  (with-temp-dir
+    (fn [dir]
+      (local simple-path (write-unit-file dir "no-snapshot"
+                            (.. "(fn init [] true)\n"
+                                "(fn drop [] true)\n"
+                                "{:init init :drop drop}")))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-no-snapshot"
+                         :module-name "no-snapshot"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [simple-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local result (service:snapshot {:unit_id "user-no-snapshot"}))
+          (assert result.unit-id "snapshot missing unit-id")
+          (assert (= result.unit-id "user-no-snapshot") "unit-id mismatch")
+          (assert (= result.supported false)
+                  "filesystem unit without snapshot export should report unsupported")
+          (assert (= result.state nil)
+                  "unsupported snapshot should have nil state"))))))
+
+(table.insert tests {:name "external-unit-mcp: snapshot returns unsupported for filesystem unit without snapshot export"
+                     :fn test-snapshot-returns-unsupported-for-filesystem-unit-without-snapshot})
+
 (fn test-read-log-returns-filtered-recent-lines []
   ;; read-log should work against the current application log file.
   ;; It returns structured lines, total-lines, and log-path.
@@ -859,7 +891,22 @@
           (assert result.log-path "read-log missing log-path")
           (assert (= (type result.log-path) "string") "log-path should be a string")
           ;; R1-4: total-lines must match the actual line count, not include a
-          ;; trailing empty entry from a final newline.
+          ;; trailing empty entry from a final newline. Verify independently
+          ;; by reading the raw log file and computing the expected count.
+          (local log-content (fs.read-file result.log-path))
+          (assert log-content "should be able to read log file")
+          (var raw-lines [])
+          (each [line (string.gmatch log-content "([^\n]*)\n?")]
+            (table.insert raw-lines line))
+          ;; Drop trailing empty string from final \n (same logic as read-log)
+          (when (and (> (# raw-lines) 0) (= (. raw-lines (# raw-lines)) ""))
+            (table.remove raw-lines))
+          (local expected-total (# raw-lines))
+          (assert (= result.total-lines expected-total)
+                  (.. "total-lines " result.total-lines
+                      " does not match raw line count " expected-total
+                      " — total-lines likely includes a trailing empty entry"))
+          ;; Also verify no returned line number exceeds total-lines
           (each [_ line (ipairs result.lines)]
             (local (line-num-str) (string.match line "^(%d+):"))
             (local line-num (tonumber line-num-str))

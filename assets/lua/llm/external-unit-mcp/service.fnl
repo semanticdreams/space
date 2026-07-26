@@ -69,11 +69,6 @@
       ["run-test"]
       []))
 
-(fn build-snapshot-capabilities [loader]
-  (if (= loader "filesystem")
-      true
-      false))
-
 (fn build-commit-capability [_loader]
   "none")
 
@@ -582,17 +577,26 @@
     (local unit-id (or args.unit_id (error "snapshot requires :unit_id")))
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
-    (local loader (classify-loader unit))
-    (if (not (build-snapshot-capabilities loader))
+    ;; Call unit:snapshot to detect actual snapshot support.
+    ;; A nil return means there is no real snapshot implementation
+    ;; (noop-snapshot default or missing optional export).
+    ;; A non-nil return means an actual snapshot implementation produced state.
+    ;; Errors from a real implementation are propagated as unexpected failures.
+    (local (ok state) (pcall #(unit:snapshot {})))
+    (if (not ok)
+        ;; Distinguish "missing function" (no capability) from unexpected errors.
+        (if (string.find (tostring state) "missing function" 1 true)
+            {:unit-id unit.id
+             :supported false
+             :state nil}
+            (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state))))
+        (= state nil)
         {:unit-id unit.id
          :supported false
          :state nil}
-        (let [(ok state) (pcall #(unit:snapshot {}))]
-          (if ok
-              {:unit-id unit.id
-               :supported true
-               :state state}
-              (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))))
+        {:unit-id unit.id
+         :supported true
+         :state state}))
 
   (set self.unit-handle unit-handle)
   (set self.list list)
