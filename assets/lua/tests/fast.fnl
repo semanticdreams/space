@@ -179,7 +179,8 @@
     :tests.test-repo-checks
     :tests.test-repo-presets
     :tests.test-repo-display
-    :tests.test-panel-transfer]})
+     :tests.test-panel-transfer
+     :tests.test-sandbox-scene-world-data]})
 
 (local main
   (fn []

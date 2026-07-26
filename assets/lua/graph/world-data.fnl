@@ -668,6 +668,10 @@
               (when (and world-manager world-manager.changed world-manager.changed.emit)
                 (world-manager.changed:emit {:world-id world-id
                                              :reason "scene-panel-removed"}))
+              ;; R5-1: Refresh sandbox slot state and invalidate any stale
+              ;; pending activity-session-state so Activities.snapshot-activity-sessions
+              ;; cannot overwrite the panel removal on save.
+              (refresh-sandbox-slot-if-inactive scene world-manager world-id)
               true)
             false))))
 

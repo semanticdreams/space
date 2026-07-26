@@ -572,7 +572,7 @@
      :activity-slot (fn [_self activity-id]
                       (when (= activity-id "sandbox")
                         ;; Sandbox slot exists but has stale scene-state
-                        {:scene-state {:panels []
+                        {:scene-state {:panels [{:kind "stale-panel"}]
                                        :terrains []
                                        :lights (LightSystemModule.default-state)
                                        :skybox (make-skybox-state {:enabled? true :name "stale" :brightness 0.99})
@@ -589,10 +589,11 @@
      :add-terrain-record (fn [_self _rec]
                            (table.insert call-log "add-terrain-record-called"))
      :remove-terrain (fn [_self _tid]
-                      (table.insert call-log "remove-terrain-called"))})
+                       (table.insert call-log "remove-terrain-called"))
+     :remove-panel-child (fn [_self _element] true)})
   ;; activity-session-state holds stale sandbox scene that should be updated.
   (local stale-sandbox-scene
-    {:panels []
+    {:panels [{:kind "stale-panel"}]
      :terrains []
      :lights (LightSystemModule.default-state)
      :skybox (make-skybox-state {:enabled? true :name "stale" :brightness 0.99})
@@ -606,7 +607,7 @@
                 :hud {:panels []}
                 :activity {:active_id "sandbox"
                            :sessions {:sandbox
-                                      {:scene {:panels []
+                                      {:scene {:panels [{:kind "removable-panel"}]
                                                :terrains [terrain-record]
                                                :lights (LightSystemModule.default-state)
                                                :skybox (make-skybox-state {:enabled? true :name "lake" :brightness 0.1})
@@ -619,16 +620,28 @@
                         :get-runtime (fn [_self] runtime)
                         :save-state (fn [_self] true)}})
   (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; R5-1: Remove a canonical panel while Sandbox is inactive.
+  ;; The stale pending scene has its own panel; removal + refresh must update
+  ;; activity-session-state so the stale panel does not come back on save.
+  (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 1)
+          "canonical sandbox scene should start with one panel")
+  (WorldData.remove-scene-panel manager "test-world" 1)
+  (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 0)
+          "remove-scene-panel should remove from canonical session")
+  ;; R5-1: The runtime's activity-session-state sandbox scene must be refreshed
+  ;; so it reflects the removal (not the stale panel that was pending).
+  (local pending-scene runtime.activity-session-state.sandbox.scene)
+  (assert pending-scene "activity-session-state sandbox must exist")
+  (assert (not (= pending-scene stale-sandbox-scene))
+          "activity-session-state sandbox must not be the stale object after removal")
+  (assert (= (length (or pending-scene.panels [])) 0)
+          "pending sandbox scene panels must be empty after removal and refresh")
   ;; Mutate skybox via WorldData.update-skybox
   (WorldData.update-skybox manager "test-world"
     (make-skybox-state {:enabled? false :name "night" :brightness 0.5}))
   (assert (= (length call-log) 0)
           "update-skybox should not touch runtime scene when sandbox is inactive")
   ;; R5-1: The runtime's activity-session-state sandbox scene must be updated.
-  (local pending-scene runtime.activity-session-state.sandbox.scene)
-  (assert pending-scene "activity-session-state sandbox must exist")
-  (assert (not (= pending-scene stale-sandbox-scene))
-          "activity-session-state sandbox must not be the stale object")
   (assert (= pending-scene.skybox.enabled? false)
           "pending sandbox scene skybox.enabled? must reflect mutation")
   (assert (= pending-scene.skybox.default.name "night")
