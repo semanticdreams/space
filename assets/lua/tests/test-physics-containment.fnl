@@ -393,15 +393,13 @@
     (fn [scene]
       (scene:build-default {:terrains [(flat-heightfield-record {:height 0.0})]})
       (assert scene.entity "Sandbox slot entity must exist after build-default")
-      ;; Sync the slot's entity field so deactivate-activity-slot can find
-      ;; and deactivate layout physics bodies attached to this entity.
-      ;; (activate-activity-slot syncs slot.entity before build-default
-      ;; creates the entity, so we sync it here explicitly.)
       (local slot (. scene.activity-slots "sandbox"))
-      (set slot.entity scene.entity)
       (assert (= scene.active-activity-slot-id "sandbox") "Sandbox must be active")
       (assert slot "Sandbox slot must exist after activation")
       (assert slot.visible? "Sandbox slot must be visible while active")
+      ;; The active slot owns/syncs its entity through the normal
+      ;; build-default flow (attach-entity syncs active-activity-slot.entity).
+      (assert slot.entity "Active slot must own entity after build-default")
       (set scene.camera {:position (glm.vec3 0 0 50)
                          :rotation (glm.quat 1 0 0 0)})
       (local baseline (collision-object-count))
@@ -429,7 +427,12 @@
       (assert (= scene.active-activity-slot nil)
               "Scene must have no active slot after deactivation")
       (assert (= scene.entity nil)
-              "Scene entity must be nil after slot deactivation"))))
+              "Scene entity must be nil after slot deactivation")
+      ;; Slot retains entity ownership after deactivation
+      (assert slot.entity
+              "Slot must retain entity ownership after deactivation")
+      (assert (= (type slot.scene-state) :table)
+              "Slot must retain scene-state after deactivation"))))
 (table.insert tests {:name "Scene slot deactivation retains slot state while removing active bodies"
                      :fn scene-slot-deactivation-retains-slot-state})
 

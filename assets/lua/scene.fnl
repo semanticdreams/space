@@ -1679,6 +1679,11 @@
       (self:unregister-entity self.entity)
       (self.entity:drop))
     (set self.entity entity)
+    ;; Keep the active slot's entity field in sync so deactivate-activity-slot
+    ;; can locate and deactivate layout physics bodies for the final slot
+    ;; without requiring the caller to manually sync.
+    (when self.active-activity-slot
+      (set self.active-activity-slot.entity entity))
     (set self.scene-children nil)
     (set self.scene-terrains nil)
     (set self.demo-browser nil)
