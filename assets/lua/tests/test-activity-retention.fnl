@@ -56,10 +56,15 @@
                     :set-active-interaction-surface
                     :viewport
                     :themes
-                    :renderers
-                    :lights
-                    :engine
-                    :create-default-projection])
+                     :renderers
+                     :lights
+                     :engine
+                     :create-default-projection
+                     :background-state
+                     :physics-containment-config
+                     :physics-containment-scene
+                     :__physics-global-containment
+                     :__physics_containment_refresh_debouncer])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
@@ -708,11 +713,14 @@
                    :renderers
                    :background-state
                    :skybox-state
-                   :physics-containment-config
-                   :engine
-                   :pointer-target-enabled?
-                   :scene
-                   :create-default-projection])
+                    :physics-containment-config
+                    :physics-containment-scene
+                    :__physics-global-containment
+                    :__physics_containment_refresh_debouncer
+                    :engine
+                    :pointer-target-enabled?
+                    :scene
+                    :create-default-projection])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
