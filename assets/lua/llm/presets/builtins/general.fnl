@@ -283,15 +283,23 @@
                    (assert (= (type args.pattern) "string") "space_app_search requires a string :pattern")
                    (assert (> (# args.pattern) 0) "space_app_search :pattern must not be empty")
                    (local project-root (default-search-root app))
-                   (local search-root
-                     (if args.path
-                         (if (or (= (string.sub args.path 1 1) "/")
-                                 (string.match args.path "^%a:[\\/]"))
-                             args.path
-                             (fs.join-path project-root args.path))
-                         project-root))
-                   (assert (fs.exists search-root)
-                           (.. "search path not found: " search-root))
+                    (var search-root
+                      (if args.path
+                          (if (or (= (string.sub args.path 1 1) "/")
+                                  (string.match args.path "^%a:[\\/]"))
+                              args.path
+                              (fs.join-path project-root args.path))
+                          project-root))
+                    (when (and args.path
+                               (not (fs.exists search-root))
+                               (or (= (string.sub args.path 1 7) "assets/")
+                                   (= (string.sub args.path 1 7) "assets\\")))
+                      (local parent-root (fs.parent project-root))
+                      (local alternate-root (and parent-root (fs.join-path parent-root args.path)))
+                      (when (and alternate-root (fs.exists alternate-root))
+                        (set search-root alternate-root)))
+                    (assert (fs.exists search-root)
+                            (.. "search path not found: " search-root))
                    (assert (path-under-root? search-root project-root)
                            (.. "search path escapes project root: " search-root))
                    (assert (not (path-has-symlink? search-root project-root))
