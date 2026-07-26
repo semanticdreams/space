@@ -23,10 +23,10 @@
   ;; Strip trailing path separator unless it's a root
   (local len (# result))
   (local trailing (string.sub result -1))
+  ;; Preserve Windows drive root "C:\"
   (when (and (> len 1)
              (or (= trailing "/") (= trailing "\\"))
-             ;; Preserve Windows drive root "C:\"
-             (not (and (= trailing "\\") (= len 3) (string.match result "^%a:")))))
+             (not (and (= trailing "\\") (= len 3) (string.match result "^%a:"))))
     (set result (string.sub result 1 (- len 1))))
   result)
 
