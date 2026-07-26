@@ -352,7 +352,7 @@
 (fn list-scene-panels [world-manager world-id]
   (local scene (resolve-scene world-manager world-id))
   (local produced [])
-  (if (and scene scene.scene-children)
+  (if (and scene scene.scene-children (= scene.active-activity-slot-id "sandbox"))
       (each [idx metadata (ipairs (or scene.scene-children []))]
         (local persistence (and metadata metadata.persistence))
         (local kind (or (and persistence persistence.kind) "unknown"))
@@ -429,7 +429,7 @@
 (fn list-terrains [world-manager world-id]
   (local scene (resolve-scene world-manager world-id))
   (local produced [])
-  (if (and scene scene.scene-terrains)
+  (if (and scene scene.scene-terrains (= scene.active-activity-slot-id "sandbox"))
       (each [_ entry (ipairs (or scene.scene-terrains []))]
         (local record (and entry entry.record))
         (local terrain-id (or (and record record.id) "unknown"))
@@ -619,7 +619,9 @@
 
 (fn remove-scene-panel [world-manager world-id panel-index]
   (local scene (resolve-scene world-manager world-id))
-  (if (and scene scene.scene-children scene.remove-panel-child)
+  ;; Only use runtime scene when sandbox is the active slot.
+  (if (and scene scene.scene-children scene.remove-panel-child
+           (= scene.active-activity-slot-id "sandbox"))
       (do
         (local metadata (. scene.scene-children panel-index))
         (local element (and metadata metadata.element))
@@ -683,7 +685,7 @@
 (fn update-terrain-record [world-manager world-id terrain-id updater]
   (local world (resolve-world world-manager world-id))
   (when world
-    (local scene-state (ensure-scene-state world))
+    (local scene-state (require-scene-state world (.. "WorldData.update-terrain-record[" world-id "]")))
     (local terrains scene-state.terrains)
     (local idx (find-terrain-state-index world-manager world-id terrain-id))
     (local resolved (find-terrain world-manager world-id terrain-id))
@@ -721,7 +723,7 @@
 (fn add-terrain [world-manager world-id terrain-kind]
   (local world (resolve-world world-manager world-id))
   (when world
-    (local scene-state (ensure-scene-state world))
+    (local scene-state (require-scene-state world (.. "WorldData.add-terrain[" world-id "]")))
     (local terrains scene-state.terrains)
     (local record (TerrainRecords.default-record-for-kind terrain-kind))
     (table.insert terrains record)
@@ -733,7 +735,7 @@
 (fn remove-terrain [world-manager world-id terrain-id]
   (local world (resolve-world world-manager world-id))
   (when world
-    (local scene-state (ensure-scene-state world))
+    (local scene-state (require-scene-state world (.. "WorldData.remove-terrain[" world-id "]")))
     (local terrains scene-state.terrains)
     (local idx (find-terrain-state-index world-manager world-id terrain-id))
     (when idx

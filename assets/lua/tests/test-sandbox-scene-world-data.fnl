@@ -459,6 +459,99 @@
 (table.insert tests {:name "runtime sync ignores non-sandbox active slot"
                      :fn test-runtime-sync-ignores-non-sandbox-active-slot})
 
+(fn test-runtime-reads-ignore-non-sandbox-active-slot []
+  "When Graph is the active slot, list-scene-panels, list-terrains, and
+  remove-scene-panel must ignore runtime scene data and use canonical sandbox
+  session state instead."
+  (local WorldData (require :graph/world-data))
+  ;; Build a mock runtime Scene with Graph active and populated runtime data
+  ;; that differs from sandbox session data.
+  (local mock-scene
+    {:active-activity-slot-id "graph"
+     ;; Runtime scene has different panels/terrains than sandbox session.
+     :scene-children [{:persistence {:kind "graph-runtime-panel"}}]
+     :scene-terrains [{:record {:id "graph-terrain" :kind "heightfield-terrain"}}]
+     :remove-panel-child (fn [_self _element] true)})
+  (local runtime {:scene mock-scene})
+  ;; Sandbox session has its own distinct data.
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels [{:kind "sandbox-panel"}]
+                                               :terrains [(make-heightfield-terrain-record {:id "sandbox-terrain" :name "lava"})]
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state)
+                                               :background (make-background-state)
+                                               :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? true
+                :world {:state state
+                        :get-runtime (fn [_self] runtime)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; list-scene-panels must NOT use runtime scene-children when graph is active.
+  (local panels (WorldData.list-scene-panels manager "test-world"))
+  (assert (= (length panels) 1) "should list only sandbox session panels")
+  (assert (= (. (. panels 1) 1 :kind) "sandbox-panel")
+          "panel should come from sandbox session, not graph runtime")
+  ;; list-terrains must NOT use runtime scene-terrains when graph is active.
+  (local terrains (WorldData.list-terrains manager "test-world"))
+  (assert (= (length terrains) 1) "should list only sandbox session terrains")
+  (assert (= (. (. terrains 1) 1 :label) "lava")
+          "terrain should come from sandbox session, not graph runtime")
+  ;; remove-scene-panel must NOT remove from runtime scene when graph is active;
+  ;; it should fall through to canonical state path and remove from session.
+  (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 1)
+          "sandbox session should start with one panel")
+  (WorldData.remove-scene-panel manager "test-world" 1)
+  (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 0)
+          "remove-scene-panel should remove from sandbox session when graph is active"))
+
+(fn test-terrain-mutators-fail-on-missing-sandbox-session []
+  "Terrain mutators must fail loudly when activity.sessions.sandbox.scene
+  is absent rather than silently creating it."
+  (local WorldData (require :graph/world-data))
+  ;; World with state but no sandbox session scene.
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}})
+  ;; Intentionally no activity or sessions — sandbox scene missing.
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? false
+                :world {:state state
+                        :get-runtime (fn [_self] nil)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; add-terrain should assert
+  (local (ok-add err-add)
+    (pcall (fn []
+             (WorldData.add-terrain manager "test-world" "heightfield-terrain"))))
+  (assert (not ok-add) "add-terrain should fail on missing sandbox session")
+  (assert (string.find (tostring err-add) "requires world.state.activity" 1 true)
+          "add-terrain failure should mention missing activity state")
+  ;; update-terrain-record should assert
+  (local (ok-upd err-upd)
+    (pcall (fn []
+             (WorldData.update-terrain-record manager "test-world" "t1"
+               (fn [r] (set r.name "x"))))))
+  (assert (not ok-upd) "update-terrain-record should fail on missing sandbox session")
+  (assert (string.find (tostring err-upd) "requires world.state.activity" 1 true)
+          "update-terrain-record failure should mention missing activity state")
+  ;; remove-terrain should assert
+  (local (ok-rem err-rem)
+    (pcall (fn []
+             (WorldData.remove-terrain manager "test-world" "t1"))))
+  (assert (not ok-rem) "remove-terrain should fail on missing sandbox session")
+  (assert (string.find (tostring err-rem) "requires world.state.activity" 1 true)
+          "remove-terrain failure should mention missing activity state"))
+
+(table.insert tests {:name "runtime reads ignore non-sandbox active slot"
+                     :fn test-runtime-reads-ignore-non-sandbox-active-slot})
+(table.insert tests {:name "terrain mutators fail on missing sandbox session"
+                     :fn test-terrain-mutators-fail-on-missing-sandbox-session})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
