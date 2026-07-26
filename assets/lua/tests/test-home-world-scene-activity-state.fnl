@@ -548,20 +548,100 @@
       (local snapshot-result
         ((. (require :sandbox-activity-unit) :snapshot-sandbox-activity!)))
       (set app.active-world-runtime previous-runtime)
+      ;; Snapshot must return the session shape {:scene <captured-state>},
+      ;; because Activities.snapshot-activity-sessions writes the return
+      ;; value as sessions.sandbox.
       (assert (= (type snapshot-result) :table)
-              "Snapshot must return captured canonical scene state (not nil)")
-      (assert (= (type snapshot-result.lights) :table)
-              "Snapshot result must contain lights")
-      (assert (= (type snapshot-result.containment) :table)
-              "Snapshot result must contain containment")
-      (assert (= (type snapshot-result.terrains) :table)
-              "Snapshot result must contain terrains")
-      (assert (= snapshot-result captured)
-              "Snapshot must return the exact captured state from the slot")
+              "Snapshot must return a session table (not nil)")
+      (assert (= (type snapshot-result.scene) :table)
+              "Snapshot must have :scene key wrapping the canonical state")
+      (assert (= (type snapshot-result.scene.lights) :table)
+              "Snapshot scene must contain lights")
+      (assert (= (type snapshot-result.scene.containment) :table)
+              "Snapshot scene must contain containment")
+      (assert (= (type snapshot-result.scene.terrains) :table)
+              "Snapshot scene must contain terrains")
+      (assert (= snapshot-result.scene captured)
+              "Snapshot scene must return the exact captured state from the slot")
       true)))
 
 (table.insert tests {:name "sandbox snapshot returns captured canonical state"
                      :fn sandbox-snapshot-returns-captured-canonical-state})
+
+(fn sandbox-session-scene-persists-through-save-reload []
+  ;; R1-1: The snapshot→persist→reload pipeline must preserve the Sandbox
+  ;; session's scene at activity.sessions.sandbox.scene through a full
+  ;; save/reload cycle.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      ;; Start with a legacy world.json so migration runs.
+      (write-world-json! world-dir
+        {:camera {:position [0 0 30] :rotation [1 0 0 0]}
+         :graph {:graph {:nodes [] :edges []} :views {:open-node-keys []}}
+         :scene {:panels [{:kind "test-panel"
+                           :node-key "test:a"
+                           :position [1 2 3]
+                           :rotation [1 0 0 0]
+                           :size [4 4 0]}]
+                 :terrains []
+                 :lights (LightSystemModule.default-state)
+                 :skybox (make-skybox-state {:enabled? true :name "ocean" :brightness 0.4})
+                 :background (make-background-state {:color [0.2 0.3 0.4]})}
+         :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      ;; Verify migration populated sessions.sandbox.scene.
+      (local sandbox-scene (sandbox-scene-state world))
+      (assert sandbox-scene "Sandbox scene must exist after migration")
+      (assert (= (type sandbox-scene.panels) :table)
+              "Sandbox scene must have panels after migration")
+      ;; Save the migrated state.
+      (world:save-state)
+      ;; Reload and verify sessions.sandbox.scene is still canonical.
+      (local reloaded (HomeWorld {:id "world-a"
+                                  :name "home"
+                                  :type "home"
+                                  :dir world-dir}))
+      (reloaded:init {})
+      (local reloaded-sandbox-scene (sandbox-scene-state reloaded))
+      (assert reloaded-sandbox-scene
+              "Reloaded world must have sessions.sandbox.scene")
+      (assert (= (type reloaded-sandbox-scene.lights) :table)
+              "Reloaded sandbox scene must have lights")
+      (assert (= (type reloaded-sandbox-scene.skybox) :table)
+              "Reloaded sandbox scene must have skybox")
+      (assert (= (type reloaded-sandbox-scene.containment) :table)
+              "Reloaded sandbox scene must have containment")
+      ;; Verify the persisted JSON has no legacy scene fields.
+      (local persisted-json (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
+      (when (= (type persisted-json.scene) :table)
+        (assert (= persisted-json.scene.panels nil)
+                "Persisted JSON must not have legacy scene.panels")
+        (assert (= persisted-json.scene.lights nil)
+                "Persisted JSON must not have legacy scene.lights")
+        (assert (= persisted-json.scene.skybox nil)
+                "Persisted JSON must not have legacy scene.skybox"))
+      (when (= (type persisted-json.physics) :table)
+        (assert (= persisted-json.physics.containment nil)
+                "Persisted JSON must not have legacy physics.containment"))
+      ;; Verify activity.sessions.sandbox.scene is present in persisted JSON.
+      (local persisted-sandbox-scene (and persisted-json.activity
+                                         persisted-json.activity.sessions
+                                         persisted-json.activity.sessions.sandbox
+                                         persisted-json.activity.sessions.sandbox.scene))
+      (assert persisted-sandbox-scene
+              "Persisted JSON must have activity.sessions.sandbox.scene")
+      (assert (= (type persisted-sandbox-scene.containment) :table)
+              "Persisted JSON sandbox scene must have containment")
+      true)))
+
+(table.insert tests {:name "sandbox session scene persists through save/reload"
+                     :fn sandbox-session-scene-persists-through-save-reload})
 
 (fn sandbox-activation-preserves-retained-slot-state []
   ;; R1-2: Sandbox activation must not overwrite a retained slot's scene-state
@@ -633,6 +713,59 @@
 
 (table.insert tests {:name "sandbox activation preserves retained slot state"
                      :fn sandbox-activation-preserves-retained-slot-state})
+
+(fn sandbox-restore-unwraps-pending-session-state []
+  ;; R1-2: restore-sandbox-activity! must implement the Activities hook
+  ;; signature (ctx, session, state), extract the third argument's :scene
+  ;; field, and pass only the canonical scene state to the Scene slot.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      (local canonical-scene (sandbox-scene-state world))
+      (assert canonical-scene "Expected canonical sandbox scene")
+      ;; Mock scene that records what state was passed to restore-activity-slot-state.
+      (var restored-state nil)
+      (var restored-activity-id nil)
+      (local mock-scene
+        {:restore-activity-slot-state
+         (fn [_self activity-id state]
+           (set restored-state state)
+           (set restored-activity-id activity-id)
+           true)})
+      ;; Set up mock runtime
+      (local previous-runtime app.active-world-runtime)
+      (set app.active-world-runtime {:scene mock-scene})
+      ;; Call restore with the Activities hook signature (ctx, session, state).
+      ;; The third argument is the pending session shape {:scene <canonical-state>}.
+      (local sandbox-unit (require :sandbox-activity-unit))
+      (local pending-session {:scene canonical-scene})
+      (sandbox-unit.restore-sandbox-activity! {:activity {}} {:user-session {}} pending-session)
+      (set app.active-world-runtime previous-runtime)
+      ;; Assert: the restore function unwrapped state.scene and passed only the
+      ;; canonical scene state to the Scene slot.
+      (assert (= restored-activity-id "sandbox")
+              "Restore must target the sandbox activity slot")
+      (assert (= (type restored-state) :table)
+              "Restore must pass canonical scene state (not the session wrapper)")
+      (assert (= (type restored-state.lights) :table)
+              "Restore must pass lights from the canonical scene state")
+      (assert (= (type restored-state.containment) :table)
+              "Restore must pass containment from the canonical scene state")
+      ;; Verify that the wrapper's :scene field was unwrapped — the lights
+      ;; should match the original canonical scene, NOT be nested.
+      (assert (= restored-state.lights.ambient.enabled?
+                 canonical-scene.lights.ambient.enabled?)
+              "Restore scene lights must match canonical scene")
+      true)))
+
+(table.insert tests {:name "sandbox restore unwraps pending session state"
+                     :fn sandbox-restore-unwraps-pending-session-state})
 
 (fn canonical-load-does-not-produce-legacy-fields []
   ;; R1-4: Loading a canonical world (already-migrated) must not synthesize

@@ -604,27 +604,41 @@
                           world.id))
           (set camera-state.position [0 0 30])))
     (set world.state.camera camera-state)
+    ;; Physics containment legacy repair: only run when no canonical sandbox
+    ;; session exists.  If activity.sessions.sandbox.scene is already present,
+    ;; the migration below normalizes containment; we skip synthesizing legacy
+    ;; physics.containment to avoid spurious rewrites.
     (local physics-state (or (and world.state world.state.physics) {}))
-    (local containment
-      (if (= (type physics-state.containment) :table)
-          physics-state.containment
-          (if (finite-number? physics-state.floor-y)
-              (do
-                (logging.warn (string.format
-                                "[world] %s migrating persisted physics.floor-y to containment bounds"
-                                world.id))
-                {:mode "manual-bounds"
-                 :bounds {:min [-500 physics-state.floor-y -500]
-                          :max [500 500 500]}})
-              (do
-                (when (not (= physics-state.floor-y nil))
+    ;; Only run legacy containment repair when this is a persisted load and
+    ;; no canonical sandbox session exists.  The migration below normalizes
+    ;; containment for canonical loads; new worlds get defaults from migration.
+    (when persisted
+      (local has-canonical-sandbox?
+        (and (= (type persisted.activity) :table)
+             (= (type persisted.activity.sessions) :table)
+             (= (type persisted.activity.sessions.sandbox) :table)
+             (= (type persisted.activity.sessions.sandbox.scene) :table)))
+      (when (not has-canonical-sandbox?)
+      (local containment
+        (if (= (type physics-state.containment) :table)
+            physics-state.containment
+            (if (finite-number? physics-state.floor-y)
+                (do
                   (logging.warn (string.format
-                                  "[world] %s invalid persisted physics containment; resetting to default"
-                                  world.id)))
-                default-containment-config))))
-    (set physics-state.containment
-         (PhysicsContainment.serialize-config
-           (PhysicsContainment.normalize-config containment)))
+                                  "[world] %s migrating persisted physics.floor-y to containment bounds"
+                                  world.id))
+                  {:mode "manual-bounds"
+                   :bounds {:min [-500 physics-state.floor-y -500]
+                            :max [500 500 500]}})
+                (do
+                  (when (not (= physics-state.floor-y nil))
+                    (logging.warn (string.format
+                                    "[world] %s invalid persisted physics containment; resetting to default"
+                                    world.id)))
+                  default-containment-config))))
+      (set physics-state.containment
+           (PhysicsContainment.serialize-config
+             (PhysicsContainment.normalize-config containment)))))
     (set physics-state.floor-y nil)
     (set world.state.physics physics-state)
     ;; Migrate legacy top-level scene/physics state into canonical activity sessions
@@ -1020,8 +1034,12 @@
     ;; Create an empty Scene surface; sandbox activity activation will populate it.
     (local sandbox-scene-state (resolve-sandbox-scene-state world))
     (scene:ensure-activity-slot "sandbox")
+    ;; Store serialized containment config for later use by Scene slot activation,
+    ;; but do NOT install containment into the physics world here — only the
+    ;; active Scene slot calls ensure-installed.
     (local containment-config
-      (apply-runtime-containment! world {:scene scene}))
+      (resolve-runtime-containment-config world))
+    (set-runtime-containment-config! world containment-config)
     (local runtime
       {:camera camera
        :world-dir world.dir

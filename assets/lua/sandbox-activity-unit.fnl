@@ -31,13 +31,19 @@
   true)
 
 (fn snapshot-sandbox-activity! []
+  ;; Return the canonical *session* shape {:scene <state>} because
+  ;; Activities.snapshot-activity-sessions writes this as sessions.sandbox.
   (if (and app.active-world-runtime app.active-world-runtime.scene)
-      (app.active-world-runtime.scene:capture-activity-slot-state "sandbox")
+      {:scene (app.active-world-runtime.scene:capture-activity-slot-state "sandbox")}
       nil))
 
-(fn restore-sandbox-activity! [state]
-  (when (and app.active-world-runtime app.active-world-runtime.scene state)
-    (app.active-world-runtime.scene:restore-activity-slot-state "sandbox" state))
+(fn restore-sandbox-activity! [ctx session state]
+  ;; Activities calls restore with (ctx, session, state).  The third argument
+  ;; is the pending session shape {:scene <canonical-state>}.  Only pass the
+  ;; inner canonical scene state to the Scene slot.
+  (local scene-state (and (= (type state) :table) state.scene))
+  (when (and app.active-world-runtime app.active-world-runtime.scene scene-state)
+    (app.active-world-runtime.scene:restore-activity-slot-state "sandbox" scene-state))
   true)
 
 (fn load-sandbox-activity! []
