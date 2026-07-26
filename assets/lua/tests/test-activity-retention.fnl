@@ -1,5 +1,6 @@
 (local glm (require :glm))
 (local fs (require :fs))
+(local Main (require :main))
 (local Activities (require :activities))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
@@ -641,7 +642,185 @@
   (if ok result (error result)))
 
 (table.insert tests {:name "Inactive runtime canvas surface does not double-drop slot root"
-                     :fn inactive-runtime-canvas-surface-does-not-double-drop-slot-root})
+                      :fn inactive-runtime-canvas-surface-does-not-double-drop-slot-root})
+
+(fn built-in-activity-scene-slots-are-isolated-from-sandbox []
+  ;; Every built-in activity (Graph, Drawing, Board) owns an empty Scene slot
+  ;; and must not inherit Sandbox content/environment/interaction.
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local ActivitySceneState (require :activity-scene-state))
+  (local SkyboxState (require :skybox-state))
+  (local BackgroundState (require :background-state))
+  (local Scene (require :scene))
+  (local SandboxActivityUnit (require :sandbox-activity-unit))
+  (local app-keys [:active-world-runtime
+                   :canvas
+                   :graph
+                   :graph-map
+                   :graph-map-manager
+                   :graph-view
+                   :drawing-controller
+                   :drawing-render
+                   :board
+                   :board-view
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id
+                   :canvas-visible?
+                   :active-interaction-surface
+                   :active-pointer-controls
+                   :preferred-interaction-surface
+                   :scene-interactive?
+                   :canvas-interactive?
+                   :canvas-surface-interactive?
+                   :canvas-controls
+                   :first-person-controls
+                   :set-canvas-visible
+                   :set-active-interaction-surface
+                   :viewport
+                   :themes
+                   :lights
+                   :renderers
+                   :background-state
+                   :skybox-state
+                   :physics-containment-config
+                   :engine])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.canvas-visible? false)
+  (set app.active-interaction-surface :scene)
+  (set app.preferred-interaction-surface :scene)
+  (set app.set-canvas-visible
+       (fn [visible?]
+         (set app.canvas-visible? (and app.canvas (not (= visible? false))))))
+  (set app.set-active-interaction-surface
+       (fn [surface _opts]
+         (set app.preferred-interaction-surface surface)
+         (set app.active-interaction-surface
+              (if (and (= surface :canvas) app.canvas-visible?) :canvas :scene))))
+
+  ;; Mock services
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (set app.renderers {:skybox {:get-state (fn [_] skybox-state)
+                               :set-state (fn [_ state] (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+                      :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+                      :set-background-state (fn [_ state] (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+  (var mock-lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0} :directional [] :point [] :spot []})
+  (set app.lights {:get-state (fn [_] mock-lights-state) :set-state (fn [_ state] (set mock-lights-state state))})
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body]) :removeRigidBody (fn [_phys _body])}})
+  (set app.themes {:get-active-theme
+                   (fn []
+                     {:graph {:selection-border-color (glm.vec4 1 0.6 0.2 1)
+                              :label-color (glm.vec4 1 1 1 1)
+                              :label-target-pixels 13.0
+                              :label-min-scale 4.0
+                              :edge-color (glm.vec4 0.6 0.6 0.6 1)}
+                      :input {:focus-outline (glm.vec4 0.2 0.6 1 1)}})})
+
+  (local data-dir "/tmp/space/tests/builtin-activity-scene-isolation")
+  (when (fs.exists data-dir) (fs.remove-all data-dir))
+  (fs.create-dirs data-dir)
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local focus-manager (FocusManager {:root-name "builtin-activity-scene-isolation"}))
+  (local scene (Scene {:camera camera}))
+  (local canvas (Canvas {:camera camera :focus-manager focus-manager}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
+  (local graph (Graph {:with-start false}))
+  (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
+  (local object-selector (ObjectSelector {:ctx-provider (fn [] (or (and canvas.active-activity-slot canvas.active-activity-slot.ctx) canvas.build-context)) :enabled? true}))
+  (local controller (DrawingController {:data_dir data-dir}))
+  (controller:add-layer "vector")
+  (local runtime {:canvas canvas
+                  :scene scene
+                  :graph graph
+                  :graph-map graph-map
+                  :object-selector object-selector
+                  :movables app.movables
+                  :canvas-camera camera
+                  :world-dir data-dir
+                  :drawing-controller controller
+                  :board-state {:items [] :connectors []}})
+  (set app.active-world-runtime runtime)
+  (set app.canvas canvas)
+  (set app.graph graph)
+  (set app.graph-map graph-map)
+  (set app.drawing-controller controller)
+  (local (ok result)
+    (pcall
+      (fn []
+        (SandboxActivityUnit.load-sandbox-activity!)
+        (GraphActivityUnit.load-graph-activity!)
+        (DrawingActivityUnit.load-drawing-activity!)
+        (BoardActivityUnit.load-board-activity!)
+
+        ;; Give sandbox non-default scene state
+        (local sandbox-state
+          {:panels []
+           :terrains [{:kind "heightfield-terrain"}]
+           :lights {:ambient {:enabled? true :color [1.0 1.0 1.0] :intensity 1.0} :directional [] :point [] :spot []}
+           :skybox {:enabled? true :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]}
+           :background {:color [0.2 0.3 0.4]}
+           :containment {:enabled? true}})
+        (scene:restore-activity-slot-state "sandbox" sandbox-state)
+
+        ;; Activate Sandbox — verify services reflect sandbox state
+        (Activities.activate-activity "sandbox")
+        (assert (= scene.active-activity-slot-id "sandbox") "Scene should report sandbox as active")
+        (assert (. mock-lights-state :ambient :enabled?) "Sandbox activation should enable ambient")
+
+        ;; Verify all three activities get their own empty Scene slots
+        (each [_ activity-id (ipairs ["graph" "drawing" "board"])]
+          (Activities.activate-activity activity-id)
+          (assert (= scene.active-activity-slot-id activity-id)
+                  (.. activity-id " should be the active scene slot"))
+          (local slot (scene:activity-slot activity-id))
+          (assert slot (.. activity-id " should own a scene slot"))
+          (local sandbox-slot (scene:activity-slot "sandbox"))
+          (assert (not (= slot sandbox-slot))
+                  (.. activity-id " scene slot must not be Sandbox scene slot"))
+          ;; Services should be empty/disabled for non-Sandbox activities
+          (assert (not (. mock-lights-state :ambient :enabled?))
+                  (.. activity-id " activation should disable ambient light"))
+          (assert (not skybox-state.enabled?)
+                  (.. activity-id " activation should disable skybox"))
+          (local captured (scene:capture-activity-slot-state activity-id))
+          (assert (= (length captured.terrains) 0)
+                  (.. activity-id " scene slot should have no terrains"))
+          (assert (= (length captured.panels) 0)
+                  (.. activity-id " scene slot should have no panels"))
+          (assert (not captured.lights.ambient.enabled?)
+                  (.. "Captured " activity-id " state should have disabled ambient light"))
+          (assert (not captured.skybox.enabled?)
+                  (.. "Captured " activity-id " state should have disabled skybox")))
+
+        ;; Switch back to Sandbox — identity preserved
+        (Activities.activate-activity "sandbox")
+        (assert (= scene.active-activity-slot-id "sandbox") "Switching back should restore sandbox as active")
+        (assert (. mock-lights-state :ambient :enabled?) "Sandbox reactivation should re-enable ambient")
+        (assert skybox-state.enabled? "Sandbox reactivation should re-enable skybox")
+        true)))
+  (pcall SandboxActivityUnit.unload-sandbox-activity!)
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (pcall DrawingActivityUnit.unload-drawing-activity!)
+  (pcall BoardActivityUnit.unload-board-activity!)
+  (object-selector:drop)
+  (graph-map:drop)
+  (graph:drop)
+  (scene:drop)
+  (canvas:drop)
+  (focus-manager:drop)
+  (camera:drop)
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Built-in activity scene slots are isolated from Sandbox"
+                      :fn built-in-activity-scene-slots-are-isolated-from-sandbox})
 
 (local main
   (fn []

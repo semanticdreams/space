@@ -102,6 +102,12 @@
   ((. DrawingActivityActions :drawing-selection-actions) context))
 
 (fn activate-activity! [ctx]
+  ;; Ensure and activate empty Scene slot before Canvas hooks
+  ;; so Drawing does not inherit Sandbox content/environment/interaction.
+  (when (and app.active-world-runtime app.active-world-runtime.scene)
+    (local scene app.active-world-runtime.scene)
+    (scene:ensure-activity-slot "drawing")
+    (scene:activate-activity-slot "drawing"))
   (ctx:defer-cleanup! drop-drawing-render!)
   (local render (activate-drawing-render!))
   (ctx:set-drawing-enabled! true)
@@ -122,7 +128,10 @@
    :drawing-render render})
 
 (fn deactivate-activity! [_ctx _session]
-  (deactivate-drawing-render!))
+  (deactivate-drawing-render!)
+  ;; Deactivate Scene slot after Canvas deactivation without dropping it
+  (when (and app.active-world-runtime app.active-world-runtime.scene)
+    (app.active-world-runtime.scene:deactivate-activity-slot "drawing")))
 
 (fn snapshot-drawing-activity! []
   {:active? (= (Activities.active-activity-id) "drawing")})

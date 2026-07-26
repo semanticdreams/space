@@ -285,6 +285,12 @@
   nil)
 
 (fn activate-activity! [ctx]
+  ;; Ensure and activate empty Scene slot before Canvas hooks
+  ;; so Graph does not inherit Sandbox content/environment/interaction.
+  (when (and app.active-world-runtime app.active-world-runtime.scene)
+    (local scene app.active-world-runtime.scene)
+    (scene:ensure-activity-slot "graph")
+    (scene:activate-activity-slot "graph"))
   (ctx:defer-cleanup! drop-graph-view!)
   (local graph-view (activate-graph-view!))
   (disconnect-map-switch-handlers!)
@@ -311,7 +317,10 @@
 
 (fn deactivate-activity! [_ctx _session]
   (disconnect-map-switch-handlers!)
-  (deactivate-graph-view!))
+  (deactivate-graph-view!)
+  ;; Deactivate Scene slot after Canvas deactivation without dropping it
+  (when (and app.active-world-runtime app.active-world-runtime.scene)
+    (app.active-world-runtime.scene:deactivate-activity-slot "graph")))
 
 (fn snapshot-graph-activity! []
   {:active? (= (Activities.active-activity-id) "graph")

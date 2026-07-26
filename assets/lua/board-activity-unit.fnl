@@ -171,6 +171,12 @@
       (= target-kind :board)))
 
 (fn activate-activity! [ctx]
+  ;; Ensure and activate empty Scene slot before Canvas hooks
+  ;; so Board does not inherit Sandbox content/environment/interaction.
+  (when (and app.active-world-runtime app.active-world-runtime.scene)
+    (local scene app.active-world-runtime.scene)
+    (scene:ensure-activity-slot "board")
+    (scene:activate-activity-slot "board"))
   (ctx:defer-cleanup! drop-board-view!)
   (local view (activate-board-view!))
   (ctx:set-root-actions! board-root-actions)
@@ -186,7 +192,10 @@
    :board-view view})
 
 (fn deactivate-activity! [_ctx _session]
-  (deactivate-board-view!))
+  (deactivate-board-view!)
+  ;; Deactivate Scene slot after Canvas deactivation without dropping it
+  (when (and app.active-world-runtime app.active-world-runtime.scene)
+    (app.active-world-runtime.scene:deactivate-activity-slot "board")))
 
 (fn snapshot-board-activity! []
   {:active? (= (Activities.active-activity-id) "board")
