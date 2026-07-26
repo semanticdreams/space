@@ -1789,6 +1789,172 @@
 (table.insert tests {:name "R4-3c corrupt terrain activation no-previous-slot consistent cleanup"
                      :fn corrupt-terrain-activation-no-previous-slot-consistent-cleanup})
 
+;; ── R4-3d retained slot content preserved on rollback ───────────────────
+
+(fn corrupt-activation-preserves-retained-slot-content []
+  "R4-3: When a slot with pre-existing retained content (entity,
+  scene-children, scene-terrains, physics bodies) fails activation
+  with corrupt terrain and no previous active slot, the rollback must:
+  - Deactivate layout physics bodies on the entity
+  - Clear Scene surface aliases (entity nil, scene-children nil, etc.)
+  - Preserve the slot's own retained fields (slot.entity, slot.scene-children,
+    slot.scene-terrains) intact
+  - Leave the slot invisible/inactive"
+  (with-restored-app-fields
+    [:renderers :engine :lights :physics-containment-config
+     :physics-containment-scene :__physics-global-containment
+     :skybox-state :background-state :lights-state]
+    (fn []
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local LayoutPhysicsBodies (require :layout-physics-bodies))
+      (local PhysicsContainment (require :physics-containment))
+
+      ;; Mock services
+      (var renderer-skybox
+        {:enabled? false :name "lake" :brightness 0.1 :tint-color [1.0 1.0 1.0]})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] renderer-skybox)
+                    :set-state (fn [_ state] (set renderer-skybox state))}
+            :get-background-state (fn [_] {:color [0 0 0]})
+            :set-background-state (fn [_ state])})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (set app.lights {:get-state (fn [_] {:ambient {:enabled? false :color [0 0 0] :intensity 0} :directional [] :point [] :spot []})
+                       :set-state (fn [_ _state])})
+      ;; Suppress containment
+      (local orig-ensure-installed PhysicsContainment.ensure-installed)
+      (set PhysicsContainment.ensure-installed (fn [_opts] true))
+      (set app.__physics-global-containment nil)
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+
+      ;; (1) Seed the slot with pre-existing retained content
+      ;;     Build a mock entity with layout, children, and physics
+      (local entity-layout
+        {:children []
+         :set-root (fn [layout _root] (set layout.__root :slot-root))
+         :__root nil
+         :set-position (fn [])
+         :set-rotation (fn [])
+         :mark-measure-dirty (fn [])
+         :position (glm.vec3 0 0 0)
+         :rotation (glm.quat 1 0 0 0)})
+      (local mock-entity
+        {:layout entity-layout
+         :children []
+         :scene-children []
+         :scene-terrains []
+         :scene-objects []
+         :movables []
+         :drop (fn [_])})
+      ;; Give the entity a physics entry so deactivate has something to act on
+      (var physics-deactivate-called false)
+      (local orig-deactivate LayoutPhysicsBodies.deactivate)
+      (set LayoutPhysicsBodies.deactivate
+           (fn [ent]
+             (when (= ent mock-entity)
+               (set physics-deactivate-called true))
+             (orig-deactivate ent)))
+      ;; Create a runtime physics entry on the entity
+      (local element
+        {:layout {:position (glm.vec3 0 5 0)
+                  :rotation (glm.quat 1 0 0 0)
+                  :size (glm.vec3 4 4 4)
+                  :measure (glm.vec3 4 4 4)
+                  :children []
+                  :parent entity-layout
+                  :root entity-layout
+                  :depth-offset-index 0
+                  :mark-measure-dirty (fn [_layout])}})
+      (local entry
+        (LayoutPhysicsBodies.add-runtime-layout-body mock-entity {:element element}))
+      ;; entry was created; may or may not have a live body depending on bt availability
+
+      ;; Seed slot with retained content
+      (set sandbox-slot.entity mock-entity)
+      (set sandbox-slot.scene-children
+           [{:element element
+             :persistence {:kind "physics-cuboid"
+                           :size [4 4 4]}
+             :position (glm.vec3 0 0 0)
+             :rotation (glm.quat 1 0 0 0)}])
+      (set sandbox-slot.scene-terrains
+           [{:element element :record {:id "t-retained" :kind "heightfield-terrain"}}])
+
+      ;; (2) Inject corrupt terrain into slot's scene-state
+      (local complete-skybox
+        (SkyboxState.normalize-complete-state
+          {:enabled? false
+           :default {:name "lake" :brightness 0.1 :tint-color [1 1 1]}
+           :by-theme {}}
+          "test-r4-3d-skybox"))
+      (set sandbox-slot.scene-state {:panels []
+                                     :terrains [{:kind ""}]
+                                     :lights {:ambient {:enabled? false :color [1 1 1] :intensity 0}
+                                              :directional []
+                                              :point []
+                                              :spot []}
+                                     :skybox complete-skybox
+                                     :background {:color [0 0 0]}
+                                     :containment {:enabled? false}})
+
+      ;; (3) Verify pre-activation state
+      (assert (= scene.active-activity-slot nil) "No active slot before test")
+      (assert (not sandbox-slot.visible?) "Slot invisible before activation")
+      (assert sandbox-slot.entity "Slot has retained entity")
+      (assert sandbox-slot.scene-children "Slot has retained scene-children")
+      (assert sandbox-slot.scene-terrains "Slot has retained scene-terrains")
+
+      ;; (4) Activate — must fail due to corrupt terrain
+      (local (ok _err) (pcall (fn [] (scene:activate-activity-slot "sandbox"))))
+      (assert (not ok) "Activation with corrupt terrain must fail")
+
+      ;; (5) Rollback assertions for retained content preservation:
+      ;;     (a) Slot-owned content must be intact
+      (assert (= sandbox-slot.entity mock-entity)
+              "Slot.entity must still reference the pre-seeded entity")
+      (assert sandbox-slot.scene-children
+              "Slot.scene-children must still exist")
+      (assert (= (length sandbox-slot.scene-children) 1)
+              (.. "Slot.scene-children must have 1 entry, got "
+                  (tostring (length (or sandbox-slot.scene-children [])))))
+      (assert sandbox-slot.scene-terrains
+              "Slot.scene-terrains must still exist")
+      (assert (= (length sandbox-slot.scene-terrains) 1)
+              (.. "Slot.scene-terrains must have 1 entry, got "
+                  (tostring (length (or sandbox-slot.scene-terrains [])))))
+      ;;     (b) Slot is invisible/inactive
+      (assert (not sandbox-slot.visible?)
+              "Slot must be invisible after failed activation")
+      (assert (not sandbox-slot.interactive?)
+              "Slot must be non-interactive after failed activation")
+      ;;     (c) Scene surface aliases are cleared
+      (assert (= scene.entity nil)
+              "Scene.entity must be nil after rollback")
+      (assert (= scene.scene-children nil)
+              "Scene.scene-children must be nil after rollback")
+      (assert (= scene.scene-terrains nil)
+              "Scene.scene-terrains must be nil after rollback")
+      ;;     (d) Active slot binding is nil
+      (assert (= scene.active-activity-slot nil)
+              "Scene.active-activity-slot must be nil after rollback")
+      (assert (= scene.active-activity-slot-id nil)
+              "Scene.active-activity-slot-id must be nil after rollback")
+      ;;     (e) Layout physics deactivation occurred
+      (assert physics-deactivate-called
+              "LayoutPhysicsBodies.deactivate must have been called during rollback")
+
+      ;; Restore mock
+      (set LayoutPhysicsBodies.deactivate orig-deactivate)
+      (set PhysicsContainment.ensure-installed orig-ensure-installed)
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "R4-3d corrupt activation preserves retained slot content"
+                     :fn corrupt-activation-preserves-retained-slot-content})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
