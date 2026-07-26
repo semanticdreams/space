@@ -698,6 +698,62 @@
 
       (drop-fixture fixture))))
 
+(fn restore-terrain-adds-missing-while-active []
+  ;; R1-3: restoring a state with an additional terrain while the slot is active
+  ;; must add exactly the missing terrain without duplicating existing ones.
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Mock renderer skybox / background
+      (var skybox-state {:enabled? false :name "lake" :brightness 0.1 :tint-color [1.0 1.0 1.0]})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                     :set-state (fn [_ state] (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+
+      ;; Mock physics
+      (var installed-bodies [])
+      (set app.engine {:physics {:addRigidBody (fn [_phys body] (table.insert installed-bodies body))
+                                  :removeRigidBody (fn [_phys _body])}})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local slot (scene:ensure-activity-slot "sandbox"))
+
+      ;; Activate empty slot
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Slot should be active before restore")
+
+      ;; (1) Restore state with one terrain
+      (local state-1 (ActivitySceneState.empty-state))
+      (set state-1.terrains [{:kind "heightfield-terrain"}])
+      (assert (scene:restore-activity-slot-state "sandbox" state-1)
+              "First restore should return true")
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "After first restore: expected 1 terrain, got "
+                  (tostring (length slot.scene-terrains))))
+
+      ;; (2) Restore state with two terrains — must NOT duplicate the first
+      (local state-2 (ActivitySceneState.empty-state))
+      (set state-2.terrains [{:kind "heightfield-terrain"} {:kind "flat-terrain"}])
+      (assert (scene:restore-activity-slot-state "sandbox" state-2)
+              "Second restore with additional terrain should return true")
+      (assert (= (length slot.scene-terrains) 2)
+              (.. "After second restore: expected exactly 2 terrains, got "
+                  (tostring (length slot.scene-terrains))))
+
+      (drop-fixture fixture))))
+
 (fn activate-activity-slot-fails-on-unknown []
   ;; R1-2: activate-activity-slot must assert when the slot does not exist,
   ;; instead of silently creating one.
@@ -805,6 +861,8 @@
                         :fn restore-terrain-no-duplicates-on-active-slot})
 (table.insert tests {:name "Scene restore terrain idempotent on repeat"
                         :fn restore-terrain-idempotent-on-repeat})
+(table.insert tests {:name "Scene restore terrain adds missing while active"
+                        :fn restore-terrain-adds-missing-while-active})
 (table.insert tests {:name "Scene activate-activity-slot fails on unknown"
                         :fn activate-activity-slot-fails-on-unknown})
 

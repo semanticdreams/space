@@ -864,19 +864,34 @@
     (assert (= (type state) :table)
             "Scene.restore-activity-slot-state requires a state table")
     (local ActivitySceneState (require :activity-scene-state))
-    (local canonical (ActivitySceneState.normalize-state state "Scene.restore-activity-slot-state"))
+    ;; Preserve previously captured terrain ids (by index) for stable
+    ;; idempotent reconciliation: repeated restores of the same state
+    ;; must not create duplicate terrain entries.
     (local slot (ensure-activity-slot scene activity-id))
+    (local prev-terrain-ids {})
+    (when (and slot.scene-state slot.scene-state.terrains)
+      (for [idx 1 (length slot.scene-state.terrains)]
+        (local prev (. slot.scene-state.terrains idx))
+        (when (and prev prev.id (= (type prev.id) :string))
+          (set (. prev-terrain-ids idx) prev.id))))
+    (local canonical (ActivitySceneState.normalize-state state "Scene.restore-activity-slot-state"))
+    ;; Merge previously captured ids into the canonical state by index
+    ;; so that normalize-record reuses stable ids instead of generating
+    ;; new random UUIDs on every call.
+    (when (> (length prev-terrain-ids) 0)
+      (each [idx id (pairs prev-terrain-ids)]
+        (when (<= idx (length canonical.terrains))
+          (local ct (. canonical.terrains idx))
+          (when (and ct (not ct.id))
+            (set ct.id id)))))
     (set slot.scene-state canonical)
     ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
       (apply-state-to-services self canonical)
-      ;; Rebuild terrain runtime from stored records only when the slot has no
-      ;; terrain yet (idempotent: repeated restores of the same state must not
-      ;; append duplicate terrain entries).
-      (when (and canonical.terrains (> (length canonical.terrains) 0)
-                 (or (not self.entity)
-                     (not self.scene-terrains)
-                     (= (length (or self.scene-terrains [])) 0)))
+      ;; Rebuild terrain runtime from stored records (panels deferred to Task 5).
+      ;; Each canonical terrain record is built exactly once; per-record
+      ;; id checking prevents duplicates on repeated restores.
+      (when (and canonical.terrains (> (length canonical.terrains) 0))
         (if (not self.entity)
             ;; No base entity yet — build-default creates entity and all terrains
             (self:build-default {:terrains canonical.terrains})
@@ -888,7 +903,12 @@
                 (if (and record-id (find-terrain-entry self.scene-terrains record-id))
                     ;; idempotent: skip terrain records that already exist in the runtime
                     nil
-                    (self:add-terrain-record entry.record))))))
+                    (self:add-terrain-record entry.record)))))
+        ;; Capture runtime terrain ids back into the slot's scene-state
+        ;; so that subsequent restores can match existing terrains by stable id.
+        (when self.scene-terrains
+          (set (. slot.scene-state :terrains)
+               (SceneWorldState.capture-terrains self.scene-terrains))))
       ;; After terrain rebuild, update slot fields so the slot owns the
       ;; newly built content (not just the service state).
       (set slot.entity self.entity)

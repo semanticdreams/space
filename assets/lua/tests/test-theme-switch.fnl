@@ -405,7 +405,10 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   true)
 
-(fn apply-theme-preserves-active-world-terrains []
+(fn apply-theme-applies-canonical-sandbox-skybox []
+  ;; R1-1: apply-theme must resolve skybox from canonical Sandbox scene state
+  ;; (world.state.activity.sessions.sandbox.scene.skybox) and must NOT attempt
+  ;; a legacy rebuild from world.state.scene.terrains.
   (local original-settings app.settings)
   (local original-themes app.themes)
   (local original-scene app.scene)
@@ -416,43 +419,52 @@
   (local original-graph app.graph)
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
-  (var scene-payload nil)
-  (local terrain-record {:id "terrain-a"
-                         :kind "heightfield-terrain"
-                         :options {:position [1 2 3]
-                                   :rotation [1 0 0 0]
-                                   :chunk-samples [17 17]
-                                   :chunk-size [16 16]
-                                   :default-height 0.0}
-                         :chunks [{:coord [0 0]
-                                   :size [17 17]
-                                   :heights [0]}]})
+  (var build-default-called? false)
+  (var skybox-applied nil)
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.canvas nil)
-  (set app.scene {:build-default (fn [_self payload]
-                                   (set scene-payload payload)
-                                   true)})
+  ;; Mock scene: build-default should NOT be called by theme-actions anymore
+  (set app.scene {:build-default (fn [_self _payload]
+                                  (set build-default-called? true)
+                                  true)
+                  :build-context {}
+                  ;; set-skybox-state is called by reapply-active-world-skybox
+                  :set-skybox-state (fn [_self state]
+                                     (set skybox-applied state)
+                                     true)})
   (set app.hud {:build-default (fn [_self] true)})
   (set app.apply-active-world-hud-contrib nil)
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.settings {:set-value (fn [_key _value _opts] true)
-                     :save (fn [] true)})
+                      :save (fn [] true)})
   (set app.themes {:set-theme (fn [_name] true)
-                   :get-active-theme (fn [] {:name :light})})
-  (set app.active-world-entry {:world {:state {:scene {:terrains [terrain-record]}}}})
-  (local (ok err)
-    (pcall
-      (fn []
-        (ThemeActions.apply-theme :light)
-        (assert scene-payload "apply-theme should pass a scene payload to build-default when an active world exists")
-        (assert (= (length (or scene-payload.terrains [])) 1)
-                "apply-theme should preserve the active world terrain list during scene rebuild")
-        (assert (= (and (. scene-payload.terrains 1) (. (. scene-payload.terrains 1) :id))
-                   "terrain-a")
-                "apply-theme should rebuild the scene with the persisted terrain id")
-        (assert (not (= (. scene-payload.terrains 1) terrain-record))
-                "apply-theme should clone persisted terrain records before handing them to the scene rebuild"))))
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Set up canonical Sandbox scene state with custom skybox
+  (local sandbox-skybox {:enabled? true
+                         :name "ocean"
+                         :brightness 0.75
+                         :tint-color [0.8 0.9 1.0]})
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}  ;; legacy scene is empty
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox sandbox-skybox
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
+  (ThemeActions.apply-theme :light)
+  ;; R1-1: verify canonical skybox was applied
+  (assert skybox-applied "apply-theme should apply skybox from canonical sandbox state")
+  (assert skybox-applied.enabled? "canonical skybox should be enabled")
+  (assert (= skybox-applied.name "ocean")
+          "canonical skybox should use the name from sandbox session scene")
+  ;; R1-1: verify legacy scene rebuild was NOT triggered
+  (assert (not build-default-called?)
+          "apply-theme must NOT call build-default (no legacy terrain rebuild)")
   (set app.settings original-settings)
   (set app.themes original-themes)
   (set app.scene original-scene)
@@ -463,11 +475,12 @@
   (set app.graph original-graph)
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
-  (when (not ok)
-    (error err))
   true)
 
-(fn apply-theme-requires-active-world-terrain-state []
+(fn apply-theme-succeeds-without-legacy-terrain-state []
+  ;; R1-1: apply-theme must NOT fail when legacy world.state.scene.terrains
+  ;; is absent. ThemeActions reads skybox from canonical Sandbox state and
+  ;; does not assert on legacy terrain state.
   (local original-settings app.settings)
   (local original-themes app.themes)
   (local original-scene app.scene)
@@ -481,15 +494,27 @@
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.canvas nil)
-  (set app.scene {:build-default (fn [_self _payload] true)})
+  (set app.scene {:build-context {}
+                  :set-skybox-state (fn [_self _state] true)})
   (set app.hud {:build-default (fn [_self] true)})
   (set app.apply-active-world-hud-contrib nil)
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.settings {:set-value (fn [_key _value _opts] true)
-                     :save (fn [] true)})
+                      :save (fn [] true)})
   (set app.themes {:set-theme (fn [_name] true)
-                   :get-active-theme (fn [] {:name :light})})
-  (set app.active-world-entry {:world {:state {:scene {}}}})
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Legacy scene has no terrains key; canonical sandbox scene has skybox
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}  ;; empty legacy scene (no terrains)
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox {:enabled? true :name "lake" :brightness 0.1 :tint-color [1 1 1]}
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
   (local (ok err)
     (pcall
       (fn []
@@ -504,10 +529,7 @@
   (set app.graph original-graph)
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
-  (assert (not ok)
-          "apply-theme should fail loudly when active world terrain state is missing")
-  (assert (and err (string.find err "ThemeActions.apply-theme requires active world scene terrains" 1 true))
-          "apply-theme should report that active world scene terrains are required")
+  (assert ok (.. "apply-theme should succeed without legacy terrain state, got: " (tostring err)))
   true)
 
 (fn apply-theme-rebuilds-active-board-mode-through-mode-lifecycle []
@@ -611,10 +633,10 @@
                       :fn apply-theme-updates-scene-and-hud-build-contexts-without-canvas})
 (table.insert tests {:name "Apply theme refreshes physics containment visualization"
                      :fn apply-theme-refreshes-physics-containment-visualization})
-(table.insert tests {:name "Apply theme preserves active world terrains"
-                     :fn apply-theme-preserves-active-world-terrains})
-(table.insert tests {:name "Apply theme requires active world terrain state"
-                     :fn apply-theme-requires-active-world-terrain-state})
+(table.insert tests {:name "Apply theme applies canonical sandbox skybox"
+                      :fn apply-theme-applies-canonical-sandbox-skybox})
+(table.insert tests {:name "Apply theme succeeds without legacy terrain state"
+                      :fn apply-theme-succeeds-without-legacy-terrain-state})
 (table.insert tests {:name "Apply theme rebuilds active board mode through mode lifecycle"
                      :fn apply-theme-rebuilds-active-board-mode-through-mode-lifecycle})
 
