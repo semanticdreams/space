@@ -2,8 +2,28 @@
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
+(local ActivitySceneState (require :activity-scene-state))
 
 (local M {})
+
+;; ── Canonical sandbox session helpers ──────────────────────────────
+
+(fn resolve-sandbox-scene-state [world context]
+  "Return the canonical sandbox session scene state for a HomeWorld, or nil."
+  (when world
+    (assert world.state (.. (or context "WorldData") " requires world.state"))
+    (ActivitySceneState.scene-state world.state.activity "sandbox")))
+
+(fn ensure-sandbox-scene-state [world]
+  "Ensure the sandbox session scene state exists and return it."
+  (assert world "WorldData requires world")
+  (assert world.state "WorldData requires world.state")
+  (when (not (= (type world.state.activity) :table))
+    (set world.state.activity {}))
+  (ActivitySceneState.ensure-session-scene!
+    world.state.activity
+    "sandbox"
+    ActivitySceneState.default-sandbox-state))
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -76,7 +96,8 @@
 
 (fn scene-state-panels [world-manager world-id]
   (local world (resolve-world world-manager world-id))
-  (or (and world world.state world.state.scene world.state.scene.panels) []))
+  (local sandbox-scene (resolve-sandbox-scene-state world))
+  (or (and sandbox-scene sandbox-scene.panels) []))
 
 (fn hud-state-panels [world-manager world-id]
   (local world (resolve-world world-manager world-id))
@@ -84,54 +105,47 @@
 
 (fn terrain-state-records [world-manager world-id]
   (local world (resolve-world world-manager world-id))
-  (or (and world world.state world.state.scene world.state.scene.terrains) []))
+  (local sandbox-scene (resolve-sandbox-scene-state world))
+  (or (and sandbox-scene sandbox-scene.terrains) []))
 
 (fn scene-state-skybox [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
       (do
-        (assert world.state (.. "WorldData[" world-id "] requires world.state"))
-        (assert world.state.scene (.. "WorldData[" world-id "] requires world.state.scene"))
-        (local scene-state world.state.scene)
+        (local sandbox-scene (resolve-sandbox-scene-state world (.. "WorldData[" world-id "]")))
+        (assert sandbox-scene (.. "WorldData[" world-id "] requires sandbox scene state"))
         (SkyboxState.normalize-complete-state
-          (assert scene-state.skybox
-                  (.. "WorldData[" world-id "] requires scene.skybox"))
-          (.. "WorldData[" world-id "] scene.skybox")))))
+          (assert sandbox-scene.skybox
+                  (.. "WorldData[" world-id "] requires sandbox scene.skybox"))
+          (.. "WorldData[" world-id "] sandbox scene.skybox")))))
 
 (fn scene-state-background [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
       (do
-        (assert world.state (.. "WorldData[" world-id "] requires world.state"))
-        (assert world.state.scene (.. "WorldData[" world-id "] requires world.state.scene"))
-        (local scene-state world.state.scene)
+        (local sandbox-scene (resolve-sandbox-scene-state world (.. "WorldData[" world-id "]")))
+        (assert sandbox-scene (.. "WorldData[" world-id "] requires sandbox scene state"))
         (BackgroundState.normalize-complete-state
-          (assert scene-state.background
-                  (.. "WorldData[" world-id "] requires scene.background"))
-          (.. "WorldData[" world-id "] scene.background")))))
+          (assert sandbox-scene.background
+                  (.. "WorldData[" world-id "] requires sandbox scene.background"))
+          (.. "WorldData[" world-id "] sandbox scene.background")))))
 
 (fn resolve-default-light-state []
   (LightSystemModule.default-state))
 
 (fn ensure-scene-state [world]
-  (when (not world.state)
-    (set world.state {}))
-  (when (not world.state.scene)
-    (set world.state.scene {}))
-  (when (not world.state.scene.panels)
-    (set world.state.scene.panels []))
-  (when (not world.state.scene.terrains)
-    (set world.state.scene.terrains []))
-  world.state.scene)
+  "Ensure sandbox session scene state exists and return it."
+  (ensure-sandbox-scene-state world))
 
 (fn require-scene-state [world context]
-  (local label (or context "WorldData"))
+  "Assert that sandbox session scene state exists and return it."
+  (local label (.. (or context "WorldData")))
   (assert world (.. label " requires world"))
-  (assert world.state (.. label " requires world.state"))
-  (assert world.state.scene (.. label " requires world.state.scene"))
-  world.state.scene)
+  (local sandbox-scene (resolve-sandbox-scene-state world label))
+  (assert sandbox-scene (.. label " requires sandbox scene state"))
+  sandbox-scene)
 
 (fn emit-world-change [world-manager world-id reason]
   (when (and world-manager world-manager.changed world-manager.changed.emit)
@@ -178,19 +192,27 @@
   (if (not world)
       nil
       (do
-        (local scene-state (require-scene-state world (.. "WorldData[" world-id "]")))
+        (local sandbox-scene (require-scene-state world (.. "WorldData[" world-id "]")))
         (LightSystemModule.normalize-complete-state
-          (assert scene-state.lights
-                  (.. "WorldData[" world-id "] requires scene.lights"))
-          (.. "WorldData[" world-id "] scene.lights")))))
+          (assert sandbox-scene.lights
+                  (.. "WorldData[" world-id "] requires sandbox scene.lights"))
+          (.. "WorldData[" world-id "] sandbox scene.lights")))))
 
 (fn normalize-light-state [lights context]
   (LightSystemModule.normalize-complete-state lights context))
 
 (fn persist-light-state! [scene-state lights context]
+  "Normalize lights and store into scene-state.lights. Updates in place
+  to maintain canonical session references when the same table is shared."
   (local normalized (normalize-light-state lights (or context "WorldData.persist-light-state!")))
-  (set scene-state.lights normalized)
-  normalized)
+  ;; Update in place: keep the same table identity for shared references.
+  (each [k v (pairs normalized)]
+    (tset scene-state.lights k v))
+  ;; Remove keys that are no longer present.
+  (each [k _ (pairs scene-state.lights)]
+    (when (= (. normalized k) nil)
+      (tset scene-state.lights k nil)))
+  scene-state.lights)
 
 (fn sync-active-light-state [world-manager world-id lights]
   (local scene (resolve-scene world-manager world-id))

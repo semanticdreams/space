@@ -43,6 +43,18 @@
                                           :skybox (make-skybox-state)
                                           :background (make-background-state)}
                                   :hud {:panels []}}))
+  ;; Populate canonical activity session state.
+  (when (not (= (type state.activity) :table))
+    (local sandbox-scene
+           {:panels state.scene.panels
+            :terrains state.scene.terrains
+            :lights state.scene.lights
+            :skybox state.scene.skybox
+            :background state.scene.background
+            :containment {:enabled? false}})
+    (set state.activity
+         {:active_id "sandbox"
+          :sessions {:sandbox {:scene sandbox-scene}}}))
   {:id (or options.id "test-world")
    :name (or options.name "Test World")
    :active? (or options.active? false)
@@ -124,17 +136,20 @@
   (var saved-background nil)
   (var synced-background nil)
   (local runtime (make-scene-runtime {:background state.scene.background
-                                      :on-set-background-state (fn [value]
-                                                                 (set synced-background value))}))
+                                       :on-set-background-state (fn [value]
+                                                                  (set synced-background value))}))
   (local entry (make-world-entry {:id "test-world"
-                                  :state state
-                                  :runtime runtime
-                                  :active? true
-                                  :on-save (fn [saved-state]
-                                             (set saved-background
-                                                  (and saved-state
-                                                       saved-state.scene
-                                                       saved-state.scene.background)))}))
+                                   :state state
+                                   :runtime runtime
+                                   :active? true
+                                   :on-save (fn [saved-state]
+                                              (set saved-background
+                                                   (and saved-state
+                                                        saved-state.activity
+                                                        saved-state.activity.sessions
+                                                        saved-state.activity.sessions.sandbox
+                                                        saved-state.activity.sessions.sandbox.scene
+                                                        saved-state.activity.sessions.sandbox.scene.background)))}))
   (local manager (make-world-manager {:id "test-world"
                                       :entry entry
                                       :active-world-id "test-world"}))
@@ -144,6 +159,11 @@
   (local builder (BackgroundNodeView node))
   (local view (builder ctx))
   {:state state
+   :sandbox-scene (fn [self]
+                    (and self.state.activity
+                         self.state.activity.sessions
+                         self.state.activity.sessions.sandbox
+                         self.state.activity.sessions.sandbox.scene))
    :node node
    :view view
    :synced-background (fn [_self] synced-background)
@@ -194,9 +214,10 @@
     (make-background-node-view-harness {:background (make-background-state {:color [0.0 0.0 0.0]})}))
   (harness.view.fields.color:set-text "0.1, 0.2, 0.3")
   (harness.view.apply-button:on-click {})
-  (assert (= (. harness.state.scene.background.color 1) 0.1) "Background apply should persist red")
-  (assert (= (. harness.state.scene.background.color 2) 0.2) "Background apply should persist green")
-  (assert (= (. harness.state.scene.background.color 3) 0.3) "Background apply should persist blue")
+  (local sandbox-scene (harness:sandbox-scene))
+  (assert (= (. sandbox-scene.background.color 1) 0.1) "Background apply should persist red")
+  (assert (= (. sandbox-scene.background.color 2) 0.2) "Background apply should persist green")
+  (assert (= (. sandbox-scene.background.color 3) 0.3) "Background apply should persist blue")
   (local synced-background (harness:synced-background))
   (assert synced-background "Background apply should sync the active scene")
   (assert (= (. synced-background.color 2) 0.2) "Synced background should include updated green")

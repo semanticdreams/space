@@ -40,6 +40,18 @@
                                           :lights (LightSystemModule.default-state)
                                           :skybox (make-skybox-state)}
                                   :hud {:panels []}}))
+  ;; Populate canonical activity session state.
+  (when (not (= (type state.activity) :table))
+    (local sandbox-scene
+           {:panels state.scene.panels
+            :terrains state.scene.terrains
+            :lights state.scene.lights
+            :skybox state.scene.skybox
+            :background {:color [0 0 0]}
+            :containment {:enabled? false}})
+    (set state.activity
+         {:active_id "sandbox"
+          :sessions {:sandbox {:scene sandbox-scene}}}))
   {:id (or options.id "test-world")
    :name (or options.name "Test World")
    :active? (or options.active? false)
@@ -164,29 +176,37 @@
   (var saved-skybox nil)
   (var synced-skybox nil)
   (local runtime (make-scene-runtime {:lights state.scene.lights
-                                      :skybox state.scene.skybox
-                                      :theme-key :dark
-                                      :on-set-skybox-state (fn [value]
-                                                             (set synced-skybox value))}))
+                                       :skybox state.scene.skybox
+                                       :theme-key :dark
+                                       :on-set-skybox-state (fn [value]
+                                                              (set synced-skybox value))}))
   (local entry (make-world-entry {:id "test-world"
-                                  :state state
-                                  :runtime runtime
-                                  :active? true
-                                  :on-save (fn [saved-state]
-                                             (set saved-skybox
-                                                  (and saved-state
-                                                       saved-state.scene
-                                                       saved-state.scene.skybox)))}))
+                                   :state state
+                                   :runtime runtime
+                                   :active? true
+                                   :on-save (fn [saved-state]
+                                              (set saved-skybox
+                                                   (and saved-state
+                                                        saved-state.activity
+                                                        saved-state.activity.sessions
+                                                        saved-state.activity.sessions.sandbox
+                                                        saved-state.activity.sessions.sandbox.scene
+                                                        saved-state.activity.sessions.sandbox.scene.skybox)))}))
   (local manager (make-world-manager {:id "test-world"
-                                      :entry entry
-                                      :active-world-id "test-world"}))
+                                       :entry entry
+                                       :active-world-id "test-world"}))
   (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
   (local node (SkyboxNode {:world-id "test-world"
-                           :world-manager manager
-                           :asset-path-resolver asset-path-resolver}))
+                            :world-manager manager
+                            :asset-path-resolver asset-path-resolver}))
   (local builder (SkyboxNodeView node))
   (local view (builder ctx))
   {:state state
+   :sandbox-scene (fn [self]
+                    (and self.state.activity
+                         self.state.activity.sessions
+                         self.state.activity.sessions.sandbox
+                         self.state.activity.sessions.sandbox.scene))
    :node node
    :view view
    :synced-skybox (fn [_self] synced-skybox)
@@ -294,19 +314,20 @@
       (harness.view.theme-overrides.dark.brightness:set-text "0.4")
       (harness.view.theme-overrides.dark.tint-color:set-text "1.0, 0.8, 0.8")
       (harness.view.apply-button:on-click {})
-      (assert (= harness.state.scene.skybox.enabled? false) "Skybox apply should persist enabled flag")
-      (assert (= harness.state.scene.skybox.default.name next-name)
+      (local sandbox-scene (harness:sandbox-scene))
+      (assert (= sandbox-scene.skybox.enabled? false) "Skybox apply should persist enabled flag")
+      (assert (= sandbox-scene.skybox.default.name next-name)
               "Skybox apply should persist default name")
-      (assert (= harness.state.scene.skybox.default.brightness 0.25)
+      (assert (= sandbox-scene.skybox.default.brightness 0.25)
               "Skybox apply should persist default brightness")
-      (assert (= (. harness.state.scene.skybox.default.tint-color 2) 0.9)
+      (assert (= (. sandbox-scene.skybox.default.tint-color 2) 0.9)
               "Skybox apply should persist default tint color")
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      harness.state.scene.skybox.by-theme.dark.name)
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      sandbox-scene.skybox.by-theme.dark.name)
                  "lake")
               "Skybox apply should persist dark-theme override")
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      (. harness.state.scene.skybox.by-theme.dark.tint-color 2))
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      (. sandbox-scene.skybox.by-theme.dark.tint-color 2))
                  0.8)
               "Skybox apply should persist dark-theme tint override")
       (local synced-skybox (harness:synced-skybox))
@@ -336,8 +357,9 @@
       (harness.view.theme-overrides.dark.name:set-value "lake")
       (harness.view.theme-overrides.dark.brightness:set-text "")
       (harness.view.apply-button:on-click {})
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      harness.state.scene.skybox.by-theme.dark.brightness)
+      (local sandbox-scene (harness:sandbox-scene))
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      sandbox-scene.skybox.by-theme.dark.brightness)
                  0.35)
               "Theme override should inherit default brightness when left blank")
       (local synced-skybox (harness:synced-skybox))
@@ -357,8 +379,9 @@
       (harness.view.theme-overrides.dark.name:set-value "lake")
       (harness.view.theme-overrides.dark.tint-color:set-text "")
       (harness.view.apply-button:on-click {})
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      (. harness.state.scene.skybox.by-theme.dark.tint-color 3))
+      (local sandbox-scene (harness:sandbox-scene))
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      (. sandbox-scene.skybox.by-theme.dark.tint-color 3))
                  0.9)
               "Theme override should inherit default tint when left blank")
       (local synced-skybox (harness:synced-skybox))
