@@ -2,6 +2,7 @@
 (local fs (require :fs))
 (local Main (require :main))
 (local Activities (require :activities))
+(local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
 (local DrawingController (require :drawing/controller))
@@ -51,6 +52,13 @@
   (local focus-manager (FocusManager {:root-name "drawing-activity-slot-test"}))
   (local canvas (Canvas {:camera camera
                          :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+  (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
   (local controller (DrawingController {:data_dir data-dir}))
   (controller:add-layer "vector")
   (controller:begin-gesture "rectangle" (glm.vec3 0 0 0))
@@ -58,6 +66,7 @@
   (assert (controller:commit-gesture)
           "drawing activity slot test expected rectangle commit to succeed")
   (local runtime {:canvas canvas
+                  :scene scene
                   :drawing-controller controller})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
@@ -91,6 +100,7 @@
   (when runtime.drawing-render
     (runtime.drawing-render:drop)
     (set runtime.drawing-render nil))
+  (scene:drop)
   (canvas:drop)
   (focus-manager:drop)
   (camera:drop)
@@ -139,11 +149,16 @@
                    :engine
                    :pointer-target-enabled?
                    :viewport
-                   :themes])
+                   :themes
+                   :scene])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
   (set app.active-activity-id nil)
+  (set app.scene-interactive? true)
+  (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
+  (Main.install-app-shell!)
   (local data-dir "/tmp/space/tests/drawing-scene-isolation")
   (when (fs.exists data-dir)
     (fs.remove-all data-dir))
@@ -200,6 +215,7 @@
                   :drawing-controller controller})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
+  (set app.scene scene)
   (set app.drawing-controller controller)
   (local (ok result)
     (pcall
@@ -231,6 +247,17 @@
                 "Scene should report sandbox as active slot")
         (assert (. mock-lights-state :ambient :enabled?)
                 "Sandbox activation should enable ambient light")
+        ;; Background and containment should reflect sandbox state
+        (assert (and app.background-state
+                     (= (. app.background-state.color 1) 0.2)
+                     (= (. app.background-state.color 2) 0.3)
+                     (= (. app.background-state.color 3) 0.4))
+                "Sandbox activation should apply custom background color")
+        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
+                "Sandbox containment should be enabled")
+        (let [sb-slot (scene:activity-slot "sandbox")]
+          (assert (app.pointer-target-enabled? (. sb-slot :pointer-target))
+                  "Sandbox pointer target should be enabled while sandbox is active"))
 
         ;; Switch to Drawing
         (Activities.activate-activity "drawing")
@@ -251,6 +278,19 @@
                 "Drawing scene slot should have no terrains")
         (assert (= (length drawing-captured.panels) 0)
                 "Drawing scene slot should have no panels")
+        ;; Background should be reset to default
+        (assert (and app.background-state
+                     (= (. app.background-state.color 1) 0.0)
+                     (= (. app.background-state.color 2) 0.0)
+                     (= (. app.background-state.color 3) 0.0))
+                "Drawing activation should reset background to default")
+        ;; Containment should be disabled
+        (assert (and app.physics-containment-config (not app.physics-containment-config.enabled?))
+                "Drawing activation should disable containment")
+        ;; Sandbox pointer target should be rejected
+        (let [sb-slot (scene:activity-slot "sandbox")]
+          (assert (not (app.pointer-target-enabled? (. sb-slot :pointer-target)))
+                  "Sandbox pointer target should be rejected while drawing is active"))
 
         ;; Switch back to Sandbox — content preserved
         (Activities.activate-activity "sandbox")

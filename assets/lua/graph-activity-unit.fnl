@@ -287,8 +287,10 @@
 (fn activate-activity! [ctx]
   ;; Ensure and activate empty Scene slot before Canvas hooks
   ;; so Graph does not inherit Sandbox content/environment/interaction.
-  (when (and app.active-world-runtime app.active-world-runtime.scene)
-    (local scene app.active-world-runtime.scene)
+  (let [runtime (assert app.active-world-runtime
+                         "Graph activity activation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Graph activity activation requires runtime.scene")]
     (scene:ensure-activity-slot "graph")
     (scene:activate-activity-slot "graph"))
   (ctx:defer-cleanup! drop-graph-view!)
@@ -319,14 +321,22 @@
   (disconnect-map-switch-handlers!)
   (deactivate-graph-view!)
   ;; Deactivate Scene slot after Canvas deactivation without dropping it
-  (when (and app.active-world-runtime app.active-world-runtime.scene)
-    (app.active-world-runtime.scene:deactivate-activity-slot "graph")))
+  (let [runtime (assert app.active-world-runtime
+                         "Graph activity deactivation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Graph activity deactivation requires runtime.scene")]
+    (scene:deactivate-activity-slot "graph")))
 
 (fn snapshot-graph-activity! []
-  {:active? (= (Activities.active-activity-id) "graph")
-   :graph-view-state (capture-graph-view-state!)
-   :graph-view-states (clone-table (and app.active-world-runtime
-                                        app.active-world-runtime.graph-view-states))})
+  (let [scene-state
+         (if (and app.active-world-runtime app.active-world-runtime.scene)
+             (app.active-world-runtime.scene:capture-activity-slot-state "graph")
+             nil)]
+    {:active? (= (Activities.active-activity-id) "graph")
+     :graph-view-state (capture-graph-view-state!)
+     :graph-view-states (clone-table (and app.active-world-runtime
+                                         app.active-world-runtime.graph-view-states))
+     :scene scene-state}))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -339,7 +349,9 @@
     (when state.graph-view-states
       (set app.active-world-runtime.graph-view-states (clone-table state.graph-view-states)))
     (when state.graph-view-state
-      (set app.active-world-runtime.graph-view-state state.graph-view-state)))
+      (set app.active-world-runtime.graph-view-state state.graph-view-state))
+    (when (and state.scene app.active-world-runtime.scene)
+      (app.active-world-runtime.scene:restore-activity-slot-state "graph" state.scene)))
   (when (and state state.active?)
         (if (and (= (Activities.active-activity-id) "graph")
                   app.graph-view

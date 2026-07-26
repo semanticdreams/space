@@ -173,8 +173,10 @@
 (fn activate-activity! [ctx]
   ;; Ensure and activate empty Scene slot before Canvas hooks
   ;; so Board does not inherit Sandbox content/environment/interaction.
-  (when (and app.active-world-runtime app.active-world-runtime.scene)
-    (local scene app.active-world-runtime.scene)
+  (let [runtime (assert app.active-world-runtime
+                         "Board activity activation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Board activity activation requires runtime.scene")]
     (scene:ensure-activity-slot "board")
     (scene:activate-activity-slot "board"))
   (ctx:defer-cleanup! drop-board-view!)
@@ -194,12 +196,20 @@
 (fn deactivate-activity! [_ctx _session]
   (deactivate-board-view!)
   ;; Deactivate Scene slot after Canvas deactivation without dropping it
-  (when (and app.active-world-runtime app.active-world-runtime.scene)
-    (app.active-world-runtime.scene:deactivate-activity-slot "board")))
+  (let [runtime (assert app.active-world-runtime
+                         "Board activity deactivation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Board activity deactivation requires runtime.scene")]
+    (scene:deactivate-activity-slot "board")))
 
 (fn snapshot-board-activity! []
-  {:active? (= (Activities.active-activity-id) "board")
-   :board-state (capture-board-state!)})
+  (let [scene-state
+         (if (and app.active-world-runtime app.active-world-runtime.scene)
+             (app.active-world-runtime.scene:capture-activity-slot-state "board")
+             nil)]
+    {:active? (= (Activities.active-activity-id) "board")
+     :board-state (capture-board-state!)
+     :scene scene-state}))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -210,6 +220,8 @@
   (local state (restore-state-arg first session maybe-state))
   (when (and app.active-world-runtime state state.board-state)
     (set app.active-world-runtime.board-state state.board-state))
+  (when (and app.active-world-runtime state state.scene app.active-world-runtime.scene)
+    (app.active-world-runtime.scene:restore-activity-slot-state "board" state.scene))
   (when (and state state.active?)
     (if (and state.board-state
              (= (Activities.active-activity-id) "board")

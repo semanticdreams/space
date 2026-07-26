@@ -4,6 +4,7 @@
 (local Activities (require :activities))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
+(local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
 (local ObjectSelector (require :object-selector))
@@ -106,8 +107,13 @@
   (local focus-manager (FocusManager {:root-name "graph-activity-slot-test"}))
   (local canvas (Canvas {:camera camera
                           :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
   (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
@@ -116,6 +122,7 @@
                                                              canvas.build-context))
                                            :enabled? true}))
   (local runtime {:canvas canvas
+                  :scene scene
                   :graph graph
                   :graph-map graph-map
                   :object-selector object-selector
@@ -161,7 +168,7 @@
                 "Deactivating graph activity should hide the graph slot")
         (assert (not app.graph-view)
                 "Deactivating graph activity should stop exposing app.graph-view")
-        true)))
+         true)))
   (pcall GraphActivityUnit.unload-graph-activity!)
   (when runtime.graph-view
     (runtime.graph-view:drop)
@@ -169,6 +176,7 @@
   (object-selector:drop)
   (graph-map:drop)
   (graph:drop)
+  (scene:drop)
   (canvas:drop)
   (focus-manager:drop)
   (camera:drop)
@@ -238,8 +246,24 @@
   (local canvas (Canvas {:camera camera
                          :focus-manager focus-manager
                          :icons (make-icons-stub)}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  ;; Mock services needed by scene:activate-activity-slot and scene:capture-activity-slot-state
+  (local SkyboxState (require :skybox-state))
+  (local BackgroundState (require :background-state))
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (set app.renderers {:skybox {:get-state (fn [_] skybox-state)
+                               :set-state (fn [_ state] (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+                      :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+                      :set-background-state (fn [_ state] (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+  (var mock-lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0} :directional [] :point [] :spot []})
+  (set app.lights {:get-state (fn [_] mock-lights-state) :set-state (fn [_ state] (set mock-lights-state state))})
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body]) :removeRigidBody (fn [_phys _body])}})
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
   (local panel-node (make-panel-node))
   (graph:register-key-loader "test-panel-node"
@@ -257,6 +281,7 @@
   (local controller (DrawingController {:data_dir data-dir}))
   (controller:add-layer "vector")
   (local runtime {:canvas canvas
+                  :scene scene
                   :graph graph
                   :graph-map graph-map
                   :object-selector object-selector
@@ -337,6 +362,7 @@
   (object-selector:drop)
   (graph-map:drop)
   (graph:drop)
+  (scene:drop)
   (canvas:drop)
   (focus-manager:drop)
   (camera:drop)
@@ -386,7 +412,8 @@
                    :skybox-state
                    :physics-containment-config
                    :engine
-                   :pointer-target-enabled?])
+                   :pointer-target-enabled?
+                   :scene])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
@@ -463,6 +490,7 @@
                   :world-dir data-dir})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
+  (set app.scene scene)
   (set app.graph graph)
   (set app.graph-map graph-map)
   (local (ok result)
@@ -495,6 +523,18 @@
                 "Sandbox activation should enable ambient light")
         (assert skybox-state.enabled?
                 "Sandbox activation should enable skybox")
+        ;; Background and containment should reflect sandbox state
+        (assert (and app.background-state
+                     (= (. app.background-state.color 1) 0.2)
+                     (= (. app.background-state.color 2) 0.3)
+                     (= (. app.background-state.color 3) 0.4))
+                "Sandbox activation should apply custom background color")
+        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
+                "Sandbox containment should be enabled")
+        ;; Sandbox pointer target should be enabled while sandbox is active
+        (let [sb-slot (scene:activity-slot "sandbox")]
+          (assert (app.pointer-target-enabled? (. sb-slot :pointer-target))
+                  "Sandbox pointer target should be enabled while sandbox is active"))
 
         ;; Switch to Graph
         (Activities.activate-activity "graph")
@@ -521,6 +561,19 @@
                 "Captured graph state should have disabled ambient light")
         (assert (not graph-captured.skybox.enabled?)
                 "Captured graph state should have disabled skybox")
+        ;; Background should be reset to default (neutral/black)
+        (assert (and app.background-state
+                     (= (. app.background-state.color 1) 0.0)
+                     (= (. app.background-state.color 2) 0.0)
+                     (= (. app.background-state.color 3) 0.0))
+                "Graph activation should reset background to default")
+        ;; Containment should be disabled
+        (assert (and app.physics-containment-config (not app.physics-containment-config.enabled?))
+                "Graph activation should disable containment")
+        ;; Sandbox pointer target should be rejected
+        (let [sb-slot (scene:activity-slot "sandbox")]
+          (assert (not (app.pointer-target-enabled? (. sb-slot :pointer-target)))
+                  "Sandbox pointer target should be rejected while graph is active"))
 
         ;; Switch back to Sandbox — content should be preserved
         (Activities.activate-activity "sandbox")

@@ -4,6 +4,7 @@
 (local Activities (require :activities))
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
+(local Scene (require :scene))
 (local Canvas (require :canvas))
 (local Camera (require :camera))
 (local ObjectSelector (require :object-selector))
@@ -86,18 +87,35 @@
   (local focus-manager (FocusManager {:root-name "activity-retention-test"}))
   (local canvas (Canvas {:camera camera
                          :focus-manager focus-manager}))
+  (local AppProjection (require :app-projection))
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local scene (Scene {:camera camera}))
+  ;; Mock services needed by scene:activate-activity-slot and scene:capture-activity-slot-state
+  (local SkyboxState (require :skybox-state))
+  (local BackgroundState (require :background-state))
+  (var skybox-state {:enabled? false :name "lake" :brightness 0.5 :tint-color [1.0 1.0 1.0]})
+  (set app.renderers {:skybox {:get-state (fn [_] skybox-state)
+                               :set-state (fn [_ state] (set skybox-state (SkyboxState.normalize-resolved-state state "skybox-mock")))}
+                      :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+                      :set-background-state (fn [_ state] (set app.background-state (BackgroundState.normalize-complete-state state "bg-mock")))})
+  (var mock-lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0} :directional [] :point [] :spot []})
+  (set app.lights {:get-state (fn [_] mock-lights-state) :set-state (fn [_ state] (set mock-lights-state state))})
+  (set app.engine {:physics {:addRigidBody (fn [_phys _body]) :removeRigidBody (fn [_phys _body])}})
   (set app.viewport {:x 0 :y 0 :width 800 :height 600})
   (canvas:on-viewport-changed app.viewport)
+  (scene:on-viewport-changed app.viewport)
   (local graph (Graph {:with-start false}))
   (local graph-map (GraphMap.GraphMap {:graph graph :id "main"}))
   (local object-selector (ObjectSelector {:ctx-provider (fn []
-                                                        (or (and canvas.active-activity-slot
-                                                                 canvas.active-activity-slot.ctx)
-                                                            canvas.build-context))
-                                          :enabled? true}))
+                                                         (or (and canvas.active-activity-slot
+                                                                  canvas.active-activity-slot.ctx)
+                                                             canvas.build-context))
+                                           :enabled? true}))
   (local controller (DrawingController {:data_dir data-dir}))
   (controller:add-layer "vector")
   (local runtime {:canvas canvas
+                  :scene scene
                   :graph graph
                   :graph-map graph-map
                   :object-selector object-selector
@@ -190,6 +208,7 @@
   (object-selector:drop)
   (graph-map:drop)
   (graph:drop)
+  (scene:drop)
   (canvas:drop)
   (focus-manager:drop)
   (camera:drop)
@@ -686,14 +705,20 @@
                    :background-state
                    :skybox-state
                    :physics-containment-config
-                   :engine])
+                   :engine
+                   :pointer-target-enabled?
+                   :scene])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
   (set app.active-activity-id nil)
   (set app.canvas-visible? false)
+  (set app.canvas-interactive? false)
+  (set app.canvas-surface-interactive? true)
+  (set app.scene-interactive? true)
   (set app.active-interaction-surface :scene)
   (set app.preferred-interaction-surface :scene)
+  (Main.install-app-shell!)
   (set app.set-canvas-visible
        (fn [visible?]
          (set app.canvas-visible? (and app.canvas (not (= visible? false))))))
@@ -748,6 +773,7 @@
                   :board-state {:items [] :connectors []}})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
+  (set app.scene scene)
   (set app.graph graph)
   (set app.graph-map graph-map)
   (set app.drawing-controller controller)
@@ -773,6 +799,17 @@
         (Activities.activate-activity "sandbox")
         (assert (= scene.active-activity-slot-id "sandbox") "Scene should report sandbox as active")
         (assert (. mock-lights-state :ambient :enabled?) "Sandbox activation should enable ambient")
+        ;; Background and containment should reflect sandbox state
+        (assert (and app.background-state
+                     (= (. app.background-state.color 1) 0.2)
+                     (= (. app.background-state.color 2) 0.3)
+                     (= (. app.background-state.color 3) 0.4))
+                "Sandbox activation should apply custom background color")
+        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
+                "Sandbox containment should be enabled")
+        (let [sb-slot (scene:activity-slot "sandbox")]
+          (assert (app.pointer-target-enabled? (. sb-slot :pointer-target))
+                  "Sandbox pointer target should be enabled while sandbox is active"))
 
         ;; Verify all three activities get their own empty Scene slots
         (each [_ activity-id (ipairs ["graph" "drawing" "board"])]
@@ -797,13 +834,34 @@
           (assert (not captured.lights.ambient.enabled?)
                   (.. "Captured " activity-id " state should have disabled ambient light"))
           (assert (not captured.skybox.enabled?)
-                  (.. "Captured " activity-id " state should have disabled skybox")))
+                  (.. "Captured " activity-id " state should have disabled skybox"))
+          ;; Background should be reset to default
+          (assert (and app.background-state
+                       (= (. app.background-state.color 1) 0.0)
+                       (= (. app.background-state.color 2) 0.0)
+                       (= (. app.background-state.color 3) 0.0))
+                  (.. activity-id " activation should reset background to default"))
+          ;; Containment should be disabled
+          (assert (and app.physics-containment-config (not app.physics-containment-config.enabled?))
+                  (.. activity-id " activation should disable containment"))
+          ;; Sandbox pointer target should be rejected
+          (let [sb-slot (scene:activity-slot "sandbox")]
+            (assert (not (app.pointer-target-enabled? (. sb-slot :pointer-target)))
+                    (.. "Sandbox pointer target should be rejected while " activity-id " is active"))))
 
         ;; Switch back to Sandbox — identity preserved
         (Activities.activate-activity "sandbox")
         (assert (= scene.active-activity-slot-id "sandbox") "Switching back should restore sandbox as active")
         (assert (. mock-lights-state :ambient :enabled?) "Sandbox reactivation should re-enable ambient")
         (assert skybox-state.enabled? "Sandbox reactivation should re-enable skybox")
+        ;; Background and containment should be restored
+        (assert (and app.background-state
+                     (= (. app.background-state.color 1) 0.2)
+                     (= (. app.background-state.color 2) 0.3)
+                     (= (. app.background-state.color 3) 0.4))
+                "Sandbox reactivation should restore custom background color")
+        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
+                "Sandbox reactivation should restore containment")
         true)))
   (pcall SandboxActivityUnit.unload-sandbox-activity!)
   (pcall GraphActivityUnit.unload-graph-activity!)
