@@ -1158,6 +1158,24 @@
 (table.insert tests {:name "GraphMapManager selection survives switch" :fn manager-selection-survives-switch})
 (table.insert tests {:name "GraphMapManager selection survives capture roundtrip" :fn manager-selection-survives-capture-roundtrip})
 
+(fn manager-newly-created-map-seeds-start-after-switch []
+    (local graph (Graph {:with-start false}))
+    (graph:register-key-loader "start"
+        (fn [_key]
+            (Graph.GraphNode {:key "start"})))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    ;; Create a second map and switch to it
+    (manager:create-map! "second" "Second")
+    (manager:switch-map! "second")
+    (local active (manager:get-active-map))
+    (assert (>= (active:node-count) 1)
+            "Newly created map should seed start node after switch")
+    (manager:switch-map! "main")
+    (manager:drop)
+    (graph:drop))
+
+(table.insert tests {:name "GraphMapManager newly created map seeds start after switch" :fn manager-newly-created-map-seeds-start-after-switch})
+
 (fn manager-switch-emits-will-change-before-drop []
     (local graph (Graph {:with-start false}))
     (graph:register-key-loader "test"
