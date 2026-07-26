@@ -351,8 +351,10 @@
     (when state.graph-view-state
       (set app.active-world-runtime.graph-view-state state.graph-view-state)))
   ;; Scene restore asserts runtime.scene even when app.active-world-runtime is nil,
-  ;; matching Drawing and Board restore behaviour.
-  (when state.scene
+  ;; matching Drawing and Board restore behaviour.  Tolerate nil state like
+  ;; Drawing and Board — restore-state-arg may return nil when the first
+  ;; argument is not a valid activity-origin call.
+  (when (and state state.scene)
     (let [runtime (assert app.active-world-runtime
                            "Graph activity restore requires app.active-world-runtime")
           scene (assert runtime.scene

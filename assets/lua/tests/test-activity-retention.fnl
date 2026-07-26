@@ -931,6 +931,31 @@
 (table.insert tests {:name "Activity restore fails loudly without runtime.scene"
                       :fn activity-restore-fails-loudly-without-runtime-scene})
 
+(fn graph-restore-tolerates-nil-state []
+  ;; restore-state-arg returns nil when the first argument lacks :activity,
+  ;; so restore must tolerate a nil state without crashing on state.scene.
+  (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
+                   :graph-view :graph-view-states :canvas])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.canvas {})
+  (set app.active-world-runtime {:canvas app.canvas
+                                  :world-dir "/tmp/space/tests/graph-restore-nil-state"})
+  (GraphActivityUnit.load-graph-activity!)
+  ;; Call restore with nil — this simulates restore-state-arg returning nil.
+  ;; Must not crash, must return true (matching Drawing / Board tolerance).
+  (local (ok result) (pcall GraphActivityUnit.restore-graph-activity! nil))
+  (assert ok (.. "Graph restore with nil state should not crash, got: " (tostring result)))
+  (assert result "Graph restore with nil state should return true")
+  (pcall GraphActivityUnit.unload-graph-activity!)
+  (restore-app-fields! app-snapshot)
+  true)
+
+(table.insert tests {:name "Graph restore tolerates nil state"
+                      :fn graph-restore-tolerates-nil-state})
+
 (fn drawing-snapshot-fails-loudly-without-runtime-scene []
   ;; R1-2: Drawing snapshot must assert runtime.scene.
   (local app-keys [:active-world-runtime :activity-registry :activities-changed :active-activity-id
