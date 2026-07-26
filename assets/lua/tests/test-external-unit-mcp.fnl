@@ -229,12 +229,26 @@
         (fn [mgr service]
           (local user-unit (mgr:get "user-bubble-overlay"))
           (local orphan-unit (mgr:get "orphan"))
-          ;; Filesystem handle
+          ;; Flat filesystem handle: should have read/write/delete but NOT create
           (local handle (service:unit-handle user-unit))
           (assert (= handle.loader "filesystem") "filesystem unit should have filesystem loader")
           (assert handle.source-handle "filesystem unit should have source-handle")
           (assert (> (length handle.edit-capabilities) 0)
-                  "filesystem unit should have edit capabilities")
+                  "flat filesystem unit should have edit capabilities")
+          ;; Flat unit must not advertise create
+          (var has-create false)
+          (each [_ cap (ipairs handle.edit-capabilities)]
+            (when (= cap "create")
+              (set has-create true)))
+          (assert (not has-create) "flat unit should not advertise create capability")
+          ;; Flat unit must have read and write
+          (var has-read false)
+          (var has-write false)
+          (each [_ cap (ipairs handle.edit-capabilities)]
+            (when (= cap "read") (set has-read true))
+            (when (= cap "write") (set has-write true)))
+          (assert has-read "flat unit should have read capability")
+          (assert has-write "flat unit should have write capability")
           ;; Orphan handle (user source but no owned paths => unknown loader)
           (local orphan-handle (service:unit-handle orphan-unit))
           (assert (= orphan-handle.loader "unknown")
@@ -568,8 +582,7 @@
           (local result (service:create-source
                           {:unit_id "user-dir-unit"
                            :source_id "helper.fnl"
-                           :source new-source
-                           :expected_absent true}))
+                           :source new-source}))
           (assert result.unit-id "create-source missing unit_id")
           (assert (= result.unit-id "user-dir-unit") "unit_id mismatch")
           (assert result.source-id "create-source missing source_id")
@@ -613,6 +626,108 @@
 
 (table.insert tests {:name "external-unit-mcp: create-source fails loudly for flat unit without create capability"
                      :fn test-create-source-fails-for-flat-unit})
+
+;; ── Fix round 1: R1-1, R1-2, R1-3 ──
+
+(fn test-directory-unit-has-create-capability []
+  (with-temp-dir
+    (fn [dir]
+      (local unit-dir (fs.join-path dir "dir-unit"))
+      (fs.create-dirs unit-dir)
+      (local init-path (fs.join-path unit-dir "init.fnl"))
+      (fs.write-file init-path
+        (.. "(fn init [] true)\n"
+            "(fn drop [] true)\n"
+            "{:init init :drop drop}"))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;" dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-dir-unit"
+                         :module-name "dir-unit"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [unit-dir init-path]}))
+          (mgr:register unit))
+        (fn [mgr service]
+          (local handle (service:unit-handle (mgr:get "user-dir-unit")))
+          ;; Directory unit must have create capability
+          (var has-create false)
+          (each [_ cap (ipairs handle.edit-capabilities)]
+            (when (= cap "create")
+              (set has-create true)))
+          (assert has-create "directory unit should advertise create capability"))))))
+
+(table.insert tests {:name "external-unit-mcp: directory unit has create capability"
+                     :fn test-directory-unit-has-create-capability})
+
+(fn test-create-source-rejects-existing-file []
+  (with-temp-dir
+    (fn [dir]
+      (local unit-dir (fs.join-path dir "dir-unit"))
+      (fs.create-dirs unit-dir)
+      (local init-path (fs.join-path unit-dir "init.fnl"))
+      (fs.write-file init-path
+        (.. "(fn init [] true)\n"
+            "(fn drop [] true)\n"
+            "{:init init :drop drop}"))
+      ;; Pre-create a file that create-source would try to create
+      (local existing-path (fs.join-path unit-dir "existing.fnl"))
+      (fs.write-file existing-path "(fn helper [] true)\n{:helper helper}")
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;" dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-dir-unit"
+                         :module-name "dir-unit"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [unit-dir init-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local original-content (fs.read-file existing-path))
+          (local (ok err) (pcall #(service:create-source
+                                    {:unit_id "user-dir-unit"
+                                     :source_id "existing.fnl"
+                                     :source "(fn helper [] true)\n{:helper helper}"})))
+          (assert (not ok) "should reject create for existing file")
+          (assert (string.find (or err "") "already exists" 1 true)
+                  "error should mention already exists")
+          ;; Verify the existing file was NOT overwritten
+          (assert (= (fs.read-file existing-path) original-content)
+                  "existing file should remain unchanged"))))))
+
+(table.insert tests {:name "external-unit-mcp: create-source rejects existing file"
+                     :fn test-create-source-rejects-existing-file})
+
+(fn test-read-source-rejects-path-escape []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          ;; Attempt to read via path with .. segment
+          (local (ok err) (pcall #(service:read-source
+                                    {:unit_id "user-bubble-overlay"
+                                     :source_id "../etc/passwd"})))
+          (assert (not ok) "should reject .. path segment")
+          (assert (string.find (or err "") ".." 1 true)
+                  "error should mention .."))))))
+
+(table.insert tests {:name "external-unit-mcp: read-source rejects path escape via .."
+                     :fn test-read-source-rejects-path-escape})
 
 (local main
   (fn []

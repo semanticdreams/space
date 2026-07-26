@@ -64,11 +64,6 @@
          :size primary.size
          :hash primary.hash})))
 
-(fn build-edit-capabilities [loader]
-  (if (= loader "filesystem")
-      ["read" "write" "create" "delete"]
-      []))
-
 (fn build-test-capabilities [loader]
   (if (= loader "filesystem")
       ["run-test"]
@@ -111,6 +106,13 @@
 (fn is-directory-unit? [unit]
   (not= (get-unit-root-dir unit) nil))
 
+(fn build-edit-capabilities [loader unit]
+  (if (= loader "filesystem")
+      (if (is-directory-unit? unit)
+          ["read" "write" "create" "delete"]
+          ["read" "write" "delete"])
+      []))
+
 (fn get-primary-source-path [unit]
   ;; Find the first .fnl file in owned-paths.
   (local paths (or unit.owned-paths []))
@@ -137,18 +139,47 @@
           (.. operation ": unit " unit.id " is a flat unit and cannot create new source artifacts")))
 
 (fn resolve-source-path [unit source-id operation]
-  ;; Resolve a source_id to an absolute file path for a filesystem unit.
-  ;; Rejects invalid source_ids and validates against unit structure.
+  ;; Resolve a source_id to a safe absolute file path for a filesystem unit.
+  ;; Rejects invalid source_ids, path-escape attempts, and symlink traversal.
   (validate-source-id source-id operation)
+  (var root nil)
+  (var raw-joined nil)
   (if (is-directory-unit? unit)
-      (let [root (get-unit-root-dir unit)]
-        (fs.join-path root source-id))
+      (do
+        (set root (get-unit-root-dir unit))
+        (set raw-joined (fs.join-path root source-id)))
       (let [primary-basename (get-primary-source-basename unit)]
         (assert primary-basename
                 (.. operation ": unit " unit.id " has no primary source file"))
         (assert (= source-id primary-basename)
                 (.. operation ": flat unit " unit.id " only accepts source_id " primary-basename))
-        (get-primary-source-path unit))))
+        (local primary-path (get-primary-source-path unit))
+        (set root (fs.parent primary-path))
+        (set raw-joined primary-path)))
+  ;; Path containment check against unit root
+  (local root-absolute (fs.absolute root))
+  (local resolved-absolute (fs.absolute raw-joined))
+  (assert (and (>= (# resolved-absolute) (# root-absolute))
+               (= (string.sub resolved-absolute 1 (# root-absolute)) root-absolute)
+               (or (= (# resolved-absolute) (# root-absolute))
+                   (= (string.sub resolved-absolute (+ (# root-absolute) 1)
+                                  (+ (# root-absolute) 1)) "/")))
+          (.. operation ": source_id escapes unit directory: " source-id))
+  ;; Reject symlink at the resolved path itself
+  (when (fs.exists resolved-absolute)
+    (local st (fs.stat resolved-absolute))
+    (assert (not st.is-symlink)
+            (.. operation ": target is a symlink: " source-id)))
+  ;; Reject symlinked ancestor directories
+  (var current (fs.parent resolved-absolute))
+  (while (and current
+              (> (# current) (# root-absolute))
+              (not= (fs.absolute current) root-absolute))
+    (local st (fs.stat current))
+    (assert (not (and st.exists st.is-symlink))
+            (.. operation ": path ancestor is a symlink: " current))
+    (set current (fs.parent current)))
+  resolved-absolute)
 
 (fn validate-fnl-source [path source]
   (when (path-has-fnl-extension? path)
@@ -164,7 +195,7 @@
   {:unit-id unit.id
    :loader loader
    :source-handle (build-source-handle unit)
-   :edit-capabilities (build-edit-capabilities loader)
+   :edit-capabilities (build-edit-capabilities loader unit)
    :test-capabilities (build-test-capabilities loader)
    :commit-capability (build-commit-capability loader)})
 
@@ -397,10 +428,9 @@
     (validate-source-id source-id "create-source")
     (local root (get-unit-root-dir unit))
     (local target-path (fs.join-path root source-id))
-    ;; Check file does not already exist if expected_absent is true
-    (when args.expected_absent
-      (assert (not (fs.exists target-path))
-              (.. "create-source: file already exists: " source-id)))
+    ;; Always reject overwriting an existing file — create-source only creates new artifacts
+    (assert (not (fs.exists target-path))
+            (.. "create-source: file already exists: " source-id))
     ;; Validate Fennel source before creating
     (validate-fnl-source target-path source)
     ;; Create parent directories if needed
@@ -411,7 +441,7 @@
     (local (write-ok write-err) (pcall fs.write-file target-path source))
     (when (not write-ok)
       (error (.. "create-source failed to write: " (tostring write-err))))
-    ;; Reload the unit; on failure, remove new file and re-raise
+    ;; Reload the unit; on failure, remove the newly created file and re-raise
     (local (reload-ok reload-err) (pcall #(mgr:reload-unit unit-id {})))
     (if reload-ok
         {:unit-id unit.id
@@ -420,7 +450,7 @@
          :reloaded true
          :hash (hash-file target-path)}
         (do
-          ;; Rollback: remove the newly created file
+          ;; Rollback: remove the newly created file (never an overwrite)
           (pcall fs.remove-all target-path)
           (error (.. "create-source reload failed, new file removed: " (tostring reload-err))))))
 
