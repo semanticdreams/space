@@ -33,7 +33,7 @@
       (or (and rail-entity rail-entity.layout rail-entity.layout.measure)
           (glm.vec3 0 0 0)))
 
-    (fn rail-measured-width []
+    (fn rail-measured-w []
       (. (rail-measure) 1))
 
     (fn allocated-root-width [self]
@@ -127,10 +127,10 @@
     (fn measurer [self]
       (each [_ child (ipairs (or self.children []))]
         (child:measurer))
-      (local current-rail-width (rail-measured-width))
+      (local rail-w (rail-measured-w))
       (local total-width (if (and sidebar.expanded? sidebar.active-id active-panel-entity)
-                             (+ panel-width current-rail-width)
-                             current-rail-width))
+                             (+ panel-width rail-w)
+                             rail-w))
       (set self.measure (glm.vec3 total-width 0 0)))
 
     (fn layouter [self]
@@ -138,13 +138,13 @@
       (local base-rotation self.rotation)
       (local base-depth (or self.depth-offset-index 0))
       (local height (or (and self.size self.size.y) 0))
-      (local current-rail-width (rail-measured-width))
+      (local rail-w (rail-measured-w))
       (local allocated-width (allocated-root-width self))
       (set self.size (glm.vec3 allocated-width height 0))
-      (local rail-offset (glm.vec3 (- allocated-width current-rail-width) 0 0))
+      (local rail-offset (glm.vec3 (- allocated-width rail-w) 0 0))
       (local rail-position (+ base-position (base-rotation:rotate rail-offset)))
       (when active-panel-entity
-        (local panel-offset (glm.vec3 (- allocated-width current-rail-width panel-width) 0 0))
+        (local panel-offset (glm.vec3 (- allocated-width rail-w panel-width) 0 0))
         (set active-panel-entity.layout.position (+ base-position (base-rotation:rotate panel-offset)))
         (set active-panel-entity.layout.size (glm.vec3 panel-width height 0))
         (set active-panel-entity.layout.rotation base-rotation)
@@ -153,7 +153,7 @@
         (active-panel-entity.layout:layouter))
       (when rail-entity
         (set rail-entity.layout.position rail-position)
-        (set rail-entity.layout.size (glm.vec3 current-rail-width height 0))
+        (set rail-entity.layout.size (glm.vec3 rail-w height 0))
         (set rail-entity.layout.rotation base-rotation)
         (set rail-entity.layout.clip-region self.clip-region)
         (set rail-entity.layout.depth-offset-index (+ base-depth 1))
