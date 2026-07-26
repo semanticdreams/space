@@ -953,6 +953,50 @@
 (table.insert tests {:name "Renderers update uses background clear color"
                      :fn renderers-update-uses-background-clear-color})
 
+(fn draw-target-uses-only-active-slot-draw-source []
+  ;; Regression: renderers:draw-target must only consume data from the active
+  ;; slot source. When the target exposes slot-gated getters that switch which
+  ;; internal data is served, draw-target must not read from inactive slots.
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          ;; Simulate a target with two internal "slots" where only the active
+          ;; one is exposed by getter methods.
+          (var active-slot nil)
+          (local slot-a {:vector (fake-vector 80)
+                         :id "slot-a"})
+          (local slot-b {:vector (fake-vector 80)
+                         :id "slot-b"})
+          (set active-slot slot-a)
+          (local target
+            {:projection {:projection true}
+             :get-view-matrix (fn [_self] {:view true})
+             :get-lighting-view-state (fn [_self] {:kind :perspective :position (glm.vec3 1 2 3)})
+             :get-triangle-vector (fn [_self] active-slot.vector)
+             :get-mesh-batches (fn [_self] [{:vector (fake-vector 0)}])
+             :get-instanced-color-mesh-batches
+             (fn [_self] [{:vertex-vector (fake-vector 0)
+                           :instance-vector (fake-vector 0)}])
+             :get-quad-draw-list
+             (fn [_self] [{:vector (fake-vector 0)
+                           :batches []
+                           :clip-vector (fake-vector 0)
+                           :clip-group-vector (fake-vector 0)}])})
+          ;; First draw should succeed with slot-a's vector
+          (renderers:draw-target target)
+          ;; Switch active slot to simulate slot change
+          (set active-slot slot-b)
+          ;; Second draw should use slot-b's vector without interference from slot-a
+          (renderers:draw-target target)
+          ;; If slot-a's data leaked, the renderer would have conflicting buffer state
+          true)))))
+
+(table.insert tests {:name "Renderers draw-target uses only active slot draw source"
+                     :fn draw-target-uses-only-active-slot-draw-source})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

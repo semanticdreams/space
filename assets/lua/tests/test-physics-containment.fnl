@@ -381,6 +381,33 @@
 (table.insert tests {:name "PhysicsContainment visualization refreshes on theme change"
                      :fn visualization-refreshes-on-theme-change})
 
+(fn scene-slot-deactivation-retains-slot-state []
+  ;; Regression: deactivating the active scene slot must retain the slot itself
+  ;; while removing its active physics bodies. The scene surface should be
+  ;; left with no active slot and nil entity after deactivation.
+  (with-scene
+    {:position (glm.vec3 0 0 0)
+     :rotation (glm.quat 1 0 0 0)}
+    (fn [scene]
+      (scene:build-default {:terrains [(flat-heightfield-record {:height 0.0})]})
+      (assert scene.entity "Sandbox slot entity must exist after build-default")
+      (assert (= scene.active-activity-slot-id "sandbox") "Sandbox must be active")
+      (local slot (. scene.activity-slots "sandbox"))
+      (assert slot "Sandbox slot must exist after activation")
+      (assert slot.visible? "Sandbox slot must be visible while active")
+      (scene:deactivate-activity-slot "sandbox")
+      ;; After deactivation, the slot object must still exist
+      (assert (. scene.activity-slots "sandbox")
+              "Slot must still be present in the scene after deactivation")
+      (assert (not slot.visible?)
+              "Slot must be marked invisible after deactivation")
+      (assert (= scene.active-activity-slot nil)
+              "Scene must have no active slot after deactivation")
+      (assert (= scene.entity nil)
+              "Scene entity must be nil after slot deactivation"))))
+(table.insert tests {:name "Scene slot deactivation retains slot state while removing active bodies"
+                     :fn scene-slot-deactivation-retains-slot-state})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

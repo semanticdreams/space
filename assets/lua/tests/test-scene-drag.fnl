@@ -140,6 +140,8 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
+            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+            (assert sandbox-slot "Entity drag test requires a valid sandbox slot")
             (scene:build
               (fn [_ctx]
                 (set target-layout
@@ -589,6 +591,8 @@
         (assert Main.install-app-shell!
                 "scene drag regression test requires Main.install-app-shell!")
         (Main.install-app-shell!)
+        (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+        (assert sandbox-slot "Canvas-hidden drag test requires a valid sandbox slot")
         (scene:build
           (fn [_ctx]
             (set target-layout
