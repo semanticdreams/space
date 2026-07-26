@@ -73,6 +73,25 @@
 
 (fn ensure-built-in-activities! []
   (local registry (Activities.ensure-registry))
+  (when (and (. registry.activities "sandbox")
+             (not (. (. registry.activities "sandbox") :menu-test?)))
+    (Activities.unregister-activity "sandbox"))
+  (when (not (. registry.activities "sandbox"))
+    (Activities.register-activity
+      {:id "sandbox"
+       :menu-test? true
+       :label "Sandbox"
+       :icon "toys"
+       :button-name "sandbox-activity"
+       :show-in-switcher? true
+       :activate (fn [ctx]
+                   (ctx:set-root-actions! RootContextMenuActions.scene-root-actions)
+                   (ctx:set-preferred-interaction-surface! :scene)
+                   (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
+                   (ctx:set-target-enabled! (fn [target] true))
+                   {:activity-id "sandbox"})
+       :deactivate (fn [_ctx _session]
+                     true)}))
   (when (and (. registry.activities "graph")
              (not (. (. registry.activities "graph") :menu-test?)))
     (Activities.unregister-activity "graph"))
@@ -594,14 +613,20 @@
 
 (fn menu-manager-root-add-cuboid-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:add-cuboid 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-physics-body (fn [_self]
                                         (set calls.add-cuboid (+ calls.add-cuboid 1)))})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -622,12 +647,15 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-demo-video-player-opens-launchable []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
@@ -635,7 +663,12 @@
   (local calls {:open-panel 0
                 :scene nil})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-panel-child (fn [_self _opts] nil)})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -669,18 +702,26 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-demo-video-player-errors-loudly-when-unavailable []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-panel-child (fn [_self _opts] nil)})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -715,20 +756,28 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-ball-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:add-object 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-object (fn [_self _object]
                                 (set calls.add-object (+ calls.add-object 1)))})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -749,20 +798,28 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-light-ball-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:add-light-ball 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-light-ball (fn [_self _opts]
                                     (set calls.add-light-ball (+ calls.add-light-ball 1)))})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -783,23 +840,31 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-recover-terrain-bound-objects-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:recover 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (local original-recover SceneTerrainRecovery.recover)
   (set app.scene {})
   (set SceneTerrainRecovery.recover
        (fn [_scene]
          (set calls.recover (+ calls.recover 1))))
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -820,6 +885,8 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
   (set SceneTerrainRecovery.recover original-recover)
 
   (when (not ok)

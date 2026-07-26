@@ -41,7 +41,7 @@
 (fn build-context [event]
   (local surface (or app.active-interaction-surface :scene))
   (local activity
-    (if (= surface :canvas)
+    (if (or (= surface :canvas) (= surface :scene))
         (resolve-context-activity
           app.active-activity-id)
         nil))
@@ -65,7 +65,7 @@
   (local options (or opts {}))
   (local resolved-surface (or surface :scene))
   (local resolved-activity
-    (if (= resolved-surface :canvas)
+    (if (or (= resolved-surface :canvas) (= resolved-surface :scene))
         (resolve-context-activity
           (or options.activity
               app.active-activity-id))
@@ -80,7 +80,8 @@
   (enrich-active-activity-context!
     {:event (or options.event nil)
      :surface resolved-surface
-     :activity (if (= resolved-surface :canvas)
+     :activity (if (or (= resolved-surface :canvas)
+                       (= resolved-surface :scene))
                   resolved-activity
                   nil)
      :modifiers (merge-context-part {:shift? false
@@ -172,10 +173,10 @@
                (= context.surface :canvas))
     :actions activity-selection-actions}
    {:name :scene-root
-    :mode :replace
-    :matches (fn [context]
-               (= context.surface :scene))
-    :actions scene-root-actions}
+     :mode :replace
+     :matches (fn [context]
+                (= context.surface :scene))
+     :actions activity-root-actions}
    {:name :shared
     :mode :append
     :matches (fn [_context] true)

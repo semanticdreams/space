@@ -1215,8 +1215,6 @@
     (local active? (if (and opts (not (= opts.active? nil)))
                        opts.active?
                        world.active?))
-    (when (and active? runtime runtime.hydration)
-      (update-runtime-hydration! world runtime))
     (when (and active?
                  runtime
                  app.activity-update)

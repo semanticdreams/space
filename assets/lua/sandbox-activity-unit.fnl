@@ -3,17 +3,96 @@
 (local fs (require :fs))
 (local Activities (require :activities))
 (local ActivitySceneState (require :activity-scene-state))
+(local SandboxActivityActions (require :sandbox-activity-actions))
 
 (fn sandbox-activity-owned-paths []
   (local runtime (require :runtime))
   (local lua-root (fs.join-path runtime.assets-path "lua"))
-  [(fs.join-path lua-root "sandbox-activity-unit.fnl")])
+  [(fs.join-path lua-root "sandbox-activity-unit.fnl")
+   (fs.join-path lua-root "sandbox-activity-actions.fnl")])
+
+;; ---------------------------------------------------------------------------
+;; Scene-target predicate
+;; ---------------------------------------------------------------------------
+
+(fn sandbox-target-enabled? [target]
+  "Allow any target when the active surface is Scene.  The scene surface
+  already routes targets through the active activity slot — no further
+  filtering is needed for Sandbox."
+  true)
+
+;; ---------------------------------------------------------------------------
+;; Incremental panel hydration per frame
+;; ---------------------------------------------------------------------------
+
+(fn hydration-now-ms []
+  (assert (and app app.engine app.engine.now-ms)
+          "Sandbox hydration timing requires app.engine.now-ms")
+  (app.engine:now-ms))
+
+(fn restore-one-hydration-panel! [runtime]
+  "Restore a single queued hydration panel from runtime.hydration.
+  Returns true when all panels have been restored (hydration complete),
+  nil otherwise."
+  (local hydration runtime.hydration)
+  (local scene runtime.scene)
+  (local panels (or hydration.scene-panels []))
+  (if (> hydration.scene-panel-index (length panels))
+      true   ;; no panels left — already complete
+      (do
+        (scene:restore-panel-state
+          (. panels hydration.scene-panel-index)
+          hydration.scene-panel-index)
+        (scene:sync-scene-objects)
+        (set hydration.scene-panel-index (+ hydration.scene-panel-index 1))
+        (when (> hydration.scene-panel-index (length panels))
+          true))))
+
+(fn mark-hydration-complete! [hydrated? world]
+  (local runtime app.active-world-runtime)
+  (when (and runtime runtime.hydration)
+    (local hydration runtime.hydration)
+    (set hydration.completed? true)
+    (set hydration.phase "complete")
+    (set hydration.completed-at-ms (hydration-now-ms)))
+  (when (and hydrated? world world.id app app.set-startup-physics-paused)
+    (app.set-startup-physics-paused world.id false))
+  true)
+
+(fn sandbox-activity-update [payload]
+  "Activity-owned update hook: restore at most one queued scene panel
+  per frame from runtime.hydration, then sync completion state."
+  (local runtime (or (and payload payload.runtime)
+                     app.active-world-runtime))
+  (local world (and payload payload.world))
+  (when (and runtime runtime.hydration)
+    (local hydration runtime.hydration)
+    (when (and hydration.ready?
+               (not hydration.completed?))
+      ;; First hydrating frame: record start time
+      (when (not hydration.started?)
+        (set hydration.started? true)
+        (set hydration.started-at-ms (hydration-now-ms)))
+      (if (= hydration.phase "scene-panels")
+          (let [all-done? (restore-one-hydration-panel! runtime)]
+            (when all-done?
+              (mark-hydration-complete! true world)))
+          (mark-hydration-complete! false world))))
+  nil)
+
+;; ---------------------------------------------------------------------------
+;; Activity lifecycle
+;; ---------------------------------------------------------------------------
+
+(fn sandbox-root-actions [context]
+  "Delegated from root-context-menu-actions when Sandbox is the active activity."
+  ((. SandboxActivityActions :sandbox-root-actions) context))
 
 (fn activate-sandbox-activity! [ctx]
   (local world-runtime (assert app.active-world-runtime
                                 "Sandbox activity requires app.active-world-runtime"))
   (local scene (assert world-runtime.scene
-                       "Sandbox activity requires runtime.scene"))
+                        "Sandbox activity requires runtime.scene"))
   ;; Ensure the slot exists but do NOT overwrite its retained scene-state.
   ;; Pending session state (restored by Activities after activation) or the
   ;; existing retained state provides the canonical scene data.
@@ -23,6 +102,12 @@
   ;; Sandbox is the primary 3D workspace; canvas is not visible by default
   (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
   (ctx:set-preferred-interaction-surface! :scene)
+  ;; Install Sandbox-specific root actions (replaces global scene actions)
+  (ctx:set-root-actions! sandbox-root-actions)
+  ;; Scene surface accepts any target — the active slot handles routing
+  (ctx:set-target-enabled! sandbox-target-enabled?)
+  ;; Incremental hydration: restore queued panels one per frame
+  (ctx:set-update! sandbox-activity-update)
   {:activity-id "sandbox"})
 
 (fn deactivate-sandbox-activity! [_ctx _session]
