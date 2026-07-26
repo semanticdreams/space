@@ -791,6 +791,9 @@
                (> (length slot.scene-state.terrains) 0)
                (not self.scene-terrains))
       (pcall (fn [] (self:build-default {:terrains slot.scene-state.terrains}))))
+    ;; Sync slot entity with scene entity so deactivate-activity-slot
+    ;; can deactivate layout physics bodies for the final slot.
+    (set slot.entity self.entity)
     ;; Activate target physics bodies
     (when (and slot.entity
                (pcall require :layout-physics-bodies))

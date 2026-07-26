@@ -579,30 +579,35 @@
   "When sandbox deactivates and no successor Scene slot activates,
   the global lights/skybox/background/containment must be reset to empty
   so they don't leak sandbox state into other activities.
-  Additionally, the slot's layout physics bodies must be deactivated
-  matching slot-to-slot activation behavior."
-  ;; Mock PhysicsContainment and LayoutPhysicsBodies with call trackers
-  (var containment-calls [])
-  (var physics-deactivate-calls [])
+  Exercises the real Scene:deactivate-activity-slot last-slot path."
+  ;; Collect the module names we will mock so we can restore them correctly
+  ;; regardless of whether they were originally in package.loaded or not.
+  (local mocked-modules [:physics-containment :layout-physics-bodies])
+  ;; Save originals, tracking nil vs non-nil
   (local originals {})
-  (set (. originals "physics-containment") (. package.loaded "physics-containment"))
-  (set (. originals "layout-physics-bodies") (. package.loaded "layout-physics-bodies"))
-  (set (. package.loaded "physics-containment")
+  (each [_ name (ipairs mocked-modules)]
+    (set (. originals name) (. package.loaded name)))
+  ;; Install mock PhysicsContainment that records calls precisely
+  (var containment-calls [])
+  (set (. package.loaded :physics-containment)
        {:clear (fn []
                  (table.insert containment-calls :clear)
                  true)
         :ensure-installed (fn [opts]
                             (table.insert containment-calls {:ensure-installed opts})
-                            (when (and opts opts.config (not opts.config.enabled?))
-                              (table.insert containment-calls :clear))
                             true)})
-  (set (. package.loaded "layout-physics-bodies")
+  ;; Install mock LayoutPhysicsBodies that records deactivation calls
+  (var physics-deactivate-calls [])
+  (set (. package.loaded :layout-physics-bodies)
        {:deactivate (fn [entity]
                       (table.insert physics-deactivate-calls entity)
                       true)})
   (local (ok result)
     (pcall
       (fn []
+        (local Camera (require :camera))
+        (local glm (require :glm))
+        (local Scene (require :scene))
         (with-restored-app
           [:active-world-runtime
            :scene
@@ -618,60 +623,64 @@
            :renderers
            :physics-containment-config
            :physics-containment-scene
-           :engine]
-           (fn []
-             (ensure-built-in-activities!)
-             (local mock-scene (make-mock-scene))
-             ;; Track calls to service resets
-             (var lights-reset-calls [])
-             (var skybox-reset-calls [])
-             (var background-reset-calls [])
-             ;; Install mock global services that record reset calls
-             (set app.lights {:set-state (fn [_self state] (table.insert lights-reset-calls state))})
-             (set app.renderers
-                  {:skybox {:set-state (fn [_self state] (table.insert skybox-reset-calls state))}
-                   :set-background-state (fn [_self state] (table.insert background-reset-calls state))})
-             ;; Set up runtime with sandbox session
-             (set app.active-world-runtime
-                  {:scene mock-scene
-                   :activity-session-state
-                   {:sandbox {:scene (ActivitySceneState.empty-state)}}})
-             (set app.scene mock-scene)
-             (when (not (= (Activities.active-activity-id) nil))
-               (Activities.deactivate-active-activity))
-             ;; Activate sandbox
-             (Activities.activate-activity "sandbox")
-             (assert (. mock-scene.slots "sandbox" :visible?)
-                     "Sandbox slot must be active")
-             ;; Give the sandbox slot a mock entity so physics deactivation is exercised
-             (set (. mock-scene.slots "sandbox" :entity) {:id "sandbox-root"})
-             ;; Override the mock deactivation to exercise the real physics
-             ;; body deactivation path (matching the fix in scene.fnl)
-             (local original-deactivate mock-scene.deactivate-activity-slot)
-             (set mock-scene.deactivate-activity-slot
-                  (fn [self activity-id]
-                    (local slot (. self.slots activity-id))
-                    (when (and slot (= (self:active-slot-id) activity-id))
-                      (local LayoutPhysicsBodies (require :layout-physics-bodies))
-                      (when (and slot.entity
-                                 (pcall (fn [] (LayoutPhysicsBodies.deactivate slot.entity))))
-                        nil))
-                    (original-deactivate self activity-id)))
-            ;; Track calls before deactivation
+           :engine
+           :create-default-projection]
+          (fn []
+            (ensure-built-in-activities!)
+            ;; Set up minimum app globals required by real Scene constructor
+            (local AppProjection (require :app-projection))
+            (when (not app.create-default-projection)
+              (set app.create-default-projection AppProjection.create-default-projection))
+            ;; Create a real Scene with a Camera so the real
+            ;; deactivate-activity-slot path is exercised.
+            (local camera (Camera {:position (glm.vec3 0 0 100)}))
+            (local real-scene (Scene {:camera camera}))
+            ;; Install mock global services
+            (var lights-reset-calls [])
+            (var skybox-reset-calls [])
+            (var background-reset-calls [])
+            (set app.lights {:set-state (fn [_self state] (table.insert lights-reset-calls state))})
+            (set app.renderers
+                 {:skybox {:set-state (fn [_self state] (table.insert skybox-reset-calls state))}
+                  :set-background-state (fn [_self state] (table.insert background-reset-calls state))})
+            ;; Set up runtime with the real Scene
+            ;; Set up runtime with sandbox session
+            (set app.active-world-runtime
+                 {:scene real-scene
+                  :activity-session-state
+                  {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+            (set app.scene real-scene)
+            (when (not (= (Activities.active-activity-id) nil))
+              (Activities.deactivate-active-activity))
+            ;; Activate sandbox (calls real Scene.activate-activity-slot)
+            (Activities.activate-activity "sandbox")
+            (assert (. real-scene.activity-slots "sandbox")
+                    "Sandbox slot must exist on real Scene")
+            (assert real-scene.active-activity-slot
+                    "Real Scene must have an active slot after sandbox activation")
+            ;; Manually set an entity on the slot so the real
+            ;; Scene:deactivate-activity-slot path exercises the
+            ;; LayoutPhysicsBodies.deactivate branch.
+            (set real-scene.entity {:id "sandbox-root"})
+            (set (. real-scene.activity-slots "sandbox" :entity) {:id "sandbox-root"})
+            ;; Track pre-deactivation call counts
             (local pre-lights-count (length lights-reset-calls))
             (local pre-skybox-count (length skybox-reset-calls))
             (local pre-background-count (length background-reset-calls))
-            ;; Deactivate sandbox
+            (local pre-containment-count (length containment-calls))
+            (local pre-physics-count (length physics-deactivate-calls))
+            ;; Deactivate sandbox — exercises the real Scene:deactivate-activity-slot
+            ;; path which now includes the LayoutPhysicsBodies.deactivate fix.
             (Activities.deactivate-active-activity)
-            ;; After deactivation WITHOUT a successor Scene slot:
-            ;; services must have been reset to empty.
+            ;; No successor Scene slot activated — sandbox deactivation must
+            ;; reset shared services to empty.
             (assert (> (length lights-reset-calls) pre-lights-count)
                     "Deactivation must reset lights to empty")
             (assert (> (length skybox-reset-calls) pre-skybox-count)
                     "Deactivation must reset skybox to empty")
             (assert (> (length background-reset-calls) pre-background-count)
                     "Deactivation must reset background to empty")
-            ;; Verify the reset state is empty (not sandbox state)
+            ;; Verify reset state is empty (not sandbox)
             (local last-lights (. lights-reset-calls (length lights-reset-calls)))
             (when last-lights
               (assert (= last-lights.ambient.enabled? false)
@@ -684,15 +693,30 @@
             (when last-background
               (assert (= (type last-background.color) :table)
                       "Reset background must be valid"))
-            ;; R1-2: Containment must be cleared via real PhysicsContainment API
-            (assert (> (length containment-calls) 0)
+            ;; R1-2: Containment must be cleared via PhysicsContainment.ensure-installed
+            ;; with enabled? false config.
+            (assert (> (length containment-calls) pre-containment-count)
                     "Containment must be cleared on deactivation without successor")
-            ;; R1-2: Layout physics bodies must be deactivated matching slot-to-slot behavior
-            (assert (> (length physics-deactivate-calls) 0)
-                    "Sandbox slot physics bodies must be deactivated on last-slot clear")
+            ;; Verify the call was ensure-installed with the expected disabled config
+            (var ensure-call nil)
+            (each [_ call (ipairs containment-calls)]
+              (when (= (type call) :table)
+                (set ensure-call (. call :ensure-installed))))
+            (assert ensure-call
+                    "PhysicsContainment.ensure-installed must be called on deactivation")
+            (assert (and ensure-call.config (not ensure-call.config.enabled?))
+                    "Containment config must have enabled? = false")
+            (assert (= ensure-call.scene real-scene)
+                    "Containment must reference the deactivated scene")
+            ;; R1-2: Layout physics bodies must be deactivated via real Scene path
+            (assert (> (length physics-deactivate-calls) pre-physics-count)
+                    "Real Scene deactivate-activity-slot must deactivate layout physics bodies")
+            ;; Clean up real Scene
+            (real-scene:drop)
+            (camera:drop)
             true)))))
-  ;; Restore package.loaded overrides
-  (each [name _value (pairs originals)]
+  ;; Restore package.loaded: handle both nil and non-nil originals
+  (each [_ name (ipairs mocked-modules)]
     (set (. package.loaded name) (. originals name)))
   (if ok result (error result)))
 
