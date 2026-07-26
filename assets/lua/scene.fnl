@@ -731,14 +731,19 @@
     (when was-different-slot
       ;; Capture old active services state onto the old slot.
       ;; Merge services into existing scene-state to preserve terrain
-      ;; and panel records (R2-1).
+      ;; and panel records (R2-1).  Preserve the existing complete
+      ;; skybox policy (:default, :by-theme) rather than overwriting
+      ;; it with the renderer's resolved format (R2-2).
       (local current-state (or self.active-activity-slot.scene-state
                                 (do
                                   (local ActivitySceneState (require :activity-scene-state))
                                   (ActivitySceneState.empty-state))))
       (local services (capture-active-service-state self))
       (set current-state.lights services.lights)
-      (set current-state.skybox services.skybox)
+      ;; R2-2: Do NOT overwrite current-state.skybox with services.skybox.
+      ;; services.skybox is the resolved renderer view; the slot's existing
+      ;; scene-state.skybox holds the complete policy (:default, :by-theme).
+      ;; Keep it intact.
       (set current-state.background services.background)
       (set current-state.containment services.containment)
       (set self.active-activity-slot.scene-state current-state)
@@ -809,9 +814,13 @@
     ;; mutations may have changed the canonical records without updating
     ;; the stale runtime slot.scene-terrains.  Apply add/update/remove
     ;; differences so activation always reflects the canonical state.
-    (let [canonical-terrains (and slot.scene-state slot.scene-state.terrains)]
-      (when (and canonical-terrains (> (length canonical-terrains) 0))
-        (local canonical-ids {})
+    ;; This is guarded on slot.scene-state being a table so every slot
+    ;; created via ensure-activity-slot (which initializes scene-state to
+    ;; empty-state) triggers the reconcile path — even when the canonical
+    ;; terrain list is empty (removal-to-empty while inactive).
+    (when (= (type slot.scene-state) :table)
+      (let [canonical-terrains (or slot.scene-state.terrains [])
+            canonical-ids {}]
         (each [_ record (ipairs canonical-terrains)]
           (when (and record record.id)
             (tset canonical-ids record.id true)))
@@ -826,20 +835,21 @@
               (table.insert stale-ids record-id)))
           (each [_ stale-id (ipairs stale-ids)]
             (self:remove-terrain stale-id)))
-        ;; Build or add terrain from canonical records.
-        (if (not self.entity)
-            (pcall (fn [] (self:build-default {:terrains canonical-terrains})))
-            (do
-              (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
-              (each [_ entry (ipairs entries)]
-                (local record-id (and entry.record entry.record.id))
-                (if (and record-id (find-terrain-entry self.scene-terrains record-id))
-                    nil  ;; already present — idempotent skip
-                    (self:add-terrain-record entry.record)))
-              ;; Capture runtime terrain ids back for stable reconciliation
-              (when self.scene-terrains
-                (set (. slot.scene-state :terrains)
-                     (SceneWorldState.capture-terrains self.scene-terrains)))))))
+        ;; Build or add terrain from canonical records (only when non-empty).
+        (when (> (length canonical-terrains) 0)
+          (if (not self.entity)
+              (pcall (fn [] (self:build-default {:terrains canonical-terrains})))
+              (do
+                (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+                (each [_ entry (ipairs entries)]
+                  (local record-id (and entry.record entry.record.id))
+                  (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                      nil  ;; already present — idempotent skip
+                      (self:add-terrain-record entry.record)))
+                ;; Capture runtime terrain ids back for stable reconciliation
+                (when self.scene-terrains
+                  (set (. slot.scene-state :terrains)
+                       (SceneWorldState.capture-terrains self.scene-terrains))))))))
     ;; Sync slot entity with scene entity so deactivate-activity-slot
     ;; can deactivate layout physics bodies for the final slot.
     (set slot.entity self.entity)

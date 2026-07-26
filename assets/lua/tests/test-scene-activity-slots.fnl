@@ -1029,6 +1029,146 @@
 (table.insert tests {:name "sandbox activation reconciles terrains"
                      :fn sandbox-activation-reconciles-terrains})
 
+;; ── R2-1 empty canonical terrain list ──────────────────────────────────
+
+(fn sandbox-activation-removes-stale-terrains-when-canonical-empty []
+  "R2-1: When all terrains are removed from the canonical state while
+  Sandbox is inactive, reactivation must remove all stale runtime
+  terrains.  The result is zero runtime terrains and zero canonical
+  terrain records — no leftover stale entries and no recapture."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Activate sandbox with exactly one terrain.
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      (local original-state (ActivitySceneState.empty-state))
+      (set original-state.terrains [(make-heightfield-terrain-record {:id "t-solo"})])
+      (scene:restore-activity-slot-state "sandbox" original-state)
+      ;; Switch to Graph (deactivates sandbox).
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      (assert (not slot.visible?) "Sandbox should be inactive after graph activation")
+      ;; Simulate removal of the only terrain via WorldData while inactive:
+      ;; clear the canonical terrain list to empty.
+      (set slot.scene-state.terrains [])
+      ;; Stale runtime terrains remain in slot.scene-terrains from capture.
+      ;; Reactivate sandbox — the reconcile must remove them all.
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Sandbox should be active after reactivation")
+      ;; Verify zero canonical terrain records.
+      (assert (= (length slot.scene-state.terrains) 0)
+              (.. "Expected zero canonical terrains after removal-to-empty, got "
+                  (tostring (length slot.scene-state.terrains))))
+      ;; Verify zero runtime terrains (stale ones were removed).
+      (assert (or (not slot.scene-terrains) (= (length slot.scene-terrains) 0))
+              (.. "Expected zero runtime terrains after stale removal, got "
+                  (tostring (length (or slot.scene-terrains [])))))
+      (drop-fixture fixture))))
+
+;; ── R2-2 preserve complete skybox policy on slot switch ────────────────
+
+(fn slot-switch-preserves-complete-skybox-policy []
+  "R2-2: When an active slot with a by-theme skybox policy is switched
+  away from and later reactivated, its slot.scene-state.skybox must
+  retain the complete policy (:default, :by-theme) — not be overwritten
+  by the renderer's resolved format during slot switch."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      ;; Mock renderer so the resolved skybox is captured on switch.
+      (var renderer-skybox {:enabled? true
+                            :name "lake"
+                            :brightness 0.1
+                            :tint-color [1.0 1.0 1.0]})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] renderer-skybox)
+                    :set-state (fn [_ state] (set renderer-skybox state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Activate sandbox and set a complete skybox with a by-theme override.
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      (local complete-skybox
+        (SkyboxState.normalize-complete-state
+          {:enabled? true
+           :default {:name "lake"
+                     :brightness 0.1
+                     :tint-color [1.0 1.0 1.0]}
+           :by-theme {:dark {:name "night"
+                              :brightness 0.3
+                              :tint-color [0.8 0.8 1.0]}}}
+          "test-skybox-policy"))
+      (local sandbox-state (ActivitySceneState.empty-state))
+      (set sandbox-state.skybox complete-skybox)
+      (scene:restore-activity-slot-state "sandbox" sandbox-state)
+      ;; Switch to Graph — this triggers capture of the old slot's services.
+      ;; The fix must preserve the complete skybox policy, not overwrite it
+      ;; with the renderer's resolved view.
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      (assert (not slot.visible?) "Sandbox should be inactive after switch")
+      ;; Verify the sandbox slot retained its complete skybox policy.
+      (assert slot.scene-state "Slot must have scene-state after switch")
+      (assert slot.scene-state.skybox "Slot scene-state must have skybox")
+      (assert (= (type slot.scene-state.skybox.default) :table)
+              "skybox.default must still be present after switch (not flattened)")
+      (assert (= (type slot.scene-state.skybox.by-theme) :table)
+              "skybox.by-theme must still be present after switch")
+      (assert slot.scene-state.skybox.by-theme.dark
+              "dark theme override must survive slot switch")
+      (assert (= slot.scene-state.skybox.by-theme.dark.name "night")
+              "dark theme override name must survive slot switch")
+      (assert (= slot.scene-state.skybox.by-theme.dark.brightness 0.3)
+              "dark theme override brightness must survive slot switch")
+      ;; Switch back to sandbox and verify policy is still complete.
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Sandbox should be active after reactivation")
+      (assert (= (type slot.scene-state.skybox.by-theme) :table)
+              "skybox.by-theme must still be present after reactivation")
+      (assert slot.scene-state.skybox.by-theme.dark
+              "dark theme override must survive full switch cycle")
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "sandbox activation removes stale terrains when canonical empty"
+                     :fn sandbox-activation-removes-stale-terrains-when-canonical-empty})
+(table.insert tests {:name "slot switch preserves complete skybox policy"
+                     :fn slot-switch-preserves-complete-skybox-policy})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
