@@ -2261,7 +2261,94 @@
 
       (drop-fixture fixture))))
 (table.insert tests {:name "R7-1 active restore removes stale and replaces changed terrains"
-                     :fn active-restore-removes-stale-terrains})
+                      :fn active-restore-removes-stale-terrains})
+
+;; ── R7-1b active restore captures generated terrain id ───────────────────
+
+(fn active-restore-captures-generated-terrain-id []
+  "R7-1: When an active empty slot is restored from a terrain record
+  without an explicit id, the generated terrain id must be captured back
+  into slot.scene-state.terrains, and a repeat restore must remain
+  idempotent (no duplicate terrain entries)."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Mock renderer services
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local slot (scene:ensure-activity-slot "sandbox"))
+
+      ;; Activate empty slot
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Slot should be active before restore")
+
+      ;; (1) Restore with a terrain record that has NO explicit id
+      (local state (ActivitySceneState.empty-state))
+      (set state.terrains [{:kind "heightfield-terrain"}])
+      (assert (scene:restore-activity-slot-state "sandbox" state)
+              "First restore should return true")
+
+      ;; (2) Assert the generated terrain id was captured back into
+      ;;     slot.scene-state.terrains
+      (assert slot.scene-state
+              "slot.scene-state should exist after restore")
+      (assert slot.scene-state.terrains
+              "slot.scene-state.terrains should exist after restore")
+      (assert (= (length slot.scene-state.terrains) 1)
+              (.. "slot.scene-state.terrains should have 1 entry, got "
+                  (tostring (length slot.scene-state.terrains))))
+      (local captured-id (. slot.scene-state.terrains 1 :id))
+      (assert (and captured-id (= (type captured-id) :string) (> (string.len captured-id) 0))
+              (.. "slot.scene-state.terrains[1].id must be a generated non-empty string after restore, got "
+                  (tostring captured-id)))
+
+      ;; (3) Assert runtime terrains have exactly one entry
+      (assert slot.scene-terrains
+              "slot.scene-terrains should have runtime terrain after restore")
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "slot.scene-terrains should have 1 runtime entry, got "
+                  (tostring (length slot.scene-terrains))))
+
+      ;; (4) Second restore with same state must remain idempotent
+      (assert (scene:restore-activity-slot-state "sandbox" state)
+              "Second restore should return true")
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "After second restore: expected exactly 1 terrain (idempotent), got "
+                  (tostring (length slot.scene-terrains))))
+      (assert (= (length slot.scene-state.terrains) 1)
+              (.. "After second restore: canonical terrains count must still be 1, got "
+                  (tostring (length slot.scene-state.terrains))))
+      ;; The id should be stable across repeated restores
+      (local second-id (. slot.scene-state.terrains 1 :id))
+      (assert (= second-id captured-id)
+              (.. "Terrain id must be stable across repeated restores (got " (tostring second-id) " expected " (tostring captured-id) ")"))
+
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "R7-1b active restore captures generated terrain id"
+                     :fn active-restore-captures-generated-terrain-id})
 
 (local main
   (fn []

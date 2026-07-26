@@ -341,6 +341,14 @@
               (local bounds (resolve-active-bounds config scene))
               (local physics app.engine.physics)
               (local existing app.__physics-global-containment)
+              ;; R7-2: Track the build context used for visualization
+              ;; so we can recreate when the active slot changes but
+              ;; config/bounds/mode are otherwise identical.
+              (local viz-build-ctx
+                (or (and scene scene.resolve-active-build-context
+                         (scene:resolve-active-build-context))
+                    (and scene scene.build-context)))
+              (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
               (local already-installed?
                 (and existing
                      (= existing.physics physics)
@@ -349,7 +357,16 @@
                      (= existing.mode config.mode)))
               (set app.physics-containment-scene scene)
               (if already-installed?
-                  true
+                  (do
+                    ;; Refresh visualization when the active build context
+                    ;; (slot) has changed, even though physics params match.
+                    (if (not (= existing.viz-lines viz-lines))
+                        (do
+                          (when (and existing.visualization existing.visualization.drop)
+                            (existing.visualization:drop))
+                          (set existing.visualization (create-visualization scene bounds config))
+                          (set existing.viz-lines viz-lines)))
+                    true)
                   (do
                     (drop-installed)
                     (local planes
@@ -361,7 +378,8 @@
                           :mode config.mode
                           :restitution config.restitution
                           :planes planes
-                          :visualization (create-visualization scene bounds config)})
+                          :visualization (create-visualization scene bounds config)
+                          :viz-lines viz-lines})
                     true)))))))
 
 (fn refresh-visualization [opts]
@@ -376,7 +394,13 @@
         (set app.physics-containment-scene scene)
         (when (and existing.visualization existing.visualization.drop)
           (existing.visualization:drop))
+        (local viz-build-ctx
+          (or (and scene scene.resolve-active-build-context
+                   (scene:resolve-active-build-context))
+              (and scene scene.build-context)))
+        (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
         (set existing.visualization (create-visualization scene existing.bounds config))
+        (set existing.viz-lines viz-lines)
         true)))
 
 (fn ensure-refresh-debouncer []

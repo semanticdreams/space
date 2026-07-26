@@ -491,7 +491,91 @@
     (error err)))
 
 (table.insert tests {:name "R7-2 containment visualization registers line batches on active slot context"
-                     :fn visualization-uses-active-slot-build-context})
+                      :fn visualization-uses-active-slot-build-context})
+
+;; ── R7-2b visualization refreshes on slot build-context change ───────────
+
+(fn visualization-refreshes-on-slot-context-change []
+  "R7-2: When ensure-installed is called after the active scene slot
+  build context changes (different slot activated), the visualization
+  must be recreated on the new slot's build context even when config,
+  bounds, and mode are otherwise identical."
+  (local original-themes app.themes)
+  (local original-scene app.physics-containment-scene)
+  (local original-config app.physics-containment-config)
+  (local (ok err)
+    (pcall
+      (fn []
+        (PhysicsContainment.clear)
+        ;; Two distinct build contexts with tracked create-line-batch calls
+        (var sandbox-create-count 0)
+        (var graph-create-count 0)
+        (local sandbox-build-context
+          {:lines {:create-line-batch
+                   (fn [_self _params]
+                     (set sandbox-create-count (+ sandbox-create-count 1))
+                     {:drop (fn [_batch])})}})
+        (local graph-build-context
+          {:lines {:create-line-batch
+                   (fn [_self _params]
+                     (set graph-create-count (+ graph-create-count 1))
+                     {:drop (fn [_batch])})}})
+        ;; Current active build context (mutable to simulate slot switching)
+        (var active-build-ctx sandbox-build-context)
+        ;; Mock scene: resolve-active-build-context returns current active context
+        (local mock-scene
+          {:update (fn [_self])
+           :build-context sandbox-build-context
+           :resolve-active-build-context
+           (fn [_self]
+             active-build-ctx)})
+
+        ;; (1) Install containment for the first time (sandbox slot active)
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene mock-scene})
+          "First ensure-installed should succeed")
+        ;; Sandbox line batch should have been created once
+        (assert (= sandbox-create-count 1)
+                (.. "Expected 1 line batch on sandbox context, got " (tostring sandbox-create-count)))
+        ;; Graph line batch should NOT have been created yet
+        (assert (= graph-create-count 0)
+                (.. "Expected 0 line batches on graph context before switch, got " (tostring graph-create-count)))
+
+        ;; (2) Simulate switching active slot to graph
+        (set active-build-ctx graph-build-context)
+
+        ;; (3) Call ensure-installed with the SAME config and scene
+        ;;     The config/bounds/mode are unchanged, but the build context
+        ;;     has changed.  R7-2 fix must force visualization recreation.
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene mock-scene})
+          "Second ensure-installed should succeed after slot switch")
+        ;; The sandbox line batch count should NOT have increased
+        ;; (old batch was dropped, new batch created on graph context)
+        (assert (= sandbox-create-count 1)
+                (.. "Expected sandbox line batch count to remain 1 after switch, got "
+                    (tostring sandbox-create-count)))
+        ;; Graph line batch should now have been created
+        (assert (= graph-create-count 1)
+                (.. "Expected 1 line batch on graph context after switch, got "
+                    (tostring graph-create-count))))))
+  (PhysicsContainment.clear)
+  (set app.themes original-themes)
+  (set app.physics-containment-scene original-scene)
+  (set app.physics-containment-config original-config)
+  (when (not ok)
+    (error err)))
+
+(table.insert tests {:name "R7-2b visualization refreshes on slot build-context change"
+                     :fn visualization-refreshes-on-slot-context-change})
 
 (local main
   (fn []

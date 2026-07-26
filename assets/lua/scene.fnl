@@ -881,25 +881,30 @@
                     (table.insert stale-ids record-id)))
                 (each [_ stale-id (ipairs stale-ids)]
                   (self:remove-terrain stale-id)))
-              ;; Build or add terrain from canonical records (only when non-empty).
-              (when (> (length canonical-terrains) 0)
-                (if (not self.entity)
-                    (self:build-default {:terrains canonical-terrains})
-                    (do
-                      (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
-                      (each [_ entry (ipairs entries)]
-                        (local record-id (and entry.record entry.record.id))
-                        ;; R3-1: Replace stale runtime terrain with canonical
-                        ;; record.  The canonical record may have changed while
-                        ;; the slot was inactive.  Replacing instead of skipping
-                        ;; ensures activation always reflects WorldData mutations.
-                        (if (and record-id (find-terrain-entry self.scene-terrains record-id))
-                            (self:replace-terrain-record record-id entry.record)
-                            (self:add-terrain-record entry.record)))
-                      ;; Capture runtime terrain ids back for stable reconciliation
-                      (when self.scene-terrains
-                        (set (. slot.scene-state :terrains)
-                             (SceneWorldState.capture-terrains self.scene-terrains))))))))
+               ;; Build or add terrain from canonical records (only when non-empty).
+               (when (> (length canonical-terrains) 0)
+                 (if (not self.entity)
+                     (do
+                       (self:build-default {:terrains canonical-terrains})
+                       ;; Capture runtime terrain ids back for stable reconciliation
+                       (when self.scene-terrains
+                         (set (. slot.scene-state :terrains)
+                              (SceneWorldState.capture-terrains self.scene-terrains))))
+                     (do
+                       (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+                       (each [_ entry (ipairs entries)]
+                         (local record-id (and entry.record entry.record.id))
+                         ;; R3-1: Replace stale runtime terrain with canonical
+                         ;; record.  The canonical record may have changed while
+                         ;; the slot was inactive.  Replacing instead of skipping
+                         ;; ensures activation always reflects WorldData mutations.
+                         (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                             (self:replace-terrain-record record-id entry.record)
+                             (self:add-terrain-record entry.record)))
+                       ;; Capture runtime terrain ids back for stable reconciliation
+                       (when self.scene-terrains
+                         (set (. slot.scene-state :terrains)
+                              (SceneWorldState.capture-terrains self.scene-terrains))))))))
           ;; R3-2: Panel reconciliation when inactive.
           ;; When canonical Sandbox panels change while the slot is inactive
           ;; (e.g. panel removal via WorldData), the retained stale runtime
@@ -1110,7 +1115,14 @@
         (when (> (length canonical-terrains) 0)
           (if (not self.entity)
               ;; No base entity yet — build-default creates entity and all terrains
-              (self:build-default {:terrains canonical-terrains})
+              (do
+                (self:build-default {:terrains canonical-terrains})
+                ;; Capture runtime terrain ids back into the slot's scene-state
+                ;; so that generated IDs (from normalize-record during build)
+                ;; are persisted for future reconciliation / idempotent restore.
+                (when self.scene-terrains
+                  (set (. slot.scene-state :terrains)
+                       (SceneWorldState.capture-terrains self.scene-terrains))))
               ;; Entity already exists — add missing terrain records, replace changed ones
               (do
                 (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
