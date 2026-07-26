@@ -246,9 +246,11 @@
   (tset self :restore-export restore-export)
   (tset self :has-snapshot? (fn [_self]
                                (or explicit-snapshot?
-                                   (let [(ok module) (pcall require-module)]
-                                     (and ok (= (type (. module snapshot-export))
-                                                "function"))))))
+                                   (let [(ok module-or-err) (pcall require-module)]
+                                     (if (not ok)
+                                         (error module-or-err)
+                                         (= (type (. module-or-err snapshot-export))
+                                            "function"))))))
   self)
 
 (fn SourceUnit [opts]

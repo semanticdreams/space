@@ -952,6 +952,40 @@
 (table.insert tests {:name "external-unit-mcp: snapshot propagates error from real snapshot implementation"
                      :fn test-snapshot-propagates-error-from-real-snapshot-implementation})
 
+(fn test-snapshot-errors-on-default-export-module-load-failure []
+  ;; R1-3: A ModuleUnit without explicit :snapshot-export whose module fails
+  ;; to load (e.g. a compile error) must propagate the load error, not
+  ;; silently return supported=false. The defect was that has-snapshot?
+  ;; used pcall(require-module) and treated the load failure as "no
+  ;; snapshot capability" instead of propagating it.
+  (with-temp-dir
+    (fn [dir]
+      (local bad-path (write-unit-file dir "broken-module"
+                        "(fn init [] tru\n"  ;; missing closing paren + bad bool
+                        "(fn drop [] true)\n"
+                        "{:init init :drop drop}\n"))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          ;; No :snapshot-export — the lazy has-snapshot? will try to
+          ;; load the module and must propagate the compile error.
+          (local unit (Units.ModuleUnit
+                        {:id "user-broken-module"
+                         :module-name "broken-module"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [bad-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local (ok err) (pcall #(service:snapshot {:unit_id "user-broken-module"})))
+          (assert (not ok) "should propagate module load error, not return supported=false")
+          (assert (string.find (or err "") "broken-module" 1 true)
+                  (.. "error should mention the failing module name, got: " (or err ""))))))))
+
+(table.insert tests {:name "external-unit-mcp: snapshot errors on default-export module load failure"
+                     :fn test-snapshot-errors-on-default-export-module-load-failure})
+
 (fn test-read-log-returns-filtered-recent-lines []
   ;; read-log returns structured lines, total-lines, and log-path.
   ;; R1-4: uses an isolated controlled log fixture with a known exact
