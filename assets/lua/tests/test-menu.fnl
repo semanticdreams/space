@@ -14,20 +14,37 @@
 (local GraphMap (require :graph/map))
 (local LinkEntityStore (require :entities/link))
 
-;; Capture the activity registry state before any menu test stubs are
-;; registered.  After this module's tests complete the captured state is
-;; restored so stub activities (sandbox, graph, drawing) do not leak
-;; into subsequent test modules.
+;; Capture the full activity-registry state before any menu test
+;; stubs are registered.  After this module's tests complete the
+;; captured state is restored so stub activities (sandbox, graph,
+;; drawing), any active-activity state, sessions, and other mutable
+;; fields do not leak into subsequent test modules.
 (local _saved-registry-activities {})
 (local _saved-registry-ordered-ids [])
-(let [registry (Activities.ensure-registry)]
+(var _saved-active-activity-id nil)
+(var _saved-active-activity-spec nil)
+(var _saved-active-activity-session nil)
+(local _saved-registry-sessions {})
+(var _saved-registry-global-sessions nil)
+(var _saved-suppress-workspace-shell-change? false)
+(local _saved-registry-existed? (not (= app.activity-registry nil)))
+(let [registry (if _saved-registry-existed? app.activity-registry
+                   (Activities.ensure-registry))]
   (each [k v (pairs registry.activities)]
     (tset _saved-registry-activities k v))
   (each [_ id (ipairs registry.ordered-ids)]
-    (table.insert _saved-registry-ordered-ids id)))
+    (table.insert _saved-registry-ordered-ids id))
+  (set _saved-active-activity-id registry.active-activity-id)
+  (set _saved-active-activity-spec registry.active-activity-spec)
+  (set _saved-active-activity-session registry.active-activity-session)
+  (each [k v (pairs registry.sessions)]
+    (tset _saved-registry-sessions k v))
+  (set _saved-registry-global-sessions registry.global-sessions)
+  (set _saved-suppress-workspace-shell-change?
+       registry.suppress-workspace-shell-change?))
 
 (fn restore-activity-registry! []
-  "Remove menu-test stub activities and restore the pre-module registry state."
+  "Restore the full pre-module registry state so no stub or session leaks."
   (let [registry (Activities.ensure-registry)]
     ;; Remove activities registered by menu tests that were not in the
     ;; original state.
@@ -41,6 +58,21 @@
     (set registry.ordered-ids [])
     (each [_ id (ipairs _saved-registry-ordered-ids)]
       (table.insert registry.ordered-ids id))
+    ;; Restore active activity state.
+    (set registry.active-activity-id _saved-active-activity-id)
+    (set registry.active-activity-spec _saved-active-activity-spec)
+    (set registry.active-activity-session _saved-active-activity-session)
+    ;; Restore sessions: remove any session added by menu tests, then
+    ;; bring back the original entries.
+    (each [k _ (pairs registry.sessions)]
+      (when (not (. _saved-registry-sessions k))
+        (tset registry.sessions k nil)))
+    (each [k v (pairs _saved-registry-sessions)]
+      (tset registry.sessions k v))
+    ;; Restore global-sessions and suppress flag.
+    (set registry.global-sessions _saved-registry-global-sessions)
+    (set registry.suppress-workspace-shell-change?
+         _saved-suppress-workspace-shell-change?)
     true))
 
 (local tests [])
