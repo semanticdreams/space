@@ -2017,6 +2017,7 @@
 (fn app.drop []
   (set (. package.loaded "renderers") nil)
   (drop-agent-runtime!)
+  (InputState.release-active-input)
   (AppBootstrap.drop-states)
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)

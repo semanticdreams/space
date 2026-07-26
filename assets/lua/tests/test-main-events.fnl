@@ -6,6 +6,10 @@
 (local Hoverables (require :hoverables))
 (local AppViewport (require :app-viewport))
 (local AppProjection (require :app-projection))
+(local InputState (require :input-state-router))
+(local StateSystemBindings (require :state-system-bindings))
+(local Units (require :units))
+(local UnitManager (require :unit-manager))
 (local reset-engine-events
   (fn []
     (when _G.reset-engine-events
@@ -1184,7 +1188,71 @@
 (table.insert tests {:name "bind-active-world-runtime emits shell once for surface sync"
                      :fn bind-active-world-runtime-emits-shell-once-for-surface-sync})
 (table.insert tests {:name "bind-active-world-runtime respects shell suppression"
-                     :fn bind-active-world-runtime-respects-shell-suppression})
+                      :fn bind-active-world-runtime-respects-shell-suppression})
+
+(fn app-drop-releases-active-input-before-state-teardown []
+  ;; Regression test: app.drop must release active input before unbinding the
+  ;; states host.  Without this ordering, unit-manager:clear unloads units
+  ;; whose drop/disconnect calls require the states host, which is already nil.
+  (reset-state)
+  (ensure-renderers)
+  ;; Save global app systems that Main.drop destroys, so subsequent test
+  ;; modules are not affected by the teardown in this test.
+  (local saved-intersectables app.intersectables)
+  (local saved-clickables app.clickables)
+  (local saved-hoverables app.hoverables)
+  (local saved-movables app.movables)
+  (local saved-resizables app.resizables)
+  (local saved-system-cursors app.system-cursors)
+  (local saved-renderers app.renderers)
+  (local saved-states app.states)
+  (var last-state nil)
+  (local states-host
+    {:active-name (fn [_self] "normal")
+     :set-state (fn [_self name] (set last-state name))
+     :drop (fn [_self] nil)})
+  (StateSystemBindings.bind-states-host states-host)
+  (set app.states states-host)
+  (var disconnected? false)
+  (local input
+    {:on-state-connected (fn [_self _payload] true)
+     :on-state-disconnected (fn [_self _payload] (set disconnected? true))
+     :on-key-down (fn [_self _payload] false)})
+  (InputState.connect-input input)
+  (assert (= (InputState.active-input) input)
+          "Input should be active before drop")
+  (local unit (Units.Unit
+                {:id "test-drop-unit"
+                 :load (fn [_ctx] nil)
+                 :unload (fn [_ctx]
+                           (InputState.disconnect-input input))}))
+  (set app.unit-manager (or app.unit-manager (UnitManager)))
+  (app.unit-manager:register unit)
+  (unit:load {})
+  (assert (= (InputState.active-input) input)
+          "Input must remain active after unit load")
+  (Main.drop)
+  (assert disconnected? "Input should have been disconnected during drop")
+  (assert (not (InputState.active-input)) "No input should be active after drop")
+  ;; Restore global app systems destroyed by Main.drop so subsequent
+  ;; modules (test-states, etc.) are not affected.
+  (when (not app.intersectables)
+    (set app.intersectables saved-intersectables))
+  (when (not app.clickables)
+    (set app.clickables saved-clickables))
+  (when (not app.hoverables)
+    (set app.hoverables saved-hoverables))
+  (when (not app.movables)
+    (set app.movables saved-movables))
+  (when (not app.resizables)
+    (set app.resizables saved-resizables))
+  (when (not app.system-cursors)
+    (set app.system-cursors saved-system-cursors))
+  (set app.renderers saved-renderers)
+  (set app.states saved-states)
+  (InputState.reset)
+  (StateSystemBindings.bind-states-host saved-states))
+(table.insert tests {:name "app.drop releases active input before state teardown" :fn app-drop-releases-active-input-before-state-teardown})
 
 (local main
   (fn []
