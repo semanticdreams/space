@@ -1569,6 +1569,89 @@
 (table.insert tests {:name "R4-3 corrupt terrain activation fails loudly"
                      :fn corrupt-terrain-activation-fails})
 
+;; ── R4-3b transactional rollback on corrupt terrain ─────────────────────
+
+(fn corrupt-terrain-activation-rolls-back-previous-slot []
+  "R4-3: When activating a slot whose terrain build fails while switching
+  from a different active slot, the activation must be transactional:
+  the target slot must not remain active, and the previous slot (with its
+  content/services/visibility) must be fully restored."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :renderers
+     :engine :physics-containment-config]
+    (fn []
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      ;; Mock renderer services so service-application succeeds
+      (var renderer-skybox
+        {:enabled? false :name "lake" :brightness 0.1 :tint-color [1.0 1.0 1.0]})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] renderer-skybox)
+                    :set-state (fn [_ state] (set renderer-skybox state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; (1) Create two activity slots — graph (healthy) and sandbox (corrupt)
+      (local graph-slot (scene:ensure-activity-slot "graph"))
+      ;; Set up a valid empty state for graph (no terrains, basic services)
+      (local complete-skybox
+        (SkyboxState.normalize-complete-state
+          {:enabled? false
+           :default {:name "lake" :brightness 0.1 :tint-color [1 1 1]}
+           :by-theme {}}
+          "test-r4-3b-skybox"))
+      (set graph-slot.scene-state {:panels []
+                                   :terrains []
+                                   :lights {:ambient {:enabled? false :color [1 1 1] :intensity 0}
+                                            :directional []
+                                            :point []
+                                            :spot []}
+                                   :skybox complete-skybox
+                                   :background {:color [0 0 0]}
+                                   :containment {:enabled? false}})
+      ;; (2) Activate graph slot (this becomes the "previous" slot)
+      (scene:activate-activity-slot "graph")
+      (assert graph-slot.visible? "Graph slot must be active after first activation")
+      (assert (= scene.active-activity-slot-id "graph")
+              "Scene must report graph as active slot")
+      ;; (3) Build sandbox slot with corrupt terrain (invalid record with empty kind)
+      (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+      (set sandbox-slot.scene-state {:panels []
+                                     :terrains [{:kind ""}]
+                                     :lights {:ambient {:enabled? false :color [1 1 1] :intensity 0}
+                                              :directional []
+                                              :point []
+                                              :spot []}
+                                     :skybox complete-skybox
+                                     :background {:color [0 0 0]}
+                                     :containment {:enabled? false}})
+      ;; (4) Attempt to activate corrupt sandbox — must fail
+      (local (ok err) (pcall (fn [] (scene:activate-activity-slot "sandbox"))))
+      (assert (not ok)
+              "Activation with corrupt terrain must fail")
+      (assert (and err (string.find (tostring err) "Terrain record kind" 1 true))
+              (.. "Error must mention terrain record kind, got: " (tostring err)))
+      ;; (5) Transactional rollback assertions:
+      ;;     Graph must remain active/visible (the previous slot is restored)
+      (assert graph-slot.visible?
+              "Graph slot must remain visible after failed sandbox activation")
+      (assert (= scene.active-activity-slot graph-slot)
+              "Scene must still have graph as active slot after rollback")
+      (assert (= scene.active-activity-slot-id "graph")
+              "Scene must still report graph as active slot id after rollback")
+      ;;     Sandbox must NOT be active
+      (assert (not sandbox-slot.visible?)
+              "Sandbox slot must remain invisible after failed activation")
+      (assert (not (= scene.active-activity-slot sandbox-slot))
+              "Sandbox slot must NOT be the active slot after failed activation")
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "R4-3b corrupt terrain activation rolls back to previous slot"
+                     :fn corrupt-terrain-activation-rolls-back-previous-slot})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

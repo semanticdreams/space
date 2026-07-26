@@ -8,6 +8,10 @@
 (local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
 (local Activities (require :activities))
+(local Scene (require :scene))
+(local Camera (require :camera))
+(local glm (require :glm))
+(local AppProjection (require :app-projection))
 
 (fn with-settings [value f]
   (local previous app.settings)
@@ -1060,6 +1064,109 @@
 
 (table.insert tests {:name "R4-4 apply theme updates scene slot contexts"
                      :fn apply-theme-updates-scene-slot-contexts})
+
+;; ── R4-4 extended: Real Scene with retained activity slots ──────────────
+
+(fn apply-theme-updates-real-scene-slot-contexts []
+  "R4-4: Theme switching must update retained Scene slot contexts
+  via a real Scene (not a mock).  Uses scene:ensure-activity-slot
+  to create real slot build contexts, then asserts both surface
+  and slot contexts receive the new theme after apply-theme."
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-create-default-projection app.create-default-projection)
+  (local original-clickables app.clickables)
+  (local original-hoverables app.hoverables)
+  (local original-touch-gesture-targets app.touch-gesture-targets)
+  (local original-system-cursors app.system-cursors)
+  (local original-icons app.icons)
+  (local original-states app.states)
+  (local original-object-selector app.object-selector)
+  (local original-movables app.movables)
+  (local original-physics-containment-config app.physics-containment-config)
+  (local original-physics-containment-scene app.physics-containment-scene)
+
+  ;; Set up themes
+  (local themes (Themes))
+  (themes.add-theme :dark (require :dark-theme))
+  (themes.add-theme :light (require :light-theme))
+  (themes.set-theme :dark)
+
+  ;; Set up app with themes and minimal mocks
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (set app.themes themes)
+  (set app.hud {:build-context {:set-theme (fn [self theme] (set self.theme theme))}
+                 :build-default (fn [_self] true)})
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.active-world-entry nil)
+  ;; Clear physics containment to prevent refresh-visualization side effects
+  (set app.physics-containment-config nil)
+  (set app.physics-containment-scene nil)
+
+  ;; Create real Scene (reads app.themes during construction for initial theme)
+  (local scene (Scene {:camera camera}))
+  (set app.scene scene)
+
+  ;; Create retained activity slots — each gets its own build-context with theme
+  (scene:ensure-activity-slot "sandbox")
+  (scene:ensure-activity-slot "graph")
+  (local sandbox-slot (scene:activity-slot "sandbox"))
+  (local graph-slot (scene:activity-slot "graph"))
+
+  ;; Verify initial themes: all should be dark (set above)
+  (assert (= (and scene.build-context.theme scene.build-context.theme.name) :dark)
+          "Surface build-context should start with dark theme")
+  (assert (= (and sandbox-slot.build-context.theme sandbox-slot.build-context.theme.name) :dark)
+          "Sandbox slot build-context should start with dark theme")
+  (assert (= (and graph-slot.build-context.theme graph-slot.build-context.theme.name) :dark)
+          "Graph slot build-context should start with dark theme")
+
+  ;; Apply light theme — Scene.apply-active-theme-to-contexts must update all
+  (ThemeActions.apply-theme :light)
+
+  ;; Assert all contexts received the new theme
+  (assert (= (and scene.build-context.theme scene.build-context.theme.name) :light)
+          "Surface build-context theme should update to light after apply-theme")
+  (assert (= (and sandbox-slot.build-context.theme sandbox-slot.build-context.theme.name) :light)
+          "Sandbox slot build-context theme should update to light after apply-theme")
+  (assert (= (and graph-slot.build-context.theme graph-slot.build-context.theme.name) :light)
+          "Graph slot build-context theme should update to light after apply-theme")
+
+  ;; Cleanup
+  (scene:drop)
+  (camera:drop)
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.create-default-projection original-create-default-projection)
+  (set app.clickables original-clickables)
+  (set app.hoverables original-hoverables)
+  (set app.touch-gesture-targets original-touch-gesture-targets)
+  (set app.system-cursors original-system-cursors)
+  (set app.icons original-icons)
+  (set app.states original-states)
+  (set app.object-selector original-object-selector)
+  (set app.movables original-movables)
+  (set app.physics-containment-config original-physics-containment-config)
+  (set app.physics-containment-scene original-physics-containment-scene)
+  true)
+
+(table.insert tests {:name "R4-4b apply theme updates real Scene slot contexts"
+                     :fn apply-theme-updates-real-scene-slot-contexts})
 
 (local main
   (fn []

@@ -824,106 +824,128 @@
               (local LayoutPhysicsBodies (require :layout-physics-bodies))
               (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
           (error (.. "Scene.activate-activity-slot service application failed: " (tostring service-err)))))
-    ;; Activate target slot (services succeeded)
-    (slot:activate)
-    (set self.active-activity-slot-id activity-id)
-    (set self.active-activity-slot slot)
-    ;; R2-1: Reconcile self.scene-terrains with authoritative
-    ;; slot.scene-state.terrains.  When the slot was inactive, WorldData
-    ;; mutations may have changed the canonical records without updating
-    ;; the stale runtime slot.scene-terrains.  Apply add/update/remove
-    ;; differences so activation always reflects the canonical state.
-    ;; This is guarded on slot.scene-state being a table so every slot
-    ;; created via ensure-activity-slot (which initializes scene-state to
-    ;; empty-state) triggers the reconcile path — even when the canonical
-    ;; terrain list is empty (removal-to-empty while inactive).
-    (when (= (type slot.scene-state) :table)
-      (let [canonical-terrains (or slot.scene-state.terrains [])
-            canonical-ids {}]
-        (each [_ record (ipairs canonical-terrains)]
-          (when (and record record.id)
-            (tset canonical-ids record.id true)))
-        ;; Remove stale runtime entries whose record id is absent from
-        ;; canonical state.  Collect ids first to avoid index-shift bugs.
-        (when self.scene-terrains
-          (local stale-ids [])
-          (for [idx (length self.scene-terrains) 1 -1]
-            (local entry (. self.scene-terrains idx))
-            (local record-id (and entry entry.record entry.record.id))
-            (when (and record-id (not (. canonical-ids record-id)))
-              (table.insert stale-ids record-id)))
-          (each [_ stale-id (ipairs stale-ids)]
-            (self:remove-terrain stale-id)))
-        ;; Build or add terrain from canonical records (only when non-empty).
-        (when (> (length canonical-terrains) 0)
-          (if (not self.entity)
-              (self:build-default {:terrains canonical-terrains})
-              (do
-                (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
-                (each [_ entry (ipairs entries)]
-                  (local record-id (and entry.record entry.record.id))
-                  ;; R3-1: Replace stale runtime terrain with canonical
-                  ;; record.  The canonical record may have changed while
-                  ;; the slot was inactive.  Replacing instead of skipping
-                  ;; ensures activation always reflects WorldData mutations.
-                  (if (and record-id (find-terrain-entry self.scene-terrains record-id))
-                      (self:replace-terrain-record record-id entry.record)
-                      (self:add-terrain-record entry.record)))
-                ;; Capture runtime terrain ids back for stable reconciliation
-                (when self.scene-terrains
-                  (set (. slot.scene-state :terrains)
-                       (SceneWorldState.capture-terrains self.scene-terrains))))))))
-    ;; R3-2: Panel reconciliation when inactive.
-    ;; When canonical Sandbox panels change while the slot is inactive
-    ;; (e.g. panel removal via WorldData), the retained stale runtime
-    ;; panels in slot.scene-children must be dropped so reactivation
-    ;; does not carry forward deleted panels.
-    (when (and self.entity self.scene-children
-               (= (type slot.scene-state) :table)
-               (= (type slot.scene-state.panels) :table))
-      (let [canonical-panels slot.scene-state.panels]
-        (local stale-elements [])
-        (each [_ metadata (ipairs self.scene-children)]
-          (when (and metadata metadata.persistence metadata.element)
-            ;; Check if this panel has a match in canonical state.
-            ;; Match by comparing persistence fingerprints, excluding
-            ;; layout-specific fields (position, rotation) that drift
-            ;; at runtime.
-            (local persistence metadata.persistence)
-            (var matched? false)
-            (each [_ panel (ipairs canonical-panels)]
-              (when (and (not matched?)
-                         (= persistence.kind panel.kind))
-                ;; Two panels match when all non-layout persistence
-                ;; fields are equal.
-                (set matched?
-                     (accumulate [same? true k v (pairs persistence)]
-                       (if (not same?) false
-                           (or (= k :position) (= k :rotation)) true
-                           (let [cv (. panel k)]
-                             (and (not (= cv nil))
-                                  (= v cv))))))))
-            (when (not matched?)
-              (table.insert stale-elements metadata.element))))
-        ;; Remove stale panels from the entity and scene metadata.
-        ;; Use pcall since remove-panel-child may fail on panels without
-        ;; full layout integration; we still remove from scene-children.
-        (each [_ element (ipairs stale-elements)]
-          (pcall (fn [] (self:remove-panel-child element)))
-          ;; Remove from scene-children even if remove-panel-child failed
-          ;; (e.g. due to missing layout entry).
-          (when self.scene-children
-            (for [idx (length self.scene-children) 1 -1]
-              (when (= (and (. self.scene-children idx) (. self.scene-children idx :element)) element)
-                (table.remove self.scene-children idx)))))))
-    ;; Sync slot entity with scene entity so deactivate-activity-slot
-    ;; can deactivate layout physics bodies for the final slot.
-    (set slot.entity self.entity)
-    ;; Activate target physics bodies
-    (when (and slot.entity
-               (pcall require :layout-physics-bodies))
-      (local LayoutPhysicsBodies (require :layout-physics-bodies))
-      (pcall LayoutPhysicsBodies.activate slot.entity))
+    ;; Activate target slot, reconcile terrain/panels, sync entity, activate physics.
+    ;; Wrap in transactional pcall: on failure restore previous slot state.
+    (local (activate-ok activate-err)
+      (pcall
+        (fn []
+          (slot:activate)
+          (set self.active-activity-slot-id activity-id)
+          (set self.active-activity-slot slot)
+          ;; R2-1: Reconcile self.scene-terrains with authoritative
+          ;; slot.scene-state.terrains.  When the slot was inactive, WorldData
+          ;; mutations may have changed the canonical records without updating
+          ;; the stale runtime slot.scene-terrains.  Apply add/update/remove
+          ;; differences so activation always reflects the canonical state.
+          ;; This is guarded on slot.scene-state being a table so every slot
+          ;; created via ensure-activity-slot (which initializes scene-state to
+          ;; empty-state) triggers the reconcile path — even when the canonical
+          ;; terrain list is empty (removal-to-empty while inactive).
+          (when (= (type slot.scene-state) :table)
+            (let [canonical-terrains (or slot.scene-state.terrains [])
+                  canonical-ids {}]
+              (each [_ record (ipairs canonical-terrains)]
+                (when (and record record.id)
+                  (tset canonical-ids record.id true)))
+              ;; Remove stale runtime entries whose record id is absent from
+              ;; canonical state.  Collect ids first to avoid index-shift bugs.
+              (when self.scene-terrains
+                (local stale-ids [])
+                (for [idx (length self.scene-terrains) 1 -1]
+                  (local entry (. self.scene-terrains idx))
+                  (local record-id (and entry entry.record entry.record.id))
+                  (when (and record-id (not (. canonical-ids record-id)))
+                    (table.insert stale-ids record-id)))
+                (each [_ stale-id (ipairs stale-ids)]
+                  (self:remove-terrain stale-id)))
+              ;; Build or add terrain from canonical records (only when non-empty).
+              (when (> (length canonical-terrains) 0)
+                (if (not self.entity)
+                    (self:build-default {:terrains canonical-terrains})
+                    (do
+                      (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+                      (each [_ entry (ipairs entries)]
+                        (local record-id (and entry.record entry.record.id))
+                        ;; R3-1: Replace stale runtime terrain with canonical
+                        ;; record.  The canonical record may have changed while
+                        ;; the slot was inactive.  Replacing instead of skipping
+                        ;; ensures activation always reflects WorldData mutations.
+                        (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                            (self:replace-terrain-record record-id entry.record)
+                            (self:add-terrain-record entry.record)))
+                      ;; Capture runtime terrain ids back for stable reconciliation
+                      (when self.scene-terrains
+                        (set (. slot.scene-state :terrains)
+                             (SceneWorldState.capture-terrains self.scene-terrains))))))))
+          ;; R3-2: Panel reconciliation when inactive.
+          ;; When canonical Sandbox panels change while the slot is inactive
+          ;; (e.g. panel removal via WorldData), the retained stale runtime
+          ;; panels in slot.scene-children must be dropped so reactivation
+          ;; does not carry forward deleted panels.
+          (when (and self.entity self.scene-children
+                     (= (type slot.scene-state) :table)
+                     (= (type slot.scene-state.panels) :table))
+            (let [canonical-panels slot.scene-state.panels]
+              (local stale-elements [])
+              (each [_ metadata (ipairs self.scene-children)]
+                (when (and metadata metadata.persistence metadata.element)
+                  (local persistence metadata.persistence)
+                  (var matched? false)
+                  (each [_ panel (ipairs canonical-panels)]
+                    (when (and (not matched?)
+                               (= persistence.kind panel.kind))
+                      (set matched?
+                           (accumulate [same? true k v (pairs persistence)]
+                             (if (not same?) false
+                                 (or (= k :position) (= k :rotation)) true
+                                 (let [cv (. panel k)]
+                                   (and (not (= cv nil))
+                                        (= v cv))))))))
+                  (when (not matched?)
+                    (table.insert stale-elements metadata.element))))
+              (each [_ element (ipairs stale-elements)]
+                (pcall (fn [] (self:remove-panel-child element)))
+                (when self.scene-children
+                  (for [idx (length self.scene-children) 1 -1]
+                    (when (= (and (. self.scene-children idx) (. self.scene-children idx :element)) element)
+                      (table.remove self.scene-children idx)))))))
+          ;; Sync slot entity with scene entity so deactivate-activity-slot
+          ;; can deactivate layout physics bodies for the final slot.
+          (set slot.entity self.entity)
+          ;; Activate target physics bodies
+          (when (and slot.entity
+                     (pcall require :layout-physics-bodies))
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (pcall LayoutPhysicsBodies.activate slot.entity))
+          true)))
+    (if (not activate-ok)
+        (do
+          ;; Rollback: deactivate failed target, restore previous slot state
+          (slot:deactivate)
+          (set self.active-activity-slot nil)
+          (set self.active-activity-slot-id nil)
+          (reset-services-to-empty self)
+          (when previous-slot
+            ;; Restore previous slot's content and activation
+            (set self.entity previous-slot.entity)
+            (set self.scene-children previous-slot.scene-children)
+            (set self.scene-terrains previous-slot.scene-terrains)
+            (set self.queued-cube-panels previous-slot.queued-cube-panels)
+            (set self.panel-restorers previous-slot.panel-restorers)
+            (set self.demo-browser previous-slot.demo-browser)
+            (set self.physics-body-count previous-slot.physics-body-count)
+            (previous-slot:activate)
+            (set self.active-activity-slot previous-slot)
+            (set self.active-activity-slot-id previous-slot-id)
+            ;; Restore previous services
+            (when previous-slot.scene-state
+              (apply-state-to-services self previous-slot.scene-state))
+            ;; Reactivate physics
+            (when (and previous-slot.entity
+                       (pcall require :layout-physics-bodies))
+              (local LayoutPhysicsBodies (require :layout-physics-bodies))
+              (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
+          (error (.. "Scene.activate-activity-slot failed: " (tostring activate-err)))))
     slot)
 
   (fn capture-activity-slot-state [scene activity-id]
