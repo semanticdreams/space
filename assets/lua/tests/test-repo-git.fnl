@@ -29,7 +29,6 @@
   (when (fs.exists clone-dir)
     (fs.remove-all clone-dir))
   (Git.clone dir clone-dir)
-  (Process.run {:args ["git" "-C" clone-dir "checkout" "-b" "main"] :timeout 30 :merge-stderr true})
   (local readme (fs.join-path clone-dir "README.md"))
   (fs.write-file readme "# test repo\n")
   (Process.run {:args ["git" "-C" clone-dir "add" "-A"] :timeout 30 :merge-stderr true})
