@@ -539,9 +539,10 @@
      :stderr result.stderr})
 
   (fn read-log [self args]
-    (local logging (require :logging))
-    (local log-path (logging.get-output-path))
     (local fs (require :fs))
+    (local log-path (or args.log_path
+                        (let [logging (require :logging)]
+                          (logging.get-output-path))))
     (when (not (fs.exists log-path))
       (error (.. "read-log: log file not found: " log-path)))
     (var content (fs.read-file log-path))
@@ -577,35 +578,24 @@
     (local unit-id (or args.unit_id (error "snapshot requires :unit_id")))
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
-    ;; Call unit:snapshot to detect actual snapshot support.
-    ;; A nil state means there is no real snapshot implementation
-    ;; (noop-snapshot default or missing optional export).
-    ;; A non-nil state means an actual snapshot implementation produced data.
-    ;; If the call throws, we inspect the loaded module to distinguish
-    ;; "missing export" (no capability) from a runtime error in a real
-    ;; snapshot function (unexpected failure that must propagate).
-    (local (ok state) (pcall #(unit:snapshot {})))
-    (if (not ok)
-        ;; Check structurally: did the export function exist on the module?
-        (let [export-name unit.snapshot-export
-              module-name unit.module-name
-              loaded-module (and module-name (. package.loaded module-name))
-              export-fn (and loaded-module export-name (. loaded-module export-name))]
-          (if (and export-name loaded-module (not= (type export-fn) "function"))
-              ;; Module loaded but export function does not exist — missing capability
-              {:unit-id unit.id
-               :supported false
-               :state nil}
-              ;; Export function exists and threw, or we cannot determine —
-              ;; propagate as an unexpected error
-              (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))
-        (= state nil)
+    ;; Determine snapshot support structurally via unit.has-snapshot?
+    ;; before calling unit:snapshot, so we never invoke a noop/default.
+    ;; For Unit: has-snapshot? is true only when a :snapshot function
+    ;; was explicitly provided (defaults to noop otherwise).
+    ;; For ModuleUnit: has-snapshot? is true only when :snapshot-export
+    ;; was explicitly set in the options.
+    ;; For SourceUnit: has-snapshot? is true only when :snapshot-export
+    ;; was explicitly set in the options.
+    (if (not unit.has-snapshot?)
         {:unit-id unit.id
          :supported false
          :state nil}
-        {:unit-id unit.id
-         :supported true
-         :state state}))
+        (let [(ok state) (pcall #(unit:snapshot {}))]
+          (if ok
+              {:unit-id unit.id
+               :supported true
+               :state state}
+              (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))))
 
   (set self.unit-handle unit-handle)
   (set self.list list)

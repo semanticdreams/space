@@ -20,6 +20,7 @@
   (local load-fn (assert-fn spec :load))
   (local unload-fn (assert-fn spec :unload))
   (local snapshot-fn (or spec.snapshot noop-snapshot))
+  (local has-snapshot? (not= spec.snapshot nil))
   (local restore-fn (or spec.restore noop-restore))
   (var loaded? false)
   (var connected-signals {})
@@ -34,6 +35,7 @@
    :parent-id spec.parent-id
    :source (or spec.source :user)
    :owned-paths (clone-list spec.owned-paths)
+   :has-snapshot? has-snapshot?
    :loaded? (fn [_self] loaded?)
    :load (fn [self ctx]
            (load-fn ctx)
@@ -242,6 +244,7 @@
   (tset self :unload-export unload-export)
   (tset self :snapshot-export snapshot-export)
   (tset self :restore-export restore-export)
+  (tset self :has-snapshot? explicit-snapshot?)
   self)
 
 (fn SourceUnit [opts]
@@ -310,6 +313,7 @@
                                    (call-export restore-export state))
                                  true)}))
   (tset self :force-purge-module-cache! (fn [_self] (clear-module)))
+  (tset self :has-snapshot? (not= snapshot-export nil))
   self)
 
 {:Unit Unit

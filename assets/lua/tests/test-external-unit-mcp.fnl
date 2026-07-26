@@ -903,59 +903,48 @@
                      :fn test-snapshot-propagates-error-from-real-snapshot-implementation})
 
 (fn test-read-log-returns-filtered-recent-lines []
-  ;; read-log should work against the current application log file.
-  ;; It returns structured lines, total-lines, and log-path.
-  ;; R1-4: total-lines is verified against a controlled fixture:
-  ;; we write exactly 3 known lines with a unique run marker, grep for
-  ;; them to confirm they exist, then independently read the raw log file
-  ;; and assert total-lines matches the actual normalized line count.
+  ;; read-log returns structured lines, total-lines, and log-path.
+  ;; R1-4: uses an isolated controlled log fixture with a known exact
+  ;; newline-terminated line count instead of the live application log.
   (with-temp-dir
     (fn [dir]
       (with-service dir
         (fn [mgr _dir] nil)  ;; no units needed
         (fn [_mgr service]
-          (local logging (require :logging))
-          ;; Generate a unique marker so previous test runs don't accumulate
-          (local marker (.. "R1-4-FIX-" (tostring (os.time)) "-" (tostring (math.random 1000000 9999999))))
-          ;; Write exactly 3 controlled fixture lines
-          (logging.info (.. marker "-LINE-1"))
-          (logging.info (.. marker "-LINE-2"))
-          (logging.info (.. marker "-LINE-3"))
-          (logging.flush)
-          (local result (service:read-log {:lines 500 :grep marker}))
-          ;; The 3 fixture lines just written must be found
-          (assert (= (length result.lines) 3)
-                  (.. "grep for unique marker should find exactly 3 lines, got "
-                      (length result.lines)))
+          ;; Create a controlled log fixture with exactly 5 lines
+          ;; and a trailing newline (newline-terminated).
+          (local fixture-path (fs.join-path dir "controlled.log"))
+          (local fixture-content "alpha\nbeta\ngamma\ndelta\nepsilon\n")
+          (fs.write-file fixture-path fixture-content)
+          ;; Read the controlled fixture via the :log_path seam
+          (local result (service:read-log {:log_path fixture-path}))
+          (assert result.lines "read-log missing lines")
+          (assert (= (type result.lines) "table") "lines should be a table")
+          ;; total-lines must exactly match the known fixture count (5)
           (assert result.total-lines "read-log missing total-lines")
           (assert (= (type result.total-lines) "number")
                   "total-lines should be a number")
-          (assert (>= result.total-lines 3)
-                  "total-lines should be at least 3")
+          (assert (= result.total-lines 5)
+                  (.. "total-lines should be 5 for 5-line newline-terminated fixture, got "
+                      result.total-lines))
           (assert result.log-path "read-log missing log-path")
-          ;; Independently verify total-lines by reading the raw log file
-          ;; and applying the same normalization logic.
-          (local log-content (fs.read-file result.log-path))
-          (assert log-content "should be able to read log file")
-          (var raw-lines [])
-          (each [line (string.gmatch log-content "([^\n]*)\n?")]
-            (table.insert raw-lines line))
-          ;; Drop trailing empty string from final \n (same logic as read-log)
-          (when (and (> (# raw-lines) 0) (= (. raw-lines (# raw-lines)) ""))
-            (table.remove raw-lines))
-          (local expected-total (# raw-lines))
-          (assert (= result.total-lines expected-total)
-                  (.. "total-lines " result.total-lines
-                      " does not match raw line count " expected-total
-                      " — trailing empty entry may not be normalized"))
-          ;; Verify no returned line number exceeds total-lines
-          (each [_ line (ipairs result.lines)]
-            (local (line-num-str) (string.match line "^(%d+):"))
-            (when line-num-str
-              (local line-num (tonumber line-num-str))
-              (assert (<= line-num result.total-lines)
-                      (.. "line number " line-num " exceeds total-lines "
-                          result.total-lines)))))))))
+          (assert (= result.log-path fixture-path) "log-path should match fixture path")
+          ;; Verify all 5 lines are present and line numbers are correct
+          (assert (= (length result.lines) 5)
+                  (.. "expected 5 lines, got " (length result.lines)))
+          (local expected ["1: alpha" "2: beta" "3: gamma" "4: delta" "5: epsilon"])
+          (each [i line (ipairs result.lines)]
+            (assert (= line (. expected i))
+                    (.. "line " i " mismatch: " line " vs " (. expected i))))
+          ;; grep filtering: only lines containing "ta" (beta, delta)
+          (local filtered (service:read-log {:log_path fixture-path :grep "ta"}))
+          (assert (= (length filtered.lines) 2)
+                  (.. "grep for 'ta' should find 2 lines, got " (length filtered.lines)))
+          (assert (= filtered.total-lines 5) "total-lines should still be 5")
+          (assert (= (. filtered.lines 1) "2: beta")
+                  (.. "first grep hit: " (. filtered.lines 1)))
+          (assert (= (. filtered.lines 2) "4: delta")
+                  (.. "second grep hit: " (. filtered.lines 2))))))))
 
 (table.insert tests {:name "external-unit-mcp: read-log returns filtered recent lines"
                      :fn test-read-log-returns-filtered-recent-lines})
