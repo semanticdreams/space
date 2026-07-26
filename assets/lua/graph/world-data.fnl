@@ -170,18 +170,32 @@
 (fn refresh-sandbox-slot-if-inactive [scene world-manager world-id]
   "When the active Scene slot is NOT sandbox, refresh the retained sandbox
   slot's scene-state from canonical session state so mutations survive until
-  the next sandbox activation.  Does nothing when sandbox is already active
-  (the direct runtime sync handles that case)."
+  the next sandbox activation.  Also update runtime.activity-session-state
+  so that Activities.snapshot-activity-sessions cannot overwrite the
+  mutation with stale pending data.  Does nothing when sandbox is already
+  active (the direct runtime sync handles that case)."
   (when (and scene (not (= scene.active-activity-slot-id "sandbox")))
-    (local sandbox-slot (and scene.activity-slot
-                             (scene:activity-slot "sandbox")))
-    (when (and sandbox-slot sandbox-slot.scene-state)
-      (local world (resolve-world world-manager world-id))
-      (local canonical (resolve-sandbox-scene-state world))
-      (when canonical
+    (local world (resolve-world world-manager world-id))
+    (local canonical (resolve-sandbox-scene-state world))
+    (when canonical
+      ;; Ensure the retained slot exists and has scene-state so mutations
+      ;; survive until the next sandbox activation.
+      (local sandbox-slot (and scene.activity-slot
+                               (scene:activity-slot "sandbox")))
+      (when (and sandbox-slot sandbox-slot.scene-state)
         ;; Refresh retained slot state in place from canonical.
         (each [k v (pairs canonical)]
-          (tset sandbox-slot.scene-state k v))))))
+          (tset sandbox-slot.scene-state k v)))
+      ;; R5-1: Also update runtime.activity-session-state.sandbox.scene
+      ;; so Activities.snapshot-activity-sessions cannot save stale
+      ;; pending data over the mutation.
+      (local runtime (resolve-runtime world-manager world-id))
+      (when (and runtime runtime.activity-session-state)
+        (when (not (= (type runtime.activity-session-state.sandbox) :table))
+          (tset runtime.activity-session-state :sandbox {}))
+        ;; Replace sandbox.scene with the canonical scene so stale
+        ;; pending data cannot overwrite the mutation during snapshot.
+        (tset runtime.activity-session-state.sandbox :scene canonical)))))
 
 (fn require-active-scene-light-method [scene method-name]
   (assert (. scene method-name)
@@ -262,6 +276,16 @@
   (when scene
     (if (= scene.active-activity-slot-id "sandbox")
         (do
+          ;; R5-2: Update the active sandbox slot's scene-state.skybox with the
+          ;; complete policy skybox BEFORE applying the resolved renderer state.
+          ;; This ensures capture-activity-slot-state reads the complete policy,
+          ;; not a stale or resolved-only skybox.
+          (local sandbox-slot (and scene.activity-slot
+                                   (scene:activity-slot "sandbox")))
+          (when sandbox-slot
+            (when (not (= (type sandbox-slot.scene-state) :table))
+              (set sandbox-slot.scene-state {}))
+            (tset sandbox-slot.scene-state :skybox skybox))
           (assert scene.set-skybox-state
                   "Active scene is missing set-skybox-state for world skybox sync")
           (scene:set-skybox-state

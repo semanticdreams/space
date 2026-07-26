@@ -548,9 +548,186 @@
           "remove-terrain failure should mention missing activity state"))
 
 (table.insert tests {:name "runtime reads ignore non-sandbox active slot"
-                     :fn test-runtime-reads-ignore-non-sandbox-active-slot})
+                      :fn test-runtime-reads-ignore-non-sandbox-active-slot})
 (table.insert tests {:name "terrain mutators fail on missing sandbox session"
-                     :fn test-terrain-mutators-fail-on-missing-sandbox-session})
+                      :fn test-terrain-mutators-fail-on-missing-sandbox-session})
+
+;; ── R5-1: WorldData mutations update runtime.activity-session-state ────
+
+(fn test-worlddata-mutation-updates-activity-session-state-when-inactive []
+  "R5-1: When WorldData mutates canonical Sandbox scene state while an active
+  runtime exists and Sandbox is inactive, the runtime's activity-session-state
+  sandbox.scene must be updated so that Activities.snapshot-activity-sessions
+  cannot save stale pending data over the mutation."
+  (local WorldData (require :graph/world-data))
+  (local SkyboxState (require :skybox-state))
+  (local BackgroundState (require :background-state))
+  (local LightSystemModule (require :light-system))
+  ;; Build a runtime where Graph is the active slot and sandbox was never activated.
+  ;; The runtime has activity-session-state with stale sandbox scene data.
+  (var call-log [])
+  (var slot-skybox nil)
+  (local mock-scene
+    {:active-activity-slot-id "graph"
+     :activity-slot (fn [_self activity-id]
+                      (when (= activity-id "sandbox")
+                        ;; Sandbox slot exists but has stale scene-state
+                        {:scene-state {:panels []
+                                       :terrains []
+                                       :lights (LightSystemModule.default-state)
+                                       :skybox (make-skybox-state {:enabled? true :name "stale" :brightness 0.99})
+                                       :background (make-background-state {:color [0.99 0.99 0.99]})
+                                       :containment {:enabled? false}}}))
+     :set-light-state (fn [_self _lights]
+                        (table.insert call-log "set-light-state-called"))
+     :set-skybox-state (fn [_self _skybox]
+                         (table.insert call-log "set-skybox-state-called"))
+     :set-background-state (fn [_self _bg]
+                            (table.insert call-log "set-background-state-called"))
+     :replace-terrain-record (fn [_self _tid _rec]
+                               (table.insert call-log "replace-terrain-record-called"))
+     :add-terrain-record (fn [_self _rec]
+                           (table.insert call-log "add-terrain-record-called"))
+     :remove-terrain (fn [_self _tid]
+                      (table.insert call-log "remove-terrain-called"))})
+  ;; activity-session-state holds stale sandbox scene that should be updated.
+  (local stale-sandbox-scene
+    {:panels []
+     :terrains []
+     :lights (LightSystemModule.default-state)
+     :skybox (make-skybox-state {:enabled? true :name "stale" :brightness 0.99})
+     :background (make-background-state {:color [0.99 0.99 0.99]})
+     :containment {:enabled? false}})
+  (local runtime {:scene mock-scene
+                  :activity-session-state {:sandbox {:scene stale-sandbox-scene}
+                                          :graph {:scene {:panels []}}}})
+  (local terrain-record (make-heightfield-terrain-record {:id "r5-1-terrain"}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels []
+                                               :terrains [terrain-record]
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state {:enabled? true :name "lake" :brightness 0.1})
+                                               :background (make-background-state {:color [0.1 0.2 0.3]})
+                                               :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? true
+                :world {:state state
+                        :get-runtime (fn [_self] runtime)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; Mutate skybox via WorldData.update-skybox
+  (WorldData.update-skybox manager "test-world"
+    (make-skybox-state {:enabled? false :name "night" :brightness 0.5}))
+  (assert (= (length call-log) 0)
+          "update-skybox should not touch runtime scene when sandbox is inactive")
+  ;; R5-1: The runtime's activity-session-state sandbox scene must be updated.
+  (local pending-scene runtime.activity-session-state.sandbox.scene)
+  (assert pending-scene "activity-session-state sandbox must exist")
+  (assert (not (= pending-scene stale-sandbox-scene))
+          "activity-session-state sandbox must not be the stale object")
+  (assert (= pending-scene.skybox.enabled? false)
+          "pending sandbox scene skybox.enabled? must reflect mutation")
+  (assert (= pending-scene.skybox.default.name "night")
+          "pending sandbox scene skybox.name must reflect mutation")
+  (assert (= pending-scene.skybox.default.brightness 0.5)
+          "pending sandbox scene skybox.brightness must reflect mutation")
+  ;; Mutate background
+  (WorldData.update-background manager "test-world"
+    (make-background-state {:color [0.4 0.5 0.6]}))
+  (assert (= (. pending-scene.background.color 1) 0.4)
+          "pending sandbox scene background must reflect mutation")
+  ;; Mutate terrain
+  (WorldData.update-terrain-record manager "test-world" "r5-1-terrain"
+    (fn [record] (set record.name "mutated-terrain")))
+  (assert (= (. pending-scene.terrains 1 :name) "mutated-terrain")
+          "pending sandbox scene terrain must reflect mutation")
+  ;; Mutate lights
+  (WorldData.add-light manager "test-world" "point")
+  (assert (= (length pending-scene.lights.point) 1)
+          "pending sandbox scene lights must reflect added point light"))
+
+(table.insert tests {:name "R5-1 WorldData mutation updates activity-session-state when inactive"
+                     :fn test-worlddata-mutation-updates-activity-session-state-when-inactive})
+
+;; ── R5-2: WorldData.update-skybox updates active slot scene-state.skybox ──
+
+(fn test-worlddata-update-skybox-updates-active-slot-scene-state []
+  "R5-2: With Sandbox active, WorldData.update-skybox must update the active
+  sandbox slot's scene-state.skybox with the normalized complete skybox
+  before applying the resolved renderer state."
+  (local WorldData (require :graph/world-data))
+  (local SkyboxState (require :skybox-state))
+  (var resolved-skybox nil)
+  (var slot-skybox nil)
+  (local sandbox-slot
+    {:scene-state {:panels []
+                   :terrains []
+                   :lights {}
+                   :skybox (make-skybox-state {:enabled? true :name "lake" :brightness 0.1})
+                   :background {}
+                   :containment {}}})
+  (local mock-scene
+    {:active-activity-slot-id "sandbox"
+     :activity-slot (fn [_self activity-id]
+                      (when (= activity-id "sandbox")
+                        sandbox-slot))
+     :set-skybox-state (fn [_self skybox]
+                        (set resolved-skybox skybox)
+                        true)})
+  (local runtime {:scene mock-scene
+                  :activity-session-state {}})
+  (local terrain-record (make-heightfield-terrain-record {:id "r5-2-terrain"}))
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels []
+                                               :terrains [terrain-record]
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state {:enabled? true :name "lake" :brightness 0.1})
+                                               :background (make-background-state {:color [0 0 0]})
+                                               :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? true
+                :world {:state state
+                        :get-runtime (fn [_self] runtime)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; update-skybox with a complete-by-theme-policy skybox
+  (WorldData.update-skybox manager "test-world"
+    (SkyboxState.normalize-complete-state
+      {:enabled? true
+       :default {:name "desert"
+                 :brightness 0.35
+                 :tint-color [1.0 1.0 1.0]}
+       :by-theme {:dark {:name "night"
+                          :brightness 0.6
+                          :tint-color [0.8 0.8 1.0]}}}
+      "R5-2 test skybox"))
+  ;; R5-2: The active sandbox slot's scene-state.skybox must be the
+  ;; complete policy (not the resolved renderer format).
+  (assert (= (type sandbox-slot.scene-state.skybox.default) :table)
+          "slot scene-state skybox must have :default policy")
+  (assert (= sandbox-slot.scene-state.skybox.default.name "desert")
+          "slot scene-state skybox default name must be updated")
+  (assert (= sandbox-slot.scene-state.skybox.default.brightness 0.35)
+          "slot scene-state skybox default brightness must be updated")
+  (assert (= (type sandbox-slot.scene-state.skybox.by-theme) :table)
+          "slot scene-state skybox must have :by-theme overrides")
+  (assert (= sandbox-slot.scene-state.skybox.by-theme.dark.name "night")
+          "slot scene-state skybox dark override must be updated")
+  ;; The renderer should receive the resolved skybox (for active theme).
+  (assert resolved-skybox "renderer should receive resolved skybox")
+  (assert (= (type resolved-skybox.name) :string)
+          "resolved skybox should have a :name field"))
+
+(table.insert tests {:name "R5-2 WorldData.update-skybox updates active slot scene-state skybox"
+                     :fn test-worlddata-update-skybox-updates-active-slot-scene-state})
 
 (local main
   (fn []
