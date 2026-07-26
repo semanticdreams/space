@@ -742,6 +742,71 @@
 (table.insert tests {:name "R5-2 WorldData.update-skybox updates active slot scene-state skybox"
                      :fn test-worlddata-update-skybox-updates-active-slot-scene-state})
 
+;; ── R6-3: Active Sandbox remove-scene-panel updates canonical state ────
+
+(fn test-active-sandbox-remove-panel-updates-canonical-session []
+  "R6-3: When Sandbox is the active slot, WorldData.remove-scene-panel must
+  update both the canonical activity.sessions.sandbox.scene.panels AND the
+  runtime.activity-session-state.sandbox.scene so capture/save/pending
+  sessions no longer contain the removed panel."
+  (local WorldData (require :graph/world-data))
+  (local LightSystemModule (require :light-system))
+  ;; Build a runtime where Sandbox IS the active slot.
+  (var removed-element nil)
+  (local mock-scene
+    {:active-activity-slot-id "sandbox"
+     :scene-children [{:element {:drop (fn [_])}
+                        ;; Persistence data that matches the canonical panel
+                        :persistence {:kind "test-panel"
+                                      :graph-map-id "gm-1"
+                                      :node-key "nk-1"
+                                      :label "Test Panel"}}]
+     :remove-panel-child (fn [_self element]
+                           (set removed-element element)
+                           true)})
+  (local runtime {:scene mock-scene
+                  :activity-session-state {:sandbox {:scene {:panels []}}}})
+  ;; Canonical sandbox session has matching panel
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels [{:kind "test-panel"
+                                                         :graph-map-id "gm-1"
+                                                         :node-key "nk-1"
+                                                         :label "Test Panel"}]
+                                               :terrains []
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state)
+                                               :background (make-background-state)
+                                               :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? true
+                :world {:state state
+                        :get-runtime (fn [_self] runtime)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; Precondition: canonical has one panel
+  (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 1)
+          "canonical sandbox session should start with one panel")
+  ;; Remove panel through WorldData (Sandbox active)
+  (WorldData.remove-scene-panel manager "test-world" 1)
+  ;; R6-3: The canonical session panels must be empty
+  (assert (= (length (. state.activity.sessions.sandbox.scene :panels)) 0)
+          "remove-scene-panel with active sandbox must remove from canonical session")
+  ;; R6-3: runtime.activity-session-state.sandbox.scene must reflect removal
+  (local pending-scene runtime.activity-session-state.sandbox.scene)
+  (assert pending-scene "activity-session-state sandbox must exist")
+  (assert (= (length (or (. state.activity.sessions.sandbox.scene :panels) [])) 0)
+          "canonical panels must be empty after removal")
+  ;; The runtime panel was actually removed
+  (assert removed-element
+          "remove-panel-child must have been called on the runtime scene"))
+
+(table.insert tests {:name "R6-3 active sandbox remove-scene-panel updates canonical and pending"
+                     :fn test-active-sandbox-remove-panel-updates-canonical-session})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

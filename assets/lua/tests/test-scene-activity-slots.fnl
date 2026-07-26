@@ -165,6 +165,83 @@
 
       (drop-fixture fixture))))
 
+;; ── R6-1: Scene content input registrations are slot-scoped ────────────
+
+(fn slot-content-movables-use-slot-pointer-target []
+  "R6-1: movables/resizables registered for content built inside an activity
+  slot must carry the owning slot's pointer-target so that
+  app.pointer-target-enabled? rejects them when the slot is inactive."
+  (with-restored-app-fields
+    [:scene
+     :scene-interactive?
+     :pointer-target-enabled?
+     :movables]
+    (fn []
+      (Main.install-app-shell!)
+      (local glm (require :glm))
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (set app.scene scene)
+      (set app.scene-interactive? true)
+      ;; Track movable registrations to inspect pointer-target
+      (var registered-movables [])
+      (set app.movables
+           {:register
+            (fn [_movables _widget opts]
+              (table.insert registered-movables opts))
+            :unregister (fn [_movables _key])})
+
+      ;; (1) Activate sandbox and build content — movables must use
+      ;;     the sandbox slot's pointer-target.
+      (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      ;; Build a minimal entity with layout (simulates content building)
+      (fn mock-builder [ctx]
+        (local entity {:layout {:children []
+                                :set-root (fn [layout root] (set layout.__root root))
+                                :set-position (fn [])
+                                :set-rotation (fn [])
+                                :mark-measure-dirty (fn [])
+                                :position (glm.vec3 0 0 0)
+                                :rotation (glm.quat 1 0 0 0)}
+                       :children []
+                       :scene-children []
+                       :scene-terrains []
+                       :scene-objects []
+                       :movables []
+                       :drop (fn [_])})
+        entity)
+      (scene:build mock-builder)
+      ;; Movables should have been registered with sandbox slot pointer-target
+      (assert (> (length registered-movables) 0)
+              "Building content should register movables")
+      (var sandbox-pt-count 0)
+      (each [_ opts (ipairs registered-movables)]
+        (when (= opts.pointer-target sandbox-slot.pointer-target)
+          (set sandbox-pt-count (+ sandbox-pt-count 1))))
+      (assert (> sandbox-pt-count 0)
+              "Movables registered under Sandbox must carry Sandbox slot pointer-target")
+
+      ;; (2) Sandbox slot is active → pointer-target should be enabled
+      (each [_ opts (ipairs registered-movables)]
+        (assert (app.pointer-target-enabled? opts.pointer-target)
+                "Sandbox content movables should be enabled while Sandbox is active"))
+
+      ;; (3) Switch to Graph → Sandbox content movables must be disabled
+      (local graph-slot (scene:ensure-activity-slot "graph"))
+      (scene:activate-activity-slot "graph")
+      (each [_ opts (ipairs registered-movables)]
+        (assert (not (app.pointer-target-enabled? opts.pointer-target))
+                "Sandbox content movables must be disabled when Graph is active"))
+
+      ;; (4) Switch back to Sandbox → Sandbox content movables re-enabled
+      (scene:activate-activity-slot "sandbox")
+      (each [_ opts (ipairs registered-movables)]
+        (assert (app.pointer-target-enabled? opts.pointer-target)
+                "Sandbox content movables must be re-enabled when Sandbox reactivates"))
+
+      (drop-fixture fixture))))
+
 (fn drop-activity-slot-removes-content []
   (local fixture (make-scene))
   (local scene fixture.scene)
@@ -182,6 +259,105 @@
   (assert (= (scene:get-triangle-vector) scene.build-context.triangle-vector))
 
   (drop-fixture fixture))
+
+;; ── R6-2: Dropping a retained slot releases entity ─────────────────────
+
+(fn drop-inactive-slot-releases-retained-entity []
+  "R6-2: Dropping a retained (inactive) Scene activity slot must deactivate
+  physics, unregister movables/resizables, and drop the entity without
+  double-dropping active content."
+  (with-restored-app-fields
+    [:movables :resizables :engine]
+    (fn []
+      (local glm (require :glm))
+      (local LayoutPhysicsBodies (require :layout-physics-bodies))
+      (pcall require :bt)
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+
+      ;; Mock physics
+      (var deactivate-calls [])
+      (var remove-rigid-body-called false)
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body]
+                                                     (set remove-rigid-body-called true))}})
+
+      ;; Mock movables
+      (var movable-unregister-calls [])
+      (set app.movables {:register (fn [_m _w _o])
+                         :unregister (fn [_m key] (table.insert movable-unregister-calls key))})
+      (var resizable-unregister-calls [])
+      (set app.resizables {:register (fn [_r _w _o])
+                           :unregister (fn [_r key] (table.insert resizable-unregister-calls key))})
+
+      ;; (1) Create a slot, activate it, build content with physics
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      ;; Build a mock entity
+      (fn mock-builder [ctx]
+        (local entity-layout
+          {:children []
+           :set-root (fn [_layout _root])
+           :set-position (fn [])
+           :set-rotation (fn [])
+           :mark-measure-dirty (fn [])
+           :position (glm.vec3 0 0 0)
+           :rotation (glm.quat 1 0 0 0)})
+        (local entity
+          {:layout entity-layout
+           :children []
+           :scene-children []
+           :scene-terrains []
+           :scene-objects []
+           :movables []
+           :drop (fn [_])})
+        ;; Create a physics entry on the entity
+        (local element
+          {:layout {:position (glm.vec3 0 5 0)
+                    :rotation (glm.quat 1 0 0 0)
+                    :size (glm.vec3 4 4 4)
+                    :measure (glm.vec3 4 4 4)
+                    :children []
+                    :parent entity-layout
+                    :root entity-layout
+                    :depth-offset-index 0
+                    :mark-measure-dirty (fn [_layout])}})
+        (LayoutPhysicsBodies.add-runtime-layout-body entity {:element element})
+        ;; Give entity movable/resizable keys so slot.drop can unregister them
+        (set entity.__scene_movable_keys ["movable-key-1" "movable-key-2"])
+        (set entity.__scene_resizable_keys ["resizable-key-1"])
+        entity)
+      (scene:build mock-builder)
+      (assert scene.entity "Entity should exist after build")
+      (assert slot.entity "Slot should own the entity")
+
+      ;; Track if entity.drop was called
+      (var entity-dropped? false)
+      (set slot.entity.drop (fn [_] (set entity-dropped? true)))
+
+      ;; (2) Deactivate sandbox (slot is now inactive) — switch to graph
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      ;; Slot retains entity but scene does not
+      (assert slot.entity "Slot must retain entity when inactive")
+      (assert (not (= scene.entity slot.entity))
+              "Scene entity should be different from retained slot entity")
+
+      ;; (3) Drop the retained slot — must release entity
+      (scene:drop-activity-slot "sandbox")
+      (assert (= (scene:activity-slot "sandbox") nil)
+              "Slot must be removed after drop")
+      ;; Entity must have been dropped
+      (assert entity-dropped?
+              "Inactive slot entity must be dropped on slot.drop")
+      ;; Movables must be unregistered
+      (assert (> (length movable-unregister-calls) 0)
+              "Slot.drop must unregister movables for retained entity")
+      ;; Resizables must be unregistered
+      (assert (> (length resizable-unregister-calls) 0)
+              "Slot.drop must unregister resizables for retained entity")
+
+      (drop-fixture fixture))))
 
 (fn activity-slot-returns-nil-for-unknown []
   (local fixture (make-scene))
@@ -858,8 +1034,12 @@
                      :fn active-slot-controls-render-context})
 (table.insert tests {:name "Scene slot pointer target routing"
                      :fn slot-pointer-target-routing})
+(table.insert tests {:name "R6-1 slot content movables use slot pointer target"
+                     :fn slot-content-movables-use-slot-pointer-target})
 (table.insert tests {:name "Scene activity slot drop removes content"
                      :fn drop-activity-slot-removes-content})
+(table.insert tests {:name "R6-2 drop inactive slot releases retained entity"
+                      :fn drop-inactive-slot-releases-retained-entity})
 (table.insert tests {:name "Scene activity-slot returns nil for unknown"
                      :fn activity-slot-returns-nil-for-unknown})
 (table.insert tests {:name "Scene active slot batch accessors route correctly"

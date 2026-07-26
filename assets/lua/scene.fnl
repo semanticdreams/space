@@ -600,21 +600,44 @@
              (focus-manager:detach slot-self.focus-scope))
            slot-self))
     (set slot.drop
-          (fn [slot-self]
-            (slot-self:deactivate)
-            (when (and slot-self.root slot-self.root.drop)
-              (slot-self.root:drop))
-            (set slot-self.root nil)
-            (set slot-self.entity nil)
-            (set slot-self.scene-children nil)
-            (set slot-self.scene-terrains nil)
-            (set slot-self.queued-cube-panels [])
-            (set slot-self.demo-browser nil)
-            (set slot-self.physics-body-count 0)
-            (when slot-self.focus-scope
-              (slot-self.focus-scope:drop)
-              (set slot-self.focus-scope nil))
-            true))
+           (fn [slot-self]
+             (slot-self:deactivate)
+             ;; R6-2: Release retained entity/content when present.
+             ;; Deactivate physics, unregister input resources, and drop
+             ;; the entity — but guard against double-dropping active
+             ;; content that is already managed by the scene's own teardown.
+             (when slot-self.entity
+               (when (pcall require :layout-physics-bodies)
+                 (let [LayoutPhysicsBodies (require :layout-physics-bodies)]
+                   (pcall LayoutPhysicsBodies.deactivate slot-self.entity)))
+               ;; Unregister block-scoped movables so stale keys never
+               ;; block future registrations for the same widget.
+               (when (and app.movables slot-self.entity.__scene_movable_keys)
+                 (each [_ key (ipairs slot-self.entity.__scene_movable_keys)]
+                   (app.movables:unregister key)))
+               (when (and app.resizables slot-self.entity.__scene_resizable_keys)
+                 (each [_ key (ipairs slot-self.entity.__scene_resizable_keys)]
+                   (app.resizables:unregister key)))
+               ;; Only drop the entity when the slot is NOT the currently
+               ;; active slot.  When it is active, the scene's own
+               ;; unregister-entity / entity:drop in Scene.drop handles
+               ;; lifecycle without double-dropping.
+               (when (not (= self.active-activity-slot slot-self))
+                 (when slot-self.entity.drop
+                   (slot-self.entity:drop)))
+               (set slot-self.entity nil))
+             (when (and slot-self.root slot-self.root.drop)
+               (slot-self.root:drop))
+             (set slot-self.root nil)
+             (set slot-self.scene-children nil)
+             (set slot-self.scene-terrains nil)
+             (set slot-self.queued-cube-panels [])
+             (set slot-self.demo-browser nil)
+             (set slot-self.physics-body-count 0)
+             (when slot-self.focus-scope
+               (slot-self.focus-scope:drop)
+               (set slot-self.focus-scope nil))
+             true))
     (slot:deactivate)
     slot)
 
@@ -1175,15 +1198,22 @@
     (when (and entity app.movables)
       (local entries (icollect [_ entry (ipairs (or entity.movables []))]
                                (normalize-movable-entry self entry)))
+      ;; R6-1: When an activity slot is active, use its pointer-target
+      ;; as the default so app.pointer-target-enabled? rejects input
+      ;; for inactive slot content (e.g. Sandbox movables when Graph is active).
+      (local default-pointer-target
+        (or (and self.active-activity-slot
+                 self.active-activity-slot.pointer-target)
+            self))
       (var filtered [])
       (each [_ entry (ipairs entries)]
         (when entry
           (when (not entry.pointer-target)
-            (set entry.pointer-target self))
+            (set entry.pointer-target default-pointer-target))
           (table.insert filtered entry)))
       (when (= (length filtered) 0)
         (table.insert filtered {:target entity.layout
-                                :pointer-target self}))
+                                :pointer-target default-pointer-target}))
       (register-movable-entries self entity filtered)))
 
   (fn normalize-resizable-entry [_self entry]
@@ -1236,15 +1266,22 @@
     (when (and entity app.resizables)
       (local entries (icollect [_ entry (ipairs (or entity.resizables []))]
                                (normalize-resizable-entry self entry)))
+      ;; R6-1: When an activity slot is active, use its pointer-target
+      ;; as the default so app.pointer-target-enabled? rejects input
+      ;; for inactive slot content (e.g. Sandbox resizables when Graph is active).
+      (local default-pointer-target
+        (or (and self.active-activity-slot
+                 self.active-activity-slot.pointer-target)
+            self))
       (var filtered [])
       (each [_ entry (ipairs entries)]
         (when entry
           (when (not entry.pointer-target)
-            (set entry.pointer-target self))
+            (set entry.pointer-target default-pointer-target))
           (table.insert filtered entry)))
       (when (= (length filtered) 0)
         (table.insert filtered {:target entity.layout
-                                :pointer-target self}))
+                                :pointer-target default-pointer-target}))
       (register-resizable-entries self entity filtered)))
 
   (fn unregister-entity-movables [self entity]
