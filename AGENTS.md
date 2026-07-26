@@ -8,6 +8,14 @@ Clean design is important, refactor when reasonable.
 
 The default base branch for pull requests and merges is `main`.
 
+After implementation is complete — reviewed, committed, tests passing, tree
+clean — the default integration action is to push the current branch and create a
+pull request targeting `main`. Do this automatically; do not present an
+integration menu or ask the user which action to take. Only deviate when the user
+explicitly requests a different integration action or when the branch state is
+unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
+`main`).
+
 ## Project Structure & Modules
 - `src/` holds the C++17 engine modules (rendering, physics, audio, bindings). Add new systems as matching `.cpp`/`.h` pairs. Engine Lua bindings live in `src/lua_engine.cpp`.
 - `apps/space/main.cpp` is the executable entry point; bootstrap other front ends here.

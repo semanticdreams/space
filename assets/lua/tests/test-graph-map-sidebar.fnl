@@ -1,3 +1,4 @@
+(local glm (require :glm))
 (local Graph (require :graph/init))
 (local GraphMapManager (require :graph/map-manager))
 (local GraphMapSidebar (require :graph/map-sidebar))
@@ -186,7 +187,7 @@
             (Graph.GraphNode {:key key})))
     (local manager (GraphMapManager.GraphMapManager {:graph graph}))
     (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
-                              :hoverables (make-hoverables-stub)}))
+                               :hoverables (make-hoverables-stub)}))
     (local builder (GraphMapSidebar.GraphMapSidebar {:manager manager}))
     (local entity (builder ctx))
     (local active (manager:get-active-map))
@@ -208,6 +209,73 @@
     (manager:drop)
     (graph:drop))
 
+(local text-utils (require :text-utils))
+
+(fn button-label [btn]
+    ;; Convert codepoints back to a string for comparison
+    (when (and btn.text btn.text.get-codepoints)
+        (local cps (btn.text:get-codepoints))
+        (var s "")
+        (each [_ cp (ipairs cps)]
+            (set s (.. s (string.char cp))))
+        s))
+
+(fn find-clickable-by-label [target-text]
+    (var found nil)
+    (each [_ obj (ipairs app.clickables.left-click-objects)]
+        (when (and (not found) obj.on-click)
+            (local label (button-label obj))
+            (when (= label target-text)
+                (set found obj))))
+    found)
+
+(fn sidebar-new-button-creates-map-without-crashing []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                               :hoverables (make-hoverables-stub)}))
+    (local builder (GraphMapSidebar.GraphMapSidebar {:manager manager}))
+    (local entity (builder ctx))
+    (entity:update)
+    (local new-button (find-clickable-by-label "New"))
+    (assert new-button "Sidebar should render a New button")
+    (local initial-map-count (length (manager:list-maps)))
+    (local (ok err) (pcall (fn [] (new-button:on-click {}))))
+    (assert ok (.. "New button click should not crash: " (tostring err)))
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
+(fn sidebar-map-rows-do-not-stretch-to-full-panel-height []
+    (local graph (Graph {:with-start false}))
+    (local manager (GraphMapManager.GraphMapManager {:graph graph}))
+    (local ctx (BuildContext {:clickables (assert app.clickables "test requires app.clickables")
+                               :hoverables (make-hoverables-stub)}))
+    (local builder (GraphMapSidebar.GraphMapSidebar {:manager manager}))
+    (local entity (builder ctx))
+    (entity:update)
+    (local panel-height 10.0)
+    (set entity.layout.size (glm.vec3 3 panel-height 0))
+    (entity.layout:measurer)
+    (entity.layout:layouter)
+    ;; After layout, root-layout.children[1] is the Stack layout.
+    ;; Stack layout.children[1] = background, [2] = content Flex.
+    (local root-children entity.layout.children)
+    (assert (= (length root-children) 1) "Root layout should have 1 child: the Stack")
+    (local stack-layout (. root-children 1))
+    (local stack-children stack-layout.children)
+    (assert (= (length stack-children) 2) "Stack should have 2 children: background + content Flex")
+    (local flex-layout (. stack-children 2))
+    (local flex-children flex-layout.children)
+    ;; flex-children[1]=title, [2]=actions, [3]=switch-title, [4]=map row, [5]=separator, [6]=selected-count
+    (assert (>= (length flex-children) 4) "Flex should have at least 4 content rows with 1 map")
+    (local map-row-layout (. flex-children 4))
+    (assert (< map-row-layout.size.y panel-height)
+            "Map row should not stretch to full panel height")
+    (entity:drop)
+    (manager:drop)
+    (graph:drop))
+
 (table.insert tests {:name "GraphMapManager active-map-id updates after switch" :fn manager-active-map-id-updates-after-switch})
 (table.insert tests {:name "GraphMapManager rename updates active-map-name" :fn manager-rename-updates-active-map-name})
 (table.insert tests {:name "GraphMapManager active-map-status returns correct values" :fn manager-active-map-status-returns-correct-values})
@@ -221,6 +289,8 @@
 (table.insert tests {:name "GraphMap sidebar rebuilds on maps-changed" :fn sidebar-rebuilds-on-maps-changed})
 (table.insert tests {:name "GraphMap sidebar labels map actions and selected count" :fn sidebar-exposes-map-labels-and-selected-count})
 (table.insert tests {:name "GraphMap sidebar refreshes active map counts after map mutations" :fn sidebar-refreshes-active-map_counts_after_map_mutations})
+(table.insert tests {:name "GraphMap sidebar New button creates map without crashing" :fn sidebar-new-button-creates-map-without-crashing})
+(table.insert tests {:name "GraphMap sidebar map rows do not stretch to full panel height" :fn sidebar-map-rows-do-not-stretch-to-full-panel-height})
 
 (local main
     (fn []
