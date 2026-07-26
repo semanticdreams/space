@@ -385,16 +385,21 @@
   ;; Regression: deactivating the active scene slot must retain the slot itself
   ;; while removing its active physics bodies. The scene surface should be
   ;; left with no active slot and nil entity after deactivation. The physics
-  ;; body added by this test must be removed from the Bullet world on
-  ;; deactivation, returning collision count to baseline.
+  ;; body added by this test must be removed from the Bullet world by the
+  ;; deactivation path itself (not by a manual LayoutPhysicsBodies call).
   (with-scene
     {:position (glm.vec3 0 0 0)
      :rotation (glm.quat 1 0 0 0)}
     (fn [scene]
       (scene:build-default {:terrains [(flat-heightfield-record {:height 0.0})]})
       (assert scene.entity "Sandbox slot entity must exist after build-default")
-      (assert (= scene.active-activity-slot-id "sandbox") "Sandbox must be active")
+      ;; Sync the slot's entity field so deactivate-activity-slot can find
+      ;; and deactivate layout physics bodies attached to this entity.
+      ;; (activate-activity-slot syncs slot.entity before build-default
+      ;; creates the entity, so we sync it here explicitly.)
       (local slot (. scene.activity-slots "sandbox"))
+      (set slot.entity scene.entity)
+      (assert (= scene.active-activity-slot-id "sandbox") "Sandbox must be active")
       (assert slot "Sandbox slot must exist after activation")
       (assert slot.visible? "Sandbox slot must be visible while active")
       (set scene.camera {:position (glm.vec3 0 0 50)
@@ -409,19 +414,14 @@
               (string.format
                 "Adding a physics body should increase collision objects (baseline=%d with=%d)"
                 baseline with-body))
-      ;; Explicitly deactivate physics bodies on the entity to verify
-      ;; that the Bullet body is removed from the world.
-      (local LayoutPhysicsBodies (require :layout-physics-bodies))
-      (local body-count-before (collision-object-count))
-      (LayoutPhysicsBodies.deactivate scene.entity)
-      (local body-count-after (collision-object-count))
-      (assert (< body-count-after body-count-before)
-              (string.format
-                "LayoutPhysicsBodies.deactivate must remove active bodies (before=%d after=%d)"
-                body-count-before body-count-after))
-      ;; Now deactivate the slot. After deactivation, the slot object and
-      ;; its fields must survive, while the scene surface is cleared.
+      ;; Deactivate the slot: this must remove the physics body created above
+      ;; from the Bullet world, while retaining the slot object and its state.
       (scene:deactivate-activity-slot "sandbox")
+      (local after-deactivate (collision-object-count))
+      (assert (<= after-deactivate baseline)
+              (string.format
+                "Deactivation must remove active slot physics body (baseline=%d with=%d after=%d)"
+                baseline with-body after-deactivate))
       (assert (. scene.activity-slots "sandbox")
               "Slot must still be present in the scene after deactivation")
       (assert (not slot.visible?)
