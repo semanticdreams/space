@@ -11,11 +11,29 @@
     (error (.. tool-name " exited with code " (tostring result.exit-code) ": " (or detail ""))))
   result.stdout)
 
+(fn normalize-path-for-root-compare [path]
+  (local fs (require :fs))
+  (local absolute (fs.absolute path))
+  (var result absolute)
+  ;; Windows: normalize separators, collapse repeats, lowercase
+  (when (= (string.sub (or package.config "") 1 1) "\\")
+    (set result (string.gsub result "/" "\\"))
+    (set result (string.gsub result "\\+" "\\"))
+    (set result (string.lower result)))
+  ;; Strip trailing path separator unless it's a root
+  (local len (# result))
+  (local trailing (string.sub result -1))
+  (when (and (> len 1)
+             (or (= trailing "/") (= trailing "\\"))
+             ;; Preserve Windows drive root "C:\"
+             (not (and (= trailing "\\") (= len 3) (string.match result "^%a:")))))
+    (set result (string.sub result 1 (- len 1))))
+  result)
+
 (fn path-under-root? [path root]
   (local path-utils (require :path-utils))
-  (local fs (require :fs))
-  (local normalized (fs.absolute path))
-  (local normalized-root (fs.absolute root))
+  (local normalized (normalize-path-for-root-compare path))
+  (local normalized-root (normalize-path-for-root-compare root))
   (local root-len (# normalized-root))
   (and (>= (# normalized) root-len)
        (= (string.sub normalized 1 root-len) normalized-root)
