@@ -73,6 +73,10 @@
     (set registry.global-sessions _saved-registry-global-sessions)
     (set registry.suppress-workspace-shell-change?
          _saved-suppress-workspace-shell-change?)
+    ;; If the registry did not exist before the module loaded,
+    ;; remove it so no newly-created object leaks to later modules.
+    (when (not _saved-registry-existed?)
+      (set app.activity-registry nil))
     true))
 
 (local tests [])
