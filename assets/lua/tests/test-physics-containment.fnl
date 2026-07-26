@@ -395,8 +395,25 @@
       (local slot (. scene.activity-slots "sandbox"))
       (assert slot "Sandbox slot must exist after activation")
       (assert slot.visible? "Sandbox slot must be visible while active")
+      ;; Ensure camera is set for placement resolution
+      (set scene.camera {:position (glm.vec3 0 0 50)
+                         :rotation (glm.quat 1 0 0 0)})
+      ;; Add a physics cuboid so the entity gains active Bullet bodies
+      (local baseline (collision-object-count))
+      (local body-element
+        (scene:add-physics-body {:position (glm.vec3 0 0 0)
+                                 :size (glm.vec3 4 4 4)}))
+      (assert body-element "Expected add-physics-body to create a runtime body")
+      (local with-body (collision-object-count))
+      (assert (> with-body baseline)
+              (string.format
+                "Adding a physics body should increase collision objects (baseline=%d with=%d)"
+                baseline with-body))
+      ;; After deactivation, the slot must still exist but the scene surface
+      ;; (entity, active-slot-id) must be unbound. Physics body cleanup is
+      ;; verified by the LayoutPhysicsBodies lifecycle (tested in
+      ;; test-scene-activity-slots).
       (scene:deactivate-activity-slot "sandbox")
-      ;; After deactivation, the slot object must still exist
       (assert (. scene.activity-slots "sandbox")
               "Slot must still be present in the scene after deactivation")
       (assert (not slot.visible?)

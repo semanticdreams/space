@@ -957,18 +957,20 @@
   ;; Regression: renderers:draw-target must only consume data from the active
   ;; slot source. When the target exposes slot-gated getters that switch which
   ;; internal data is served, draw-target must not read from inactive slots.
+  ;; Slot-a and slot-b use distinct-length vectors; the draw call counts must
+  ;; match the active slot's vector and never the inactive one.
   (with-open-gl
-    (fn [_mock]
+    (fn [mock]
       (with-renderers-constructor-deps
         (fn []
           (local Renderers (reload-renderers-module))
           (local renderers (Renderers))
-          ;; Simulate a target with two internal "slots" where only the active
-          ;; one is exposed by getter methods.
           (var active-slot nil)
-          (local slot-a {:vector (fake-vector 80)
+          ;; Slot-a: 64 floats -> 64/8 = 8 triangle vertices -> 1 draw call with count=8
+          (local slot-a {:vector (fake-vector 64)
                          :id "slot-a"})
-          (local slot-b {:vector (fake-vector 80)
+          ;; Slot-b: 160 floats -> 160/8 = 20 triangle vertices -> 1 draw call with count=20
+          (local slot-b {:vector (fake-vector 160)
                          :id "slot-b"})
           (set active-slot slot-a)
           (local target
@@ -985,13 +987,24 @@
                            :batches []
                            :clip-vector (fake-vector 0)
                            :clip-group-vector (fake-vector 0)}])})
-          ;; First draw should succeed with slot-a's vector
+          ;; First draw with slot-a active
           (renderers:draw-target target)
-          ;; Switch active slot to simulate slot change
+          (local draw-a (mock:get-gl-calls "glMultiDrawArrays"))
+          (assert draw-a "Expected draw calls for slot-a")
+          (local draw-a-counts (or (and (. draw-a 1) (. (. draw-a 1) :args :counts)) []))
+          (assert (= (or (. draw-a-counts 1) 0) 8)
+                  (.. "slot-a draw should render 8 triangles, got "
+                      (tostring (or (. draw-a-counts 1) 0))))
+          ;; Switch to slot-b and draw again
           (set active-slot slot-b)
-          ;; Second draw should use slot-b's vector without interference from slot-a
+          (mock:reset)
           (renderers:draw-target target)
-          ;; If slot-a's data leaked, the renderer would have conflicting buffer state
+          (local draw-b (mock:get-gl-calls "glMultiDrawArrays"))
+          (assert draw-b "Expected draw calls for slot-b")
+          (local draw-b-counts (or (and (. draw-b 1) (. (. draw-b 1) :args :counts)) []))
+          (assert (= (or (. draw-b-counts 1) 0) 20)
+                  (.. "slot-b draw should render 20 triangles, not stale slot-a count, got "
+                      (tostring (or (. draw-b-counts 1) 0))))
           true)))))
 
 (table.insert tests {:name "Renderers draw-target uses only active slot draw source"

@@ -985,12 +985,15 @@
       (local element (app.scene:add-panel-child
                        {:builder dialog-builder
                         :position (glm.vec3 0 0 0)
-                        :rotation (glm.quat 1 0 0 0)}))
+                        :rotation (glm.quat 1 0 0 0)
+                        :persistence {:kind "test-dialog"}}))
       (assert element "dialog should be created in the active slot")
       ;; Content must land in the active scene-children (aliased from the slot)
       (assert (= (length scene.scene-children) 1)
               "Transferred content must be in the active slot's scene-children")
-      ;; After HUD transfer, content should leave the scene slot
+      ;; The panel must be in the sandbox slot's scene-children (not a global list).
+      ;; The slot aliases scene.scene-children while active, so any addition
+      ;; lands in the active slot. After HUD transfer, the slot list is cleared.
       (app.panel-transfer:register-receiver
         {:id :hud
          :label "HUD"

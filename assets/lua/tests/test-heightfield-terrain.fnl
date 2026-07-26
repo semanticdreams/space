@@ -57,6 +57,7 @@
         (set scene (Scene scene-opts))
         (set app.scene scene)
         (set app.layout-root scene.layout-root)
+        (scene:activate-activity-slot "sandbox")
         (f scene))))
   (when scene
     (scene:drop))
