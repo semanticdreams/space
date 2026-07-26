@@ -549,7 +549,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local LightingViewState (require :lighting-view-state))
@@ -780,7 +780,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -838,7 +838,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -903,7 +903,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1079,7 +1079,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1154,7 +1154,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1219,7 +1219,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1278,7 +1278,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1530,9 +1530,9 @@
   skybox applied to the renderer must resolve for the current active theme,
   not just use the default entry."
   (with-restored-app-fields
-    [:renderers :themes :skybox-state :background-state :lights-state :physics-containment-config
+    [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :themes :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -2174,7 +2174,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -2273,7 +2273,7 @@
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
-     :engine]
+     :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
