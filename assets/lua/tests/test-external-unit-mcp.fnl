@@ -729,6 +729,61 @@
 (table.insert tests {:name "external-unit-mcp: read-source rejects path escape via .."
                      :fn test-read-source-rejects-path-escape})
 
+(fn test-create-source-rejects-symlinked-ancestor []
+  ;; Create a directory unit, place a symlinked directory inside it pointing
+  ;; outside the unit root, then attempt create-source through the symlink.
+  ;; This verifies the safe resolver is used for create-source as well.
+  (with-temp-dir
+    (fn [dir]
+      (local unit-dir (fs.join-path dir "dir-unit"))
+      (fs.create-dirs unit-dir)
+      (local init-path (fs.join-path unit-dir "init.fnl"))
+      (fs.write-file init-path
+        (.. "(fn init [] true)\n"
+            "(fn drop [] true)\n"
+            "{:init init :drop drop}"))
+      ;; Create a directory outside the unit root
+      (local outside-dir (fs.join-path dir "outside"))
+      (fs.create-dirs outside-dir)
+      ;; Create a symlink inside the unit dir pointing outside
+      (local symlink-path (fs.join-path unit-dir "escape-hatch"))
+      (local Process (require :process))
+      (local symlink-result (Process.run {:args ["ln" "-s" outside-dir symlink-path]
+                                         :merge-stderr true}))
+      (assert (= symlink-result.exit-code 0)
+              (.. "symlink creation failed: " (or symlink-result.stderr symlink-result.stdout)))
+      ;; Verify the symlink was created
+      (local symlink-stat (fs.stat symlink-path))
+      (assert symlink-stat.is-symlink "expected symlink")
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;" dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-dir-unit"
+                         :module-name "dir-unit"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [unit-dir init-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          ;; Attempt create-source through the symlinked directory
+          (local (ok err) (pcall #(service:create-source
+                                    {:unit_id "user-dir-unit"
+                                     :source_id "escape-hatch/evil.fnl"
+                                     :source "(fn init [] true)\n(fn drop [] true)\n{:init init :drop drop}"})))
+          (assert (not ok) "should reject create through symlinked ancestor")
+          (assert (or (string.find (or err "") "symlink" 1 true)
+                      (string.find (or err "") "escape" 1 true))
+                  (.. "error should mention symlink or path issue, got: " (or err "")))
+          ;; Verify no file was created through the symlink
+          (local escaped-path (fs.join-path outside-dir "evil.fnl"))
+          (assert (not (fs.exists escaped-path))
+                  "file must not be created outside unit root"))))))
+
+(table.insert tests {:name "external-unit-mcp: create-source rejects symlinked ancestor directory"
+                     :fn test-create-source-rejects-symlinked-ancestor})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

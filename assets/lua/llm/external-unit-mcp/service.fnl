@@ -425,9 +425,7 @@
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
     (assert-directory-unit unit "create-source")
-    (validate-source-id source-id "create-source")
-    (local root (get-unit-root-dir unit))
-    (local target-path (fs.join-path root source-id))
+    (local target-path (resolve-source-path unit source-id "create-source"))
     ;; Always reject overwriting an existing file — create-source only creates new artifacts
     (assert (not (fs.exists target-path))
             (.. "create-source: file already exists: " source-id))
