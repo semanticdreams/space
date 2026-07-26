@@ -51,10 +51,17 @@ jobs:
         run: |
           sudo apt-get update
           deps=$(awk '/CI_DEPS_START/{flag=1;next}/CI_DEPS_END/{flag=0}flag' docs/dev/building.md | sed -n 's/^sudo apt install //p')
+          # sccache not available via apt on Ubuntu 22.04 — install via cargo below
+          deps=$(echo "$deps" | sed 's/\bsccache\b//g')
           sudo apt-get install -y ${deps} ccache
+
+      - name: Install sccache
+        run: cargo install sccache --version 0.16.0 --locked
 
       - name: Configure git for test directories
         run: |
+          git config --global user.name "CI Test"
+          git config --global user.email "ci@test.local"
           git config --global --add safe.directory /tmp/space/tests
           git config --global --add safe.directory '*'
           git config --global protocol.file.allow always

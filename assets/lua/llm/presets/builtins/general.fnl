@@ -11,11 +11,29 @@
     (error (.. tool-name " exited with code " (tostring result.exit-code) ": " (or detail ""))))
   result.stdout)
 
+(fn normalize-path-for-root-compare [path]
+  (local fs (require :fs))
+  (local absolute (fs.absolute path))
+  (var result absolute)
+  ;; Windows: normalize separators, collapse repeats, lowercase
+  (when (= (string.sub (or package.config "") 1 1) "\\")
+    (set result (string.gsub result "/" "\\"))
+    (set result (string.gsub result "\\+" "\\"))
+    (set result (string.lower result)))
+  ;; Strip trailing path separator unless it's a root
+  (local len (# result))
+  (local trailing (string.sub result -1))
+  ;; Preserve Windows drive root "C:\"
+  (when (and (> len 1)
+             (or (= trailing "/") (= trailing "\\"))
+             (not (and (= trailing "\\") (= len 3) (string.match result "^%a:"))))
+    (set result (string.sub result 1 (- len 1))))
+  result)
+
 (fn path-under-root? [path root]
   (local path-utils (require :path-utils))
-  (local fs (require :fs))
-  (local normalized (fs.absolute path))
-  (local normalized-root (fs.absolute root))
+  (local normalized (normalize-path-for-root-compare path))
+  (local normalized-root (normalize-path-for-root-compare root))
   (local root-len (# normalized-root))
   (and (>= (# normalized) root-len)
        (= (string.sub normalized 1 root-len) normalized-root)
@@ -50,6 +68,19 @@
       assets-root
       assets-root
       cwd))
+
+(fn is-assets-directory? [path]
+  "Return true if the final path component of path is exactly 'assets'."
+  (local normalized (string.gsub (string.gsub path "\\" "/") "/+" "/"))
+  ;; Strip trailing slash unless this is the root directory "/"
+  (local stripped (if (and (> (# normalized) 1) (= (string.sub normalized -1) "/"))
+                     (string.sub normalized 1 (- (# normalized) 1))
+                     normalized))
+  ;; Extract the last component after the final separator
+  (or (= stripped "assets")
+      (let [slash-pos (string.find stripped "/[^/]+$")]
+        (and slash-pos
+             (= (string.sub stripped (+ slash-pos 1)) "assets")))))
 
 (fn search-result-with-limit [stdout limit]
   (local max-lines (math.max 1 (math.floor (or limit 200))))
@@ -281,15 +312,29 @@
                    (assert (= (type args.pattern) "string") "space_app_search requires a string :pattern")
                    (assert (> (# args.pattern) 0) "space_app_search :pattern must not be empty")
                    (local project-root (default-search-root app))
-                   (local search-root
-                     (if args.path
-                         (if (or (= (string.sub args.path 1 1) "/")
-                                 (string.match args.path "^%a:[\\/]"))
-                             args.path
-                             (fs.join-path project-root args.path))
-                         project-root))
-                   (assert (fs.exists search-root)
-                           (.. "search path not found: " search-root))
+                    (var search-root
+                      (if args.path
+                          (if (or (= (string.sub args.path 1 1) "/")
+                                  (string.match args.path "^%a:[\\/]"))
+                              args.path
+                              (fs.join-path project-root args.path))
+                          project-root))
+                    (when (and args.path
+                               (not (fs.exists search-root))
+                               (is-assets-directory? project-root)
+                               (or (= args.path "assets")
+                                   (= (string.sub args.path 1 7) "assets/")
+                                   (= (string.sub args.path 1 7) "assets\\")))
+                      (local remainder (if (= args.path "assets")
+                                           ""
+                                           (string.sub args.path 8)))
+                      (local alternate (if (= remainder "")
+                                           project-root
+                                           (fs.join-path project-root remainder)))
+                      (when (fs.exists alternate)
+                        (set search-root alternate)))
+                    (assert (fs.exists search-root)
+                            (.. "search path not found: " search-root))
                    (assert (path-under-root? search-root project-root)
                            (.. "search path escapes project root: " search-root))
                    (assert (not (path-has-symlink? search-root project-root))

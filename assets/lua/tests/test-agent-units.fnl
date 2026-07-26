@@ -440,6 +440,19 @@
 (table.insert tests {:name "agent-units: space_app_search returns limited rg output"
                       :fn test-space-app-search-returns-limited-rg-output})
 
+(fn test-space-app-search-rejects-duplicated-assets-path []
+  (local adapters (ToolAdapterRegistry {}))
+  (BuiltinGeneral.register {:tool-adapters adapters})
+  (local def (adapters:resolve "app.search" app))
+  (local (ok err) (pcall #(def.run {:pattern "needle"
+                                    :path "assets/assets/lua"})))
+  (assert (not ok) "search with duplicated assets path should fail")
+  (assert (string.find (tostring err) "search path not found" 1 true)
+          (.. "should report path not found, got: " (tostring err))))
+
+(table.insert tests {:name "agent-units: space_app_search rejects duplicated-assets path"
+                     :fn test-space-app-search-rejects-duplicated-assets-path})
+
 (fn test-space-app-search-rejects-symlink-path []
   (when is-windows
     (print "Skipping symlink search test on Windows: ln -s not available")
