@@ -1238,6 +1238,87 @@
 (table.insert tests {:name "external-unit-mcp: write tool errors propagate as MCP tool errors"
                      :fn test-write-tool-errors-propagate-as-mcp-tool-errors})
 
+;; ── Fix round 1: R1-1, R1-2 ──
+
+(fn test-read-log-mcp-json-contains-no-native-path-field []
+  (with-temp-dir
+    (fn [dir]
+      (local fixture-path (fs.join-path dir "controlled.log"))
+      (local fixture-content "alpha\nbeta\ngamma\n")
+      (fs.write-file fixture-path fixture-content)
+      (with-service* dir
+        (fn [mgr _dir] nil)
+        {:log_path fixture-path}
+        (fn [_mgr service]
+          (local json (require :json))
+          (local registry (ExternalUnitMcpTools.make-tool-registry {:app {}}))
+          (ExternalUnitMcpTools.register-tools registry service)
+          (local result (registry:call "space_unit_read_log" {}))
+          (assert (= result.isError false) "read-log should not error")
+          (local text (. result.content 1 :text))
+          (assert (not= text nil) "content text should not be nil")
+          (local parsed (json.loads text))
+          (assert (= (type parsed) "table") "should parse as a table")
+          ;; Verify no native path field is present in the JSON
+          (assert (= parsed.log-path nil)
+                  "MCP JSON must not expose native log-path")
+          (assert (= (. parsed "log-path") nil)
+                  "MCP JSON must not expose log-path with hyphenated key")
+          ;; Verify expected fields are still present
+          (assert parsed.lines "read-log missing lines")
+          (assert parsed.total-lines "read-log missing total-lines"))))))
+
+(table.insert tests {:name "external-unit-mcp: space_unit_read_log MCP JSON contains no native path field"
+                     :fn test-read-log-mcp-json-contains-no-native-path-field})
+
+(fn test-external-tools-carry-explicit-risk-labels []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local registry (ExternalUnitMcpTools.make-tool-registry {:app {}}))
+          (ExternalUnitMcpTools.register-tools registry service)
+          (local risks (ExternalUnitMcpTools.get-tool-risks))
+          ;; Verify risk labels are present for all 10 tools
+          (local expected-risks
+            {:space_unit_apply_patch "filesystem-write"
+             :space_unit_create_source "filesystem-write"
+             :space_unit_run_tests "shell"
+             :space_unit_read_source "filesystem-read"
+             :space_unit_read_log "filesystem-read"
+             :space_unit_list "normal"
+             :space_unit_inspect "normal"
+             :space_unit_resolve "normal"
+             :space_unit_reload "normal"
+             :space_unit_snapshot "normal"})
+          (each [tool-name expected-risk (pairs expected-risks)]
+            (local actual-risk (. risks tool-name))
+            (assert actual-risk
+                    (.. "tool '" tool-name "' missing risk label"))
+            (assert (= actual-risk expected-risk)
+                    (.. "tool '" tool-name "' expected risk '" expected-risk
+                        "', got '" (or actual-risk "nil") "'")))
+          ;; Verify no extra tools in the risk map
+          (var risk-count 0)
+          (each [_ _ (pairs risks)]
+            (set risk-count (+ risk-count 1)))
+          (assert (= risk-count 10)
+                  (.. "risk map should have exactly 10 entries, got " risk-count)))))))
+
+(table.insert tests {:name "external-unit-mcp: external tools carry explicit risk labels for write/test operations"
+                     :fn test-external-tools-carry-explicit-risk-labels})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
