@@ -14,6 +14,35 @@
 (local GraphMap (require :graph/map))
 (local LinkEntityStore (require :entities/link))
 
+;; Capture the activity registry state before any menu test stubs are
+;; registered.  After this module's tests complete the captured state is
+;; restored so stub activities (sandbox, graph, drawing) do not leak
+;; into subsequent test modules.
+(local _saved-registry-activities {})
+(local _saved-registry-ordered-ids [])
+(let [registry (Activities.ensure-registry)]
+  (each [k v (pairs registry.activities)]
+    (tset _saved-registry-activities k v))
+  (each [_ id (ipairs registry.ordered-ids)]
+    (table.insert _saved-registry-ordered-ids id)))
+
+(fn restore-activity-registry! []
+  "Remove menu-test stub activities and restore the pre-module registry state."
+  (let [registry (Activities.ensure-registry)]
+    ;; Remove activities registered by menu tests that were not in the
+    ;; original state.
+    (each [k _ (pairs registry.activities)]
+      (when (not (. _saved-registry-activities k))
+        (tset registry.activities k nil)))
+    ;; Restore any activities that were replaced by menu test stubs.
+    (each [k v (pairs _saved-registry-activities)]
+      (tset registry.activities k v))
+    ;; Restore ordered IDs.
+    (set registry.ordered-ids [])
+    (each [_ id (ipairs _saved-registry-ordered-ids)]
+      (table.insert registry.ordered-ids id))
+    true))
+
 (local tests [])
 (local reset-engine-events
   (fn []
@@ -1199,11 +1228,18 @@
 (table.insert tests {:name "Root context menu actions support active custom activity"
                      :fn root-context-menu-actions-support-active-custom-activity})
 
+;; Cleanup test: always runs last and restores the activity registry to
+;; its pre-module state.  This prevents menu test stub activities from
+;; contaminating later test modules (e.g. test-sandbox-activity).
+(table.insert tests {:name "test-menu cleanup: restore activity registry state"
+                     :fn restore-activity-registry!})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
     (runner.run-tests {:name "menu"
-                       :tests tests})))
+                       :tests tests
+                       :teardown restore-activity-registry!})))
 
 {:name "menu"
  :tests tests
