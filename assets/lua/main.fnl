@@ -971,8 +971,7 @@
       (set hud-opts.left-dock-builder contrib.left_dock_builder))
     (when app.agent-runner
       (ensure-extended-sidebar!)
-      (set hud-opts.right-dock-builder (HudExtendedSidebarView app.extended-sidebar))
-      (set hud-opts.right-dock-width 6))
+      (set hud-opts.right-dock-builder (HudExtendedSidebarView app.extended-sidebar)))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)
     (when contrib.overlay
