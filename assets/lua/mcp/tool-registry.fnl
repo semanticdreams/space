@@ -95,7 +95,7 @@
           (when (not (or (string.match err-text "^approval_required ")
                          (string.match err-text "^tool denied by approval policy: ")
                          (string.match err-text "^tool approval did not resolve execution state: ")))
-            (logging.error (.. "[mcp] tool " name " error: " err-text)))
+            (logging.warn (.. "[mcp] tool " name " error: " err-text)))
           {:content [{:type "text" :text (.. "Tool execution error: " err-text)}]
            :isError true})))
 
@@ -114,7 +114,7 @@
               result-or-err
               (do
                 (local err-text (tostring result-or-err))
-                (logging.error (.. "[mcp] tool " name " error: " err-text))
+                (logging.warn (.. "[mcp] tool " name " error: " err-text))
                 (on-result {:type :error :message (.. "Tool execution error: " err-text)})
                 :completed)))
         (do
@@ -126,7 +126,7 @@
                 (when (not (or (string.match err-text "^approval_required ")
                                (string.match err-text "^tool denied by approval policy: ")
                                (string.match err-text "^tool approval did not resolve execution state: ")))
-                  (logging.error (.. "[mcp] tool " name " error: " err-text)))
+                  (logging.warn (.. "[mcp] tool " name " error: " err-text)))
                 (on-result {:type :error :message err-text})))
           :completed)))
 
