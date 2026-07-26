@@ -791,6 +791,135 @@
 (table.insert tests {:name "external-unit-mcp: create-source rejects symlinked ancestor directory"
                      :fn test-create-source-rejects-symlinked-ancestor})
 
+;; ── Final review fix: R1-1 & R1-2 ──
+
+;; R1-1: Gate source artifact/source-handle derivation and read-source on explicit
+;;        filesystem/read capability. For loader "unknown", return no source handle/artifacts
+;;        and make read-source fail loudly with an unsupported-loader error.
+
+(fn test-builtin-unit-with-owned-paths-returns-unknown-loader []
+  (with-temp-dir
+    (fn [dir]
+      ;; Create a real .fnl file so the unit has owned paths, but mark it as builtin.
+      (local dummy-path (write-unit-file dir "builtin-with-path"
+                          (.. "(fn init [] true)\n(fn drop [] true)\n{:init init :drop drop}")))
+      (with-service dir
+        (fn [mgr _dir]
+          ;; Unit with source :builtin and owned-paths — current class rules say
+          ;; "unknown" because source is not :user.
+          (local builtin-unit (Units.Unit {:id "builtin-with-ownership"
+                                            :source :builtin
+                                            :owned-paths [dummy-path]
+                                            :load (fn [_] true)
+                                            :unload (fn [_] true)}))
+          (mgr:register builtin-unit))
+        (fn [_mgr service]
+          ;; list: loader must be "unknown", source-handle must be nil
+          (local results (service:list {}))
+          (var found nil)
+          (each [_ h (ipairs results)]
+            (when (= h.unit-id "builtin-with-ownership")
+              (set found h)))
+          (assert found "should find builtin-with-ownership in list")
+          (assert (= found.loader "unknown")
+                  (.. "builtin unit should have unknown loader, got " found.loader))
+          (assert (= found.source-handle nil)
+                  "builtin unit should have nil source-handle even with owned paths")
+          ;; inspect: source-artifacts must be empty
+          (local info (service:inspect {:unit_id "builtin-with-ownership"}))
+          (assert (= info.loader "unknown"))
+          (assert (= info.source-handle nil))
+          (assert (= (length info.source-artifacts) 0)
+                  "builtin unit should have zero source-artifacts")
+          ;; read-source: must fail loudly
+          (local (ok err) (pcall #(service:read-source
+                                    {:unit_id "builtin-with-ownership"
+                                     :source_id "builtin-with-path.fnl"})))
+          (assert (not ok) "read-source should fail for unknown loader")
+          (assert (string.find (or err "") "does not support" 1 true)
+                  (.. "error should mention unsupported operation, got: " (or err ""))))))))
+
+(table.insert tests {:name "external-unit-mcp: builtin unit with owned paths returns unknown loader and rejects read-source"
+                     :fn test-builtin-unit-with-owned-paths-returns-unknown-loader})
+
+;; R1-2: For filesystem directory units, compute source-id as the path relative to the
+;;       unit root for file artifacts under that root, and verify inspect -> read-source
+;;       round-trips a nested artifact.
+
+(fn test-directory-unit-inspect-read-source-roundtrips-nested-artifact []
+  (with-temp-dir
+    (fn [dir]
+      (local unit-dir (fs.join-path dir "nested-unit"))
+      (fs.create-dirs unit-dir)
+      ;; Create a subdirectory with a nested .fnl file
+      (local components-dir (fs.join-path unit-dir "components"))
+      (fs.create-dirs components-dir)
+      (local view-path (fs.join-path components-dir "view.fnl"))
+      (fs.write-file view-path
+        (.. "(fn view [] {:color \"blue\" :size 12})\n{:view view}"))
+      ;; Create init.fnl at the unit root
+      (local init-path (fs.join-path unit-dir "init.fnl"))
+      (fs.write-file init-path
+        (.. "(fn init [] true)\n(fn drop [] true)\n{:init init :drop drop}"))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;"
+                                  dir "/?.fnl;" dir "/?/init.fnl"))
+          (local unit (Units.ModuleUnit
+                        {:id "user-nested-unit"
+                         :module-name "nested-unit"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [unit-dir init-path view-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          ;; inspect: verify source-ids use relative paths, not basenames
+          (local info (service:inspect {:unit_id "user-nested-unit"}))
+          (assert info.source-artifacts (> (length info.source-artifacts) 0)
+                  "should have source artifacts")
+          ;; Collect source-ids
+          (local ids {})
+          (each [_ art (ipairs info.source-artifacts)]
+            (tset ids art.source-id true))
+          ;; The nested file must be addressable by its relative path
+          (assert (. ids "components/view.fnl")
+                  (.. "expected components/view.fnl in source artifacts, got keys: "
+                      (let [ks []]
+                        (each [k _ (pairs ids)] (table.insert ks k))
+                        (table.concat ks ", "))))
+          ;; The root init.fnl must still use its basename
+          (assert (. ids "init.fnl")
+                  "expected init.fnl in source artifacts")
+          ;; read-source round-trip for the nested artifact
+          (local nested-content (service:read-source
+                                  {:unit_id "user-nested-unit"
+                                   :source_id "components/view.fnl"}))
+          (assert nested-content.content "should have content")
+          (assert (string.find nested-content.content ":color \"blue\"" 1 true)
+                  (.. "content should contain original source, got: "
+                      nested-content.content))
+          ;; read-source round-trip for the root artifact
+          (local root-content (service:read-source
+                                {:unit_id "user-nested-unit"
+                                 :source_id "init.fnl"}))
+          (assert root-content.content "should have content")
+          (assert (string.find root-content.content "init []" 1 true)
+                  (.. "content should contain init, got: " root-content.content))
+          ;; Verify basename-only lookup (view.fnl) still works for the root
+          ;; init.fnl since it sits directly at root, but view.fnl without
+          ;; the "components/" prefix should NOT work — it's not under root.
+          (local (bad-ok bad-err) (pcall #(service:read-source
+                                            {:unit_id "user-nested-unit"
+                                             :source_id "view.fnl"})))
+          (assert (not bad-ok)
+                  "read-source with basename view.fnl should fail for nested file")
+          (assert (string.find (or bad-err "") "not found" 1 true)
+                  (.. "error should mention not found, got: " (or bad-err ""))))))))
+
+(table.insert tests {:name "external-unit-mcp: directory unit inspect-to-read-source round-trips nested artifact"
+                     :fn test-directory-unit-inspect-read-source-roundtrips-nested-artifact})
+
 ;; ── Task 3: External Unit Test, Log, and Snapshot Operations ──
 
 (fn test-snapshot-returns-unit-state-with-capability-metadata []

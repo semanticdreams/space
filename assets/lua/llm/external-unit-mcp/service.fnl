@@ -24,14 +24,44 @@
 (fn path-has-fnl-extension? [path]
   (not= (string.match (or path "") "%.fnl$") nil))
 
+(fn get-unit-root-dir [unit]
+  ;; Find the unit root directory from owned-paths (first directory entry).
+  (local paths (or unit.owned-paths []))
+  (var root nil)
+  (each [_ path (ipairs paths) &until root]
+    (when (and path (fs.exists path))
+      (local st (fs.stat path))
+      (when (and st st.is-dir)
+        (set root path))))
+  root)
+
 (fn derive-source-artifacts [unit]
+  (local loader (classify-loader unit))
+  ;; R1-1: Only filesystem loaders expose source artifacts.
+  (when (not= loader "filesystem")
+    (lua "return {}"))
   (local paths (or unit.owned-paths []))
   (local artifacts [])
+  (local unit-root (get-unit-root-dir unit))
+  (local seen-ids {})
   ;; Collect regular files from owned paths for source artifacts.
   ;; Directories are included in owned-paths but are not source artifacts.
   (each [_ path (ipairs paths)]
     (when (and path (fs.exists path) (not (let [st (fs.stat path)] (and st st.is-dir))))
-      (local source-id (path-basename path))
+      ;; R1-2: For directory units, compute source-id as the path relative to the
+      ;; unit root so that nested artifacts (e.g. components/view.fnl) are
+      ;; addressable by source-id.  For flat units, fall back to basename.
+      (local source-id
+        (if unit-root
+            (let [prefix (.. unit-root "/")]
+              (if (= (string.sub path 1 (# prefix)) prefix)
+                  (string.sub path (+ (# prefix) 1))
+                  (path-basename path)))
+            (path-basename path)))
+      ;; Reject duplicate source-ids to prevent collisions.
+      (assert (not (. seen-ids source-id))
+              (.. "duplicate source-id in unit " unit.id ": " source-id))
+      (tset seen-ids source-id true)
       (local primary (path-has-fnl-extension? path))
       (local file-size (or (and (fs.exists path)
                                 (let [stat (fs.stat path)]
@@ -54,6 +84,10 @@
   (or primary (. artifacts 1)))
 
 (fn build-source-handle [unit]
+  (local loader (classify-loader unit))
+  ;; R1-1: Only filesystem loaders expose source handles.
+  (when (not= loader "filesystem")
+    (lua "return nil"))
   (local artifacts (derive-source-artifacts unit))
   (if (= (length artifacts) 0)
       nil
@@ -91,17 +125,6 @@
                    (string.match source-id "%.%.$")
                    (= source-id "..")))
           (.. operation " :source_id must not contain .. segments")))
-
-(fn get-unit-root-dir [unit]
-  ;; Find the unit root directory from owned-paths (first directory entry).
-  (local paths (or unit.owned-paths []))
-  (var root nil)
-  (each [_ path (ipairs paths) &until root]
-    (when (and path (fs.exists path))
-      (local st (fs.stat path))
-      (when (and st st.is-dir)
-        (set root path))))
-  root)
 
 (fn is-directory-unit? [unit]
   (not= (get-unit-root-dir unit) nil))
@@ -315,6 +338,18 @@
     (local source-id (or args.source_id (error "read-source requires :source_id")))
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
+    ;; R1-1: Gate on filesystem loader and read capability.
+    (local loader (classify-loader unit))
+    (assert (= loader "filesystem")
+            (.. "read-source: unit " unit-id " loader " loader
+                " does not support source read operations"))
+    (local edit-caps (build-edit-capabilities loader unit))
+    (var has-read false)
+    (each [_ cap (ipairs edit-caps)]
+      (when (= cap "read") (set has-read true)))
+    (assert has-read
+            (.. "read-source: unit " unit-id " loader " loader
+                " does not support read capability"))
     (local target-path (resolve-source-path unit source-id "read-source"))
     (assert (fs.exists target-path)
             (.. "read-source: source file not found: " source-id))
