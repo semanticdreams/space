@@ -925,26 +925,41 @@
           (set self.active-activity-slot nil)
           (set self.active-activity-slot-id nil)
           (reset-services-to-empty self)
-          (when previous-slot
-            ;; Restore previous slot's content and activation
-            (set self.entity previous-slot.entity)
-            (set self.scene-children previous-slot.scene-children)
-            (set self.scene-terrains previous-slot.scene-terrains)
-            (set self.queued-cube-panels previous-slot.queued-cube-panels)
-            (set self.panel-restorers previous-slot.panel-restorers)
-            (set self.demo-browser previous-slot.demo-browser)
-            (set self.physics-body-count previous-slot.physics-body-count)
-            (previous-slot:activate)
-            (set self.active-activity-slot previous-slot)
-            (set self.active-activity-slot-id previous-slot-id)
-            ;; Restore previous services
-            (when previous-slot.scene-state
-              (apply-state-to-services self previous-slot.scene-state))
-            ;; Reactivate physics
-            (when (and previous-slot.entity
-                       (pcall require :layout-physics-bodies))
-              (local LayoutPhysicsBodies (require :layout-physics-bodies))
-              (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
+          (if previous-slot
+              (do
+                ;; Restore previous slot's content and activation
+                (set self.entity previous-slot.entity)
+                (set self.scene-children previous-slot.scene-children)
+                (set self.scene-terrains previous-slot.scene-terrains)
+                (set self.queued-cube-panels previous-slot.queued-cube-panels)
+                (set self.panel-restorers previous-slot.panel-restorers)
+                (set self.demo-browser previous-slot.demo-browser)
+                (set self.physics-body-count previous-slot.physics-body-count)
+                (previous-slot:activate)
+                (set self.active-activity-slot previous-slot)
+                (set self.active-activity-slot-id previous-slot-id)
+                ;; Restore previous services
+                (when previous-slot.scene-state
+                  (apply-state-to-services self previous-slot.scene-state))
+                ;; Reactivate physics
+                (when (and previous-slot.entity
+                           (pcall require :layout-physics-bodies))
+                  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+                  (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
+              ;; No previous slot: drop any partially-built entity created
+              ;; during the failed activation, then clear content aliases
+              ;; consistent with deactivate-activity-slot behavior.
+              (do
+                (when self.entity
+                  (self:unregister-entity self.entity)
+                  (self.entity:drop))
+                (set self.entity nil)
+                (set self.scene-children nil)
+                (set self.scene-terrains nil)
+                (set self.queued-cube-panels [])
+                (set self.panel-restorers {})
+                (set self.demo-browser nil)
+                (set self.physics-body-count 0)))
           (error (.. "Scene.activate-activity-slot failed: " (tostring activate-err)))))
     slot)
 
