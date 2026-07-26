@@ -1196,6 +1196,16 @@
   ;; whose drop/disconnect calls require the states host, which is already nil.
   (reset-state)
   (ensure-renderers)
+  ;; Save global app systems that Main.drop destroys, so subsequent test
+  ;; modules are not affected by the teardown in this test.
+  (local saved-intersectables app.intersectables)
+  (local saved-clickables app.clickables)
+  (local saved-hoverables app.hoverables)
+  (local saved-movables app.movables)
+  (local saved-resizables app.resizables)
+  (local saved-system-cursors app.system-cursors)
+  (local saved-renderers app.renderers)
+  (local saved-states app.states)
   (var last-state nil)
   (local states-host
     {:active-name (fn [_self] "normal")
@@ -1224,8 +1234,24 @@
   (Main.drop)
   (assert disconnected? "Input should have been disconnected during drop")
   (assert (not (InputState.active-input)) "No input should be active after drop")
+  ;; Restore global app systems destroyed by Main.drop so subsequent
+  ;; modules (test-states, etc.) are not affected.
+  (when (not app.intersectables)
+    (set app.intersectables saved-intersectables))
+  (when (not app.clickables)
+    (set app.clickables saved-clickables))
+  (when (not app.hoverables)
+    (set app.hoverables saved-hoverables))
+  (when (not app.movables)
+    (set app.movables saved-movables))
+  (when (not app.resizables)
+    (set app.resizables saved-resizables))
+  (when (not app.system-cursors)
+    (set app.system-cursors saved-system-cursors))
+  (set app.renderers saved-renderers)
+  (set app.states saved-states)
   (InputState.reset)
-  (StateSystemBindings.bind-states-host nil))
+  (StateSystemBindings.bind-states-host saved-states))
 (table.insert tests {:name "app.drop releases active input before state teardown" :fn app-drop-releases-active-input-before-state-teardown})
 
 (local main
