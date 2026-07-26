@@ -215,7 +215,9 @@
                    :set-active-interaction-surface
                    :sync-interaction-surface-state
                    :viewport
-                   :themes])
+                   :themes
+                   :renderers
+                   :engine])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
