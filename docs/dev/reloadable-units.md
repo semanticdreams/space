@@ -436,6 +436,53 @@ If we had implemented dependency graphs, escalation logic, and staged transactio
 
 ## Recommended Next Steps
 
+
+### Units as Loader-Backed Runtime Objects
+
+The unit system is intentionally loader-neutral at the abstraction layer. A unit
+is a runtime object with an id, lifecycle exports (init/drop/snapshot/restore),
+and a backing loader that owns the source of truth.
+
+Today's user units are filesystem-backed: their source lives as `.fnl` files
+under `app.code-dir`, their loader is `"filesystem"`, and their owned-paths
+point to real files on disk. But that is an implementation detail. Future units
+may be backed by database records, remote hosts, generated stores, or other
+loaders.
+
+Callers should use unit handles and source-ids instead of constructing raw
+filesystem paths. The `ExternalUnitService` in
+`assets/lua/llm/external-unit-mcp/service.fnl` classifies each unit's loader and
+exposes loader-neutral operations (resolve, inspect, read-source, apply-patch,
+create-source, reload). Operations fail loudly when the loader lacks a requested
+capability rather than silently falling back to filesystem assumptions.
+
+### External Editing Through MCP Tools
+
+When external OpenCode sessions need to edit user units, they should use the
+`space_unit_*` external MCP tools rather than direct filesystem edits:
+
+- `space_unit_read_source` / `space_unit_apply_patch` / `space_unit_create_source`
+  for source editing with stale-content protection, path containment, Fennel
+  validation, and automatic reload.
+
+- `space_unit_reload` for explicit reload operations.
+
+- `space_unit_run_tests` for test execution in a subprocess.
+
+- `space_unit_read_log` for inspecting the application log after edits.
+
+Direct filesystem edits skip all of these protections: stale-content detection,
+path containment enforcement, source validation, symlink rejection, and reload
+integration. They are an escape hatch that requires explicit human approval and
+a Space-reported local filesystem source handle.
+
+The external unit MCP subsystem lives under `assets/lua/llm/external-unit-mcp/`
+with a standalone entrypoint at `assets/lua/tools/external-unit-mcp-server.fnl`.
+It boots a headless engine, creates an isolated OpenCode config, and exposes
+loader-neutral unit tools on loopback. See [External Unit MCP](./external-unit-mcp)
+for the full workflow.
+
+
 The next useful work is probably one of these:
 
 ### 1. Extract another meaningful child unit

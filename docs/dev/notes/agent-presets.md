@@ -414,6 +414,24 @@ Template variables in prompt fragments are resolved by the future prompt compose
 - `assets/lua/activities.fnl`: expose activity context enrichment when presets need selection/tool-target facts beyond shell state.
 - `assets/lua/tests/fast.fnl`: add preset unit tests once modules land.
 
+### Internal Unit Presets vs. External Unit MCP
+
+The `space_unit_*` tools registered through `llm/presets/builtins/units.fnl`
+(`space_unit_list`, `space_unit_inspect`, `space_unit_edit`, `space_unit_apply_patch`,
+`space_unit_reload`, etc.) are **internal Space agent tools**. They expect the
+full app runtime (`app.mcp-tools`, `app.unit-manager`, `app.code-dir`) and adapt
+to context through the preset system.
+
+External user-unit development uses the separate `llm/external-unit-mcp/*`
+subsystem instead. The external MCP registry is loader-neutral, runs in a
+headless engine with an isolated OpenCode config, and does not depend on the
+app bootstrap's `app.mcp-tools` registry.
+
+Do not add Space-specific user-unit behavior to global `~/.config/opencode`. The
+external unit MCP bridge writes an isolated config and prints
+`OPENCODE_XDG_CONFIG_HOME` so external OpenCode sessions can consume Space unit
+tools without polluting the user's global configuration.
+
 ## Tests
 
 Add `assets/lua/tests/test-agent-presets.fnl`:
@@ -469,6 +487,7 @@ Extend live MCP coverage later only after offline tests cover sync ownership and
 ## References
 
 - [remote mcp](./remote-mcp)
+- [external unit mcp](./external-unit-mcp)
 - [drawing architecture](./drawing-architecture)
 - [graph](./graph)
 - [composable states](./composable-states)
