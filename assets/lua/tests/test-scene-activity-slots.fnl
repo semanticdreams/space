@@ -1434,6 +1434,141 @@
 (table.insert tests {:name "R3-3 sandbox activation resolves skybox by-theme"
                      :fn sandbox-activation-resolves-skybox-by-theme})
 
+;; ── R4-1 active slot content construction routes through slot ctx ───────
+
+(fn terrain-build-routes-to-slot-context []
+  "R4-1: When content is built via build/build-default/attach-entity into an
+  active slot, the builder receives the slot's build-context (not surface empty
+  context), the entity layout-root is set to the slot's layout-root, and the
+  renderer-facing batches/vectors route through the slot's ctx."
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+
+  ;; Sentinels: surface context vector identifiers
+  (set scene.build-context.triangle-vector :surface-triangle-vector)
+  (set scene.build-context.line-vector :surface-line-vector)
+  (set scene.build-context.point-vector :surface-point-vector)
+
+  ;; Sentinels: sandbox slot context vector identifiers
+  (set sandbox-slot.build-context.triangle-vector :slot-triangle-vector)
+  (set sandbox-slot.build-context.line-vector :slot-line-vector)
+  (set sandbox-slot.build-context.point-vector :slot-point-vector)
+
+  ;; Activate sandbox slot
+  (scene:activate-activity-slot "sandbox")
+  (assert sandbox-slot.visible? "Sandbox slot should be active")
+
+  ;; Verify pre-existing render routing (render context already routes to slot)
+  (assert (= (scene:get-triangle-vector) :slot-triangle-vector)
+          "Active render context should route to slot before content build")
+
+  ;; R4-1: Verify that build() passes the slot's build-context to the builder
+  (var builder-received-ctx nil)
+  (fn mock-builder [ctx]
+    (set builder-received-ctx ctx)
+    ;; Return a minimal entity-like table
+    (local entity {:layout {:children []
+                            :set-root (fn [layout root] (set layout.__root root))
+                            :set-position (fn [])
+                            :set-rotation (fn [])
+                            :mark-measure-dirty (fn [])
+                            :position (glm.vec3 0 0 0)
+                            :rotation (glm.quat 1 0 0 0)}
+                   :children []
+                   :scene-children []
+                   :scene-terrains []
+                   :scene-objects []
+                   :movables []
+                   :drop (fn [_])})
+    entity)
+  (scene:build mock-builder)
+  (assert builder-received-ctx "Builder should have been called")
+  (assert (= builder-received-ctx.triangle-vector :slot-triangle-vector)
+          (.. "Builder should receive slot's build-context (triangle-vector), got "
+              (tostring builder-received-ctx.triangle-vector)))
+  (assert (= builder-received-ctx.line-vector :slot-line-vector)
+          "Builder should receive slot's build-context (line-vector)")
+
+  ;; R4-1: Verify that attach-entity sets the entity layout root to the slot's layout root
+  (assert scene.entity "Scene should have an entity after build")
+  (assert scene.entity.layout "Entity should have a layout")
+  (assert (= scene.entity.layout.__root sandbox-slot.layout-root)
+          (.. "Entity layout root should be the active slot's layout root, got "
+              (tostring scene.entity.layout.__root)))
+  (assert (not (= scene.entity.layout.__root scene.layout-root))
+          "Entity layout root must NOT be the surface layout root")
+
+  ;; After build, render context should still route through the active slot
+  (assert (= (scene:get-triangle-vector) :slot-triangle-vector)
+          "Render context should still route through slot after content build")
+  (assert (= (scene:get-line-vector) :slot-line-vector)
+          "Render line vector should still route through slot after content build")
+  (assert (= (scene:get-point-vector) :slot-point-vector)
+          "Render point vector should still route through slot after content build")
+
+  (drop-fixture fixture))
+
+(table.insert tests {:name "R4-1 terrain build routes to slot build-context"
+                     :fn terrain-build-routes-to-slot-context})
+
+;; ── R4-3 corrupt terrain activation fails loudly ────────────────────────
+
+(fn corrupt-terrain-activation-fails []
+  "R4-3: Activating a slot with corrupt/unsupported terrain records must
+  fail loudly (not silently swallowed by pcall). The activation error
+  must propagate out so callers can handle it."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :renderers
+     :engine :physics-containment-config]
+    (fn []
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      ;; Mock renderer services so service-application succeeds
+      (var renderer-skybox
+        {:enabled? false :name "lake" :brightness 0.1 :tint-color [1.0 1.0 1.0]})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] renderer-skybox)
+                    :set-state (fn [_ state] (set renderer-skybox state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Ensure the sandbox slot exists but inject a corrupt terrain record
+      ;; that will cause build-default to throw.  An empty kind string triggers
+      ;; an assertion in normalize-record.
+      (local sandbox-slot (scene:ensure-activity-slot "sandbox"))
+      ;; Build a complete scene-state with valid services but corrupt terrains
+      (local complete-skybox
+        (SkyboxState.normalize-complete-state
+          {:enabled? false
+           :default {:name "lake" :brightness 0.1 :tint-color [1 1 1]}
+           :by-theme {}}
+          "test-corrupt-terrain-skybox"))
+      (set sandbox-slot.scene-state {:panels []
+                                     :terrains [{:kind ""}]
+                                     :lights {:ambient {:enabled? false :color [1 1 1] :intensity 0}
+                                              :directional []
+                                              :point []
+                                              :spot []}
+                                     :skybox complete-skybox
+                                     :background {:color [0 0 0]}
+                                     :containment {:enabled? false}})
+      ;; Activate the slot — this must fail because the corrupt terrain record
+      ;; causes normalize-record to assert "Terrain record kind must not be empty"
+      ;; during build-default → make-default-builder → normalize-records.
+      (local (ok err) (pcall (fn [] (scene:activate-activity-slot "sandbox"))))
+      (assert (not ok)
+              "Activation with corrupt terrain must fail, not silently succeed")
+      (assert (and err (string.find (tostring err) "Terrain record kind" 1 true))
+              (.. "Error must mention terrain record kind, got: " (tostring err)))
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "R4-3 corrupt terrain activation fails loudly"
+                     :fn corrupt-terrain-activation-fails})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

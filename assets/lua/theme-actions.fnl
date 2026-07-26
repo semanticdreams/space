@@ -32,6 +32,13 @@
        world.state.activity.sessions.sandbox.scene.skybox))
 
 (fn reapply-active-world-skybox [theme-name]
+  ;; Only apply Sandbox skybox when Sandbox is the active activity.
+  ;; When another activity (Drawing, Graph, Board) is active, the
+  ;; renderer should stay with the active slot's skybox policy —
+  ;; not receive an out-of-band Sandbox skybox override.
+  (local sandbox-active? (= (Activities.active-activity-id) "sandbox"))
+  (when (not sandbox-active?)
+    (lua "return nil"))
   (local entry (and app app.active-world-entry))
   (local world (and entry entry.world))
   (local runtime
@@ -56,9 +63,11 @@
       (app.canvas:apply-active-theme-to-contexts)
       (when (and canvas-ctx canvas-ctx.set-theme)
         (canvas-ctx:set-theme active-theme)))
-  (local scene-ctx (and app.scene app.scene.build-context))
-  (when (and scene-ctx scene-ctx.set-theme)
-    (scene-ctx:set-theme active-theme))
+  (if (and app.scene app.scene.apply-active-theme-to-contexts)
+      (app.scene:apply-active-theme-to-contexts)
+      (let [scene-ctx (and app.scene app.scene.build-context)]
+        (when (and scene-ctx scene-ctx.set-theme)
+          (scene-ctx:set-theme active-theme))))
   (local hud-ctx (and app.hud app.hud.build-context))
   (when (and hud-ctx hud-ctx.set-theme)
     (hud-ctx:set-theme active-theme))

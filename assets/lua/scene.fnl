@@ -624,6 +624,24 @@
         self.active-activity-slot.ctx
         self.build-context))
 
+  (fn resolve-active-build-context []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.build-context
+        self.build-context))
+
+  (fn resolve-active-layout-root []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.layout-root
+        self.layout-root))
+
+  (fn apply-active-theme-to-contexts [_scene]
+    (apply-active-theme self.build-context)
+    (each [_ slot (pairs self.activity-slots)]
+      (apply-active-theme slot.build-context))
+    true)
+
   (fn ensure-activity-slot [_scene activity-id]
     (assert (= (type activity-id) :string)
             "Scene.ensure-activity-slot requires string activity id")
@@ -839,7 +857,7 @@
         ;; Build or add terrain from canonical records (only when non-empty).
         (when (> (length canonical-terrains) 0)
           (if (not self.entity)
-              (pcall (fn [] (self:build-default {:terrains canonical-terrains})))
+              (self:build-default {:terrains canonical-terrains})
               (do
                 (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
                 (each [_ entry (ipairs entries)]
@@ -1416,7 +1434,7 @@
       (local parent-rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0)))
       (local parent-inverse (parent-rotation:inverse))
       (local local-rotation (* parent-inverse resolved-rotation))
-      (set element (builder self.build-context builder-options))
+      (set element (builder (resolve-active-build-context) builder-options))
       (local metadata {:flex (or opts.flex 0)
                        :element element
                        :object (and opts opts.object)
@@ -1703,7 +1721,7 @@
     (local terrain-spec (. built-entry 1))
     (assert terrain-spec (.. "Scene.replace-terrain-record could not build terrain " terrain-id))
     (local terrain-builder terrain-spec.builder)
-    (local new-element (terrain-builder self.build-context))
+    (local new-element (terrain-builder (resolve-active-build-context)))
     (assert (and new-element new-element.layout)
             (.. "Scene.replace-terrain-record built invalid terrain " terrain-id))
     (local current-selection-target
@@ -1768,7 +1786,7 @@
             (.. "Scene.add-terrain-record could not build terrain "
                 (or (and record record.id) "?")))
     (local terrain-builder terrain-spec.builder)
-    (local new-element (terrain-builder self.build-context))
+    (local new-element (terrain-builder (resolve-active-build-context)))
     (assert (and new-element new-element.layout)
             (.. "Scene.add-terrain-record built invalid terrain "
                 (or (and record record.id) "?")))
@@ -1847,7 +1865,7 @@
         (set entity.children []))
       (set self.scene-children entity.scene-children)
       (set self.scene-terrains entity.scene-terrains)
-      (entity.layout:set-root self.layout-root)
+      (entity.layout:set-root (resolve-active-layout-root))
       (local position self.default-position)
       (local resolved-position (glm.vec3 position.x position.y position.z))
       (entity.layout:set-position resolved-position)
@@ -1867,8 +1885,9 @@
     (set self.builder builder)
     (if builder
       (do
-        (apply-active-theme self.build-context)
-        (self:attach-entity (builder self.build-context)))
+        (local build-ctx (resolve-active-build-context))
+        (apply-active-theme build-ctx)
+        (self:attach-entity (builder build-ctx)))
       (self:attach-entity nil)))
 
 (fn build-default [self opts]
@@ -2328,6 +2347,7 @@
 (set self.drop-activity-slot drop-activity-slot)
 (set self.capture-activity-slot-state capture-activity-slot-state)
 (set self.restore-activity-slot-state restore-activity-slot-state)
+(set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)
