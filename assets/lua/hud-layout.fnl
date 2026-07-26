@@ -2,7 +2,6 @@
 (local {: Layout} (require :layout))
 (local {: Flex : FlexChild} (require :flex))
 (local Stack (require :stack))
-(local Sized (require :sized))
 (local Tiles (require :tiles))
 (local FloatLayer (require :float-layer))
 (local ControlPanel (require :hud-control-panel))
@@ -124,8 +123,6 @@
     (set overlay.drop drop)
     overlay))
 
-(local default-right-dock-width 42)
-
 (fn make-hud-builder [opts]
   (local options (or opts {}))
   (local control-builder (or options.control-builder
@@ -161,11 +158,7 @@
       (table.insert base-children (FlexChild (fn [_ctx] left-dock))))
     (table.insert base-children (FlexChild (fn [_ctx] tiles) 1))
     (when right-dock
-      (local right-dock-width (or options.right-dock-width default-right-dock-width))
-      (table.insert base-children
-                    (FlexChild (fn [_ctx] ((Sized {:size (glm.vec3 right-dock-width 0 0)
-                                                    :child (fn [_ctx] right-dock)})
-                                           _ctx)))))
+      (table.insert base-children (FlexChild (fn [_ctx] right-dock))))
     (local middle-base
       ((Flex {:axis 1
               :xspacing 0
