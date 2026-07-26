@@ -788,6 +788,53 @@
           "panel B Rectangle should be in batcher after switch")
   (entity:drop))
 
+(fn view-collapsed-panel-remains-effectively-culled []
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fn [ctx]
+                                           ((make-test-panel "test-panel" (glm.vec3 38 10 0)) ctx))})
+  (local ctx (make-widget-ctx))
+  (sidebar:select :test)
+  (local view (HudExtendedSidebarView sidebar))
+  (local entity (view ctx))
+  (entity:update)
+  (entity:update)
+  ;; Capture the panel layout reference while visible.
+  (var panel-layout nil)
+  (each [_ child (ipairs entity.layout.children)]
+    (when (= child.name "test-panel")
+      (set panel-layout child)))
+  (assert panel-layout "panel layout should be in tree while visible")
+  (assert (not (panel-layout:effective-culled?))
+          "panel should not be effectively culled while visible")
+  ;; Verify intersect works while visible.
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.size (glm.vec3 200 100 0))
+  (entity.layout:layouter)
+  ;; Use the panel's computed position for intersection.
+  (local px panel-layout.position.x)
+  (local py panel-layout.position.y)
+  (local test-ray {:origin (glm.vec3 px py 1) :direction (glm.vec3 0 0 -1)})
+  (local (hit _ _) (panel-layout:intersect test-ray))
+  (assert hit "panel should intersect while visible")
+  ;; Collapse.
+  (sidebar:toggle)
+  (entity:update)
+  (entity:update)
+  (entity.layout:measurer)
+  (entity.layout:layouter)
+  ;; The cached panel should remain effectively culled.
+  (assert (panel-layout:effective-culled?)
+          "cached panel should be effectively culled after collapse")
+  ;; Intersect should return no hit when effectively culled.
+  (local (hit2 _ _) (panel-layout:intersect test-ray))
+  (assert (not hit2) "cached panel should not intersect after collapse")
+  (entity:drop))
+
 (table.insert tests {:name "hud capture-restore pending sidebar state" :fn hud-capture-restore-pending-sidebar-state})
 (table.insert tests {:name "hud pending retained on active-id mismatch" :fn hud-capture-restore-pending-retained-on-mismatch})
 (table.insert tests {:name "view rail button matches activity button metrics"
@@ -802,6 +849,8 @@
                      :fn view-collapse-removes-panel-render-resources})
 (table.insert tests {:name "view switch removes previous panel render resources"
                      :fn view-switch-removes-previous-panel-render-resources})
+(table.insert tests {:name "view collapsed panel remains effectively culled"
+                     :fn view-collapsed-panel-remains-effectively-culled})
 
 (local main
   (fn []

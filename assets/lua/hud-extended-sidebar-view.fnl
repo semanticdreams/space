@@ -65,6 +65,9 @@
         ;; by run-layouter's clip-visibility reset of self-culled.
         (active-panel-entity.layout:set-parent-culled true)
         (active-panel-entity.layout:layouter)
+        ;; Keep the cached panel effectively culled after remove-child
+        ;; resets parent-culled. activate-panel! clears self-culled.
+        (active-panel-entity.layout:set-self-culled true)
         (when active-panel-entity.disconnect-update
           (active-panel-entity:disconnect-update))
         (set active-panel-entity nil)))
