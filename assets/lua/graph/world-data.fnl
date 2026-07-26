@@ -651,34 +651,21 @@
         (local element (and metadata metadata.element))
         (if element
             (do
-              ;; R6-3: Capture the persistence BEFORE removal so we can
-              ;; match and purge the canonical session panel record.
-              (local persistence (and metadata metadata.persistence))
               (scene:remove-panel-child element)
               ;; R6-3: Remove the matching panel from canonical
               ;; activity.sessions.sandbox.scene.panels so captures and
               ;; saves no longer include the removed panel.
+              ;; Use the runtime panel-index for canonical removal so
+              ;; duplicate panels with identical persistence (except
+              ;; position/rotation) remove the correct entry.
               (local world (resolve-world world-manager world-id))
-              (when (and world persistence)
+              (when world
                 (local canonical (resolve-sandbox-scene-state world
                                    (.. "WorldData.remove-scene-panel[" world-id "]")))
                 (when (and canonical canonical.panels)
-                  (var matched-idx nil)
-                  (for [idx (length canonical.panels) 1 -1]
-                    (when (not matched-idx)
-                      (local panel (. canonical.panels idx))
-                      (when (= (. persistence :kind) (. panel :kind))
-                        (local matched?
-                          (accumulate [same? true k v (pairs persistence)]
-                            (if (not same?) false
-                                (or (= k :position) (= k :rotation)) true
-                                (let [cv (. panel k)]
-                                  (and (not (= cv nil))
-                                       (= v cv))))))
-                        (when matched?
-                          (set matched-idx idx)))))
-                  (when matched-idx
-                    (table.remove canonical.panels matched-idx)))
+                  (when (and (>= panel-index 1)
+                             (<= panel-index (length canonical.panels)))
+                    (table.remove canonical.panels panel-index)))
                 ;; R6-3: Update runtime.activity-session-state.sandbox.scene
                 ;; so Activities.snapshot-activity-sessions cannot
                 ;; overwrite the removal with stale pending data.

@@ -798,14 +798,108 @@
   ;; R6-3: runtime.activity-session-state.sandbox.scene must reflect removal
   (local pending-scene runtime.activity-session-state.sandbox.scene)
   (assert pending-scene "activity-session-state sandbox must exist")
-  (assert (= (length (or (. state.activity.sessions.sandbox.scene :panels) [])) 0)
-          "canonical panels must be empty after removal")
+  (assert (= (length (or pending-scene.panels [])) 0)
+          "pending sandbox scene panels must be empty after removal")
   ;; The runtime panel was actually removed
   (assert removed-element
           "remove-panel-child must have been called on the runtime scene"))
 
 (table.insert tests {:name "R6-3 active sandbox remove-scene-panel updates canonical and pending"
-                     :fn test-active-sandbox-remove-panel-updates-canonical-session})
+                      :fn test-active-sandbox-remove-panel-updates-canonical-session})
+
+;; ── R6-3 duplicate-panel regression ──────────────────────────────────
+
+;; Helper: shallow clone a table
+(fn clone-table [tbl]
+  (local out {})
+  (each [k v (pairs tbl)]
+    (tset out k v))
+  out)
+
+(fn test-active-sandbox-remove-panel-duplicates-uses-index-not-persistence []
+  "R6-3: When two panels have identical persistence except position/rotation,
+  removing the first panel through the active runtime must remove the
+  corresponding canonical panel (by index/order), not the wrong duplicate.
+  Persistence matching must not cause the wrong duplicate panel to be removed."
+  (local WorldData (require :graph/world-data))
+  (local LightSystemModule (require :light-system))
+  ;; Build a runtime where Sandbox IS the active slot with two panels that
+  ;; share the same persistence data but differ only in position.
+  (var removed-element nil)
+  (local runtime-panel-1-element {:drop (fn [_])})
+  (local runtime-panel-2-element {:drop (fn [_])})
+  (local base-persistence {:kind "test-panel"
+                           :graph-map-id "gm-1"
+                           :node-key "nk-1"
+                           :label "Test Panel"})
+  (local mock-scene
+    {:active-activity-slot-id "sandbox"
+     :scene-children [{:element runtime-panel-1-element
+                        :persistence (doto (clone-table base-persistence)
+                                       (tset :position [0 0 0]))}
+                       {:element runtime-panel-2-element
+                        :persistence (doto (clone-table base-persistence)
+                                       (tset :position [5 5 5]))}]
+     :remove-panel-child (fn [_self element]
+                           (set removed-element element)
+                           true)})
+  (local runtime {:scene mock-scene
+                  :activity-session-state {:sandbox {:scene {:panels []}}}})
+  ;; Canonical sandbox session has two panels with same persistence but
+  ;; different positions. Order matches runtime.
+  (local canonical-panel-1 {:kind "test-panel"
+                            :graph-map-id "gm-1"
+                            :node-key "nk-1"
+                            :label "Test Panel"
+                            :position [0 0 0]})
+  (local canonical-panel-2 {:kind "test-panel"
+                            :graph-map-id "gm-1"
+                            :node-key "nk-1"
+                            :label "Test Panel"
+                            :position [5 5 5]})
+  (local state {:scene {:panels [] :terrains []}
+                :hud {:panels []}
+                :activity {:active_id "sandbox"
+                           :sessions {:sandbox
+                                      {:scene {:panels [canonical-panel-1 canonical-panel-2]
+                                               :terrains []
+                                               :lights (LightSystemModule.default-state)
+                                               :skybox (make-skybox-state)
+                                               :background (make-background-state)
+                                               :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? true
+                :world {:state state
+                        :get-runtime (fn [_self] runtime)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; Precondition: canonical has two panels
+  (local canonical-panels (. state.activity.sessions.sandbox.scene :panels))
+  (assert (= (length canonical-panels) 2)
+          "canonical sandbox session should start with two panels")
+  ;; Remove the FIRST panel (index 1)
+  (WorldData.remove-scene-panel manager "test-world" 1)
+  ;; R6-3: Canonical should have ONE panel remaining — the second one
+  (assert (= (length canonical-panels) 1)
+          "canonical panels should have one remaining after removal")
+  (assert (= (. canonical-panels 1 :position 1) 5)
+          "remaining canonical panel must be the second panel (position x=5), not the first (x=0)")
+  ;; Pending session must also reflect removal of first panel, leaving the second
+  (local pending-scene runtime.activity-session-state.sandbox.scene)
+  (assert pending-scene "activity-session-state sandbox must exist")
+  (assert (= (length (or pending-scene.panels [])) 1)
+          "pending scene panels should have one remaining after removal")
+  (assert (= (. pending-scene.panels 1 :position 1) 5)
+          "remaining pending panel must be the second panel (position x=5), not the first (x=0)")
+  ;; The runtime removal was called with the FIRST panel's element
+  (assert removed-element
+          "remove-panel-child must have been called on the runtime scene")
+  (assert (= removed-element runtime-panel-1-element)
+          "remove-panel-child must receive the first panel's element, not the second"))
+
+(table.insert tests {:name "R6-3 duplicate panels use index-based removal not persistence matching"
+                      :fn test-active-sandbox-remove-panel-duplicates-uses-index-not-persistence})
 
 (local main
   (fn []
