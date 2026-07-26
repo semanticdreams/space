@@ -84,12 +84,33 @@
        world.state.activity.sessions.sandbox.scene))
 
 (fn with-temp-dir [f]
+  ;; Save activity registry entries that ensure-built-in-activities! may
+  ;; stub, so they don't leak to subsequent test modules.  Some of these
+  ;; tests use simplified stub activities without snapshot/restore hooks,
+  ;; which would break tests that expect the real sandbox-activity-unit.
+  (local registry (Activities.ensure-registry))
+  (local saved-sandbox (. registry.activities "sandbox"))
+  (local saved-graph (. registry.activities "graph"))
+  (local saved-drawing (. registry.activities "drawing"))
+  (local saved-board (. registry.activities "board"))
+  (local saved-ordered [])
+  (each [_ id (ipairs registry.ordered-ids)]
+    (table.insert saved-ordered id))
   (ensure-built-in-activities!)
   (local dir (make-temp-dir))
   (fs.create-dirs dir)
   (local (ok result) (pcall f dir))
-  (fs.remove-all dir)
-  (if ok
+  (local (rm-ok rm-err) (pcall (fn [] (fs.remove-all dir) true)))
+  ;; Restore activity registry entries to their pre-stub state so the
+  ;; next module sees only what was there before with-temp-dir ran.
+  (set (. registry.activities "sandbox") saved-sandbox)
+  (set (. registry.activities "graph") saved-graph)
+  (set (. registry.activities "drawing") saved-drawing)
+  (set (. registry.activities "board") saved-board)
+  (set registry.ordered-ids saved-ordered)
+  (if (not rm-ok)
+      (error (.. "Failed to clean temp dir: " (tostring rm-err)))
+      ok
       result
       (error result)))
 
