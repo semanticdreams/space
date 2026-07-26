@@ -181,6 +181,7 @@
     (set scene.projection (glm.perspective 0.8 1.33 0.1 1000.0))
     (set app.scene scene)
     (set app.layout-root scene.layout-root)
+    (scene:ensure-activity-slot "sandbox")
     (local sandbox-slot (scene:activate-activity-slot "sandbox"))
     (assert sandbox-slot "panel-transfer with-scene-and-hud requires a valid sandbox slot")
     (scene:build-default)

@@ -140,6 +140,7 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
+            (scene:ensure-activity-slot "sandbox")
             (local sandbox-slot (scene:activate-activity-slot "sandbox"))
             (assert sandbox-slot "Entity drag test requires a valid sandbox slot")
             (scene:build
@@ -271,6 +272,7 @@
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
              (app.engine.physics:setGravity 0 -25 0)
+             (scene:ensure-activity-slot "sandbox")
              (scene:activate-activity-slot "sandbox")
              (scene:build-default {:terrains []})
              (set ball (scene:add-object (Ball {:size (glm.vec3 6 6 6)})
@@ -402,6 +404,7 @@
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
              (app.engine.physics:setGravity 0 -25 0)
+             (scene:ensure-activity-slot "sandbox")
              (scene:activate-activity-slot "sandbox")
              (scene:build-default {:terrains []})
              (set cuboid (scene:add-physics-body {:position (glm.vec3 0 0 0)
@@ -591,6 +594,7 @@
         (assert Main.install-app-shell!
                 "scene drag regression test requires Main.install-app-shell!")
         (Main.install-app-shell!)
+        (scene:ensure-activity-slot "sandbox")
         (local sandbox-slot (scene:activate-activity-slot "sandbox"))
         (assert sandbox-slot "Canvas-hidden drag test requires a valid sandbox slot")
         (scene:build

@@ -89,6 +89,7 @@
                  (set app.movables movables)
                  (set app.camera camera)
                   (configure-test-physics-world)
+                  (scene:ensure-activity-slot "sandbox")
                   (scene:activate-activity-slot "sandbox")
                   (scene:build-default)
                  {:scene scene :movables movables}))]

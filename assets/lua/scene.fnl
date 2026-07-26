@@ -712,7 +712,8 @@
             "Scene content mutation requires an active activity scene slot"))
 
   (fn activate-activity-slot [scene activity-id]
-    (local slot (ensure-activity-slot scene activity-id))
+    (local slot (activity-slot self activity-id))
+    (assert slot (.. "Scene.activate-activity-slot: no slot for activity " (tostring activity-id) " — call ensure-activity-slot first"))
     (local was-different-slot
       (and self.active-activity-slot
            (not (= self.active-activity-slot slot))))
@@ -869,9 +870,13 @@
     ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
       (apply-state-to-services self canonical)
-      ;; Rebuild terrain runtime from stored records (panels deferred to Task 5).
-      ;; Each canonical terrain record is built exactly once.
-      (when (and canonical.terrains (> (length canonical.terrains) 0))
+      ;; Rebuild terrain runtime from stored records only when the slot has no
+      ;; terrain yet (idempotent: repeated restores of the same state must not
+      ;; append duplicate terrain entries).
+      (when (and canonical.terrains (> (length canonical.terrains) 0)
+                 (or (not self.entity)
+                     (not self.scene-terrains)
+                     (= (length (or self.scene-terrains [])) 0)))
         (if (not self.entity)
             ;; No base entity yet — build-default creates entity and all terrains
             (self:build-default {:terrains canonical.terrains})
@@ -879,7 +884,11 @@
             (do
               (local entries (SceneWorldState.build-terrain-entries canonical.terrains))
               (each [_ entry (ipairs entries)]
-                (self:add-terrain-record entry.record)))))
+                (local record-id (and entry.record entry.record.id))
+                (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                    ;; idempotent: skip terrain records that already exist in the runtime
+                    nil
+                    (self:add-terrain-record entry.record))))))
       ;; After terrain rebuild, update slot fields so the slot owns the
       ;; newly built content (not just the service state).
       (set slot.entity self.entity)
