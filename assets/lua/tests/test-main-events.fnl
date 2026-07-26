@@ -6,6 +6,10 @@
 (local Hoverables (require :hoverables))
 (local AppViewport (require :app-viewport))
 (local AppProjection (require :app-projection))
+(local InputState (require :input-state-router))
+(local StateSystemBindings (require :state-system-bindings))
+(local Units (require :units))
+(local UnitManager (require :unit-manager))
 (local reset-engine-events
   (fn []
     (when _G.reset-engine-events
@@ -1184,7 +1188,45 @@
 (table.insert tests {:name "bind-active-world-runtime emits shell once for surface sync"
                      :fn bind-active-world-runtime-emits-shell-once-for-surface-sync})
 (table.insert tests {:name "bind-active-world-runtime respects shell suppression"
-                     :fn bind-active-world-runtime-respects-shell-suppression})
+                      :fn bind-active-world-runtime-respects-shell-suppression})
+
+(fn app-drop-releases-active-input-before-state-teardown []
+  ;; Regression test: app.drop must release active input before unbinding the
+  ;; states host.  Without this ordering, unit-manager:clear unloads units
+  ;; whose drop/disconnect calls require the states host, which is already nil.
+  (reset-state)
+  (ensure-renderers)
+  (var last-state nil)
+  (local states-host
+    {:active-name (fn [_self] "normal")
+     :set-state (fn [_self name] (set last-state name))
+     :drop (fn [_self] nil)})
+  (StateSystemBindings.bind-states-host states-host)
+  (set app.states states-host)
+  (var disconnected? false)
+  (local input
+    {:on-state-connected (fn [_self _payload] true)
+     :on-state-disconnected (fn [_self _payload] (set disconnected? true))
+     :on-key-down (fn [_self _payload] false)})
+  (InputState.connect-input input)
+  (assert (= (InputState.active-input) input)
+          "Input should be active before drop")
+  (local unit (Units.Unit
+                {:id "test-drop-unit"
+                 :load (fn [_ctx] nil)
+                 :unload (fn [_ctx]
+                           (InputState.disconnect-input input))}))
+  (set app.unit-manager (or app.unit-manager (UnitManager)))
+  (app.unit-manager:register unit)
+  (unit:load {})
+  (assert (= (InputState.active-input) input)
+          "Input must remain active after unit load")
+  (Main.drop)
+  (assert disconnected? "Input should have been disconnected during drop")
+  (assert (not (InputState.active-input)) "No input should be active after drop")
+  (InputState.reset)
+  (StateSystemBindings.bind-states-host nil))
+(table.insert tests {:name "app.drop releases active input before state teardown" :fn app-drop-releases-active-input-before-state-teardown})
 
 (local main
   (fn []
