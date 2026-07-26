@@ -47,8 +47,6 @@
       cwd
       (and root (fs.exists (fs.join-path root "assets" "lua")))
       root
-      (and assets-root root (fs.exists (fs.join-path assets-root "lua")))
-      root
       assets-root
       assets-root
       cwd))
