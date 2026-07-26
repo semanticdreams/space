@@ -235,6 +235,7 @@
   (local mgr (require-unit-manager app))
 
   (local self {})
+  (tset self :_log_path opts.log_path)
 
   (fn list [_ args]
     (local results [])
@@ -540,7 +541,7 @@
 
   (fn read-log [self args]
     (local fs (require :fs))
-    (local log-path (or args.log_path
+    (local log-path (or self._log_path
                         (let [logging (require :logging)]
                           (logging.get-output-path))))
     (when (not (fs.exists log-path))
@@ -578,15 +579,19 @@
     (local unit-id (or args.unit_id (error "snapshot requires :unit_id")))
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
-    ;; Determine snapshot support structurally via unit.has-snapshot?
+    (local has-snapshot? (if (= (type unit.has-snapshot?) "function")
+                            (unit.has-snapshot? unit)
+                            unit.has-snapshot?))
+    ;; Determine snapshot support structurally via has-snapshot?
     ;; before calling unit:snapshot, so we never invoke a noop/default.
     ;; For Unit: has-snapshot? is true only when a :snapshot function
     ;; was explicitly provided (defaults to noop otherwise).
-    ;; For ModuleUnit: has-snapshot? is true only when :snapshot-export
-    ;; was explicitly set in the options.
+    ;; For ModuleUnit: has-snapshot? is a function that checks whether
+    ;; the option :snapshot-export was explicitly set OR the loaded
+    ;; module has a matching default snapshot export.
     ;; For SourceUnit: has-snapshot? is true only when :snapshot-export
     ;; was explicitly set in the options.
-    (if (not unit.has-snapshot?)
+    (if (not has-snapshot?)
         {:unit-id unit.id
          :supported false
          :state nil}

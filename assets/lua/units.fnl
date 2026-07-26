@@ -244,7 +244,11 @@
   (tset self :unload-export unload-export)
   (tset self :snapshot-export snapshot-export)
   (tset self :restore-export restore-export)
-  (tset self :has-snapshot? explicit-snapshot?)
+  (tset self :has-snapshot? (fn [_self]
+                               (or explicit-snapshot?
+                                   (let [(ok module) (pcall require-module)]
+                                     (and ok (= (type (. module snapshot-export))
+                                                "function"))))))
   self)
 
 (fn SourceUnit [opts]

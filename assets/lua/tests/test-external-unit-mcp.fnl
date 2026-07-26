@@ -19,12 +19,18 @@
       result
       (error result)))
 
-(fn with-service [dir mgr-populate f]
+(fn with-service* [dir mgr-populate service-opts f]
   (local mgr (UnitManager {}))
   (mgr-populate mgr dir)
-  (local service (ExternalUnitService.ExternalUnitService {:app {:unit-manager mgr}}))
+  (local full-opts {:app {:unit-manager mgr}})
+  (each [k v (pairs (or service-opts {}))]
+    (tset full-opts k v))
+  (local service (ExternalUnitService.ExternalUnitService full-opts))
   (f mgr service)
   (mgr:clear))
+
+(fn with-service [dir mgr-populate f]
+  (with-service* dir mgr-populate {} f))
 
 ;; ── Helpers ──
 
@@ -867,7 +873,51 @@
                   "unsupported snapshot should have nil state"))))))
 
 (table.insert tests {:name "external-unit-mcp: snapshot returns unsupported for filesystem unit without snapshot export"
-                     :fn test-snapshot-returns-unsupported-for-filesystem-unit-without-snapshot})
+                      :fn test-snapshot-returns-unsupported-for-filesystem-unit-without-snapshot})
+
+(fn test-snapshot-supports-module-unit-with-default-snapshot-export []
+  ;; R1-3: A ModuleUnit constructed without explicit :snapshot-export but
+  ;; whose module exports a default "snapshot" function must report
+  ;; supported=true and return the snapshot state — i.e. the unit must
+  ;; still be called even when :snapshot-export was not explicitly set.
+  (with-temp-dir
+    (fn [dir]
+      (local default-snap-path (write-unit-file dir "default-snapshot"
+                                  (.. "(fn init [] true)\n"
+                                      "(fn drop [] true)\n"
+                                      "(fn snapshot [] {:items [1 2 3] :version 1})\n"
+                                      "{:init init :drop drop :snapshot snapshot}")))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          ;; Construct ModuleUnit WITHOUT :snapshot-export — defaults to "snapshot"
+          (local unit (Units.ModuleUnit
+                        {:id "user-default-snap"
+                         :module-name "default-snapshot"
+                         :module-paths fennel-paths
+                         :source :user
+                         :suppress-run-main? true
+                         :owned-paths [default-snap-path]}))
+          (mgr:register unit))
+        (fn [_mgr service]
+          (local result (service:snapshot {:unit_id "user-default-snap"}))
+          (assert result.unit-id "snapshot missing unit-id")
+          (assert (= result.unit-id "user-default-snap") "unit-id mismatch")
+          (assert (= result.supported true)
+                  (.. "module with default snapshot export should be supported, got "
+                      (tostring result.supported)))
+          (assert (not= result.state nil)
+                  "module with default snapshot export should have non-nil state")
+          (assert (= (type result.state) "table")
+                  (.. "state should be a table, got " (type result.state)))
+          (assert (= result.state.version 1)
+                  (.. "state.version should be 1, got " (tostring result.state.version)))
+          (assert (= (length result.state.items) 3)
+                  "state.items should have 3 items"))))))
+
+(table.insert tests {:name "external-unit-mcp: snapshot supports ModuleUnit with default snapshot export"
+                      :fn test-snapshot-supports-module-unit-with-default-snapshot-export})
+
 
 (fn test-snapshot-propagates-error-from-real-snapshot-implementation []
   ;; R1-3: a filesystem unit with an actual snapshot function that throws
@@ -906,18 +956,20 @@
   ;; read-log returns structured lines, total-lines, and log-path.
   ;; R1-4: uses an isolated controlled log fixture with a known exact
   ;; newline-terminated line count instead of the live application log.
+  ;; The controlled fixture is injected via ExternalUnitService opts
+  ;; (:log_path), not via a public args.log_path on read-log itself.
   (with-temp-dir
     (fn [dir]
-      (with-service dir
+      ;; Create a controlled log fixture with exactly 5 lines
+      ;; and a trailing newline (newline-terminated).
+      (local fixture-path (fs.join-path dir "controlled.log"))
+      (local fixture-content "alpha\nbeta\ngamma\ndelta\nepsilon\n")
+      (fs.write-file fixture-path fixture-content)
+      (with-service* dir
         (fn [mgr _dir] nil)  ;; no units needed
+        {:log_path fixture-path}
         (fn [_mgr service]
-          ;; Create a controlled log fixture with exactly 5 lines
-          ;; and a trailing newline (newline-terminated).
-          (local fixture-path (fs.join-path dir "controlled.log"))
-          (local fixture-content "alpha\nbeta\ngamma\ndelta\nepsilon\n")
-          (fs.write-file fixture-path fixture-content)
-          ;; Read the controlled fixture via the :log_path seam
-          (local result (service:read-log {:log_path fixture-path}))
+          (local result (service:read-log {}))
           (assert result.lines "read-log missing lines")
           (assert (= (type result.lines) "table") "lines should be a table")
           ;; total-lines must exactly match the known fixture count (5)
@@ -937,7 +989,7 @@
             (assert (= line (. expected i))
                     (.. "line " i " mismatch: " line " vs " (. expected i))))
           ;; grep filtering: only lines containing "ta" (beta, delta)
-          (local filtered (service:read-log {:log_path fixture-path :grep "ta"}))
+          (local filtered (service:read-log {:grep "ta"}))
           (assert (= (length filtered.lines) 2)
                   (.. "grep for 'ta' should find 2 lines, got " (length filtered.lines)))
           (assert (= filtered.total-lines 5) "total-lines should still be 5")
