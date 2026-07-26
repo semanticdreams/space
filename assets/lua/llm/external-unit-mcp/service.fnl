@@ -69,6 +69,11 @@
       ["run-test"]
       []))
 
+(fn build-snapshot-capabilities [loader]
+  (if (= loader "filesystem")
+      true
+      false))
+
 (fn build-commit-capability [_loader]
   "none")
 
@@ -464,7 +469,8 @@
 
   (fn get-unit-fennel-root [unit]
     ;; Return the directory that serves as the Fennel path base for this unit.
-    ;; For directory units, this is the unit directory itself.
+    ;; For directory units, this is the *parent* of the unit directory (so
+    ;; module <name>.test-<suffix> resolves to <unit-dir>/test-<suffix>.fnl).
     ;; For flat units, this is the parent directory of the primary source file.
     (local paths (or unit.owned-paths []))
     (var root nil)
@@ -472,7 +478,7 @@
       (when (and path (fs.exists path))
         (local st (fs.stat path))
         (if (and st st.is-dir)
-            (set root path)
+            (set root (fs.parent path))
             (set root (fs.parent path)))))
     root)
 
@@ -480,8 +486,15 @@
     (local unit-id (or args.unit_id (error "run-tests requires :unit_id")))
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
-    (assert (not (= unit.source :builtin))
-            "run-tests: cannot run tests for built-in unit")
+    (local loader (classify-loader unit))
+    (local capabilities (build-test-capabilities loader))
+    (var can-run? false)
+    (each [_ cap (ipairs capabilities)]
+      (when (= cap "run-test")
+        (set can-run? true)))
+    (assert can-run?
+            (.. "run-tests: unit " unit-id " loader " loader
+                " does not support test execution"))
     (local test-name (or args.test_name "init"))
     (local name (or unit.module-name unit.id))
     (local test-module (.. name ".test-" test-name))
@@ -507,14 +520,13 @@
             (assert resolved
                     (.. "run-tests: could not locate space binary from cwd " cwd))
             resolved)))
-    ;; Build Fennel paths from the unit's directory, falling back to app.code-dir
-    (local unit-root (or (get-unit-fennel-root unit)
-                         (and app app.code-dir)))
+    ;; Build Fennel paths from the unit's directory
+    (local unit-root (get-unit-fennel-root unit))
+    (assert unit-root
+            (.. "run-tests: could not determine Fennel path root for unit " unit-id))
     (local unit-fennel-path
-      (if unit-root
-          (.. (fs.join-path unit-root "?" "init.fnl")
-              ";" (fs.join-path unit-root "?.fnl"))
-          ""))
+      (.. (fs.join-path unit-root "?" "init.fnl")
+          ";" (fs.join-path unit-root "?.fnl")))
     (local fennel-path
       (if (> (# unit-fennel-path) 0)
           (.. unit-fennel-path ";" runtime.fennel-path)
@@ -543,12 +555,12 @@
     (local all-lines [])
     (each [line (_G.string.gmatch content "([^\n]*)\n?")]
       (table.insert all-lines line))
-    (local total-count (# all-lines))
-    (when (= total-count 0)
+    (when (= (# all-lines) 0)
       (error "read-log: log file is empty"))
     ;; Drop trailing empty string from final \n
     (when (and (> (# all-lines) 0) (= (. all-lines (# all-lines)) ""))
       (table.remove all-lines))
+    (local total-count (# all-lines))
     (local grep (and args.grep (> (# args.grep) 0) args.grep))
     (var result-lines [])
     (var i (or args.offset 1))
@@ -570,12 +582,17 @@
     (local unit-id (or args.unit_id (error "snapshot requires :unit_id")))
     (local unit (mgr:get unit-id))
     (assert unit (.. "unit not found: " unit-id))
-    (local (ok state) (pcall #(unit:snapshot {})))
-    (if ok
+    (local loader (classify-loader unit))
+    (if (not (build-snapshot-capabilities loader))
         {:unit-id unit.id
-         :supported true
-         :state state}
-        (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))
+         :supported false
+         :state nil}
+        (let [(ok state) (pcall #(unit:snapshot {}))]
+          (if ok
+              {:unit-id unit.id
+               :supported true
+               :state state}
+              (error (.. "snapshot: call failed for unit " unit-id ": " (tostring state)))))))
 
   (set self.unit-handle unit-handle)
   (set self.list list)

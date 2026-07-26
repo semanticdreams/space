@@ -815,6 +815,28 @@
 (table.insert tests {:name "external-unit-mcp: snapshot returns unit state with capability metadata"
                      :fn test-snapshot-returns-unit-state-with-capability-metadata})
 
+(fn test-snapshot-returns-unsupported-for-unknown-loader []
+  ;; R1-3: Unknown loaders must return supported=false, not an error.
+  (with-temp-dir
+    (fn [dir]
+      (with-service dir
+        (fn [mgr _dir]
+          ;; Register a unit with no owned paths (unknown loader)
+          (local orphan-unit (Units.Unit {:id "orphan"
+                                           :source :user
+                                           :load (fn [_] true)
+                                           :unload (fn [_] true)}))
+          (mgr:register orphan-unit))
+        (fn [_mgr service]
+          (local result (service:snapshot {:unit_id "orphan"}))
+          (assert result.unit-id "snapshot missing unit-id")
+          (assert (= result.unit-id "orphan") "unit-id mismatch")
+          (assert (= result.supported false) "unknown loader should report snapshot unsupported")
+          (assert (= result.state nil) "unsupported snapshot should have nil state"))))))
+
+(table.insert tests {:name "external-unit-mcp: snapshot returns unsupported for unknown loader"
+                     :fn test-snapshot-returns-unsupported-for-unknown-loader})
+
 (fn test-read-log-returns-filtered-recent-lines []
   ;; read-log should work against the current application log file.
   ;; It returns structured lines, total-lines, and log-path.
@@ -833,8 +855,18 @@
           (assert result.total-lines "read-log missing total-lines")
           (assert (= (type result.total-lines) "number") "total-lines should be a number")
           (assert (>= result.total-lines 0) "total-lines should be non-negative")
+          (assert (> result.total-lines 0) "total-lines should be positive with log content")
           (assert result.log-path "read-log missing log-path")
           (assert (= (type result.log-path) "string") "log-path should be a string")
+          ;; R1-4: total-lines must match the actual line count, not include a
+          ;; trailing empty entry from a final newline.
+          (each [_ line (ipairs result.lines)]
+            (local (line-num-str) (string.match line "^(%d+):"))
+            (local line-num (tonumber line-num-str))
+            (assert line-num (.. "line should be prefixed with number: " line))
+            (assert (<= line-num result.total-lines)
+                    (.. "line number " line-num " exceeds total-lines " result.total-lines
+                        " — total-lines likely includes a trailing empty entry")))
           ;; Verify grep filtering
           (local grep-result (service:read-log {:lines 200 :grep "TEST-MARKER-READ-LOG"}))
           (assert (> (length grep-result.lines) 0)
@@ -849,7 +881,10 @@
 (fn test-run-tests-executes-unit-test-module []
   (with-temp-dir
     (fn [dir]
-      ;; Create a directory-based unit with a test module
+      ;; Create a directory-based unit with a test module at the standard location:
+      ;; <unit-dir>/test-init.fnl (not nested under the module name).
+      ;; get-unit-fennel-root returns the parent of unit-dir, so Fennel path
+      ;; <parent>/?.fnl resolves module run-tests-unit.test-init to <unit-dir>/test-init.fnl.
       (local unit-dir (fs.join-path dir "run-tests-unit"))
       (fs.create-dirs unit-dir)
       (local init-path (fs.join-path unit-dir "init.fnl"))
@@ -857,10 +892,8 @@
         (.. "(fn init [] true)\n"
             "(fn drop [] true)\n"
             "{:init init :drop drop}"))
-      ;; Create the test module: run-tests-unit/test-init.fnl
-      (local test-dir (fs.join-path unit-dir "run-tests-unit"))
-      (fs.create-dirs test-dir)
-      (local test-path (fs.join-path test-dir "test-init.fnl"))
+      ;; Create the test module at the standard location: unit-dir/test-init.fnl
+      (local test-path (fs.join-path unit-dir "test-init.fnl"))
       (fs.write-file test-path
         (.. "(fn main []\n"
             "  (print \"ALL TESTS PASSED\")\n"
@@ -869,8 +902,9 @@
             "{:main main :tests tests}"))
       (with-service dir
         (fn [mgr _dir]
-          (local fennel-paths (.. unit-dir "/?.fnl;" unit-dir "/?/init.fnl;"
-                                  dir "/?.fnl;" dir "/?/init.fnl"))
+          ;; Fennel path must include the parent directory (dir) so that
+          ;; module run-tests-unit.test-init resolves to dir/run-tests-unit/test-init.fnl
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
           (local unit (Units.ModuleUnit
                         {:id "user-run-tests-unit"
                          :module-name "run-tests-unit"
@@ -895,6 +929,28 @@
 
 (table.insert tests {:name "external-unit-mcp: run-tests executes unit test module"
                      :fn test-run-tests-executes-unit-test-module})
+
+(fn test-run-tests-rejects-unknown-loader []
+  ;; R1-2: run-tests must fail loudly when the loader lacks run-test capability.
+  (with-temp-dir
+    (fn [dir]
+      (with-service dir
+        (fn [mgr _dir]
+          ;; Register an unknown-loader unit (no owned paths)
+          (local orphan-unit (Units.Unit {:id "orphan"
+                                           :source :user
+                                           :load (fn [_] true)
+                                           :unload (fn [_] true)}))
+          (mgr:register orphan-unit))
+        (fn [_mgr service]
+          (local (ok err) (pcall #(service:run-tests {:unit_id "orphan"})))
+          (assert (not ok) "should reject run-tests for unknown loader")
+          (assert (or (string.find (or err "") "does not support" 1 true)
+                      (string.find (or err "") "test execution" 1 true))
+                  (.. "error should mention lack of test support, got: " (or err ""))))))))
+
+(table.insert tests {:name "external-unit-mcp: run-tests rejects unknown loader without run-test capability"
+                     :fn test-run-tests-rejects-unknown-loader})
 
 (local main
   (fn []
