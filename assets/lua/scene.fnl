@@ -676,12 +676,13 @@
                         (app.lights:set-state state.lights))
                       (when (and state.skybox
                                  app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-                        ;; R2-2: Resolve complete skybox state to renderer-ready
-                        ;; flat format.  Canonical storage preserves :default and
-                        ;; :by-theme policy; the renderer receives only name,
-                        ;; brightness, tint-color, and enabled?.
+                        ;; R3-3: Resolve complete skybox state using the current
+                        ;; active theme so by-theme overrides take effect.  Falls
+                        ;; back to :default when theme is nil or unknown.
+                        (local active-theme (resolve-active-theme))
+                        (local theme-key (and active-theme active-theme.name))
                         (local resolved-skybox
-                          (SkyboxState.resolve-for-theme state.skybox nil))
+                          (SkyboxState.resolve-for-theme state.skybox theme-key))
                         (app.renderers.skybox:set-state resolved-skybox))
                       (when (and state.background
                                  app app.renderers app.renderers.set-background-state)
@@ -843,13 +844,60 @@
                 (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
                 (each [_ entry (ipairs entries)]
                   (local record-id (and entry.record entry.record.id))
+                  ;; R3-1: Replace stale runtime terrain with canonical
+                  ;; record.  The canonical record may have changed while
+                  ;; the slot was inactive.  Replacing instead of skipping
+                  ;; ensures activation always reflects WorldData mutations.
                   (if (and record-id (find-terrain-entry self.scene-terrains record-id))
-                      nil  ;; already present — idempotent skip
+                      (self:replace-terrain-record record-id entry.record)
                       (self:add-terrain-record entry.record)))
                 ;; Capture runtime terrain ids back for stable reconciliation
                 (when self.scene-terrains
                   (set (. slot.scene-state :terrains)
                        (SceneWorldState.capture-terrains self.scene-terrains))))))))
+    ;; R3-2: Panel reconciliation when inactive.
+    ;; When canonical Sandbox panels change while the slot is inactive
+    ;; (e.g. panel removal via WorldData), the retained stale runtime
+    ;; panels in slot.scene-children must be dropped so reactivation
+    ;; does not carry forward deleted panels.
+    (when (and self.entity self.scene-children
+               (= (type slot.scene-state) :table)
+               (= (type slot.scene-state.panels) :table))
+      (let [canonical-panels slot.scene-state.panels]
+        (local stale-elements [])
+        (each [_ metadata (ipairs self.scene-children)]
+          (when (and metadata metadata.persistence metadata.element)
+            ;; Check if this panel has a match in canonical state.
+            ;; Match by comparing persistence fingerprints, excluding
+            ;; layout-specific fields (position, rotation) that drift
+            ;; at runtime.
+            (local persistence metadata.persistence)
+            (var matched? false)
+            (each [_ panel (ipairs canonical-panels)]
+              (when (and (not matched?)
+                         (= persistence.kind panel.kind))
+                ;; Two panels match when all non-layout persistence
+                ;; fields are equal.
+                (set matched?
+                     (accumulate [same? true k v (pairs persistence)]
+                       (if (not same?) false
+                           (or (= k :position) (= k :rotation)) true
+                           (let [cv (. panel k)]
+                             (and (not (= cv nil))
+                                  (= v cv))))))))
+            (when (not matched?)
+              (table.insert stale-elements metadata.element))))
+        ;; Remove stale panels from the entity and scene metadata.
+        ;; Use pcall since remove-panel-child may fail on panels without
+        ;; full layout integration; we still remove from scene-children.
+        (each [_ element (ipairs stale-elements)]
+          (pcall (fn [] (self:remove-panel-child element)))
+          ;; Remove from scene-children even if remove-panel-child failed
+          ;; (e.g. due to missing layout entry).
+          (when self.scene-children
+            (for [idx (length self.scene-children) 1 -1]
+              (when (= (and (. self.scene-children idx) (. self.scene-children idx :element)) element)
+                (table.remove self.scene-children idx)))))))
     ;; Sync slot entity with scene entity so deactivate-activity-slot
     ;; can deactivate layout physics bodies for the final slot.
     (set slot.entity self.entity)

@@ -1164,10 +1164,271 @@
               "dark theme override must survive full switch cycle")
       (drop-fixture fixture))))
 
+;; ── R3-1 inactive existing terrain update ──────────────────────────────
+
+(fn sandbox-activation-replaces-stale-terrain-with-updated-canonical []
+  "R3-1: When a canonical Sandbox terrain record changes while the Sandbox
+  is inactive, reactivation must update/replace the retained runtime terrain
+  instead of skipping the same terrain id.  The stale runtime capture must
+  not overwrite the updated canonical state."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Activate sandbox with terrain A (opacity 1.0).
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      (local original-state (ActivitySceneState.empty-state))
+      (set original-state.terrains
+           [(make-heightfield-terrain-record {:id "t-a" :opacity 1.0})])
+      (scene:restore-activity-slot-state "sandbox" original-state)
+      ;; Verify the runtime terrain has the original opacity.
+      (local runtime-terrain-a (. slot.scene-terrains 1))
+      (assert runtime-terrain-a "slot should have runtime terrain for t-a")
+      ;; Switch to Graph (deactivates sandbox).
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      (assert (not slot.visible?) "Sandbox should be inactive after graph activation")
+      ;; Simulate WorldData.update-terrain-record: update t-a's opacity
+      ;; in the canonical state while Sandbox is inactive.
+      (local canonical-t-a (. slot.scene-state.terrains 1))
+      (assert (= canonical-t-a.id "t-a")
+              "canonical terrain at index 1 should be t-a")
+      (set canonical-t-a.options.opacity 0.5)
+      ;; Reactivate Sandbox.  R3-1 fix ensures the stale runtime terrain
+      ;; is replaced with the updated canonical record.
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Sandbox should be active after reactivation")
+      ;; Verify the runtime terrain now reflects the updated canonical record.
+      (local updated-runtime-terrain-a (. slot.scene-terrains 1))
+      (assert updated-runtime-terrain-a
+              "slot should still have runtime terrain for t-a after reactivation")
+      ;; Verify terrain count is still 1 (no duplicates).
+      (assert (= (length slot.scene-terrains) 1)
+              (.. "Expected 1 runtime terrain after reactivation, got "
+                  (tostring (length slot.scene-terrains))))
+      ;; Verify the canonical state still has the updated record.
+      (assert (= (length slot.scene-state.terrains) 1)
+              "Canonical state should still have 1 terrain after reactivation")
+      ;; Now capture the slot state and verify the updated opacity is preserved.
+      (local captured (scene:capture-activity-slot-state "sandbox"))
+      (assert captured "capture-activity-slot-state should return state")
+      (assert (= (length captured.terrains) 1)
+              (.. "Captured state should have 1 terrain, got "
+                  (tostring (length captured.terrains))))
+      (local captured-t-a (. captured.terrains 1))
+      (assert (= captured-t-a.id "t-a")
+              "Captured terrain should be t-a")
+      (assert (= (. captured-t-a.options :opacity) 0.5)
+              "Captured terrain should preserve the updated opacity 0.5, not the stale 1.0")
+      (drop-fixture fixture))))
+
+;; ── R3-2 inactive panel removal ────────────────────────────────────────
+
+(fn sandbox-activation-removes-stale-panels-on-reactivation []
+  "R3-2: When canonical Sandbox panels are removed while the Sandbox is
+  inactive, reactivation must drop stale retained runtime panels so the
+  graph-mode view does not carry forward deleted panels."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      (var skybox-state {:enabled? false
+                         :default {:name "lake"
+                                   :brightness 0.1
+                                   :tint-color [1.0 1.0 1.0]}
+                         :by-theme {}})
+      (set app.renderers
+           {:skybox {:get-state (fn [_] skybox-state)
+                    :set-state (fn [_ state] (set skybox-state state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Activate sandbox and build a simple entity with a panel.
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (scene:activate-activity-slot "sandbox")
+      ;; Build a default entity so scene-children / entity exist.
+      (scene:build-default {})
+      ;; Manually inject a panel with persistence into the scene-children.
+      ;; This simulates a panel that was added via add-panel-child and
+      ;; captured into canonical state.
+      (local test-element {:layout {:position (glm.vec3 10 20 30)
+                                     :rotation (glm.quat 1 0 0 0)
+                                     :size (glm.vec3 4 4 4)
+                                     :measure (glm.vec3 4 4 4)
+                                     :children []
+                                     :parent scene.entity.layout
+                                     :root scene.entity.layout.root
+                                     :mark-measure-dirty (fn [_])}
+                            :drop (fn [_])})
+      (local test-persistence {:kind "graph-node-cube"
+                                :graph-map-id "test-map"
+                                :node-key "test-key"
+                                :label "Test Cube"
+                                :size [4 4 4]})
+      ;; Add to scene-children
+      (when (not scene.scene-children)
+        (set scene.scene-children []))
+      (table.insert scene.scene-children
+                    {:element test-element
+                     :persistence test-persistence
+                     :position (glm.vec3 0 0 0)
+                     :rotation (glm.quat 1 0 0 0)})
+      ;; Add to entity children
+      (when (not scene.entity.children)
+        (set scene.entity.children []))
+      (table.insert scene.entity.children
+                    {:element test-element
+                     :position (glm.vec3 10 20 30)
+                     :rotation (glm.quat 1 0 0 0)})
+      ;; Capture this into the slot's scene-state for canonical storage.
+      (local initial-state (ActivitySceneState.empty-state))
+      ;; Shallow copy the persistence table for canonical storage.
+      (local panel-copy {})
+      (each [k v (pairs test-persistence)]
+        (tset panel-copy k v))
+      (set initial-state.panels [panel-copy])
+      (set slot.scene-state initial-state)
+      ;; Verify the scene has the panel in its children before switch.
+      (assert (= (length (or scene.scene-children [])) 1)
+              "Scene should have 1 panel before switch")
+      ;; Switch to Graph (deactivates sandbox).
+      (scene:ensure-activity-slot "graph")
+      (scene:activate-activity-slot "graph")
+      (assert (not slot.visible?) "Sandbox should be inactive after graph activation")
+      ;; Simulate panel removal via WorldData: clear canonical panels.
+      (set slot.scene-state.panels [])
+      ;; Reactivate Sandbox.  R3-2 fix ensures the stale panel is removed.
+      (scene:activate-activity-slot "sandbox")
+      (assert slot.visible? "Sandbox should be active after reactivation")
+      ;; Verify the stale panel was removed from scene-children.
+      ;; After removal, scene-children should be empty (no persistent panels).
+      (var persistent-panel-count 0)
+      (each [_ metadata (ipairs (or scene.scene-children []))]
+        (when (and metadata metadata.persistence)
+          (set persistent-panel-count (+ persistent-panel-count 1))))
+      (assert (= persistent-panel-count 0)
+              (.. "Expected 0 persistent panels after reactivation with empty canonical, got "
+                  (tostring persistent-panel-count)))
+      (drop-fixture fixture))))
+
+;; ── R3-3 skybox by-theme on activation ─────────────────────────────────
+
+(fn sandbox-activation-resolves-skybox-by-theme []
+  "R3-3: When activating a slot with a by-theme skybox override, the
+  skybox applied to the renderer must resolve for the current active theme,
+  not just use the default entry."
+  (with-restored-app-fields
+    [:skybox-state :background-state :lights-state :physics-containment-config
+     :__physics-global-containment :physics-containment-scene
+     :engine]
+    (fn []
+      (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      ;; Build complete skybox state with a dark-theme override.
+      (local complete-skybox
+        (SkyboxState.normalize-complete-state
+          {:enabled? true
+           :default {:name "lake"
+                     :brightness 0.1
+                     :tint-color [1.0 1.0 1.0]}
+           :by-theme {:dark {:name "night"
+                              :brightness 0.3
+                              :tint-color [0.8 0.8 1.0]}}}
+          "test-by-theme"))
+      ;; Unit-test: resolve-for-theme returns the dark entry when key is "dark".
+      (let [resolved-dark (SkyboxState.resolve-for-theme complete-skybox :dark)]
+        (assert (= resolved-dark.name "night")
+                (.. "resolve-for-theme(:dark) should return night, got " (tostring resolved-dark.name)))
+        (assert (= resolved-dark.brightness 0.3)
+                (.. "resolve-for-theme(:dark) brightness should be 0.3, got " (tostring resolved-dark.brightness))))
+      ;; resolve-for-theme with nil key returns the default entry.
+      (let [resolved-nil (SkyboxState.resolve-for-theme complete-skybox nil)]
+        (assert (= resolved-nil.name "lake")
+                (.. "resolve-for-theme(nil) should return lake, got " (tostring resolved-nil.name)))
+        (assert (= resolved-nil.brightness 0.1)
+                (.. "resolve-for-theme(nil) brightness should be 0.1, got " (tostring resolved-nil.brightness))))
+      ;; resolve-for-theme with unknown key returns the default entry.
+      (let [resolved-unknown (SkyboxState.resolve-for-theme complete-skybox :unknown)]
+        (assert (= resolved-unknown.name "lake")
+                (.. "resolve-for-theme(:unknown) should fall back to lake, got " (tostring resolved-unknown.name))))
+      ;; Integration: mock renderer and activate a slot, verifying the renderer
+      ;; receives a theme-resolved skybox (not the raw complete state).
+      (var renderer-skybox nil)
+      (set app.renderers
+           {:skybox {:get-state (fn [_] (or renderer-skybox
+                                            {:enabled? false :name "lake" :brightness 0.1 :tint-color [1.0 1.0 1.0]}))
+                    :set-state (fn [_ state] (set renderer-skybox state))}
+            :get-background-state (fn [_] (or app.background-state BackgroundState.default-state))
+            :set-background-state (fn [_ state] (set app.background-state state))})
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (local slot (scene:ensure-activity-slot "sandbox"))
+      (local sandbox-state (ActivitySceneState.empty-state))
+      (set sandbox-state.skybox complete-skybox)
+      (scene:restore-activity-slot-state "sandbox" sandbox-state)
+      ;; Activate sandbox — the skybox should be resolved before reaching the renderer.
+      (scene:activate-activity-slot "sandbox")
+      (assert renderer-skybox "Skybox should have been set on activation")
+      (assert renderer-skybox.enabled? "Renderer skybox should be enabled")
+      ;; Critical: the renderer must receive a resolved skybox, not the raw
+      ;; complete state.  The complete state has :default and :by-theme keys
+      ;; which exist only in the canonical format; the renderer expects flat
+      ;; keys (name, brightness, tint-color, enabled?).
+      (assert (not renderer-skybox.default)
+              "Renderer skybox must NOT contain :default (complete state was not resolved)")
+      (assert (not renderer-skybox.by-theme)
+              "Renderer skybox must NOT contain :by-theme (complete state was not resolved)")
+      (drop-fixture fixture))))
+
 (table.insert tests {:name "sandbox activation removes stale terrains when canonical empty"
                      :fn sandbox-activation-removes-stale-terrains-when-canonical-empty})
 (table.insert tests {:name "slot switch preserves complete skybox policy"
                      :fn slot-switch-preserves-complete-skybox-policy})
+
+(table.insert tests {:name "R3-1 sandbox activation replaces stale terrain with updated canonical"
+                     :fn sandbox-activation-replaces-stale-terrain-with-updated-canonical})
+(table.insert tests {:name "R3-2 sandbox activation removes stale panels on reactivation"
+                     :fn sandbox-activation-removes-stale-panels-on-reactivation})
+(table.insert tests {:name "R3-3 sandbox activation resolves skybox by-theme"
+                     :fn sandbox-activation-resolves-skybox-by-theme})
 
 (local main
   (fn []

@@ -41,7 +41,12 @@
   (local scene (and runtime runtime.scene))
   (local skybox-state (resolve-canonical-sandbox-skybox world))
   (when (and scene scene.set-skybox-state skybox-state)
-    (scene:set-skybox-state skybox-state)))
+    ;; R3-3: Resolve skybox by-theme override for current theme before
+    ;; applying to the renderer.  This ensures theme-switch activates
+    ;; the correct per-theme skybox entry, not just the default.
+    (local SkyboxState (require :skybox-state))
+    (local resolved (SkyboxState.resolve-for-theme skybox-state theme-name))
+    (scene:set-skybox-state resolved)))
 
 (fn apply-active-theme-to-build-contexts []
   (local active-theme (and app.themes app.themes.get-active-theme

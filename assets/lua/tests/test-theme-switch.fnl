@@ -713,6 +713,87 @@
           "apply-theme should not report a theme rebuild failure when theme succeeded")
   true)
 
+;; ── R3-3 skybox by-theme on theme switch ──────────────────────────────
+
+(fn apply-theme-resolves-skybox-by-theme []
+  "R3-3: apply-theme must resolve skybox with by-theme override for the
+  target theme, so theme switch activates the correct per-theme skybox entry."
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (var skybox-applied nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  ;; Mock scene: set-skybox-state captures the skybox passed to the renderer.
+  (set app.scene {:build-context {}
+                  :set-skybox-state (fn [_self state]
+                                     (set skybox-applied state)
+                                     true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Set up canonical Sandbox scene state with a by-theme skybox override.
+  ;; The dark theme should use "night" skybox; light (which there's no override
+  ;; for) should fall back to the default "lake".
+  (local sandbox-skybox
+    {:enabled? true
+     :default {:name "lake"
+               :brightness 0.1
+               :tint-color [1.0 1.0 1.0]}
+     :by-theme {:dark {:name "night"
+                       :brightness 0.3
+                       :tint-color [0.8 0.8 1.0]}}})
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox sandbox-skybox
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
+  ;; Apply light theme — no by-theme override for light, should fall back to default.
+  (ThemeActions.apply-theme :light)
+  (assert skybox-applied "apply-theme should apply skybox from canonical sandbox state")
+  (assert skybox-applied.enabled? "skybox should be enabled")
+  (assert (= skybox-applied.name "lake")
+          (.. "Expected default lake skybox for light theme, got " (tostring skybox-applied.name)))
+  ;; Now apply dark theme — the dark by-theme override should take effect.
+  (ThemeActions.apply-theme :dark)
+  (assert skybox-applied "apply-theme should re-apply skybox on theme switch")
+  (assert (= skybox-applied.name "night")
+          (.. "Expected dark-theme night skybox, got " (tostring skybox-applied.name)))
+  (assert (= skybox-applied.brightness 0.3)
+          "dark theme skybox should have brightness 0.3")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  true)
+
+(table.insert tests {:name "Apply theme resolves skybox by-theme"
+                     :fn apply-theme-resolves-skybox-by-theme})
+
 (table.insert tests {:name "Apply theme fails when reactivation fails despite successful theme"
                      :fn apply-theme-fails-when-reactivation-fails-despite-successful-theme})
 
