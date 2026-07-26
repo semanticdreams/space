@@ -1109,6 +1109,135 @@
 (table.insert tests {:name "external-unit-mcp: run-tests rejects unknown loader without run-test capability"
                      :fn test-run-tests-rejects-unknown-loader})
 
+;; ── Task 4: External Unit MCP Tool Registry ──
+
+(local ExternalUnitMcpTools (require :llm/external-unit-mcp/tools))
+
+(fn test-tool-registry-exposes-minimal-external-tool-set []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local registry (ExternalUnitMcpTools.make-tool-registry {:app {}}))
+          (ExternalUnitMcpTools.register-tools registry service)
+          (local tools-list (registry:list))
+          (assert (= (length tools-list) 10)
+                  (.. "expected 10 tools, got " (length tools-list)))
+          (local expected-names
+            ["space_unit_apply_patch"
+             "space_unit_create_source"
+             "space_unit_inspect"
+             "space_unit_list"
+             "space_unit_read_log"
+             "space_unit_read_source"
+             "space_unit_reload"
+             "space_unit_resolve"
+             "space_unit_run_tests"
+             "space_unit_snapshot"])
+          (each [_ tool (ipairs tools-list)]
+            (assert (= (string.sub tool.name 1 6) "space_")
+                    (.. "tool '" tool.name "' must use space_ prefix"))
+            (assert (not= tool.description nil)
+                    (.. "tool '" tool.name "' missing description"))
+            (assert (> (# tool.description) 0)
+                    (.. "tool '" tool.name "' description must not be empty"))
+            (assert tool.inputSchema
+                    (.. "tool '" tool.name "' missing inputSchema")))
+          (local actual-names [])
+          (each [_ tool (ipairs tools-list)]
+            (table.insert actual-names tool.name))
+          (assert (= (length actual-names) (length expected-names))
+                  "should have exactly 10 tools")
+          (each [i expected-name (ipairs expected-names)]
+            (assert (= expected-name (. actual-names i))
+                    (.. "tool at index " i " should be " expected-name
+                        ", got " (. actual-names i)))))))))
+
+(table.insert tests {:name "external-unit-mcp: tool registry exposes minimal external tool set"
+                     :fn test-tool-registry-exposes-minimal-external-tool-set})
+
+(fn test-tool-calls-return-json-service-responses []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local json (require :json))
+          (local registry (ExternalUnitMcpTools.make-tool-registry {:app {}}))
+          (ExternalUnitMcpTools.register-tools registry service)
+          (local result (registry:call "space_unit_list" {}))
+          (assert (= result.isError false) "list should not error")
+          (assert (= (length result.content) 1) "should have one content item")
+          (assert (= (. result.content 1 :type) "text") "content should be text")
+          (local text (. result.content 1 :text))
+          (assert (not= text nil) "content text should not be nil")
+          (assert (> (# text) 0) "content text should not be empty")
+          (local parsed (json.loads text))
+          (assert (= (type parsed) "table") "should parse as a table")
+          (assert (>= (length parsed) 1) "should have at least one unit in list"))))))
+
+(table.insert tests {:name "external-unit-mcp: tool calls return JSON service responses"
+                     :fn test-tool-calls-return-json-service-responses})
+
+(fn test-write-tool-errors-propagate-as-mcp-tool-errors []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit)
+          ;; Also register a unit without filesystem backing (unknown loader)
+          (local orphan-unit (Units.Unit {:id "orphan"
+                                           :source :user
+                                           :load (fn [_] true)
+                                           :unload (fn [_] true)}))
+          (mgr:register orphan-unit))
+        (fn [_mgr service]
+          (local registry (ExternalUnitMcpTools.make-tool-registry {:app {}}))
+          (ExternalUnitMcpTools.register-tools registry service)
+          ;; Calling create-source on a flat unit should error
+          (local result (registry:call "space_unit_create_source"
+                                        {:unit_id "user-bubble-overlay"
+                                         :source_id "new.fnl"
+                                         :source "(fn init [] true)\n(fn drop [] true)\n{:init init :drop drop}"}))
+          (assert (= result.isError true) "write tool on unsupported loader should return isError == true")
+          (assert (= (length result.content) 1) "error should have one content item")
+          (assert (= (. result.content 1 :type) "text") "error content should be text")
+          (assert (string.find (. result.content 1 :text) "create" 1 true)
+                  (.. "error should mention the write operation, got: " (. result.content 1 :text))))))))
+
+(table.insert tests {:name "external-unit-mcp: write tool errors propagate as MCP tool errors"
+                     :fn test-write-tool-errors-propagate-as-mcp-tool-errors})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
