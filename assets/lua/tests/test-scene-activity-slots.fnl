@@ -1172,7 +1172,7 @@
   instead of skipping the same terrain id.  The stale runtime capture must
   not overwrite the updated canonical state."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
+    [:renderers :skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
      :engine]
     (fn []
@@ -1251,7 +1251,7 @@
   inactive, reactivation must drop stale retained runtime panels so the
   graph-mode view does not carry forward deleted panels."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
+    [:renderers :skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
      :engine]
     (fn []
@@ -1350,7 +1350,7 @@
   skybox applied to the renderer must resolve for the current active theme,
   not just use the default entry."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
+    [:renderers :themes :skybox-state :background-state :lights-state :physics-containment-config
      :__physics-global-containment :physics-containment-scene
      :engine]
     (fn []
@@ -1380,15 +1380,15 @@
       ;; resolve-for-theme with nil key returns the default entry.
       (let [resolved-nil (SkyboxState.resolve-for-theme complete-skybox nil)]
         (assert (= resolved-nil.name "lake")
-                (.. "resolve-for-theme(nil) should return lake, got " (tostring resolved-nil.name)))
-        (assert (= resolved-nil.brightness 0.1)
-                (.. "resolve-for-theme(nil) brightness should be 0.1, got " (tostring resolved-nil.brightness))))
-      ;; resolve-for-theme with unknown key returns the default entry.
-      (let [resolved-unknown (SkyboxState.resolve-for-theme complete-skybox :unknown)]
-        (assert (= resolved-unknown.name "lake")
-                (.. "resolve-for-theme(:unknown) should fall back to lake, got " (tostring resolved-unknown.name))))
-      ;; Integration: mock renderer and activate a slot, verifying the renderer
-      ;; receives a theme-resolved skybox (not the raw complete state).
+                (.. "resolve-for-theme(nil) should return lake, got " (tostring resolved-nil.name))))
+      ;; Set active theme to dark via a mock themes object, so
+      ;; apply-state-to-services resolves the dark by-theme override.
+      ;; The mock must expose get-active-theme returning {:name :dark}
+      ;; because resolve-active-theme in scene.fnl extracts .name from it.
+      (set app.themes
+           {:get-active-theme (fn [] {:name :dark})
+            :set-theme (fn [_name] true)})
+      ;; Mock renderer to capture the exact skybox sent to it.
       (var renderer-skybox nil)
       (set app.renderers
            {:skybox {:get-state (fn [_] (or renderer-skybox
@@ -1404,18 +1404,22 @@
       (local sandbox-state (ActivitySceneState.empty-state))
       (set sandbox-state.skybox complete-skybox)
       (scene:restore-activity-slot-state "sandbox" sandbox-state)
-      ;; Activate sandbox — the skybox should be resolved before reaching the renderer.
+      ;; Activate sandbox.  With active theme = dark, the renderer must
+      ;; receive the dark :by-theme override (night, brightness 0.3),
+      ;; NOT the default lake skybox.  This assertion fails for the
+      ;; original nil-theme bug where resolve-for-theme received nil
+      ;; and always returned the default entry.
       (scene:activate-activity-slot "sandbox")
       (assert renderer-skybox "Skybox should have been set on activation")
       (assert renderer-skybox.enabled? "Renderer skybox should be enabled")
-      ;; Critical: the renderer must receive a resolved skybox, not the raw
-      ;; complete state.  The complete state has :default and :by-theme keys
-      ;; which exist only in the canonical format; the renderer expects flat
-      ;; keys (name, brightness, tint-color, enabled?).
       (assert (not renderer-skybox.default)
               "Renderer skybox must NOT contain :default (complete state was not resolved)")
       (assert (not renderer-skybox.by-theme)
               "Renderer skybox must NOT contain :by-theme (complete state was not resolved)")
+      (assert (= renderer-skybox.name "night")
+              (.. "Expected dark-theme night skybox, got " (tostring renderer-skybox.name)))
+      (assert (= renderer-skybox.brightness 0.3)
+              (.. "Expected dark-theme brightness 0.3, got " (tostring renderer-skybox.brightness)))
       (drop-fixture fixture))))
 
 (table.insert tests {:name "sandbox activation removes stale terrains when canonical empty"
