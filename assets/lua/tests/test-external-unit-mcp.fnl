@@ -102,7 +102,9 @@
           (assert bubble-handle.source-handle.primary "source-handle should be primary")
           (assert (> bubble-handle.source-handle.size 0) "source-handle size should be > 0")
           (assert (= (type bubble-handle.source-handle.hash) "string") "source-handle hash should be string")
-          (assert (> (# bubble-handle.source-handle.hash) 0) "source-handle hash should not be empty")
+          (assert (= (string.sub bubble-handle.source-handle.hash 1 7) "sha256:")
+                  "source-handle hash should be sha256: prefixed")
+          (assert (> (# bubble-handle.source-handle.hash) 7) "source-handle hash should contain digest")
           ;; Unknown unit (builtin has no owned paths)
           (assert (= builtin-handle.loader "unknown")
                   (.. "expected unknown loader, got " builtin-handle.loader))
@@ -284,6 +286,109 @@
 
 (table.insert tests {:name "external-unit-mcp: list returns deterministic ordering"
                      :fn test-list-returns-deterministic-ordering})
+
+(fn test-resolve-rejects-negative-limit []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local (ok err) (pcall #(service:resolve {:description "unit" :limit -1})))
+          (assert (not ok) "should reject negative limit")
+          (assert (string.find err "limit" 1 true)
+                  "error should mention limit"))))))
+
+(table.insert tests {:name "external-unit-mcp: resolve rejects negative limit"
+                     :fn test-resolve-rejects-negative-limit})
+
+(fn test-resolve-rejects-non-integer-limit []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local (ok err) (pcall #(service:resolve {:description "unit" :limit 1.5})))
+          (assert (not ok) "should reject non-integer limit")
+          (assert (string.find err "integer" 1 true)
+                  "error should mention integer"))))))
+
+(table.insert tests {:name "external-unit-mcp: resolve rejects non-integer limit"
+                     :fn test-resolve-rejects-non-integer-limit})
+
+(fn test-resolve-accepts-nil-limit []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          ;; nil limit should default to 20 — this must complete without error
+          (local result (service:resolve {:description "unit"}))
+          (assert result.candidates "nil limit should default and return candidates"))))))
+
+(table.insert tests {:name "external-unit-mcp: resolve accepts nil limit (defaults to 20)"
+                     :fn test-resolve-accepts-nil-limit})
+
+(fn test-source-artifacts-have-sha256-prefix []
+  (with-temp-dir
+    (fn [dir]
+      (local bubble-path (write-bubble-unit dir))
+      (with-service dir
+        (fn [mgr _dir]
+          (local fennel-paths (.. dir "/?.fnl;" dir "/?/init.fnl"))
+          (local bubble-unit (Units.ModuleUnit
+                               {:id "user-bubble-overlay"
+                                :module-name "bubble-overlay"
+                                :module-paths fennel-paths
+                                :source :user
+                                :suppress-run-main? true
+                                :owned-paths [bubble-path]}))
+          (mgr:register bubble-unit))
+        (fn [_mgr service]
+          (local result (service:inspect {:unit_id "user-bubble-overlay"}))
+          ;; Source handle hash must have sha256: prefix
+          (assert (and result.source-handle result.source-handle.hash)
+                  "source-handle should have a hash")
+          (assert (= (string.sub result.source-handle.hash 1 7) "sha256:")
+                  "source-handle hash must be sha256: prefixed")
+          ;; Source artifacts must have sha256: prefix
+          (each [_ art (ipairs result.source-artifacts)]
+            (assert art.hash "artifact missing hash")
+            (assert (= (string.sub art.hash 1 7) "sha256:")
+                    (.. "artifact " art.source-id " hash must be sha256: prefixed, got "
+                        (string.sub (or art.hash "") 1 20)))))))))
+
+(table.insert tests {:name "external-unit-mcp: source artifacts have sha256: prefix"
+                     :fn test-source-artifacts-have-sha256-prefix})
 
 (local main
   (fn []

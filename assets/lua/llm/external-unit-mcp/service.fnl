@@ -38,13 +38,13 @@
                                 (let [stat (fs.stat path)]
                                   (and stat.exists stat.size)))
                            0))
-      (local (hash-ok file-hash) (pcall #(Sha256.hash-file path)))
+      (local file-hash (.. "sha256:" (Sha256.hash-file path)))
       (table.insert artifacts
                     {:source-id source-id
                      :kind "file"
                      :primary primary
                      :size file-size
-                     :hash (if hash-ok file-hash "unknown")})))
+                     :hash file-hash})))
   artifacts)
 
 (fn primary-source-artifact [artifacts]
@@ -151,6 +151,13 @@
   (fn resolve [self args]
     (local description (or args.description
                            (error "resolve requires :description")))
+    (when (not= args.limit nil)
+      (assert (= (type args.limit) :number)
+              "resolve :limit must be a number")
+      (assert (>= args.limit 0)
+              "resolve :limit must be non-negative")
+      (assert (= args.limit (math.floor args.limit))
+              "resolve :limit must be an integer"))
     (local limit (or args.limit 20))
     (local tokens (tokenize description))
     (assert (> (length tokens) 0)
@@ -184,8 +191,8 @@
                   (if (> a.confidence b.confidence) true
                       (< a.confidence b.confidence) false
                       (< a.unit-id b.unit-id))))
-    ;; Apply optional limit
-    (when (and limit (> (length candidates) limit))
+    ;; Apply optional limit via bounded slicing — cannot loop indefinitely
+    (when (> (length candidates) limit)
       (while (> (length candidates) limit)
         (table.remove candidates)))
     {:candidates candidates})
