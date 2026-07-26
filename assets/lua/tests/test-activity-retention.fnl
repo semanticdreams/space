@@ -55,7 +55,11 @@
                      :set-canvas-visible
                     :set-active-interaction-surface
                     :viewport
-                    :themes])
+                    :themes
+                    :renderers
+                    :lights
+                    :engine
+                    :create-default-projection])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
@@ -707,7 +711,8 @@
                    :physics-containment-config
                    :engine
                    :pointer-target-enabled?
-                   :scene])
+                   :scene
+                   :create-default-projection])
   (local app-snapshot (snapshot-app-fields app-keys))
   (set app.activity-registry nil)
   (set app.activities-changed nil)
