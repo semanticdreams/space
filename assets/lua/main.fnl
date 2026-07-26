@@ -971,8 +971,7 @@
       (set hud-opts.left-dock-builder contrib.left_dock_builder))
     (when app.agent-runner
       (ensure-extended-sidebar!)
-      (set hud-opts.right-dock-builder (HudExtendedSidebarView app.extended-sidebar))
-      (set hud-opts.right-dock-width 6))
+      (set hud-opts.right-dock-builder (HudExtendedSidebarView app.extended-sidebar)))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)
     (when contrib.overlay
@@ -2034,6 +2033,7 @@
 (fn app.drop []
   (set (. package.loaded "renderers") nil)
   (drop-agent-runtime!)
+  (InputState.release-active-input)
   (AppBootstrap.drop-states)
   (when (and app.update-handler app.engine.events app.engine.events.updated)
     (app.engine.events.updated:disconnect app.update-handler true)

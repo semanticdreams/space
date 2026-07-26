@@ -210,7 +210,7 @@
   (assert (> tiles.layout.size.x 0) "tiles should have positive width between docks")
   (entity:drop))
 
-(fn right-dock-width-is-in-hud-units []
+(fn right-dock-uses-natural-measured-width []
   (local hud {:world-units-per-pixel 0.05
               :margin-px 0
               :half-width 50
@@ -220,6 +220,7 @@
     (HudLayout.make-hud-builder
       {:control-builder (fixed-widget "control" (glm.vec3 8 3 0))
        :status-builder (fixed-widget "status" (glm.vec3 8 2 0))
+       :right-dock-width 99
        :right-dock-builder (fixed-widget "right-dock" (glm.vec3 5 4 0))}))
   (local entity (builder ctx))
   (entity.layout:measurer)
@@ -229,8 +230,10 @@
   (set entity.layout.clip-region nil)
   (set entity.layout.depth-offset-index 0)
   (entity.layout:layouter)
-  (assert (= entity.right-dock-root.layout.size.x 42)
-          "right dock width should use stable HUD world units, not pixels")
+  (assert (= entity.right-dock-root.layout.size.x 5)
+          "right dock should use its natural measured width, ignoring right-dock-width")
+  (assert (= entity.tiles-root.layout.size.x 95)
+          "tiles should reserve exactly the natural right dock width")
   (entity:drop))
 
 (table.insert tests {:name "Hud layout left dock fills canvas band height"
@@ -245,8 +248,8 @@
                      :fn right-dock-fills-canvas-band-height})
 (table.insert tests {:name "Hud layout right dock coexists with left dock"
                      :fn right-dock-coexists-with-left-dock})
-(table.insert tests {:name "Hud layout right dock width is in HUD units"
-                     :fn right-dock-width-is-in-hud-units})
+(table.insert tests {:name "Hud layout right dock uses natural measured width"
+                     :fn right-dock-uses-natural-measured-width})
 (table.insert tests {:name "Status panel layout uses one gap with two columns"
                      :fn status-panel-layout-uses-single-gap-with-two-columns})
 

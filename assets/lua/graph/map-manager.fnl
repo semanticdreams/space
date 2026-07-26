@@ -554,13 +554,13 @@
         (when (. entries id)
             (error (.. "GraphMapManager.create-map! duplicate id: " id)))
          (set (. entries id) {:id id
-                              :name resolved-name
-                              :nodes []
-                              :edges []
-                              :selected_node_keys []
-                              :focused_node_key nil
-                              :restored-from-state? true
-                              :map nil})
+                               :name resolved-name
+                               :nodes []
+                               :edges []
+                               :selected_node_keys []
+                               :focused_node_key nil
+                               :restored-from-state? false
+                               :map nil})
         (set next-id (+ next-id 1))
         (set self.next-map-id next-id)
         (maps-changed:emit {:created-id id :active-id active-id})

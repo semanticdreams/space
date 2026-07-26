@@ -411,6 +411,8 @@
        :layout layout
        :drop drop
        :update update
+       :connect-update connect-update
+       :disconnect-update disconnect-update
        :cell-size cell-size
        :scroll_offset (fn []
                         (assert-live "scroll_offset")

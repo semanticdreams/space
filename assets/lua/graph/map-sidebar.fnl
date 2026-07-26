@@ -167,7 +167,7 @@
                                                     :children
                                                     [(FlexChild (build-action-button "New"
                                                                                       (fn [_ _]
-                                                                                          (local sid (.. "map-" (tostring (manager.next-map-id))))
+                                                                                           (local sid (.. "map-" (tostring manager.next-map-id)))
                                                                                           (manager:create-map! sid sid)
                                                                                           (manager:switch-map! sid))
                                                                                       true)
@@ -193,17 +193,20 @@
                                             ic2))})
                      ic)))
 
-            (local children
-                [(fn [ic] ((Rectangle {:color (panel-bg)}) ic))
-                 (build-title)
-                 (build-switch-title)])
+            (local content-children
+                [(FlexChild (build-title) 0)
+                 (FlexChild (build-actions) 0)
+                 (FlexChild (build-switch-title) 0)])
             (each [_ entry (ipairs maps)]
-                (table.insert children (build-map-row entry)))
-            (table.insert children (build-selected-count))
-            (table.insert children (build-separator))
-            (table.insert children (build-actions))
+                (table.insert content-children (FlexChild (build-map-row entry) 0)))
+            (table.insert content-children (FlexChild (build-separator) 0))
+            (table.insert content-children (FlexChild (build-selected-count) 0))
             (root-layout:clear-children)
-            (set content-entity ((Stack {:children children}) ctx))
+            (set content-entity
+                 ((Stack {:children
+                          [(fn [ic] ((Rectangle {:color (panel-bg)}) ic))
+                           (fn [ic] ((Flex {:axis 2 :spacing 0.0 :children content-children}) ic))]})
+                  ctx))
             (when content-entity
                 (root-layout:add-child content-entity.layout)))
 

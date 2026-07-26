@@ -74,6 +74,57 @@ Session IDs come from the native `uuid.v4` binding. Sessions track `created` and
 - `assets/lua/mcp/handler.fnl`: MCP initialize, tools/list, tools/call, sessions
 - `assets/lua/mcp/server-http.fnl`: HTTP/SSE transport wrapper
 - `assets/lua/tools/mcp-remote-server.fnl`: server entrypoint for opencode SSE mode; it requires the app bootstrap-owned `app.mcp-tools` registry rather than installing stub tools
+- `assets/lua/tools/external-unit-mcp-server.fnl`: standalone external unit-development MCP server entrypoint
+- `assets/lua/llm/external-unit-mcp/service.fnl`: loader-neutral unit operations
+- `assets/lua/llm/external-unit-mcp/tools.fnl`: external unit MCP tool definitions
+- `assets/lua/llm/external-unit-mcp/bridge.fnl`: loopback server and isolated OpenCode config
+
+## Internal vs. External MCP Registries
+
+Space has two separate MCP tool registries exposed through different server
+entrypoints. Both bind loopback by default and use the same MCP HTTP/SSE
+transport, but they serve different audiences with different tool sets.
+
+### Internal Agent MCP Server
+
+`assets/lua/tools/mcp-remote-server.fnl` (module `tools.mcp-remote-server:main`)
+
+- Serves the app bootstrap-owned `app.mcp-tools` registry.
+- Registry uses `ToolRegistry {:namespace-prefix "space_"}`.
+- Tools are registered by the preset system (`llm/presets/builtins/`) and
+  adapt to the current app context (scene, canvas, graph, drawing).
+- The Space agent uses this surface for runtime operations: scene manipulation,
+  canvas drawing, graph navigation, unit management, file and shell access.
+- Internal agent tools include `space_unit_*` tools from
+  `llm/presets/builtins/units.fnl` that expect the full app runtime.
+
+### External Unit MCP Server
+
+`assets/lua/tools/external-unit-mcp-server.fnl` (module `tools.external-unit-mcp-server:main`)
+
+- Creates its own standalone `ToolRegistry` with namespace prefix `space_`.
+- Tools are registered from `llm/external-unit-mcp/tools.fnl`.
+- Exposes loader-neutral unit development tools: `space_unit_resolve`,
+  `space_unit_inspect`, `space_unit_read_source`, `space_unit_apply_patch`,
+  `space_unit_create_source`, `space_unit_run_tests`, `space_unit_reload`,
+  `space_unit_read_log`, `space_unit_snapshot`, `space_unit_list`.
+- Uses `ExternalUnitMcpBridge` (`llm/external-unit-mcp/bridge.fnl`) which
+  writes an **isolated** OpenCode config into a temporary directory and prints
+  `OPENCODE_XDG_CONFIG_HOME=<path>` (a label; the caller must set
+  `XDG_CONFIG_HOME` to that path).
+- Does **not** mutate global `~/.config/opencode`.
+- Denies all native tool permissions (filesystem, shell, web, etc.) in the
+  generated config so external sessions can only use `space_unit_*` MCP tools.
+- Headless engine — no graphics window.
+
+### Shared Infrastructure
+
+Both servers reuse the same infrastructure:
+- `mcp/tool-registry.fnl` for tool registration and change notifications
+- `mcp/protocol.fnl` for JSON-RPC helpers
+- `mcp/handler.fnl` for MCP lifecycle (initialize, tools/list, tools/call)
+- `mcp/server-http.fnl` for HTTP/SSE transport
+- C++ `http_server` binding for loopback HTTP and main-thread dispatch
 
 ## Tests
 
@@ -81,6 +132,7 @@ Session IDs come from the native `uuid.v4` binding. Sessions track `created` and
 - `assets/lua/tests/test-http-server.fnl`: HTTP server binding, lifecycle guards, SSE delivery/cleanup
 - `assets/lua/tests/test-mcp-http.fnl`: direct HTTP MCP integration, status diagnostics, loopback guard, SSE reconnect/list_changed behavior, and force-SSE pre-stream rejection
 - `assets/lua/tests/test-mcp-live.fnl`: opencode live integration, gated by `MCP_LIVE_TESTS=1`
+- `assets/lua/tests/test-external-unit-mcp.fnl`: external unit MCP service, tools, bridge, and integration tests
 
 Live tests write opencode config under an isolated `/tmp/space/tests/opencode-mcp-live-*` `XDG_CONFIG_HOME`; they no longer mutate the user’s real `~/.config/opencode`.
 
@@ -111,4 +163,6 @@ SPACE_DISABLE_AUDIO=1 SPACE_ASSETS_PATH="$(pwd)/assets" \
 
 ## See also
 
+- [External Unit MCP](./external-unit-mcp)
+- [Agent Presets](./agent-presets)
 - [Agent Tools](/dev/features/agent-tools), [Agent Runner System](/dev/features/agent-runner-system)`
