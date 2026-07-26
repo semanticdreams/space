@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - opencode/workflow-debug/test-20260725205456
   pull_request:
     branches:
       - main
