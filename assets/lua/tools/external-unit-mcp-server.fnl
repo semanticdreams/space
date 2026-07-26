@@ -6,6 +6,13 @@
   (global app (or app {}))
   (local fs (require :fs))
   (local EngineModule (require :engine))
+
+  ;; Install headless engine before any require that may auto-create one.
+  ;; `main.fnl` auto-creates app.engine with Engine {} when absent, so we
+  ;; must ensure the headless flag is already set before requiring :main.
+  (when (not app.engine)
+    (set app.engine (EngineModule.Engine {:headless true})))
+
   (local appdirs (require :appdirs))
   (local UnitManager (require :unit-manager))
   (local tempfile (require :tempfile))
@@ -14,10 +21,6 @@
   (local ExternalUnitService (require :llm/external-unit-mcp/service))
   (local ExternalUnitMcpBridge (require :llm/external-unit-mcp/bridge))
   (local Main (require :main))
-
-  ;; Ensure app.engine exists
-  (when (not app.engine)
-    (set app.engine (EngineModule.Engine {:headless true})))
 
   ;; Initialize app dirs
   (local data-dir (appdirs.user-data-dir "space"))
