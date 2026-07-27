@@ -182,7 +182,8 @@
     :tests.test-repo-display
     :tests.test-panel-transfer
     :tests.test-sandbox-scene-world-data
-    :tests.test-external-unit-mcp]})
+    :tests.test-external-unit-mcp
+    :tests.test-constraints-runner]})
 
 (local main
   (fn []
