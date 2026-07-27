@@ -76,7 +76,7 @@
   (assert found-build "should find definition for fn build"))
 
 (fn extracts-export-key []
-  (local source "(fn build [world]\n  {:render build})\n")
+  (local source "{:render (fn [] :ok)}\n")
   (local fact-db (extract-from-source source))
   (local ff (. fact-db.files 1))
   (assert ff.exports "file-fact should have :exports")
@@ -267,6 +267,21 @@
   (assert (<= shallow-nesting 1)
           (.. "shallow-fn should have nesting <= 1, got " (tostring shallow-nesting))))
 
+;; --- R2-1: export extraction is restricted to top-level tables ---
+
+(fn exports-are-restricted-to-top-level-tables []
+  "A nested data table like (local config {:main false}) must NOT produce export keys,
+  while a top-level module-return table {:main main} must produce 'main'."
+  (local source "(local config {:main false})\n{:main main}\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  ;; There should be exactly one export: "main" from the top-level table.
+  ;; The nested {:main false} inside local_form must not appear.
+  (assert (= (length ff.exports) 1)
+          (.. "expected exactly 1 export key, got " (length ff.exports)))
+  (assert (= (. ff.exports 1 :key) "main")
+          "the single export should be 'main'"))
+
 ;; Register all tests
 (table.insert tests {:name "facts extracts require module"
                      :fn extracts-require-module})
@@ -302,6 +317,8 @@
                      :fn extracts-top-level-export})
 (table.insert tests {:name "facts per-function nesting depth is scoped"
                      :fn per-function-nesting-depth-is-scoped})
+(table.insert tests {:name "facts exports are restricted to top-level tables"
+                     :fn exports-are-restricted-to-top-level-tables})
 
 (local main
   (fn []

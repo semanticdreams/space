@@ -359,26 +359,25 @@
                 loc (node-line-col node)]
             (when (> table-size facts.metrics.max-table-literal-size)
               (set facts.metrics.max-table-literal-size table-size))
-            ;; Export keys from table-like nodes:
-            ;; table has { table_pair(string key, value) ... }
-            ;; table_metadata has { table_metadata_pair(string key, value) ... }
-            ;; Extracted regardless of function nesting so top-level
-            ;; module-return tables (the dominant export pattern) are included.
-            (let [pair-type (table-pair-type node-type)]
-              (when pair-type
-                (for [i 0 (- (node:child-count) 1)]
-                  (let [c (node:child i)]
-                    (when (= (c:type) pair-type)
-                      (for [j 0 (- (c:child-count) 1)]
-                        (let [tp-c (c:child j)]
-                          (when (= (tp-c:type) "string")
-                            (let [key-text (extract-module-name-from-string-node source tp-c)
-                                  key-loc (node-line-col c)]
-                              (table.insert facts.exports
-                                {:key key-text
-                                 :line key-loc.line
-                                 :column key-loc.column
-                                 :form (node-text source c)}))))))))))))
+            ;; Export keys from top-level table literals only.
+            ;; These are module-return tables (the dominant Fennel export pattern).
+            ;; Nested tables (e.g., (local config {:key val})) are data, not exports.
+            (when (= depth 1)
+              (let [pair-type (table-pair-type node-type)]
+                (when pair-type
+                  (for [i 0 (- (node:child-count) 1)]
+                    (let [c (node:child i)]
+                      (when (= (c:type) pair-type)
+                        (for [j 0 (- (c:child-count) 1)]
+                          (let [tp-c (c:child j)]
+                            (when (= (tp-c:type) "string")
+                              (let [key-text (extract-module-name-from-string-node source tp-c)
+                                    key-loc (node-line-col c)]
+                                (table.insert facts.exports
+                                  {:key key-text
+                                   :line key-loc.line
+                                   :column key-loc.column
+                                   :form (node-text source c)})))))))))))))
 
         ;; Recurse into children
         (for [i 0 (- (node:child-count) 1)]
