@@ -190,7 +190,8 @@
     :tests.test-constraints-rules-scene-sandbox
     :tests.test-constraints-rules-lifecycle
     :tests.test-constraints-rules-layout
-    :tests.test-constraints-rules-structure]})
+    :tests.test-constraints-rules-structure
+    :tests.test-constraints-default-run]})
 
 (local main
   (fn []

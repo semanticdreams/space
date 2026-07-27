@@ -3,6 +3,10 @@
 
 (local Baseline (require :constraints.baseline))
 (local Diagnostics (require :constraints.diagnostics))
+(local Facts (require :constraints.facts))
+(local RuleRegistry (require :constraints.rules.init))
+(local Source (require :constraints.source))
+(local Targets (require :constraints.targets))
 (local json (require :json))
 
 (local M {})
@@ -157,21 +161,119 @@
            :diagnostics all-diagnostics}))))
 
 
-(fn M.main [opts]
-  "Entry point for the constraints runner.
-  Accepts injectable :print and :exit for testability; tolerates nil opts
-  for the runtime's zero-argument module entry-point convention.
-  opts: {:rules [] :target <target> :print <fn> :exit <fn> :argv []
-         :baseline-data <table|nil>}"
+(fn table-contains? [tbl val]
+  "Check whether a sequential table contains a value."
+  (var found false)
+  (each [_ v (ipairs tbl)]
+    (when (= v val)
+      (set found true)))
+  found)
+
+(fn M.run-target [target opts]
+  "Execute the full constraint pipeline for a target:
+   1. Discover source files
+   2. Extract static facts
+   3. Select applicable rules from the registry
+   4. Execute each rule independently with fact context
+   5. Apply baseline policy
+  opts: {:baseline-data <table|nil|false> :timeout-seconds <int|nil>}
+  Returns {:status :pass|:violations|:fail|:interrupted
+           :counts {:total <int> :by-family <table> :by-severity <table>}
+           :diagnostics []}"
   (local o (or opts {}))
-  (let [print-fn (or o.print print)
-        exit-fn (or o.exit os.exit)
-        rules (or o.rules [])
-        target (or o.target {:kind :repo :name "default"})
-        result (M.run {:rules rules :target target :baseline-data o.baseline-data})]
-    (print-fn (json.dumps result))
-    (if (= result.status :pass)
-        (exit-fn 0)
-        (exit-fn 1))))
+  ;; 1. Discover source files
+  (local file-records (Source.discover target))
+  ;; 2. Extract static facts
+  (local fact-db (Facts.extract file-records))
+  ;; 3. Get all rules from registry and filter by target kind & suite
+  (local all-rules (RuleRegistry.all-rules))
+  (local target-suites (or target.suites []))
+  (local applicable-rules [])
+  (each [_ rule (ipairs all-rules)]
+    (let [rule-targets (or rule.targets [:repo :unit :app :files])
+          rule-family (or rule.family "")]
+      (when (and (table-contains? rule-targets target.kind)
+                 (or (= (length target-suites) 0)
+                     (table-contains? target-suites rule-family)))
+        (table.insert applicable-rules rule))))
+  ;; 4. Execute each applicable rule with fact context
+  (local all-diagnostics [])
+  (local present-rule-ids [])
+  (local ctx {:facts fact-db})
+  (each [_ rule (ipairs applicable-rules)]
+    (let [rule-id (or rule.id rule.constraint-id "unknown-rule")
+          rule-fn (or rule.run rule.fn)]
+      (table.insert present-rule-ids rule-id)
+      ;; Wrap rule-fn so it discards the target arg that run-rule passes
+      ;; and calls the real rule function with the fact context instead.
+      (let [result (M.run-rule (fn [_ignored-target] (rule-fn ctx))
+                                target
+                                o.timeout-seconds
+                                rule-id)]
+        (when result
+          (each [_ d (ipairs result)]
+            ;; Ensure every diagnostic identifies the target
+            (when (not (. d :target))
+              (tset d :target target))
+            (table.insert all-diagnostics d))))))
+  ;; 5. Apply baseline policy
+  (let [baseline-data (if (= false o.baseline-data)
+                         nil
+                         (or o.baseline-data (Baseline.load)))]
+    (if baseline-data
+        (let [baseline-result (Baseline.apply all-diagnostics
+                                              baseline-data
+                                              present-rule-ids)
+              filtered-diagnostics baseline-result.diagnostics]
+          ;; Append baseline diagnostics (worsened, stale, missing-required)
+          (each [_ bd (ipairs baseline-result.baseline-diagnostics)]
+            (when (not (. bd :target))
+              (tset bd :target target))
+            (table.insert filtered-diagnostics bd))
+          (let [final-status (compute-status filtered-diagnostics)
+                counts (Diagnostics.summary final-status filtered-diagnostics)]
+            {:status final-status
+             :counts counts
+             :diagnostics filtered-diagnostics}))
+        ;; No baseline data — compute status from unfiltered diagnostics
+        (let [final-status (compute-status all-diagnostics)
+              counts (Diagnostics.summary final-status all-diagnostics)]
+          {:status final-status
+           :counts counts
+           :diagnostics all-diagnostics}))))
+
+(fn M.main [opts-or-argv]
+  "Entry point for the constraints runner.
+  Supports two calling conventions:
+  1. New argv-based: (Runner.main [\"--target\" \"repo\"]) or nil — runs full pipeline.
+  2. Old opts-based: (Runner.main {:rules [] :target ...}) — backwards compatible.
+  Tolerates nil (runtime's zero-argument entry-point convention).
+  When running with nil/empty argv, defaults to repo target."
+  (local arg (or opts-or-argv {}))
+  (if (and (= (type arg) :table) (. arg :rules))
+      ;; Old interface: {:rules [] :target ... :print fn :exit fn :baseline-data tbl}
+      (let [o arg
+            print-fn (or o.print print)
+            exit-fn (or o.exit os.exit)
+            rules (or o.rules [])
+            target (or o.target {:kind :repo :name "default"})
+            result (M.run {:rules rules
+                           :target target
+                           :baseline-data o.baseline-data})]
+        (print-fn (json.dumps result))
+        (if (= result.status :pass)
+            (exit-fn 0)
+            (exit-fn 1)))
+      ;; New interface: argv (sequential table) or nil → full pipeline
+      (let [argv (if (= (type arg) :table) arg [])
+            target (Targets.resolve argv {})
+            ;; Check if old-style injected print/exit are present
+            print-fn (or (. arg :print) print)
+            exit-fn (or (. arg :exit) os.exit)
+            result (M.run-target target {})]
+        (print-fn (json.dumps result))
+        (if (= result.status :pass)
+            (exit-fn 0)
+            (exit-fn 1)))))
 
 M
