@@ -105,6 +105,80 @@
                               (lua :break)))))))))
           found))))
 
+(fn find-pcall-body-end-byte [fn-form]
+  "Find the byte position of the closing paren for the pcall's protected
+   function body. Locates (fn [...] within (pcall (fn [...] and returns
+   the byte position of the matching close paren, or nil if not found."
+  (let [(pcall-start) (string.find fn-form "pcall" 1 true)]
+    (when pcall-start
+      ;; Look for (fn pattern after pcall start
+      (let [(fn-start) (string.find fn-form "%(fn[%s%)]" pcall-start false)]
+        (when fn-start
+          ;; Find matching close paren for this fn form
+          (var depth 1)
+          (var pos (+ fn-start 4))
+          (var end-pos nil)
+          (while (and (> depth 0) (<= pos (length fn-form)))
+            (let [ch (fn-form:sub pos pos)]
+              (if (= ch "(") (set depth (+ depth 1))
+                  (= ch ")") (do (set depth (- depth 1))
+                                 (when (= depth 0)
+                                   (set end-pos pos)))
+                  ;; Skip string literals to avoid false parens inside strings
+                  (= ch "\"") (let [end-quote (fn-form:find "\"" (+ pos 1) true)]
+                                (when end-quote (set pos end-quote)))))
+            (set pos (+ pos 1)))
+          end-pos)))))
+
+(fn has-concrete-restore-after-byte? [fn-form fn-def-line path min-byte]
+  "Check for concrete restore evidence at a byte position >= min-byte.
+   Like has-concrete-restore-after-line? but compares start byte position
+   instead of approximate line number. Used for pcall where the restore
+   must be textually after the pcall body's closing paren."
+  (let [snap-var (find-snapshot-var fn-form path)]
+    (if (not snap-var)
+        false
+        (let [path-text (table.concat path ".")
+              escaped-path (path-text:gsub "%." "%%.")
+              escaped-var (escape-pattern snap-var)]
+          (var found false)
+          ;; Scan (set path_text snap-var) positions
+          (let [set-pat (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)")]
+            (var search-start 1)
+            (while (and (not found) search-start)
+              (let [(start end) (string.find fn-form set-pat search-start)]
+                (if start
+                    (if (>= start min-byte)
+                        (set found true)
+                        (set search-start (+ end 1)))
+                    (lua :break)))))
+          ;; Scan tset positions  
+          (when (and (not found) (>= (length path) 2))
+            (let [plen (length path)]
+              (local table-parts [])
+              (for [i 1 (- plen 1)]
+                (table.insert table-parts (. path i)))
+              (let [tset-table (table.concat table-parts ".")
+                    key (. path plen)
+                    escaped-tset (tset-table:gsub "%." "%%.")
+                    escaped-key (escape-pattern key)
+                    pat1 (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var)
+                    pat2 (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var)]
+                (var search-start 1)
+                (while (and (not found) search-start)
+                  (let [(start1 end1) (string.find fn-form pat1 search-start)]
+                    (if start1
+                        (if (>= start1 min-byte)
+                            (set found true)
+                            (set search-start (+ end1 1)))
+                        (let [(start2 end2) (string.find fn-form pat2 search-start)]
+                          (if start2
+                              (if (>= start2 min-byte)
+                                  (set found true)
+                                  (set search-start (+ end2 1)))
+                              (lua :break)))))))))
+          found))))
+
 (fn global-mutation-restoration-rule-run [ctx]
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
@@ -146,14 +220,20 @@
                   (when (string.find fn-form "with-restored-app-fields" 1 true)
                     (set has-restoration true))
                   ;; Pattern 2: direct snapshot table restore (order-aware)
-                  (when (not has-restoration)
-                    (when (has-concrete-restore-after-line? fn-form fn-def-line path-segments max-line)
-                      (set has-restoration true)))
-                  ;; Pattern 3: pcall cleanup restore (order-aware)
-                  (when (not has-restoration)
-                    (when (and (string.find fn-form "pcall" 1 true)
-                               (has-concrete-restore-after-line? fn-form fn-def-line path-segments max-line))
-                      (set has-restoration true))))
+                  ;; Skip when pcall is present — Pattern 3 handles pcall-specific ordering
+                  (let [has-pcall (string.find fn-form "pcall" 1 true)]
+                    (when (and (not has-restoration) (not has-pcall))
+                      (when (has-concrete-restore-after-line? fn-form fn-def-line path-segments max-line)
+                        (set has-restoration true)))
+                    ;; Pattern 3: pcall cleanup restore (order-aware)
+                    ;; For pcall: the restore must be outside/after the pcall-protected body,
+                    ;; not inside it. Find the end of the inner fn form and require
+                    ;; the restore after that line.
+                    (when (and (not has-restoration) has-pcall)
+                      (let [pcall-body-end-byte (find-pcall-body-end-byte fn-form)]
+                        (when pcall-body-end-byte
+                          (when (has-concrete-restore-after-byte? fn-form fn-def-line path-segments pcall-body-end-byte)
+                            (set has-restoration true)))))))
                 ;; Emit diagnostic if no valid restoration found
                 (when (not has-restoration)
                   (tset diagnosed key true)

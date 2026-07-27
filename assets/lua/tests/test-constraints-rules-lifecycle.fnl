@@ -1064,6 +1064,46 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should flag pcall-pre-restore-then-mutate"))
 
+(fn mutation-restoration-flags-pcall-restore-inside-pcall-body []
+  "A function that uses pcall to mutate a sensitive global and places the
+  restore write INSIDE the pcall body should be flagged. A restore inside
+  the pcall-protected mutation body is not cleanup — it runs only when
+  the protected call succeeds, not when it fails."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  ;; form: (fn test-fn [] (let [orig app.renderers] (pcall (fn [] (set app.renderers custom) (set app.renderers orig)))))
+  ;; The restore (set app.renderers orig) is inside the pcall body — NOT cleanup.
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pcall-restore-inside-body"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-pcall-restore-inside-body []
+  (let [orig app.renderers]
+    (pcall (fn []
+      (set app.renderers custom)
+      (set app.renderers orig)))))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 7 :column 1
+                                          :form "(set app.renderers custom)"
+                                          :enclosing-fn "test-pcall-restore-inside-body"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers orig)"
+                                          :enclosing-fn "test-pcall-restore-inside-body"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for restore inside pcall body")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag restore-inside-pcall-body"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -1237,6 +1277,8 @@
                      :fn mutation-restoration-flags-pre-restore-then-mutate})
 (table.insert tests {:name "mutation-restoration flags pcall pre-restore then mutate"
                      :fn mutation-restoration-flags-pcall-pre-restore-then-mutate})
+(table.insert tests {:name "mutation-restoration flags pcall restore inside pcall body"
+                     :fn mutation-restoration-flags-pcall-restore-inside-pcall-body})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"
