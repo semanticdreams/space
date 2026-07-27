@@ -183,7 +183,8 @@
     :tests.test-panel-transfer
     :tests.test-sandbox-scene-world-data
     :tests.test-external-unit-mcp
-    :tests.test-constraints-runner]})
+    :tests.test-constraints-runner
+    :tests.test-constraints-source]})
 
 (local main
   (fn []

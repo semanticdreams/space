@@ -1,0 +1,114 @@
+;; Source discovery and parsing for experimental Fennel constraints.
+;; Provides file discovery, tree-sitter parsing, traversal, and text extraction.
+
+(local ts (require :tree-sitter))
+(local fs (require :fs))
+
+(local M {})
+
+(fn list-fnl-files [root]
+  "Recursively collect .fnl file paths under root, sorted lexicographically.
+  Excludes hidden directories (those starting with '.')."
+  (let [files []]
+    (fn walk [dir]
+      (let [(ok entries) (pcall #(fs.list-dir dir false))]
+        (when ok
+          (each [_ entry (ipairs entries)]
+            (if entry.is-dir
+                (walk entry.path)
+                (and entry.is-file
+                     (or (entry.name:match "%.fnl$")
+                         (entry.path:match "%.fnl$")))
+                (table.insert files (fs.absolute entry.path)))))))
+    (walk root)
+    ;; Sort lexicographically for deterministic ordering
+    (table.sort files)
+    files))
+
+(fn compute-module [file-path module-roots]
+  "Compute a module name from file-path by removing .fnl and replacing / with .,
+  relative to the first matching module root."
+  (var module-name file-path)
+  (each [_ root (ipairs module-roots)]
+    (let [root-prefix (.. root "/")]
+      (when (and (or (= file-path root-prefix) true)
+                 ;; Check if file is under this root
+                 (let [root-lower (root:lower)
+                       file-lower (file-path:lower)]
+                   (or (= file-lower root-lower)
+                       (file-lower:match (.. "^" (root-lower:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1") "/")))))
+        ;; Strip root prefix
+        (let [relative (if (= (# file-path) (# root))
+                          file-path
+                          (file-path:sub (+ (# root) 2)))]
+          ;; Remove .fnl extension
+          (let [no-ext (relative:gsub "%.fnl$" "")]
+            ;; Replace / with .
+            (set module-name (no-ext:gsub "/" ".")))))
+      ;; Break on first match? No, use last match. Actually, first match should be enough.
+      ;; For simplicity, just use the first matching root
+      ;; (We could break here but we'll compute all and take the shortest)
+      )
+    module-name))
+
+(fn M.node-text [source node]
+  "Extract the substring of source covered by node's byte range.
+  Tree-sitter byte offsets are 0-indexed; Lua strings are 1-indexed."
+  (source:sub (+ (node:start-byte) 1) (node:end-byte)))
+
+(fn M.node-location [node]
+  "Return {:line integer :column integer} for the start of node.
+  Maps tree-sitter's row/column to Fennel/Lua line/column convention."
+  (let [pt (node:start-point)]
+    {:line pt.row
+     :column pt.column}))
+
+(fn M.walk [node f]
+  "Call f on every node in a depth-first traversal."
+  (f node)
+  (for [i 0 (- (node:child-count) 1)]
+    (M.walk (node:child i) f)))
+
+(fn M.discover [target]
+  "Discover and parse Fennel source files for a target.
+  Returns a list of file-records:
+  [{:target target
+    :path absolute-path-string
+    :module string
+    :source string
+    :tree TSTree
+    :root TSNode} ...]"
+  (var file-paths [])
+  ;; Collect files from roots
+  (each [_ root (ipairs (or target.roots []))]
+    (each [_ f (ipairs (list-fnl-files root))]
+      (table.insert file-paths f)))
+  ;; Collect explicit files
+  (each [_ f (ipairs (or target.files []))]
+    (table.insert file-paths (fs.absolute f)))
+  ;; Deduplicate paths (sort by path)
+  (table.sort file-paths)
+  (var seen {})
+  (local deduped [])
+  (each [_ path (ipairs file-paths)]
+    (when (not (. seen path))
+      (tset seen path true)
+      (table.insert deduped path)))
+  ;; Parse each file
+  (local module-roots (or target.module-roots target.roots []))
+  (local records [])
+  (each [_ path (ipairs deduped)]
+    (let [source (fs.read-file path)
+          tree (ts.parse source {:language :fennel})
+          root (tree:root)
+          module (compute-module path module-roots)]
+      (table.insert records
+        {:target target
+         :path path
+         :module module
+         :source source
+         :tree tree
+         :root root})))
+  records)
+
+M
