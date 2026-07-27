@@ -909,6 +909,83 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should flag pcall-triple-mutate-no-restore"))
 
+(fn mutation-restoration-flags-snapshot-two-mutations-without-restore []
+  "A function that snapshots a sensitive global then mutates it twice
+  without a restore write back to the snapshot var should be flagged.
+  Snapshot evidence + 2 mutations does not imply restoration."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  ;; form: (fn test-fn [] (let [orig app.renderers] (set app.renderers c1) (set app.renderers c2)))
+  ;; Both sets are mutations to app.renderers, neither restores to orig.
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-snapshot-two-mutates"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-snapshot-two-mutates []
+  (let [orig app.renderers]
+    (set app.renderers custom1)
+    (set app.renderers custom2)))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 7 :column 1
+                                          :form "(set app.renderers custom1)"
+                                          :enclosing-fn "test-snapshot-two-mutates"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom2)"
+                                          :enclosing-fn "test-snapshot-two-mutates"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for snapshot+two-mutations without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag snapshot+two-mutations-without-restore"))
+
+(fn mutation-restoration-flags-snapshot-pcall-two-mutations-without-restore []
+  "A function that snapshots a sensitive global then wraps two mutations
+  in pcall without restoring back to the snapshot var should be flagged.
+  pcall + snapshot + 2 mutations does not imply restoration."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  ;; form: (fn test-fn [] (let [orig app.renderers] (pcall (fn [] (set app.renderers c1) (set app.renderers c2)))))
+  ;; Both sets are mutations, neither restores to orig.
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pcall-snapshot-two-mutates"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-pcall-snapshot-two-mutates []
+  (let [orig app.renderers]
+    (pcall (fn []
+      (set app.renderers custom1)
+      (set app.renderers custom2)))))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom1)"
+                                          :enclosing-fn "test-pcall-snapshot-two-mutates"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 9 :column 1
+                                          :form "(set app.renderers custom2)"
+                                          :enclosing-fn "test-pcall-snapshot-two-mutates"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for snapshot+pcall+two-mutations without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag snapshot+pcall+two-mutations-without-restore"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -1074,6 +1151,10 @@
                      :fn mutation-restoration-flags-pcall-double-mutate-no-restore})
 (table.insert tests {:name "mutation-restoration flags pcall triple-mutate without restore"
                      :fn mutation-restoration-flags-pcall-triple-mutate-no-restore})
+(table.insert tests {:name "mutation-restoration flags snapshot+two-mutations without restore"
+                     :fn mutation-restoration-flags-snapshot-two-mutations-without-restore})
+(table.insert tests {:name "mutation-restoration flags snapshot+pcall+two-mutations without restore"
+                     :fn mutation-restoration-flags-snapshot-pcall-two-mutations-without-restore})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"

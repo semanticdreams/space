@@ -24,35 +24,55 @@
                   (when matches (set found true))))))
           found))))
 
-(fn form-has-snapshot-evidence? [fn-form path-text]
-  "Check for snapshot patterns: the path appearing in a local binding or
-  let binding position where it is read, not written."
-  (or (string.find fn-form (.. "(local " path-text) 1 true)
-      (string.find fn-form (.. " " path-text ")") 1 true)
-      (string.find fn-form (.. " " path-text "]") 1 true)))
+(fn escape-pattern [s]
+  "Escape Lua pattern magic characters in a string."
+  (s:gsub "[%]%[%%%.%*%+%-%?%(%)%^%$]" "%%%1"))
+
+(fn has-concrete-restore-evidence? [fn-form path]
+  "Check for concrete restore evidence: the function form must show both
+   a snapshot of the path into a local variable and a later write that
+   sets the path back to that same variable.
+   Snapshot: (let [VAR path_text ...] or (local VAR path_text ...)
+   Restore:  (set path_text VAR) or (tset table-prefix key VAR)"
+  (let [path-text (table.concat path ".")
+        escaped-path (path-text:gsub "%." "%%.")]
+    (var found false)
+    ;; Find snapshot variables from (let [VAR path_text ...]) patterns.
+    (each [snap-var (fn-form:gmatch (.. "%(let%s*%[%s*([^%s]+)%s+" escaped-path))]
+      (let [escaped-var (escape-pattern snap-var)]
+        ;; (set path_text snap-var)
+        (when (string.find fn-form (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)"))
+          (set found true))
+        ;; (tset table-prefix key snap-var)
+        (when (not found)
+          (let [plen (length path)]
+            (when (>= plen 2)
+              (local table-parts [])
+              (for [i 1 (- plen 1)]
+                (table.insert table-parts (. path i)))
+              (let [tset-table (table.concat table-parts ".")
+                    key (. path plen)
+                    escaped-tset (tset-table:gsub "%." "%%.")
+                    escaped-key (escape-pattern key)]
+                (when (or (string.find fn-form (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var))
+                          (string.find fn-form (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var)))
+                  (set found true))))))))
+    ;; Also check (local VAR path_text) patterns.
+    (when (not found)
+      (each [snap-var (fn-form:gmatch (.. "%(local%s+([^%s]+)%s+" escaped-path))]
+        (let [escaped-var (escape-pattern snap-var)]
+          (when (string.find fn-form (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)"))
+            (set found true)))))
+    found))
 
 (fn global-mutation-restoration-rule-run [ctx]
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (when (string.find ff.path "/tests/" 1 true)
-      ;; Pre-count mutations per function per path for restore detection.
-      ;; The fact extractor records ALL set/tset forms as mutations,
-      ;; including restoration writes. So a valid snapshot+restore
-      ;; function has >= 2 mutation entries for the same path.
-      (var fn-mutation-counts {})
-      (each [_ mutation (ipairs (or ff.mutations []))]
-        (when (mutation-path-is-sensitive? mutation.path)
-          (let [pt (table.concat (or mutation.path []) ".")
-                fn-name (or mutation.enclosing-fn "<top-level>")]
-            (var entry (. fn-mutation-counts fn-name))
-            (when (not entry)
-              (set entry {})
-              (tset fn-mutation-counts fn-name entry))
-            (tset entry pt (+ (or (. entry pt) 0) 1)))))
       ;; Track which (fn, path) pairs we've already diagnosed to avoid
       ;; duplicate diagnostics for the same function+path.
       (var diagnosed {})
-      ;; Now check each mutation for restoration evidence
+      ;; Check each mutation for restoration evidence
       (each [_ mutation (ipairs (or ff.mutations []))]
         (when (mutation-path-is-sensitive? mutation.path)
           (let [fn-name (or mutation.enclosing-fn "<top-level>")
@@ -65,35 +85,34 @@
                     (set fn-form def.form))))
               (var has-restoration false)
               (when fn-form
-                (let [fn-counts (. fn-mutation-counts fn-name)
-                      mutation-count (or (and fn-counts (. fn-counts path-text)) 0)]
-                  ;; Pattern 1: with-restored-app-fields
-                  (when (string.find fn-form "with-restored-app-fields" 1 true)
-                    (set has-restoration true))
-                  ;; Pattern 2: direct snapshot table restore
-                  ;; Requires snapshot evidence (path read into local/let binding)
-                  ;; AND >= 2 mutation records (mutation + restore both recorded by extractor)
-                  (when (not has-restoration)
-                    (when (and (form-has-snapshot-evidence? fn-form path-text)
-                               (>= mutation-count 2))
-                      (set has-restoration true)))
-                  ;; Pattern 3: pcall cleanup restore
-                  ;; Requires pcall in form, snapshot evidence, AND >= 2 mutation records
-                  ;; (mutation inside pcall + restore outside, both recorded by extractor)
-                  (when (not has-restoration)
-                    (when (and (string.find fn-form "pcall" 1 true)
-                               (form-has-snapshot-evidence? fn-form path-text)
-                               (>= mutation-count 2))
-                      (set has-restoration true)))))
+                ;; Pattern 1: with-restored-app-fields (explicit, unambiguous)
+                (when (string.find fn-form "with-restored-app-fields" 1 true)
+                  (set has-restoration true))
+                ;; Pattern 2: direct snapshot table restore
+                ;; Requires concrete restore evidence: (let [VAR path] ...)
+                ;; AND a later (set path VAR) or (tset prefix key VAR)
+                ;; that restores the sensitive global back to the snapshot value.
+                (when (not has-restoration)
+                  (when (has-concrete-restore-evidence? fn-form mutation.path)
+                    (set has-restoration true)
+                    ;; Mark as Pattern 2 for pcall branch to skip.
+                    nil))
+                ;; Pattern 3: pcall cleanup restore
+                ;; Requires pcall in form AND concrete restore evidence
+                ;; (snapshot + restore write back to snapshot binding).
+                (when (not has-restoration)
+                  (when (and (string.find fn-form "pcall" 1 true)
+                             (has-concrete-restore-evidence? fn-form mutation.path))
+                    (set has-restoration true))))
               (when (not has-restoration)
                 (tset diagnosed (.. fn-name "::" path-text) true)
                 (table.insert diagnostics
                   (Diagnostics.violation
                     {:constraint-id "lifecycle.global-mutation-restoration" :family "test-isolation"
-                     :message (.. "test file mutates sensitive global " (table.concat (or mutation.path []) ".") " without snapshot and restore")
+                     :message (.. "test file mutates sensitive global " path-text " without snapshot and restore")
                      :file ff.path :line (or mutation.line 0) :column 0
-                     :evidence {:global-path (table.concat (or mutation.path []) ".") :enclosing-fn (or mutation.enclosing-fn "<top-level>")}
-                     :hint (.. "snapshot and restore " (table.concat (or mutation.path []) ".") " using with-restored-app-fields or pcall cleanup")})))))))))
+                     :evidence {:global-path path-text :enclosing-fn (or mutation.enclosing-fn "<top-level>")}
+                     :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn M.rules []
