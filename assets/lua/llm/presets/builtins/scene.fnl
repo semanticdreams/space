@@ -287,8 +287,7 @@
      :inputSchema {:type "object" :properties {:x {:type "number"} :y {:type "number"}} :required ["x" "y"]}
      :make-run (fn [app]
                  (fn [args]
-                   (assert app.scene "space_scene_screen_ray requires app.scene")
-                   (local ray (app.scene:screen-pos-ray {:x args.x :y args.y}))
+                   (local ray (app.presentation-screen-pos-ray {:x args.x :y args.y}))
                    (.. "origin=(" ray.origin.x "," ray.origin.y "," ray.origin.z ") dir=(" ray.direction.x "," ray.direction.y "," ray.direction.z ")")))})
 
   (adapters:register

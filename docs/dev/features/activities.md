@@ -123,7 +123,7 @@ Responsibilities:
 
 The first implementation does not need a broad generic compositor. It only needs one active slot per surface.
 
-### Activity-Owned Presentation
+## Activity-Owned Presentation
 
 - Activities expose render targets explicitly through Scene/Canvas/HUD slots.
 - Scene and Canvas slots own cameras; no activity receives a default app camera.
