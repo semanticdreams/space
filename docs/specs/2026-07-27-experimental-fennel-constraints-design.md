@@ -24,6 +24,9 @@ constraints:
 - tests for the runner, fact extraction, and each constraint family;
 - integration into the normal validation flow with `make constraints` and a
   CTest target that runs before Fennel tests.
+- support for checking targets outside the main repository file set, including
+  user units, app-specific scripts, and other Fennel modules that run on the
+  Space runtime.
 
 The MVP does not need a general query language, complete semantic analysis,
 macro-expanded analysis, or broad lint coverage. Those can be added after the
@@ -33,8 +36,11 @@ first constraints prove useful.
 
 The system has four stable boundaries:
 
-1. **Code under examination**: production and test Fennel files under
-   `assets/lua/`. Production modules do not import or call constraint modules.
+1. **Code under examination**: one or more configured analysis targets. The
+   default target is the repository Fennel code under `assets/lua/`, but the
+   runner must also accept external roots or explicit files for user units,
+   app-specific scripts, and other Space-runtime Fennel code. Production modules
+   do not import or call constraint modules.
 2. **Facts made available for examination**: parsed source facts and selected
    executable scenario observations.
 3. **Constraints**: Fennel modules that encode acceptable system behavior.
@@ -65,6 +71,27 @@ The MVP should expose traversal helpers and fact tables only. It should not
 attempt to build a general-purpose query language before the first rules are in
 use.
 
+### Analysis targets
+
+The runner should treat the repository as the default analysis target, not the
+only possible target. A target describes a set of source roots or explicit files,
+the module path assumptions needed to parse them, and the constraint suites that
+apply to them.
+
+Supported target kinds should include:
+
+- `:repo`: the default project code and tests under `assets/lua/`;
+- `:unit`: user-authored units or generated unit source that run through the
+  Space unit system;
+- `:app`: app-specific Fennel entry points or scripts using the Space runtime;
+- `:files`: explicit standalone files passed to the runner.
+
+Not every constraint applies to every target. Repo architecture constraints such
+as Scene/Sandbox ownership apply to `:repo`. General source, lifecycle, layout,
+and structure constraints should be reusable for external targets when their
+facts are available. Diagnostics should always identify the target as well as the
+file and constraint id.
+
 ### Executable scenario facts
 
 Some contracts are behavioral and cannot be usefully proven by source scans.
@@ -84,6 +111,12 @@ The system runs as a blocking gate before normal tests:
 make constraints
 make test
 ```
+
+The same runner should also support explicit target execution, for example a
+single user unit source root or a set of standalone scripts. The exact CLI flags
+can be chosen during implementation, but the design requires a non-repo entry
+point so other Space-runtime code can be checked without being copied into
+`assets/lua/`.
 
 `make test` and the CTest Fennel test targets should depend on the constraints
 target so constraints cannot silently disappear from the normal workflow.
@@ -208,6 +241,9 @@ is part of keeping the system honest.
 - `assets/lua/constraints/source.fnl`: file discovery, file reading, parse
   wrapper, AST traversal helpers.
 - `assets/lua/constraints/facts.fnl`: stable fact extraction from Fennel source.
+- `assets/lua/constraints/targets.fnl`: target configuration, source-root/file
+  resolution, and suite selection for repo, user-unit, app, and explicit-file
+  runs.
 - `assets/lua/constraints/baseline.fnl`: reviewed baseline loading and checking.
 
 ### Constraint modules
@@ -235,6 +271,11 @@ Add a `make constraints` target using the same runtime conventions as Fennel
 tests: `SPACE_DISABLE_AUDIO=1`, absolute `SPACE_ASSETS_PATH`, and configured
 `FENNEL_PATH` / `FENNEL_MACRO_PATH`.
 
+The Make target should run the default repo target. The underlying runner should
+also expose a way to run constraints against non-repo targets, such as user units
+or app scripts, while still using the Space runtime and the same diagnostic
+schema.
+
 Add a CTest target for experimental constraints and make normal Fennel tests
 depend on it. The target name and docs should keep the word `experimental`, but
 the target must be blocking.
@@ -253,6 +294,8 @@ Concrete acceptance criteria:
   `interrupted`.
 - `make test` cannot run Fennel tests without first running constraints.
 - The static Fennel parser path records source locations for diagnostics.
+- The runner can analyze at least one explicit non-repo file/root target without
+  requiring that source to live under `assets/lua/`.
 - The first rule set covers Scene/Sandbox, lifecycle, layout/rendering, and
   structure/formatting families.
 - Every rule has valid and invalid tests.
