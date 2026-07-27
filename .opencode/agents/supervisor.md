@@ -87,6 +87,20 @@ incidental overlap.
 **Skill priority:** process skills first. Brainstorming and systematic-debugging
 before implementation skills.
 
+### Space Project Skill Routing
+
+- If a request touches Fennel widgets, layout, rendering adapters, interaction
+  widgets, widget lifecycle, or widget tests, invoke `space-fennel-ui` before
+  planning or implementation.
+- If a request touches graph nodes, graph maps, graph views, graph
+  persistence/topology, key loaders, or graph terminology, invoke
+  `space-graph-doctrine` before planning or implementation.
+- If a request touches Space tests, E2E snapshots, remote-control debugging,
+  profiling, build commands, or runtime harnesses, invoke `space-testing-runtime`
+  before planning or implementation.
+- Keep process skills first when they apply; do not invoke project skills for
+  incidental overlap.
+
 ## Red Flags — STOP
 
 These thoughts mean you're rationalizing. Stop and follow the process:

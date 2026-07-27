@@ -59,7 +59,14 @@ Rules:
     is still clean and production-ready.
 17. Identify the docs/dev page that should document the feature, subsystem,
     problem, or architectural decision. Plan to create or update docs/dev when
-    behavior, architecture, workflows, or operational assumptions change.
+    behavior, architecture, workflows, or operational assumptions change:
+    - Plans that change behavior, architecture, workflows, or operational
+      assumptions must name the exact `docs/dev/**` page to create or update.
+    - If no appropriate docs/dev page exists, the plan must include creating a
+      minimal focused page under `docs/dev/features/` or `docs/dev/notes/`.
+    - If the change is documentation/config only and existing docs/dev pages
+      remain canonical, the plan must state why no additional docs/dev page is
+      needed.
 
 Return only raw Markdown suitable for PLAN.md — do NOT wrap the output in a
 code fence. The plan must use these exact section headings so that automated
