@@ -5,9 +5,7 @@
 (local Camera (require :camera))
 (local {: FirstPersonControls} (require :first-person-controls))
 (local Activities (require :activities))
-(local ActivitySceneState (require :activity-scene-state))
 (local SandboxActivityActions (require :sandbox-activity-actions))
-(local SkyboxState (require :skybox-state))
 (local ActivityCameraState (require :activity-camera-state))
 
 (fn sandbox-activity-owned-paths []
@@ -157,28 +155,12 @@
   panels)
 
 (fn deactivate-sandbox-activity! [_ctx _session]
+  "Deactivate the sandbox Scene slot.  Scene slot activation/deactivation
+  owns service cleanup — the Scene handles resetting lights, skybox,
+  background, and containment to empty when the slot is deactivated."
   (when (and app.active-world-runtime app.active-world-runtime.scene)
     (local scene app.active-world-runtime.scene)
-    (scene:deactivate-activity-slot "sandbox")
-    ;; R1-2: After deactivating the Scene slot, if no successor Scene slot
-    ;; is active, reset shared lights/skybox/background/containment to empty
-    ;; so they don't leak sandbox state into other activities.
-    (when (not (= (type scene.active-activity-slot-id) :string))
-      (local empty (ActivitySceneState.empty-state))
-      (when (and app app.lights app.lights.set-state)
-        (app.lights:set-state empty.lights))
-      (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-        ;; R2-2: Resolve complete skybox to renderer format.
-        (app.renderers.skybox:set-state
-          (SkyboxState.resolve-for-theme empty.skybox nil)))
-      (when (and app app.renderers app.renderers.set-background-state)
-        (app.renderers:set-background-state empty.background))
-      ;; Clear containment through the sandbox slot's manager.
-      ;; ensure-installed with enabled? false calls clear() internally.
-      (let [slot (scene:activity-slot "sandbox")]
-        (when (and slot slot.ensure-containment-manager)
-          (let [manager (slot:ensure-containment-manager)]
-            (manager:ensure-installed {:config {:enabled? false} :scene scene}))))))
+    (scene:deactivate-activity-slot "sandbox"))
   true)
 
 (fn snapshot-sandbox-activity! []

@@ -763,8 +763,13 @@
      :background background
      :containment containment})
 
-  (fn apply-state-to-services [scene state ?target-slot]
-    (assert state "Scene.apply-state-to-services requires state")
+  (fn apply-slot-service-state [self slot state]
+    "Apply the canonical service state to engine globals and install
+    containment on the given slot.  Writes to app.lights, renderer
+    skybox/background as side effects, but the authoritative state
+    remains slot.scene-state."
+    (assert state "Scene.apply-slot-service-state requires state")
+    (assert slot "Scene.apply-slot-service-state requires slot")
     (local (ok err) (pcall
                     (fn []
                       (when (and state.lights
@@ -784,11 +789,8 @@
                                  app app.renderers app.renderers.set-background-state)
                         (app.renderers:set-background-state state.background))
                       (when state.containment
-                        (local target-slot (or ?target-slot
-                                               (and scene scene.active-activity-slot)))
-                        (when target-slot
-                          (local manager (target-slot:ensure-containment-manager))
-                          (manager:ensure-installed {:config state.containment :scene scene}))))))
+                        (local manager (slot:ensure-containment-manager))
+                        (manager:ensure-installed {:config state.containment :scene self})))))
     (if (not ok)
         (do
           ;; Transactional rollback: reset all services to empty
@@ -799,22 +801,34 @@
               (when (and app app.lights app.lights.set-state)
                 (app.lights:set-state empty.lights))
               (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-                ;; R2-2: Resolve empty.skybox from complete to renderer format.
                 (app.renderers.skybox:set-state
                   (SkyboxState.resolve-for-theme empty.skybox nil)))
               (when (and app app.renderers app.renderers.set-background-state)
                 (app.renderers:set-background-state empty.background))
-              ;; Clear containment via active slot manager
-              (let [active-slot (and scene scene.active-activity-slot)]
-                (when (and active-slot active-slot.physics-containment-manager)
-                  (active-slot.physics-containment-manager:ensure-installed {:config empty.containment :scene scene})))))
+              ;; Clear containment via slot manager
+              (let [manager (and slot (slot:ensure-containment-manager))]
+                (when manager
+                  (manager:ensure-installed {:config empty.containment :scene self})))))
           (error err))
         true))
 
   (fn reset-services-to-empty [scene]
+    "Reset engine service globals (lights, skybox, background) and clear
+    any active slot's containment installation to the canonical empty state."
     (local ActivitySceneState (require :activity-scene-state))
     (local empty (ActivitySceneState.empty-state))
-    (apply-state-to-services scene empty))
+    (when (and app app.lights app.lights.set-state)
+      (app.lights:set-state empty.lights))
+    (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+      (app.renderers.skybox:set-state
+        (SkyboxState.resolve-for-theme empty.skybox nil)))
+    (when (and app app.renderers app.renderers.set-background-state)
+      (app.renderers:set-background-state empty.background))
+    ;; Clear containment via active slot manager if one exists
+    (let [active-slot (and scene scene.active-activity-slot)]
+      (when (and active-slot active-slot.physics-containment-manager)
+        (active-slot.physics-containment-manager:ensure-installed {:config empty.containment :scene scene})))
+    true)
 
   (fn assert-active-content-slot []
     (assert self.active-activity-slot
@@ -886,7 +900,7 @@
       (pcall
         (fn []
           (when slot.scene-state
-            (apply-state-to-services self slot.scene-state slot)))))
+            (self:apply-slot-service-state slot slot.scene-state)))))
     (if (not service-ok)
         (do
           ;; Rollback: reset services to empty, restore previous slot binding
@@ -905,7 +919,7 @@
             (set self.active-activity-slot-id previous-slot-id)
             ;; Restore previous services
             (when previous-slot.scene-state
-              (apply-state-to-services self previous-slot.scene-state previous-slot))
+              (self:apply-slot-service-state previous-slot previous-slot.scene-state))
             ;; Reactivate physics
             (when (and previous-slot.entity
                        (pcall require :layout-physics-bodies))
@@ -1033,7 +1047,7 @@
                 (set self.active-activity-slot-id previous-slot-id)
                 ;; Restore previous services
                 (when previous-slot.scene-state
-                  (apply-state-to-services self previous-slot.scene-state previous-slot))
+                  (self:apply-slot-service-state previous-slot previous-slot.scene-state))
                 ;; Reactivate physics
                 (when (and previous-slot.entity
                            (pcall require :layout-physics-bodies))
@@ -1159,7 +1173,7 @@
     (set slot.scene-state canonical)
     ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
-      (apply-state-to-services self canonical slot)
+      (self:apply-slot-service-state slot canonical)
       ;; R7-1: Reconcile runtime terrains exactly to canonical state,
       ;; using the same logic as activation: remove stale entries, replace
       ;; updated records, add missing records, and handle empty canonical
@@ -1243,7 +1257,11 @@
         (set self.demo-browser nil)
         (set self.physics-body-count 0)
         (set self.active-activity-slot nil)
-        (set self.active-activity-slot-id nil)))
+        (set self.active-activity-slot-id nil)
+        ;; Task 7: Reset engine services to empty so the deactivated
+        ;; slot's lights/skybox/background/containment state does not
+        ;; leak into the scene render path.
+        (reset-services-to-empty self)))
     slot)
 
   (fn drop-activity-slot [_scene activity-id]
@@ -2565,6 +2583,8 @@
 (set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
 (set self.resolve-active-build-context resolve-active-build-context)
 (set self.active-containment-manager active-containment-manager)
+(set self.apply-slot-service-state apply-slot-service-state)
+(set self.reset-services-to-empty reset-services-to-empty)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)

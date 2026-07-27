@@ -2506,6 +2506,46 @@
 (table.insert tests {:name "R7-1b active restore captures generated terrain id"
                      :fn active-restore-captures-generated-terrain-id})
 
+;; ── Task 7: Empty scene slot service leakage ─────────────────────────
+
+(fn empty-scene-slot-applies-empty-services-without-render-target []
+  "Task 7: An empty drawing scene slot activated after sandbox must not
+  expose a render target, must own explicit empty service state, and must
+  not leak sandbox service state through the scene surface."
+  (with-restored-app-fields
+    [:lights :renderers]
+    (fn []
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (var lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0}
+                         :directional []
+                         :point []
+                         :spot []})
+      (var background-state {:color [0 0 0]})
+      (var skybox-state {:enabled? false
+                         :name "lake"
+                         :brightness 0.1
+                         :tint-color [1.0 1.0 1.0]})
+      (set app.lights {:set-state (fn [_self state] (set lights-state state))
+                       :get-state (fn [_self] lights-state)})
+      (set app.renderers {:set-background-state (fn [_self state]
+                                                  (set background-state state))
+                          :get-background-state (fn [_self] background-state)
+                          :skybox {:set-state (fn [_self _state])
+                                   :get-state (fn [_self] skybox-state)}})
+      (scene:ensure-activity-slot "sandbox")
+      (scene:activate-activity-slot "sandbox")
+      (local empty-slot (scene:ensure-activity-slot "drawing"))
+      (scene:activate-activity-slot "drawing")
+      (assert (= (scene:presentation-target) nil)
+              "Empty drawing scene slot must not render")
+      (assert empty-slot.scene-state
+              "Empty slot must own explicit empty service state")
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "Task 7: empty scene slot applies empty services without render target"
+                     :fn empty-scene-slot-applies-empty-services-without-render-target})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
