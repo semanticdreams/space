@@ -569,6 +569,7 @@
           "unhandled F1 should open the HUD overlay from text state")
   (InputState.reset)
   (hud:drop)
+  (states:drop)
   (set app.hud original-hud)
   (set-app-states! original-states))
 
@@ -600,8 +601,38 @@
           "prefix hints should be visible while the overlay stays open")
   (InputState.reset)
   (hud:drop)
+  (states:drop)
   (set app.hud original-hud)
   (set-app-states! original-states))
+
+(fn text-state-drop-disconnects-updated-handler []
+  (local original-states app.states)
+  (local original-presentation-input-controls app.presentation-input-controls)
+  (local states (States))
+  (states:add-state :normal (state-with-hints :normal [(entry "space" "leader" {:priority 10})]))
+  (states:set-state :normal)
+  (set-app-states! states)
+  (InputState.reset)
+  (local subject (TextState))
+  (states:add-state :text subject)
+  (InputState.connect-input (make-input-stub {:text "test"}))
+  (states:set-state :text)
+  ;; Clean up: drop states to disconnect all routes including updated
+  (InputState.reset)
+  (states:drop)
+  (set-app-states! original-states)
+  ;; Spy on app.presentation-input-controls to prove updated handler is gone
+  (var spy-called 0)
+  (set app.presentation-input-controls
+       (fn []
+         (set spy-called (+ spy-called 1))
+         nil))
+  ;; Emit updated — the leaked handler must NOT fire
+  (pcall #(when (and app.engine app.engine.events app.engine.events.updated)
+              (app.engine.events.updated:emit {:dt (/ 1 60)})))
+  (set app.presentation-input-controls original-presentation-input-controls)
+  (assert (= spy-called 0)
+          (.. "expected no updated handler after TextState drop, but presentation-input-controls was called " (tostring spy-called) " times")))
 
 (fn command-hints-route-fails-loudly-without-hud-host []
   (local subject
@@ -931,7 +962,9 @@
 (table.insert tests {:name "Text state unhandled F1 opens HUD overlay while input is active"
                      :fn text-state-unhandled-f1-opens-overlay-while-input-active})
 (table.insert tests {:name "Text state prefix keeps overlay open and updates hints"
-                     :fn text-state-prefix-keeps-overlay-open-and-updates-hints})
+                      :fn text-state-prefix-keeps-overlay-open-and-updates-hints})
+(table.insert tests {:name "Text state drop disconnects updated handler"
+                      :fn text-state-drop-disconnects-updated-handler})
 (table.insert tests {:name "Command hints route fails loudly without HUD host"
                      :fn command-hints-route-fails-loudly-without-hud-host})
 (table.insert tests {:name "Command hints close fails loudly without HUD host"

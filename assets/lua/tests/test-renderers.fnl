@@ -1091,7 +1091,31 @@
           (set app.canvas saved-canvas))))))
 
 (table.insert tests {:name "Renderer lazily constructs presentation provider from runtime"
-                     :fn renderer-lazily-constructs-presentation-from-runtime})
+                      :fn renderer-lazily-constructs-presentation-from-runtime})
+
+(fn renderers-update-records-glViewport-calls []
+  (with-open-gl
+    (fn [mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          (local saved-viewport app.viewport)
+          (set app.viewport {:x 10 :y 20 :width 640 :height 480})
+          (let [(ok result) (pcall #(renderers:update))]
+            (set app.viewport saved-viewport)
+            (assert ok (.. "renderers:update should not crash with viewport: " (tostring result))))
+          (local viewport-calls (mock:get-gl-calls "glViewport"))
+          (assert (>= (# viewport-calls) 1)
+                  (.. "expected at least one glViewport call, got " (# viewport-calls)))
+          (local call (. viewport-calls 1))
+          (assert (= call.args.x 10))
+          (assert (= call.args.y 20))
+          (assert (= call.args.width 640))
+          (assert (= call.args.height 480)))))))
+
+(table.insert tests {:name "Renderers update records glViewport calls"
+                      :fn renderers-update-records-glViewport-calls})
 
 (local main
   (fn []
