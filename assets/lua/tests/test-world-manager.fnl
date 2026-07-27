@@ -686,9 +686,9 @@
       (local sandbox-scene (sandbox-scene-state world))
       (local skybox (and sandbox-scene sandbox-scene.skybox))
       (assert (= (type skybox) :table) "Expected world scene skybox table")
-      (assert (= skybox.enabled? true) "Expected default skybox to start enabled")
-      (assert (= skybox.name "lake") "Expected default skybox name")
-      (assert (= skybox.brightness 0.1) "Expected default skybox brightness")
+       (assert (= skybox.enabled? true) "Expected default skybox to start enabled")
+       (assert (= skybox.default.name "lake") "Expected default skybox name")
+       (assert (= skybox.default.brightness 0.1) "Expected default skybox brightness")
       true)))
 
 (fn home-world-new-state-seeds-default-background []
@@ -780,9 +780,9 @@
       (world:init {})
       (local sandbox-scene (sandbox-scene-state world))
       (local skybox (and sandbox-scene sandbox-scene.skybox))
-      (assert (= skybox.enabled? false) "Expected persisted skybox enabled flag to load")
-      (assert (= skybox.name "lake") "Expected persisted skybox name to load")
-      (assert (= skybox.brightness 0.25) "Expected persisted skybox brightness to load")
+       (assert (= skybox.enabled? false) "Expected persisted skybox enabled flag to load")
+       (assert (= skybox.default.name "lake") "Expected persisted skybox name to load")
+       (assert (= skybox.default.brightness 0.25) "Expected persisted skybox brightness to load")
       true)))
 
 (fn home-world-loads-persisted-background []
@@ -873,9 +873,9 @@
       (local sandbox-scene (sandbox-scene-state world))
       (local skybox (and sandbox-scene sandbox-scene.skybox))
       (assert skybox "HomeWorld should seed missing persisted scene skybox")
-      (assert (= skybox.enabled? true) "HomeWorld should repair missing skybox with default enabled flag")
-      (assert (= skybox.name "lake") "HomeWorld should repair missing skybox with default name")
-      (assert (= skybox.brightness 0.1) "HomeWorld should repair missing skybox with default brightness")
+       (assert (= skybox.enabled? true) "HomeWorld should repair missing skybox with default enabled flag")
+       (assert (= skybox.default.name "lake") "HomeWorld should repair missing skybox with default name")
+       (assert (= skybox.default.brightness 0.1) "HomeWorld should repair missing skybox with default brightness")
       (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
       (local persisted-sandbox-scene (and persisted.activity
                                          persisted.activity.sessions
@@ -883,7 +883,7 @@
                                          persisted.activity.sessions.sandbox.scene))
       (local persisted-skybox (and persisted-sandbox-scene persisted-sandbox-scene.skybox))
       (assert persisted-skybox "HomeWorld should immediately persist repaired skybox during load")
-      (assert (= persisted-skybox.name "lake") "Persisted repaired skybox should use default name")
+       (assert (= persisted-skybox.default.name "lake") "Persisted repaired skybox should use default name")
       true)))
 
 (fn home-world-repairs-missing-persisted-background-with-default []

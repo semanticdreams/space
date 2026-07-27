@@ -794,19 +794,19 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
-        (scene.layout-root:update)
-        (local hit (scene:screen-pos-terrain-domain-hit {:x 50 :y 50}
-                                                        {:view view
-                                                         :projection projection
-                                                         :viewport viewport}))
-        (assert hit "screen-pos terrain domain hit should resolve a translated scene-root terrain")
-        (assert (= hit.terrain-id "terrain-a")
-                "screen-pos terrain domain hit should report terrain id through scene-root transform")
-        (assert (= hit.sample.x 2)
-                "screen-pos terrain domain hit should preserve sample x under scene-root translation")
-        (assert (= hit.sample.z 2)
-                "screen-pos terrain domain hit should preserve sample z under scene-root translation"))))
-  (app.set-viewport original-viewport)
+         (scene:update)
+         (local hit (scene:screen-pos-terrain-domain-hit {:x 50 :y 50}
+                                                         {:view view
+                                                          :projection projection
+                                                          :viewport viewport}))
+         (assert hit "screen-pos terrain domain hit should resolve a translated scene-root terrain")
+         (assert (= hit.terrain-id "terrain-a")
+                 "screen-pos terrain domain hit should report terrain id through scene-root transform")
+         (assert (= hit.sample.x 2)
+                 "screen-pos terrain domain hit should preserve sample x under scene-root translation")
+         (assert (= hit.sample.z 2)
+                 "screen-pos terrain domain hit should preserve sample z under scene-root translation"))))
+   (app.set-viewport original-viewport)
   (set app.projection original-projection)
   (cleanup)
   (when (not ok)
@@ -889,14 +889,14 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
-        (scene.layout-root:update)
-        (local hit (scene:screen-pos-terrain-hit {:x 50 :y 50}
-                                                 {:view view
-                                                  :projection projection
-                                                  :viewport viewport}))
-        (assert hit "screen-pos terrain hit should resolve a translated scene-root terrain")
-        (assert (= hit.terrain-id "terrain-a")
-                "screen-pos terrain hit should report terrain id through scene-root transform")
+         (scene:update)
+         (local hit (scene:screen-pos-terrain-hit {:x 50 :y 50}
+                                                  {:view view
+                                                   :projection projection
+                                                   :viewport viewport}))
+         (assert hit "screen-pos terrain hit should resolve a translated scene-root terrain")
+         (assert (= hit.terrain-id "terrain-a")
+                 "screen-pos terrain hit should report terrain id through scene-root transform")
         (assert (= hit.sample.x 2)
                 "screen-pos terrain hit should preserve sample x under scene-root translation")
         (assert (= hit.sample.z 2)
@@ -989,11 +989,11 @@
                                                               0 0 0 0 0
                                                               0 0 0 0 0
                                                               0 0 0 0 0]}]}]})
-        (scene.layout-root:update)
-        (local target-result
-          (scene:screen-rect-terrain-target "terrain-a"
-                                            {:x 40 :y 50}
-                                            {:x 60 :y 50}
+         (scene:update)
+         (local target-result
+           (scene:screen-rect-terrain-target "terrain-a"
+                                             {:x 40 :y 50}
+                                             {:x 60 :y 50}
                                             {:view view
                                              :projection projection
                                              :viewport viewport}))
