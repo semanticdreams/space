@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Humpback now has a project-local `.opencode/` configuration, so project guidance no longer needs to live entirely in `AGENTS.md`. The goal is to keep always-on context compact while preserving strong project doctrine for agents that work on Fennel widgets, graph exposure, lifecycle/teardown, tests, and release workflow.
+Space now has a project-local `.opencode/` configuration, so project guidance no longer needs to live entirely in `AGENTS.md`. The goal is to keep always-on context compact while preserving strong project doctrine for agents that work on Fennel widgets, graph exposure, lifecycle/teardown, tests, and release workflow.
 
 ## Direction
 
@@ -10,25 +10,25 @@ Use a balanced split:
 
 - `AGENTS.md` remains the concise, durable source of project facts that every agent and tool should see: repository structure, canonical build/test commands, branch/integration policy, high-risk project rules, and pointers to deeper docs.
 - `.opencode/agents/**` remains mostly role and permission configuration: supervisor coordination, implementer/reviewer discipline, model choices, and safe tool behavior.
-- `.opencode/skills/**` gains project-specific, task-triggered guidance for Humpback domains that are too detailed to keep always loaded.
+- `.opencode/skills/**` gains project-specific, task-triggered guidance for Space domains that are too detailed to keep always loaded.
 - `docs/dev/**` remains the human-readable canonical architecture reference. Project skills should reference docs instead of copying long sections.
 
 ## Proposed Project Skills
 
 Create project-specific skills only where triggerable context is useful:
 
-1. `humpback-fennel-ui`
+1. `space-fennel-ui`
    - Use when editing or designing Fennel widgets, layout, rendering adapters, interaction widgets, or widget tests.
    - Points to `docs/dev/fennel/style.md`, `docs/dev/lifecycle-invariants.md`, and `docs/dev/widget-ownership-and-teardown.md`.
    - Captures compact reminders: builder closures, explicit `Layout` ownership, dirt rules, direct child transform writes during layout passes, `drop` responsibility, no silent fallbacks, and Fennel idioms.
 
-2. `humpback-graph-doctrine`
+2. `space-graph-doctrine`
    - Use when editing graph nodes, graph maps, graph views, graph persistence/topology, or graph terminology.
    - Points to `docs/dev/notes/graph.md` and `docs/dev/graph-maps.md`.
    - Captures compact reminders: graph as exposure/adaptor layer, graph topology vs domain-owned data, key loaders adapt owning stores, and forbidden terminology.
 
-3. `humpback-testing-runtime`
-   - Use when running or adding Humpback tests, E2E snapshots, remote-control debugging, profiling, or build/test harnesses.
+3. `space-testing-runtime`
+   - Use when running or adding Space tests, E2E snapshots, remote-control debugging, profiling, or build/test harnesses.
    - Keeps project command details discoverable without bloating generic process skills.
    - Points back to `AGENTS.md` for canonical commands and to relevant docs when present.
 
@@ -51,9 +51,9 @@ Avoid removing facts that non-OpenCode tools still need. `AGENTS.md` should rema
 
 Keep role agents generic by default. Add only small project-aware routing guidance where it improves behavior:
 
-- Supervisor: when a request touches Fennel UI/layout, graph topology/exposure, or Humpback testing/runtime, invoke the corresponding project skill before planning or implementation.
+- Supervisor: when a request touches Fennel UI/layout, graph topology/exposure, or Space testing/runtime, invoke the corresponding project skill before planning or implementation.
 - Planner: require plans that change behavior, architecture, workflows, or operational assumptions to update the appropriate `docs/dev` page.
-- Implementer and reviewer: rely on task briefs and invoked skills rather than permanently embedding all Humpback architecture rules.
+- Implementer and reviewer: rely on task briefs and invoked skills rather than permanently embedding all Space architecture rules.
 
 Do not create new subagents initially. The existing explorer/planner/implementer/reviewer/adjudicator/debug-advisor roles are enough. Consider a specialized subagent later only if repeated work shows a stable, role-specific need that a skill cannot cover.
 

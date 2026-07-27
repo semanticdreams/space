@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refactor Humpback project instructions into a slim always-on `AGENTS.md`, project-specific OpenCode skills, and small role-agent routing guidance.
+**Goal:** Refactor Space project instructions into a slim always-on `AGENTS.md`, project-specific OpenCode skills, and small role-agent routing guidance.
 
-**Architecture:** Keep durable cross-tool facts in `AGENTS.md`, move detailed Humpback domain guidance into triggerable `.opencode/skills/humpback-*` skill files, and add minimal routing hints to role agents. Canonical architecture detail remains in `docs/dev/**`; skills and `AGENTS.md` reference those docs instead of duplicating them.
+**Architecture:** Keep durable cross-tool facts in `AGENTS.md`, move detailed Space domain guidance into triggerable `.opencode/skills/space-*` skill files, and add minimal routing hints to role agents. Canonical architecture detail remains in `docs/dev/**`; skills and `AGENTS.md` reference those docs instead of duplicating them.
 
 **Tech Stack:** Markdown, OpenCode project agents/skills, repository validation with `python3`, `rg`, `git diff --check`, `make test`.
 
@@ -12,7 +12,7 @@
 
 - `AGENTS.md` remains the concise, durable source of project facts that every agent and tool should see: repository structure, canonical build/test commands, branch/integration policy, high-risk project rules, and pointers to deeper docs.
 - `.opencode/agents/**` remains mostly role and permission configuration: supervisor coordination, implementer/reviewer discipline, model choices, and safe tool behavior.
-- `.opencode/skills/**` gains project-specific, task-triggered guidance for Humpback domains that are too detailed to keep always loaded.
+- `.opencode/skills/**` gains project-specific, task-triggered guidance for Space domains that are too detailed to keep always loaded.
 - `docs/dev/**` remains the human-readable canonical architecture reference. Project skills should reference docs instead of copying long sections.
 - Do not create a separate skill for every subsystem yet.
 - `AGENTS.md` should remain useful outside OpenCode, but it should not duplicate full docs/dev pages or long skill bodies.
@@ -35,7 +35,7 @@
 
 **Acceptance criteria:**
 - `AGENTS.md` has fewer lines than the current 145-line version and contains only summaries, commands, high-risk rules, and references.
-- `.opencode/skills/humpback-fennel-ui/SKILL.md`, `.opencode/skills/humpback-graph-doctrine/SKILL.md`, and `.opencode/skills/humpback-testing-runtime/SKILL.md` exist with valid OpenCode skill frontmatter.
+- `.opencode/skills/space-fennel-ui/SKILL.md`, `.opencode/skills/space-graph-doctrine/SKILL.md`, and `.opencode/skills/space-testing-runtime/SKILL.md` exist with valid OpenCode skill frontmatter.
 - New skills reference canonical docs and avoid copying long architecture prose.
 - `.opencode/agents/supervisor.md` routes Fennel UI, graph doctrine, and testing/runtime tasks to the new skills.
 - `.opencode/agents/planner.md` keeps plans disciplined about `docs/dev` updates for behavior, architecture, workflow, or operational-assumption changes.
@@ -51,20 +51,20 @@
 - New subagents.
 - Broad rewrites of generic role agents or generic workflow skills.
 - Copying full `docs/dev/**` architecture pages into OpenCode skill files.
-- Adding subsystem-specific skills beyond the three specified Humpback project skills.
+- Adding subsystem-specific skills beyond the three specified Space project skills.
 
 ---
 
-### Task 1: Project-Specific Humpback Skills
+### Task 1: Project-Specific Space Skills
 
 **Files:**
-- Create: `.opencode/skills/humpback-fennel-ui/SKILL.md`
-- Create: `.opencode/skills/humpback-graph-doctrine/SKILL.md`
-- Create: `.opencode/skills/humpback-testing-runtime/SKILL.md`
+- Create: `.opencode/skills/space-fennel-ui/SKILL.md`
+- Create: `.opencode/skills/space-graph-doctrine/SKILL.md`
+- Create: `.opencode/skills/space-testing-runtime/SKILL.md`
 
 **Interfaces:**
 - Consumes: Existing OpenCode skill file convention: `.opencode/skills/<skill-name>/SKILL.md` with `name:` and `description:` frontmatter.
-- Produces: Skills named `humpback-fennel-ui`, `humpback-graph-doctrine`, and `humpback-testing-runtime` for later references from `AGENTS.md` and `.opencode/agents/supervisor.md`.
+- Produces: Skills named `space-fennel-ui`, `space-graph-doctrine`, and `space-testing-runtime` for later references from `AGENTS.md` and `.opencode/agents/supervisor.md`.
 
 - [ ] **Step 1: Inspect existing skill format**
 
@@ -76,13 +76,13 @@ sed -n '1,30p' .opencode/skills/test-driven-development/SKILL.md
 
 Expected: frontmatter includes `name:` and `description:`, followed by a Markdown heading.
 
-- [ ] **Step 2: Create `humpback-fennel-ui` skill**
+- [ ] **Step 2: Create `space-fennel-ui` skill**
 
-Create `.opencode/skills/humpback-fennel-ui/SKILL.md` with:
-- `name: humpback-fennel-ui`
-- Description: `Use when editing or designing Humpback Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.`
+Create `.opencode/skills/space-fennel-ui/SKILL.md` with:
+- `name: space-fennel-ui`
+- Description: `Use when editing or designing Space Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.`
 - Body sections:
-  - `# Humpback Fennel UI`
+  - `# Space Fennel UI`
   - `## Use When`
   - `## Canonical References`
   - `## Required Reminders`
@@ -101,13 +101,13 @@ Create `.opencode/skills/humpback-fennel-ui/SKILL.md` with:
   - Assert on missing required context instead of silently falling back.
   - Prefer project Fennel idioms: `local` over `let`, multi-branch `if`, factory functions over `.new`.
 
-- [ ] **Step 3: Create `humpback-graph-doctrine` skill**
+- [ ] **Step 3: Create `space-graph-doctrine` skill**
 
-Create `.opencode/skills/humpback-graph-doctrine/SKILL.md` with:
-- `name: humpback-graph-doctrine`
-- Description: `Use when editing Humpback graph nodes, graph maps, graph views, graph persistence, graph topology, graph key loaders, or graph terminology.`
+Create `.opencode/skills/space-graph-doctrine/SKILL.md` with:
+- `name: space-graph-doctrine`
+- Description: `Use when editing Space graph nodes, graph maps, graph views, graph persistence, graph topology, graph key loaders, or graph terminology.`
 - Body sections:
-  - `# Humpback Graph Doctrine`
+  - `# Space Graph Doctrine`
   - `## Use When`
   - `## Canonical References`
   - `## Required Doctrine`
@@ -123,13 +123,13 @@ Create `.opencode/skills/humpback-graph-doctrine/SKILL.md` with:
   - `GraphMap` owns interaction context over shared graph-addressable objects.
   - Avoid forbidden terminology by using the canonical terms from `docs/dev/notes/graph.md`.
 
-- [ ] **Step 4: Create `humpback-testing-runtime` skill**
+- [ ] **Step 4: Create `space-testing-runtime` skill**
 
-Create `.opencode/skills/humpback-testing-runtime/SKILL.md` with:
-- `name: humpback-testing-runtime`
-- Description: `Use when running, adding, or debugging Humpback tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.`
+Create `.opencode/skills/space-testing-runtime/SKILL.md` with:
+- `name: space-testing-runtime`
+- Description: `Use when running, adding, or debugging Space tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.`
 - Body sections:
-  - `# Humpback Testing Runtime`
+  - `# Space Testing Runtime`
   - `## Use When`
   - `## Canonical Commands`
   - `## Runtime Test Environment`
@@ -155,16 +155,16 @@ python3 - <<'PY'
 from pathlib import Path
 
 skills = {
-    "humpback-fennel-ui": [
+    "space-fennel-ui": [
         "docs/dev/fennel/style.md",
         "docs/dev/lifecycle-invariants.md",
         "docs/dev/widget-ownership-and-teardown.md",
     ],
-    "humpback-graph-doctrine": [
+    "space-graph-doctrine": [
         "docs/dev/notes/graph.md",
         "docs/dev/graph-maps.md",
     ],
-    "humpback-testing-runtime": [
+    "space-testing-runtime": [
         "AGENTS.md",
         "docs/dev/features/development-tooling.md",
     ],
@@ -202,9 +202,9 @@ python3 - <<'PY'
 from pathlib import Path
 
 limits = {
-    ".opencode/skills/humpback-fennel-ui/SKILL.md": 120,
-    ".opencode/skills/humpback-graph-doctrine/SKILL.md": 100,
-    ".opencode/skills/humpback-testing-runtime/SKILL.md": 120,
+    ".opencode/skills/space-fennel-ui/SKILL.md": 120,
+    ".opencode/skills/space-graph-doctrine/SKILL.md": 100,
+    ".opencode/skills/space-testing-runtime/SKILL.md": 120,
 }
 
 for file_name, max_lines in limits.items():
@@ -220,10 +220,10 @@ Expected: command exits successfully with no output.
 Run after implementer → reviewer → pass:
 
 ```bash
-git add .opencode/skills/humpback-fennel-ui/SKILL.md \
-        .opencode/skills/humpback-graph-doctrine/SKILL.md \
-        .opencode/skills/humpback-testing-runtime/SKILL.md
-git commit -m "docs(opencode): add Humpback project skills"
+git add .opencode/skills/space-fennel-ui/SKILL.md \
+        .opencode/skills/space-graph-doctrine/SKILL.md \
+        .opencode/skills/space-testing-runtime/SKILL.md
+git commit -m "docs(opencode): add Space project skills"
 ```
 
 ---
@@ -235,7 +235,7 @@ git commit -m "docs(opencode): add Humpback project skills"
 - Modify: `docs/dev/features/development-tooling.md`
 
 **Interfaces:**
-- Consumes: Skill names produced by Task 1: `humpback-fennel-ui`, `humpback-graph-doctrine`, `humpback-testing-runtime`.
+- Consumes: Skill names produced by Task 1: `space-fennel-ui`, `space-graph-doctrine`, `space-testing-runtime`.
 - Produces: A concise `AGENTS.md` that remains useful outside OpenCode and points OpenCode users toward the project skills and canonical docs.
 
 - [ ] **Step 1: Record current `AGENTS.md` size**
@@ -263,9 +263,9 @@ Modify `AGENTS.md` so it keeps these concise sections:
 - `## Assets & Configuration Tips`
 
 Required `Project-Specific OpenCode Skills` bullets:
-- Use `humpback-fennel-ui` for Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.
-- Use `humpback-graph-doctrine` for graph nodes, graph maps, graph views, graph persistence/topology, key loaders, or graph terminology.
-- Use `humpback-testing-runtime` for tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.
+- Use `space-fennel-ui` for Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.
+- Use `space-graph-doctrine` for graph nodes, graph maps, graph views, graph persistence/topology, key loaders, or graph terminology.
+- Use `space-testing-runtime` for tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.
 
 Required retained command facts:
 - `make cmake`
@@ -298,7 +298,7 @@ Delete or condense the current long sections for:
 - [ ] **Step 4: Document the instruction split in `docs/dev/features/development-tooling.md`**
 
 Add one concise design bullet under the existing `## Design` list:
-- OpenCode project guidance uses `AGENTS.md` for always-on repository facts and `.opencode/skills/humpback-*` for triggerable Humpback domain guidance; users must restart OpenCode after `.opencode/**` changes.
+- OpenCode project guidance uses `AGENTS.md` for always-on repository facts and `.opencode/skills/space-*` for triggerable Space domain guidance; users must restart OpenCode after `.opencode/**` changes.
 
 Do not expand this into a full OpenCode manual.
 
@@ -314,9 +314,9 @@ lines = Path("AGENTS.md").read_text().splitlines()
 assert len(lines) < 145, f"AGENTS.md should be shorter than 145 lines, got {len(lines)}"
 text = "\n".join(lines)
 for needle in [
-    "humpback-fennel-ui",
-    "humpback-graph-doctrine",
-    "humpback-testing-runtime",
+    "space-fennel-ui",
+    "space-graph-doctrine",
+    "space-testing-runtime",
     "docs/dev/fennel/style.md",
     "docs/dev/notes/graph.md",
     "docs/dev/features/development-tooling.md",
@@ -349,7 +349,7 @@ Expected: no matches.
 Run:
 
 ```bash
-rg -n "OpenCode project guidance|AGENTS.md|\.opencode/skills/humpback-\*|restart OpenCode" docs/dev/features/development-tooling.md
+rg -n "OpenCode project guidance|AGENTS.md|\.opencode/skills/space-\*|restart OpenCode" docs/dev/features/development-tooling.md
 ```
 
 Expected: matches the new concise design bullet.
@@ -373,47 +373,47 @@ git commit -m "docs(opencode): slim always-on project guidance"
 
 **Interfaces:**
 - Consumes: Skill names produced by Task 1 and `docs/dev` documentation discipline from Task 2.
-- Produces: Minimal role-agent routing guidance that makes project skills discoverable without embedding Humpback domain doctrine in generic agents.
+- Produces: Minimal role-agent routing guidance that makes project skills discoverable without embedding Space domain doctrine in generic agents.
 
 - [ ] **Step 1: Add project skill routing to supervisor**
 
-Modify `.opencode/agents/supervisor.md` under `## Skill Enforcement` with a short subsection named `## Humpback Project Skill Routing` or equivalent.
+Modify `.opencode/agents/supervisor.md` under `## Skill Enforcement` with a short subsection named `## Space Project Skill Routing` or equivalent.
 
 Required routing bullets:
-- If a request touches Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests, invoke `humpback-fennel-ui` before planning or implementation.
-- If a request touches graph nodes, graph maps, graph views, graph persistence/topology, key loaders, or graph terminology, invoke `humpback-graph-doctrine` before planning or implementation.
-- If a request touches Humpback tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses, invoke `humpback-testing-runtime` before planning or implementation.
+- If a request touches Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests, invoke `space-fennel-ui` before planning or implementation.
+- If a request touches graph nodes, graph maps, graph views, graph persistence/topology, key loaders, or graph terminology, invoke `space-graph-doctrine` before planning or implementation.
+- If a request touches Space tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses, invoke `space-testing-runtime` before planning or implementation.
 - Keep process skills first when they apply; do not invoke project skills for incidental overlap.
 
 Do not change supervisor permissions, mode, model, or edit allowlist.
 
-- [ ] **Step 2: Add Humpback docs/dev planning discipline to planner**
+- [ ] **Step 2: Add Space docs/dev planning discipline to planner**
 
-Modify `.opencode/agents/planner.md` rules to make the existing docs/dev requirement explicit for Humpback:
+Modify `.opencode/agents/planner.md` rules to make the existing docs/dev requirement explicit for Space:
 - Plans that change behavior, architecture, workflows, or operational assumptions must name the exact `docs/dev/**` page to create or update.
 - If no appropriate docs/dev page exists, the plan must include creating a minimal focused page under `docs/dev/features/` or `docs/dev/notes/`.
 - If the change is documentation/config only and existing docs/dev pages remain canonical, the plan must state why no additional docs/dev page is needed.
 
-Do not add Humpback domain implementation rules to planner.
+Do not add Space domain implementation rules to planner.
 
 - [ ] **Step 3: Validate agent routing references exist**
 
 Run:
 
 ```bash
-rg -n "humpback-fennel-ui|humpback-graph-doctrine|humpback-testing-runtime" .opencode/agents/supervisor.md
+rg -n "space-fennel-ui|space-graph-doctrine|space-testing-runtime" .opencode/agents/supervisor.md
 rg -n "docs/dev|behavior, architecture, workflows, or operational assumptions|docs/dev/features|docs/dev/notes" .opencode/agents/planner.md
 ```
 
 Expected: supervisor references all three project skills; planner references docs/dev planning discipline.
 
-- [ ] **Step 4: Validate role agents did not absorb long Humpback doctrine**
+- [ ] **Step 4: Validate role agents did not absorb long Space doctrine**
 
 Run:
 
 ```bash
 if rg -n "builder closures|Dirt rules:|Graph nodes are lightweight adapters|All flamegraph profilers live|When creating or debugging snapshots" .opencode/agents/supervisor.md .opencode/agents/planner.md; then
-    echo "Role agents contain long Humpback domain detail" >&2
+    echo "Role agents contain long Space domain detail" >&2
     exit 1
 fi
 ```
@@ -448,7 +448,7 @@ Run after implementer → reviewer → pass:
 
 ```bash
 git add .opencode/agents/supervisor.md .opencode/agents/planner.md
-git commit -m "docs(opencode): route Humpback project skills"
+git commit -m "docs(opencode): route Space project skills"
 ```
 
 ---
@@ -457,9 +457,9 @@ git commit -m "docs(opencode): route Humpback project skills"
 
 **Files:**
 - Test: `AGENTS.md`
-- Test: `.opencode/skills/humpback-fennel-ui/SKILL.md`
-- Test: `.opencode/skills/humpback-graph-doctrine/SKILL.md`
-- Test: `.opencode/skills/humpback-testing-runtime/SKILL.md`
+- Test: `.opencode/skills/space-fennel-ui/SKILL.md`
+- Test: `.opencode/skills/space-graph-doctrine/SKILL.md`
+- Test: `.opencode/skills/space-testing-runtime/SKILL.md`
 - Test: `.opencode/agents/supervisor.md`
 - Test: `.opencode/agents/planner.md`
 - Test: `docs/dev/features/development-tooling.md`
@@ -477,16 +477,16 @@ python3 - <<'PY'
 from pathlib import Path
 
 skills = {
-    "humpback-fennel-ui": [
+    "space-fennel-ui": [
         "docs/dev/fennel/style.md",
         "docs/dev/lifecycle-invariants.md",
         "docs/dev/widget-ownership-and-teardown.md",
     ],
-    "humpback-graph-doctrine": [
+    "space-graph-doctrine": [
         "docs/dev/notes/graph.md",
         "docs/dev/graph-maps.md",
     ],
-    "humpback-testing-runtime": [
+    "space-testing-runtime": [
         "AGENTS.md",
         "docs/dev/features/development-tooling.md",
     ],
@@ -522,8 +522,8 @@ if rg -n "Each widget module exports|When propagating transforms inside a layout
     exit 1
 fi
 
-rg -n "humpback-fennel-ui|humpback-graph-doctrine|humpback-testing-runtime" AGENTS.md .opencode/agents/supervisor.md
-rg -n "docs/dev/fennel/style.md|docs/dev/lifecycle-invariants.md|docs/dev/widget-ownership-and-teardown.md|docs/dev/notes/graph.md|docs/dev/graph-maps.md|docs/dev/features/development-tooling.md" AGENTS.md .opencode/skills/humpback-*/SKILL.md
+rg -n "space-fennel-ui|space-graph-doctrine|space-testing-runtime" AGENTS.md .opencode/agents/supervisor.md
+rg -n "docs/dev/fennel/style.md|docs/dev/lifecycle-invariants.md|docs/dev/widget-ownership-and-teardown.md|docs/dev/notes/graph.md|docs/dev/graph-maps.md|docs/dev/features/development-tooling.md" AGENTS.md .opencode/skills/space-*/SKILL.md
 ```
 
 Expected: first block has no moved-detail matches; later `rg` commands find all required skill and docs references.
@@ -565,7 +565,7 @@ Expected: full registered test suite passes.
 Run:
 
 ```bash
-rg -n "restart OpenCode|restart opencode|Restart OpenCode" AGENTS.md docs/dev/features/development-tooling.md .opencode/skills/humpback-*/SKILL.md
+rg -n "restart OpenCode|restart opencode|Restart OpenCode" AGENTS.md docs/dev/features/development-tooling.md .opencode/skills/space-*/SKILL.md
 ```
 
 Expected: at least one user-visible reminder says OpenCode must be restarted after `.opencode/**` changes.
