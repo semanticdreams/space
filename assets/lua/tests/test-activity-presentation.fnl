@@ -26,10 +26,79 @@
   (assert (string.find (tostring err) "screen ray target")
           "Missing screen-ray target must fail loudly"))
 
+;; R1-2: opts.surface path must return the matching surface presentation target
+(fn provider-default-screen-ray-surface-selects-target []
+  (local scene-target {:kind :scene
+                       :screen-pos-ray (fn [_self _pos _opts]
+                                         "scene-ray")})
+  (local canvas-target {:kind :canvas
+                        :screen-pos-ray (fn [_self _pos _opts]
+                                          "canvas-ray")})
+  (local runtime
+    {:scene {:presentation-target (fn [_self] scene-target)}
+     :canvas {:presentation-target (fn [_self] canvas-target)}})
+  (local provider (Presentation.for-runtime runtime))
+  (let [scene-result (provider:default-screen-ray-target {:surface :scene})
+        canvas-result (provider:default-screen-ray-target {:surface :canvas})]
+    (assert (= scene-result scene-target)
+            "opts.surface :scene must return scene presentation target")
+    (assert (= canvas-result canvas-target)
+            "opts.surface :canvas must return canvas presentation target"))
+  ;; screen-pos-ray must delegate to surface-matched target
+  (let [ray (provider:screen-pos-ray {:x 10 :y 20} {:surface :scene})]
+    (assert (= ray "scene-ray")
+            (.. "screen-pos-ray via surface must delegate, got " (tostring ray)))))
+
+;; R1-2: fallback must use runtime.preferred-interaction-surface, not app
+(fn provider-default-screen-ray-fallback-uses-runtime-interaction-surface []
+  (local scene-target {:kind :scene
+                       :screen-pos-ray (fn [_self _pos _opts]
+                                         "runtime-scene-ray")})
+  (local canvas-target {:kind :canvas
+                        :screen-pos-ray (fn [_self _pos _opts]
+                                          "runtime-canvas-ray")})
+  (local runtime
+    {:scene {:presentation-target (fn [_self] scene-target)}
+     :canvas {:presentation-target (fn [_self] canvas-target)}
+     :preferred-interaction-surface :canvas})
+  (local provider (Presentation.for-runtime runtime))
+  ;; The runtime prefers canvas; screen-ray without explicit surface should use that
+  (let [ray (provider:screen-pos-ray {:x 1 :y 2} {})]
+    (assert (= ray "runtime-canvas-ray")
+            (.. "screen-pos-ray fallback must use runtime.preferred-interaction-surface, got "
+                (tostring ray))))
+  ;; default-screen-ray-target must pick canvas when runtime prefers it
+  (let [target (provider:default-screen-ray-target {})]
+    (assert (= target canvas-target)
+            "default-screen-ray-target must use runtime.preferred-interaction-surface fallback")))
+
+;; R1-3: HUD is not included in render targets unless explicitly activity-owned
+(fn provider-render-targets-excludes-global-hud []
+  ;; Temporarily set app.hud to verify it is NOT included
+  (let [saved-hud (and app app.hud)
+        scene-target {:kind :scene}
+        runtime {:scene {:presentation-target (fn [_self] scene-target)}
+                 :canvas {:presentation-target (fn [_self] nil)}}]
+    (when app (set app.hud {:kind :hud}))
+    (local provider (Presentation.for-runtime runtime))
+    (local targets (provider:render-targets))
+    (assert (= (length targets) 1)
+            (.. "render-targets must not include global app.hud, got " (length targets)
+                " targets"))
+    (assert (= (. targets 1) scene-target)
+            "only explicit runtime-owned scene target must be present")
+    (when app (set app.hud saved-hud))))
+
 (table.insert tests {:name "Provider returns only explicit targets"
                      :fn provider-returns-only-explicit-targets})
 (table.insert tests {:name "Provider screen ray requires target"
                      :fn provider-screen-ray-requires-target-camera})
+(table.insert tests {:name "Provider default-screen-ray-target uses opts.surface"
+                     :fn provider-default-screen-ray-surface-selects-target})
+(table.insert tests {:name "Provider default-screen-ray-target fallback uses runtime interaction surface"
+                     :fn provider-default-screen-ray-fallback-uses-runtime-interaction-surface})
+(table.insert tests {:name "Provider render-targets excludes global app.hud"
+                     :fn provider-render-targets-excludes-global-hud})
 
 (local main
   (fn []

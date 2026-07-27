@@ -13,6 +13,7 @@
 (local BackgroundState (require :background-state))
 
 (local gl (require :gl))
+(local Presentation (require :activity-presentation))
 
 (fn bool-option [options key default-value]
   (if (or (not options) (= (. options key) nil))
@@ -191,9 +192,18 @@
         (when (and sub-app sub-app.render)
           (sub-app:render image-renderer projection view)))))
 
+  (fn ensure-presentation [runtime]
+    (when runtime
+      (when (not runtime.presentation)
+        (set runtime.presentation (Presentation.for-runtime runtime)))
+      runtime.presentation))
+
   (fn collect-presentation-targets []
-    (if (and app app.active-world-runtime app.active-world-runtime.presentation)
-        (app.active-world-runtime.presentation:render-targets)
+    (if (and app app.active-world-runtime)
+        (let [provider (ensure-presentation app.active-world-runtime)]
+          (if provider
+              (provider:render-targets)
+              []))
         []))
 
   (fn draw-scene-targets-first-pass [self targets]
