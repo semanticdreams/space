@@ -1,13 +1,13 @@
 ---
 name: finishing-a-development-branch
-description: Use when implementation is complete, all tests pass, and you need to decide how to integrate the work
+description: Use when implementation is complete and reviewed, to run final validation, recover from validation failures, and integrate only when green
 ---
 
 # Finishing a Development Branch
 
 ## Overview
 
-**Core principle:** Verify clean tree → Verify tests → Consult project policy → Detect environment → Execute action (or present options if no policy) → Clean up.
+**Core principle:** Verify clean tree → Verify required validation → If validation fails, debug root cause and route reviewed fixes → Rerun validation until green or blocked → Consult project policy → Detect environment → Execute action (or present options if no policy) → Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
@@ -39,7 +39,26 @@ Never auto-stage or auto-discard. Only allowlisted coordination-artifact files m
 
 Run the project's full test suite. Consult AGENTS.md for the correct test command.
 
-**If tests fail**, report the failures and stop — integration comes after a green suite.
+**If tests fail**, integration is forbidden but the branch is not finished.
+Do all of the following:
+
+1. Capture the exact failing command, failing tests, relevant error output, and
+   current `git status --porcelain`.
+2. Invoke `systematic-debugging` before proposing any fix.
+3. Identify and document the root cause. If root cause cannot be established,
+   continue gathering evidence or report BLOCKED with the missing evidence.
+4. Route any fix through `implementer` → `reviewer` → pass. The supervisor must
+   not edit code, tests, `.opencode/**`, workflow files, or other non-allowlisted
+   files directly.
+5. After reviewed fixes are committed and the tree is clean, rerun this finishing
+   skill from Step 0.
+6. Only continue to Step 2 when the required validation suite passes.
+
+If systematic debugging establishes that the failure is external, environmental,
+unrelated to this branch, unreproducible with available evidence, or requires a
+human product/API/data/architecture decision, report BLOCKED or
+HUMAN_DECISION_REQUIRED with the evidence. Do not push, PR, merge, or clean up
+while required validation is red.
 
 **If tests pass:** continue to Step 2.
 
@@ -164,3 +183,4 @@ git worktree prune
 | "They obviously want it merged" | Follow the project's integration policy, not assumptions. If AGENTS.md specifies an automatic action (push + create PR), execute it. Only present the menu when no policy exists or branch-unsafe conditions block the automatic action. |
 | "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |
 | "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner's explicit request. |
+| "The final suite failed, so I'll just report it and stop" | A red final suite is a debugging task. Invoke `systematic-debugging`, route reviewed fixes through `implementer` → `reviewer`, rerun validation, and finish only when green or explicitly blocked. |
