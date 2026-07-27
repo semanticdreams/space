@@ -22,6 +22,18 @@
 (fn strip-strings [s]
   (s:gsub "\"[^\"]*\"" ""))
 
+;; Strip Fennel comments (; to end of line) from form text.
+;; Must be called after strip-strings to avoid removing semicolons
+;; that appear inside string literals.
+(fn strip-comments [s]
+  (let [lines []]
+    (each [line (s:gmatch "[^\n]*")]
+      (let [comment-pos (string.find line ";" 1 true)]
+        (if comment-pos
+            (table.insert lines (string.sub line 1 (- comment-pos 1)))
+            (table.insert lines line))))
+    (table.concat lines "\n")))
+
 ;; ---------------------------------------------------------------------------
 ;; Rule 1: layout.no-setters-in-layouters
 ;; ---------------------------------------------------------------------------
@@ -67,22 +79,23 @@
       (set found true)))
   found)
 
-(fn collect-layouter-call-lines [ff]
-  "Return a list of line numbers where calls with :layouter in their form text appear."
-  (var lines [])
+(fn collect-layouter-call-forms [ff]
+  "Return a list of call form texts whose form contains :layouter."
+  (var forms [])
   (each [_ call (ipairs (or ff.calls []))]
     (when (string.find (or call.form "") ":layouter" 1 true)
-      (table.insert lines (or call.line 0))))
-  lines)
+      (table.insert forms (or call.form ""))))
+  forms)
 
-(fn line-near? [line ref-lines]
-  "Check if line is within approximately 5 lines of any reference line.
-  Used to correlate anonymous functions with nearby layouter context."
-  (var near false)
-  (each [_ ref (ipairs ref-lines)]
-    (when (and (not near) (>= (math.abs (- line ref)) 0) (<= (math.abs (- line ref)) 5))
-      (set near true)))
-  near)
+(fn anonymous-def-is-layouter-callback? [def layouter-call-forms]
+  "Check if an anonymous definition's form text appears as a substring
+  of any :layouter call form, meaning it is the inline layouter callback."
+  (when (not def.form) (lua "return false"))
+  (var found false)
+  (each [_ lcf (ipairs layouter-call-forms)]
+    (when (and (not found) (string.find lcf def.form 1 true))
+      (set found true)))
+  found)
 
 (fn no-setters-in-layouters-rule-run [ctx]
   "Rule: flag calls to forbidden setters inside layouter functions
@@ -90,22 +103,37 @@
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (when (file-has-layouter-context? ff)
+      ;; Named layouter functions (by name)
       (var layouter-names {})
       (each [_ def (ipairs (or ff.definitions []))]
         (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
           (tset layouter-names def.name true)))
-      (var layouter-call-lines (if (not (next layouter-names))
-                                    (collect-layouter-call-lines ff)
-                                    []))
+      ;; :layouter call form texts for anonymous correlation
+      (var layouter-call-forms (collect-layouter-call-forms ff))
+      ;; Identify anonymous definitions that are inline layouter callbacks:
+      ;; their form text appears inside a :layouter call form text.
+      (var layouter-anon-def-forms {})
+      (each [_ def (ipairs (or ff.definitions []))]
+        (when (and (= def.kind :fn) (= def.name "<anonymous>")
+                   (anonymous-def-is-layouter-callback? def layouter-call-forms))
+          (tset layouter-anon-def-forms def.form true)))
+      ;; Check each call
       (each [_ call (ipairs (or ff.calls []))]
         (when (callee-is-forbidden-setter? call.callee)
           (let [efn (or call.enclosing-fn "")]
             (when (or (. layouter-names efn)
-                      ;; Only flag anonymous functions near a layouter-context
-                      ;; call to avoid overbroad correlation.
+                      ;; Anonymous: only flag if the enclosing definition is a
+                      ;; verified layouter callback (its form text appears in a
+                      ;; :layouter call form), not just nearby.
                       (and (= efn "<anonymous>")
                            (not (next layouter-names))
-                           (line-near? (or call.line 0) layouter-call-lines)))
+                           (let [call-form (or call.form "")]
+                             (var in-layouter-anon false)
+                             (each [def-form _ (pairs layouter-anon-def-forms)]
+                               (when (and (not in-layouter-anon)
+                                          (string.find def-form call-form 1 true))
+                                 (set in-layouter-anon true)))
+                             in-layouter-anon)))
               (table.insert diagnostics
                 (Diagnostics.violation
                   {:constraint-id "layout.no-setters-in-layouters"
@@ -245,9 +273,10 @@
 (fn fn-def-has-bare-interactive? [def]
   "Check if a function definition's form text contains bare 'clickables'
   or 'hoverables' as standalone tokens, excluding string/comment text
-  and hyphenated identifiers.  String literals are stripped first."
+  and hyphenated identifiers.  String literals and comments are stripped first."
   (when (and def.form def.kind (= def.kind :fn))
-    (let [clean (strip-strings def.form)]
+    (let [no-strings (strip-strings def.form)
+          clean (strip-comments no-strings)]
       (var found false)
       (each [kw _ (pairs interactive-access-patterns)]
         (when (not found)
@@ -266,8 +295,10 @@
       (= def.name "<anonymous>")
       ;; Anonymous functions: check the definition's own form text for
       ;; an actual (assert ...) or (assert) call — no cross-correlation.
+      ;; Strip strings and comments first to avoid false positives.
       (do
-        (let [clean (strip-strings def.form)]
+        (let [no-strings (strip-strings def.form)
+              clean (strip-comments no-strings)]
           (or (clean:find "(assert " 1 true)
               (clean:find "(assert)" 1 true))))
       ;; Named functions: correlate via call facts.

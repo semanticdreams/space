@@ -1224,6 +1224,88 @@
   (assert (= d.constraint-id "layout.interactive-context-assertion")
           "diagnostic should flag second anonymous fn without own assert"))
 
+;; R4-1: comment-only clickables must NOT be flagged as bare interactive
+(fn interactive-assertion-allows-comment-only-clickables []
+  "A function containing only a comment ';; missing clickables' and no real
+  clickables access should NOT be flagged by the bare-interactive detector."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "render-empty"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 80
+                                             :form "(fn render-empty [ctx]
+  ;; missing clickables
+  (print :done))"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "comment-only clickables should not trigger bare-interactive detection"))
+
+;; R4-2: unrelated anonymous setter within 5-line proximity of layouter
+(fn no-setters-allows-unrelated-anonymous-near-layouter []
+  "A file with :layouter Layout call on line 10 and an unrelated anonymous
+  callback with obj:set-size on line 12 (within the 5-line proximity window)
+  should NOT flag the unrelated anonymous function."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  ;; Layouter context at line 10 via call form text
+  ;; Unrelated anonymous fn at line 12 with setter
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 12 :column 1
+                                             :length 100
+                                             :form "(fn [obj] (obj:set-size 50 50))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 10 :column 1
+                                       :form "(Layout {:layouter (fn [ctx] (ctx:set-flex 1))})"
+                                       :enclosing-fn nil}
+                                      {:callee "obj:set-size"
+                                       :receiver nil :method nil
+                                       :line 13 :column 1
+                                       :form "(obj:set-size 50 50)"
+                                       :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "unrelated anonymous setter near layouter should not be flagged"))
+
+;; R4-3: comment-only assert in anonymous function
+(fn interactive-assertion-flags-comment-only-assert-in-anonymous []
+  "An anonymous function using clickables with only a commented-out assert
+  ';; (assert clickables ...)' should still be flagged (the comment should
+  not count as a real assert)."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-widget.fnl"
+                              :module "bad-widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn [ctx]
+  ;; (assert clickables \"missing\")
+  (when clickables
+    (handle clickables)))"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for clickables with only commented-out assert")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "diagnostic should flag anonymous fn with commented-out assert"))
+
 ;; ======================================================================
 
 (fn layout-rules-returns-table-with-three-rules []
@@ -1369,9 +1451,18 @@
 ;; R3-F2: unrelated anonymous far from layouter
 (table.insert tests {:name "no-setters allows unrelated anonymous far from layouter"
                      :fn no-setters-allows-unrelated-anonymous-far-from-layouter})
+;; R4-2: unrelated anonymous near layouter (within 5-line window)
+(table.insert tests {:name "no-setters allows unrelated anonymous near layouter"
+                     :fn no-setters-allows-unrelated-anonymous-near-layouter})
 ;; R3-F3: cross-anonymous-function assert
 (table.insert tests {:name "interactive-assertion flags second anonymous without own assert"
                      :fn interactive-assertion-flags-second-anonymous-without-own-assert})
+;; R4-1: comment-only clickables
+(table.insert tests {:name "interactive-assertion allows comment-only clickables"
+                     :fn interactive-assertion-allows-comment-only-clickables})
+;; R4-3: comment-only assert in anonymous
+(table.insert tests {:name "interactive-assertion flags comment-only assert in anonymous"
+                     :fn interactive-assertion-flags-comment-only-assert-in-anonymous})
 
 ;; Structure tests
 (table.insert tests {:name "layout rules returns table with three rules"
