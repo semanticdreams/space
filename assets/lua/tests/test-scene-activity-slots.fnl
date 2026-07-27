@@ -547,9 +547,7 @@
   ;; and activation applying lights/skybox/background/containment.
   ;; R1-6: Use valid terrain record, assert containment installs/clears, assert content preserved.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local LightingViewState (require :lighting-view-state))
@@ -786,9 +784,7 @@
   ;; The existing environment-isolation test restores before activation;
   ;; this exercises the active-slot restore path directly.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -844,9 +840,7 @@
   ;; R1-3: restore-activity-slot-state called twice on an already-active slot
   ;; with the same one-terrain state must leave exactly one runtime terrain.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -909,9 +903,7 @@
   ;; R1-3: restoring a state with an additional terrain while the slot is active
   ;; must add exactly the missing terrain without duplicating existing ones.
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1198,9 +1190,7 @@
   This prevents stale runtime terrain from overwriting canonical state
   during inactive capture."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1273,9 +1263,7 @@
   authoritative slot.scene-state.terrains.  Stale terrains should be
   removed and new canonical terrains should be added."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1338,9 +1326,7 @@
   terrains.  The result is zero runtime terrains and zero canonical
   terrain records — no leftover stale entries and no recapture."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1397,9 +1383,7 @@
   retain the complete policy (:default, :by-theme) — not be overwritten
   by the renderer's resolved format during slot switch."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -1473,8 +1457,7 @@
   instead of skipping the same terrain id.  The stale runtime capture must
   not overwrite the updated canonical state."
   (with-restored-app-fields
-    [:renderers :skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
+    [:renderers :skybox-state :background-state :lights-state
      :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
@@ -1552,8 +1535,7 @@
   inactive, reactivation must drop stale retained runtime panels so the
   graph-mode view does not carry forward deleted panels."
   (with-restored-app-fields
-    [:renderers :skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
+    [:renderers :skybox-state :background-state :lights-state
      :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
@@ -1651,8 +1633,7 @@
   skybox applied to the renderer must resolve for the current active theme,
   not just use the default entry."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
+    [:skybox-state :background-state :lights-state
      :renderers :themes :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
@@ -1821,7 +1802,7 @@
   must propagate out so callers can handle it."
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :renderers
-     :engine :physics-containment-config]
+     :engine]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
@@ -1879,7 +1860,7 @@
   content/services/visibility) must be fully restored."
   (with-restored-app-fields
     [:skybox-state :background-state :lights-state :renderers
-     :engine :physics-containment-config]
+     :engine]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
@@ -2351,9 +2332,7 @@
   removed from runtime.  When a terrain record changes (different data
   for the same id), the runtime entry must be replaced."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
@@ -2450,9 +2429,7 @@
   into slot.scene-state.terrains, and a repeat restore must remain
   idempotent (no duplicate terrain entries)."
   (with-restored-app-fields
-    [:skybox-state :background-state :lights-state :physics-containment-config
-     :__physics-global-containment :physics-containment-scene
-     :renderers :engine]
+    [:skybox-state :background-state :lights-state :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
       (local SkyboxState (require :skybox-state))
