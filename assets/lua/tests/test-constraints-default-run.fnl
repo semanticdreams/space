@@ -69,8 +69,8 @@
                  :name "constraint-fixture"
                  :roots []
                  :files [fixture-path]
-                 :module-roots []
-                 :suites [:scene-sandbox :lifecycle :layout-rendering :structure-formatting]})
+                  :module-roots []
+                  :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]})
   (local result (Runner.run-target target {:baseline-data false}))
   ;; Verify result structure
   (assert (= (type result) "table") "result should be a table")
@@ -94,7 +94,7 @@
                  :roots []
                  :files [fixture-path]
                  :module-roots []
-                 :suites [:scene-sandbox :lifecycle :layout-rendering :structure-formatting]})
+                 :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]})
   (local result (Runner.run-target target {:baseline-data false}))
   ;; Check that all diagnostics include target metadata
   (each [_ d (ipairs result.diagnostics)]
@@ -116,7 +116,7 @@
                  :roots []
                  :files [fixture-path]
                  :module-roots []
-                 :suites [:scene-sandbox :lifecycle :layout-rendering :structure-formatting]})
+                 :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]})
   (local result (Runner.run-target target {:baseline-data false}))
   ;; Should not crash; the fixture file is well-formed Fennel
   (assert (= (type result) "table") "run-target should return a table")
@@ -139,7 +139,7 @@
                  :roots [lua-dir]
                  :files []
                  :module-roots [lua-dir]
-                 :suites [:scene-sandbox :lifecycle :layout-rendering :structure-formatting]})
+                 :suites [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting]})
   (local result (Runner.run-target target {:baseline-data false}))
   ;; Should complete without crash; the real repo will have violations.
   (assert (= (type result) "table") "run-target should return a table")
@@ -157,6 +157,65 @@
   (assert has-constraint-id "at least one diagnostic should have a constraint-id"))
 
 ;; --- Runner.main argv tests ---
+
+(fn default-target-suites-match-rule-families []
+  "Prove that all registry rule families are represented in the default target
+  suites so that no required rule is filtered out before execution."
+  (local RuleRegistry (require :constraints.rules.init))
+  (local Targets (require :constraints.targets))
+  (local BaselineData (require :constraints.baseline-data))
+  ;; Resolve the default repo target — same path Runner.main nil-argv takes.
+  (local target (Targets.resolve [] {}))
+  (local target-suites (or target.suites []))
+  ;; Collect all unique family names from the registry
+  (local registry-families {})
+  (local all-rules (RuleRegistry.all-rules))
+  (each [_ rule (ipairs all-rules)]
+    (tset registry-families rule.family true))
+  ;; Every target suite name should match a real rule family
+  (each [_ suite (ipairs target-suites)]
+    (assert (. registry-families suite)
+            (.. "target suite \"" suite "\" should match a rule family")))
+  ;; Every registry family should be in the target suites
+  (each [fam _ (pairs registry-families)]
+    (var found false)
+    (each [_ suite (ipairs target-suites)]
+      (when (= suite fam) (set found true)))
+    (assert found (.. "rule family \"" fam "\" should be in default target suites"))))
+
+(fn default-target-runs-all-required-rules []
+  "Prove that the default repo target executes every required MVP rule from
+  the registry and no required rule is incorrectly filtered out."
+  (local Runner (require :constraints.runner))
+  (local RuleRegistry (require :constraints.rules.init))
+  (local Targets (require :constraints.targets))
+  (local BaselineData (require :constraints.baseline-data))
+  ;; Resolve the default repo target — same path Runner.main nil-argv takes.
+  (local target (Targets.resolve [] {}))
+  ;; Collect all rule IDs from the registry
+  (local all-rules (RuleRegistry.all-rules))
+  (local registry-ids {})
+  (each [_ rule (ipairs all-rules)]
+    (let [id (or rule.id rule.constraint-id "unknown")]
+      (tset registry-ids id true)))
+  ;; Run the full pipeline with default baseline
+  (local result (Runner.run-target target {}))
+  (assert (= (type result) "table") "run-target should return a table")
+  ;; Verify no missing-required diagnostic refers to a rule that exists
+  ;; in the registry.  If a missing-required diagnostic fires for a rule
+  ;; the registry knows about, it was incorrectly filtered out.
+  (each [_ d (ipairs result.diagnostics)]
+    (when (and (. d :missing-required) d.constraint-id)
+      (assert (not (. registry-ids d.constraint-id))
+              (.. "required rule \"" d.constraint-id "\" should not be missing — "
+                  "it is in the registry but was filtered out"))))
+  ;; Verify that every required rule id from baseline-data is in the registry.
+  ;; If baseline-data requires a rule the registry does not publish, the test
+  ;; must fail early rather than producing a false-missing signal at runtime.
+  (each [_ required-id (ipairs BaselineData.required-rule-ids)]
+    (assert (. registry-ids required-id)
+            (.. "baseline-data requires \"" required-id
+                "\" but it is not in the rule registry"))))
 
 (fn runner-main-argv-defaults-to-repo []
   "Runner.main() with nil argv should default to repo target and execute pipeline."
@@ -191,6 +250,10 @@
                      :fn runner-run-target-explicit-files-target-works})
 (table.insert tests {:name "runner run-target with repo target runs full pipeline"
                      :fn runner-run-target-with-repo-target-runs-full-pipeline})
+(table.insert tests {:name "default target suites match rule families"
+                     :fn default-target-suites-match-rule-families})
+(table.insert tests {:name "default target runs all required rules"
+                     :fn default-target-runs-all-required-rules})
 (table.insert tests {:name "runner main argv defaults to repo"
                      :fn runner-main-argv-defaults-to-repo})
 

@@ -13,8 +13,8 @@
     (fs.absolute (fs.join-path assets-dir "lua"))))
 
 (fn default-suites []
-  "All four constraint families active by default."
-  [:scene-sandbox :lifecycle :layout :structure])
+  "All five constraint families active by default."
+  [:scene-sandbox :lifecycle :test-isolation :layout-rendering :structure-formatting])
 
 (fn base-name [root-path]
   "Extract a human-readable name from a directory path."
