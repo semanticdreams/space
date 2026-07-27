@@ -1338,7 +1338,8 @@
   "A file with an inline :layouter (fn [obj] (obj:set-size 50 50)) and a
   separate unrelated anonymous function with the same form/body should NOT
   flag the unrelated anonymous's setter call. When form texts are identical
-  and correlation by form alone is ambiguous, be conservative and skip."
+  and correlation by form alone is ambiguous, the rule conservatively skips
+  all duplicates rather than guessing by distance to the outer call start."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
@@ -1347,84 +1348,161 @@
   (local ff (make-file-fact {:path "/src/widget.fnl"
                               :module "widget"
                               :definitions [{:kind :fn
-                                             :name "<anonymous>"
-                                             :top-level? false
-                                             :line 5 :column 20
-                                             :length 100
-                                             :form anon-form}
-                                            {:kind :fn
-                                             :name "<anonymous>"
-                                             :top-level? false
-                                             :line 60 :column 1
-                                             :length 100
-                                             :form anon-form}]
+                                              :name "<anonymous>"
+                                              :top-level? false
+                                              :line 5 :column 20
+                                              :length 100
+                                              :form anon-form}
+                                             {:kind :fn
+                                              :name "<anonymous>"
+                                              :top-level? false
+                                              :line 60 :column 1
+                                              :length 100
+                                              :form anon-form}]
                               :calls [{:callee "Layout"
                                        :receiver nil :method nil
                                        :line 5 :column 1
                                        :form (.. "(Layout {:layouter " anon-form "})")
                                        :enclosing-fn nil}
-                                      ;; setter from the INLINE layouter (line 6, near def line 5)
+                                       ;; setter from the INLINE layouter (line 6, near def line 5)
+                                       {:callee "obj:set-size"
+                                        :receiver nil :method nil
+                                        :line 6 :column 1
+                                        :form "(obj:set-size 50 50)"
+                                        :enclosing-fn "<anonymous>"}
+                                       ;; setter from UNRELATED anonymous (line 61, near def line 60)
+                                       {:callee "obj:set-size"
+                                        :receiver nil :method nil
+                                        :line 61 :column 1
+                                        :form "(obj:set-size 50 50)"
+                                        :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  ;; Conservative skip: when duplicate same-form anonymous defs are present,
+  ;; the rule cannot reliably distinguish the layouter callback from the
+  ;; unrelated one, so it skips all of them rather than risk flagging the
+  ;; wrong (non-layouter) callback.
+  (assert (= result nil)
+          (.. "duplicate same-form anonymous defs should be skipped "
+              "conservatively — expected nil, got diagnostics")))
+;; R5-1: duplicate anonymous form same as inline layouter — when ambiguous,
+;; the rule conservatively skips all duplicates (see R6-1 fix).
+(fn no-setters-skips-inline-layouter-setter-when-duplicate-anonymous-present []
+  "When duplicate same-form anonymous defs are present, the rule
+  conservatively skips all of them — the inline layouter's setter is a
+  false negative but this avoids false positives on the unrelated copy."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local anon-form "(fn [obj] (obj:set-size 50 50))")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                              :name "<anonymous>"
+                                              :top-level? false
+                                              :line 5 :column 20
+                                              :length 100
+                                              :form anon-form}
+                                             {:kind :fn
+                                              :name "<anonymous>"
+                                              :top-level? false
+                                              :line 60 :column 1
+                                              :length 100
+                                              :form anon-form}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form (.. "(Layout {:layouter " anon-form "})")
+                                       :enclosing-fn nil}
+                                       {:callee "obj:set-size"
+                                        :receiver nil :method nil
+                                        :line 6 :column 1
+                                        :form "(obj:set-size 50 50)"
+                                        :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  ;; Conservative skip: duplicate same-form anonymous defs make correlation
+  ;; ambiguous, so the rule skips all duplicates rather than guessing wrong.
+  (assert (= result nil)
+          (.. "ambiguous duplicate same-form anonymous defs should be skipped "
+              "conservatively — expected nil, got diagnostics")))
+;; R6-1: duplicate anonymous forms inside same Layout call with different keys
+(fn no-setters-skips-ambiguous-duplicate-callbacks-in-same-call []
+  "When a long Layout call form contains both :measurer and :layouter with
+  identical anonymous callback forms, the rule should NOT pick the wrong
+  non-layouter callback (the :measurer) by distance to the outer Layout call
+  start.  Conservative behavior: skip ambiguous duplicates so no false positive
+  is produced on the :measurer's forbidden setter."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local anon-form "(fn [obj] (obj:set-size 50 50))")
+  ;; A long Layout call with :measurer first (near call start) and
+  ;; :layouter later (farther from call start).  Both anonymous callbacks
+  ;; have the same form text containing the forbidden setter :set-size.
+  (local layout-call-form (.. "(Layout {:measurer " anon-form "\n"
+                              "         :some-attr 1\n"
+                              "         :other-attr 2\n"
+                              "         :yet-another 3\n"
+                              "         :and-another 4\n"
+                              "         :still-more 5\n"
+                              "         :even-more 6\n"
+                              "         :getting-there 7\n"
+                              "         :almost 8\n"
+                              "         :finally 9\n"
+                              "         :more-keys 10\n"
+                              "         :still-going 11\n"
+                              "         :one-more 12\n"
+                              "         :last-one 13\n"
+                              "         :layouter " anon-form "})"))
+  ;; The :measurer's anonymous def is near the call start (line 2 inside the
+  ;; multi-line call form starting at line 1).  The :layouter's anonymous def
+  ;; is much farther down (line 15 from the call form newlines).
+  (local ff (make-file-fact {:path "/src/long-widget.fnl"
+                              :module "long-widget"
+                              :definitions [{:kind :fn
+                                              :name "<anonymous>"
+                                              :top-level? false
+                                              :line 2 :column 20
+                                              :length 100
+                                              :form anon-form}
+                                             {:kind :fn
+                                              :name "<anonymous>"
+                                              :top-level? false
+                                              :line 15 :column 20
+                                              :length 100
+                                              :form anon-form}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 1 :column 1
+                                       :form layout-call-form
+                                       :enclosing-fn nil}
+                                      ;; Setter from the :measurer (NOT a layouter) — near call start
                                       {:callee "obj:set-size"
                                        :receiver nil :method nil
-                                       :line 6 :column 1
+                                       :line 3 :column 1
                                        :form "(obj:set-size 50 50)"
                                        :enclosing-fn "<anonymous>"}
-                                      ;; setter from UNRELATED anonymous (line 61, near def line 60)
+                                      ;; Setter from the actual :layouter — farther from call start
                                       {:callee "obj:set-size"
                                        :receiver nil :method nil
-                                       :line 61 :column 1
+                                       :line 16 :column 1
                                        :form "(obj:set-size 50 50)"
                                        :enclosing-fn "<anonymous>"}]}))
   (local result (rule.run (make-ctx [ff])))
-  ;; The inline layouter setter (line 6) should be flagged.
-  ;; The unrelated setter (line 61) must NOT be flagged.
-  (assert result "should produce diagnostics for inline layouter setter")
-  (assert (= (length result) 1)
-          (.. "expected exactly 1 diagnostic (the inline layouter setter), got " (length result)))
-  (local d (. result 1))
-  (assert (= d.constraint-id "layout.no-setters-in-layouters")
-          "diagnostic should be for the actual inline layouter setter")
-  ;; The flagged setter should be from the inline layouter (line ~6), not the unrelated one (line ~61)
-  (assert (<= d.line 10) (.. "setter line should be near inline layouter, got line " (tostring d.line))))
-;; R5-1: duplicate anonymous form same as inline layouter — negative (unique forms should still flag)
-(fn no-setters-flags-inline-layouter-setter-with-duplicate-anonymous-present []
-  "Even when an unrelated anonymous with the same form exists, the actual
-  inline layouter's setter should still be detected."
-  (local Layout (require :constraints.rules.layout))
-  (local rules (Layout.rules))
-  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
-  (assert rule "rule should be in rules list")
-  (local anon-form "(fn [obj] (obj:set-size 50 50))")
-  (local ff (make-file-fact {:path "/src/widget.fnl"
-                              :module "widget"
-                              :definitions [{:kind :fn
-                                             :name "<anonymous>"
-                                             :top-level? false
-                                             :line 5 :column 20
-                                             :length 100
-                                             :form anon-form}
-                                            {:kind :fn
-                                             :name "<anonymous>"
-                                             :top-level? false
-                                             :line 60 :column 1
-                                             :length 100
-                                             :form anon-form}]
-                              :calls [{:callee "Layout"
-                                       :receiver nil :method nil
-                                       :line 5 :column 1
-                                       :form (.. "(Layout {:layouter " anon-form "})")
-                                       :enclosing-fn nil}
-                                      {:callee "obj:set-size"
-                                       :receiver nil :method nil
-                                       :line 6 :column 1
-                                       :form "(obj:set-size 50 50)"
-                                       :enclosing-fn "<anonymous>"}]}))
-  (local result (rule.run (make-ctx [ff])))
-  (assert result "should produce diagnostics for the inline layouter setter")
-  (assert (>= (length result) 1) "should have at least one diagnostic")
-  (local d (. result 1))
-  (assert (= d.constraint-id "layout.no-setters-in-layouters")
-          "should flag the inline layouter setter"))
+  ;; Conservative: when duplicate same-form anonymous callbacks make
+  ;; correlation ambiguous, skip them rather than guessing by distance
+  ;; to the outer Layout call start.  The measurer at line 2 must NOT be
+  ;; falsely flagged as a layouter violation.
+  (assert (= result nil)
+          (.. "ambiguous duplicate callbacks in same Layout call should be "
+              "skipped conservatively — expected nil, got diagnostics"))
+  ;; Document: this is a deliberate false-negative tradeoff.  When
+  ;; identical anonymous callback forms appear under different keys in
+  ;; the same Layout call, the rule conservatively skips all of them
+  ;; rather than risk flagging the wrong (non-layouter) callback.
+  )
+
 ;; R4-3: comment-only assert in anonymous function
 (fn interactive-assertion-flags-comment-only-assert-in-anonymous []
   "An anonymous function using clickables with only a commented-out assert
@@ -1613,9 +1691,12 @@
 ;; R5-1: duplicate anonymous form same as inline layouter
 (table.insert tests {:name "no-setters allows unrelated anonymous with duplicate form"
                      :fn no-setters-allows-unrelated-anonymous-with-duplicate-form})
-;; R5-1b: inline layouter setter still detected when duplicate form present
-(table.insert tests {:name "no-setters flags inline layouter setter with duplicate anonymous present"
-                     :fn no-setters-flags-inline-layouter-setter-with-duplicate-anonymous-present})
+;; R5-1b: duplicate same-form — conservative skip (R6-1)
+(table.insert tests {:name "no-setters skips inline layouter setter when duplicate anonymous present"
+                     :fn no-setters-skips-inline-layouter-setter-when-duplicate-anonymous-present})
+;; R6-1: duplicate same-form callbacks in same Layout call under different keys
+(table.insert tests {:name "no-setters skips ambiguous duplicate callbacks in same call"
+                     :fn no-setters-skips-ambiguous-duplicate-callbacks-in-same-call})
 ;; R4-3: comment-only assert in anonymous
 (table.insert tests {:name "interactive-assertion flags comment-only assert in anonymous"
                      :fn interactive-assertion-flags-comment-only-assert-in-anonymous})

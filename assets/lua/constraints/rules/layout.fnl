@@ -22,11 +22,6 @@
 (fn strip-strings [s]
   (s:gsub "\"[^\"]*\"" ""))
 
-;; Absolute distance between two line numbers.
-(fn line-distance [a b]
-  (let [diff (- (or a 0) (or b 0))]
-    (if (< diff 0) (- diff) diff)))
-
 ;; Strip Fennel comments (; to end of line) from form text.
 ;; Must be called after strip-strings to avoid removing semicolons
 ;; that appear inside string literals.
@@ -95,7 +90,7 @@
 (fn anonymous-def-is-layouter-callback? [def layouter-call-records]
   "Check if an anonymous definition's form text appears as a substring
   of any :layouter call form — form-text containment proves the definition
-  is inside the Layout call.  No fixed line-distance cutoff is used."
+  is inside the Layout call."
   (when (not def.form) (lua "return false"))
   (var found false)
   (each [_ lc (ipairs layouter-call-records)]
@@ -145,29 +140,20 @@
                     (anonymous-def-is-layouter-callback? def layouter-call-records))
            (tset layouter-anon-by-line (or def.line 0) def.form)))
        ;; Resolve duplicate entries: when multiple anonymous defs share the
-       ;; same form text and that form appears in a layouter call, keep only
-       ;; the def closest to the layouter call line.  This avoids flagging an
-       ;; unrelated duplicate anonymous function that happens to have the same
-       ;; form text as an inline layouter callback.
+       ;; same form text and that form appears in a layouter call, skip ALL
+       ;; of them conservatively.  Choosing by distance to the outer Layout
+       ;; call start can pick the wrong callback when identical forms appear
+       ;; under different keys in the same Layout call (e.g., :measurer vs
+       ;; :layouter).  This is a deliberate false-negative tradeoff to avoid
+       ;; false positives.
        (var form-counts {})
        (each [line form (pairs layouter-anon-by-line)]
          (tset form-counts form (+ 1 (or (. form-counts form) 0))))
        (each [form count (pairs form-counts)]
          (when (> count 1)
-           (var best-line nil)
-           (var best-dist nil)
            (each [line lform (pairs layouter-anon-by-line)]
              (when (= lform form)
-               (each [_ lc (ipairs layouter-call-records)]
-                 (when (string.find lc.form form 1 true)
-                   (let [dist (line-distance line lc.line)]
-                     (when (or (= best-dist nil) (< dist best-dist))
-                       (set best-dist dist)
-                       (set best-line line)))))))
-           (when best-line
-             (each [line lform (pairs layouter-anon-by-line)]
-               (when (and (= lform form) (not (= line best-line)))
-                 (tset layouter-anon-by-line line nil))))))
+               (tset layouter-anon-by-line line nil)))))
        ;; Build sorted list of all fn definitions for enclosure resolution
       (var all-fn-defs (build-def-line-map ff.definitions))
       ;; Check each call
