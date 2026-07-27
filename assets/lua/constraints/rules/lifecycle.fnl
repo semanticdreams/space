@@ -9,8 +9,15 @@
        (= (s:sub (- (length s) (- (length suffix) 1))) suffix)))
 
 (fn register? [c] (and c (or (= c :register) (= c "app.engine.events.updated:connect") (str-ends-with? c ":connect"))))
-(fn cleanup-call? [c] (and c (or (= c :disconnect) (= c :unregister) (= c :clear) (= c :drop) (str-ends-with? c ":disconnect") (str-ends-with? c ":drop") (str-ends-with? c ":clear") (str-ends-with? c ":unregister"))))
-(fn cleanup-fn-name? [n] (or (= n :cleanup) (= n :teardown) (= n :shutdown) (= n :unload) (= n :drop)))
+(fn cleanup-call? [c]
+  (and c
+       (or (= c :disconnect) (= c :unregister) (= c :clear) (= c :drop)
+           (str-ends-with? c ":disconnect") (str-ends-with? c ":drop")
+           (str-ends-with? c ":clear") (str-ends-with? c ":unregister")
+           (c:match "^disconnect%-") (c:match "^unsubscribe%-"))))
+(fn cleanup-fn-name? [n]
+  (or (= n :cleanup) (= n :teardown) (= n :shutdown) (= n :unload) (= n :drop)
+      (and n (or (n:match "^disconnect%-") (n:match "^unsubscribe%-")))))
 
 (fn event-registration-cleanup-rule-run [ctx]
   (var diagnostics [])
@@ -71,25 +78,29 @@
       (each [_ def (ipairs (or ff.definitions []))]
         (when (and (= def.kind :fn) def.form)
           (var matched nil)
+          ;; Check for or-synthesis pattern: (or SENSITIVE_GLOBAL <default>)
+          ;; Use targeted pattern: must have (or <whitespace> GLOBAL <whitespace> <more>),
+          ;; not followed by a dot (which would mean subfield access).
           (each [_ sg (ipairs sensitive)]
-            (when (and (not matched) (string.find def.form sg 1 true))
-              (set matched sg)))
+            (when (not matched)
+              (let [sg-escaped (sg:gsub "%." "%%.")  ;; escape dots for pattern matching
+                    ;; Match (or GLOBAL followed by whitespace + more args (not just the global alone)
+                    or-pat (.. "%(or%s+" sg-escaped "%s+")]
+                (when (string.find def.form or-pat)
+                  (set matched sg)))))
           (when matched
-            (var has-syn false)
-            (when (or (string.find def.form "(or " 1 true) (string.find def.form "(when " 1 true) (string.find def.form "(if " 1 true))
-              (set has-syn true))
-            (when has-syn
-              (var has-assert false)
-              (when (or (string.find def.form "assert" 1 true) (string.find def.form "error" 1 true))
-                (set has-assert true))
-              (when (not has-assert)
-                (table.insert diagnostics
-                  (Diagnostics.violation
-                    {:constraint-id "lifecycle.required-runtime-fails-loudly" :family "lifecycle"
-                     :message (.. "function " (or def.name "<anonymous>") " uses or/when/if with " matched " without assert/error")
-                     :file ff.path :line (or def.line 0) :column 0
-                     :evidence {:function-name (or def.name "<anonymous>") :sensitive-global matched}
-                     :hint "Assert required runtime state instead of silently no-oping or synthesizing canonical state."})))))))))
+            ;; Check for assert/error in the same function — if present, skip
+            (var has-assert false)
+            (when (or (string.find def.form "assert" 1 true) (string.find def.form "error" 1 true))
+              (set has-assert true))
+            (when (not has-assert)
+              (table.insert diagnostics
+                (Diagnostics.violation
+                  {:constraint-id "lifecycle.required-runtime-fails-loudly" :family "lifecycle"
+                   :message (.. "function " (or def.name "<anonymous>") " synthesizes " matched " with or without assert/error")
+                   :file ff.path :line (or def.line 0) :column 0
+                   :evidence {:function-name (or def.name "<anonymous>") :sensitive-global matched}
+                   :hint "Assert required runtime state instead of silently synthesizing canonical state."}))))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn M.rules []

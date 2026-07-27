@@ -345,6 +345,50 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "file with function named unload should pass"))
 
+;; --- Precision: disconnect-* helper calls and functions ---
+
+(fn registration-cleanup-allows-disconnect-dash-helper-call []
+  "A file with connect registrations and a call to disconnect-input (or any
+  disconnect-* helper) should pass — these are recognized cleanup calls."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :calls [{:callee "some-obj:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(some-obj:connect handler)"}
+                                     {:callee "disconnect-input"
+                                      :receiver nil :method nil
+                                      :line 25 :column 1
+                                      :form "(disconnect-input)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with disconnect-* helper call should pass"))
+
+(fn registration-cleanup-allows-disconnect-dash-function-name []
+  "A file with connect registrations and a function named disconnect-update
+  should pass — disconnect-* function names are recognized as cleanup evidence."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :definitions [{:kind :fn
+                                            :name "disconnect-update"
+                                            :top-level? true
+                                            :line 30 :column 1
+                                            :length 10
+                                            :form "(fn disconnect-update [] (some-obj:disconnect handler))"}]
+                             :calls [{:callee "some-obj:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(some-obj:connect handler)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with function named disconnect-* should pass"))
+
 (fn registration-cleanup-flags-file-with-partial-cleanup []
   "A file with two registrations but only one cleanup should produce diagnostics
   for the unmatched registration."
@@ -470,15 +514,15 @@
   (assert d.evidence "diagnostic should include evidence")
   (assert d.hint "diagnostic should include hint"))
 
-(fn required-runtime-flags-file-with-when-silently-no-oping []
-  "A file that accesses a sensitive global and uses when to silently
-  no-op without assert/error should produce a diagnostic."
+(fn required-runtime-allows-when-conditional-execution []
+  "A file that accesses a sensitive global and uses when for conditional
+  execution should NOT be flagged — when is guard logic, not silent fallback."
   (local Lifecycle (require :constraints.rules.lifecycle))
   (local rules (Lifecycle.rules))
   (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
   (assert rule "rule should be in rules list")
-  (local ff (make-file-fact {:path "/src/bad-module.fnl"
-                             :module "bad-module"
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
                              :accesses [{:path ["app" "lights"]
                                          :text "app.lights"
                                          :line 5 :column 1
@@ -492,15 +536,161 @@
   (when app.lights
     (tset app.lights :extra l)))"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert result "should produce diagnostics for when-pattern without assert")
+  (assert (= result nil) "file with when-pattern should pass — when is guard, not synthesis"))
+
+(fn required-runtime-allows-if-conditional []
+  "A file that uses if to branch on a sensitive global should NOT be flagged
+  as synthesis by default — if is complex conditional logic, not simple or-synthesis."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "engine"]
+                                         :text "app.engine"
+                                         :line 5 :column 1
+                                         :form "app.engine"}]
+                             :definitions [{:kind :fn
+                                            :name "get-engine"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-engine []
+  (if app.engine
+    app.engine
+    (make-debug-engine)))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with if-pattern should pass — if is conditional, not or-synthesis"))
+
+;; --- Precision: guard patterns should NOT be flagged ---
+
+(fn required-runtime-allows-and-guard-pattern []
+  "A function using (and app.engine app.engine.frame-id) as a guard check
+  does not synthesize app.engine — it guards against nil before accessing subfields."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "engine"]
+                                         :text "app.engine"
+                                         :line 5 :column 1
+                                         :form "app.engine"}]
+                             :definitions [{:kind :fn
+                                            :name "get-frame-id"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-frame-id []
+  (and app.engine app.engine.frame-id))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "and guard pattern should not be flagged as synthesis"))
+
+(fn required-runtime-allows-or-with-and-guard []
+  "A function using (or (and app.engine app.engine.frame-id) 0) should not be
+  flagged — the and-guarded or is not synthesizing app.engine itself."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "engine"]
+                                         :text "app.engine"
+                                         :line 5 :column 1
+                                         :form "app.engine"}]
+                             :definitions [{:kind :fn
+                                            :name "get-frame-id"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-frame-id []
+  (or (and app.engine app.engine.frame-id) 0))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "or with and-guard should not be flagged as synthesis"))
+
+;; --- Precision: subfield defaults should NOT be flagged ---
+
+(fn required-runtime-allows-subfield-default []
+  "A function using (or app.engine.input.mouse.x 0) defaults a deep subfield,
+  not the top-level app.engine global. This should not be flagged."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "engine"]
+                                         :text "app.engine"
+                                         :line 5 :column 1
+                                         :form "app.engine"}]
+                             :definitions [{:kind :fn
+                                            :name "get-mouse-x"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-mouse-x []
+  (or app.engine.input.mouse.x 0))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "subfield default should not be flagged as synthesis"))
+
+(fn required-runtime-allows-renderers-subfield-default []
+  "Defaults for subfields of app.renderers should not be flagged as
+  synthesizing app.renderers itself."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "renderers"]
+                                         :text "app.renderers"
+                                         :line 5 :column 1
+                                         :form "app.renderers"}]
+                             :definitions [{:kind :fn
+                                            :name "get-layer"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-layer []
+  (or app.renderers.render-layer 0))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "renderers subfield default should not be flagged"))
+
+;; --- Precision: genuine or-synthesis should still be flagged ---
+
+(fn required-runtime-flags-file-with-set-or-synthesizing-global []
+  "A function that uses (set app.engine (or app.engine {})) to synthesize
+  a default global without assert/error should still be flagged."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :accesses [{:path ["app" "engine"]
+                                         :text "app.engine"
+                                         :line 5 :column 1
+                                         :form "app.engine"}]
+                             :definitions [{:kind :fn
+                                            :name "ensure-engine"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn ensure-engine []
+  (set app.engine (or app.engine {})))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for set+or synthesis pattern")
   (assert (> (length result) 0) "should have at least one diagnostic")
   (local d (. result 1))
   (assert (= d.constraint-id "lifecycle.required-runtime-fails-loudly")
           "diagnostic should have correct constraint-id"))
 
-(fn required-runtime-flags-file-with-if-synthesizing []
-  "A file that accesses a sensitive global and uses if to synthesize
-  state without assert/error should produce a diagnostic."
+(fn required-runtime-flags-file-with-or-synthesizing-engine []
+  "A function that uses (or app.engine {}) should still be flagged —
+  this is top-level sensitive global synthesis without assert/error."
   (local Lifecycle (require :constraints.rules.lifecycle))
   (local rules (Lifecycle.rules))
   (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
@@ -517,11 +707,9 @@
                                             :line 3 :column 1
                                             :length 100
                                             :form "(fn get-engine []
-  (if app.engine
-    app.engine
-    (make-debug-engine)))"}]}))
+  (or app.engine {}))"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert result "should produce diagnostics for if-pattern without assert")
+  (assert result "should produce diagnostics for or-synthesis of app.engine")
   (assert (> (length result) 0) "should have at least one diagnostic")
   (local d (. result 1))
   (assert (= d.constraint-id "lifecycle.required-runtime-fails-loudly")
@@ -1275,6 +1463,10 @@
                      :fn registration-cleanup-allows-connect-with-unregister-method})
 (table.insert tests {:name "registration-cleanup allows function named unload"
                      :fn registration-cleanup-allows-function-named-unload})
+(table.insert tests {:name "registration-cleanup allows disconnect-dash helper call"
+                     :fn registration-cleanup-allows-disconnect-dash-helper-call})
+(table.insert tests {:name "registration-cleanup allows disconnect-dash function name"
+                     :fn registration-cleanup-allows-disconnect-dash-function-name})
 (table.insert tests {:name "registration-cleanup flags file with partial cleanup"
                      :fn registration-cleanup-flags-file-with-partial-cleanup})
 
@@ -1287,10 +1479,22 @@
                      :fn required-runtime-allows-file-with-error-and-sensitive-access})
 (table.insert tests {:name "required-runtime flags file with or synthesizing sensitive global"
                      :fn required-runtime-flags-file-with-or-synthesizing-sensitive-global})
-(table.insert tests {:name "required-runtime flags file with when silently no-oping"
-                     :fn required-runtime-flags-file-with-when-silently-no-oping})
-(table.insert tests {:name "required-runtime flags file with if synthesizing"
-                     :fn required-runtime-flags-file-with-if-synthesizing})
+(table.insert tests {:name "required-runtime allows when conditional execution"
+                     :fn required-runtime-allows-when-conditional-execution})
+(table.insert tests {:name "required-runtime allows if conditional"
+                     :fn required-runtime-allows-if-conditional})
+(table.insert tests {:name "required-runtime allows and guard pattern"
+                     :fn required-runtime-allows-and-guard-pattern})
+(table.insert tests {:name "required-runtime allows or with and guard"
+                     :fn required-runtime-allows-or-with-and-guard})
+(table.insert tests {:name "required-runtime allows subfield default"
+                     :fn required-runtime-allows-subfield-default})
+(table.insert tests {:name "required-runtime allows renderers subfield default"
+                     :fn required-runtime-allows-renderers-subfield-default})
+(table.insert tests {:name "required-runtime flags set+or synthesizing global"
+                     :fn required-runtime-flags-file-with-set-or-synthesizing-global})
+(table.insert tests {:name "required-runtime flags or synthesizing engine"
+                     :fn required-runtime-flags-file-with-or-synthesizing-engine})
 (table.insert tests {:name "required-runtime only checks per-function, not file-level"
                      :fn required-runtime-allows-file-with-assert-in-outer-fn})
 
