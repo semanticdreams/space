@@ -123,6 +123,64 @@
   (set app.first-person-controls saved-first-person)
   (set app.active-pointer-controls saved-active-pointer))
 
+;; R4-1 fix-round-2: canvas-active input-controls must not fall
+;; back to first-person-controls when canvas-controls is missing.
+(fn provider-input-controls-no-cross-surface-fallback []
+  (local fpc {:kind :fpc})
+  (local canvas-ctls {:kind :canvas-controls})
+  (local saved-runtime app.active-world-runtime)
+  (local saved-canvas-interactive app.canvas-interactive?)
+  ;; Scenario A: canvas active with canvas-controls → returns canvas-controls
+  (set app.canvas-interactive? true)
+  (set app.active-world-runtime
+       {:first-person-controls fpc
+        :canvas-controls canvas-ctls})
+  (local provider-a (Presentation.for-runtime app.active-world-runtime))
+  (assert (= (provider-a:input-controls) canvas-ctls)
+          "canvas-active + canvas-controls must return canvas-controls")
+  ;; Scenario B: canvas active with NO canvas-controls → must return nil, not fpc
+  (set app.active-world-runtime
+       {:first-person-controls fpc})
+  (local provider-b (Presentation.for-runtime app.active-world-runtime))
+  (assert (= (provider-b:input-controls) nil)
+          "canvas-active + missing canvas-controls must return nil, not fpc")
+  ;; Scenario C: scene active → returns first-person-controls (or nil)
+  (set app.canvas-interactive? false)
+  (set app.active-world-runtime
+       {:first-person-controls fpc
+        :canvas-controls canvas-ctls})
+  (local provider-c (Presentation.for-runtime app.active-world-runtime))
+  (assert (= (provider-c:input-controls) fpc)
+          "scene-active must return first-person-controls")
+  (set app.active-world-runtime saved-runtime)
+  (set app.canvas-interactive? saved-canvas-interactive))
+
+;; R4-1 fix-round-2: Common.controls-from must not return legacy
+;; app.active-pointer-controls / app.first-person-controls globals
+;; when presentation controls are nil.
+(fn common-controls-from-rejects-legacy-app-globals []
+  (local Common (require :state-handlers/common))
+  (local saved-runtime app.active-world-runtime)
+  (local saved-fpc app.first-person-controls)
+  (local saved-ptr app.active-pointer-controls)
+  ;; Set legacy globals to non-nil — they must be ignored
+  (set app.first-person-controls {:legacy :fpc})
+  (set app.active-pointer-controls {:legacy :ptr})
+  ;; Presentation provider exists but returns nil controls
+  (set app.active-world-runtime
+       {:presentation {:input-controls (fn [_self] nil)}})
+  (let [ctx {:app app}]
+    (assert (= (Common.controls-from ctx) nil)
+            "Common.controls-from must return nil when presentation controls are nil, even with legacy globals set"))
+  ;; No presentation provider at all
+  (set app.active-world-runtime nil)
+  (let [ctx {:app app}]
+    (assert (= (Common.controls-from ctx) nil)
+            "Common.controls-from must return nil when no presentation provider exists"))
+  (set app.active-world-runtime saved-runtime)
+  (set app.first-person-controls saved-fpc)
+  (set app.active-pointer-controls saved-ptr))
+
 (table.insert tests {:name "Provider returns only explicit targets"
                      :fn provider-returns-only-explicit-targets})
 (table.insert tests {:name "Provider screen ray requires target"
@@ -137,6 +195,10 @@
                      :fn app-screen-pos-ray-delegates-to-runtime-presentation})
 (table.insert tests {:name "state-runtime uses presentation controls"
                      :fn state-runtime-uses-presentation-controls})
+(table.insert tests {:name "provider input-controls has no cross-surface fallback"
+                     :fn provider-input-controls-no-cross-surface-fallback})
+(table.insert tests {:name "common controls-from rejects legacy app globals"
+                     :fn common-controls-from-rejects-legacy-app-globals})
 
 (local main
   (fn []

@@ -5,10 +5,8 @@
 
 (fn controls-from [ctx]
   (let [app-obj (app-from ctx)]
-    (or (when app-obj.presentation-input-controls
-          (app-obj.presentation-input-controls))
-        app-obj.active-pointer-controls
-        app-obj.first-person-controls)))
+    (when app-obj.presentation-input-controls
+      (app-obj.presentation-input-controls))))
 
 (fn selector-from [_ctx]
   (Runtime.selection-handler))
