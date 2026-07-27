@@ -1,0 +1,243 @@
+;; Tests for static Fennel fact extraction.
+;; Follows TDD: these tests must FAIL before facts.fnl is implemented.
+
+(local tests [])
+(local fs (require :fs))
+
+(var temp-counter 0)
+(local temp-root (fs.join-path "/tmp/space/tests" "constraints-facts-test"))
+
+(fn temp-dir-name []
+  (set temp-counter (+ temp-counter 1))
+  (fs.join-path temp-root (.. "test-" (os.time) "-" temp-counter)))
+
+(fn make-file [dir name content]
+  "Create a file in dir with given name and content."
+  (local path (fs.join-path dir name))
+  (fs.write-file path content)
+  path)
+
+(fn with-temp-dir [f]
+  (local dir (temp-dir-name))
+  (when (fs.exists dir)
+    (fs.remove-all dir))
+  (fs.create-dirs dir)
+  (local (ok result) (pcall f dir))
+  (fs.remove-all dir)
+  (if ok
+      result
+      (error result)))
+
+;; Helper: extract facts from a Fennel source string via temp file.
+(fn extract-from-source [source]
+  (with-temp-dir (fn [dir]
+    (make-file dir "test.fnl" source)
+    (local target {:kind :unit
+                   :name "facts-test"
+                   :roots [dir]
+                   :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local Facts (require :constraints.facts))
+    (local records (Source.discover target))
+    (Facts.extract records))))
+
+;; --- Test: Fact extraction of a simple module ---
+
+(fn extracts-require-module []
+  (local source "(local Scene (require :scene))\n(fn build [world]\n  (set world.state.scene.panels [])\n  (Scene.activate world)\n  {:render build})\n")
+  (local fact-db (extract-from-source source))
+  (assert fact-db "fact-db should not be nil")
+  (assert fact-db.files "fact-db should have :files")
+  (assert fact-db.by-file "fact-db should have :by-file")
+  (assert (= (length fact-db.files) 1) "should have one file fact")
+  (local ff (. fact-db.files 1))
+  ;; require module "scene"
+  (assert ff.requires "file-fact should have :requires")
+  (assert (> (length ff.requires) 0) "should have at least one require")
+  (local req (. ff.requires 1))
+  (assert (= req.module "scene") (.. "expected require module 'scene', got " (tostring req.module))))
+
+(fn extracts-definition []
+  (local source "(local Scene (require :scene))\n(fn build [world]\n  (set world.state.scene.panels [])\n  (Scene.activate world)\n  {:render build})\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert ff.definitions "file-fact should have :definitions")
+  (local defs ff.definitions)
+  ;; Should have both the local and the fn
+  (assert (>= (length defs) 2) (.. "expected at least 2 definitions, got " (length defs)))
+  ;; Find the fn build definition
+  (var found-build false)
+  (each [_ d (ipairs defs)]
+    (when (and (= d.kind :fn) (= d.name "build"))
+      (assert d.top-level? "build should be top-level")
+      (assert d.line "should have line")
+      (assert d.column "should have column")
+      (set found-build true)))
+  (assert found-build "should find definition for fn build"))
+
+(fn extracts-export-key []
+  (local source "(fn build [world]\n  {:render build})\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert ff.exports "file-fact should have :exports")
+  (var found-render false)
+  (each [_ e (ipairs ff.exports)]
+    (when (= e.key "render")
+      (set found-render true)))
+  (assert found-render "should find export key 'render'"))
+
+(fn extracts-call []
+  (local source "(local Scene (require :scene))\n(fn build [world]\n  (Scene.activate world))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert ff.calls "file-fact should have :calls")
+  (var found-call false)
+  (each [_ c (ipairs ff.calls)]
+    (when (= c.callee "Scene.activate")
+      (set found-call true)))
+  (assert found-call "should find call to Scene.activate"))
+
+(fn extracts-access-path []
+  (local source "(fn build [world]\n  (set world.state.scene.panels []))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert ff.accesses "file-fact should have :accesses")
+  (var found-access false)
+  (each [_ a (ipairs ff.accesses)]
+    (when (= a.text "world.state.scene.panels")
+      (assert a.path "access should have :path")
+      (assert (>= (length a.path) 4) "path should have at least 4 segments")
+      (assert (= (. a.path 1) "world"))
+      (assert (= (. a.path 2) "state"))
+      (assert (= (. a.path 3) "scene"))
+      (assert (= (. a.path 4) "panels"))
+      (set found-access true)))
+  (assert found-access "should find access to world.state.scene.panels"))
+
+(fn extracts-mutation []
+  (local source "(fn build [world]\n  (set world.state.scene.panels []))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert ff.mutations "file-fact should have :mutations")
+  (var found-mutation false)
+  (each [_ m (ipairs ff.mutations)]
+    (when (and (= m.op :set)
+               (= (. m.path 1) "world")
+               (= (. m.path 2) "state")
+               (= (. m.path 3) "scene")
+               (= (. m.path 4) "panels"))
+      (set found-mutation true)))
+  (assert found-mutation "should find set mutation of world.state.scene.panels"))
+
+(fn extracts-positive-module-lines []
+  (local source "(local Scene (require :scene))\n(fn build [world]\n  (set world.state.scene.panels [])\n  (Scene.activate world)\n  {:render build})\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert ff.metrics "file-fact should have :metrics")
+  (assert (> ff.metrics.module-lines 0) "module-lines should be positive")
+  (assert ff.metrics.functions "metrics should have :functions")
+  (assert (>= (length ff.metrics.functions) 1) "should have at least one function metric"))
+
+;; --- Test: Metrics extraction ---
+
+(fn extracts-nesting-depth []
+  (local source "(fn outer [x]\n  (fn inner [y]\n    (fn deep [z]\n      (each [_ v (ipairs z)]\n        (print v))))\n  {:values [1 2 3 4 5 6 7 8 9 10]})\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert (>= ff.metrics.max-nesting-depth 2)
+          (.. "max-nesting-depth should be >= 2 for nested fns, got " (tostring ff.metrics.max-nesting-depth))))
+
+(fn extracts-table-literal-size []
+  (local source "(fn outer [x]\n  {:values [1 2 3 4 5 6 7 8 9 10]})\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert (> ff.metrics.max-table-literal-size 0)
+          "max-table-literal-size should be positive"))
+
+(fn extracts-anonymous-callback-depth []
+  (local source "(fn process [items]\n  (table.sort items (fn [a b]\n    (< a b))))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  ;; Should have an anonymous fn callback
+  (assert (>= ff.metrics.max-anonymous-callback-depth 0)
+          "max-anonymous-callback-depth should be non-negative"))
+
+(fn extracts-function-metrics []
+  (local source "(fn outer [x]\n  (fn inner [y]\n    (print y)))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (assert (>= (length ff.metrics.functions) 2)
+          (.. "expected >= 2 function metrics, got " (length ff.metrics.functions)))
+  (var found-outer false)
+  (each [_ f (ipairs ff.metrics.functions)]
+    (when (= f.name "outer")
+      (assert f.line "function metric should have :line")
+      (assert f.length "function metric should have :length")
+      (assert f.max-nesting-depth "function metric should have :max-nesting-depth")
+      (set found-outer true)))
+  (assert found-outer "should find metric for function outer"))
+
+;; --- Test: global definitions ---
+
+(fn extracts-global-definition []
+  (local source "(global CONFIG {:version 1})\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var found-global false)
+  (each [_ d (ipairs ff.definitions)]
+    (when (and (= d.kind :global) (= d.name "CONFIG"))
+      (assert d.top-level? "global should be top-level")
+      (set found-global true)))
+  (assert found-global "should find global CONFIG"))
+
+;; --- Test: tset mutation ---
+
+(fn extracts-tset-mutation []
+  (local source "(fn update [world]\n  (tset world.state :active true))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var found-tset false)
+  (each [_ m (ipairs ff.mutations)]
+    (when (= m.op :tset)
+      (assert m.path "tset mutation should have :path")
+      (assert m.form "tset mutation should have :form")
+      (set found-tset true)))
+  (assert found-tset "should find tset mutation"))
+
+;; Register all tests
+(table.insert tests {:name "facts extracts require module"
+                     :fn extracts-require-module})
+(table.insert tests {:name "facts extracts definition"
+                     :fn extracts-definition})
+(table.insert tests {:name "facts extracts export key"
+                     :fn extracts-export-key})
+(table.insert tests {:name "facts extracts call"
+                     :fn extracts-call})
+(table.insert tests {:name "facts extracts access path"
+                     :fn extracts-access-path})
+(table.insert tests {:name "facts extracts mutation"
+                     :fn extracts-mutation})
+(table.insert tests {:name "facts extracts positive module lines"
+                     :fn extracts-positive-module-lines})
+(table.insert tests {:name "facts extracts nesting depth"
+                     :fn extracts-nesting-depth})
+(table.insert tests {:name "facts extracts table literal size"
+                     :fn extracts-table-literal-size})
+(table.insert tests {:name "facts extracts anonymous callback depth"
+                     :fn extracts-anonymous-callback-depth})
+(table.insert tests {:name "facts extracts function metrics"
+                     :fn extracts-function-metrics})
+(table.insert tests {:name "facts extracts global definition"
+                     :fn extracts-global-definition})
+(table.insert tests {:name "facts extracts tset mutation"
+                     :fn extracts-tset-mutation})
+
+(local main
+  (fn []
+    (local runner (require :tests/runner))
+    (runner.run-tests {:name "constraints-facts"
+                        :tests tests})))
+
+{:name "constraints-facts"
+ :tests tests
+ :main main}
