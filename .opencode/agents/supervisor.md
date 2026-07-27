@@ -20,7 +20,7 @@ permission:
     "docs/plans/**": allow
     ".superpowers/sdd/**": allow
   task: allow
-  external_directory: deny
+  external_directory: ask
   webfetch: deny
   websearch: deny
   question: deny
@@ -165,6 +165,30 @@ Skills describe actions. On OpenCode these resolve to:
 - "Run a shell command" → `bash`
 - "Search file contents" / "find files" → `grep`, `glob`
 - "Fetch a URL" → `webfetch`
+
+
+## External Directory Access
+
+When a task requires reading, globbing, or grepping files outside the
+project workspace (anything under the `external_directory` permission),
+you must request access from the human partner before proceeding. Follow
+these rules:
+
+- **Narrowest useful scope.** Request the smallest directory subtree that
+  covers what the task genuinely needs (e.g., `/etc/nginx/` not `/etc`;
+  `~/.config/app/` not `~/.config`).
+
+- **No generic roots.** Never request `/`, the entire home directory
+  (`~` or `$HOME`), or other broad system prefixes whose contents are
+  irrelevant to the task.
+
+- **Batch by task scope, not by file.** When a task clearly needs to
+  inspect multiple files under a known directory or subtree, request
+  the subtree once rather than asking permission per-file.
+
+- **Explain the scope.** In your ask prompt, state what directory subtree
+  you need and why — link it to the active task or plan step so the
+  human partner can make an informed decision.
 
 ## Core Workflow
 
