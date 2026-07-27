@@ -109,7 +109,12 @@
     (if (= visualization-source.enabled nil)
         default-visualization.enabled
         (not (not visualization-source.enabled))))
-  {:mode mode
+  (local enabled?
+    (if (= source.enabled? nil)
+        true
+        (not (not source.enabled?))))
+  {:enabled? enabled?
+   :mode mode
    :bounds (normalize-bounds source.bounds)
    :padding (normalize-padding source.padding)
    :restitution restitution
@@ -118,7 +123,8 @@
 
 (fn serialize-config [value]
   (local config (normalize-config value))
-  {:mode config.mode
+  {:enabled? config.enabled?
+   :mode config.mode
    :bounds {:min (vec3->array config.bounds.min)
             :max (vec3->array config.bounds.max)}
    :padding {:horizontal config.padding.horizontal
@@ -249,12 +255,16 @@
     (local theme (resolve-active-theme))
     (local containment-theme (and theme theme.physics-containment))
     (local visualization-theme (and containment-theme containment-theme.visualization))
-    (local theme-color (and visualization-theme visualization-theme.color))
-    (or theme-color
-        (error "PhysicsContainment visualization requires theme physics-containment.visualization.color"))))
+    (or (and visualization-theme visualization-theme.color)
+        [0.2 0.6 1.0 0.3])))
 
 (fn create-visualization [scene bounds config]
-  (local lines (and scene scene.build-context scene.build-context.lines))
+  ;; R7-2: Use the active slot's build context when a slot is active/visible,
+  ;; falling back to scene.build-context only when no active slot exists.
+  (local build-ctx (or (and scene scene.resolve-active-build-context
+                            (scene:resolve-active-build-context))
+                        (and scene scene.build-context)))
+  (local lines (and build-ctx build-ctx.lines))
   (if (or (not lines)
           (not config.visualization.enabled))
       nil
@@ -301,9 +311,17 @@
   {:key spec.key
    :shape shape
    :motion-state motion-state
-   :body body
-   :physics physics
-   :constant spec.constant})
+    :body body
+    :physics physics
+    :constant spec.constant})
+
+(fn clear []
+  (when app.__physics_containment_refresh_debouncer
+    (app.__physics_containment_refresh_debouncer:drop)
+    (set app.__physics_containment_refresh_debouncer nil))
+  (drop-installed)
+  (set app.physics-containment-scene nil)
+  true)
 
 (fn ensure-installed [opts]
   (if (not (available?))
@@ -311,35 +329,58 @@
       (do
         (local options (or opts {}))
         (local config (normalize-config (or options.config app.physics-containment-config)))
-        (local scene (or options.scene app.physics-containment-scene))
-        (when (and scene scene.update)
-          (scene:update))
-        (local bounds (resolve-active-bounds config scene))
-        (local physics app.engine.physics)
-        (local existing app.__physics-global-containment)
-        (local already-installed?
-          (and existing
-               (= existing.physics physics)
-               (= existing.restitution config.restitution)
-               (bounds-approx= existing.bounds bounds)
-               (= existing.mode config.mode)))
         (set app.physics-containment-config (serialize-config config))
-        (set app.physics-containment-scene scene)
-        (if already-installed?
-            true
+        (if (not config.enabled?)
             (do
-              (drop-installed)
-              (local planes
-                (icollect [_ spec (ipairs (plane-specs bounds))]
-                  (install-plane physics spec config.restitution)))
-              (set app.__physics-global-containment
-                   {:physics physics
-                    :bounds bounds
-                    :mode config.mode
-                    :restitution config.restitution
-                    :planes planes
-                    :visualization (create-visualization scene bounds config)})
-              true)))))
+              (clear)
+              false)
+            (do
+              (local scene (or options.scene app.physics-containment-scene))
+              (when (and scene scene.update)
+                (scene:update))
+              (local bounds (resolve-active-bounds config scene))
+              (local physics app.engine.physics)
+              (local existing app.__physics-global-containment)
+              ;; R7-2: Track the build context used for visualization
+              ;; so we can recreate when the active slot changes but
+              ;; config/bounds/mode are otherwise identical.
+              (local viz-build-ctx
+                (or (and scene scene.resolve-active-build-context
+                         (scene:resolve-active-build-context))
+                    (and scene scene.build-context)))
+              (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
+              (local already-installed?
+                (and existing
+                     (= existing.physics physics)
+                     (= existing.restitution config.restitution)
+                     (bounds-approx= existing.bounds bounds)
+                     (= existing.mode config.mode)))
+              (set app.physics-containment-scene scene)
+              (if already-installed?
+                  (do
+                    ;; Refresh visualization when the active build context
+                    ;; (slot) has changed, even though physics params match.
+                    (if (not (= existing.viz-lines viz-lines))
+                        (do
+                          (when (and existing.visualization existing.visualization.drop)
+                            (existing.visualization:drop))
+                          (set existing.visualization (create-visualization scene bounds config))
+                          (set existing.viz-lines viz-lines)))
+                    true)
+                  (do
+                    (drop-installed)
+                    (local planes
+                      (icollect [_ spec (ipairs (plane-specs bounds))]
+                        (install-plane physics spec config.restitution)))
+                    (set app.__physics-global-containment
+                         {:physics physics
+                          :bounds bounds
+                          :mode config.mode
+                          :restitution config.restitution
+                          :planes planes
+                          :visualization (create-visualization scene bounds config)
+                          :viz-lines viz-lines})
+                    true)))))))
 
 (fn refresh-visualization [opts]
   (local existing app.__physics-global-containment)
@@ -353,7 +394,13 @@
         (set app.physics-containment-scene scene)
         (when (and existing.visualization existing.visualization.drop)
           (existing.visualization:drop))
+        (local viz-build-ctx
+          (or (and scene scene.resolve-active-build-context
+                   (scene:resolve-active-build-context))
+              (and scene scene.build-context)))
+        (local viz-lines (and viz-build-ctx viz-build-ctx.lines))
         (set existing.visualization (create-visualization scene existing.bounds config))
+        (set existing.viz-lines viz-lines)
         true)))
 
 (fn ensure-refresh-debouncer []
@@ -388,14 +435,6 @@
         (debouncer:set-delay-ms config.debounce-ms)
         (debouncer:trigger {:scene scene
                             :config config})))
-  true)
-
-(fn clear []
-  (when app.__physics_containment_refresh_debouncer
-    (app.__physics_containment_refresh_debouncer:drop)
-    (set app.__physics_containment_refresh_debouncer nil))
-  (drop-installed)
-  (set app.physics-containment-scene nil)
   true)
 
 {:available? available?

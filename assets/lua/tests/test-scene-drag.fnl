@@ -140,6 +140,9 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
+            (scene:ensure-activity-slot "sandbox")
+            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+            (assert sandbox-slot "Entity drag test requires a valid sandbox slot")
             (scene:build
               (fn [_ctx]
                 (set target-layout
@@ -168,9 +171,9 @@
             (assert (approx target-layout.position.x 5.0) "Drag should update layout X position")
             (assert (approx target-layout.position.y 5.5) "Drag should update layout Y position")
             (assert (approx target-layout.position.z 0.0) "Drag should keep layout on the ground plane")
-            (local root scene.layout-root)
-            (assert root "Scene should expose a layout root")
-            (assert (. root.layout-dirt.lookup target-layout) "Drag should mark layout node dirty")
+             (local active-root sandbox-slot.layout-root)
+             (assert active-root "Active sandbox slot should expose a layout root")
+             (assert (. active-root.layout-dirt.lookup target-layout) "Drag should mark layout node dirty")
 
             (app.engine.events.mouse-button-up.emit {:button 1})
             (assert (not (app.movables:drag-active?)) "Drag should end on mouse-up")))]
@@ -268,9 +271,11 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
-            (app.engine.physics:setGravity 0 -25 0)
-            (scene:build-default {:terrains []})
-            (set ball (scene:add-object (Ball {:size (glm.vec3 6 6 6)})
+             (app.engine.physics:setGravity 0 -25 0)
+             (scene:ensure-activity-slot "sandbox")
+             (scene:activate-activity-slot "sandbox")
+             (scene:build-default {:terrains []})
+             (set ball (scene:add-object (Ball {:size (glm.vec3 6 6 6)})
                                         {:position (glm.vec3 0 0 0)}))
             (scene:update)
             (set scene.screen-pos-ray
@@ -398,9 +403,11 @@
             (set app.active-interaction-surface :scene)
             (set app.scene-interactive? true)
             (set app.canvas-interactive? false)
-            (app.engine.physics:setGravity 0 -25 0)
-            (scene:build-default {:terrains []})
-            (set cuboid (scene:add-physics-body {:position (glm.vec3 0 0 0)
+             (app.engine.physics:setGravity 0 -25 0)
+             (scene:ensure-activity-slot "sandbox")
+             (scene:activate-activity-slot "sandbox")
+             (scene:build-default {:terrains []})
+             (set cuboid (scene:add-physics-body {:position (glm.vec3 0 0 0)
                                                  :size (glm.vec3 6 6 6)}))
             (assert cuboid "Scene should create a runtime physics body")
             (scene:update)
@@ -587,6 +594,9 @@
         (assert Main.install-app-shell!
                 "scene drag regression test requires Main.install-app-shell!")
         (Main.install-app-shell!)
+        (scene:ensure-activity-slot "sandbox")
+        (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+        (assert sandbox-slot "Canvas-hidden drag test requires a valid sandbox slot")
         (scene:build
           (fn [_ctx]
             (set target-layout

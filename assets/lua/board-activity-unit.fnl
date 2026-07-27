@@ -171,6 +171,14 @@
       (= target-kind :board)))
 
 (fn activate-activity! [ctx]
+  ;; Ensure and activate empty Scene slot before Canvas hooks
+  ;; so Board does not inherit Sandbox content/environment/interaction.
+  (let [runtime (assert app.active-world-runtime
+                         "Board activity activation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Board activity activation requires runtime.scene")]
+    (scene:ensure-activity-slot "board")
+    (scene:activate-activity-slot "board"))
   (ctx:defer-cleanup! drop-board-view!)
   (local view (activate-board-view!))
   (ctx:set-root-actions! board-root-actions)
@@ -186,11 +194,23 @@
    :board-view view})
 
 (fn deactivate-activity! [_ctx _session]
-  (deactivate-board-view!))
+  (deactivate-board-view!)
+  ;; Deactivate Scene slot after Canvas deactivation without dropping it
+  (let [runtime (assert app.active-world-runtime
+                         "Board activity deactivation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Board activity deactivation requires runtime.scene")]
+    (scene:deactivate-activity-slot "board")))
 
 (fn snapshot-board-activity! []
-  {:active? (= (Activities.active-activity-id) "board")
-   :board-state (capture-board-state!)})
+  (let [runtime (assert app.active-world-runtime
+                         "Board activity snapshot requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Board activity snapshot requires runtime.scene")
+        scene-state (scene:capture-activity-slot-state "board")]
+    {:active? (= (Activities.active-activity-id) "board")
+     :board-state (capture-board-state!)
+     :scene scene-state}))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -201,6 +221,12 @@
   (local state (restore-state-arg first session maybe-state))
   (when (and app.active-world-runtime state state.board-state)
     (set app.active-world-runtime.board-state state.board-state))
+  (when (and state state.scene)
+    (let [runtime (assert app.active-world-runtime
+                           "Board activity restore requires app.active-world-runtime")
+          scene (assert runtime.scene
+                         "Board activity restore requires runtime.scene")]
+      (scene:restore-activity-slot-state "board" state.scene)))
   (when (and state state.active?)
     (if (and state.board-state
              (= (Activities.active-activity-id) "board")

@@ -17,6 +17,75 @@
 (local Camera (require :camera))
 (local {: FocusManager} (require :focus))
 
+;; Minimal Scene stub providing the activity-slot lifecycle needed by
+;; board-activity-unit (ensure, activate, deactivate, capture, restore).
+;; This avoids requiring a full Scene with BuildContext, layout roots,
+;; and focus-manager dependencies.
+(local make-scene-stub
+  (fn []
+    (local slots {})
+    (local stub
+      {:activity-slots slots
+       :active-activity-slot nil
+       :active-activity-slot-id nil})
+    (fn make-slot [activity-id]
+      {:activity-id activity-id
+       :surface :scene
+       :entity nil
+       :scene-children nil
+       :scene-terrains nil
+       :queued-cube-panels []
+       :panel-restorers {}
+       :demo-browser nil
+       :physics-body-count 0
+       :scene-state nil
+       :visible? false
+       :interactive? false
+       :activate (fn [self] (set self.visible? true) (set self.interactive? true) self)
+       :deactivate (fn [self] (set self.visible? false) (set self.interactive? false) self)
+       :drop (fn [self] (self:deactivate) (set self.entity nil) true)})
+    (set stub.ensure-activity-slot
+         (fn [_self activity-id]
+           (assert (= (type activity-id) :string) "Scene.ensure-activity-slot requires string activity id")
+           (local existing (. slots activity-id))
+           (if existing
+               existing
+               (let [slot (make-slot activity-id)]
+                 (set (. slots activity-id) slot)
+                 slot))))
+    (set stub.activate-activity-slot
+         (fn [self activity-id]
+           (local slot (self:ensure-activity-slot activity-id))
+           (when (and self.active-activity-slot
+                      (not= self.active-activity-slot slot))
+             (self.active-activity-slot:deactivate)
+             (set self.active-activity-slot nil)
+             (set self.active-activity-slot-id nil))
+           (slot:activate)
+           (set self.active-activity-slot-id activity-id)
+           (set self.active-activity-slot slot)
+           slot))
+    (set stub.deactivate-activity-slot
+         (fn [self activity-id]
+           (local slot (. slots activity-id))
+           (when slot
+             (slot:deactivate)
+             (when (= self.active-activity-slot slot)
+               (set self.active-activity-slot nil)
+               (set self.active-activity-slot-id nil)))
+           slot))
+    (set stub.capture-activity-slot-state
+         (fn [_self _activity-id]
+           {:panels []
+            :terrains []
+            :lights nil
+            :skybox nil
+            :background nil}))
+    (set stub.restore-activity-slot-state
+         (fn [_self _activity-id _state]
+           true))
+    stub))
+
 (local tests [])
 
 (fn dummy-widget [_item]
@@ -898,6 +967,7 @@
                                        :direction (glm.vec3 2 4 -10)})}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
+                                 :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -941,6 +1011,7 @@
                                       (error "screen-pos-ray should not be called when event.ray is present"))}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
+                                 :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1036,6 +1107,7 @@
                                       (error "screen-pos-ray should not be called when event.ray is present"))}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
+                                 :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1081,6 +1153,7 @@
                                        :direction (glm.vec3 0 0 1)})}))
   (local canvas fixture.canvas)
   (set app.active-world-runtime {:canvas canvas
+                                 :scene (make-scene-stub)
                                  :board-state {:items [] :connectors []}})
   (set app.canvas canvas)
   (BoardActivityUnit.load-board-activity!)
@@ -1122,6 +1195,7 @@
       (local fixture (make-activity-canvas))
       (local canvas fixture.canvas)
       (local runtime {:canvas canvas
+                       :scene (make-scene-stub)
                        :board-state {:items [{:id "bad"
                                               :type "missing-board-item-type"}]
                                     :connectors []}})
@@ -1168,6 +1242,7 @@
       (local canvas fixture.canvas)
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime {:canvas canvas
+                                      :scene (make-scene-stub)
                                       :board-state {:items [] :connectors []}})
       (set app.canvas canvas)
       (BoardActivityUnit.load-board-activity!)
@@ -1223,6 +1298,7 @@
       (local canvas fixture.canvas)
       (set app.active-world-entry {:dir dir})
       (set app.active-world-runtime {:canvas canvas
+                                      :scene (make-scene-stub)
                                       :board-state {:items [] :connectors []}})
       (set app.canvas canvas)
       (BoardActivityUnit.load-board-activity!)
@@ -1490,6 +1566,7 @@
   (set app.canvas canvas)
   (set app.active-interaction-surface :canvas)
   (local runtime {:canvas canvas
+                  :scene (make-scene-stub)
                   :board-state (or options.board-state {:items [] :connectors []})})
   (when options.object-selector
     (set runtime.object-selector options.object-selector))

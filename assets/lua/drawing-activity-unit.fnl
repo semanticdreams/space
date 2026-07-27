@@ -102,6 +102,14 @@
   ((. DrawingActivityActions :drawing-selection-actions) context))
 
 (fn activate-activity! [ctx]
+  ;; Ensure and activate empty Scene slot before Canvas hooks
+  ;; so Drawing does not inherit Sandbox content/environment/interaction.
+  (let [runtime (assert app.active-world-runtime
+                         "Drawing activity activation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Drawing activity activation requires runtime.scene")]
+    (scene:ensure-activity-slot "drawing")
+    (scene:activate-activity-slot "drawing"))
   (ctx:defer-cleanup! drop-drawing-render!)
   (local render (activate-drawing-render!))
   (ctx:set-drawing-enabled! true)
@@ -122,10 +130,22 @@
    :drawing-render render})
 
 (fn deactivate-activity! [_ctx _session]
-  (deactivate-drawing-render!))
+  (deactivate-drawing-render!)
+  ;; Deactivate Scene slot after Canvas deactivation without dropping it
+  (let [runtime (assert app.active-world-runtime
+                         "Drawing activity deactivation requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Drawing activity deactivation requires runtime.scene")]
+    (scene:deactivate-activity-slot "drawing")))
 
 (fn snapshot-drawing-activity! []
-  {:active? (= (Activities.active-activity-id) "drawing")})
+  (let [runtime (assert app.active-world-runtime
+                         "Drawing activity snapshot requires app.active-world-runtime")
+        scene (assert runtime.scene
+                       "Drawing activity snapshot requires runtime.scene")
+        scene-state (scene:capture-activity-slot-state "drawing")]
+    {:active? (= (Activities.active-activity-id) "drawing")
+     :scene scene-state}))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -134,6 +154,12 @@
 
 (fn restore-drawing-activity! [first session maybe-state]
   (local state (restore-state-arg first session maybe-state))
+  (when (and state state.scene)
+    (let [runtime (assert app.active-world-runtime
+                           "Drawing activity restore requires app.active-world-runtime")
+          scene (assert runtime.scene
+                         "Drawing activity restore requires runtime.scene")]
+      (scene:restore-activity-slot-state "drawing" state.scene)))
   (when (and state state.active?)
     (if app.set-active-activity
         (app.set-active-activity "drawing")

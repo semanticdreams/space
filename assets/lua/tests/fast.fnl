@@ -64,9 +64,12 @@
     :tests.test-cuboid
     :tests.test-main-events
     :tests.test-states
-     :tests.test-canvas-controls
+      :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
+      :tests.test-scene-activity-slots
       :tests.test-activity-retention
+      :tests.test-home-world-scene-activity-state
+      :tests.test-sandbox-activity
       :tests.test-graph-activity-slots
      :tests.test-drawing-activity-slots
      :tests.test-board
@@ -175,9 +178,10 @@
     :tests.test-repo-store
     :tests.test-repo-checks
     :tests.test-repo-presets
-     :tests.test-repo-display
-     :tests.test-panel-transfer
-     :tests.test-external-unit-mcp]})
+    :tests.test-repo-display
+    :tests.test-panel-transfer
+    :tests.test-sandbox-scene-world-data
+    :tests.test-external-unit-mcp]})
 
 (local main
   (fn []

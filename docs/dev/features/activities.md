@@ -778,10 +778,12 @@ E2E coverage:
 
 Current implementation status:
 
-- Phases 1, 2, and 3 are implemented for HomeWorld graph, drawing, and board activities.
+- Phases 1, 2, 3, and 4 are implemented for HomeWorld graph, drawing, board, and sandbox activities.
 - Graph, drawing, and board render into isolated canvas activity slots.
-- Normal activity switches retain graph, drawing, and board sessions instead of dropping presentation objects.
-- Remaining work is focused on scene slots, broader HUD contribution formalization, and preserving old terminology only in explicitly legacy/historical docs.
+- Sandbox activity owns the former default 3D workspace via an isolated Scene activity slot.
+- Normal activity switches retain graph, drawing, board, and sandbox sessions instead of dropping presentation objects.
+- Scene slots are retained per-activity and active-slot isolated; canonical persisted state is activity-session scene state.
+- Remaining work is focused on HUD contribution formalization, broader agent preset context migration, and preserving old terminology only in explicitly legacy/historical docs.
 
 ### Phase 1: Activity Naming And State Shape (Complete)
 
@@ -841,7 +843,7 @@ Phase exit criteria:
 - Activity sessions survive activity switching.
 - World drop and hot reload still clean up correctly.
 
-### Phase 4: Scene Activity Surface Slots
+### Phase 4: Scene Activity Surface Slots (Complete)
 
 Add equivalent scene slots.
 
@@ -852,12 +854,19 @@ Work items:
 - Ensure scene render methods expose active slot draw data plus explicitly shared world draw data.
 - Decide which scene state is shared and which is activity-owned.
 - Migrate scene panel persistence if activity-owned scene panels are introduced.
+- Add the Sandbox activity (id `sandbox`, label `Sandbox`, icon `toys`) as the sole owner of the former default 3D workspace.
+- Make Sandbox the default activity for a new HomeWorld.
 
 Phase exit criteria:
 
 - An activity can request no scene content without destroying the scene surface.
 - An activity can request a distinct retained scene root.
 - Scene switching does not rebuild the scene surface.
+- Sandbox owns the former default 3D workspace: scene slots are retained per-activity and active-slot isolated; canonical persisted state lives under `activity.sessions.<activity-id>.scene`.
+- Legacy top-level `scene.*` and `physics.containment` are migrated once at load, removed from canonical state, and never read as runtime fallback.
+- Graph, Drawing, and Board activate empty Scene slots and must not inherit Sandbox state.
+- Inactive slots remain retained; ordinary activity switching does not drop or recreate them.
+- Only the active slot supplies render data, picking targets, scene interaction, physics simulation, lights, skybox, and background.
 
 ### Phase 5: HUD Contributions And Activity Dock
 

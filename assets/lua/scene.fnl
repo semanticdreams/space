@@ -381,30 +381,33 @@
                        :focus-parent focus-root
                        :focus-scope focus-scope}))
   (local self {:layout-root layout-root
-               :build-context ctx
-               :debug-id (or options.debug-id "scene")
-               :projection nil
-               :projection-version 0
-               :viewport nil
-               :entity nil
-               :builder nil
-               :graph options.graph
-               :graph-map options.graph-map
-                :panel-restorers {}
-                :demo-browser nil
-                :scene-children nil
-                :queued-cube-panels []
-               :scene-terrains nil
-               :physics-body-count 0
-               :default-position (or options.position default-position)
-               :default-rotation (or options.rotation default-rotation)
-               :on-terrains-changed options.on-terrains-changed
-               :reference-point default-position
-               :focus-manager focus-manager
-               :focus-scope focus-scope
-               :camera options.camera
-               :interaction-surface :scene
-               :default-panel-location "float"})
+                :build-context ctx
+                :activity-slots {}
+                :active-activity-slot-id nil
+                :active-activity-slot nil
+                :debug-id (or options.debug-id "scene")
+                :projection nil
+                :projection-version 0
+                :viewport nil
+                :entity nil
+                :builder nil
+                :graph options.graph
+                :graph-map options.graph-map
+                 :panel-restorers {}
+                 :demo-browser nil
+                 :scene-children nil
+                 :queued-cube-panels []
+                :scene-terrains nil
+                :physics-body-count 0
+                :default-position (or options.position default-position)
+                :default-rotation (or options.rotation default-rotation)
+                :on-terrains-changed options.on-terrains-changed
+                :reference-point default-position
+                :focus-manager focus-manager
+                :focus-scope focus-scope
+                :camera options.camera
+                :interaction-surface :scene
+                :default-panel-location "float"})
 
   (set ctx.pointer-target self)
   (set ctx.panel-target self)
@@ -519,6 +522,667 @@
         (self.on-terrains-changed self))))
   (apply-active-theme ctx)
 
+  ;; Activity slot infrastructure
+  (fn make-slot-focus-scope [activity-id]
+    (and focus-manager
+         (focus-manager:create-scope {:name (.. "scene:" activity-id)
+                                      :directional-traversal-boundary? true})))
+
+  (fn make-slot-pointer-target [slot]
+    {:interaction-surface :scene
+     :activity-slot slot
+     :screen-pos-ray (fn [_target pos opts]
+                       (self:screen-pos-ray pos opts))})
+
+  (fn make-slot-build-context [slot slot-layout-root slot-focus-scope]
+    (local slot-ctx
+      (BuildContext {:theme (resolve-active-theme)
+                     :clickables app.clickables
+                     :hoverables app.hoverables
+                     :touch-gesture-targets app.touch-gesture-targets
+                     :system-cursors app.system-cursors
+                     :icons options.icons
+                     :states options.states
+                     :object-selector options.object-selector
+                     :layout-root slot-layout-root
+                     :movables options.movables
+                     :focus-manager focus-manager
+                     :focus-parent focus-scope
+                     :focus-scope slot-focus-scope}))
+    (set slot-ctx.pointer-target slot.pointer-target)
+    (set slot-ctx.panel-target self)
+    (apply-active-theme slot-ctx)
+    slot-ctx)
+
+  (fn make-activity-slot [activity-id]
+    (local slot-focus-scope (make-slot-focus-scope activity-id))
+    (local slot-layout-root (LayoutRoot {:log-dirt? true}))
+    (local slot
+      {:activity-id activity-id
+       :interaction-surface :scene
+       :surface :scene
+       :ctx nil
+       :build-context nil
+       :layout-root slot-layout-root
+       :focus-scope slot-focus-scope
+       :pointer-target nil
+       :root nil
+       :entity nil
+       :scene-children nil
+       :scene-terrains nil
+       :queued-cube-panels []
+       :panel-restorers {}
+       :demo-browser nil
+       :physics-body-count 0
+       :scene-state nil
+       :visible? false
+       :interactive? false})
+    (set slot.pointer-target (make-slot-pointer-target slot))
+    (set slot.ctx (make-slot-build-context slot slot-layout-root slot-focus-scope))
+    (set slot.build-context slot.ctx)
+    (set slot.activate
+         (fn [slot-self]
+           (when (and focus-manager
+                      focus-scope
+                      slot-self.focus-scope
+                      (not slot-self.focus-scope.parent))
+             (focus-manager:attach slot-self.focus-scope focus-scope))
+           (set slot-self.visible? true)
+           (set slot-self.interactive? true)
+           slot-self))
+    (set slot.deactivate
+         (fn [slot-self]
+           (set slot-self.visible? false)
+           (set slot-self.interactive? false)
+           (when (and focus-manager
+                      slot-self.focus-scope
+                      slot-self.focus-scope.parent)
+             (focus-manager:detach slot-self.focus-scope))
+           slot-self))
+    (set slot.drop
+           (fn [slot-self]
+             (slot-self:deactivate)
+             ;; R6-2: Release retained entity/content when present.
+             ;; Deactivate physics, unregister input resources, and drop
+             ;; the entity — but guard against double-dropping active
+             ;; content that is already managed by the scene's own teardown.
+             (when slot-self.entity
+               (when (pcall require :layout-physics-bodies)
+                 (let [LayoutPhysicsBodies (require :layout-physics-bodies)]
+                   (pcall LayoutPhysicsBodies.deactivate slot-self.entity)))
+               ;; Unregister block-scoped movables so stale keys never
+               ;; block future registrations for the same widget.
+               (when (and app.movables slot-self.entity.__scene_movable_keys)
+                 (each [_ key (ipairs slot-self.entity.__scene_movable_keys)]
+                   (app.movables:unregister key)))
+               (when (and app.resizables slot-self.entity.__scene_resizable_keys)
+                 (each [_ key (ipairs slot-self.entity.__scene_resizable_keys)]
+                   (app.resizables:unregister key)))
+               ;; Only drop the entity when the slot is NOT the currently
+               ;; active slot.  When it is active, the scene's own
+               ;; unregister-entity / entity:drop in Scene.drop handles
+               ;; lifecycle without double-dropping.
+               (when (not (= self.active-activity-slot slot-self))
+                 (when slot-self.entity.drop
+                   (slot-self.entity:drop)))
+               (set slot-self.entity nil))
+             (when (and slot-self.root slot-self.root.drop)
+               (slot-self.root:drop))
+             (set slot-self.root nil)
+             (set slot-self.scene-children nil)
+             (set slot-self.scene-terrains nil)
+             (set slot-self.queued-cube-panels [])
+             (set slot-self.demo-browser nil)
+             (set slot-self.physics-body-count 0)
+             (when slot-self.focus-scope
+               (slot-self.focus-scope:drop)
+               (set slot-self.focus-scope nil))
+             true))
+    (slot:deactivate)
+    slot)
+
+  (fn active-render-context []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.ctx
+        self.build-context))
+
+  (fn resolve-active-build-context []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.build-context
+        self.build-context))
+
+  (fn resolve-active-layout-root []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        self.active-activity-slot.layout-root
+        self.layout-root))
+
+  (fn apply-active-theme-to-contexts [_scene]
+    (apply-active-theme self.build-context)
+    (each [_ slot (pairs self.activity-slots)]
+      (apply-active-theme slot.build-context))
+    true)
+
+  (fn ensure-activity-slot [_scene activity-id]
+    (assert (= (type activity-id) :string)
+            "Scene.ensure-activity-slot requires string activity id")
+    (assert (> (# activity-id) 0)
+            "Scene.ensure-activity-slot requires non-empty activity id")
+    (local existing (. self.activity-slots activity-id))
+    (if existing
+        existing
+        (do
+          (local ActivitySceneState (require :activity-scene-state))
+          (local slot (make-activity-slot activity-id))
+          (set slot.scene-state (ActivitySceneState.empty-state))
+          (set (. self.activity-slots activity-id) slot)
+          slot)))
+
+  (fn activity-slot [_scene activity-id]
+    (assert (= (type activity-id) :string)
+            "Scene.activity-slot requires string activity id")
+    (. self.activity-slots activity-id))
+
+  (fn capture-active-service-state [scene]
+    (local lights
+      (if (and app app.lights app.lights.get-state)
+          (app.lights:get-state)
+          nil))
+    (local skybox
+      (if (and app app.renderers app.renderers.skybox app.renderers.skybox.get-state)
+          (scene:get-skybox-state)
+          nil))
+    (local background
+      (if (and app app.renderers app.renderers.get-background-state)
+          (scene:get-background-state)
+          nil))
+    (local PhysicsContainment (require :physics-containment))
+    (local containment
+      (if app.physics-containment-config
+          (PhysicsContainment.serialize-config app.physics-containment-config)
+          {:enabled? false}))
+    {:lights lights
+     :skybox skybox
+     :background background
+     :containment containment})
+
+  (fn apply-state-to-services [scene state]
+    (assert state "Scene.apply-state-to-services requires state")
+    (local (ok err) (pcall
+                    (fn []
+                      (when (and state.lights
+                                 app app.lights app.lights.set-state)
+                        (app.lights:set-state state.lights))
+                      (when (and state.skybox
+                                 app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+                        ;; R3-3: Resolve complete skybox state using the current
+                        ;; active theme so by-theme overrides take effect.  Falls
+                        ;; back to :default when theme is nil or unknown.
+                        (local active-theme (resolve-active-theme))
+                        (local theme-key (and active-theme active-theme.name))
+                        (local resolved-skybox
+                          (SkyboxState.resolve-for-theme state.skybox theme-key))
+                        (app.renderers.skybox:set-state resolved-skybox))
+                      (when (and state.background
+                                 app app.renderers app.renderers.set-background-state)
+                        (app.renderers:set-background-state state.background))
+                      (when state.containment
+                        (local PhysicsContainment (require :physics-containment))
+                        (PhysicsContainment.ensure-installed {:config state.containment :scene scene})))))
+    (if (not ok)
+        (do
+          ;; Transactional rollback: reset all services to empty
+          (local ActivitySceneState (require :activity-scene-state))
+          (local empty (ActivitySceneState.empty-state))
+          (pcall
+            (fn []
+              (when (and app app.lights app.lights.set-state)
+                (app.lights:set-state empty.lights))
+              (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+                ;; R2-2: Resolve empty.skybox from complete to renderer format.
+                (app.renderers.skybox:set-state
+                  (SkyboxState.resolve-for-theme empty.skybox nil)))
+              (when (and app app.renderers app.renderers.set-background-state)
+                (app.renderers:set-background-state empty.background))
+              (when app.engine
+                (local PhysicsContainment (require :physics-containment))
+                (PhysicsContainment.ensure-installed {:config empty.containment :scene scene}))))
+          (error err))
+        true))
+
+  (fn reset-services-to-empty [scene]
+    (local ActivitySceneState (require :activity-scene-state))
+    (local empty (ActivitySceneState.empty-state))
+    (apply-state-to-services scene empty))
+
+  (fn assert-active-content-slot []
+    (assert self.active-activity-slot
+            "Scene content mutation requires an active activity scene slot"))
+
+  (fn activate-activity-slot [scene activity-id]
+    (local slot (activity-slot self activity-id))
+    (assert slot (.. "Scene.activate-activity-slot: no slot for activity " (tostring activity-id) " — call ensure-activity-slot first"))
+    (local was-different-slot
+      (and self.active-activity-slot
+           (not (= self.active-activity-slot slot))))
+    ;; Capture and deactivate old slot (but keep it in a snapshot for rollback)
+    (local previous-slot self.active-activity-slot)
+    (local previous-slot-id self.active-activity-slot-id)
+    (when was-different-slot
+      ;; Capture old active services state onto the old slot.
+      ;; Merge services into existing scene-state to preserve terrain
+      ;; and panel records (R2-1).  Preserve the existing complete
+      ;; skybox policy (:default, :by-theme) rather than overwriting
+      ;; it with the renderer's resolved format (R2-2).
+      (local current-state (or self.active-activity-slot.scene-state
+                                (do
+                                  (local ActivitySceneState (require :activity-scene-state))
+                                  (ActivitySceneState.empty-state))))
+      (local services (capture-active-service-state self))
+      (set current-state.lights services.lights)
+      ;; R2-2: Do NOT overwrite current-state.skybox with services.skybox.
+      ;; services.skybox is the resolved renderer view; the slot's existing
+      ;; scene-state.skybox holds the complete policy (:default, :by-theme).
+      ;; Keep it intact.
+      (set current-state.background services.background)
+      (set current-state.containment services.containment)
+      (set self.active-activity-slot.scene-state current-state)
+      ;; Capture old slot's content state back to its slot fields
+      (set self.active-activity-slot.entity self.entity)
+      (set self.active-activity-slot.scene-children self.scene-children)
+      (set self.active-activity-slot.scene-terrains self.scene-terrains)
+      (set self.active-activity-slot.queued-cube-panels self.queued-cube-panels)
+      (set self.active-activity-slot.panel-restorers self.panel-restorers)
+      (set self.active-activity-slot.demo-browser self.demo-browser)
+      (set self.active-activity-slot.physics-body-count self.physics-body-count)
+      ;; Deactivate old physics bodies
+      (when (and self.active-activity-slot.entity
+                 (pcall require :layout-physics-bodies))
+        (local LayoutPhysicsBodies (require :layout-physics-bodies))
+        (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
+      (self.active-activity-slot:deactivate)
+      ;; Clear active binding
+      (set self.active-activity-slot nil)
+      (set self.active-activity-slot-id nil))
+    ;; Reset engine services to empty before applying target state
+    (reset-services-to-empty self)
+    ;; Bind target slot content to Scene surface aliases BEFORE activation
+    (set self.entity slot.entity)
+    (set self.scene-children slot.scene-children)
+    (set self.scene-terrains slot.scene-terrains)
+    (set self.queued-cube-panels slot.queued-cube-panels)
+    (set self.panel-restorers slot.panel-restorers)
+    (set self.demo-browser slot.demo-browser)
+    (set self.physics-body-count slot.physics-body-count)
+    ;; Try applying target slot's stored scene state to engine services
+    (local (service-ok service-err)
+      (pcall
+        (fn []
+          (when slot.scene-state
+            (apply-state-to-services self slot.scene-state)))))
+    (if (not service-ok)
+        (do
+          ;; Rollback: reset services to empty, restore previous slot binding
+          (reset-services-to-empty self)
+          (when previous-slot
+            ;; Restore previous slot's content and activation
+            (set self.entity previous-slot.entity)
+            (set self.scene-children previous-slot.scene-children)
+            (set self.scene-terrains previous-slot.scene-terrains)
+            (set self.queued-cube-panels previous-slot.queued-cube-panels)
+            (set self.panel-restorers previous-slot.panel-restorers)
+            (set self.demo-browser previous-slot.demo-browser)
+            (set self.physics-body-count previous-slot.physics-body-count)
+            (previous-slot:activate)
+            (set self.active-activity-slot previous-slot)
+            (set self.active-activity-slot-id previous-slot-id)
+            ;; Restore previous services
+            (when previous-slot.scene-state
+              (apply-state-to-services self previous-slot.scene-state))
+            ;; Reactivate physics
+            (when (and previous-slot.entity
+                       (pcall require :layout-physics-bodies))
+              (local LayoutPhysicsBodies (require :layout-physics-bodies))
+              (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
+          (error (.. "Scene.activate-activity-slot service application failed: " (tostring service-err)))))
+    ;; Activate target slot, reconcile terrain/panels, sync entity, activate physics.
+    ;; Wrap in transactional pcall: on failure restore previous slot state.
+    (local (activate-ok activate-err)
+      (pcall
+        (fn []
+          (slot:activate)
+          (set self.active-activity-slot-id activity-id)
+          (set self.active-activity-slot slot)
+          ;; R2-1: Reconcile self.scene-terrains with authoritative
+          ;; slot.scene-state.terrains.  When the slot was inactive, WorldData
+          ;; mutations may have changed the canonical records without updating
+          ;; the stale runtime slot.scene-terrains.  Apply add/update/remove
+          ;; differences so activation always reflects the canonical state.
+          ;; This is guarded on slot.scene-state being a table so every slot
+          ;; created via ensure-activity-slot (which initializes scene-state to
+          ;; empty-state) triggers the reconcile path — even when the canonical
+          ;; terrain list is empty (removal-to-empty while inactive).
+          (when (= (type slot.scene-state) :table)
+            (let [canonical-terrains (or slot.scene-state.terrains [])
+                  canonical-ids {}]
+              (each [_ record (ipairs canonical-terrains)]
+                (when (and record record.id)
+                  (tset canonical-ids record.id true)))
+              ;; Remove stale runtime entries whose record id is absent from
+              ;; canonical state.  Collect ids first to avoid index-shift bugs.
+              (when self.scene-terrains
+                (local stale-ids [])
+                (for [idx (length self.scene-terrains) 1 -1]
+                  (local entry (. self.scene-terrains idx))
+                  (local record-id (and entry entry.record entry.record.id))
+                  (when (and record-id (not (. canonical-ids record-id)))
+                    (table.insert stale-ids record-id)))
+                (each [_ stale-id (ipairs stale-ids)]
+                  (self:remove-terrain stale-id)))
+               ;; Build or add terrain from canonical records (only when non-empty).
+               (when (> (length canonical-terrains) 0)
+                 (if (not self.entity)
+                     (do
+                       (self:build-default {:terrains canonical-terrains})
+                       ;; Capture runtime terrain ids back for stable reconciliation
+                       (when self.scene-terrains
+                         (set (. slot.scene-state :terrains)
+                              (SceneWorldState.capture-terrains self.scene-terrains))))
+                     (do
+                       (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+                       (each [_ entry (ipairs entries)]
+                         (local record-id (and entry.record entry.record.id))
+                         ;; R3-1: Replace stale runtime terrain with canonical
+                         ;; record.  The canonical record may have changed while
+                         ;; the slot was inactive.  Replacing instead of skipping
+                         ;; ensures activation always reflects WorldData mutations.
+                         (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                             (self:replace-terrain-record record-id entry.record)
+                             (self:add-terrain-record entry.record)))
+                       ;; Capture runtime terrain ids back for stable reconciliation
+                       (when self.scene-terrains
+                         (set (. slot.scene-state :terrains)
+                              (SceneWorldState.capture-terrains self.scene-terrains))))))))
+          ;; R3-2: Panel reconciliation when inactive.
+          ;; When canonical Sandbox panels change while the slot is inactive
+          ;; (e.g. panel removal via WorldData), the retained stale runtime
+          ;; panels in slot.scene-children must be dropped so reactivation
+          ;; does not carry forward deleted panels.
+          (when (and self.entity self.scene-children
+                     (= (type slot.scene-state) :table)
+                     (= (type slot.scene-state.panels) :table))
+            (let [canonical-panels slot.scene-state.panels]
+              (local stale-elements [])
+              (each [_ metadata (ipairs self.scene-children)]
+                (when (and metadata metadata.persistence metadata.element)
+                  (local persistence metadata.persistence)
+                  (var matched? false)
+                  (each [_ panel (ipairs canonical-panels)]
+                    (when (and (not matched?)
+                               (= persistence.kind panel.kind))
+                      (set matched?
+                           (accumulate [same? true k v (pairs persistence)]
+                             (if (not same?) false
+                                 (or (= k :position) (= k :rotation)) true
+                                 (let [cv (. panel k)]
+                                   (and (not (= cv nil))
+                                        (= v cv))))))))
+                  (when (not matched?)
+                    (table.insert stale-elements metadata.element))))
+              (each [_ element (ipairs stale-elements)]
+                (pcall (fn [] (self:remove-panel-child element)))
+                (when self.scene-children
+                  (for [idx (length self.scene-children) 1 -1]
+                    (when (= (and (. self.scene-children idx) (. self.scene-children idx :element)) element)
+                      (table.remove self.scene-children idx)))))))
+          ;; Sync slot entity with scene entity so deactivate-activity-slot
+          ;; can deactivate layout physics bodies for the final slot.
+          (set slot.entity self.entity)
+          ;; Activate target physics bodies
+          (when (and slot.entity
+                     (pcall require :layout-physics-bodies))
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (pcall LayoutPhysicsBodies.activate slot.entity))
+          true)))
+    (if (not activate-ok)
+        (do
+          ;; Rollback: deactivate failed target, restore previous slot state
+          (slot:deactivate)
+          (set self.active-activity-slot nil)
+          (set self.active-activity-slot-id nil)
+          (reset-services-to-empty self)
+          (if previous-slot
+              (do
+                ;; Restore previous slot's content and activation
+                (set self.entity previous-slot.entity)
+                (set self.scene-children previous-slot.scene-children)
+                (set self.scene-terrains previous-slot.scene-terrains)
+                (set self.queued-cube-panels previous-slot.queued-cube-panels)
+                (set self.panel-restorers previous-slot.panel-restorers)
+                (set self.demo-browser previous-slot.demo-browser)
+                (set self.physics-body-count previous-slot.physics-body-count)
+                (previous-slot:activate)
+                (set self.active-activity-slot previous-slot)
+                (set self.active-activity-slot-id previous-slot-id)
+                ;; Restore previous services
+                (when previous-slot.scene-state
+                  (apply-state-to-services self previous-slot.scene-state))
+                ;; Reactivate physics
+                (when (and previous-slot.entity
+                           (pcall require :layout-physics-bodies))
+                  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+                  (pcall LayoutPhysicsBodies.activate previous-slot.entity)))
+              ;; No previous slot: clear content aliases to match
+              ;; deactivate-activity-slot behavior.  Deactivate any
+              ;; partially-built physics bodies but preserve the
+              ;; target slot's retained fields and entity ownership.
+              (do
+                (when (and self.entity
+                           (pcall require :layout-physics-bodies))
+                  (local LayoutPhysicsBodies (require :layout-physics-bodies))
+                  (pcall LayoutPhysicsBodies.deactivate self.entity))
+                (set self.entity nil)
+                (set self.scene-children nil)
+                (set self.scene-terrains nil)
+                (set self.queued-cube-panels [])
+                (set self.panel-restorers {})
+                (set self.demo-browser nil)
+                (set self.physics-body-count 0)))
+          (error (.. "Scene.activate-activity-slot failed: " (tostring activate-err)))))
+    slot)
+
+  (fn capture-activity-slot-state [scene activity-id]
+    (local slot (ensure-activity-slot scene activity-id))
+    (local is-active (= self.active-activity-slot slot))
+    ;; Capture panels and terrains from the slot's own content,
+    ;; not from the current active slot's aliases.
+    (local panels [])
+    (local source-children
+      (if is-active
+          self.scene-children
+          slot.scene-children))
+    (when source-children
+      (each [_ metadata (ipairs (or source-children []))]
+        (local persistence (and metadata metadata.persistence))
+        (when persistence
+          (local capture-layout (capture-panel-layout-state metadata))
+          (when capture-layout
+            (local record (clone-table persistence))
+            (set record.position capture-layout.position)
+            (set record.rotation capture-layout.rotation)
+            (set record.size (or capture-layout.size record.size))
+            (table.insert panels record)))))
+    ;; Preserve queued cube panels from slot's own queued list
+    (local source-queued
+      (if is-active
+          self.queued-cube-panels
+          slot.queued-cube-panels))
+    (each [_ panel (ipairs (or source-queued []))]
+      (table.insert panels (clone-table panel)))
+    ;; R2-1: For inactive slots, use authoritative slot.scene-state.terrains
+    ;; instead of stale slot.scene-terrains. For active slots, capture from
+    ;; live runtime terrain entries as before.
+    (local terrains
+      (if is-active
+          (if (= self.scene-terrains nil)
+              nil
+              (SceneWorldState.capture-terrains self.scene-terrains))
+          (or (and (= (type slot.scene-state) :table)
+                   slot.scene-state.terrains)
+              [])))
+    ;; Capture service state: for active slot, read from live engine;
+    ;; for inactive slot, use stored scene-state services.
+    (local services
+      (if is-active
+          (capture-active-service-state self)
+          (or slot.scene-state
+              (do
+                (local ActivitySceneState (require :activity-scene-state))
+                (ActivitySceneState.empty-state)))))
+    ;; R2-2: For active slots, preserve the slot's complete (policy-preserving)
+    ;; skybox from scene-state instead of the resolved renderer skybox.  For
+    ;; inactive slots, services already carries the authoritative scene-state.
+    (local skybox
+      (if (and is-active
+               (= (type slot.scene-state) :table)
+               (= (type slot.scene-state.skybox) :table))
+          slot.scene-state.skybox
+          services.skybox))
+    ;; Build canonical state
+    (local ActivitySceneState (require :activity-scene-state))
+    (local state
+      {:panels panels
+       :terrains (or terrains [])
+       :lights services.lights
+       :skybox skybox
+       :background services.background
+       :containment services.containment})
+    (local canonical (ActivitySceneState.normalize-state state "Scene.capture-activity-slot-state"))
+    (set slot.scene-state canonical)
+    canonical)
+
+  (fn restore-activity-slot-state [scene activity-id state]
+    (assert (= (type state) :table)
+            "Scene.restore-activity-slot-state requires a state table")
+    (local ActivitySceneState (require :activity-scene-state))
+    ;; Preserve previously captured terrain ids (by index) for stable
+    ;; idempotent reconciliation: repeated restores of the same state
+    ;; must not create duplicate terrain entries.
+    (local slot (ensure-activity-slot scene activity-id))
+    (local prev-terrain-ids {})
+    (when (and slot.scene-state slot.scene-state.terrains)
+      (for [idx 1 (length slot.scene-state.terrains)]
+        (local prev (. slot.scene-state.terrains idx))
+        (when (and prev prev.id (= (type prev.id) :string))
+          (set (. prev-terrain-ids idx) prev.id))))
+    (local canonical (ActivitySceneState.normalize-state state "Scene.restore-activity-slot-state"))
+    ;; Merge previously captured ids into the canonical state by index
+    ;; so that normalize-record reuses stable ids instead of generating
+    ;; new random UUIDs on every call.
+    (when (> (length prev-terrain-ids) 0)
+      (each [idx id (pairs prev-terrain-ids)]
+        (when (<= idx (length canonical.terrains))
+          (local ct (. canonical.terrains idx))
+          (when (and ct (not ct.id))
+            (set ct.id id)))))
+    (set slot.scene-state canonical)
+    ;; If this slot is currently active, apply state and rebuild terrain immediately
+    (when (= self.active-activity-slot slot)
+      (apply-state-to-services self canonical)
+      ;; R7-1: Reconcile runtime terrains exactly to canonical state,
+      ;; using the same logic as activation: remove stale entries, replace
+      ;; updated records, add missing records, and handle empty canonical
+      ;; list by clearing all runtime terrains.
+      (let [canonical-terrains (or canonical.terrains [])
+            canonical-ids {}]
+        (each [_ record (ipairs canonical-terrains)]
+          (when (and record record.id)
+            (tset canonical-ids record.id true)))
+        ;; Remove stale runtime entries whose record id is absent from
+        ;; canonical state.  Collect ids first to avoid index-shift bugs.
+        (when self.scene-terrains
+          (local stale-ids [])
+          (for [idx (length self.scene-terrains) 1 -1]
+            (local entry (. self.scene-terrains idx))
+            (local record-id (and entry entry.record entry.record.id))
+            (when (and record-id (not (. canonical-ids record-id)))
+              (table.insert stale-ids record-id)))
+          (each [_ stale-id (ipairs stale-ids)]
+            (self:remove-terrain stale-id)))
+        ;; Build or add terrain from canonical records (only when non-empty).
+        (when (> (length canonical-terrains) 0)
+          (if (not self.entity)
+              ;; No base entity yet — build-default creates entity and all terrains
+              (do
+                (self:build-default {:terrains canonical-terrains})
+                ;; Capture runtime terrain ids back into the slot's scene-state
+                ;; so that generated IDs (from normalize-record during build)
+                ;; are persisted for future reconciliation / idempotent restore.
+                (when self.scene-terrains
+                  (set (. slot.scene-state :terrains)
+                       (SceneWorldState.capture-terrains self.scene-terrains))))
+              ;; Entity already exists — add missing terrain records, replace changed ones
+              (do
+                (local entries (SceneWorldState.build-terrain-entries canonical-terrains))
+                (each [_ entry (ipairs entries)]
+                  (local record-id (and entry.record entry.record.id))
+                  ;; Replace stale runtime terrain with canonical record,
+                  ;; or add if it doesn't exist yet.
+                  (if (and record-id (find-terrain-entry self.scene-terrains record-id))
+                      (self:replace-terrain-record record-id entry.record)
+                      (self:add-terrain-record entry.record)))
+                ;; Capture runtime terrain ids back into the slot's scene-state
+                ;; so that subsequent restores can match existing terrains by stable id.
+                (when self.scene-terrains
+                  (set (. slot.scene-state :terrains)
+                       (SceneWorldState.capture-terrains self.scene-terrains)))))))
+      ;; After terrain rebuild, update slot fields so the slot owns the
+      ;; newly built content (not just the service state).
+      (set slot.entity self.entity)
+      (set slot.scene-children self.scene-children)
+      (set slot.scene-terrains self.scene-terrains)
+      (set slot.queued-cube-panels self.queued-cube-panels)
+      (set slot.panel-restorers self.panel-restorers)
+      (set slot.demo-browser self.demo-browser)
+      (set slot.physics-body-count self.physics-body-count))
+    true)
+
+  (fn deactivate-activity-slot [_scene activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:deactivate)
+      (when (= self.active-activity-slot slot)
+        ;; R1-2: Deactivate the slot's layout physics bodies when there
+        ;; is no successor slot, matching the per-slot physics lifecycle
+        ;; in activate-activity-slot.
+        (when (and self.active-activity-slot.entity
+                   (pcall require :layout-physics-bodies))
+          (local LayoutPhysicsBodies (require :layout-physics-bodies))
+          (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
+        ;; Unbind content aliases; slot retains ownership
+        (set self.entity nil)
+        (set self.scene-children nil)
+        (set self.scene-terrains nil)
+        (set self.queued-cube-panels [])
+        (set self.panel-restorers {})
+        (set self.demo-browser nil)
+        (set self.physics-body-count 0)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil)))
+    slot)
+
+  (fn drop-activity-slot [_scene activity-id]
+    (local slot (activity-slot self activity-id))
+    (when slot
+      (slot:drop)
+      (when (= self.active-activity-slot slot)
+        (set self.active-activity-slot nil)
+        (set self.active-activity-slot-id nil))
+      (set (. self.activity-slots activity-id) nil))
+    true)
+
   (fn normalize-movable-entry [_self entry]
     (if (not entry)
         (error "Movable entry must not be nil")
@@ -565,15 +1229,22 @@
     (when (and entity app.movables)
       (local entries (icollect [_ entry (ipairs (or entity.movables []))]
                                (normalize-movable-entry self entry)))
+      ;; R6-1: When an activity slot is active, use its pointer-target
+      ;; as the default so app.pointer-target-enabled? rejects input
+      ;; for inactive slot content (e.g. Sandbox movables when Graph is active).
+      (local default-pointer-target
+        (or (and self.active-activity-slot
+                 self.active-activity-slot.pointer-target)
+            self))
       (var filtered [])
       (each [_ entry (ipairs entries)]
         (when entry
           (when (not entry.pointer-target)
-            (set entry.pointer-target self))
+            (set entry.pointer-target default-pointer-target))
           (table.insert filtered entry)))
       (when (= (length filtered) 0)
         (table.insert filtered {:target entity.layout
-                                :pointer-target self}))
+                                :pointer-target default-pointer-target}))
       (register-movable-entries self entity filtered)))
 
   (fn normalize-resizable-entry [_self entry]
@@ -626,15 +1297,22 @@
     (when (and entity app.resizables)
       (local entries (icollect [_ entry (ipairs (or entity.resizables []))]
                                (normalize-resizable-entry self entry)))
+      ;; R6-1: When an activity slot is active, use its pointer-target
+      ;; as the default so app.pointer-target-enabled? rejects input
+      ;; for inactive slot content (e.g. Sandbox resizables when Graph is active).
+      (local default-pointer-target
+        (or (and self.active-activity-slot
+                 self.active-activity-slot.pointer-target)
+            self))
       (var filtered [])
       (each [_ entry (ipairs entries)]
         (when entry
           (when (not entry.pointer-target)
-            (set entry.pointer-target self))
+            (set entry.pointer-target default-pointer-target))
           (table.insert filtered entry)))
       (when (= (length filtered) 0)
         (table.insert filtered {:target entity.layout
-                                :pointer-target self}))
+                                :pointer-target default-pointer-target}))
       (register-resizable-entries self entity filtered)))
 
   (fn unregister-entity-movables [self entity]
@@ -667,6 +1345,7 @@
       (register-entity-resizables self entity)))
 
   (fn register-scene-object [self entry]
+    (assert-active-content-slot)
     (local entity self.entity)
     (assert entity "Scene.register-scene-object requires an attached entity")
     (when (not entity.scene-objects)
@@ -809,6 +1488,7 @@
                :size layout-state.size}))))
 
   (fn register-panel-restorer [self kind restorer owner]
+    (assert-active-content-slot)
     (assert (= (type kind) :string) "Scene.register-panel-restorer requires string kind")
     (assert (= (type restorer) :function) "Scene.register-panel-restorer requires function restorer")
     (set (. self.panel-restorers kind) {:restore restorer
@@ -826,6 +1506,7 @@
     true)
 
   (fn add-panel-child [self opts]
+    (assert-active-content-slot)
     (local entity self.entity)
     (var builder (and opts opts.builder))
     (when (and entity builder)
@@ -860,7 +1541,7 @@
       (local parent-rotation (or (and parent-layout parent-layout.rotation) (glm.quat 1 0 0 0)))
       (local parent-inverse (parent-rotation:inverse))
       (local local-rotation (* parent-inverse resolved-rotation))
-      (set element (builder self.build-context builder-options))
+      (set element (builder (resolve-active-build-context) builder-options))
       (local metadata {:flex (or opts.flex 0)
                        :element element
                        :object (and opts opts.object)
@@ -911,6 +1592,7 @@
       element))
 
   (fn add-object [self object opts]
+    (assert-active-content-slot)
     (assert object "Scene.add-object requires an object")
     (local object-config
       (if object.scene-object-options
@@ -937,6 +1619,7 @@
     element)
 
   (fn add-demo-entry [self entry]
+    (assert-active-content-slot)
     (when (and entry entry.builder)
       (assert entry.persistence
               (.. "Scene.add-demo-entry requires :persistence for demo entry key "
@@ -946,6 +1629,7 @@
                              :persistence entry.persistence})))
 
   (fn add-light-ball [self opts]
+    (assert-active-content-slot)
     (local options (or opts {}))
     (local light-ball-options (clone-table options))
     (set light-ball-options.position nil)
@@ -957,6 +1641,7 @@
        :rotation options.rotation}))
 
   (fn add-physics-body [self opts]
+    (assert-active-content-slot)
     (local options (or opts {}))
     (local size (or options.size (glm.vec3 4 4 4)))
     (local placement (resolve-camera-placement self))
@@ -983,6 +1668,7 @@
     element)
 
   (fn add-graph-node-cube [self opts]
+    (assert-active-content-slot)
     (local options (or opts {}))
     (local key (tostring (or options.node-key (and options.node options.node.key) "")))
     (assert (> (string.len key) 0)
@@ -1093,6 +1779,7 @@
     element)
 
   (fn add-demo-browser [self opts]
+    (assert-active-content-slot)
     (if self.demo-browser
         self.demo-browser
         (let [options (or opts {})
@@ -1125,6 +1812,7 @@
           (entry:sync entity)))))
 
   (fn replace-terrain-record [self terrain-id record]
+    (assert-active-content-slot)
     (local runtime-entry (require-terrain-runtime-entry self terrain-id))
     (local entity runtime-entry.entity)
     (local terrain-entry runtime-entry.terrain-entry)
@@ -1140,7 +1828,7 @@
     (local terrain-spec (. built-entry 1))
     (assert terrain-spec (.. "Scene.replace-terrain-record could not build terrain " terrain-id))
     (local terrain-builder terrain-spec.builder)
-    (local new-element (terrain-builder self.build-context))
+    (local new-element (terrain-builder (resolve-active-build-context)))
     (assert (and new-element new-element.layout)
             (.. "Scene.replace-terrain-record built invalid terrain " terrain-id))
     (local current-selection-target
@@ -1196,6 +1884,7 @@
     (element:get-selection-target))
 
   (fn add-terrain-record [self record]
+    (assert-active-content-slot)
     (local entity self.entity)
     (assert entity "Scene.add-terrain-record requires an attached entity")
     (local built-entry (SceneWorldState.build-terrain-entries [record]))
@@ -1204,7 +1893,7 @@
             (.. "Scene.add-terrain-record could not build terrain "
                 (or (and record record.id) "?")))
     (local terrain-builder terrain-spec.builder)
-    (local new-element (terrain-builder self.build-context))
+    (local new-element (terrain-builder (resolve-active-build-context)))
     (assert (and new-element new-element.layout)
             (.. "Scene.add-terrain-record built invalid terrain "
                 (or (and record record.id) "?")))
@@ -1236,6 +1925,7 @@
     true)
 
   (fn remove-terrain [self terrain-id]
+    (assert-active-content-slot)
     (local runtime-entry (require-terrain-runtime-entry self terrain-id))
     (local entity runtime-entry.entity)
     (local terrain-entry runtime-entry.terrain-entry)
@@ -1261,6 +1951,11 @@
       (self:unregister-entity self.entity)
       (self.entity:drop))
     (set self.entity entity)
+    ;; Keep the active slot's entity field in sync so deactivate-activity-slot
+    ;; can locate and deactivate layout physics bodies for the final slot
+    ;; without requiring the caller to manually sync.
+    (when self.active-activity-slot
+      (set self.active-activity-slot.entity entity))
     (set self.scene-children nil)
     (set self.scene-terrains nil)
     (set self.demo-browser nil)
@@ -1277,7 +1972,7 @@
         (set entity.children []))
       (set self.scene-children entity.scene-children)
       (set self.scene-terrains entity.scene-terrains)
-      (entity.layout:set-root self.layout-root)
+      (entity.layout:set-root (resolve-active-layout-root))
       (local position self.default-position)
       (local resolved-position (glm.vec3 position.x position.y position.z))
       (entity.layout:set-position resolved-position)
@@ -1297,11 +1992,13 @@
     (set self.builder builder)
     (if builder
       (do
-        (apply-active-theme self.build-context)
-        (self:attach-entity (builder self.build-context)))
+        (local build-ctx (resolve-active-build-context))
+        (apply-active-theme build-ctx)
+        (self:attach-entity (builder build-ctx)))
       (self:attach-entity nil)))
 
 (fn build-default [self opts]
+  (assert-active-content-slot)
   (log-terrain-diagnostic self :info
                           "build-default"
                           (string.format "requested-terrains=%s"
@@ -1312,10 +2009,19 @@
     (self:sync-physics-bodies)
     (self:sync-scene-objects)
     (self.layout-root:update)
+    (when (and self.active-activity-slot
+               self.active-activity-slot.layout-root)
+      (self.active-activity-slot.layout-root:update))
     (sync-terrain-runtime-state self))
 
   (fn drop [self]
   (log-terrain-diagnostic self :info "drop:begin")
+  ;; Drop all retained activity slots first
+  (local slot-ids [])
+  (each [id _ (pairs self.activity-slots)]
+    (table.insert slot-ids id))
+  (each [_ id (ipairs slot-ids)]
+    (drop-activity-slot self id))
   (when self.entity
     (self:unregister-entity self.entity)
     (self.entity:drop)
@@ -1323,6 +2029,8 @@
     (set self.scene-children nil)
     (set self.scene-terrains nil))
   (set self.demo-browser nil)
+  (set self.queued-cube-panels [])
+  (set self.physics-body-count 0)
   (when (and self.focus-manager self.focus-scope)
     (self.focus-manager:detach self.focus-scope)
     (set self.focus-scope nil))
@@ -1347,44 +2055,49 @@
   (LightingViewState.perspective self.camera.position))
 
 (fn get-triangle-vector [self]
-  self.build-context.triangle-vector)
+  (. (active-render-context) :triangle-vector))
 
 (fn get-triangle-batches [self]
-  (and self.build-context
-       self.build-context.get-triangle-batches
-       (self.build-context:get-triangle-batches)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-triangle-batches
+       (render-ctx:get-triangle-batches)))
 
 (fn get-line-vector [self]
-  self.build-context.line-vector)
+  (. (active-render-context) :line-vector))
 
 (fn get-point-vector [self]
-  self.build-context.point-vector)
+  (. (active-render-context) :point-vector))
 
 (fn get-line-strips [self]
-  self.build-context.line-strips)
+  (. (active-render-context) :line-strips))
 
 (fn get-image-batches [self]
-  self.build-context.image-batches)
+  (. (active-render-context) :image-batches))
 
 (fn get-quad-draw-list [self]
-  (and self.build-context
-       self.build-context.get-quad-draw-list
-       (self.build-context:get-quad-draw-list)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-quad-draw-list
+       (render-ctx:get-quad-draw-list)))
 
 (fn get-text-ssbo-draw-list [self]
-  (and self.build-context
-       self.build-context.get-text-ssbo-draw-list
-       (self.build-context:get-text-ssbo-draw-list)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-text-ssbo-draw-list
+       (render-ctx:get-text-ssbo-draw-list)))
 
 (fn get-mesh-batches [self]
-  (and self.build-context
-       self.build-context.get-mesh-batches
-       (self.build-context:get-mesh-batches)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-mesh-batches
+       (render-ctx:get-mesh-batches)))
 
 (fn get-instanced-color-mesh-batches [self]
-  (and self.build-context
-       self.build-context.get-instanced-color-mesh-batches
-       (self.build-context:get-instanced-color-mesh-batches)))
+  (local render-ctx (active-render-context))
+  (and render-ctx
+       render-ctx.get-instanced-color-mesh-batches
+       (render-ctx:get-instanced-color-mesh-batches)))
 
 (fn get-reference-point [self]
   self.reference-point)
@@ -1734,6 +2447,15 @@
 (set self.drop drop)
 (set self.sync-physics-bodies sync-physics-bodies)
 (set self.sync-scene-objects sync-scene-objects)
+(set self.ensure-activity-slot ensure-activity-slot)
+(set self.activity-slot activity-slot)
+(set self.activate-activity-slot activate-activity-slot)
+(set self.deactivate-activity-slot deactivate-activity-slot)
+(set self.drop-activity-slot drop-activity-slot)
+(set self.capture-activity-slot-state capture-activity-slot-state)
+(set self.restore-activity-slot-state restore-activity-slot-state)
+(set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
+(set self.resolve-active-build-context resolve-active-build-context)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)

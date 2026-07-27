@@ -41,6 +41,7 @@
     {:color (or options.color [0.0 0.0 0.0])}
     "test-world-nodes background state"))
 
+
 (fn make-world-entry [opts]
   (local options (or opts {}))
   (local runtime (or options.runtime nil))
@@ -50,15 +51,42 @@
                                           :skybox (make-skybox-state)
                                           :background (make-background-state)}
                                   :hud {:panels []}}))
-  {:id (or options.id "test-world")
-   :name (or options.name "Test World")
-   :active? (or options.active? false)
-   :world {:state state
-           :get-runtime (fn [_self] runtime)
+  ;; Populate canonical activity session state, keeping legacy scene keys
+  ;; populated for tests that still reference them directly.
+  ;; Arrays (panels, terrains) shared by reference with legacy scene.
+  ;; Lights, skybox, background use their own references to avoid
+  ;; inadvertently materializing state when a test passes nil.
+  (local has-activity? (= (type state.activity) :table))
+  (when (not has-activity?)
+    (local sandbox-lights (or state.scene.lights
+                              (LightSystemModule.default-state)))
+    (local sandbox-skybox (or state.scene.skybox
+                              (make-skybox-state)))
+    (local sandbox-background (or state.scene.background
+                                  (make-background-state)))
+    (local sandbox-scene
+           {:panels state.scene.panels
+            :terrains state.scene.terrains
+            :lights sandbox-lights
+            :skybox sandbox-skybox
+            :background sandbox-background
+            :containment {:enabled? false}})
+    (local sandbox-session {:scene sandbox-scene})
+    (local sessions {:sandbox sandbox-session})
+    (set state.activity
+         {:active_id "sandbox"
+          :sessions sessions}))
+  (local entry
+   {:id (or options.id "test-world")
+    :name (or options.name "Test World")
+    :active? (or options.active? false)
+    :world {:state state
+            :get-runtime (fn [_self] runtime)
             :save-state (fn [_self]
                           (when options.on-save
                             (options.on-save state))
                           true)}})
+  entry)
 
 (fn make-flat-terrain-record [opts]
   (local options (or opts {}))
@@ -140,7 +168,8 @@
   (var lights (or options.lights (LightSystemModule.default-state)))
   (var skybox (or options.skybox (make-skybox-state)))
   (var background (or options.background (make-background-state)))
-  (local scene {:capture-state (fn [_self]
+  (local scene {:active-activity-slot-id "sandbox"
+                :capture-state (fn [_self]
                                  {:panels (or options.panels [])
                                   :terrains (or options.terrains [])
                                   :lights lights
@@ -728,7 +757,7 @@
   (local terrain-record (make-flat-terrain-record {:id "terrain-a" :width 50}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
-  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :replace-terrain-record (fn [_self _terrain-id _record] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -831,7 +860,7 @@
   (local terrain-record (make-perlin-terrain-record {:id "terrain-a" :seed 7}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
-  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :replace-terrain-record (fn [_self _terrain-id _record] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -932,7 +961,7 @@
   (local terrain-record (make-heightfield-terrain-record {:id "terrain-a" :default-height 0.0}))
   (local state {:scene {:panels [] :terrains [terrain-record]}
                 :hud {:panels []}})
-  (local runtime {:scene {:replace-terrain-record (fn [_self _terrain-id _record] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :replace-terrain-record (fn [_self _terrain-id _record] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -1395,20 +1424,28 @@
 
 (fn test-world-data-light-reads-fail-loudly-when-lights-missing []
   (local WorldData (require :graph/world-data))
-  (local state {:scene {:panels []
-                        :terrains []
-                        :lights nil}
-                :hud {:panels []}})
-  (local entry (make-world-entry {:id "test-world" :state state}))
-  (local manager (make-world-manager {:id "test-world" :entry entry}))
-  (local (ok err)
-    (pcall (fn []
-             (WorldData.list-light-types manager "test-world"))))
-  (assert (not ok) "light reads should fail loudly when persisted scene lights are missing")
-  (assert (string.find (tostring err) "requires scene.lights" 1 true)
-          "missing scene lights should be reported directly")
-  (assert (= state.scene.lights nil)
-          "light reads should not materialize missing scene lights"))
+   (local sandbox-session-scene {:panels []
+                                :terrains []
+                                :lights nil
+                                :skybox (make-skybox-state)
+                                :background (make-background-state)
+                                :containment {:enabled? false}})
+   (local state {:scene {:panels []
+                         :terrains []
+                         :skybox (make-skybox-state)
+                         :background (make-background-state)}
+                 :hud {:panels []}
+                 :activity {:active_id "sandbox"
+                            :sessions {:sandbox
+                                       {:scene sandbox-session-scene}}}})
+   (local entry (make-world-entry {:id "test-world" :state state}))
+   (local manager (make-world-manager {:id "test-world" :entry entry}))
+   (local (ok err)
+     (pcall (fn []
+              (WorldData.list-light-types manager "test-world"))))
+   (assert (not ok) "light reads should fail loudly when sandbox scene lights are missing")
+   (assert (string.find (tostring err) "requires sandbox scene.lights" 1 true)
+           "missing sandbox scene lights should be reported directly"))
 
 (fn test-light-node-updates-world-state-and-active-scene []
   (local {:LightNode LightNode} (require :graph/nodes/light))
@@ -1745,7 +1782,7 @@
   (local state {:scene {:panels []
                         :terrains [(make-flat-terrain-record {:id "terrain-a"})]}
                 :hud {:panels []}})
-  (local runtime {:scene {:remove-terrain (fn [_self _terrain-id] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :remove-terrain (fn [_self _terrain-id] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime
@@ -1806,7 +1843,7 @@
   (local state {:scene {:panels []
                         :terrains [(make-perlin-terrain-record {:id "terrain-a"})]}
                 :hud {:panels []}})
-  (local runtime {:scene {:remove-terrain (fn [_self _terrain-id] false)}})
+  (local runtime {:scene {:active-activity-slot-id "sandbox" :remove-terrain (fn [_self _terrain-id] false)}})
   (local entry (make-world-entry {:id "test-world"
                                   :active? true
                                   :runtime runtime

@@ -1,5 +1,3 @@
-(local Ball (require :ball))
-(local SceneTerrainRecovery (require :scene-terrain-recovery))
 (local Activities (require :activities))
 (local Modifiers (require :input-modifiers))
 
@@ -41,7 +39,7 @@
 (fn build-context [event]
   (local surface (or app.active-interaction-surface :scene))
   (local activity
-    (if (= surface :canvas)
+    (if (or (= surface :canvas) (= surface :scene))
         (resolve-context-activity
           app.active-activity-id)
         nil))
@@ -65,7 +63,7 @@
   (local options (or opts {}))
   (local resolved-surface (or surface :scene))
   (local resolved-activity
-    (if (= resolved-surface :canvas)
+    (if (or (= resolved-surface :canvas) (= resolved-surface :scene))
         (resolve-context-activity
           (or options.activity
               app.active-activity-id))
@@ -80,7 +78,8 @@
   (enrich-active-activity-context!
     {:event (or options.event nil)
      :surface resolved-surface
-     :activity (if (= resolved-surface :canvas)
+     :activity (if (or (= resolved-surface :canvas)
+                       (= resolved-surface :scene))
                   resolved-activity
                   nil)
      :modifiers (merge-context-part {:shift? false
@@ -113,41 +112,6 @@
           (when (and engine engine.quit)
             (engine.quit)))}])
 
-(fn scene-root-actions [context]
-  (local scene (and context.scene context.scene.scene))
-  (local actions [])
-  (table.insert actions
-                {:name "Demo Browser"
-                 :fn (fn [_button _event]
-                       (when (and scene scene.add-demo-browser)
-                         (scene:add-demo-browser)))})
-  (table.insert actions
-                {:name "Demo Video Player"
-                 :fn (fn [_button _event]
-                       (local launchable (require :launchables/demo-video-cube))
-                       (launchable.open-panel {:scene scene}))})
-  (table.insert actions
-                {:name "add cuboid"
-                 :fn (fn [_button _event]
-                       (when (and scene scene.add-physics-body)
-                         (scene:add-physics-body)))})
-  (table.insert actions
-                {:name "ball"
-                 :fn (fn [_button _event]
-                       (when (and scene scene.add-object)
-                         (scene:add-object (Ball {}))))})
-  (table.insert actions
-                {:name "Add light ball"
-                 :fn (fn [_button _event]
-                       (when (and scene scene.add-light-ball)
-                         (scene:add-light-ball {})))})
-  (table.insert actions
-                {:name "Recover Terrain-Bound Objects"
-                 :fn (fn [_button _event]
-                       (when scene
-                         (SceneTerrainRecovery.recover scene)))})
-  actions)
-
 (fn activity-root-actions [context]
   (if (and app.activity-root-actions
            (= (Activities.active-activity-id) context.activity))
@@ -172,10 +136,10 @@
                (= context.surface :canvas))
     :actions activity-selection-actions}
    {:name :scene-root
-    :mode :replace
-    :matches (fn [context]
-               (= context.surface :scene))
-    :actions scene-root-actions}
+     :mode :replace
+     :matches (fn [context]
+                (= context.surface :scene))
+     :actions activity-root-actions}
    {:name :shared
     :mode :append
     :matches (fn [_context] true)
@@ -214,5 +178,4 @@
  :default-root-actions default-root-actions
  :actions-for-event actions-for-event
  :actions-for-context actions-for-context
- :actions-for-surface actions-for-surface
- :scene-root-actions scene-root-actions}
+ :actions-for-surface actions-for-surface}

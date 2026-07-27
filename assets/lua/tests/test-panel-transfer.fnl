@@ -181,6 +181,9 @@
     (set scene.projection (glm.perspective 0.8 1.33 0.1 1000.0))
     (set app.scene scene)
     (set app.layout-root scene.layout-root)
+    (scene:ensure-activity-slot "sandbox")
+    (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+    (assert sandbox-slot "panel-transfer with-scene-and-hud requires a valid sandbox slot")
     (scene:build-default)
     (set hud (Hud {:scene scene
                    :icons icons}))
@@ -963,6 +966,59 @@
       (assert transferred.set-query
               "transferred LauncherView should have set-query"))))
 (table.insert tests {:name "launcher view transfer preserves search and set-items on transfer" :fn launcher-view-transfer-preserves-search-and-set-items})
+
+(fn scene-transfer-goes-to-active-slot-not-global-root []
+  (with-scene-and-hud
+    (fn [scene hud]
+      (local sandbox-slot (. scene.activity-slots "sandbox"))
+      (assert sandbox-slot "panel-transfer regression requires a sandbox slot")
+      (assert sandbox-slot.visible? "Sandbox slot must be visible while active")
+      (assert (= scene.active-activity-slot-id "sandbox")
+              "Sandbox must be the active scene slot")
+      (local child-builder
+        (fn [_ctx]
+          (local {: Layout} (require :layout))
+          {:layout (Layout {:name "slot-test-child"})
+           :drop (fn [_self] nil)}))
+      (local dialog-builder
+        (DefaultDialog {:title "Slot Transfer Test"
+                        :child child-builder}))
+      (local element (app.scene:add-panel-child
+                       {:builder dialog-builder
+                        :position (glm.vec3 0 0 0)
+                        :rotation (glm.quat 1 0 0 0)
+                        :persistence {:kind "test-dialog"}}))
+      (assert element "dialog should be created in the active slot")
+      ;; Content must land in the active scene-children (aliased from the slot)
+      (assert (= (length scene.scene-children) 1)
+              "Transferred content must be in the active slot's scene-children")
+      ;; The panel must be in the sandbox slot's scene-children (not a global list).
+      ;; The slot aliases scene.scene-children while active, so any addition
+      ;; lands in the active slot. After HUD transfer, the slot list is cleared.
+      (app.panel-transfer:register-receiver
+        {:id :hud
+         :label "HUD"
+         :icon "dashboard"
+         :target-fn (fn [] app.hud)})
+      (app.panel-transfer:register-receiver
+        {:id :scene
+         :label "Scene"
+         :icon "view_in_ar"
+         :target-fn (fn [] app.scene)})
+      (local menu-captured {:last-action nil})
+      (set app.menu-manager
+           {:open (fn [_self opts]
+                    (when (and opts.actions (> (length opts.actions) 0))
+                      (set menu-captured.last-action (. opts.actions 1))))})
+      (local move-action (find-move-action element))
+      (move-action:on-click {:screen {:x 100 :y 200}})
+      (assert (not (= menu-captured.last-action nil)) "menu should be shown")
+      (menu-captured.last-action.fn nil nil)
+      (assert (= (length scene.scene-children) 0)
+              "Dialog should leave the active slot after HUD transfer")
+      (assert (= (length hud.tiles.children) 1)
+              "Dialog should appear in HUD after transfer"))))
+(table.insert tests {:name "scene transfer goes to active slot not global root" :fn scene-transfer-goes-to-active-slot-not-global-root})
 
 (local main
   (fn []

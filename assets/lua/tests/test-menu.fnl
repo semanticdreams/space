@@ -4,6 +4,7 @@
 (local MenuManager (require :menu-manager))
 (local Activities (require :activities))
 (local RootContextMenuActions (require :root-context-menu-actions))
+(local SandboxActivityActions (require :sandbox-activity-actions))
 (local GraphActivityActions (require :graph-activity-actions))
 (local DrawingActivityActions (require :drawing-activity-actions))
 (local SceneTerrainRecovery (require :scene-terrain-recovery))
@@ -12,6 +13,71 @@
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 (local LinkEntityStore (require :entities/link))
+
+;; Capture the full activity-registry state before any menu test
+;; stubs are registered.  After this module's tests complete the
+;; captured state is restored so stub activities (sandbox, graph,
+;; drawing), any active-activity state, sessions, and other mutable
+;; fields do not leak into subsequent test modules.
+(local _saved-registry-activities {})
+(local _saved-registry-ordered-ids [])
+(var _saved-active-activity-id nil)
+(var _saved-active-activity-spec nil)
+(var _saved-active-activity-session nil)
+(local _saved-registry-sessions {})
+(var _saved-registry-global-sessions nil)
+(var _saved-suppress-workspace-shell-change? false)
+(local _saved-registry-existed? (not (= app.activity-registry nil)))
+(let [registry (if _saved-registry-existed? app.activity-registry
+                   (Activities.ensure-registry))]
+  (each [k v (pairs registry.activities)]
+    (tset _saved-registry-activities k v))
+  (each [_ id (ipairs registry.ordered-ids)]
+    (table.insert _saved-registry-ordered-ids id))
+  (set _saved-active-activity-id registry.active-activity-id)
+  (set _saved-active-activity-spec registry.active-activity-spec)
+  (set _saved-active-activity-session registry.active-activity-session)
+  (each [k v (pairs registry.sessions)]
+    (tset _saved-registry-sessions k v))
+  (set _saved-registry-global-sessions registry.global-sessions)
+  (set _saved-suppress-workspace-shell-change?
+       registry.suppress-workspace-shell-change?))
+
+(fn restore-activity-registry! []
+  "Restore the full pre-module registry state so no stub or session leaks."
+  (let [registry (Activities.ensure-registry)]
+    ;; Remove activities registered by menu tests that were not in the
+    ;; original state.
+    (each [k _ (pairs registry.activities)]
+      (when (not (. _saved-registry-activities k))
+        (tset registry.activities k nil)))
+    ;; Restore any activities that were replaced by menu test stubs.
+    (each [k v (pairs _saved-registry-activities)]
+      (tset registry.activities k v))
+    ;; Restore ordered IDs.
+    (set registry.ordered-ids [])
+    (each [_ id (ipairs _saved-registry-ordered-ids)]
+      (table.insert registry.ordered-ids id))
+    ;; Restore active activity state.
+    (set registry.active-activity-id _saved-active-activity-id)
+    (set registry.active-activity-spec _saved-active-activity-spec)
+    (set registry.active-activity-session _saved-active-activity-session)
+    ;; Restore sessions: remove any session added by menu tests, then
+    ;; bring back the original entries.
+    (each [k _ (pairs registry.sessions)]
+      (when (not (. _saved-registry-sessions k))
+        (tset registry.sessions k nil)))
+    (each [k v (pairs _saved-registry-sessions)]
+      (tset registry.sessions k v))
+    ;; Restore global-sessions and suppress flag.
+    (set registry.global-sessions _saved-registry-global-sessions)
+    (set registry.suppress-workspace-shell-change?
+         _saved-suppress-workspace-shell-change?)
+    ;; If the registry did not exist before the module loaded,
+    ;; remove it so no newly-created object leaks to later modules.
+    (when (not _saved-registry-existed?)
+      (set app.activity-registry nil))
+    true))
 
 (local tests [])
 (local reset-engine-events
@@ -73,6 +139,25 @@
 
 (fn ensure-built-in-activities! []
   (local registry (Activities.ensure-registry))
+  (when (and (. registry.activities "sandbox")
+             (not (. (. registry.activities "sandbox") :menu-test?)))
+    (Activities.unregister-activity "sandbox"))
+  (when (not (. registry.activities "sandbox"))
+    (Activities.register-activity
+      {:id "sandbox"
+       :menu-test? true
+       :label "Sandbox"
+       :icon "toys"
+       :button-name "sandbox-activity"
+       :show-in-switcher? true
+       :activate (fn [ctx]
+                   (ctx:set-root-actions! SandboxActivityActions.sandbox-root-actions)
+                   (ctx:set-preferred-interaction-surface! :scene)
+                   (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
+                   (ctx:set-target-enabled! (fn [target] true))
+                   {:activity-id "sandbox"})
+       :deactivate (fn [_ctx _session]
+                     true)}))
   (when (and (. registry.activities "graph")
              (not (. (. registry.activities "graph") :menu-test?)))
     (Activities.unregister-activity "graph"))
@@ -594,14 +679,20 @@
 
 (fn menu-manager-root-add-cuboid-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:add-cuboid 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-physics-body (fn [_self]
                                         (set calls.add-cuboid (+ calls.add-cuboid 1)))})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -622,12 +713,15 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-demo-video-player-opens-launchable []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
@@ -635,7 +729,12 @@
   (local calls {:open-panel 0
                 :scene nil})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-panel-child (fn [_self _opts] nil)})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -669,18 +768,26 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-demo-video-player-errors-loudly-when-unavailable []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-panel-child (fn [_self _opts] nil)})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -715,20 +822,28 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-ball-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:add-object 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-object (fn [_self _object]
                                 (set calls.add-object (+ calls.add-object 1)))})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -749,20 +864,28 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-light-ball-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:add-light-ball 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (set app.scene {:add-light-ball (fn [_self _opts]
                                     (set calls.add-light-ball (+ calls.add-light-ball 1)))})
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -783,23 +906,31 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
 
   (when (not ok)
     (error err)))
 
 (fn menu-manager-root-recover-terrain-bound-objects-invokes-scene []
   (reset-engine-events)
+  (ensure-built-in-activities!)
   (local clickables (make-clickables-stub))
   (local hoverables (make-hoverables-stub))
   (local ctx (make-test-ctx {:clickables clickables :hoverables hoverables}))
   (local hud (make-hud-stub ctx))
   (local calls {:recover 0})
   (local original-scene app.scene)
+  (local original-activity app.active-activity-id)
+  (local original-surface app.active-interaction-surface)
   (local original-recover SceneTerrainRecovery.recover)
   (set app.scene {})
   (set SceneTerrainRecovery.recover
        (fn [_scene]
          (set calls.recover (+ calls.recover 1))))
+  (Activities.deactivate-active-activity)
+  (Activities.activate-activity "sandbox")
+  (set app.active-interaction-surface :scene)
 
   (local manager
     (MenuManager {:clickables clickables
@@ -820,6 +951,8 @@
 
   (manager:drop)
   (set app.scene original-scene)
+  (set app.active-activity-id original-activity)
+  (set app.active-interaction-surface original-surface)
   (set SceneTerrainRecovery.recover original-recover)
 
   (when (not ok)
@@ -1131,11 +1264,18 @@
 (table.insert tests {:name "Root context menu actions support active custom activity"
                      :fn root-context-menu-actions-support-active-custom-activity})
 
+;; Cleanup test: always runs last and restores the activity registry to
+;; its pre-module state.  This prevents menu test stub activities from
+;; contaminating later test modules (e.g. test-sandbox-activity).
+(table.insert tests {:name "test-menu cleanup: restore activity registry state"
+                     :fn restore-activity-registry!})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
     (runner.run-tests {:name "menu"
-                       :tests tests})))
+                       :tests tests
+                       :teardown restore-activity-registry!})))
 
 {:name "menu"
  :tests tests

@@ -1,5 +1,3 @@
-(local PanelUtils (require :target-panel-utils))
-(local SkyboxState (require :skybox-state))
 (local PhysicsContainment (require :physics-containment))
 (local Activities (require :activities))
 
@@ -24,7 +22,23 @@
                                        :current current}))
   current)
 
+(fn resolve-canonical-sandbox-skybox [world]
+  (and world
+       world.state
+       world.state.activity
+       world.state.activity.sessions
+       world.state.activity.sessions.sandbox
+       world.state.activity.sessions.sandbox.scene
+       world.state.activity.sessions.sandbox.scene.skybox))
+
 (fn reapply-active-world-skybox [theme-name]
+  ;; Only apply Sandbox skybox when Sandbox is the active activity.
+  ;; When another activity (Drawing, Graph, Board) is active, the
+  ;; renderer should stay with the active slot's skybox policy —
+  ;; not receive an out-of-band Sandbox skybox override.
+  (local sandbox-active? (= (Activities.active-activity-id) "sandbox"))
+  (when (not sandbox-active?)
+    (lua "return nil"))
   (local entry (and app app.active-world-entry))
   (local world (and entry entry.world))
   (local runtime
@@ -32,28 +46,14 @@
         (world:get-runtime)
         (and world world.runtime)))
   (local scene (and runtime runtime.scene))
-  (local skybox-policy (and world world.state world.state.scene world.state.scene.skybox))
-  (when (and scene scene.set-skybox-state skybox-policy)
-    (scene:set-skybox-state
-      (SkyboxState.resolve-for-theme skybox-policy theme-name))))
-
-(fn require-active-world-scene-state []
-  (local entry (and app app.active-world-entry))
-  (if (= entry nil)
-      nil
-      (do
-        (assert entry.world "ThemeActions.apply-theme requires active-world-entry.world")
-        (assert entry.world.state "ThemeActions.apply-theme requires active world state")
-        (assert entry.world.state.scene "ThemeActions.apply-theme requires active world scene state")
-        (assert (= (type entry.world.state.scene.terrains) :table)
-                "ThemeActions.apply-theme requires active world scene terrains")
-        entry.world.state.scene)))
-
-(fn active-world-scene-build-payload []
-  (local scene-state (require-active-world-scene-state))
-  (if (= scene-state nil)
-      nil
-      {:terrains (PanelUtils.clone-table scene-state.terrains)}))
+  (local skybox-state (resolve-canonical-sandbox-skybox world))
+  (when (and scene scene.set-skybox-state skybox-state)
+    ;; R3-3: Resolve skybox by-theme override for current theme before
+    ;; applying to the renderer.  This ensures theme-switch activates
+    ;; the correct per-theme skybox entry, not just the default.
+    (local SkyboxState (require :skybox-state))
+    (local resolved (SkyboxState.resolve-for-theme skybox-state theme-name))
+    (scene:set-skybox-state resolved)))
 
 (fn apply-active-theme-to-build-contexts []
   (local active-theme (and app.themes app.themes.get-active-theme
@@ -63,9 +63,11 @@
       (app.canvas:apply-active-theme-to-contexts)
       (when (and canvas-ctx canvas-ctx.set-theme)
         (canvas-ctx:set-theme active-theme)))
-  (local scene-ctx (and app.scene app.scene.build-context))
-  (when (and scene-ctx scene-ctx.set-theme)
-    (scene-ctx:set-theme active-theme))
+  (if (and app.scene app.scene.apply-active-theme-to-contexts)
+      (app.scene:apply-active-theme-to-contexts)
+      (let [scene-ctx (and app.scene app.scene.build-context)]
+        (when (and scene-ctx scene-ctx.set-theme)
+          (scene-ctx:set-theme active-theme))))
   (local hud-ctx (and app.hud app.hud.build-context))
   (when (and hud-ctx hud-ctx.set-theme)
     (hud-ctx:set-theme active-theme))
@@ -87,8 +89,6 @@
         (when (and themes themes.set-theme)
           (themes.set-theme theme-name))
         (apply-active-theme-to-build-contexts)
-        (when (and app.scene app.scene.build-default)
-          (app.scene:build-default (active-world-scene-build-payload)))
         (if app.apply-active-world-hud-contrib
             (app.apply-active-world-hud-contrib)
             (when (and app.hud app.hud.build-default)

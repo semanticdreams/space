@@ -29,6 +29,8 @@
 (local PathUtils (require :tests.path-utils))
 (local TestSupport (require :tests/test-support))
 (local StateSystemBindings (require :state-system-bindings))
+(local SkyboxState (require :skybox-state))
+(local BackgroundState (require :background-state))
 
 (local tests [])
 (local appdirs (require :appdirs))
@@ -207,13 +209,68 @@
                              0 0 0 0 0
                              0 0 0 0 0]}])})
 
+(fn make-skybox-state [opts]
+    (local options (or opts {}))
+    (SkyboxState.normalize-complete-state
+      {:enabled? (if (= options.enabled? nil) true options.enabled?)
+       :default {:name (or options.name "lake")
+                 :brightness (or options.brightness 0.1)}
+       :by-theme (or options.by-theme {})}
+      "test-graph-view skybox state"))
+
+(fn make-background-state [opts]
+    (local options (or opts {}))
+    (BackgroundState.normalize-complete-state
+      {:color (or options.color [0.0 0.0 0.0])}
+      "test-graph-view background state"))
+
 (fn make-world-entry [opts]
     (local options (or opts {}))
+    (local runtime (or options.runtime nil))
+    (local state (or options.state {:scene {:panels []
+                                            :terrains []
+                                            :lights (LightSystemModule.default-state)
+                                            :skybox (make-skybox-state)
+                                            :background (make-background-state)}
+                                    :hud {:panels []}}))
+    ;; Populate canonical sandbox session scene state when absent,
+    ;; preserving any existing activity metadata and keeping legacy
+    ;; scene keys populated for tests that still reference them directly.
+    ;; Arrays (panels, terrains) shared by reference with legacy scene.
+    ;; Lights, skybox, background use their own references to avoid
+    ;; inadvertently materializing state when a test passes nil.
+    (local has-complete-sandbox-scene?
+      (and (= (type state.activity) :table)
+           (= (type state.activity.sessions) :table)
+           (= (type state.activity.sessions.sandbox) :table)
+           (= (type state.activity.sessions.sandbox.scene) :table)))
+    (when (not has-complete-sandbox-scene?)
+      ;; Ensure intermediate tables exist, defaulting active_id if nil.
+      (when (not (= (type state.activity) :table))
+        (set state.activity {}))
+      (when (= state.activity.active_id nil)
+        (set state.activity.active_id "sandbox"))
+      (when (not (= (type state.activity.sessions) :table))
+        (set state.activity.sessions {}))
+      (when (not (= (type state.activity.sessions.sandbox) :table))
+        (set state.activity.sessions.sandbox {}))
+      (local sandbox-lights (or state.scene.lights
+                                (LightSystemModule.default-state)))
+      (local sandbox-skybox (or state.scene.skybox
+                                (make-skybox-state)))
+      (local sandbox-background (or state.scene.background
+                                    (make-background-state)))
+      (set state.activity.sessions.sandbox.scene
+           {:panels state.scene.panels
+            :terrains state.scene.terrains
+            :lights sandbox-lights
+            :skybox sandbox-skybox
+            :background sandbox-background
+            :containment {:enabled? false}}))
     {:id (or options.id "world-a")
      :name (or options.name "World A")
-     :world {:state (or options.state {:scene {:panels [] :terrains [] :lights (LightSystemModule.default-state)}
-                                       :hud {:panels []}})
-             :get-runtime (fn [_self] options.runtime)
+     :world {:state state
+             :get-runtime (fn [_self] runtime)
              :save-state (fn [_self] true)}})
 
 (fn make-world-manager [opts]

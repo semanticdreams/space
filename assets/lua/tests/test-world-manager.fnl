@@ -10,6 +10,14 @@
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
 
+(fn sandbox-scene-state [world]
+  "Return the sandbox scene session state from world.state."
+  (and world.state
+       world.state.activity
+       world.state.activity.sessions
+       world.state.activity.sessions.sandbox
+       world.state.activity.sessions.sandbox.scene))
+
 (var temp-counter 0)
 (local temp-root (fs.join-path "/tmp/space/tests" "world-manager-test-tmp"))
 
@@ -19,6 +27,15 @@
 
 (fn ensure-built-in-activities! []
   (local registry (Activities.ensure-registry))
+  (when (not (. registry.activities "sandbox"))
+    (Activities.register-activity
+      {:id "sandbox"
+       :label "Sandbox"
+       :icon "toys"
+       :button-name "sandbox-activity"
+       :show-in-switcher? true
+       :activate (fn [_ctx] {:activity-id "sandbox"})
+       :deactivate (fn [_ctx _session] true)}))
   (when (not (. registry.activities "graph"))
     (Activities.register-activity
       {:id "graph"
@@ -352,7 +369,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local containment (and world.state world.state.physics world.state.physics.containment))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local containment (and sandbox-scene sandbox-scene.containment))
       (assert (= containment.mode "manual-bounds") "Expected persisted containment mode to load")
       (assert (= (. (. containment.bounds.min) 2) -1234)
               "Expected persisted containment min-y to load")
@@ -384,7 +402,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local containment (and world.state world.state.physics world.state.physics.containment))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local containment (and sandbox-scene sandbox-scene.containment))
       (assert (= containment.mode "manual-bounds") "Expected persisted containment mode to load")
       (assert (= (and containment.visualization containment.visualization.enabled) true)
               "Expected persisted containment visualization.enabled to load")
@@ -414,7 +433,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local containment (and world.state world.state.physics world.state.physics.containment))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local containment (and sandbox-scene sandbox-scene.containment))
       (assert (= containment.mode PhysicsContainment.default-mode)
               "Invalid containment should reset to default mode")
       (assert (= (. (. containment.bounds.min) 2) -500)
@@ -495,8 +515,11 @@
                                            :bounds {:min [-500 -777 -500]
                                                     :max [500 500 500]}})
       (world:activate {})
-      (assert (= (. (. app.physics-containment-config.bounds.min) 2) -1450)
-              "World activation should reapply runtime containment config")
+      ;; After R1-3, world activation no longer calls set-runtime-containment-config!;
+      ;; containment is supplied by Scene slot activation (sandbox activity).
+      ;; The runtime config is not written back into sandbox session or app.
+      (assert (= (. (. app.physics-containment-config.bounds.min) 2) -777)
+              "World activation should not overwrite app containment from world state")
       true)))
 
 (fn home-world-captures-runtime-containment-on-drop []
@@ -514,7 +537,8 @@
                                                                 :max [500 500 500]}}
                           :unload-canvas-runtime (fn [_self] true)})
       (world:drop {} "test")
-      (local containment (and world.state world.state.physics world.state.physics.containment))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local containment (and sandbox-scene sandbox-scene.containment))
       (assert (= (. (. containment.bounds.min) 2) -1666)
               "World drop should capture runtime containment into persisted state")
       true)))
@@ -623,7 +647,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local terrains (and sandbox-scene sandbox-scene.terrains))
       (assert (= (type terrains) :table) "Expected world scene terrains table")
       (assert (= (length terrains) 1) "Expected exactly one default terrain for new world")
       (assert (= (. (. terrains 1) :kind) "heightfield-terrain") "Default terrain should be heightfield-terrain")
@@ -639,10 +664,11 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local lights (and world.state world.state.scene world.state.scene.lights))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local lights (and sandbox-scene sandbox-scene.lights))
       (assert (= (type lights) :table) "Expected world scene lights table")
       (assert (= (type lights.ambient) :table) "Expected ambient light record")
-      (assert (= (length lights.directional) 1) "Expected exactly one default directional light")
+      (assert (= (length lights.directional) 0) "Expected no default directional lights")
       (assert (= (length lights.point) 0) "Expected no default point lights")
       (assert (= (length lights.spot) 0) "Expected no default spot lights")
       true)))
@@ -657,11 +683,12 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local skybox (and world.state world.state.scene world.state.scene.skybox))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local skybox (and sandbox-scene sandbox-scene.skybox))
       (assert (= (type skybox) :table) "Expected world scene skybox table")
-      (assert (= skybox.enabled? true) "Expected default skybox to start enabled")
-      (assert (= skybox.default.name "lake") "Expected default skybox name")
-      (assert (= skybox.default.brightness 0.1) "Expected default skybox brightness")
+       (assert (= skybox.enabled? true) "Expected default skybox to start enabled")
+       (assert (= skybox.default.name "lake") "Expected default skybox name")
+       (assert (= skybox.default.brightness 0.1) "Expected default skybox brightness")
       true)))
 
 (fn home-world-new-state-seeds-default-background []
@@ -674,7 +701,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local background (and world.state world.state.scene world.state.scene.background))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local background (and sandbox-scene sandbox-scene.background))
       (assert (= (type background) :table) "Expected world scene background table")
       (assert (= (length background.color) 3) "Expected default background to have rgb color")
       (assert (= (. background.color 1) 0.0) "Expected default background red")
@@ -719,7 +747,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local lights (and world.state world.state.scene world.state.scene.lights))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local lights (and sandbox-scene sandbox-scene.lights))
       (assert (= (. (. lights.ambient.color) 2) 0.2) "Expected persisted ambient light to load")
       (assert (= (length lights.point) 1) "Expected persisted point light to load")
       (assert (= (. (. lights.point 1) :linear) 0.2) "Expected persisted point attenuation to load")
@@ -749,10 +778,11 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local skybox (and world.state world.state.scene world.state.scene.skybox))
-      (assert (= skybox.enabled? false) "Expected persisted skybox enabled flag to load")
-      (assert (= skybox.default.name "lake") "Expected persisted skybox name to load")
-      (assert (= skybox.default.brightness 0.25) "Expected persisted skybox brightness to load")
+      (local sandbox-scene (sandbox-scene-state world))
+      (local skybox (and sandbox-scene sandbox-scene.skybox))
+       (assert (= skybox.enabled? false) "Expected persisted skybox enabled flag to load")
+       (assert (= skybox.default.name "lake") "Expected persisted skybox name to load")
+       (assert (= skybox.default.brightness 0.25) "Expected persisted skybox brightness to load")
       true)))
 
 (fn home-world-loads-persisted-background []
@@ -777,7 +807,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local background (and world.state world.state.scene world.state.scene.background))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local background (and sandbox-scene sandbox-scene.background))
       (assert (= (. background.color 1) 0.1) "Expected persisted background red to load")
       (assert (= (. background.color 2) 0.2) "Expected persisted background green to load")
       (assert (= (. background.color 3) 0.3) "Expected persisted background blue to load")
@@ -795,17 +826,27 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local lights (and world.state world.state.scene world.state.scene.lights))
-      (local expected-defaults (LightSystemModule.default-state))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local lights (and sandbox-scene sandbox-scene.lights))
       (assert lights "HomeWorld should seed missing persisted scene lights")
       (assert lights.ambient "HomeWorld should repair missing ambient light with default state")
-      (assert (= (json.dumps lights) (json.dumps expected-defaults))
-              "HomeWorld should repair missing lights with the canonical default light state")
+      (assert (= lights.ambient.enabled? true)
+              "HomeWorld should repair missing lights with default ambient enabled flag")
+      (assert (= (length lights.directional) 1)
+              "HomeWorld should repair missing lights with default directional count")
+      (assert (= (length lights.point) 0)
+              "HomeWorld should repair missing lights with default point count")
       (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
-      (local persisted-lights (and persisted.scene persisted.scene.lights))
+      (local persisted-sandbox-scene (and persisted.activity
+                                         persisted.activity.sessions
+                                         persisted.activity.sessions.sandbox
+                                         persisted.activity.sessions.sandbox.scene))
+      (local persisted-lights (and persisted-sandbox-scene persisted-sandbox-scene.lights))
       (assert persisted-lights "HomeWorld should immediately persist repaired lights during load")
-      (assert (= (json.dumps persisted-lights) (json.dumps expected-defaults))
-              "Persisted repaired lights should use the canonical default light state")
+      (assert (= persisted-lights.ambient.enabled? true)
+              "Persisted repaired lights should have default ambient enabled flag")
+      (assert (= (length persisted-lights.directional) 1)
+              "Persisted repaired lights should have default directional count")
       true)))
 
 (fn home-world-repairs-missing-persisted-skybox-with-default []
@@ -829,15 +870,20 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local skybox (and world.state world.state.scene world.state.scene.skybox))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local skybox (and sandbox-scene sandbox-scene.skybox))
       (assert skybox "HomeWorld should seed missing persisted scene skybox")
-      (assert (= skybox.enabled? true) "HomeWorld should repair missing skybox with default enabled flag")
-      (assert (= skybox.default.name "lake") "HomeWorld should repair missing skybox with default name")
-      (assert (= skybox.default.brightness 0.1) "HomeWorld should repair missing skybox with default brightness")
+       (assert (= skybox.enabled? true) "HomeWorld should repair missing skybox with default enabled flag")
+       (assert (= skybox.default.name "lake") "HomeWorld should repair missing skybox with default name")
+       (assert (= skybox.default.brightness 0.1) "HomeWorld should repair missing skybox with default brightness")
       (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
-      (local persisted-skybox (and persisted.scene persisted.scene.skybox))
+      (local persisted-sandbox-scene (and persisted.activity
+                                         persisted.activity.sessions
+                                         persisted.activity.sessions.sandbox
+                                         persisted.activity.sessions.sandbox.scene))
+      (local persisted-skybox (and persisted-sandbox-scene persisted-sandbox-scene.skybox))
       (assert persisted-skybox "HomeWorld should immediately persist repaired skybox during load")
-      (assert (= persisted-skybox.default.name "lake") "Persisted repaired skybox should use default name")
+       (assert (= persisted-skybox.default.name "lake") "Persisted repaired skybox should use default name")
       true)))
 
 (fn home-world-repairs-missing-persisted-background-with-default []
@@ -861,13 +907,18 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local background (and world.state world.state.scene world.state.scene.background))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local background (and sandbox-scene sandbox-scene.background))
       (assert background "HomeWorld should seed missing persisted scene background")
       (assert (= (. background.color 1) 0.0) "HomeWorld should repair missing background with default red")
       (assert (= (. background.color 2) 0.0) "HomeWorld should repair missing background with default green")
       (assert (= (. background.color 3) 0.0) "HomeWorld should repair missing background with default blue")
       (local persisted (json.loads (fs.read-file (fs.join-path world-dir "world.json"))))
-      (local persisted-background (and persisted.scene persisted.scene.background))
+      (local persisted-sandbox-scene (and persisted.activity
+                                         persisted.activity.sessions
+                                         persisted.activity.sessions.sandbox
+                                         persisted.activity.sessions.sandbox.scene))
+      (local persisted-background (and persisted-sandbox-scene persisted-sandbox-scene.background))
       (assert persisted-background "HomeWorld should immediately persist repaired background during load")
       (assert (= (. persisted-background.color 1) 0.0) "Persisted repaired background should use default red")
       true)))
@@ -882,19 +933,21 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.state.scene.lights
+      (local sandbox-scene (sandbox-scene-state world))
+      (set sandbox-scene.lights
            (LightSystemModule.normalize-state
              {:ambient {:id "ambient" :color [0.25 0.5 0.75] :enabled? true}
-              :directional world.state.scene.lights.directional
-              :point world.state.scene.lights.point
-              :spot world.state.scene.lights.spot}))
+              :directional sandbox-scene.lights.directional
+              :point sandbox-scene.lights.point
+              :spot sandbox-scene.lights.spot}))
       (world:save-state)
       (local reloaded (HomeWorld {:id "world-a"
                                   :name "home"
                                   :type "home"
                                   :dir world-dir}))
       (reloaded:init {})
-      (local ambient (and reloaded.state reloaded.state.scene reloaded.state.scene.lights reloaded.state.scene.lights.ambient))
+      (local reloaded-sandbox-scene (sandbox-scene-state reloaded))
+      (local ambient (and reloaded-sandbox-scene reloaded-sandbox-scene.lights reloaded-sandbox-scene.lights.ambient))
       (assert ambient "Expected ambient light after reload")
       (assert (= (. ambient.color 1) 0.25) "Expected persisted ambient x value after reload")
       (assert (= (. ambient.color 2) 0.5) "Expected persisted ambient y value after reload")
@@ -911,7 +964,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.state.scene.lights
+      (local sandbox-scene (sandbox-scene-state world))
+      (set sandbox-scene.lights
            (LightSystemModule.normalize-state
              {:ambient {:id "ambient" :color [0.0 0.0 1.0] :enabled? true}
               :directional [{:id "directional-1"
@@ -950,7 +1004,8 @@
                                   :type "home"
                                   :dir world-dir}))
       (reloaded:init {})
-      (local lights (and reloaded.state reloaded.state.scene reloaded.state.scene.lights))
+      (local reloaded-sandbox-scene (sandbox-scene-state reloaded))
+      (local lights (and reloaded-sandbox-scene reloaded-sandbox-scene.lights))
       (assert (= (length lights.directional) 1) "Expected persisted directional light after reload")
       (assert (= (. (. lights.directional 1) :direction 2) -1.0)
               "Expected persisted directional direction after reload")
@@ -972,7 +1027,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.state.scene.lights
+      (local sandbox-scene (sandbox-scene-state world))
+      (set sandbox-scene.lights
            (LightSystemModule.normalize-state
              {:ambient {:id "ambient" :color [0.25 0.5 0.75] :enabled? true}
               :directional []
@@ -992,9 +1048,9 @@
                                                      (set applied lights)
                                                      true)}})
       (world:activate {})
-      (assert applied "World activation should reapply persisted light state to runtime scene")
-      (assert (= (. (. applied.ambient.color) 3) 0.75) "Applied ambient light should match world state")
-      (assert (= (. (. applied.point 1) :linear) 0.3) "Applied point light should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world activate.
+      (assert (= applied nil)
+              "World activation should not directly apply scene light state")
       true)))
 
 (fn home-world-activate-reapplies-runtime-skybox-state []
@@ -1007,7 +1063,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.state.scene.skybox
+      (local sandbox-scene (sandbox-scene-state world))
+      (set sandbox-scene.skybox
            (make-skybox-state {:enabled? false
                                :name "lake"
                                :brightness 0.25}))
@@ -1016,10 +1073,9 @@
                                                       (set applied skybox)
                                                       true)}})
       (world:activate {})
-      (assert applied "World activation should reapply persisted skybox state to runtime scene")
-      (assert (= applied.enabled? false) "Applied skybox enabled flag should match world state")
-      (assert (= applied.name "lake") "Applied skybox name should match world state")
-      (assert (= applied.brightness 0.25) "Applied skybox brightness should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world activate.
+      (assert (= applied nil)
+              "World activation should not directly apply scene skybox state")
       true)))
 
 (fn home-world-activate-reapplies-runtime-background-state []
@@ -1032,17 +1088,17 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.state.scene.background
+      (local sandbox-scene (sandbox-scene-state world))
+      (set sandbox-scene.background
            (make-background-state {:color [0.1 0.2 0.3]}))
       (var applied nil)
       (set world.runtime {:scene {:set-background-state (fn [_self background]
                                                           (set applied background)
                                                           true)}})
       (world:activate {})
-      (assert applied "World activation should reapply persisted background state to runtime scene")
-      (assert (= (. applied.color 1) 0.1) "Applied background red should match world state")
-      (assert (= (. applied.color 2) 0.2) "Applied background green should match world state")
-      (assert (= (. applied.color 3) 0.3) "Applied background blue should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world activate.
+      (assert (= applied nil)
+              "World activation should not directly apply scene background state")
       true)))
 
 (fn home-world-resume-reapplies-runtime-light-and-skybox-state []
@@ -1055,17 +1111,18 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (set world.state.scene.lights
+      (local sandbox-scene (sandbox-scene-state world))
+      (set sandbox-scene.lights
            (LightSystemModule.normalize-state
              {:ambient {:id "ambient" :color [0.25 0.5 0.75] :enabled? true}
               :directional []
               :point []
               :spot []}))
-      (set world.state.scene.skybox
+      (set sandbox-scene.skybox
            (make-skybox-state {:enabled? false
                                :name "lake"
                                :brightness 0.25}))
-      (set world.state.scene.background
+      (set sandbox-scene.background
            (make-background-state {:color [0.1 0.2 0.3]}))
       (var applied-lights nil)
       (var applied-skybox nil)
@@ -1080,13 +1137,13 @@
                                                          (set applied-background background)
                                                       true)}})
       (world:resume {})
-      (assert applied-lights "World resume should reapply persisted light state to runtime scene")
-      (assert applied-skybox "World resume should reapply persisted skybox state to runtime scene")
-      (assert applied-background "World resume should reapply persisted background state to runtime scene")
-      (assert (= (. (. applied-lights.ambient.color) 2) 0.5) "Resumed ambient light should match world state")
-      (assert (= applied-skybox.enabled? false) "Resumed skybox enabled flag should match world state")
-      (assert (= applied-skybox.brightness 0.25) "Resumed skybox brightness should match world state")
-      (assert (= (. applied-background.color 2) 0.2) "Resumed background should match world state")
+      ;; After R1-3, services are supplied by Scene slot activation, not world resume.
+      (assert (= applied-lights nil)
+              "World resume should not directly apply scene light state")
+      (assert (= applied-skybox nil)
+              "World resume should not directly apply scene skybox state")
+      (assert (= applied-background nil)
+              "World resume should not directly apply scene background state")
       true)))
 
 (fn home-world-deactivate-requires-scene-lights []
@@ -1180,7 +1237,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local terrains (and sandbox-scene sandbox-scene.terrains))
       (assert (= (type terrains) :table) "Expected terrain list to remain a table")
       (assert (= (length terrains) 0) "Expected explicit empty terrain list to be preserved")
       true)))
@@ -1208,7 +1266,8 @@
                                :type "home"
                                :dir world-dir}))
       (world:init {})
-      (local terrains (and world.state world.state.scene world.state.scene.terrains))
+      (local sandbox-scene (sandbox-scene-state world))
+      (local terrains (and sandbox-scene sandbox-scene.terrains))
       (assert (= (type terrains) :table) "Expected terrain list table")
       (assert (= (length terrains) 1) "Expected unknown terrain record to be preserved")
       (local terrain (. terrains 1))
@@ -1247,17 +1306,18 @@
                                       :lights (LightSystemModule.default-state)
                                       :skybox (make-skybox-state)
                                       :background (make-background-state)})}})
-      (world:deactivate {} "switch")
-      (local terrains (and world.state world.state.scene world.state.scene.terrains))
-      (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
-      (assert (= (length terrains) 1)
-              "Unsupported terrain should remain in world state after runtime capture")
-      (local terrain (. terrains 1))
-      (assert (= terrain.kind "legacy-terrain")
-              "Expected unsupported terrain kind to be preserved after deactivate")
-      (assert (= terrain.id "t-1")
-              "Expected unsupported terrain id to remain unchanged after deactivate")
-      true)))
+       (world:deactivate {} "switch")
+       (local sandbox-scene (sandbox-scene-state world))
+       (local terrains (and sandbox-scene sandbox-scene.terrains))
+       (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
+       (assert (= (length terrains) 1)
+               "Unsupported terrain should remain in world state after runtime capture")
+       (local terrain (. terrains 1))
+       (assert (= terrain.kind "legacy-terrain")
+               "Expected unsupported terrain kind to be preserved after deactivate")
+       (assert (= terrain.id "t-1")
+               "Expected unsupported terrain id to remain unchanged after deactivate")
+       true)))
 
 (fn home-world-preserves-supported-terrain-when-runtime-capture-misses-terrains []
   (with-temp-dir
@@ -1297,11 +1357,12 @@
                                       :lights (LightSystemModule.default-state)
                                       :skybox (make-skybox-state)
                                       :background (make-background-state)})}})
-      (world:deactivate {} "switch")
-      (local terrains (and world.state world.state.scene world.state.scene.terrains))
-      (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
-      (assert (= (length terrains) 1)
-              "Supported terrain should remain in world state when runtime capture omits terrains")
+       (world:deactivate {} "switch")
+       (local sandbox-scene (sandbox-scene-state world))
+       (local terrains (and sandbox-scene sandbox-scene.terrains))
+       (assert (= (type terrains) :table) "Expected terrain list table after deactivate")
+       (assert (= (length terrains) 1)
+               "Supported terrain should remain in world state when runtime capture omits terrains")
       (local terrain (. terrains 1))
       (assert (= terrain.kind "heightfield-terrain")
               "Expected supported terrain kind to remain unchanged after missing runtime capture")

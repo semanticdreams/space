@@ -2,8 +2,37 @@
 (local LightSystemModule (require :light-system))
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
+(local ActivitySceneState (require :activity-scene-state))
 
 (local M {})
+
+;; ── Canonical sandbox session helpers ──────────────────────────────
+
+(fn resolve-sandbox-scene-state [world context]
+  "Return the canonical sandbox session scene state for a HomeWorld.
+  Fails loudly when world.state exists but the sandbox session scene
+  is missing (corrupt or uninitialized state).
+  Returns nil only when world itself is nil (truly missing entry)."
+  (when world
+    (assert world.state (.. (or context "WorldData") " requires world.state"))
+    (assert (= (type world.state.activity) :table)
+            (.. (or context "WorldData") " requires world.state.activity"))
+    (local scene (ActivitySceneState.scene-state world.state.activity "sandbox"))
+    (assert scene
+            (.. (or context "WorldData")
+                " requires activity.sessions.sandbox.scene"))
+    scene))
+
+(fn ensure-sandbox-scene-state [world]
+  "Ensure the sandbox session scene state exists and return it."
+  (assert world "WorldData requires world")
+  (assert world.state "WorldData requires world.state")
+  (when (not (= (type world.state.activity) :table))
+    (set world.state.activity {}))
+  (ActivitySceneState.ensure-session-scene!
+    world.state.activity
+    "sandbox"
+    ActivitySceneState.default-sandbox-state))
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -76,7 +105,8 @@
 
 (fn scene-state-panels [world-manager world-id]
   (local world (resolve-world world-manager world-id))
-  (or (and world world.state world.state.scene world.state.scene.panels) []))
+  (local sandbox-scene (resolve-sandbox-scene-state world))
+  (or (and sandbox-scene sandbox-scene.panels) []))
 
 (fn hud-state-panels [world-manager world-id]
   (local world (resolve-world world-manager world-id))
@@ -84,54 +114,47 @@
 
 (fn terrain-state-records [world-manager world-id]
   (local world (resolve-world world-manager world-id))
-  (or (and world world.state world.state.scene world.state.scene.terrains) []))
+  (local sandbox-scene (resolve-sandbox-scene-state world))
+  (or (and sandbox-scene sandbox-scene.terrains) []))
 
 (fn scene-state-skybox [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
       (do
-        (assert world.state (.. "WorldData[" world-id "] requires world.state"))
-        (assert world.state.scene (.. "WorldData[" world-id "] requires world.state.scene"))
-        (local scene-state world.state.scene)
+        (local sandbox-scene (resolve-sandbox-scene-state world (.. "WorldData[" world-id "]")))
+        (assert sandbox-scene (.. "WorldData[" world-id "] requires sandbox scene state"))
         (SkyboxState.normalize-complete-state
-          (assert scene-state.skybox
-                  (.. "WorldData[" world-id "] requires scene.skybox"))
-          (.. "WorldData[" world-id "] scene.skybox")))))
+          (assert sandbox-scene.skybox
+                  (.. "WorldData[" world-id "] requires sandbox scene.skybox"))
+          (.. "WorldData[" world-id "] sandbox scene.skybox")))))
 
 (fn scene-state-background [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
       (do
-        (assert world.state (.. "WorldData[" world-id "] requires world.state"))
-        (assert world.state.scene (.. "WorldData[" world-id "] requires world.state.scene"))
-        (local scene-state world.state.scene)
+        (local sandbox-scene (resolve-sandbox-scene-state world (.. "WorldData[" world-id "]")))
+        (assert sandbox-scene (.. "WorldData[" world-id "] requires sandbox scene state"))
         (BackgroundState.normalize-complete-state
-          (assert scene-state.background
-                  (.. "WorldData[" world-id "] requires scene.background"))
-          (.. "WorldData[" world-id "] scene.background")))))
+          (assert sandbox-scene.background
+                  (.. "WorldData[" world-id "] requires sandbox scene.background"))
+          (.. "WorldData[" world-id "] sandbox scene.background")))))
 
 (fn resolve-default-light-state []
   (LightSystemModule.default-state))
 
 (fn ensure-scene-state [world]
-  (when (not world.state)
-    (set world.state {}))
-  (when (not world.state.scene)
-    (set world.state.scene {}))
-  (when (not world.state.scene.panels)
-    (set world.state.scene.panels []))
-  (when (not world.state.scene.terrains)
-    (set world.state.scene.terrains []))
-  world.state.scene)
+  "Ensure sandbox session scene state exists and return it."
+  (ensure-sandbox-scene-state world))
 
 (fn require-scene-state [world context]
-  (local label (or context "WorldData"))
+  "Assert that sandbox session scene state exists and return it."
+  (local label (.. (or context "WorldData")))
   (assert world (.. label " requires world"))
-  (assert world.state (.. label " requires world.state"))
-  (assert world.state.scene (.. label " requires world.state.scene"))
-  world.state.scene)
+  (local sandbox-scene (resolve-sandbox-scene-state world label))
+  (assert sandbox-scene (.. label " requires sandbox scene state"))
+  sandbox-scene)
 
 (fn emit-world-change [world-manager world-id reason]
   (when (and world-manager world-manager.changed world-manager.changed.emit)
@@ -144,6 +167,36 @@
     (world:save-state))
   world)
 
+(fn refresh-sandbox-slot-if-inactive [scene world-manager world-id]
+  "When the active Scene slot is NOT sandbox, refresh the retained sandbox
+  slot's scene-state from canonical session state so mutations survive until
+  the next sandbox activation.  Also update runtime.activity-session-state
+  so that Activities.snapshot-activity-sessions cannot overwrite the
+  mutation with stale pending data.  Does nothing when sandbox is already
+  active (the direct runtime sync handles that case)."
+  (when (and scene (not (= scene.active-activity-slot-id "sandbox")))
+    (local world (resolve-world world-manager world-id))
+    (local canonical (resolve-sandbox-scene-state world))
+    (when canonical
+      ;; Ensure the retained slot exists and has scene-state so mutations
+      ;; survive until the next sandbox activation.
+      (local sandbox-slot (and scene.activity-slot
+                               (scene:activity-slot "sandbox")))
+      (when (and sandbox-slot sandbox-slot.scene-state)
+        ;; Refresh retained slot state in place from canonical.
+        (each [k v (pairs canonical)]
+          (tset sandbox-slot.scene-state k v)))
+      ;; R5-1: Also update runtime.activity-session-state.sandbox.scene
+      ;; so Activities.snapshot-activity-sessions cannot save stale
+      ;; pending data over the mutation.
+      (local runtime (resolve-runtime world-manager world-id))
+      (when (and runtime runtime.activity-session-state)
+        (when (not (= (type runtime.activity-session-state.sandbox) :table))
+          (tset runtime.activity-session-state :sandbox {}))
+        ;; Replace sandbox.scene with the canonical scene so stale
+        ;; pending data cannot overwrite the mutation during snapshot.
+        (tset runtime.activity-session-state.sandbox :scene canonical)))))
+
 (fn require-active-scene-light-method [scene method-name]
   (assert (. scene method-name)
           (.. "Active scene is missing " method-name " for world light sync")))
@@ -155,63 +208,99 @@
 (fn sync-active-terrain-record [world-manager world-id terrain-id record]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-method scene terrain-id :replace-terrain-record)
-    (assert (scene:replace-terrain-record terrain-id record)
-            (.. "Active scene failed to replace terrain " terrain-id))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-method scene terrain-id :replace-terrain-record)
+          (assert (scene:replace-terrain-record terrain-id record)
+                  (.. "Active scene failed to replace terrain " terrain-id)))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-terrain-removal [world-manager world-id terrain-id]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-method scene terrain-id :remove-terrain)
-    (assert (scene:remove-terrain terrain-id)
-            (.. "Active scene failed to remove terrain " terrain-id))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-method scene terrain-id :remove-terrain)
+          (assert (scene:remove-terrain terrain-id)
+                  (.. "Active scene failed to remove terrain " terrain-id)))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-terrain-addition [world-manager world-id record]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-method scene record.id :add-terrain-record)
-    (assert (scene:add-terrain-record record)
-            (.. "Active scene failed to add terrain " record.id))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-method scene record.id :add-terrain-record)
+          (assert (scene:add-terrain-record record)
+                  (.. "Active scene failed to add terrain " record.id)))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn scene-state-lights [world-manager world-id]
   (local world (resolve-world world-manager world-id))
   (if (not world)
       nil
       (do
-        (local scene-state (require-scene-state world (.. "WorldData[" world-id "]")))
+        (local sandbox-scene (require-scene-state world (.. "WorldData[" world-id "]")))
         (LightSystemModule.normalize-complete-state
-          (assert scene-state.lights
-                  (.. "WorldData[" world-id "] requires scene.lights"))
-          (.. "WorldData[" world-id "] scene.lights")))))
+          (assert sandbox-scene.lights
+                  (.. "WorldData[" world-id "] requires sandbox scene.lights"))
+          (.. "WorldData[" world-id "] sandbox scene.lights")))))
 
 (fn normalize-light-state [lights context]
   (LightSystemModule.normalize-complete-state lights context))
 
 (fn persist-light-state! [scene-state lights context]
+  "Normalize lights and store into scene-state.lights. Updates in place
+  to maintain canonical session references when the same table is shared."
   (local normalized (normalize-light-state lights (or context "WorldData.persist-light-state!")))
-  (set scene-state.lights normalized)
-  normalized)
+  ;; Update in place: keep the same table identity for shared references.
+  (each [k v (pairs normalized)]
+    (tset scene-state.lights k v))
+  ;; Remove keys that are no longer present.
+  (each [k _ (pairs scene-state.lights)]
+    (when (= (. normalized k) nil)
+      (tset scene-state.lights k nil)))
+  scene-state.lights)
 
 (fn sync-active-light-state [world-manager world-id lights]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (require-active-scene-light-method scene :set-light-state)
-    (scene:set-light-state lights)))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (require-active-scene-light-method scene :set-light-state)
+          (scene:set-light-state lights))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-skybox-state [world-manager world-id skybox]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (assert scene.set-skybox-state
-            "Active scene is missing set-skybox-state for world skybox sync")
-    (scene:set-skybox-state
-      (SkyboxState.resolve-for-theme skybox (active-theme-key)))))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          ;; R5-2: Update the active sandbox slot's scene-state.skybox with the
+          ;; complete policy skybox BEFORE applying the resolved renderer state.
+          ;; This ensures capture-activity-slot-state reads the complete policy,
+          ;; not a stale or resolved-only skybox.
+          (local sandbox-slot (and scene.activity-slot
+                                   (scene:activity-slot "sandbox")))
+          (when sandbox-slot
+            (when (not (= (type sandbox-slot.scene-state) :table))
+              (set sandbox-slot.scene-state {}))
+            (tset sandbox-slot.scene-state :skybox skybox))
+          (assert scene.set-skybox-state
+                  "Active scene is missing set-skybox-state for world skybox sync")
+          (scene:set-skybox-state
+            (SkyboxState.resolve-for-theme skybox (active-theme-key))))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn sync-active-background-state [world-manager world-id background]
   (local scene (resolve-scene world-manager world-id))
   (when scene
-    (assert scene.set-background-state
-            "Active scene is missing set-background-state for world background sync")
-    (scene:set-background-state background)))
+    (if (= scene.active-activity-slot-id "sandbox")
+        (do
+          (assert scene.set-background-state
+                  "Active scene is missing set-background-state for world background sync")
+          (scene:set-background-state background))
+        (refresh-sandbox-slot-if-inactive scene world-manager world-id))))
 
 (fn list-light-types [world-manager world-id]
   (local lights (scene-state-lights world-manager world-id))
@@ -287,7 +376,7 @@
 (fn list-scene-panels [world-manager world-id]
   (local scene (resolve-scene world-manager world-id))
   (local produced [])
-  (if (and scene scene.scene-children)
+  (if (and scene scene.scene-children (= scene.active-activity-slot-id "sandbox"))
       (each [idx metadata (ipairs (or scene.scene-children []))]
         (local persistence (and metadata metadata.persistence))
         (local kind (or (and persistence persistence.kind) "unknown"))
@@ -364,7 +453,7 @@
 (fn list-terrains [world-manager world-id]
   (local scene (resolve-scene world-manager world-id))
   (local produced [])
-  (if (and scene scene.scene-terrains)
+  (if (and scene scene.scene-terrains (= scene.active-activity-slot-id "sandbox"))
       (each [_ entry (ipairs (or scene.scene-terrains []))]
         (local record (and entry entry.record))
         (local terrain-id (or (and record record.id) "unknown"))
@@ -554,13 +643,39 @@
 
 (fn remove-scene-panel [world-manager world-id panel-index]
   (local scene (resolve-scene world-manager world-id))
-  (if (and scene scene.scene-children scene.remove-panel-child)
+  ;; Only use runtime scene when sandbox is the active slot.
+  (if (and scene scene.scene-children scene.remove-panel-child
+           (= scene.active-activity-slot-id "sandbox"))
       (do
         (local metadata (. scene.scene-children panel-index))
         (local element (and metadata metadata.element))
         (if element
             (do
               (scene:remove-panel-child element)
+              ;; R6-3: Remove the matching panel from canonical
+              ;; activity.sessions.sandbox.scene.panels so captures and
+              ;; saves no longer include the removed panel.
+              ;; Use the runtime panel-index for canonical removal so
+              ;; duplicate panels with identical persistence (except
+              ;; position/rotation) remove the correct entry.
+              (local world (resolve-world world-manager world-id))
+              (when world
+                (local canonical (resolve-sandbox-scene-state world
+                                   (.. "WorldData.remove-scene-panel[" world-id "]")))
+                (when (and canonical canonical.panels)
+                  (when (and (>= panel-index 1)
+                             (<= panel-index (length canonical.panels)))
+                    (table.remove canonical.panels panel-index)))
+                ;; R6-3: Update runtime.activity-session-state.sandbox.scene
+                ;; so Activities.snapshot-activity-sessions cannot
+                ;; overwrite the removal with stale pending data.
+                (local runtime (resolve-runtime world-manager world-id))
+                (when (and runtime runtime.activity-session-state)
+                  (when (not (= (type runtime.activity-session-state.sandbox) :table))
+                    (tset runtime.activity-session-state :sandbox {}))
+                  (tset runtime.activity-session-state.sandbox :scene canonical)))
+              (when (and world world.save-state)
+                (world:save-state))
               (when (and world-manager world-manager.changed world-manager.changed.emit)
                 (world-manager.changed:emit {:world-id world-id
                                              :reason "scene-panel-removed"}))
@@ -577,6 +692,10 @@
               (when (and world-manager world-manager.changed world-manager.changed.emit)
                 (world-manager.changed:emit {:world-id world-id
                                              :reason "scene-panel-removed"}))
+              ;; R5-1: Refresh sandbox slot state and invalidate any stale
+              ;; pending activity-session-state so Activities.snapshot-activity-sessions
+              ;; cannot overwrite the panel removal on save.
+              (refresh-sandbox-slot-if-inactive scene world-manager world-id)
               true)
             false))))
 
@@ -618,7 +737,7 @@
 (fn update-terrain-record [world-manager world-id terrain-id updater]
   (local world (resolve-world world-manager world-id))
   (when world
-    (local scene-state (ensure-scene-state world))
+    (local scene-state (require-scene-state world (.. "WorldData.update-terrain-record[" world-id "]")))
     (local terrains scene-state.terrains)
     (local idx (find-terrain-state-index world-manager world-id terrain-id))
     (local resolved (find-terrain world-manager world-id terrain-id))
@@ -656,7 +775,7 @@
 (fn add-terrain [world-manager world-id terrain-kind]
   (local world (resolve-world world-manager world-id))
   (when world
-    (local scene-state (ensure-scene-state world))
+    (local scene-state (require-scene-state world (.. "WorldData.add-terrain[" world-id "]")))
     (local terrains scene-state.terrains)
     (local record (TerrainRecords.default-record-for-kind terrain-kind))
     (table.insert terrains record)
@@ -668,7 +787,7 @@
 (fn remove-terrain [world-manager world-id terrain-id]
   (local world (resolve-world world-manager world-id))
   (when world
-    (local scene-state (ensure-scene-state world))
+    (local scene-state (require-scene-state world (.. "WorldData.remove-terrain[" world-id "]")))
     (local terrains scene-state.terrains)
     (local idx (find-terrain-state-index world-manager world-id terrain-id))
     (when idx

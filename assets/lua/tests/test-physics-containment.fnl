@@ -81,6 +81,11 @@
         (set scene (Scene scene-opts))
         (set app.scene scene)
         (set app.layout-root scene.layout-root)
+        ;; Activate a slot so content mutations pass the assertion;
+        ;; then clear containment config so tests start with a clean slate
+        (scene:ensure-activity-slot "sandbox")
+        (scene:activate-activity-slot "sandbox")
+        (set app.physics-containment-config nil)
         (f scene))))
   (when scene
     (scene:drop))
@@ -376,6 +381,201 @@
                      :fn visualization-uses-theme-color})
 (table.insert tests {:name "PhysicsContainment visualization refreshes on theme change"
                      :fn visualization-refreshes-on-theme-change})
+
+(fn scene-slot-deactivation-retains-slot-state []
+  ;; Regression: deactivating the active scene slot must retain the slot itself
+  ;; while removing its active physics bodies. The scene surface should be
+  ;; left with no active slot and nil entity after deactivation. The physics
+  ;; body added by this test must be removed from the Bullet world by the
+  ;; deactivation path itself (not by a manual LayoutPhysicsBodies call).
+  (with-scene
+    {:position (glm.vec3 0 0 0)
+     :rotation (glm.quat 1 0 0 0)}
+    (fn [scene]
+      (scene:build-default {:terrains [(flat-heightfield-record {:height 0.0})]})
+      (assert scene.entity "Sandbox slot entity must exist after build-default")
+      (local slot (. scene.activity-slots "sandbox"))
+      (assert (= scene.active-activity-slot-id "sandbox") "Sandbox must be active")
+      (assert slot "Sandbox slot must exist after activation")
+      (assert slot.visible? "Sandbox slot must be visible while active")
+      ;; The active slot owns/syncs its entity through the normal
+      ;; build-default flow (attach-entity syncs active-activity-slot.entity).
+      (assert slot.entity "Active slot must own entity after build-default")
+      (set scene.camera {:position (glm.vec3 0 0 50)
+                         :rotation (glm.quat 1 0 0 0)})
+      (local baseline (collision-object-count))
+      (local body-element
+        (scene:add-physics-body {:position (glm.vec3 0 0 0)
+                                 :size (glm.vec3 4 4 4)}))
+      (assert body-element "Expected add-physics-body to create a runtime body")
+      (local with-body (collision-object-count))
+      (assert (> with-body baseline)
+              (string.format
+                "Adding a physics body should increase collision objects (baseline=%d with=%d)"
+                baseline with-body))
+      ;; Deactivate the slot: this must remove the physics body created above
+      ;; from the Bullet world, while retaining the slot object and its state.
+      (scene:deactivate-activity-slot "sandbox")
+      (local after-deactivate (collision-object-count))
+      (assert (<= after-deactivate baseline)
+              (string.format
+                "Deactivation must remove active slot physics body (baseline=%d with=%d after=%d)"
+                baseline with-body after-deactivate))
+      (assert (. scene.activity-slots "sandbox")
+              "Slot must still be present in the scene after deactivation")
+      (assert (not slot.visible?)
+              "Slot must be marked invisible after deactivation")
+      (assert (= scene.active-activity-slot nil)
+              "Scene must have no active slot after deactivation")
+      (assert (= scene.entity nil)
+              "Scene entity must be nil after slot deactivation")
+      ;; Slot retains entity ownership after deactivation
+      (assert slot.entity
+              "Slot must retain entity ownership after deactivation")
+      (assert (= (type slot.scene-state) :table)
+              "Slot must retain scene-state after deactivation"))))
+(table.insert tests {:name "Scene slot deactivation retains slot state while removing active bodies"
+                     :fn scene-slot-deactivation-retains-slot-state})
+
+;; ── R7-2 visualization line batches on active slot context ──────────────
+
+(fn visualization-uses-active-slot-build-context []
+  "R7-2: Physics containment visualization must register line batches on the
+  active scene slot build context when a slot is active/visible, falling back
+  to scene.build-context only when no active slot exists."
+  (local original-themes app.themes)
+  (local original-scene app.physics-containment-scene)
+  (local original-config app.physics-containment-config)
+  (local (ok err)
+    (pcall
+      (fn []
+        (PhysicsContainment.clear)
+        (var slot-ctx-used false)
+        (var fallback-ctx-used false)
+        (local slot-build-context
+          {:lines {:create-line-batch
+                   (fn [_self params]
+                     (set slot-ctx-used true)
+                     {:drop (fn [_batch])})}})
+        (local scene-build-context
+          {:lines {:create-line-batch
+                   (fn [_self params]
+                     (set fallback-ctx-used true)
+                     {:drop (fn [_batch])})}})
+        ;; Mock scene with both scene.build-context and a resolve-active-build-context
+        ;; that returns the active slot's build context.
+        (local mock-scene
+          {:update (fn [_self])
+           :build-context scene-build-context
+           :resolve-active-build-context
+           (fn [_self]
+             slot-build-context)})
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene mock-scene})
+          "Expected containment install to succeed with active slot context")
+        ;; R7-2: The line batch must have been created on the slot's build context,
+        ;; NOT the fallback scene.build-context.
+        (assert slot-ctx-used
+                "Line batch must be created on active slot's build context")
+        (assert (not fallback-ctx-used)
+                "Line batch must NOT be created on fallback scene.build-context when slot is active"))))
+  (PhysicsContainment.clear)
+  (set app.themes original-themes)
+  (set app.physics-containment-scene original-scene)
+  (set app.physics-containment-config original-config)
+  (when (not ok)
+    (error err)))
+
+(table.insert tests {:name "R7-2 containment visualization registers line batches on active slot context"
+                      :fn visualization-uses-active-slot-build-context})
+
+;; ── R7-2b visualization refreshes on slot build-context change ───────────
+
+(fn visualization-refreshes-on-slot-context-change []
+  "R7-2: When ensure-installed is called after the active scene slot
+  build context changes (different slot activated), the visualization
+  must be recreated on the new slot's build context even when config,
+  bounds, and mode are otherwise identical."
+  (local original-themes app.themes)
+  (local original-scene app.physics-containment-scene)
+  (local original-config app.physics-containment-config)
+  (local (ok err)
+    (pcall
+      (fn []
+        (PhysicsContainment.clear)
+        ;; Two distinct build contexts with tracked create-line-batch calls
+        (var sandbox-create-count 0)
+        (var graph-create-count 0)
+        (local sandbox-build-context
+          {:lines {:create-line-batch
+                   (fn [_self _params]
+                     (set sandbox-create-count (+ sandbox-create-count 1))
+                     {:drop (fn [_batch])})}})
+        (local graph-build-context
+          {:lines {:create-line-batch
+                   (fn [_self _params]
+                     (set graph-create-count (+ graph-create-count 1))
+                     {:drop (fn [_batch])})}})
+        ;; Current active build context (mutable to simulate slot switching)
+        (var active-build-ctx sandbox-build-context)
+        ;; Mock scene: resolve-active-build-context returns current active context
+        (local mock-scene
+          {:update (fn [_self])
+           :build-context sandbox-build-context
+           :resolve-active-build-context
+           (fn [_self]
+             active-build-ctx)})
+
+        ;; (1) Install containment for the first time (sandbox slot active)
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene mock-scene})
+          "First ensure-installed should succeed")
+        ;; Sandbox line batch should have been created once
+        (assert (= sandbox-create-count 1)
+                (.. "Expected 1 line batch on sandbox context, got " (tostring sandbox-create-count)))
+        ;; Graph line batch should NOT have been created yet
+        (assert (= graph-create-count 0)
+                (.. "Expected 0 line batches on graph context before switch, got " (tostring graph-create-count)))
+
+        ;; (2) Simulate switching active slot to graph
+        (set active-build-ctx graph-build-context)
+
+        ;; (3) Call ensure-installed with the SAME config and scene
+        ;;     The config/bounds/mode are unchanged, but the build context
+        ;;     has changed.  R7-2 fix must force visualization recreation.
+        (assert
+          (PhysicsContainment.ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -20 -30]
+                               :max [10 20 30]}}
+             :scene mock-scene})
+          "Second ensure-installed should succeed after slot switch")
+        ;; The sandbox line batch count should NOT have increased
+        ;; (old batch was dropped, new batch created on graph context)
+        (assert (= sandbox-create-count 1)
+                (.. "Expected sandbox line batch count to remain 1 after switch, got "
+                    (tostring sandbox-create-count)))
+        ;; Graph line batch should now have been created
+        (assert (= graph-create-count 1)
+                (.. "Expected 1 line batch on graph context after switch, got "
+                    (tostring graph-create-count))))))
+  (PhysicsContainment.clear)
+  (set app.themes original-themes)
+  (set app.physics-containment-scene original-scene)
+  (set app.physics-containment-config original-config)
+  (when (not ok)
+    (error err)))
+
+(table.insert tests {:name "R7-2b visualization refreshes on slot build-context change"
+                     :fn visualization-refreshes-on-slot-context-change})
 
 (local main
   (fn []

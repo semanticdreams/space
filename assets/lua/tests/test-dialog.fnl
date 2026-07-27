@@ -285,6 +285,8 @@
             (set app.layout-root scene.layout-root)
             (set app.hud hud)
 
+            (scene:ensure-activity-slot "sandbox")
+            (scene:activate-activity-slot "sandbox")
             (scene:build-default)
 
             (hud:build (make-test-hud-builder))
@@ -601,6 +603,8 @@
                 (set app.hud hud)
                 (set app.movables movables)
 
+                (scene:ensure-activity-slot "sandbox")
+                (scene:activate-activity-slot "sandbox")
                 (scene:build-default)
 
                 (hud:build (make-test-hud-builder))
@@ -680,6 +684,8 @@
                 (set app.hud hud)
                 (set app.movables movables)
 
+                (scene:ensure-activity-slot "sandbox")
+                (scene:activate-activity-slot "sandbox")
                 (scene:build-default)
                 (hud:build (make-test-hud-builder))
 
@@ -763,6 +769,8 @@
         (set app.layout-root scene.layout-root)
         (set app.hud hud)
 
+        (scene:ensure-activity-slot "sandbox")
+        (scene:activate-activity-slot "sandbox")
         (scene:build-default)
         (hud:build (make-test-hud-builder))
 
@@ -814,6 +822,8 @@
   (set app.layout-root scene.layout-root)
   (set app.hud hud)
 
+  (scene:ensure-activity-slot "sandbox")
+  (scene:activate-activity-slot "sandbox")
   (scene:build-default)
   (hud:build (make-test-hud-builder))
   (hud:update-projection app.viewport)
@@ -913,6 +923,8 @@
                        :camera camera}))
   (set app.scene scene)
   (set app.layout-root scene.layout-root)
+  (scene:ensure-activity-slot "sandbox")
+  (scene:activate-activity-slot "sandbox")
   (scene:build-default)
 
   (local half-width 20)

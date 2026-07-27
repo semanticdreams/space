@@ -40,6 +40,18 @@
                                           :lights (LightSystemModule.default-state)
                                           :skybox (make-skybox-state)}
                                   :hud {:panels []}}))
+  ;; Populate canonical activity session state.
+  (when (not (= (type state.activity) :table))
+    (local sandbox-scene
+           {:panels state.scene.panels
+            :terrains state.scene.terrains
+            :lights state.scene.lights
+            :skybox state.scene.skybox
+            :background {:color [0 0 0]}
+            :containment {:enabled? false}})
+    (set state.activity
+         {:active_id "sandbox"
+          :sessions {:sandbox {:scene sandbox-scene}}}))
   {:id (or options.id "test-world")
    :name (or options.name "Test World")
    :active? (or options.active? false)
@@ -57,7 +69,8 @@
        (SkyboxState.resolve-for-theme
          (or options.skybox (make-skybox-state))
          (or options.theme-key nil)))
-  {:scene {:capture-state (fn [_self]
+  {:scene {:active-activity-slot-id "sandbox"
+           :capture-state (fn [_self]
                             {:panels []
                              :terrains []
                              :lights lights
@@ -164,29 +177,37 @@
   (var saved-skybox nil)
   (var synced-skybox nil)
   (local runtime (make-scene-runtime {:lights state.scene.lights
-                                      :skybox state.scene.skybox
-                                      :theme-key :dark
-                                      :on-set-skybox-state (fn [value]
-                                                             (set synced-skybox value))}))
+                                       :skybox state.scene.skybox
+                                       :theme-key :dark
+                                       :on-set-skybox-state (fn [value]
+                                                              (set synced-skybox value))}))
   (local entry (make-world-entry {:id "test-world"
-                                  :state state
-                                  :runtime runtime
-                                  :active? true
-                                  :on-save (fn [saved-state]
-                                             (set saved-skybox
-                                                  (and saved-state
-                                                       saved-state.scene
-                                                       saved-state.scene.skybox)))}))
+                                   :state state
+                                   :runtime runtime
+                                   :active? true
+                                   :on-save (fn [saved-state]
+                                              (set saved-skybox
+                                                   (and saved-state
+                                                        saved-state.activity
+                                                        saved-state.activity.sessions
+                                                        saved-state.activity.sessions.sandbox
+                                                        saved-state.activity.sessions.sandbox.scene
+                                                        saved-state.activity.sessions.sandbox.scene.skybox)))}))
   (local manager (make-world-manager {:id "test-world"
-                                      :entry entry
-                                      :active-world-id "test-world"}))
+                                       :entry entry
+                                       :active-world-id "test-world"}))
   (local {:SkyboxNode SkyboxNode} (require :graph/nodes/skybox))
   (local node (SkyboxNode {:world-id "test-world"
-                           :world-manager manager
-                           :asset-path-resolver asset-path-resolver}))
+                            :world-manager manager
+                            :asset-path-resolver asset-path-resolver}))
   (local builder (SkyboxNodeView node))
   (local view (builder ctx))
   {:state state
+   :sandbox-scene (fn [self]
+                    (and self.state.activity
+                         self.state.activity.sessions
+                         self.state.activity.sessions.sandbox
+                         self.state.activity.sessions.sandbox.scene))
    :node node
    :view view
    :synced-skybox (fn [_self] synced-skybox)
@@ -294,19 +315,20 @@
       (harness.view.theme-overrides.dark.brightness:set-text "0.4")
       (harness.view.theme-overrides.dark.tint-color:set-text "1.0, 0.8, 0.8")
       (harness.view.apply-button:on-click {})
-      (assert (= harness.state.scene.skybox.enabled? false) "Skybox apply should persist enabled flag")
-      (assert (= harness.state.scene.skybox.default.name next-name)
+      (local sandbox-scene (harness:sandbox-scene))
+      (assert (= sandbox-scene.skybox.enabled? false) "Skybox apply should persist enabled flag")
+      (assert (= sandbox-scene.skybox.default.name next-name)
               "Skybox apply should persist default name")
-      (assert (= harness.state.scene.skybox.default.brightness 0.25)
+      (assert (= sandbox-scene.skybox.default.brightness 0.25)
               "Skybox apply should persist default brightness")
-      (assert (= (. harness.state.scene.skybox.default.tint-color 2) 0.9)
+      (assert (= (. sandbox-scene.skybox.default.tint-color 2) 0.9)
               "Skybox apply should persist default tint color")
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      harness.state.scene.skybox.by-theme.dark.name)
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      sandbox-scene.skybox.by-theme.dark.name)
                  "lake")
               "Skybox apply should persist dark-theme override")
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      (. harness.state.scene.skybox.by-theme.dark.tint-color 2))
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      (. sandbox-scene.skybox.by-theme.dark.tint-color 2))
                  0.8)
               "Skybox apply should persist dark-theme tint override")
       (local synced-skybox (harness:synced-skybox))
@@ -336,8 +358,9 @@
       (harness.view.theme-overrides.dark.name:set-value "lake")
       (harness.view.theme-overrides.dark.brightness:set-text "")
       (harness.view.apply-button:on-click {})
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      harness.state.scene.skybox.by-theme.dark.brightness)
+      (local sandbox-scene (harness:sandbox-scene))
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      sandbox-scene.skybox.by-theme.dark.brightness)
                  0.35)
               "Theme override should inherit default brightness when left blank")
       (local synced-skybox (harness:synced-skybox))
@@ -357,8 +380,9 @@
       (harness.view.theme-overrides.dark.name:set-value "lake")
       (harness.view.theme-overrides.dark.tint-color:set-text "")
       (harness.view.apply-button:on-click {})
-      (assert (= (and harness.state.scene.skybox.by-theme.dark
-                      (. harness.state.scene.skybox.by-theme.dark.tint-color 3))
+      (local sandbox-scene (harness:sandbox-scene))
+      (assert (= (and sandbox-scene.skybox.by-theme.dark
+                      (. sandbox-scene.skybox.by-theme.dark.tint-color 3))
                  0.9)
               "Theme override should inherit default tint when left blank")
       (local synced-skybox (harness:synced-skybox))
@@ -387,6 +411,87 @@
                      :fn skybox-node-view-theme-override-inherits-default-brightness})
 (table.insert tests {:name "skybox node view theme override inherits default tint"
                      :fn skybox-node-view-theme-override-inherits-default-tint})
+
+;; ── R2-2 ──────────────────────────────────────────────────────────────
+
+(fn world-data-update-skybox-preserves-by-theme-override []
+  "R2-2: WorldData.update-skybox must accept and preserve a complete
+  skybox state with :default and :by-theme policy fields.  The canonical
+  session state must store the complete policy, NOT a flattened/resolved
+  format."
+  (local WorldData (require :graph/world-data))
+  (local SkyboxState (require :skybox-state))
+  (local skybox-with-override
+    (SkyboxState.normalize-complete-state
+      {:enabled? true
+       :default {:name "lake"
+                 :brightness 0.2
+                 :tint-color [1.0 1.0 1.0]}
+       :by-theme {:dark {:name "desert"
+                          :brightness 0.5
+                          :tint-color [0.9 0.8 0.7]}}}
+      "R2-2 test skybox"))
+  ;; Build a world state with sandbox session scene.
+  ;; The initial skybox is a simple complete state.
+  (local initial-skybox
+    (SkyboxState.normalize-complete-state
+      {:enabled? true
+       :default {:name "lake"
+                 :brightness 0.1
+                 :tint-color [1.0 1.0 1.0]}
+       :by-theme {}}
+      "R2-2 initial skybox"))
+  (local state
+    {:scene {:panels [] :terrains []}
+     :hud {:panels []}
+     :activity {:active_id "sandbox"
+                :sessions {:sandbox
+                           {:scene {:panels []
+                                    :terrains []
+                                    :lights (LightSystemModule.default-state)
+                                    :skybox initial-skybox
+                                    :background {:color [0 0 0]}
+                                    :containment {:enabled? false}}}}}})
+  (local entry {:id "test-world"
+                :name "Test World"
+                :active? false
+                :world {:state state
+                        :get-runtime (fn [_self] nil)
+                        :save-state (fn [_self] true)}})
+  (local manager (make-world-manager {:id "test-world" :entry entry}))
+  ;; Call update-skybox with the complete state containing a by-theme override.
+  (local result
+    (WorldData.update-skybox manager "test-world" skybox-with-override))
+  (assert result "update-skybox should return normalized skybox state")
+  ;; Verify the canonical session state now contains the complete policy.
+  (local sandbox-scene
+    (and state.activity
+         state.activity.sessions
+         state.activity.sessions.sandbox
+         state.activity.sessions.sandbox.scene))
+  (assert sandbox-scene "sandbox scene must exist after update-skybox")
+  (assert (= sandbox-scene.skybox.enabled? true)
+          "enabled? must survive update-skybox")
+  (assert (= (type sandbox-scene.skybox.default) :table)
+          "skybox.default must exist (not flattened)")
+  (assert (= sandbox-scene.skybox.default.brightness 0.2)
+          "skybox.default.brightness must survive update-skybox")
+  (assert (= (type sandbox-scene.skybox.by-theme) :table)
+          "skybox.by-theme must exist (not flattened)")
+  (assert sandbox-scene.skybox.by-theme.dark
+          "dark theme override must survive update-skybox")
+  (assert (= sandbox-scene.skybox.by-theme.dark.name "desert")
+          "dark theme override name must survive")
+  (assert (= sandbox-scene.skybox.by-theme.dark.brightness 0.5)
+          "dark theme override brightness must survive")
+  ;; Also verify the returned result has the complete policy.
+  (assert (= result.default.brightness 0.2)
+          "returned result must have default brightness")
+  (assert (= (. result.by-theme.dark.tint-color 2) 0.8)
+          "returned result must have dark theme tint"))
+
+(table.insert tests {:name "WorldData.update-skybox preserves by-theme override"
+                     :fn world-data-update-skybox-preserves-by-theme-override})
 
 (local main
   (fn []

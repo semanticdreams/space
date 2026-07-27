@@ -8,6 +8,10 @@
 (local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
 (local Activities (require :activities))
+(local Scene (require :scene))
+(local Camera (require :camera))
+(local glm (require :glm))
+(local AppProjection (require :app-projection))
 
 (fn with-settings [value f]
   (local previous app.settings)
@@ -405,7 +409,10 @@
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   true)
 
-(fn apply-theme-preserves-active-world-terrains []
+(fn apply-theme-applies-canonical-sandbox-skybox []
+  ;; R1-1: apply-theme must resolve skybox from canonical Sandbox scene state
+  ;; (world.state.activity.sessions.sandbox.scene.skybox) and must NOT attempt
+  ;; a legacy rebuild from world.state.scene.terrains.
   (local original-settings app.settings)
   (local original-themes app.themes)
   (local original-scene app.scene)
@@ -416,43 +423,65 @@
   (local original-graph app.graph)
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
   (local original-active-world-entry app.active-world-entry)
-  (var scene-payload nil)
-  (local terrain-record {:id "terrain-a"
-                         :kind "heightfield-terrain"
-                         :options {:position [1 2 3]
-                                   :rotation [1 0 0 0]
-                                   :chunk-samples [17 17]
-                                   :chunk-size [16 16]
-                                   :default-height 0.0}
-                         :chunks [{:coord [0 0]
-                                   :size [17 17]
-                                   :heights [0]}]})
+  (local original-registry app.activity-registry)
+  (local original-active-activity-id app.active-activity-id)
+  (local original-modes-changed app.activities-changed)
+  (var build-default-called? false)
+  (var skybox-applied nil)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.canvas nil)
-  (set app.scene {:build-default (fn [_self payload]
-                                   (set scene-payload payload)
-                                   true)})
+  ;; Mock scene: build-default should NOT be called by theme-actions anymore
+  (set app.scene {:build-default (fn [_self _payload]
+                                  (set build-default-called? true)
+                                  true)
+                  :build-context {}
+                  ;; set-skybox-state is called by reapply-active-world-skybox
+                  :set-skybox-state (fn [_self state]
+                                     (set skybox-applied state)
+                                     true)})
   (set app.hud {:build-default (fn [_self] true)})
   (set app.apply-active-world-hud-contrib nil)
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.settings {:set-value (fn [_key _value _opts] true)
-                     :save (fn [] true)})
+                      :save (fn [] true)})
   (set app.themes {:set-theme (fn [_name] true)
-                   :get-active-theme (fn [] {:name :light})})
-  (set app.active-world-entry {:world {:state {:scene {:terrains [terrain-record]}}}})
-  (local (ok err)
-    (pcall
-      (fn []
-        (ThemeActions.apply-theme :light)
-        (assert scene-payload "apply-theme should pass a scene payload to build-default when an active world exists")
-        (assert (= (length (or scene-payload.terrains [])) 1)
-                "apply-theme should preserve the active world terrain list during scene rebuild")
-        (assert (= (and (. scene-payload.terrains 1) (. (. scene-payload.terrains 1) :id))
-                   "terrain-a")
-                "apply-theme should rebuild the scene with the persisted terrain id")
-        (assert (not (= (. scene-payload.terrains 1) terrain-record))
-                "apply-theme should clone persisted terrain records before handing them to the scene rebuild"))))
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Set up canonical Sandbox scene state with custom skybox
+  (local sandbox-skybox {:enabled? true
+                         :name "ocean"
+                         :brightness 0.75
+                         :tint-color [0.8 0.9 1.0]})
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}  ;; legacy scene is empty
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox sandbox-skybox
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
+  ;; R4-2: Skybox reapply is gated on sandbox being the active activity.
+  ;; Activate sandbox so the canonical skybox is applied.
+  (Activities.register-activity
+    {:id "sandbox"
+     :label "Sandbox"
+     :activate (fn [_ctx] {:activity-id "sandbox"})
+     :deactivate (fn [_ctx _session] true)})
+  (Activities.activate-activity "sandbox")
+  (ThemeActions.apply-theme :light)
+  ;; R1-1: verify canonical skybox was applied
+  (assert skybox-applied "apply-theme should apply skybox from canonical sandbox state")
+  (assert skybox-applied.enabled? "canonical skybox should be enabled")
+  (assert (= skybox-applied.name "ocean")
+          "canonical skybox should use the name from sandbox session scene")
+  ;; R1-1: verify legacy scene rebuild was NOT triggered
+  (assert (not build-default-called?)
+          "apply-theme must NOT call build-default (no legacy terrain rebuild)")
   (set app.settings original-settings)
   (set app.themes original-themes)
   (set app.scene original-scene)
@@ -463,11 +492,15 @@
   (set app.graph original-graph)
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
-  (when (not ok)
-    (error err))
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
   true)
 
-(fn apply-theme-requires-active-world-terrain-state []
+(fn apply-theme-succeeds-without-legacy-terrain-state []
+  ;; R1-1: apply-theme must NOT fail when legacy world.state.scene.terrains
+  ;; is absent. ThemeActions reads skybox from canonical Sandbox state and
+  ;; does not assert on legacy terrain state.
   (local original-settings app.settings)
   (local original-themes app.themes)
   (local original-scene app.scene)
@@ -481,15 +514,27 @@
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.canvas nil)
-  (set app.scene {:build-default (fn [_self _payload] true)})
+  (set app.scene {:build-context {}
+                  :set-skybox-state (fn [_self _state] true)})
   (set app.hud {:build-default (fn [_self] true)})
   (set app.apply-active-world-hud-contrib nil)
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
   (set app.settings {:set-value (fn [_key _value _opts] true)
-                     :save (fn [] true)})
+                      :save (fn [] true)})
   (set app.themes {:set-theme (fn [_name] true)
-                   :get-active-theme (fn [] {:name :light})})
-  (set app.active-world-entry {:world {:state {:scene {}}}})
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Legacy scene has no terrains key; canonical sandbox scene has skybox
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}  ;; empty legacy scene (no terrains)
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox {:enabled? true :name "lake" :brightness 0.1 :tint-color [1 1 1]}
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
   (local (ok err)
     (pcall
       (fn []
@@ -504,10 +549,7 @@
   (set app.graph original-graph)
   (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
   (set app.active-world-entry original-active-world-entry)
-  (assert (not ok)
-          "apply-theme should fail loudly when active world terrain state is missing")
-  (assert (and err (string.find err "ThemeActions.apply-theme requires active world scene terrains" 1 true))
-          "apply-theme should report that active world scene terrains are required")
+  (assert ok (.. "apply-theme should succeed without legacy terrain state, got: " (tostring err)))
   true)
 
 (fn apply-theme-rebuilds-active-board-mode-through-mode-lifecycle []
@@ -611,10 +653,10 @@
                       :fn apply-theme-updates-scene-and-hud-build-contexts-without-canvas})
 (table.insert tests {:name "Apply theme refreshes physics containment visualization"
                      :fn apply-theme-refreshes-physics-containment-visualization})
-(table.insert tests {:name "Apply theme preserves active world terrains"
-                     :fn apply-theme-preserves-active-world-terrains})
-(table.insert tests {:name "Apply theme requires active world terrain state"
-                     :fn apply-theme-requires-active-world-terrain-state})
+(table.insert tests {:name "Apply theme applies canonical sandbox skybox"
+                      :fn apply-theme-applies-canonical-sandbox-skybox})
+(table.insert tests {:name "Apply theme succeeds without legacy terrain state"
+                      :fn apply-theme-succeeds-without-legacy-terrain-state})
 (table.insert tests {:name "Apply theme rebuilds active board mode through mode lifecycle"
                      :fn apply-theme-rebuilds-active-board-mode-through-mode-lifecycle})
 
@@ -690,6 +732,102 @@
   (assert (not (string.find (tostring err) "theme rebuild" 1 true))
           "apply-theme should not report a theme rebuild failure when theme succeeded")
   true)
+
+;; ── R3-3 skybox by-theme on theme switch ──────────────────────────────
+
+(fn apply-theme-resolves-skybox-by-theme []
+  "R3-3: apply-theme must resolve skybox with by-theme override for the
+  target theme, so theme switch activates the correct per-theme skybox entry."
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-registry app.activity-registry)
+  (local original-active-activity-id app.active-activity-id)
+  (local original-modes-changed app.activities-changed)
+  (var skybox-applied nil)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  ;; Mock scene: set-skybox-state captures the skybox passed to the renderer.
+  (set app.scene {:build-context {}
+                  :set-skybox-state (fn [_self state]
+                                     (set skybox-applied state)
+                                     true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Set up canonical Sandbox scene state with a by-theme skybox override.
+  ;; The dark theme should use "night" skybox; light (which there's no override
+  ;; for) should fall back to the default "lake".
+  (local sandbox-skybox
+    {:enabled? true
+     :default {:name "lake"
+               :brightness 0.1
+               :tint-color [1.0 1.0 1.0]}
+     :by-theme {:dark {:name "night"
+                       :brightness 0.3
+                       :tint-color [0.8 0.8 1.0]}}})
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox sandbox-skybox
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
+   ;; Apply light theme — no by-theme override for light, should fall back to default.
+   ;; R4-2: Activate sandbox so the canonical skybox is applied.
+   (Activities.register-activity
+     {:id "sandbox"
+      :label "Sandbox"
+      :activate (fn [_ctx] {:activity-id "sandbox"})
+      :deactivate (fn [_ctx _session] true)})
+   (Activities.activate-activity "sandbox")
+   (ThemeActions.apply-theme :light)
+   (assert skybox-applied "apply-theme should apply skybox from canonical sandbox state")
+  (assert skybox-applied.enabled? "skybox should be enabled")
+  (assert (= skybox-applied.name "lake")
+          (.. "Expected default lake skybox for light theme, got " (tostring skybox-applied.name)))
+  ;; Now apply dark theme — the dark by-theme override should take effect.
+  (ThemeActions.apply-theme :dark)
+  (assert skybox-applied "apply-theme should re-apply skybox on theme switch")
+  (assert (= skybox-applied.name "night")
+          (.. "Expected dark-theme night skybox, got " (tostring skybox-applied.name)))
+  (assert (= skybox-applied.brightness 0.3)
+          "dark theme skybox should have brightness 0.3")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
+  true)
+
+(table.insert tests {:name "Apply theme resolves skybox by-theme"
+                     :fn apply-theme-resolves-skybox-by-theme})
 
 (table.insert tests {:name "Apply theme fails when reactivation fails despite successful theme"
                      :fn apply-theme-fails-when-reactivation-fails-despite-successful-theme})
@@ -769,6 +907,266 @@
 
 (table.insert tests {:name "Apply theme surfaces reactivation failure alongside original error"
                      :fn apply-theme-surfaces-reactivation-failure})
+
+;; ── R4-2 Drawing-active theme switch does not apply sandbox skybox ──────
+
+(fn apply-theme-with-drawing-active-does-not-apply-sandbox-skybox []
+  "R4-2: When Drawing (non-Sandbox) activity is active, theme switch
+  must NOT apply Sandbox skybox to the renderer.  Skybox should stay
+  disabled/empty."
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-registry app.activity-registry)
+  (local original-active-activity-id app.active-activity-id)
+  (local original-modes-changed app.activities-changed)
+  (var set-skybox-calls 0)
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas {:build-context {:theme {:name :dark}
+                                    :set-theme (fn [self theme]
+                                                 (set self.theme theme))}})
+  (set app.scene {:build-context {}
+                  :build-default (fn [_self _payload] true)
+                  :set-skybox-state (fn [_self _state]
+                                     (set set-skybox-calls (+ set-skybox-calls 1))
+                                     true)})
+  (set app.hud {:build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                    :get-active-theme (fn [] {:name :light})})
+  ;; Register drawing activity and activate it
+  (local runtime {})
+  (Activities.register-activity
+    {:id "drawing"
+     :label "Drawing"
+     :activate (fn [_ctx]
+                 (set app.active-activity-id "drawing")
+                 {:activity-id "drawing"})
+     :deactivate (fn [_ctx _session] true)})
+  (Activities.activate-activity "drawing")
+  ;; Set up canonical Sandbox skybox (which should be IGNORED since drawing is active)
+  (local sandbox-skybox {:enabled? true
+                         :name "ocean"
+                         :brightness 0.75
+                         :tint-color [0.8 0.9 1.0]})
+  (set app.active-world-entry
+       {:world {:runtime {:scene app.scene}
+                :state {:scene {}
+                        :activity {:active_id "sandbox"
+                                   :sessions {:sandbox
+                                              {:scene {:panels []
+                                                       :terrains []
+                                                       :lights {:ambient {} :directional [] :point [] :spot []}
+                                                       :skybox sandbox-skybox
+                                                       :background {:color [0 0 0]}
+                                                       :containment {:enabled? false}}}}}}}})
+  ;; Apply theme while drawing is active
+  (ThemeActions.apply-theme :light)
+  ;; R4-2: Skybox must NOT have been applied — drawing is active, not sandbox
+  (assert (= set-skybox-calls 0)
+          (.. "theme switch while drawing is active must NOT apply Sandbox skybox, but set-skybox-state was called " (tostring set-skybox-calls) " times"))
+  (Activities.unregister-activity "drawing")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.activity-registry original-registry)
+  (set app.activities-changed original-modes-changed)
+  (set app.active-activity-id original-active-activity-id)
+  true)
+
+(table.insert tests {:name "R4-2 drawing-active theme switch does not apply sandbox skybox"
+                     :fn apply-theme-with-drawing-active-does-not-apply-sandbox-skybox})
+
+;; ── R4-4 theme switching updates retained slot contexts ─────────────────
+
+(fn apply-theme-updates-scene-slot-contexts []
+  "R4-4: Theme switching must update retained Scene slot contexts,
+  not only the surface scene.build-context."
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-graph-view app.graph-view)
+  (local original-canvas app.canvas)
+  (local original-graph app.graph)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (var surface-theme nil)
+  (var slot-theme nil)
+  (set app.graph nil)
+  (set app.graph-view nil)
+  (set app.canvas nil)
+  ;; Scene with a build-context and a retained slot
+  (local slot-ctx {:theme {:name :dark}
+                   :set-theme (fn [self theme]
+                                (set self.theme theme)
+                                (set slot-theme theme))})
+  (local surface-ctx {:theme {:name :dark}
+                      :set-theme (fn [self theme]
+                                   (set self.theme theme)
+                                   (set surface-theme theme))})
+  (set app.scene {:build-context surface-ctx
+                  :build-default (fn [_self _payload] true)
+                  :apply-active-theme-to-contexts (fn [self]
+                                                    ;; Simulate what the real Scene does:
+                                                    ;; update surface build-context + all slot contexts
+                                                    (surface-ctx:set-theme
+                                                      (app.themes.get-active-theme))
+                                                    (slot-ctx:set-theme
+                                                      (app.themes.get-active-theme))
+                                                    true)})
+  (set app.hud {:build-context {:set-theme (fn [self theme] (set self.theme theme))}
+                :build-default (fn [_self] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.themes {:set-theme (fn [_name] true)
+                   :get-active-theme (fn [] {:name :light})})
+  (ThemeActions.apply-theme :light)
+  ;; R4-4: Both surface context and slot context must have the new theme
+  (assert surface-theme "apply-theme should update scene surface build-context theme")
+  (assert (= (and surface-theme surface-theme.name) :light)
+          "apply-theme should set scene surface build-context theme to light")
+  (assert slot-theme "apply-theme should update scene retained slot build-context theme")
+  (assert (= (and slot-theme slot-theme.name) :light)
+          "apply-theme should set scene slot build-context theme to light")
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.graph-view original-graph-view)
+  (set app.canvas original-canvas)
+  (set app.graph original-graph)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  true)
+
+(table.insert tests {:name "R4-4 apply theme updates scene slot contexts"
+                     :fn apply-theme-updates-scene-slot-contexts})
+
+;; ── R4-4 extended: Real Scene with retained activity slots ──────────────
+
+(fn apply-theme-updates-real-scene-slot-contexts []
+  "R4-4: Theme switching must update retained Scene slot contexts
+  via a real Scene (not a mock).  Uses scene:ensure-activity-slot
+  to create real slot build contexts, then asserts both surface
+  and slot contexts receive the new theme after apply-theme."
+  (local original-settings app.settings)
+  (local original-themes app.themes)
+  (local original-scene app.scene)
+  (local original-hud app.hud)
+  (local original-renderers app.renderers)
+  (local original-active-world-entry app.active-world-entry)
+  (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
+  (local original-create-default-projection app.create-default-projection)
+  (local original-clickables app.clickables)
+  (local original-hoverables app.hoverables)
+  (local original-touch-gesture-targets app.touch-gesture-targets)
+  (local original-system-cursors app.system-cursors)
+  (local original-icons app.icons)
+  (local original-states app.states)
+  (local original-object-selector app.object-selector)
+  (local original-movables app.movables)
+  (local original-physics-containment-config app.physics-containment-config)
+  (local original-physics-containment-scene app.physics-containment-scene)
+
+  ;; Set up themes
+  (local themes (Themes))
+  (themes.add-theme :dark (require :dark-theme))
+  (themes.add-theme :light (require :light-theme))
+  (themes.set-theme :dark)
+
+  ;; Set up app with themes and minimal mocks
+  (when (not app.create-default-projection)
+    (set app.create-default-projection AppProjection.create-default-projection))
+  (local camera (Camera {:position (glm.vec3 0 0 100)}))
+  (set app.themes themes)
+  (set app.hud {:build-context {:set-theme (fn [self theme] (set self.theme theme))}
+                 :build-default (fn [_self] true)})
+  (set app.renderers {:apply-theme (fn [_self _theme] true)})
+  (set app.settings {:set-value (fn [_key _value _opts] true)
+                      :save (fn [] true)})
+  (set app.apply-active-world-hud-contrib nil)
+  (set app.active-world-entry nil)
+  ;; Clear physics containment to prevent refresh-visualization side effects
+  (set app.physics-containment-config nil)
+  (set app.physics-containment-scene nil)
+
+  ;; Create real Scene (reads app.themes during construction for initial theme)
+  (local scene (Scene {:camera camera}))
+  (set app.scene scene)
+
+  ;; Create retained activity slots — each gets its own build-context with theme
+  (scene:ensure-activity-slot "sandbox")
+  (scene:ensure-activity-slot "graph")
+  (local sandbox-slot (scene:activity-slot "sandbox"))
+  (local graph-slot (scene:activity-slot "graph"))
+
+  ;; Verify initial themes: all should be dark (set above)
+  (assert (= (and scene.build-context.theme scene.build-context.theme.name) :dark)
+          "Surface build-context should start with dark theme")
+  (assert (= (and sandbox-slot.build-context.theme sandbox-slot.build-context.theme.name) :dark)
+          "Sandbox slot build-context should start with dark theme")
+  (assert (= (and graph-slot.build-context.theme graph-slot.build-context.theme.name) :dark)
+          "Graph slot build-context should start with dark theme")
+
+  ;; Apply light theme — Scene.apply-active-theme-to-contexts must update all
+  (ThemeActions.apply-theme :light)
+
+  ;; Assert all contexts received the new theme
+  (assert (= (and scene.build-context.theme scene.build-context.theme.name) :light)
+          "Surface build-context theme should update to light after apply-theme")
+  (assert (= (and sandbox-slot.build-context.theme sandbox-slot.build-context.theme.name) :light)
+          "Sandbox slot build-context theme should update to light after apply-theme")
+  (assert (= (and graph-slot.build-context.theme graph-slot.build-context.theme.name) :light)
+          "Graph slot build-context theme should update to light after apply-theme")
+
+  ;; Cleanup
+  (scene:drop)
+  (camera:drop)
+  (set app.settings original-settings)
+  (set app.themes original-themes)
+  (set app.scene original-scene)
+  (set app.hud original-hud)
+  (set app.renderers original-renderers)
+  (set app.active-world-entry original-active-world-entry)
+  (set app.apply-active-world-hud-contrib original-apply-active-world-hud-contrib)
+  (set app.create-default-projection original-create-default-projection)
+  (set app.clickables original-clickables)
+  (set app.hoverables original-hoverables)
+  (set app.touch-gesture-targets original-touch-gesture-targets)
+  (set app.system-cursors original-system-cursors)
+  (set app.icons original-icons)
+  (set app.states original-states)
+  (set app.object-selector original-object-selector)
+  (set app.movables original-movables)
+  (set app.physics-containment-config original-physics-containment-config)
+  (set app.physics-containment-scene original-physics-containment-scene)
+  true)
+
+(table.insert tests {:name "R4-4b apply theme updates real Scene slot contexts"
+                     :fn apply-theme-updates-real-scene-slot-contexts})
 
 (local main
   (fn []
