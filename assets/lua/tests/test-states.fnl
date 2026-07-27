@@ -499,14 +499,14 @@
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
   (set app.first-person-controls controls)
   (set app.presentation-input-controls (fn [] controls))
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state.on-enter)
-  (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
-  (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
-  (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 3)
-  (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
   (local (ok err) (pcall (fn []
+    (local state (NormalState))
+    (own-test-state! :normal state)
+    (state.on-enter)
+    (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
+    (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
+    (app.engine.input:on-touch-up 1 11 0.2 0.3 0 0 0.5 3)
+    (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
     (assert (= controls.record.mouse_button_down 1))
     (assert controls.record.mouse_motion)
     (assert (= controls.record.mouse_button_up 1))
@@ -517,8 +517,8 @@
     (assert (= (rawget clickables.record.last-down "touch-id") 1)
             "synthetic button-down payload should preserve the touch device id")
     (assert (= (rawget clickables.record.last-up "finger-id") 11)
-            "synthetic button-up payload should preserve the finger id"))))
-  (state:on-leave)
+            "synthetic button-up payload should preserve the finger id")
+    (state:on-leave))))
   (set app.active-pointer-controls original-active-controls)
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
@@ -625,10 +625,10 @@
                                (= payload.button 3))})
   (set app.first-person-controls controls)
   (set app.presentation-input-controls (fn [] controls))
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state:on-mouse-button-up {:button 3 :x 12 :y 14})
   (local (ok err) (pcall (fn []
+    (local state (NormalState))
+    (own-test-state! :normal state)
+    (state:on-mouse-button-up {:button 3 :x 12 :y 14})
     (assert (= clickables.record.mouse-button-up 1)
             "normal state should still forward releases to clickables")
     (assert (= (and clickables.record.last-up clickables.record.last-up.suppress-click?) true)
@@ -742,17 +742,17 @@
   (set app.first-person-controls controls)
   (set app.presentation-input-controls (fn [] controls))
   (set app.touch-gesture-targets {:select-object (fn [_self _payload _opts] nil)})
-  (local state (FpcState))
-  (state:on-enter)
-  (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
-  (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
-  (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
   (local (ok err) (pcall (fn []
+    (local state (FpcState))
+    (state:on-enter)
+    (state:on-touch-down (engine-touch-payload 1 11 10 20 0 0 0.5 1))
+    (state:on-touch-motion (engine-touch-payload 1 11 18 24 8 4 0.5 2))
+    (state:on-touch-up (engine-touch-payload 1 11 22 28 4 4 0.5 3))
     (assert (= controls.record.mouse_button_down 1))
     (assert (= controls.record.mouse_button_up 1))
     (assert controls.record.mouse_motion
-            "touch motion should reach first-person controls"))))
-  (state:on-leave)
+            "touch motion should reach first-person controls")
+    (state:on-leave))))
   (set app.first-person-controls original-controls)
   (set app.presentation-input-controls original-presentation-controls)
   (set app.touch-gesture-targets original-touch-targets)
@@ -800,49 +800,49 @@
         :tool "brush"
         :set-active-tool (fn [self tool]
                            (table.insert tool-log tool)
-                           (set self.tool tool))})
-  (local state (NormalState))
-  (own-test-state! :normal state)
-  (state:on-enter)
-  (state:on-pen-proximity-in {:pen-id 77
-                              :x 10
-                              :y 20
-                              :xrel 0
-                              :yrel 0
-                              :timestamp 1
-                              :in-range true})
-  (state:on-pen-down {:pen-id 77
+                            (set self.tool tool))})
+  (local (ok err) (pcall (fn []
+    (local state (NormalState))
+    (own-test-state! :normal state)
+    (state:on-enter)
+    (state:on-pen-proximity-in {:pen-id 77
+                                :x 10
+                                :y 20
+                                :xrel 0
+                                :yrel 0
+                                :timestamp 1
+                                :in-range true})
+    (state:on-pen-down {:pen-id 77
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :timestamp 2
+                        :in-range true
+                        :eraser true})
+    (state:on-touch-down {:touch-id 1
+                          :finger-id 11
+                          :x 14
+                          :y 24
+                          :xrel 0
+                          :yrel 0
+                          :pressure 0.5
+                          :timestamp 3})
+    (state:on-pen-up {:pen-id 77
                       :x 10
                       :y 20
                       :xrel 0
                       :yrel 0
-                      :timestamp 2
+                      :timestamp 4
                       :in-range true
-                      :eraser true})
-  (state:on-touch-down {:touch-id 1
-                        :finger-id 11
-                        :x 14
-                        :y 24
-                        :xrel 0
-                        :yrel 0
-                        :pressure 0.5
-                        :timestamp 3})
-  (state:on-pen-up {:pen-id 77
-                    :x 10
-                    :y 20
-                    :xrel 0
-                    :yrel 0
-                    :timestamp 4
-                    :in-range true
-                     :eraser false})
-  (local (ok err) (pcall (fn []
+                      :eraser false})
     (assert (= controls.record.mouse_button_down 1))
     (assert (= controls.record.mouse_button_up 1))
     (assert (= (# tool-log) 2))
     (assert (= (. tool-log 1) "eraser"))
     (assert (= (. tool-log 2) "brush"))
-    (assert (= (app.drawing-controller:active-tool) "brush")))))
-  (state:on-leave)
+    (assert (= (app.drawing-controller:active-tool) "brush"))
+    (state:on-leave))))
   (set app.hoverables original-hoverables)
   (set app.clickables original-clickables)
   (set app.movables original-movables)
@@ -863,42 +863,42 @@
   (local original-presentation-controls app.presentation-input-controls)
   (set app.first-person-controls controls)
   (set app.presentation-input-controls (fn [] controls))
-  (local state (FpcState))
-  (state:on-enter)
-  (state:on-pen-proximity-in {:pen-id 77
-                              :x 10
-                              :y 20
-                              :xrel 0
-                              :yrel 0
-                              :timestamp 1
-                              :in-range true})
-  (state:on-pen-down {:pen-id 77
-                      :x 10
-                      :y 20
+  (local (ok err) (pcall (fn []
+    (local state (FpcState))
+    (state:on-enter)
+    (state:on-pen-proximity-in {:pen-id 77
+                                :x 10
+                                :y 20
+                                :xrel 0
+                                :yrel 0
+                                :timestamp 1
+                                :in-range true})
+    (state:on-pen-down {:pen-id 77
+                        :x 10
+                        :y 20
+                        :xrel 0
+                        :yrel 0
+                        :timestamp 2
+                        :in-range true})
+    (state:on-pen-motion {:pen-id 77
+                          :x 18
+                          :y 24
+                          :xrel 8
+                          :yrel 4
+                          :timestamp 3
+                          :in-range true})
+    (state:on-pen-up {:pen-id 77
+                      :x 18
+                      :y 24
                       :xrel 0
                       :yrel 0
-                      :timestamp 2
+                      :timestamp 4
                       :in-range true})
-  (state:on-pen-motion {:pen-id 77
-                        :x 18
-                        :y 24
-                        :xrel 8
-                        :yrel 4
-                        :timestamp 3
-                        :in-range true})
-  (state:on-pen-up {:pen-id 77
-                    :x 18
-                    :y 24
-                    :xrel 0
-                    :yrel 0
-                    :timestamp 4
-                    :in-range true})
-  (local (ok err) (pcall (fn []
     (assert (= controls.record.mouse_button_down 1))
     (assert (= controls.record.mouse_button_up 1))
     (assert controls.record.mouse_motion
-            "pen motion should reach first-person controls"))))
-  (state:on-leave)
+            "pen motion should reach first-person controls")
+    (state:on-leave))))
   (set app.first-person-controls original-controls)
   (set app.presentation-input-controls original-presentation-controls)
   (when (not ok) (error err)))
@@ -1165,19 +1165,19 @@
   (set app.presentation-input-controls (fn [] controls))
   (set app.hoverables (make-hoverables-stub))
   (states:set-state :normal)
-  (local session
-    {:active? (fn [_self] true)
-     :begin (fn [_self] true)
-     :cancel-selection (fn [_self] nil)
-     :begin-drag (fn [_self _payload] true)
-     :drag-active? (fn [_self] true)
-     :update-drag (fn [_self _payload] true)
-     :end-drag (fn [_self _payload] true)
-     :on-key-down (fn [_self _payload] nil)})
-  (TerrainRectPickManager.begin session)
-  (app.engine.events.mouse-wheel.emit {:x 0 :y 2})
-  (app.engine.events.updated.emit 0.125)
   (local (ok err) (pcall (fn []
+    (local session
+      {:active? (fn [_self] true)
+       :begin (fn [_self] true)
+       :cancel-selection (fn [_self] nil)
+       :begin-drag (fn [_self _payload] true)
+       :drag-active? (fn [_self] true)
+       :update-drag (fn [_self _payload] true)
+       :end-drag (fn [_self _payload] true)
+       :on-key-down (fn [_self _payload] nil)})
+    (TerrainRectPickManager.begin session)
+    (app.engine.events.mouse-wheel.emit {:x 0 :y 2})
+    (app.engine.events.updated.emit 0.125)
     (assert (= controls.record.mouse_wheel 2))
     (assert (= controls.record.updated 0.125)))))
   (set app.hoverables original-hoverables)
@@ -2258,20 +2258,20 @@
   (states:set-state :normal)
   (set-app-states! states)
   (InputState.connect-input input)
-  (local state (FpcState))
-  (states:add-state :fpc state)
-  (state.on-enter)
-  (app.engine.events.key-down.emit {:key 44})
-  (app.engine.events.mouse-button-down.emit {:button 1 :x 0 :y 0})
-  (app.engine.events.mouse-motion.emit {:x 5 :y 6})
   (local (ok err) (pcall (fn []
+    (local state (FpcState))
+    (states:add-state :fpc state)
+    (state.on-enter)
+    (app.engine.events.key-down.emit {:key 44})
+    (app.engine.events.mouse-button-down.emit {:button 1 :x 0 :y 0})
+    (app.engine.events.mouse-motion.emit {:x 5 :y 6})
     (assert (= calls.input 0) "InputState should not receive events in fpc state")
     (assert (= calls.clickables 0) "Clickables should not receive events in fpc state")
     (assert (= calls.hover 0) "Hoverables should not receive events in fpc state")
     (assert (= calls.movables 0) "Movables should not receive events in fpc state")
     (assert (= controls.record.key_down 44))
-    (assert (= controls.record.mouse_button_down 1)))))
-  (state.on-leave)
+    (assert (= controls.record.mouse_button_down 1))
+    (state.on-leave))))
   (InputState.disconnect-input input)
   (set-app-states! original-states)
   (set app.clickables original-clickables)
