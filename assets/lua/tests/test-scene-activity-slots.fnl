@@ -2509,38 +2509,121 @@
 ;; ── Task 7: Empty scene slot service leakage ─────────────────────────
 
 (fn empty-scene-slot-applies-empty-services-without-render-target []
-  "Task 7: An empty drawing scene slot activated after sandbox must not
-  expose a render target, must own explicit empty service state, and must
-  not leak sandbox service state through the scene surface."
+  "Task 7: An empty drawing scene slot activated after sandbox (with
+  non-empty lights, skybox, background, and containment) must reset all
+  engine services to the canonical empty state so sandbox service state
+  does not leak through the scene surface."
   (with-restored-app-fields
-    [:lights :renderers]
+    [:lights :renderers :engine]
     (fn []
-      (local fixture (make-scene))
-      (local scene fixture.scene)
-      (var lights-state {:ambient {:enabled? false :color [0.1 0.1 0.1] :intensity 1.0}
+      (local ActivitySceneState (require :activity-scene-state))
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Mock lights — captures the last set state
+      (var lights-state {:ambient {:enabled? false :color [0 0 0] :intensity 0.0}
                          :directional []
                          :point []
                          :spot []})
-      (var background-state {:color [0 0 0]})
+      (set app.lights {:set-state (fn [_self state] (set lights-state state))
+                       :get-state (fn [_self] lights-state)})
+
+      ;; Mock renderer skybox / background — captures last set state
       (var skybox-state {:enabled? false
                          :name "lake"
                          :brightness 0.1
                          :tint-color [1.0 1.0 1.0]})
-      (set app.lights {:set-state (fn [_self state] (set lights-state state))
-                       :get-state (fn [_self] lights-state)})
-      (set app.renderers {:set-background-state (fn [_self state]
-                                                  (set background-state state))
-                          :get-background-state (fn [_self] background-state)
-                          :skybox {:set-state (fn [_self _state])
-                                   :get-state (fn [_self] skybox-state)}})
+      (var background-state {:color [0 0 0]})
+      (set app.renderers {:skybox {:get-state (fn [_] skybox-state)
+                                   :set-state (fn [_ state] (set skybox-state state))}
+                          :get-background-state (fn [_] background-state)
+                          :set-background-state (fn [_ state] (set background-state state))})
+
+      ;; Mock physics for containment
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}})
+
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+
+      ;; Pre-load the empty state for assertions
+      (local empty-state (ActivitySceneState.empty-state))
+
+      ;; (1) Activate sandbox with non-empty service state (enabled lights,
+      ;;     enabled skybox, custom background, enabled containment).
       (scene:ensure-activity-slot "sandbox")
+      (local sandbox-state
+        {:panels []
+         :terrains []
+         :lights {:ambient {:enabled? true :color [0.9 0.8 0.7] :intensity 2.0}
+                  :directional []
+                  :point []
+                  :spot []}
+         :skybox {:enabled? true
+                  :name "ocean"
+                  :brightness 0.75
+                  :tint-color [0.5 0.6 1.0]}
+         :background {:color [0.1 0.2 0.3]}
+         :containment {:enabled? true}})
+      (scene:restore-activity-slot-state "sandbox" sandbox-state)
       (scene:activate-activity-slot "sandbox")
-      (local empty-slot (scene:ensure-activity-slot "drawing"))
+
+      ;; Verify sandbox services were applied (sanity check)
+      (assert lights-state.ambient.enabled?
+              "Sandbox activation must enable ambient light")
+      (assert skybox-state.enabled?
+              "Sandbox activation must enable skybox")
+      (assert (= skybox-state.brightness 0.75)
+              "Sandbox activation must apply skybox brightness")
+      (local sandbox-slot (scene:activity-slot "sandbox"))
+      (assert (and sandbox-slot.physics-containment-manager
+                   sandbox-slot.physics-containment-manager.config
+                   sandbox-slot.physics-containment-manager.config.enabled?)
+              "Sandbox slot must have enabled containment")
+
+      ;; (2) Switch to drawing — the empty slot must reset all services.
+      (local drawing-slot (scene:ensure-activity-slot "drawing"))
       (scene:activate-activity-slot "drawing")
-      (assert (= (scene:presentation-target) nil)
-              "Empty drawing scene slot must not render")
-      (assert empty-slot.scene-state
+
+      ;; (a) Lights must be reset to empty (ambient disabled)
+      (assert (not lights-state.ambient.enabled?)
+              "Drawing activation must disable ambient light")
+      (assert (= (. empty-state.lights.ambient.color 1) 0.1)
+              "empty-state ambient red must be 0.1 for assertion reference")
+      ;; The set-state may write normalized empty lights with [0.1 0.1 0.1]
+      (assert (<= (math.abs (- (. lights-state.ambient.color 1) 0.1)) 0.01)
+              "Drawing activation must reset ambient light color to empty default")
+
+      ;; (b) Skybox must be disabled
+      (assert (not skybox-state.enabled?)
+              (.. "Drawing activation must disable skybox, got enabled?="
+                  (tostring skybox-state.enabled?)))
+
+      ;; (c) Background must be reset to neutral/default
+      (assert (and background-state
+                   (<= (math.abs (- (. background-state.color 1) 0.0)) 0.01)
+                   (<= (math.abs (- (. background-state.color 2) 0.0)) 0.01)
+                   (<= (math.abs (- (. background-state.color 3) 0.0)) 0.01))
+              "Drawing activation must reset background to neutral [0 0 0]")
+
+      ;; (d) Drawing slot must own explicit empty service state
+      (assert drawing-slot.scene-state
               "Empty slot must own explicit empty service state")
+
+      ;; (e) Drawing slot's containment manager must be disabled (not leaking
+      ;;     sandbox's enabled containment).  The manager exists on the slot
+      ;;     but its config must reflect empty containment (enabled? = false).
+      (assert drawing-slot.physics-containment-manager
+              "Drawing slot should have a containment manager after activation")
+      (assert (and drawing-slot.physics-containment-manager.config
+                   (not drawing-slot.physics-containment-manager.config.enabled?))
+              "Drawing slot containment must be disabled (empty state)")
+
+      ;; (f) Empty drawing scene slot must not expose a render target
+      (assert (= (scene:presentation-target) nil)
+              "Empty drawing scene slot must not expose a render target")
+
       (drop-fixture fixture))))
 
 (table.insert tests {:name "Task 7: empty scene slot applies empty services without render target"
