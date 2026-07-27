@@ -1164,8 +1164,8 @@
   (set app.first-person-controls controls)
   (set app.presentation-input-controls (fn [] controls))
   (set app.hoverables (make-hoverables-stub))
-  (states:set-state :normal)
   (local (ok err) (pcall (fn []
+    (states:set-state :normal)
     (local session
       {:active? (fn [_self] true)
        :begin (fn [_self] true)
@@ -2256,9 +2256,9 @@
   (local states (States {:hud_provider command-hints-hud-provider}))
   (states:add-state :normal {})
   (states:set-state :normal)
-  (set-app-states! states)
-  (InputState.connect-input input)
   (local (ok err) (pcall (fn []
+    (set-app-states! states)
+    (InputState.connect-input input)
     (local state (FpcState))
     (states:add-state :fpc state)
     (state.on-enter)
