@@ -27,6 +27,10 @@
     (table.sort files)
     files))
 
+(fn str-escape-pattern [s]
+  "Escape Lua pattern magic characters in string s for use in string.match patterns."
+  (s:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1"))
+
 (fn compute-module [file-path module-roots]
   "Compute a module name from file-path by removing .fnl and replacing / with .,
   relative to the first matching module root.
@@ -39,7 +43,7 @@
       (let [root-lower (root:lower)
             file-lower (file-path:lower)]
         (when (or (= file-lower root-lower)
-                  (file-lower:match (.. "^" (root-lower:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1") "/")))
+                  (file-lower:match (.. "^" (str-escape-pattern root-lower) "/")))
           (let [relative (if (= (# file-path) (# root))
                             file-path
                             (file-path:sub (+ (# root) 2)))]
@@ -47,6 +51,24 @@
               (set module-name (no-ext:gsub "/" "."))
               (set found true)))))))
   module-name)
+
+(fn compute-relative-path [file-path module-roots]
+  "Compute the relative path of file-path under the first matching module root.
+  Preserves the .fnl extension and subdirectory structure.
+  Returns the original path if no module root matches."
+  (var rel-path file-path)
+  (var found false)
+  (each [_ root (ipairs module-roots)]
+    (when (not found)
+      (let [root-lower (root:lower)
+            file-lower (file-path:lower)]
+        (when (or (= file-lower root-lower)
+                  (file-lower:match (.. "^" (str-escape-pattern root-lower) "/")))
+          (set rel-path (if (= (# file-path) (# root))
+                           file-path
+                           (file-path:sub (+ (# root) 2))))
+          (set found true)))))
+  rel-path)
 
 (fn M.node-text [source node]
   "Extract the substring of source covered by node's byte range.
@@ -100,11 +122,13 @@
     (let [source (fs.read-file path)
           tree (ts.parse source {:language :fennel})
           root (tree:root)
-          module (compute-module path module-roots)]
+          module (compute-module path module-roots)
+          relative-path (compute-relative-path path module-roots)]
       (table.insert records
         {:target target
          :path path
          :module module
+         :relative-path relative-path
          :source source
          :tree tree
          :root root})))

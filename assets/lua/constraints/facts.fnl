@@ -113,6 +113,7 @@
         facts {:target record.target
                :path record.path
                :module record.module
+               :relative-path (or record.relative-path record.path)
                :requires []
                :definitions []
                :exports []

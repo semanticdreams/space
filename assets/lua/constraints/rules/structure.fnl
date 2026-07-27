@@ -68,7 +68,8 @@
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (let [metrics (or ff.metrics {})
           funcs (or metrics.functions [])
-          limit thresholds.max-nesting-depth]
+          limit thresholds.max-nesting-depth
+          relative-path (or ff.relative-path ff.path)]
       (each [_ fn-info (ipairs funcs)]
         (let [measure (or fn-info.max-nesting-depth 0)
               fn-name (or fn-info.name (tostring fn-info.line))]
@@ -78,9 +79,9 @@
                 {:constraint-id "structure.max-nesting-depth"
                  :family "structure-formatting"
                  :message (.. "max nesting depth " measure " exceeds limit of " limit " in function " fn-name " of " (or ff.module ff.path))
-                 :file ff.path :line (or fn-info.line 0) :column (or fn-info.column 0)
+                 :file relative-path :line (or fn-info.line 0) :column (or fn-info.column 0)
                  :evidence {:measure measure :limit limit :function-name fn-name
-                            :fingerprint (make-fingerprint "structure.max-nesting-depth" ff.path (or fn-info.line 0) fn-name)}
+                            :fingerprint (make-fingerprint "structure.max-nesting-depth" relative-path (or fn-info.line 0) fn-name)}
                  :hint (.. "Refactor deeply nested code in " fn-name " into smaller functions to reduce nesting depth below " limit)})))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
@@ -92,16 +93,17 @@
           limit thresholds.max-function-length]
       (each [_ fn-info (ipairs funcs)]
         (let [measure (or fn-info.length 0)
-              fn-name (or fn-info.name (tostring fn-info.line))]
+              fn-name (or fn-info.name (tostring fn-info.line))
+              relative-path (or ff.relative-path ff.path)]
           (when (> measure limit)
             (table.insert diagnostics
               (Diagnostics.violation
                 {:constraint-id "structure.max-function-length"
                  :family "structure-formatting"
                  :message (.. "function " fn-name " length " measure " exceeds limit of " limit " in " (or ff.module ff.path))
-                 :file ff.path :line (or fn-info.line 0) :column (or fn-info.column 0)
+                 :file relative-path :line (or fn-info.line 0) :column (or fn-info.column 0)
                  :evidence {:measure measure :limit limit :function-name fn-name
-                            :fingerprint (make-fingerprint "structure.max-function-length" ff.path (or fn-info.line 0) fn-name)}
+                            :fingerprint (make-fingerprint "structure.max-function-length" relative-path (or fn-info.line 0) fn-name)}
                  :hint (.. "Break function " fn-name " into smaller functions to stay below " limit " lines")})))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
@@ -110,16 +112,17 @@
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (let [metrics (or ff.metrics {})
           measure (or metrics.module-lines 0)
-          limit thresholds.max-module-length]
+          limit thresholds.max-module-length
+          relative-path (or ff.relative-path ff.path)]
       (when (> measure limit)
         (table.insert diagnostics
           (Diagnostics.violation
             {:constraint-id "structure.max-module-length"
              :family "structure-formatting"
              :message (.. "module " (or ff.module ff.path) " length " measure " exceeds limit of " limit)
-             :file ff.path :line 0 :column 0
+             :file relative-path :line 0 :column 0
              :evidence {:measure measure :limit limit
-                        :fingerprint (make-fingerprint "structure.max-module-length" ff.path 0 (or ff.module ff.path))}
+                        :fingerprint (make-fingerprint "structure.max-module-length" relative-path 0 (or ff.module ff.path))}
              :hint (.. "Split " (or ff.module ff.path) " into smaller modules to stay below " limit " lines")})))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
@@ -130,16 +133,17 @@
           table-size (or metrics.max-table-literal-size 0)
           anon-depth (or metrics.max-anonymous-callback-depth 0)
           table-limit thresholds.max-table-literal-size
-          anon-limit thresholds.max-anonymous-callback-depth]
+          anon-limit thresholds.max-anonymous-callback-depth
+          relative-path (or ff.relative-path ff.path)]
       (when (> table-size table-limit)
         (table.insert diagnostics
           (Diagnostics.violation
             {:constraint-id "structure.large-inline-structure"
              :family "structure-formatting"
              :message (.. "max table literal size " table-size " exceeds limit of " table-limit " in " (or ff.module ff.path))
-             :file ff.path :line 0 :column 0
+             :file relative-path :line 0 :column 0
              :evidence {:measure table-size :limit table-limit :type :table-literal-size
-                        :fingerprint (make-fingerprint "structure.large-inline-structure" ff.path 0 "table-literal-size")}
+                        :fingerprint (make-fingerprint "structure.large-inline-structure" relative-path 0 "table-literal-size")}
              :hint "Extract large inline table literals into named constants or load from files"})))
       (when (> anon-depth anon-limit)
         (table.insert diagnostics
@@ -147,9 +151,9 @@
             {:constraint-id "structure.large-inline-structure"
              :family "structure-formatting"
              :message (.. "max anonymous callback depth " anon-depth " exceeds limit of " anon-limit " in " (or ff.module ff.path))
-             :file ff.path :line 0 :column 0
+             :file relative-path :line 0 :column 0
              :evidence {:measure anon-depth :limit anon-limit :type :anonymous-callback-depth
-                        :fingerprint (make-fingerprint "structure.large-inline-structure" ff.path 0 "anonymous-callback-depth")}
+                        :fingerprint (make-fingerprint "structure.large-inline-structure" relative-path 0 "anonymous-callback-depth")}
              :hint "Name anonymous callbacks or refactor to reduce nesting depth"})))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
@@ -182,7 +186,7 @@
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (let [module-name (or ff.module ff.path)
-          file-path ff.path
+          file-path (or ff.relative-path ff.path)
           calls (or ff.calls [])]
       (each [_ def (ipairs (or ff.definitions []))]
         (when (definition-form-contains-let? def.form)

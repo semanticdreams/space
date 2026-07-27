@@ -48,8 +48,9 @@
     (tset suite-set s true))
   (assert (. suite-set :scene-sandbox) "suites should include :scene-sandbox")
   (assert (. suite-set :lifecycle) "suites should include :lifecycle")
-  (assert (. suite-set :layout) "suites should include :layout")
-  (assert (. suite-set :structure) "suites should include :structure")
+  (assert (. suite-set :test-isolation) "suites should include :test-isolation")
+  (assert (. suite-set :layout-rendering) "suites should include :layout-rendering")
+  (assert (. suite-set :structure-formatting) "suites should include :structure-formatting")
   (assert result.module-roots "should have module-roots"))
 
 (fn targets-resolve-unit-with-root []
@@ -267,6 +268,39 @@
     (assert (= r.module "foo.bar")
             (.. "expected first-match module 'foo.bar', got '" (tostring r.module) "'")))))
 
+;; --- Relative path computation tests (R1-1 path portability) ---
+
+(fn source-computes-relative-path-from-module-root []
+  "File records should include a portable :relative-path under the module root."
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "nested"))
+    (fs.create-dirs subdir)
+    (make-file subdir "deep.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "relpath-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert r.relative-path "record should have :relative-path")
+    (assert (= (type r.relative-path) :string) "relative-path should be a string")
+    (assert (= r.relative-path "nested/deep.fnl")
+            (.. "expected 'nested/deep.fnl', got '" (tostring r.relative-path) "'")))))
+
+(fn source-relative-path-falls-back-to-absolute []
+  "When no module root matches, :relative-path should be the absolute path."
+  (with-temp-dir (fn [dir]
+    (make-file dir "orphan.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "orphan-test" :roots [dir] :module-roots []})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert r.relative-path "record should have :relative-path even with no module root")
+    ;; With empty module-roots, relative-path should equal path
+    (assert (= r.relative-path r.path)
+            (.. "expected relative-path to equal path when no module root matches, got "
+                (tostring r.relative-path) " vs " (tostring r.path))))))
+
 ;; --- Non-Fennel explicit file tests (R1-2) ---
 
 (fn source-files-target-rejects-non-fennel-paths []
@@ -356,7 +390,11 @@
 (table.insert tests {:name "source computes module name for init.fnl"
                      :fn source-computes-module-name-for-init-fnl})
 (table.insert tests {:name "source first matching root wins for overlap"
-                     :fn source-first-matching-root-wins-for-overlap})
+                      :fn source-first-matching-root-wins-for-overlap})
+(table.insert tests {:name "source computes relative path from module root (R1-1)"
+                      :fn source-computes-relative-path-from-module-root})
+(table.insert tests {:name "source relative path falls back to absolute (R1-1)"
+                      :fn source-relative-path-falls-back-to-absolute})
 (table.insert tests {:name "source files target rejects non-fennel paths"
                      :fn source-files-target-rejects-non-fennel-paths})
 (table.insert tests {:name "source files target includes fennel and excludes others"
