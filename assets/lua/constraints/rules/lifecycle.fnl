@@ -24,18 +24,24 @@
       (and n (or (n:match "^disconnect%-") (n:match "^unsubscribe%-")))))
 
 (fn has-loop-cleanup? [ff]
-  "Check if any function definition contains both a loop construct and a
-  cleanup call — evidence of handler-record loop cleanup."
+  "Check if any function definition contains a loop construct AND an actual
+  extracted cleanup call form appears inside that function — real evidence
+  of handler-record loop cleanup, not cleanup-like text in strings/comments."
   (var found false)
+  ;; Collect the form texts of actual extracted cleanup calls
+  (var cleanup-forms [])
+  (each [_ call (ipairs (or ff.calls []))]
+    (when (and (cleanup-call? call.callee) call.form)
+      (table.insert cleanup-forms call.form)))
+  ;; Only set found if a loop function contains an actual cleanup call form
   (each [_ def (ipairs (or ff.definitions []))]
     (when (and (not found) (= def.kind :fn) def.form)
       (let [form def.form]
-         (when (and (or (form:find "each " 1 true) (form:find "for " 1 true)
-                        (form:find "icollect " 1 true))
-                    (or (form:find ":disconnect" 1 true) (form:find ":drop" 1 true)
-                        (form:find ":clear" 1 true) (form:find ":unregister" 1 true)
-                        (form:find "disconnect%-") (form:find "unsubscribe%-")))
-          (set found true)))))
+        (when (or (form:find "each " 1 true) (form:find "for " 1 true)
+                  (form:find "icollect " 1 true))
+          (each [_ cf (ipairs cleanup-forms)]
+            (when (and (not found) (form:find cf 1 true))
+              (set found true)))))))
   found)
 
 (fn event-registration-cleanup-rule-run [ctx]
