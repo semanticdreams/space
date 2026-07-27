@@ -82,6 +82,7 @@
     :tests.test-list-view
     :tests.test-search-view
     :tests.test-fennel-interpreter-view
+    :tests.test-tree-sitter-fennel
     :tests.test-launchables
     :tests.test-random
     :tests.test-tempfile

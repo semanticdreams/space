@@ -6,6 +6,7 @@
 #include <cstring>
 
 extern "C" const TSLanguage *tree_sitter_cpp();
+extern "C" const TSLanguage *tree_sitter_fennel();
 
 // Smart deleters
 struct TSParserDeleter {
@@ -71,13 +72,29 @@ sol::table create_tree_sitter_table(sol::state_view lua)
 {
     sol::table ts_module = lua.create_table();
 
-    ts_module.set_function("parse", [](const std::string& code) -> LuaTSTree {
+    ts_module.set_function("parse", [](const std::string& code, sol::object opts) -> LuaTSTree {
         UniqueParser parser(ts_parser_new());
-        ts_parser_set_language(parser.get(), tree_sitter_cpp());
+        const TSLanguage *lang = tree_sitter_cpp();
 
+        if (opts.is<sol::table>()) {
+            sol::table t = opts.as<sol::table>();
+            sol::object lang_opt = t["language"];
+            if (lang_opt.valid()) {
+                std::string lang_str = lang_opt.as<std::string>();
+                if (lang_str == "cpp" || lang_str == ":cpp") {
+                    lang = tree_sitter_cpp();
+                } else if (lang_str == "fennel" || lang_str == ":fennel") {
+                    lang = tree_sitter_fennel();
+                } else {
+                    throw sol::error("tree-sitter.parse unsupported language: " + lang_str);
+                }
+            }
+        }
+
+        ts_parser_set_language(parser.get(), lang);
         TSTree *tree = ts_parser_parse_string(parser.get(), nullptr, code.c_str(), code.size());
 
-        return LuaTSTree(tree);  // Returned as userdata
+        return LuaTSTree(tree);
     });
 
     ts_module.new_usertype<LuaTSNode>("TSNode",
@@ -86,6 +103,22 @@ sol::table create_tree_sitter_table(sol::state_view lua)
         "child", &LuaTSNode::child,
         "start-byte", &LuaTSNode::start_byte,
         "end-byte", &LuaTSNode::end_byte,
+        "start-point", [](const LuaTSNode& self, sol::this_state state) -> sol::table {
+            TSPoint pt = ts_node_start_point(self.node);
+            sol::state_view lua(state);
+            sol::table t = lua.create_table();
+            t["row"] = pt.row;
+            t["column"] = pt.column;
+            return t;
+        },
+        "end-point", [](const LuaTSNode& self, sol::this_state state) -> sol::table {
+            TSPoint pt = ts_node_end_point(self.node);
+            sol::state_view lua(state);
+            sol::table t = lua.create_table();
+            t["row"] = pt.row;
+            t["column"] = pt.column;
+            return t;
+        },
         "is-null", &LuaTSNode::is_null,
         "sexpr", &LuaTSNode::sexpr
     );
