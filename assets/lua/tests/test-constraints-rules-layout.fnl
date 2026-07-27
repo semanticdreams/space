@@ -1278,6 +1278,98 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "unrelated anonymous setter near layouter should not be flagged"))
 
+;; R4-1: duplicate anonymous form same as inline layouter
+(fn no-setters-allows-unrelated-anonymous-with-duplicate-form []
+  "A file with an inline :layouter (fn [obj] (obj:set-size 50 50)) and a
+  separate unrelated anonymous function with the same form/body should NOT
+  flag the unrelated anonymous's setter call. When form texts are identical
+  and correlation by form alone is ambiguous, be conservative and skip."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local anon-form "(fn [obj] (obj:set-size 50 50))")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 20
+                                             :length 100
+                                             :form anon-form}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 60 :column 1
+                                             :length 100
+                                             :form anon-form}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form (.. "(Layout {:layouter " anon-form "})")
+                                       :enclosing-fn nil}
+                                      ;; setter from the INLINE layouter (line 6, near def line 5)
+                                      {:callee "obj:set-size"
+                                       :receiver nil :method nil
+                                       :line 6 :column 1
+                                       :form "(obj:set-size 50 50)"
+                                       :enclosing-fn "<anonymous>"}
+                                      ;; setter from UNRELATED anonymous (line 61, near def line 60)
+                                      {:callee "obj:set-size"
+                                       :receiver nil :method nil
+                                       :line 61 :column 1
+                                       :form "(obj:set-size 50 50)"
+                                       :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  ;; The inline layouter setter (line 6) should be flagged.
+  ;; The unrelated setter (line 61) must NOT be flagged.
+  (assert result "should produce diagnostics for inline layouter setter")
+  (assert (= (length result) 1)
+          (.. "expected exactly 1 diagnostic (the inline layouter setter), got " (length result)))
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.no-setters-in-layouters")
+          "diagnostic should be for the actual inline layouter setter")
+  ;; The flagged setter should be from the inline layouter (line ~6), not the unrelated one (line ~61)
+  (assert (<= d.line 10) (.. "setter line should be near inline layouter, got line " (tostring d.line))))
+;; R5-1: duplicate anonymous form same as inline layouter — negative (unique forms should still flag)
+(fn no-setters-flags-inline-layouter-setter-with-duplicate-anonymous-present []
+  "Even when an unrelated anonymous with the same form exists, the actual
+  inline layouter's setter should still be detected."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local anon-form "(fn [obj] (obj:set-size 50 50))")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 20
+                                             :length 100
+                                             :form anon-form}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 60 :column 1
+                                             :length 100
+                                             :form anon-form}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form (.. "(Layout {:layouter " anon-form "})")
+                                       :enclosing-fn nil}
+                                      {:callee "obj:set-size"
+                                       :receiver nil :method nil
+                                       :line 6 :column 1
+                                       :form "(obj:set-size 50 50)"
+                                       :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for the inline layouter setter")
+  (assert (>= (length result) 1) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.no-setters-in-layouters")
+          "should flag the inline layouter setter"))
 ;; R4-3: comment-only assert in anonymous function
 (fn interactive-assertion-flags-comment-only-assert-in-anonymous []
   "An anonymous function using clickables with only a commented-out assert
@@ -1460,6 +1552,12 @@
 ;; R4-1: comment-only clickables
 (table.insert tests {:name "interactive-assertion allows comment-only clickables"
                      :fn interactive-assertion-allows-comment-only-clickables})
+;; R5-1: duplicate anonymous form same as inline layouter
+(table.insert tests {:name "no-setters allows unrelated anonymous with duplicate form"
+                     :fn no-setters-allows-unrelated-anonymous-with-duplicate-form})
+;; R5-1b: inline layouter setter still detected when duplicate form present
+(table.insert tests {:name "no-setters flags inline layouter setter with duplicate anonymous present"
+                     :fn no-setters-flags-inline-layouter-setter-with-duplicate-anonymous-present})
 ;; R4-3: comment-only assert in anonymous
 (table.insert tests {:name "interactive-assertion flags comment-only assert in anonymous"
                      :fn interactive-assertion-flags-comment-only-assert-in-anonymous})

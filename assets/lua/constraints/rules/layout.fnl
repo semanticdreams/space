@@ -22,6 +22,11 @@
 (fn strip-strings [s]
   (s:gsub "\"[^\"]*\"" ""))
 
+;; Absolute distance between two line numbers.
+(fn line-distance [a b]
+  (let [diff (- (or a 0) (or b 0))]
+    (if (< diff 0) (- diff) diff)))
+
 ;; Strip Fennel comments (; to end of line) from form text.
 ;; Must be called after strip-strings to avoid removing semicolons
 ;; that appear inside string literals.
@@ -79,23 +84,45 @@
       (set found true)))
   found)
 
-(fn collect-layouter-call-forms [ff]
-  "Return a list of call form texts whose form contains :layouter."
-  (var forms [])
+(fn collect-layouter-call-records [ff]
+  "Return a list of {line, form} records for call forms containing :layouter."
+  (var records [])
   (each [_ call (ipairs (or ff.calls []))]
     (when (string.find (or call.form "") ":layouter" 1 true)
-      (table.insert forms (or call.form ""))))
-  forms)
+      (table.insert records {:line (or call.line 0) :form (or call.form "")})))
+  records)
 
-(fn anonymous-def-is-layouter-callback? [def layouter-call-forms]
+(fn anonymous-def-is-layouter-callback? [def layouter-call-records]
   "Check if an anonymous definition's form text appears as a substring
-  of any :layouter call form, meaning it is the inline layouter callback."
+  of any :layouter call form, and the def is within a reasonable line
+  proximity of that call (def.line within 10 lines of the layouter call)."
   (when (not def.form) (lua "return false"))
   (var found false)
-  (each [_ lcf (ipairs layouter-call-forms)]
-    (when (and (not found) (string.find lcf def.form 1 true))
+  (each [_ lc (ipairs layouter-call-records)]
+    (when (and (not found)
+               (string.find lc.form def.form 1 true)
+               (<= (line-distance (or def.line 0) lc.line) 10))
       (set found true)))
   found)
+
+(fn build-def-line-map [defs]
+  "Build a sorted list of all function definitions with line and name for
+  enclosure resolution by line number."
+  (var fn-defs [])
+  (each [_ def (ipairs (or defs []))]
+    (when (and (= def.kind :fn) def.line)
+      (table.insert fn-defs {:line def.line :name def.name :form def.form})))
+  (table.sort fn-defs (fn [a b] (< a.line b.line)))
+  fn-defs)
+
+(fn find-enclosing-fn-def [sorted-fn-defs call-line]
+  "Find the function definition that most likely encloses a call at call-line.
+  Returns the definition with the greatest line <= call-line, or nil."
+  (var enclosing nil)
+  (each [_ d (ipairs sorted-fn-defs)]
+    (when (<= d.line call-line)
+      (set enclosing d)))
+  enclosing)
 
 (fn no-setters-in-layouters-rule-run [ctx]
   "Rule: flag calls to forbidden setters inside layouter functions
@@ -108,32 +135,34 @@
       (each [_ def (ipairs (or ff.definitions []))]
         (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
           (tset layouter-names def.name true)))
-      ;; :layouter call form texts for anonymous correlation
-      (var layouter-call-forms (collect-layouter-call-forms ff))
-      ;; Identify anonymous definitions that are inline layouter callbacks:
-      ;; their form text appears inside a :layouter call form text.
-      (var layouter-anon-def-forms {})
+      ;; :layouter call records for anonymous correlation
+      (var layouter-call-records (collect-layouter-call-records ff))
+      ;; Identify anonymous definitions that are inline layouter callbacks
+      ;; by checking both form-text match and line proximity to the
+      ;; :layouter call.  Store as a map from def line to form text.
+      (var layouter-anon-by-line {})
       (each [_ def (ipairs (or ff.definitions []))]
         (when (and (= def.kind :fn) (= def.name "<anonymous>")
-                   (anonymous-def-is-layouter-callback? def layouter-call-forms))
-          (tset layouter-anon-def-forms def.form true)))
+                   (anonymous-def-is-layouter-callback? def layouter-call-records))
+          (tset layouter-anon-by-line (or def.line 0) def.form)))
+      ;; Build sorted list of all fn definitions for enclosure resolution
+      (var all-fn-defs (build-def-line-map ff.definitions))
       ;; Check each call
       (each [_ call (ipairs (or ff.calls []))]
         (when (callee-is-forbidden-setter? call.callee)
           (let [efn (or call.enclosing-fn "")]
             (when (or (. layouter-names efn)
-                      ;; Anonymous: only flag if the enclosing definition is a
-                      ;; verified layouter callback (its form text appears in a
-                      ;; :layouter call form), not just nearby.
+                      ;; Anonymous: find the actual enclosing definition by
+                      ;; line, and flag only if that definition is a verified
+                      ;; layouter callback.
                       (and (= efn "<anonymous>")
                            (not (next layouter-names))
-                           (let [call-form (or call.form "")]
-                             (var in-layouter-anon false)
-                             (each [def-form _ (pairs layouter-anon-def-forms)]
-                               (when (and (not in-layouter-anon)
-                                          (string.find def-form call-form 1 true))
-                                 (set in-layouter-anon true)))
-                             in-layouter-anon)))
+                           (let [enclosing-def (find-enclosing-fn-def all-fn-defs (or call.line 0))]
+                             (and enclosing-def
+                                  (= enclosing-def.name "<anonymous>")
+                                  (. layouter-anon-by-line enclosing-def.line)
+                                  (string.find (or enclosing-def.form "")
+                                               (or call.form "") 1 true)))))
               (table.insert diagnostics
                 (Diagnostics.violation
                   {:constraint-id "layout.no-setters-in-layouters"
