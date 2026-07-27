@@ -23,26 +23,41 @@
   (or (= n :cleanup) (= n :teardown) (= n :shutdown) (= n :unload) (= n :drop)
       (and n (or (n:match "^disconnect%-") (n:match "^unsubscribe%-")))))
 
+(fn count-newlines [s]
+  "Count the number of newline characters in s."
+  (var n 0)
+  (each [_ _ (s:gmatch "\n")]
+    (set n (+ n 1)))
+  n)
+
 (fn has-loop-cleanup? [ff]
-  "Check if any function definition contains a loop construct AND an actual
-  extracted cleanup call form appears inside that function — real evidence
-  of handler-record loop cleanup, not cleanup-like text in strings/comments."
-  (var found false)
-  ;; Collect the form texts of actual extracted cleanup calls
-  (var cleanup-forms [])
-  (each [_ call (ipairs (or ff.calls []))]
-    (when (and (cleanup-call? call.callee) call.form)
-      (table.insert cleanup-forms call.form)))
-  ;; Only set found if a loop function contains an actual cleanup call form
+  "Check if any function definition contains a loop construct AND a real
+  cleanup call falls within its line range — structured by call location
+  (line number), not raw text substring matching.  This prevents false
+  suppression when a loop merely prints or comments about a cleanup call."
+  ;; Build line ranges for functions that contain loop constructs.
+  (var loop-fn-ranges [])
   (each [_ def (ipairs (or ff.definitions []))]
-    (when (and (not found) (= def.kind :fn) def.form)
-      (let [form def.form]
-        (when (or (form:find "each " 1 true) (form:find "for " 1 true)
-                  (form:find "icollect " 1 true))
-          (each [_ cf (ipairs cleanup-forms)]
-            (when (and (not found) (form:find cf 1 true))
-              (set found true)))))))
-  found)
+    (when (and (= def.kind :fn) def.form
+               (or (def.form:find "each " 1 true)
+                   (def.form:find "for " 1 true)
+                   (def.form:find "icollect " 1 true)))
+      (let [end-line (+ def.line (count-newlines def.form))]
+        (table.insert loop-fn-ranges {:start def.line :end end-line}))))
+  ;; Check by line range: a real cleanup call fact whose line falls
+  ;; inside a loop-bearing function.
+  (if (= (length loop-fn-ranges) 0)
+      false
+      (do
+        (var found false)
+        (each [_ call (ipairs (or ff.calls []))]
+          (when (and (not found) (cleanup-call? call.callee) call.line)
+            (each [_ r (ipairs loop-fn-ranges)]
+              (when (and (not found)
+                         (>= call.line r.start)
+                         (<= call.line r.end))
+                (set found true)))))
+        found)))
 
 (fn event-registration-cleanup-rule-run [ctx]
   (var diagnostics [])

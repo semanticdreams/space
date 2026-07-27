@@ -588,6 +588,11 @@
   (local rules (Lifecycle.rules))
   (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
   (assert rule "rule should be in rules list")
+  ;; ARP: string contains the EXACT text of the cleanup call form,
+  ;; so old substring matching in has-loop-cleanup? would incorrectly
+  ;; match it.  New line-range matching correctly ignores it because
+  ;; the real cleanup call at line 20 falls outside the loop function
+  ;; range [line 30, end].
   (local ff (make-file-fact {:path "/src/bad-module.fnl"
                              :module "bad-module"
                              :definitions [{:kind :fn
@@ -597,7 +602,7 @@
                                             :length 20
                                             :form "(fn log-reminder []
   (each [_ x (ipairs items)]
-    (print \"call :disconnect when done\")))"}]
+    (print \"(some-obj:disconnect handler1)\")))"}]
                              :calls [{:callee "signal-a:connect"
                                       :receiver nil :method nil
                                       :line 10 :column 1
