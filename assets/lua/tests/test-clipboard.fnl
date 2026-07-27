@@ -5,17 +5,41 @@
       (set (. package.loaded "gl") previous-gl)
       (set (. package.loaded "gl") nil)))
 
-(fn real-clipboard-available? []
+(fn clipboard-skip-error? [err-str]
+  ;; Deterministically skip only when SDL video subsystem is unavailable
+  ;; (headless/no-display). Do not mask real clipboard failures.
+  (or (err-str:find "SDL video subsystem required")
+      (err-str:find "video subsystem required")))
+
+(fn probe-clipboard []
   (local previous-gl (. package.loaded "gl"))
   (set (. package.loaded "gl") nil)
-  (local (require-ok real-gl) (pcall require :gl))
-  (restore-gl previous-gl)
-  (and require-ok real-gl real-gl.clipboard-set real-gl.clipboard-get))
+  (local (require-ok real-gl-or-err) (pcall require :gl))
+  (if (not require-ok)
+      (do
+        (restore-gl previous-gl)
+        (error (.. "clipboard tests: require gl failed: " (tostring real-gl-or-err))))
+      (let [real-gl real-gl-or-err]
+        (if (not (and real-gl.clipboard-set real-gl.clipboard-get))
+            (do
+              (restore-gl previous-gl)
+              (error "clipboard tests: real gl module missing clipboard-set/get"))
+            (let [(probe-ok probe-err) (pcall #(real-gl.clipboard-set ":probe:"))]
+              (restore-gl previous-gl)
+              (if probe-ok
+                  :available
+                  (let [err-str (tostring probe-err)]
+                    (if (clipboard-skip-error? err-str)
+                        (do
+                          (io.stderr:write (.. "[SKIP] clipboard tests: " err-str "\n"))
+                          (io.stderr:flush)
+                          :skip)
+                        (error (.. "clipboard tests: clipboard probe failed unexpectedly: " err-str))))))))))
 
-(local have-real-clipboard (real-clipboard-available?))
+(local clipboard-status (probe-clipboard))
 
 (fn with-real-gl [body]
-  (assert have-real-clipboard "real GL clipboard unavailable; tests should be skipped")
+  (assert (not (= clipboard-status :skip)) "real GL clipboard unavailable; tests should be skipped")
   (local previous-gl (. package.loaded "gl"))
   (set (. package.loaded "gl") nil)
   (local (_ real-gl) (pcall require :gl))
@@ -25,7 +49,7 @@
   (when (not ok)
     (error err)))
 
-(when have-real-clipboard
+(when (= clipboard-status :available)
   (fn clipboard-set-does-not-raise-stale-wayland-error []
     (with-real-gl
       (fn [gl]
