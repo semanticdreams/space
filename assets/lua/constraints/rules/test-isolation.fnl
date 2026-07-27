@@ -37,8 +37,10 @@
   (let [end-line (+ def.line form-lines)]
     (and (>= line def.line) (<= line end-line))))
 
-(fn find-containing-fn-defs [definitions line]
+(fn find-containing-fn-defs [definitions line col]
   "Find all fn definitions that contain the given line.
+   col is optional; when two definitions share the same start line,
+   the one with the later column (closer to col) is sorted first.
    Returns a list sorted by start-line descending (innermost first)."
   (var result [])
   (each [_ def (ipairs (or definitions []))]
@@ -50,7 +52,10 @@
     (for [i 1 (- (length result) 1)]
       (let [a (. result i)
             b (. result (+ i 1))]
-        (when (< a.line b.line)
+        (when (or (< a.line b.line)
+                  (and (= a.line b.line) col
+                       (< a.column b.column)
+                       (<= b.column col)))
           (tset result i b)
           (tset result (+ i 1) a)
           (set sorted false)))))
@@ -90,27 +95,47 @@
 (fn helper-snapshot-covers-path? [fn-form path-text]
   "Check if the snapshot-app-fields call covers the given path.
    Extracts keys from the literal vector argument and verifies path-text
-   starts with one of them.  If keys is a variable, accept as covering
-   since coverage cannot be statically determined."
+   is covered (key maps to app.KEY which is a prefix of path-text).
+   Resolves simple local variable key vectors before falling back."
   (var covers false)
-  ;; For literal vector keys: (snapshot-app-fields [:k1 :k2 ...])
+  (var had-direct-literal false)
+  (var ever-resolved false)
+  ;; First try literal vector keys directly in snapshot call
   (let [vec-pat "%(snapshot%-app%-fields%s+%[(.-)%]%s*[%)%s]"]
+    (each [_ (fn-form:gmatch vec-pat)]
+      (set had-direct-literal true))
     (each [keys-str (fn-form:gmatch vec-pat)]
       (when (not covers)
-        ;; Parse key strings from the vector content.
-        ;; Keys may be bare symbols (:keyword, symbol, or "string").
         (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
           (when (and (not covers) (> (length k) 0))
-            ;; Match if path equals the key, starts with key., or ends with .key
-            (let [key-pat (escape-pattern k)]
-              (when (or (= path-text k)
-                        (path-text:find (.. "^" key-pat "%.") 1 false)
-                        (path-text:find (.. "%." key-pat "$") 1 false))
-                (set covers true))))))))
-  ;; For variable keys: (snapshot-app-fields some-var ...) — accept as valid
+            (local app-key (.. "app." k))
+            (local ekey (escape-pattern app-key))
+            (when (or (= path-text app-key)
+                      (path-text:find (.. "^" ekey "%.") 1 false))
+              (set covers true)))))))
+  ;; Try resolving a local variable: (local VAR [...]) then snapshot-app-fields VAR
   (when (not covers)
     (let [var-pat "%(snapshot%-app%-fields%s+([%w%-_]+)%s*[%)%s]"]
+      (each [v (fn-form:gmatch var-pat)]
+        (let [ev (escape-pattern v)
+              local-pat (.. "%(local%s+" ev "%s+%[(.-)%]")]
+          (each [keys-str (fn-form:gmatch local-pat)]
+            (set ever-resolved true)
+            (when (not covers)
+              (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
+                (when (and (not covers) (> (length k) 0))
+                  (local app-key (.. "app." k))
+                  (local ekey (escape-pattern app-key))
+                  (when (or (= path-text app-key)
+                            (path-text:find (.. "^" ekey "%.") 1 false))
+                    (set covers true))))))))))
+  ;; Fallback: completely unresolved variable keys → accept as covering
+  (when (and (not had-direct-literal) (not ever-resolved) (not covers))
+    (let [var-pat "%(snapshot%-app%-fields%s+([^%]%s]+)%s*[%)%s]"]
+      (var has-var false)
       (each [_ (fn-form:gmatch var-pat)]
+        (set has-var true))
+      (when has-var
         (set covers true))))
   covers)
 
@@ -420,7 +445,7 @@
                 ;; line + column so distinct anonymous fns get distinct groups,
                 ;; even same-line ones.
                 fn-key (if (= fn-name "<anonymous>")
-                         (let [containing (find-containing-fn-defs ff.definitions mutation.line)]
+                         (let [containing (find-containing-fn-defs ff.definitions mutation.line mutation.column)]
                            (if (> (length containing) 0)
                                (let [def (. containing 1)]
                                  (.. fn-name "@" def.line ":" def.column))
@@ -438,13 +463,18 @@
             (when sep
               (let [raw-fn-key (key:sub 1 (- sep 1))
                     path-text (key:sub (+ sep 2))
-                    ;; For anonymous fns with @LINE:COLUMN suffix, extract real fn-name and def-line
+                    ;; For anonymous fns with @LINE:COLUMN suffix, extract real fn-name, def-line, def-col
                     is-anon-key (raw-fn-key:find "<anonymous>@" 1 true)
                     fn-name (if is-anon-key "<anonymous>" raw-fn-key)
                     anon-def-line (if is-anon-key
                                     (let [rest (raw-fn-key:sub 11)]
                                       (tonumber (rest:match "^([0-9]+)")))
-                                    nil)]
+                                    nil)
+                    anon-def-col (if is-anon-key
+                                   (let [rest (raw-fn-key:sub 11)]
+                                     (let [(col-str) (rest:match ":(%d+)$")]
+                                       (if col-str (tonumber col-str) 1)))
+                                   nil)]
                 ;; Find the enclosing function form and its definition line
                 ;; Find the enclosing function form and its definition line
                 (var fn-form nil)
@@ -453,7 +483,9 @@
                   (if (= fn-name "<anonymous>")
                     ;; Anonymous functions: use extracted def-line if available,
                     ;; otherwise fall back to max-line for containment search.
-                    (let [containing (find-containing-fn-defs ff.definitions (if anon-def-line anon-def-line max-line))]
+                    (let [containing (find-containing-fn-defs ff.definitions
+                                     (if anon-def-line anon-def-line max-line)
+                                     (if anon-def-col anon-def-col nil))]
                       (when (> (length containing) 0)
                         (let [def (. containing 1)]
                           (set fn-form def.form)
@@ -484,10 +516,14 @@
                   ;; Pattern 3: parent function wrapper for anonymous functions.
                   ;; Uses byte-position containment to handle identical form text.
                   (when (and (not has-restoration) (= fn-name "<anonymous>"))
-                    (let [containing (find-containing-fn-defs ff.definitions fn-def-line)]
+                    (let [containing (find-containing-fn-defs ff.definitions fn-def-line (if anon-def-col anon-def-col nil))]
                       (when (> (length containing) 1)
                         (let [parent (. containing 2)
-                              anon-byte (find-mutation-approx-byte parent.form parent.line fn-def-line)]
+                              anon-def (. containing 1)
+                              anon-line-byte (find-mutation-approx-byte parent.form parent.line fn-def-line)
+                              ;; Adjust for column: line-start byte + (col - 1) gives
+                              ;; approximate fn start position within the parent form.
+                              anon-byte (+ anon-line-byte (math.max 0 (- (or anon-def.column 1) 1)))]
                           (when (anon-byte-inside-wraf-body? parent.form anon-byte)
                             (set has-restoration true))))))
                   ;; Determine whether the mutation is inside a pcall body.

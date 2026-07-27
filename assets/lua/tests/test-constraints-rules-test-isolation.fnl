@@ -1066,6 +1066,153 @@
           "variable-key with-restored-app-fields wrapper should be recognized"))
 
 ;; ======================================================================
+;; V2-1: same-line anonymous, column-aware definition matching
+;; ======================================================================
+
+(fn mutation-restoration-flags-same-line-leak-when-first-restores []
+  "V2-1: Two same-line anonymous fns. First restores app.engine,
+   second leaks app.engine. Column-aware grouping must not collapse them."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-same-line-reverse"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 200
+                                             :form "(fn test-same-line-reverse []
+  (fn [] (let [orig app.engine] (set app.engine new) (set app.engine orig))) (fn [] (set app.engine leaky)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 3
+                                             :length 70
+                                             :form "(fn [] (let [orig app.engine] (set app.engine new) (set app.engine orig)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 75
+                                             :length 30
+                                             :form "(fn [] (set app.engine leaky))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 20
+                                           :form "(set app.engine new)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 50
+                                           :form "(set app.engine orig)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 85
+                                           :form "(set app.engine leaky)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for leaking anon when first restores")
+  (assert (> (length result) 0) "should have at least one diagnostic for the same-line leak"))
+
+;; ======================================================================
+;; V2-2: parent wrapper column-adjusted byte position
+;; ======================================================================
+
+(fn mutation-restoration-flags-same-line-sibling-outside-wrapper []
+  "V2-2: Parent wraps one anon, sibling anon on same line outside wrapper.
+   Column-adjusted byte position must correctly place sibling outside."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-same-line-sibling"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 200
+                                             :form "(fn test-same-line-sibling []
+  (with-restored-app-fields [:engine] (fn [] (set app.engine wrapped))) (fn [] (set app.engine unwrapped)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 40
+                                             :length 40
+                                             :form "(fn [] (set app.engine wrapped))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 82
+                                             :length 40
+                                             :form "(fn [] (set app.engine unwrapped))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 48
+                                           :form "(set app.engine wrapped)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 90
+                                           :form "(set app.engine unwrapped)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for same-line unwrapped sibling")
+  (local engine-diags [])
+  (each [_ d (ipairs result)]
+    (when (and d.evidence (= d.evidence.global-path "app.engine"))
+      (table.insert engine-diags d)))
+  (assert (> (length engine-diags) 0)
+          "unwrapped same-line sibling should be flagged"))
+
+;; ======================================================================
+;; V2-3: snapshot subpath coverage and variable key resolution
+;; ======================================================================
+
+(fn mutation-restoration-allows-snapshot-covering-subpath []
+  "V2-3: snapshot [:engine] should cover app.engine.audio (subpath coverage)."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-subpath-coverage"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-subpath-coverage []
+  (local snap (snapshot-app-fields [:engine]))
+  (set app.engine.audio mock-audio)
+  (restore-app-fields! snap))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine" "audio"]
+                                           :line 8 :column 1
+                                           :form "(set app.engine.audio mock-audio)"
+                                           :enclosing-fn "test-subpath-coverage"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "snapshot [:engine] should cover app.engine.audio subpath"))
+
+(fn mutation-restoration-flags-variable-key-snapshot-missing-field []
+  "V2-3: Variable key list [:activity-registry] should be resolved from local;
+   mutating app.engine (not in the resolved keys) should still be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-var-key-missing"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-var-key-missing []
+  (local my-keys [:activity-registry])
+  (local snap (snapshot-app-fields my-keys))
+  (set app.engine custom-engine)
+  (restore-app-fields! snap))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 9 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "test-var-key-missing"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag engine mutation when variable keys only cover activity-registry")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -1145,6 +1292,10 @@
 (table.insert tests {:name "R1-2r2 allows snapshot covering path" :fn mutation-restoration-allows-snapshot-covering-path})
 (table.insert tests {:name "R1-3r2 flags identical-form sibling" :fn mutation-restoration-flags-identical-anon-form-not-inside-wrapper})
 (table.insert tests {:name "V1-1 allows variable-key wraf wrapper" :fn mutation-restoration-allows-variable-key-wraf-wrapper})
+(table.insert tests {:name "V2-1 flags same-line leak when first restores" :fn mutation-restoration-flags-same-line-leak-when-first-restores})
+(table.insert tests {:name "V2-2 flags same-line sibling outside wrapper" :fn mutation-restoration-flags-same-line-sibling-outside-wrapper})
+(table.insert tests {:name "V2-3 allows snapshot covering subpath" :fn mutation-restoration-allows-snapshot-covering-subpath})
+(table.insert tests {:name "V2-3 flags var-key snapshot missing field" :fn mutation-restoration-flags-variable-key-snapshot-missing-field})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
