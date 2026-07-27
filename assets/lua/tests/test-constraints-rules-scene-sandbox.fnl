@@ -278,6 +278,10 @@
                              :requires [{:module "runtime"
                                          :line 10 :column 1
                                          :form "(require :runtime)"}]
+                             :accesses [{:path ["runtime" "scene"]
+                                         :text "runtime.scene"
+                                         :line 11 :column 1
+                                         :form "runtime.scene"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -431,6 +435,57 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should produce diagnostics")
   (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn sandbox-contract-flags-missing-runtime-scene-access []
+  "sandbox-activity-unit with all calls and runtime require but no runtime.scene access should produce diagnostic."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.sandbox-activation-contract"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
+                             :module "sandbox-activity-unit"
+                             :requires [{:module "runtime"
+                                         :line 10 :column 1
+                                         :form "(require :runtime)"}]
+                             ;; No runtime.scene access — should be flagged
+                             :accesses []
+                             :calls [{:callee "scene:ensure-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 20 :column 1
+                                      :form "(scene:ensure-activity-slot \"sandbox\")"}
+                                     {:callee "scene:activate-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 21 :column 1
+                                      :form "(scene:activate-activity-slot \"sandbox\")"}
+                                     {:callee "ctx:set-surface-state!"
+                                      :receiver nil :method nil
+                                      :line 22 :column 1
+                                      :form "(ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})"}
+                                     {:callee "ctx:set-preferred-interaction-surface!"
+                                      :receiver nil :method nil
+                                      :line 23 :column 1
+                                      :form "(ctx:set-preferred-interaction-surface! :scene)"}
+                                     {:callee "ctx:set-root-actions!"
+                                      :receiver nil :method nil
+                                      :line 24 :column 1
+                                      :form "(ctx:set-root-actions! sandbox-root-actions)"}
+                                     {:callee "ctx:set-target-enabled!"
+                                      :receiver nil :method nil
+                                      :line 25 :column 1
+                                      :form "(ctx:set-target-enabled! sandbox-target-enabled?)"}
+                                     {:callee "ctx:set-update!"
+                                      :receiver nil :method nil
+                                      :line 26 :column 1
+                                      :form "(ctx:set-update! sandbox-activity-update)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for missing runtime.scene access")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  ;; Verify at least one diagnostic mentions runtime.scene
+  (var found false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.required-access "runtime.scene")
+      (set found true)))
+  (assert found "should flag missing runtime.scene access"))
 
 (fn sandbox-contract-flags-wrong-require-module []
   "sandbox-activity-unit requiring 'not-runtime' instead of 'runtime' should produce diagnostic."
@@ -732,6 +787,8 @@
                      :fn sandbox-contract-flags-missing-set-surface-state})
 (table.insert tests {:name "sandbox-activation-contract flags wrong require module"
                      :fn sandbox-contract-flags-wrong-require-module})
+(table.insert tests {:name "sandbox-activation-contract flags missing runtime.scene access"
+                     :fn sandbox-contract-flags-missing-runtime-scene-access})
 (table.insert tests {:name "sandbox-activation-contract flags wrong ensure slot id"
                      :fn sandbox-contract-flags-wrong-ensure-slot-id})
 (table.insert tests {:name "sandbox-activation-contract flags canvas not hidden"
@@ -747,7 +804,8 @@
 
 (fn runner-rules-executable []
   "SceneSandbox.rules() entries must be executable by constraints.runner.run.
-  Tests both static rules (in full runner mode) and verifies rule structure for all."
+  Runs static rules through the runner with synthetic data, and separately runs
+  the scenario rule through the runner with baseline-data false."
   (local SceneSandbox (require :constraints.rules.scene-sandbox))
   (local ConstraintRunner (require :constraints.runner))
   (local rules (SceneSandbox.rules))
@@ -769,11 +827,21 @@
   (assert (= result.status :pass) (.. "expected :pass status, got " result.status))
   (assert (= (length result.diagnostics) 0)
           (.. "expected 0 diagnostics, got " (length result.diagnostics)))
-  ;; Also verify the runner can resolve the scenario rule's :fn field
+  ;; Run the scenario rule through the runner — it uses Scenarios.with-test-app internally.
+  ;; The scenario rule ignores facts, just needs a target to satisfy the runner contract.
   (local scenario-rule (find-rule-by-id rules "scene.active-render-context-routing"))
   (assert scenario-rule "scenario rule should exist")
   (assert (= (type scenario-rule.fn) :function) "scenario rule should have :fn")
-  (assert (= (type scenario-rule.run) :function) "scenario rule should have :run"))
+  (assert (= (type scenario-rule.run) :function) "scenario rule should have :run")
+  (local scenario-result (ConstraintRunner.run {:rules [scenario-rule]
+                                                 :target {:kind :repo :name :test}
+                                                 :baseline-data false}))
+  (assert scenario-result "scenario runner should return a result table")
+  (assert (= (type scenario-result.status) :string) "scenario result should have a status")
+  (assert (= scenario-result.status :pass)
+          (.. "expected scenario :pass, got " scenario-result.status))
+  (assert (= (length scenario-result.diagnostics) 0)
+          (.. "expected 0 scenario diagnostics, got " (length scenario-result.diagnostics))))
 
 (table.insert tests {:name "runner recognizes scene sandbox rules"
                      :fn runner-rules-executable})

@@ -208,6 +208,36 @@
          :evidence {:required-require "runtime"}
          :hint "add (local runtime (require :runtime)) to sandbox-activity-unit.fnl"}))))
 
+(fn access-matches-scene-path? [access]
+  "Check whether an access record matches a runtime.scene path.
+  Recognises paths ending in [...]/scene where the parent segment is
+  runtime, world-runtime, or active-world-runtime."
+  (let [p (or access.path [])
+        plen (length p)]
+    (and (>= plen 2)
+         (= (. p plen) "scene")
+         (or (= (. p (- plen 1)) "runtime")
+             (= (. p (- plen 1)) "world-runtime")
+             (= (. p (- plen 1)) "active-world-runtime")))))
+
+(fn check-sandbox-uses-runtime-scene [diagnostics ff]
+  "Check that sandbox-activity-unit.fnl accesses runtime.scene (or equivalent
+  world-runtime.scene / app.active-world-runtime.scene)."
+  (var found false)
+  (each [_ a (ipairs (or ff.accesses []))]
+    (when (access-matches-scene-path? a)
+      (set found true)))
+  (when (not found)
+    (table.insert diagnostics
+      (Diagnostics.violation
+        {:constraint-id "scene.sandbox-activation-contract"
+         :family "scene-sandbox"
+         :message "sandbox-activity-unit.fnl must access runtime.scene (world-runtime.scene)"
+         :file ff.path
+         :line 0 :column 0
+         :evidence {:required-access "runtime.scene"}
+         :hint "ensure sandbox activation obtains and uses runtime.scene / world-runtime.scene"}))))
+
 (fn check-single-contract-call [diagnostics ff req]
   "Check a single required call in sandbox-activity-unit.fnl.
   When validate-arg is set, checks that the first string/keyword argument matches.
@@ -271,6 +301,7 @@
     (each [_ ff (ipairs (or fact-db.files []))]
       (when (path-contains? ff.path "sandbox-activity-unit.fnl")
         (check-sandbox-requires-runtime diagnostics ff)
+        (check-sandbox-uses-runtime-scene diagnostics ff)
         (each [_ req (ipairs sandbox-contract-required-calls)]
           (check-single-contract-call diagnostics ff req))))
     (if (> (length diagnostics) 0) diagnostics nil)))
