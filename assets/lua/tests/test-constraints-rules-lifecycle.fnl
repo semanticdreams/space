@@ -589,7 +589,8 @@
 
 (fn mutation-restoration-allows-test-file-with-restoration []
   "A test file that mutates a sensitive global but has restoration evidence
-  should pass."
+  should pass. The fact extractor records ALL set/tset forms as mutations,
+  including the restore write, so facts.mutations includes both."
   (local TestIsolation (require :constraints.rules.test-isolation))
   (local rules (TestIsolation.rules))
   (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
@@ -610,6 +611,11 @@
                                           :path ["app" "renderers"]
                                           :line 8 :column 1
                                           :form "(set app.renderers custom)"
+                                          :enclosing-fn "test-with-restore"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 10 :column 1
+                                          :form "(set app.renderers orig)"
                                           :enclosing-fn "test-with-restore"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "test file with restoration should pass"))
@@ -640,7 +646,9 @@
   (assert (= result nil) "test file with with-restored-app-fields should pass"))
 
 (fn mutation-restoration-allows-pcall-cleanup-restore []
-  "A test file using pcall for cleanup restoration should pass."
+  "A test file using pcall for cleanup restoration should pass.
+  The fact extractor records ALL set/tset forms as mutations,
+  including the restore write, so facts.mutations includes both."
   (local TestIsolation (require :constraints.rules.test-isolation))
   (local rules (TestIsolation.rules))
   (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
@@ -662,6 +670,11 @@
                                           :path ["app" "renderers"]
                                           :line 10 :column 1
                                           :form "(set app.renderers custom)"
+                                          :enclosing-fn "test-pcall-restore"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 12 :column 1
+                                          :form "(set app.renderers orig)"
                                           :enclosing-fn "test-pcall-restore"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "test file with pcall cleanup restore should pass"))
