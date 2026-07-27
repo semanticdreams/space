@@ -101,28 +101,26 @@
         {:padding false}))
 
     (fn build-content []
-      (local show-dock?
+      (local builders [(FlexChild (build-feature-rail) 0)])
+      (local show-activity-panel?
         (and app.canvas
              (= app.active-interaction-surface :canvas)
              (= app.canvas-visible? true)))
-      (if (not show-dock?)
-          nil
-          (do
-            (local builders [(FlexChild (build-feature-rail) 0)])
-            (local left-dock-builder (current-left-dock-builder))
-            (when left-dock-builder
-              (set active-dock-entity (left-dock-builder ctx))
-              (when active-dock-entity
-                (table.insert builders
-                              (FlexChild
-                                (fn [_inner-ctx]
-                                  active-dock-entity)
-                                0))))
-            ((Flex {:axis 1
-                    :spacing 0
-                    :yalign :stretch
-                    :children builders})
-             ctx))))
+      (when show-activity-panel?
+        (local left-dock-builder (current-left-dock-builder))
+        (when left-dock-builder
+          (set active-dock-entity (left-dock-builder ctx))
+          (when active-dock-entity
+            (table.insert builders
+                          (FlexChild
+                            (fn [_inner-ctx]
+                              active-dock-entity)
+                            0)))))
+      ((Flex {:axis 1
+              :spacing 0
+              :yalign :stretch
+              :children builders})
+       ctx))
 
     (fn rebuild-children! []
       (drop-content!)

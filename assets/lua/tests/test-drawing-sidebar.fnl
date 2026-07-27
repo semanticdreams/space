@@ -712,6 +712,64 @@
       (set app.activity-registry original-registry)
       (set app.activities-changed original-signal))))
 
+(fn activity-dock-always-shows-feature-rail-in-scene-mode []
+  (with-sidebar-env
+    (fn []
+      (with-controller
+        (fn [controller]
+          (local original-controller app.drawing-controller)
+          (set app.drawing-controller controller)
+
+          ;; Activate drawing activity to ensure left-dock-builder is available
+          (set-activity-id "drawing")
+
+          ;; Switch to scene mode before creating dock
+          (set app.active-interaction-surface :scene)
+          (set app.canvas-visible? false)
+
+          ;; Create dock - should still show feature rail
+          (local dock ((ActivityDockView {}) (make-ctx)))
+          (dock.layout:measurer)
+
+          ;; Feature rail should still be visible (> 0 measurement)
+          (local scene-width (. dock.layout.measure 1))
+          (assert (> scene-width 0)
+                  "activity dock should show feature rail even in scene mode")
+
+          ;; Content should exist (not nil)
+          (local content-layout (. dock.layout.children 1))
+          (assert content-layout "activity dock should have content layout even in scene mode")
+
+          ;; Feature rail (FlexChild) should be present as first child
+          (local rail-flex-child (. content-layout.children 1))
+          (assert rail-flex-child "feature rail FlexChild should be present in scene mode")
+
+          ;; Activity-specific panel should NOT be present
+          (local activity-panel-child (. content-layout.children 2))
+          (assert (not activity-panel-child)
+                  "activity-specific panel should not be present in scene mode")
+
+          ;; Switch back to canvas mode
+          (set-interaction-surface :canvas)
+          (dock:update)
+          (dock.layout:measurer)
+
+          ;; Width should increase (activity panel added)
+          (local canvas-width (. dock.layout.measure 1))
+          (assert (> canvas-width scene-width)
+                  "activity dock should widen when switching to canvas")
+
+          ;; Activity panel should now be present
+          (local updated-content (. dock.layout.children 1))
+          (local updated-activity-panel (. updated-content.children 2))
+          (assert updated-activity-panel
+                  "activity-specific panel should be present after switching to canvas")
+
+          (dock:drop)
+          (set app.drawing-controller original-controller))))))
+
+(table.insert tests {:name "Activity dock always shows feature rail in scene mode"
+                     :fn activity-dock-always-shows-feature-rail-in-scene-mode})
 (table.insert tests {:name "Drawing sidebar expands in drawing activity"
                      :fn sidebar-width-reflects-active-activity-id})
 (table.insert tests {:name "Drawing sidebar width follows panel measure"
