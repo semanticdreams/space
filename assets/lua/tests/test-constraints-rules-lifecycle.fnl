@@ -1104,6 +1104,54 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should flag restore-inside-pcall-body"))
 
+(fn mutation-restoration-flags-two-pcalls-second-mutates-in-body-restore []
+  "A function with two pcalls both using (fn [] ...) — the first is unrelated
+   and the second mutates app.renderers then restores inside its own pcall body.
+   The restore inside the second pcall body is NOT cleanup, because it runs
+   only when the protected call succeeds. The first unrelated pcall should not
+   cause the rule to miss the violation in the second pcall."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  ;; form:
+  ;; (fn test-two-pcalls-in-body-restore []
+  ;;   (let [orig app.renderers]
+  ;;     (pcall (fn [] (do-unrelated)))               ; first pcall — unrelated
+  ;;     (pcall (fn []                                 ; second pcall — mutates + in-body restore
+  ;;       (set app.renderers custom)
+  ;;       (set app.renderers orig)))))
+  ;; The restore is inside the second pcall body — NOT cleanup — should be flagged.
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-two-pcalls-in-body-restore"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 250
+                                            :form "(fn test-two-pcalls-in-body-restore []
+  (let [orig app.renderers]
+    (pcall (fn [] (do-unrelated)))
+    (pcall (fn []
+      (set app.renderers custom)
+      (set app.renderers orig)))))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 9 :column 1
+                                          :form "(set app.renderers custom)"
+                                          :enclosing-fn "test-two-pcalls-in-body-restore"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 10 :column 1
+                                          :form "(set app.renderers orig)"
+                                          :enclosing-fn "test-two-pcalls-in-body-restore"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for two pcalls with in-body restore in second")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag two-pcalls-second-in-body-restore"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -1279,6 +1327,8 @@
                      :fn mutation-restoration-flags-pcall-pre-restore-then-mutate})
 (table.insert tests {:name "mutation-restoration flags pcall restore inside pcall body"
                      :fn mutation-restoration-flags-pcall-restore-inside-pcall-body})
+(table.insert tests {:name "mutation-restoration flags two pcalls second in-body restore"
+                     :fn mutation-restoration-flags-two-pcalls-second-mutates-in-body-restore})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"

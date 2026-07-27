@@ -105,30 +105,75 @@
                               (lua :break)))))))))
           found))))
 
-(fn find-pcall-body-end-byte [fn-form]
-  "Find the byte position of the closing paren for the pcall's protected
-   function body. Locates (fn [...] within (pcall (fn [...] and returns
-   the byte position of the matching close paren, or nil if not found."
-  (let [(pcall-start) (string.find fn-form "pcall" 1 true)]
-    (when pcall-start
-      ;; Look for (fn pattern after pcall start
-      (let [(fn-start) (string.find fn-form "%(fn[%s%)]" pcall-start false)]
-        (when fn-start
-          ;; Find matching close paren for this fn form
-          (var depth 1)
-          (var pos (+ fn-start 4))
-          (var end-pos nil)
-          (while (and (> depth 0) (<= pos (length fn-form)))
-            (let [ch (fn-form:sub pos pos)]
-              (if (= ch "(") (set depth (+ depth 1))
-                  (= ch ")") (do (set depth (- depth 1))
-                                 (when (= depth 0)
-                                   (set end-pos pos)))
-                  ;; Skip string literals to avoid false parens inside strings
-                  (= ch "\"") (let [end-quote (fn-form:find "\"" (+ pos 1) true)]
-                                (when end-quote (set pos end-quote)))))
-            (set pos (+ pos 1)))
-          end-pos)))))
+(fn find-all-pcall-fn-ranges [fn-form]
+  "Find all (pcall (fn [...] ...)) forms and return their fn body byte ranges.
+   Returns a list of {:fn-start :fn-end} where fn-start is the byte position
+   of the '(' before 'fn' and fn-end is the matching close paren of the fn form.
+   Skips pcall calls that don't have a (fn [...] body (e.g. (pcall some-fn))."
+  (var ranges [])
+  (var search-pos 1)
+  (while search-pos
+    (let [(pcall-start) (string.find fn-form "pcall" search-pos true)]
+      (if pcall-start
+          (let [(fn-start) (string.find fn-form "%(fn[%s%)]" pcall-start false)]
+            (if fn-start
+                ;; Got a pcall with an inner fn — find its closing paren
+                (do
+                  (var depth 1)
+                  (var pos (+ fn-start 4))
+                  (var end-pos nil)
+                  (while (and (> depth 0) (<= pos (length fn-form)))
+                    (let [ch (fn-form:sub pos pos)]
+                      (if (= ch "(") (set depth (+ depth 1))
+                          (= ch ")") (do (set depth (- depth 1))
+                                         (when (= depth 0)
+                                           (set end-pos pos)))
+                          (= ch "\"") (let [end-quote (fn-form:find "\"" (+ pos 1) true)]
+                                        (when end-quote (set pos end-quote)))))
+                    (set pos (+ pos 1)))
+                  (if end-pos
+                      (do
+                        (table.insert ranges {:fn-start fn-start :fn-end end-pos})
+                        (set search-pos (+ end-pos 1)))
+                      (set search-pos (+ pcall-start 5))))
+                ;; pcall without (fn [...] — skip past this pcall
+                (set search-pos (+ pcall-start 5))))
+          (set search-pos nil))))
+  ranges)
+
+(fn find-mutation-approx-byte [fn-form fn-def-line target-line]
+  "Convert a file line number to an approximate byte position in the form text.
+   The form text starts at fn-def-line in the file, so position 1 corresponds
+   to fn-def-line. Each newline in the form text advances the file line by 1.
+   Returns the byte position after the newline that reaches target-line,
+   or 1 if target-line equals fn-def-line."
+  (if (<= target-line fn-def-line) 1
+      (do
+        (var byte-pos 1)
+        (var current-line fn-def-line)
+        (var search-pos 1)
+        (while (and (< current-line target-line) search-pos (<= search-pos (length fn-form)))
+          (let [(nl-pos) (string.find fn-form "\n" search-pos true)]
+            (if nl-pos
+                (do
+                  (set current-line (+ current-line 1))
+                  (set search-pos (+ nl-pos 1))
+                  (set byte-pos (+ nl-pos 1)))
+                (set search-pos nil))))
+        byte-pos)))
+
+(fn find-enclosing-pcall-end-byte [fn-form fn-def-line max-mutation-line pcall-ranges]
+  "Find the end byte of the pcall fn body that encloses the mutation position.
+   Uses the max mutation line to approximate the mutation byte position in the
+   form text, then checks which pcall body range (if any) contains it.
+   Returns the :fn-end byte of the enclosing pcall body, or nil if the mutation
+   is not inside any pcall body."
+  (let [mutation-byte (find-mutation-approx-byte fn-form fn-def-line max-mutation-line)]
+    (var enclosing-end nil)
+    (each [_ range (ipairs pcall-ranges)]
+      (when (and (<= range.fn-start mutation-byte) (>= range.fn-end mutation-byte))
+        (set enclosing-end range.fn-end)))
+    enclosing-end))
 
 (fn has-concrete-restore-after-byte? [fn-form fn-def-line path min-byte]
   "Check for concrete restore evidence at a byte position >= min-byte.
@@ -219,21 +264,25 @@
                   ;; Pattern 1: with-restored-app-fields (explicit)
                   (when (string.find fn-form "with-restored-app-fields" 1 true)
                     (set has-restoration true))
-                  ;; Pattern 2: direct snapshot table restore (order-aware)
-                  ;; Skip when pcall is present — Pattern 3 handles pcall-specific ordering
-                  (let [has-pcall (string.find fn-form "pcall" 1 true)]
-                    (when (and (not has-restoration) (not has-pcall))
+                  ;; Determine whether the mutation is inside a pcall body.
+                  ;; When it is, the restore must be outside/after that specific
+                  ;; pcall body (Pattern 3). When it is not, the standard
+                  ;; line-based ordering check applies (Pattern 2).
+                  (let [pcall-ranges (find-all-pcall-fn-ranges fn-form)
+                        enclosing-pcall-end (find-enclosing-pcall-end-byte fn-form fn-def-line max-line pcall-ranges)]
+                    ;; Pattern 2: direct snapshot table restore (order-aware)
+                    ;; Only when the mutation is NOT inside a pcall body — if it
+                    ;; is inside, Pattern 3 handles the pcall-specific ordering.
+                    (when (and (not has-restoration) (not enclosing-pcall-end))
                       (when (has-concrete-restore-after-line? fn-form fn-def-line path-segments max-line)
                         (set has-restoration true)))
                     ;; Pattern 3: pcall cleanup restore (order-aware)
-                    ;; For pcall: the restore must be outside/after the pcall-protected body,
-                    ;; not inside it. Find the end of the inner fn form and require
-                    ;; the restore after that line.
-                    (when (and (not has-restoration) has-pcall)
-                      (let [pcall-body-end-byte (find-pcall-body-end-byte fn-form)]
-                        (when pcall-body-end-byte
-                          (when (has-concrete-restore-after-byte? fn-form fn-def-line path-segments pcall-body-end-byte)
-                            (set has-restoration true)))))))
+                    ;; The mutation is inside a pcall body, so the restore must be
+                    ;; outside/after that specific pcall body's closing paren,
+                    ;; not inside the protected mutation path.
+                    (when (and (not has-restoration) enclosing-pcall-end)
+                      (when (has-concrete-restore-after-byte? fn-form fn-def-line path-segments enclosing-pcall-end)
+                        (set has-restoration true)))))
                 ;; Emit diagnostic if no valid restoration found
                 (when (not has-restoration)
                   (tset diagnosed key true)
