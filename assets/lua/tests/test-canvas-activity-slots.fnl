@@ -298,6 +298,58 @@
 (table.insert tests {:name "Canvas retained activity slot themes update"
                      :fn retained-activity-slot-themes-update})
 
+;; --- Task 2: Canvas slot presentation targets ---
+
+(fn empty-canvas-slot-exposes-no-presentation-target []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (canvas:ensure-activity-slot "graph")
+  (canvas:activate-activity-slot "graph")
+  (assert (= (canvas:presentation-target) nil)
+          "An empty canvas slot must not expose a render target")
+  (drop-fixture fixture))
+
+(fn canvas-activity-slots-own-independent-cameras []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (local graph-camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local drawing-camera (Camera {:position (glm.vec3 25 0 100)}))
+  (local graph-slot (canvas:ensure-activity-slot "graph" {:camera graph-camera}))
+  (local drawing-slot (canvas:ensure-activity-slot "drawing" {:camera drawing-camera}))
+  (canvas:activate-activity-slot "graph")
+  (graph-slot:expose-render-target! {})
+  (assert (= (. (canvas:presentation-target) :camera) graph-camera))
+  (canvas:activate-activity-slot "drawing")
+  (drawing-slot:expose-render-target! {})
+  (assert (= (. (canvas:presentation-target) :camera) drawing-camera))
+  (graph-camera:set-position (glm.vec3 77 0 100))
+  (assert (= drawing-camera.position.x 25)
+          "Updating graph camera must not move drawing camera")
+  (graph-camera:drop)
+  (drawing-camera:drop)
+  (drop-fixture fixture))
+
+(fn canvas-slot-state-captures-camera-per-activity []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (local graph-camera (Camera {:position (glm.vec3 11 22 33)}))
+  (local slot (canvas:ensure-activity-slot "graph" {:camera graph-camera}))
+  (canvas:activate-activity-slot "graph")
+  (slot:expose-render-target! {})
+  (local state (canvas:capture-activity-slot-state "graph"))
+  (assert (= (. state.camera.position 1) 11))
+  (assert (= (. state.camera.position 2) 22))
+  (assert (= (. state.camera.position 3) 33))
+  (graph-camera:drop)
+  (drop-fixture fixture))
+
+(table.insert tests {:name "Task 2: empty canvas slot exposes no presentation target"
+                     :fn empty-canvas-slot-exposes-no-presentation-target})
+(table.insert tests {:name "Task 2: canvas activity slots own independent cameras"
+                     :fn canvas-activity-slots-own-independent-cameras})
+(table.insert tests {:name "Task 2: canvas slot state captures camera per activity"
+                     :fn canvas-slot-state-captures-camera-per-activity})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

@@ -10,6 +10,7 @@
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
 (local array->vec3 (. MathUtils :array->vec3))
+(local array->quat (. MathUtils :array->quat))
 (local default-world-scale 1.0)
 (local default-scale-factor 1.0)
 (local panel-depth-layer-step 8)
@@ -420,14 +421,18 @@
          render-ctx.get-text-ssbo-draw-list
          (render-ctx:get-text-ssbo-draw-list)))
 
-  (fn ensure-activity-slot [_canvas activity-id]
+  (fn ensure-activity-slot [_canvas activity-id opts]
     (assert (= (type activity-id) :string)
             "Canvas.ensure-activity-slot requires string activity id")
     (assert (> (# activity-id) 0)
             "Canvas.ensure-activity-slot requires non-empty activity id")
     (local existing (. self.activity-slots activity-id))
     (if existing
-        existing
+        (do
+          (local options (or opts {}))
+          (when options.camera
+            (existing:set-camera options.camera))
+          existing)
         (do
           (local slot-layout-root (LayoutRoot))
           (local slot
@@ -441,11 +446,13 @@
              :pointer-target nil
              :float nil
              :panel-restorers {}
-             :camera camera
+             :camera nil
+             :render-target-spec nil
              :default-panel-location "float"
              :root nil
              :visible? false
              :interactive? false})
+          (local options (or opts {}))
           (set slot.pointer-target (make-slot-pointer-target slot))
           (set slot.ctx (make-slot-build-context slot slot-layout-root))
           (set slot.build-context slot.ctx)
@@ -526,6 +533,23 @@
                    (slot-self.float:drop)
                    (set slot-self.float nil))
                  true))
+          (set slot.set-camera
+               (fn [slot-self camera]
+                 (set slot-self.camera camera)
+                 slot-self))
+          (set slot.expose-render-target!
+               (fn [slot-self opts]
+                 (assert slot-self.camera
+                         "Canvas slot expose-render-target! requires a camera on the slot")
+                 (local options (or opts {}))
+                 (set slot-self.render-target-spec options)
+                 slot-self))
+          (set slot.clear-render-target!
+               (fn [slot-self]
+                 (set slot-self.render-target-spec nil)
+                 slot-self))
+          (when options.camera
+            (slot:set-camera options.camera))
           (slot:deactivate)
           (set (. self.activity-slots activity-id) slot)
           slot)))
@@ -644,6 +668,120 @@
       (self.focus-manager:detach self.focus-scope)
       (set self.focus-scope nil)))
 
+  (fn presentation-target [self]
+    (local slot self.active-activity-slot)
+    (when (and slot slot.visible? slot.render-target-spec slot.camera)
+      {:kind :canvas
+       :surface self
+       :slot slot
+       :camera slot.camera
+       :projection self.projection
+       :get-view-matrix (fn [] (slot.camera:get-view-matrix))
+       :get-lighting-view-state (fn []
+                                  (LightingViewState.orthographic
+                                    (glm.vec3 0.0 0.0 1.0)))
+       :get-render-contexts (fn [] [slot.ctx])
+       :screen-pos-ray (fn [_target pos opts]
+                         (local options (or opts {}))
+                         (when (not options.view)
+                           (set options.view (slot.camera:get-view-matrix)))
+                         (when (not options.projection)
+                           (set options.projection self.projection))
+                         (self:screen-pos-ray pos options))}))
+
+  (fn capture-activity-slot-state [_canvas activity-id]
+    (assert (= (type activity-id) :string)
+            "Canvas.capture-activity-slot-state requires string activity id")
+    (local slot (. self.activity-slots activity-id))
+    (assert slot
+            (.. "Canvas.capture-activity-slot-state no slot for activity " activity-id))
+    (local camera-state
+      (if slot.camera
+          {:position (vec3->array slot.camera.position)
+           :rotation (quat->array slot.camera.rotation)}
+          nil))
+    (local panels [])
+    (each [_ metadata (ipairs (or (and slot.float slot.float.children) []))]
+      (local persistence (and metadata metadata.persistence))
+      (when persistence
+        (local record (clone-table persistence))
+        (local kind record.kind)
+        (assert (= (type kind) :string)
+                "Canvas.capture-activity-slot-state panel persistence requires string :kind")
+        (local layout-state (capture-panel-layout-state metadata))
+        (assert layout-state
+                (.. "Canvas.capture-activity-slot-state missing layout for panel kind: " kind))
+        (set record.layer "float")
+        (set record.position layout-state.position)
+        (set record.rotation layout-state.rotation)
+        (set record.size layout-state.size)
+        (table.insert panels record)))
+    {:camera camera-state
+     :scale_factor self.scale-factor
+     :panels panels})
+
+  (fn restore-activity-slot-state [_canvas activity-id state]
+    (assert (= (type activity-id) :string)
+            "Canvas.restore-activity-slot-state requires string activity id")
+    (local slot (. self.activity-slots activity-id))
+    (assert slot
+            (.. "Canvas.restore-activity-slot-state no slot for activity " activity-id))
+    (local payload (or state {}))
+    (local camera-state (or payload.camera {}))
+    (when (and slot.camera camera-state.position)
+      (local (ok position) (pcall array->vec3 camera-state.position))
+      (if (and ok (safe-vec3? position))
+          (slot.camera:set-position position)
+          (logging.warn "[canvas] invalid persisted slot camera position; keeping current value")))
+    (when (and slot.camera camera-state.rotation)
+      (local (ok rotation) (pcall array->quat camera-state.rotation))
+      (if ok
+          (slot.camera:set-rotation rotation)
+          (logging.warn "[canvas] invalid persisted slot camera rotation; keeping current value")))
+    (local scale-factor (or payload.scale_factor payload.scale-factor))
+    (if (finite-number? scale-factor)
+        (self:set-scale-factor scale-factor)
+        (when (not (= scale-factor nil))
+          (logging.warn "[canvas] invalid persisted scale factor; keeping current value")))
+    (local panels (or payload.panels []))
+    (assert (= (type panels) :table) "Canvas.restore-activity-slot-state requires :panels table")
+    (each [_ panel (ipairs panels)]
+      (assert (= (type panel) :table) "Canvas.restore-activity-slot-state panel entries must be tables")
+      (local kind panel.kind)
+      (assert (= (type kind) :string) "Canvas.restore-activity-slot-state panel kind must be a string")
+      (local restorer (resolve-slot-panel-restorer slot panel))
+      (restorer panel))
+    true)
+
+  (fn resolve-slot-panel-restorer [slot panel]
+    (local kind panel.kind)
+    (local registered-record (. slot.panel-restorers kind))
+    (local registered (and registered-record registered-record.restore))
+    (if registered
+        registered
+        (do
+          (local module-name panel.restorer-module)
+          (assert (= (type module-name) :string)
+                  (.. "Canvas.restore-activity-slot-state panel kind "
+                      kind
+                      " requires string :restorer-module or registered restorer"))
+          (local (ok module-or-error) (pcall require module-name))
+          (assert ok
+                  (.. "Canvas.restore-activity-slot-state failed requiring panel restorer module "
+                      module-name
+                      ": "
+                      (tostring module-or-error)))
+          (local module module-or-error)
+          (local restore (and module module.restore))
+          (assert (= (type restore) :function)
+                  (.. "Canvas.restore-activity-slot-state module "
+                      module-name
+                      " must export function :restore"))
+          (fn [payload]
+            (restore {:canvas self
+                      :target slot
+                      :panel payload})))))
+
   (set self.get-view-matrix get-view-matrix)
   (set self.get-lighting-view-state get-lighting-view-state)
   (set self.get-triangle-vector get-triangle-vector)
@@ -672,6 +810,9 @@
   (set self.capture-state capture-state)
   (set self.restore-state restore-state)
   (set self.restore-shell-state restore-shell-state)
+  (set self.presentation-target presentation-target)
+  (set self.capture-activity-slot-state capture-activity-slot-state)
+  (set self.restore-activity-slot-state restore-activity-slot-state)
   (set self.screen-pos-ray screen-pos-ray)
   (set self.update-projection update-projection)
   (set self.set-scale-factor set-scale-factor)
