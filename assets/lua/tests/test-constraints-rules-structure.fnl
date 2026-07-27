@@ -763,6 +763,53 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "or after escaped quote inside string should not be flagged"))
 
+;; R1-2 round 3: escaped backslash before closing quote
+(fn style-doctrine-allows-let-in-string-ending-with-backslash []
+  "A Fennel string ending with an escaped backslash before the closing
+  quote (\\\\\\\" in source: escaped backslash + terminator) should
+  properly close the string. (let ...) inside the string must not be flagged."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  ;; def.form contains a string ending with \\\\\" (source: \\ then \")
+  ;; The bytes in def.form: ... \"contains (let stuff) end \\\\\" ...
+  ;; The \\\\ is an escaped backslash, \" is the closing quote (not escaped)
+  (local ff (make-file-fact {:path "/src/backslash-term.fnl"
+                              :module "backslash-term"
+                              :definitions [{:kind :fn
+                                             :name "helper"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 30
+                                             :form "(fn helper []
+  \"contains (let stuff) end \\\\\")"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "let inside string ending with escaped backslash should not be flagged"))
+
+(fn style-doctrine-allows-or-in-string-ending-with-backslash []
+  "A Fennel string ending with an escaped backslash before the closing
+  quote should properly close. (or ...) inside the string must not be flagged."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/backslash-or.fnl"
+                              :module "backslash-or"
+                              :definitions [{:kind :fn
+                                             :name "helper"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 30
+                                             :form "(fn helper []
+  \"before (or x y) tail \\\\\")"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "or inside string ending with escaped backslash should not be flagged"))
+
 ;; ======================================================================
 ;; R1-3: Real Source/Facts integration — parse valid and invalid Fennel source
 ;; ======================================================================
@@ -1011,6 +1058,10 @@
                      :fn style-doctrine-allows-let-text-after-escaped-quote})
 (table.insert tests {:name "style-doctrine allows or text after escaped quote"
                      :fn style-doctrine-allows-or-text-after-escaped-quote})
+(table.insert tests {:name "style-doctrine allows let in string ending with backslash"
+                     :fn style-doctrine-allows-let-in-string-ending-with-backslash})
+(table.insert tests {:name "style-doctrine allows or in string ending with backslash"
+                     :fn style-doctrine-allows-or-in-string-ending-with-backslash})
 
 ;; Structure metadata
 (table.insert tests {:name "structure rules returns table with five rules"
