@@ -205,8 +205,30 @@
   (set (. runtime.activity-cameras.canvas activity-id) camera)
   camera)
 
+(fn ensure-activity-canvas-controls! [runtime activity-id camera]
+  "Create or reuse CanvasControls for a canvas activity slot.  The controls
+   are stored in runtime.activity-controls.canvas[activity-id] and returned.
+   The camera must be the slot camera for correct pan/zoom behaviour."
+  (assert runtime "ensure-activity-canvas-controls! requires runtime")
+  (assert (= (type activity-id) :string)
+          "ensure-activity-canvas-controls! requires string activity-id")
+  (assert runtime.activity-controls
+          "ensure-activity-canvas-controls! requires runtime.activity-controls")
+  (when (not runtime.activity-controls.canvas)
+    (set runtime.activity-controls.canvas {}))
+  (local existing (. runtime.activity-controls.canvas activity-id))
+  (when existing
+    (lua "return existing"))
+  (assert camera "ensure-activity-canvas-controls! requires a camera")
+  (local controls
+    (CanvasControls {:canvas runtime.canvas
+                     :camera camera}))
+  (set (. runtime.activity-controls.canvas activity-id) controls)
+  controls)
+
 {:load-runtime-canvas-surface! load-runtime-canvas-surface!
  :drop-runtime-canvas-surface! drop-runtime-canvas-surface!
  :capture-runtime-canvas-unit-state capture-runtime-canvas-unit-state
  :restore-runtime-canvas-unit-state! restore-runtime-canvas-unit-state!
- :ensure-activity-canvas-camera! ensure-activity-canvas-camera!}
+ :ensure-activity-canvas-camera! ensure-activity-canvas-camera!
+ :ensure-activity-canvas-controls! ensure-activity-canvas-controls!}

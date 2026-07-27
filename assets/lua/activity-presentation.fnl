@@ -45,10 +45,22 @@
             "screen ray target does not support screen-pos-ray")
     (target:screen-pos-ray pos opts))
 
+  (fn resolve-active-slot-controls [surface-key]
+    "Return the controls stored for the currently active slot on the given surface."
+    (let [surface (and runtime runtime.activity-controls (. runtime.activity-controls surface-key))]
+      (when surface
+        (let [slot-id (if (= surface-key :scene)
+                         (and runtime runtime.scene runtime.scene.active-activity-slot-id)
+                         (and runtime runtime.canvas runtime.canvas.active-activity-slot-id))]
+          (when slot-id
+            (. surface slot-id))))))
+
   (fn provider.input-controls [self]
     (if (and app app.canvas-interactive?)
-        runtime.canvas-controls
-        runtime.first-person-controls))
+        (or (resolve-active-slot-controls :canvas)
+            runtime.canvas-controls)
+        (or (resolve-active-slot-controls :scene)
+            runtime.first-person-controls)))
 
   (fn provider.camera [self opts]
     (local options (or opts {}))

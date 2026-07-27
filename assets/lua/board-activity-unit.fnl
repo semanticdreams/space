@@ -8,6 +8,7 @@
 (local BoardView (require :board/view))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
 (local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
+(local ActivityCameraState (require :activity-camera-state))
 
 (local owner {})
 
@@ -53,6 +54,10 @@
       world-runtime
       "board"
       {:position (glm.vec3 0 0 100)}))
+
+  ;; Create or reuse canvas controls bound to the slot camera.
+  (HomeWorldCanvasRuntime.ensure-activity-canvas-controls!
+    world-runtime "board" slot-camera)
 
   ;; Ensure the slot has the camera before activation
   (canvas:ensure-activity-slot "board" {:camera slot-camera})
@@ -216,13 +221,22 @@
 
 (fn snapshot-board-activity! []
   (let [runtime (assert app.active-world-runtime
-                         "Board activity snapshot requires app.active-world-runtime")
+                          "Board activity snapshot requires app.active-world-runtime")
         scene (assert runtime.scene
-                       "Board activity snapshot requires runtime.scene")
-        scene-state (scene:capture-activity-slot-state "board")]
-    {:active? (= (Activities.active-activity-id) "board")
-     :board-state (capture-board-state!)
-     :scene scene-state}))
+                        "Board activity snapshot requires runtime.scene")
+        scene-state (scene:capture-activity-slot-state "board")
+        canvas-camera (and runtime.activity-cameras
+                           runtime.activity-cameras.canvas
+                           (. runtime.activity-cameras.canvas "board"))
+        camera-state (and canvas-camera
+                          (ActivityCameraState.capture-camera canvas-camera))]
+    (local result
+      {:active? (= (Activities.active-activity-id) "board")
+       :board-state (capture-board-state!)
+       :scene scene-state})
+    (when camera-state
+      (set result.canvas-camera camera-state))
+    result))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -233,11 +247,19 @@
   (local state (restore-state-arg first session maybe-state))
   (when (and app.active-world-runtime state state.board-state)
     (set app.active-world-runtime.board-state state.board-state))
+  ;; Restore canvas camera position from persisted session state
+  (when (and state state.canvas-camera
+             app.active-world-runtime
+             app.active-world-runtime.activity-cameras
+             app.active-world-runtime.activity-cameras.canvas)
+    (local camera (. app.active-world-runtime.activity-cameras.canvas "board"))
+    (when camera
+      (ActivityCameraState.restore-camera! camera state.canvas-camera)))
   (when (and state state.scene)
     (let [runtime (assert app.active-world-runtime
-                           "Board activity restore requires app.active-world-runtime")
+                            "Board activity restore requires app.active-world-runtime")
           scene (assert runtime.scene
-                         "Board activity restore requires runtime.scene")]
+                          "Board activity restore requires runtime.scene")]
       (scene:restore-activity-slot-state "board" state.scene)))
   (when (and state state.active?)
     (if (and state.board-state

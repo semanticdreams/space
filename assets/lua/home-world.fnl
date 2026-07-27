@@ -656,6 +656,20 @@
         (set sandbox-scene.camera
              {:position (or camera-state.position [0 0 30])
               :rotation (or camera-state.rotation [1 0 0 0])})))
+    ;; Migrate legacy canvas camera into canvas activity sessions when
+    ;; no per-activity canvas camera exists yet.
+    (let [canvas-camera-state (and world.state world.state.canvas
+                                   world.state.canvas.camera)
+          activity-state (and world.state world.state.activity)
+          sessions (and activity-state activity-state.sessions)]
+      (when (and sessions
+                 (= (type canvas-camera-state) :table))
+        (each [_ activity-id (ipairs [:graph :drawing :board])]
+          (let [session (. sessions activity-id)]
+            (when (and session (= (type session) :table)
+                       (not session.canvas-camera))
+              (set session.canvas-camera
+                   {:position (or canvas-camera-state.position [0 0 100])}))))))
     (when repaired-persisted-state?
       (persist-loaded-state! world)))
 
