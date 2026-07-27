@@ -235,6 +235,36 @@
       (set found-wrong true)))
   (assert found-wrong "should flag call with unexpected non-sandbox id 'drawing'"))
 
+(fn slot-ownership-flags-second-call-after-correct-one []
+  "A graph module with a correct first call and a later incorrect call should still flag the foreign call."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.activity-slot-ownership"))
+  (assert rule "rule should be in rules list")
+  ;; Two ensure-activity-slot calls: first correct ("graph"), second foreign ("sandbox")
+  (local ff (make-file-fact {:path "/lua/graph-activity-unit.fnl"
+                             :module "graph-activity-unit"
+                             :calls [{:callee "scene:ensure-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(scene:ensure-activity-slot \"graph\")"}
+                                     {:callee "scene:ensure-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 20 :column 1
+                                      :form "(scene:ensure-activity-slot \"sandbox\")"}
+                                     {:callee "scene:activate-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 11 :column 1
+                                      :form "(scene:activate-activity-slot \"graph\")"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for foreign call after correct one")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var found-sandbox-flag false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.actual-arg "sandbox")
+      (set found-sandbox-flag true)))
+  (assert found-sandbox-flag "should flag the 'sandbox' call even when a correct 'graph' call exists"))
+
 ;; --- Rule 3: scene.sandbox-activation-contract ---
 
 (fn sandbox-contract-passes-when-all-calls-present []
@@ -245,9 +275,9 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime.scene"
+                             :requires [{:module "runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime.scene)"}]
+                                         :form "(require :runtime)"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -332,9 +362,9 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime.scene"
+                             :requires [{:module "runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime.scene)"}]
+                                         :form "(require :runtime)"}]
                              :calls [{:callee "scene:activate-activity-slot"
                                       :receiver nil :method nil
                                       :line 21 :column 1
@@ -371,9 +401,9 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime.scene"
+                             :requires [{:module "runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime.scene)"}]
+                                         :form "(require :runtime)"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -403,16 +433,16 @@
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
 (fn sandbox-contract-flags-wrong-require-module []
-  "sandbox-activity-unit requiring 'runtime' instead of 'runtime.scene' should produce diagnostic."
+  "sandbox-activity-unit requiring 'not-runtime' instead of 'runtime' should produce diagnostic."
   (local SceneSandbox (require :constraints.rules.scene-sandbox))
   (local rules (SceneSandbox.rules))
   (local rule (find-rule-by-id rules "scene.sandbox-activation-contract"))
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime"
+                             :requires [{:module "not-runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime)"}]
+                                         :form "(require :not-runtime)"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -446,9 +476,9 @@
   (assert (> (length result) 0) "should have at least one diagnostic")
   (var found-require false)
   (each [_ d (ipairs result)]
-    (when (= d.evidence.required-require "runtime.scene")
+    (when (= d.evidence.required-require "runtime")
       (set found-require true)))
-  (assert found-require "should flag missing runtime.scene require"))
+  (assert found-require "should flag missing runtime require"))
 
 (fn sandbox-contract-flags-wrong-ensure-slot-id []
   "sandbox-activity-unit calling ensure-activity-slot with 'graph' should produce diagnostic."
@@ -458,9 +488,9 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime.scene"
+                             :requires [{:module "runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime.scene)"}]
+                                         :form "(require :runtime)"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -506,9 +536,9 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime.scene"
+                             :requires [{:module "runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime.scene)"}]
+                                         :form "(require :runtime)"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -549,9 +579,9 @@
   (assert rule "rule should be in rules list")
   (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
                              :module "sandbox-activity-unit"
-                             :requires [{:module "runtime.scene"
+                             :requires [{:module "runtime"
                                          :line 10 :column 1
-                                         :form "(require :runtime.scene)"}]
+                                         :form "(require :runtime)"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -599,15 +629,42 @@
   (local result (rule.run {:target {:kind :repo :name :test}
                            :facts (make-fact-db [])
                            :files []}))
-  ;; The scenario runs against a real test app; it returns nil on pass
-  ;; or a diagnostics table on violations. Both are valid.
-  (assert (or (= result nil) (= (type result) :table))
-          (.. "scenario rule should return nil or a diagnostics table, got " (type result)))
-  ;; Check that diagnostics (if any) have the correct family
-  (when (and result (> (length result) 0))
-    (each [_ d (ipairs result)]
-      (assert (= d.family "scene-sandbox")
-              "all diagnostics should have family scene-sandbox"))))
+  ;; The real scenario should pass (nil) when the sandbox activation works correctly.
+  (assert (= result nil) (.. "expected scenario to pass (nil), got diagnostics count: " (if result (length result) 0))))
+
+(fn render-context-routing-flags-broken-slot []
+  "The slot-checking helper should produce diagnostics for a nil slot (missing slot),
+  a slot without ctx (missing render context), and a slot without layout-root."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  ;; Use the exported check-scene-slot-routing helper directly
+  (local diagnostics [])
+  ;; Case 1: nil slot → missing slot diagnostic
+  (SceneSandbox.check-scene-slot-routing diagnostics nil)
+  (assert (> (length diagnostics) 0) "should diagnose nil slot")
+  (assert (= (. diagnostics 1 :constraint-id) "scene.active-render-context-routing")
+          "should use correct constraint-id")
+  ;; Case 2: slot without ctx → missing context diagnostic
+  (local d2 [])
+  (SceneSandbox.check-scene-slot-routing d2 {:ctx nil :layout-root true})
+  (assert (> (length d2) 0) "should diagnose missing ctx")
+  (var found-ctx false)
+  (each [_ d (ipairs d2)]
+    (when (d.message:find "ctx" 1 true)
+      (set found-ctx true)))
+  (assert found-ctx "should include diagnostic about missing render context")
+  ;; Case 3: slot without layout-root → missing layout-root diagnostic
+  (local d3 [])
+  (SceneSandbox.check-scene-slot-routing d3 {:ctx true :layout-root nil})
+  (assert (> (length d3) 0) "should diagnose missing layout-root")
+  (var found-lr false)
+  (each [_ d (ipairs d3)]
+    (when (d.message:find "layout root" 1 true)
+      (set found-lr true)))
+  (assert found-lr "should mention layout-root in message")
+  ;; Case 4: healthy slot → no diagnostics
+  (local d4 [])
+  (SceneSandbox.check-scene-slot-routing d4 {:ctx true :layout-root true})
+  (assert (= (length d4) 0) "healthy slot should produce no diagnostics"))
 
 ;; --- Rules list structure tests ---
 
@@ -663,6 +720,8 @@
                      :fn slot-ownership-flags-missing-ensure-call})
 (table.insert tests {:name "activity-slot-ownership flags wrong id (not sandbox)"
                      :fn slot-ownership-flags-wrong-id-not-sandbox})
+(table.insert tests {:name "activity-slot-ownership flags second foreign call after correct one"
+                     :fn slot-ownership-flags-second-call-after-correct-one})
 (table.insert tests {:name "sandbox-activation-contract passes when all calls present"
                      :fn sandbox-contract-passes-when-all-calls-present})
 (table.insert tests {:name "sandbox-activation-contract flags missing requires runtime"
@@ -681,15 +740,18 @@
                      :fn sandbox-contract-flags-wrong-preferred-surface})
 (table.insert tests {:name "active-render-context-routing scenario"
                      :fn active-render-context-routing-scenario})
+(table.insert tests {:name "render-context-routing flags broken slot"
+                     :fn render-context-routing-flags-broken-slot})
 
 ;; --- Runner integration test: verify rules are executable by constraints.runner ---
 
 (fn runner-rules-executable []
-  "SceneSandbox.rules() entries must be executable by constraints.runner.run."
+  "SceneSandbox.rules() entries must be executable by constraints.runner.run.
+  Tests both static rules (in full runner mode) and verifies rule structure for all."
   (local SceneSandbox (require :constraints.rules.scene-sandbox))
   (local ConstraintRunner (require :constraints.runner))
   (local rules (SceneSandbox.rules))
-  ;; Take only static rules (scenario rule needs special setup)
+  ;; Run static rules through the runner with synthetic data
   (local static-rules [])
   (each [_ r (ipairs rules)]
     (when (= r.kind :static)
@@ -706,7 +768,12 @@
   (assert (= (type result.status) :string) "result should have a status")
   (assert (= result.status :pass) (.. "expected :pass status, got " result.status))
   (assert (= (length result.diagnostics) 0)
-          (.. "expected 0 diagnostics, got " (length result.diagnostics))))
+          (.. "expected 0 diagnostics, got " (length result.diagnostics)))
+  ;; Also verify the runner can resolve the scenario rule's :fn field
+  (local scenario-rule (find-rule-by-id rules "scene.active-render-context-routing"))
+  (assert scenario-rule "scenario rule should exist")
+  (assert (= (type scenario-rule.fn) :function) "scenario rule should have :fn")
+  (assert (= (type scenario-rule.run) :function) "scenario rule should have :run"))
 
 (table.insert tests {:name "runner recognizes scene sandbox rules"
                      :fn runner-rules-executable})

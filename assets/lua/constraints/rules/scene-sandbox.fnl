@@ -60,6 +60,14 @@
       (set found c)))
   found)
 
+(fn find-all-calls-with-method [calls callee]
+  "Find all calls with the given callee, returning a list of call records."
+  (var found [])
+  (each [_ c (ipairs calls)]
+    (when (= c.callee callee)
+      (table.insert found c)))
+  found)
+
 (fn form-contains-any? [form patterns]
   "Check if form string contains any of the given literal substrings."
   (var found false)
@@ -115,10 +123,11 @@
 
 (fn check-activity-slot-call [diagnostics ff basename expected-id method-name]
   "Check that the module has the required Scene slot call with the correct id.
-  Flags: missing call, call with wrong id (any id other than expected-id)."
+  Iterates over ALL matching calls: flags any call with wrong id, and
+  separately detects when a required correct call is entirely absent."
   (let [full-method (.. "scene:" method-name)
-        existing-call (find-call-with-method ff.calls full-method)]
-    (if (not existing-call)
+        matching-calls (find-all-calls-with-method ff.calls full-method)]
+    (if (= (length matching-calls) 0)
         ;; Missing the required call entirely
         (table.insert diagnostics
           (Diagnostics.violation
@@ -130,24 +139,25 @@
              :evidence {:missing-call full-method
                         :expected-id expected-id}
              :hint (.. "add (" full-method " \"" expected-id "\") to " basename)}))
-        ;; Call exists — check if the slot id argument matches the expected id
-        (let [arg (extract-string-arg-from-form existing-call.form)]
-          (when (not (= arg expected-id))
-            (table.insert diagnostics
-              (Diagnostics.violation
-                {:constraint-id "scene.activity-slot-ownership"
-                 :family "scene-sandbox"
-                 :message (.. basename " calls " method-name " with \""
-                              (or arg "?") "\" instead of \"" expected-id "\"")
-                 :file ff.path
-                 :line (or existing-call.line 0)
-                 :column (or existing-call.column 0)
-                 :evidence {:call full-method
-                            :form (or existing-call.form "")
-                            :actual-arg (or arg "unknown")
-                            :expected-arg expected-id}
-                 :hint (.. "replace the id argument with \""
-                           expected-id "\" in the " method-name " call")})))))))
+        ;; Calls exist — check each one's slot id argument
+        (each [_ call-rec (ipairs matching-calls)]
+          (let [arg (extract-string-arg-from-form (or call-rec.form ""))]
+            (when (not (= arg expected-id))
+              (table.insert diagnostics
+                (Diagnostics.violation
+                  {:constraint-id "scene.activity-slot-ownership"
+                   :family "scene-sandbox"
+                   :message (.. basename " calls " method-name " with \""
+                                (or arg "?") "\" instead of \"" expected-id "\"")
+                   :file ff.path
+                   :line (or call-rec.line 0)
+                   :column (or call-rec.column 0)
+                   :evidence {:call full-method
+                              :form (or call-rec.form "")
+                              :actual-arg (or arg "unknown")
+                              :expected-arg expected-id}
+                   :hint (.. "replace the id argument with \""
+                             expected-id "\" in the " method-name " call")}))))))))
 
 (fn activity-slot-ownership-rule-run [ctx]
   "Rule: Graph, Drawing, and Board modules must call ensure/activate-activity-slot
@@ -185,17 +195,18 @@
    {:callee "ctx:set-update!" :label "set-update!"}])
 
 (fn check-sandbox-requires-runtime [diagnostics ff]
-  "Check that sandbox-activity-unit.fnl requires the runtime.scene module."
-  (when (not (require-exists? ff.requires "runtime.scene"))
+  "Check that sandbox-activity-unit.fnl requires the runtime module
+  (which provides the runtime.scene / world-runtime.scene namespaces)."
+  (when (not (require-exists? ff.requires "runtime"))
     (table.insert diagnostics
       (Diagnostics.violation
         {:constraint-id "scene.sandbox-activation-contract"
          :family "scene-sandbox"
-         :message "sandbox-activity-unit.fnl must require 'runtime.scene'"
+         :message "sandbox-activity-unit.fnl must require 'runtime' (for runtime.scene)"
          :file ff.path
          :line 0 :column 0
-         :evidence {:required-require "runtime.scene"}
-         :hint "add (local runtime (require :runtime.scene)) to sandbox-activity-unit.fnl"}))))
+         :evidence {:required-require "runtime"}
+         :hint "add (local runtime (require :runtime)) to sandbox-activity-unit.fnl"}))))
 
 (fn check-single-contract-call [diagnostics ff req]
   "Check a single required call in sandbox-activity-unit.fnl.
@@ -268,6 +279,41 @@
 ;; Rule 4: scene.active-render-context-routing
 ;; ---------------------------------------------------------------------------
 
+(fn check-scene-slot-routing [diagnostics slot]
+  "Check that an active Scene activity slot provides render context routing.
+  Accepts a slot table (or nil) and appends diagnostics for missing ctx or layout-root.
+  Exported for testable injection."
+  (when (not slot)
+    (table.insert diagnostics
+      (Diagnostics.violation
+        {:constraint-id "scene.active-render-context-routing"
+         :family "scene-sandbox"
+         :message "no Scene activity slot for sandbox after activation"
+         :file "sandbox-activity-unit.fnl"
+         :line 0 :column 0
+         :evidence {:assertion "scene:activity-slot(\"sandbox\")"}
+         :hint "ensure sandbox activation creates a Scene activity slot via ensure-activity-slot"})))
+  (when (and slot (not slot.ctx))
+    (table.insert diagnostics
+      (Diagnostics.violation
+        {:constraint-id "scene.active-render-context-routing"
+         :family "scene-sandbox"
+         :message "active Scene slot missing render context (ctx)"
+         :file "sandbox-activity-unit.fnl"
+         :line 0 :column 0
+         :evidence {:assertion "slot.ctx render context"}
+         :hint "ensure the Scene slot provides a build context for render vectors"})))
+  (when (and slot (not slot.layout-root))
+    (table.insert diagnostics
+      (Diagnostics.violation
+        {:constraint-id "scene.active-render-context-routing"
+         :family "scene-sandbox"
+         :message "active Scene slot missing layout root for render routing"
+         :file "sandbox-activity-unit.fnl"
+         :line 0 :column 0
+         :evidence {:assertion "slot.layout-root render routing"}
+         :hint "ensure the Scene slot provides a layout root for render routing"}))))
+
 (fn active-render-context-routing-rule-run [ctx]
   "Scenario: verify that the active Scene slot context supplies render vectors."
   (local Scenarios (require :constraints.scenarios))
@@ -301,44 +347,14 @@
       (Activities.activate-activity "sandbox")
 
       ;; Verify: the scene should have an active slot for sandbox
+      ;; with render context (ctx) and layout root for render routing
       (let [slot (scene:activity-slot "sandbox")]
-        (when (not slot)
-          (table.insert diagnostics
-            (Diagnostics.violation
-              {:constraint-id "scene.active-render-context-routing"
-               :family "scene-sandbox"
-               :message "no Scene activity slot for sandbox after activation"
-               :file "sandbox-activity-unit.fnl"
-               :line 0 :column 0
-               :evidence {:assertion "scene:activity-slot(\"sandbox\")"}
-               :hint "ensure sandbox activation creates a Scene activity slot via ensure-activity-slot"})))
-        ;; Verify: the slot should have a build context (render vectors)
-        (when (and slot (not slot.ctx))
-          (table.insert diagnostics
-            (Diagnostics.violation
-              {:constraint-id "scene.active-render-context-routing"
-               :family "scene-sandbox"
-               :message "active Scene slot missing render context (ctx)"
-               :file "sandbox-activity-unit.fnl"
-               :line 0 :column 0
-               :evidence {:assertion "slot.ctx render context"}
-               :hint "ensure the Scene slot provides a build context for render vectors"})))
-        ;; Verify: the slot should have a layout root for render routing
-        (when (and slot (not slot.layout-root))
-          (table.insert diagnostics
-            (Diagnostics.violation
-              {:constraint-id "scene.active-render-context-routing"
-               :family "scene-sandbox"
-               :message "active Scene slot missing layout root for render routing"
-               :file "sandbox-activity-unit.fnl"
-               :line 0 :column 0
-               :evidence {:assertion "slot.layout-root render routing"}
-               :hint "ensure the Scene slot provides a layout root for render routing"})))
+        (check-scene-slot-routing diagnostics slot))
 
       ;; Cleanup
       (scene:drop)
       (camera:drop)
-      (tset app :active-world-runtime nil))))
+      (tset app :active-world-runtime nil)))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 ;; ---------------------------------------------------------------------------
@@ -371,5 +387,7 @@
     :kind :scenario
     :run active-render-context-routing-rule-run
     :fn active-render-context-routing-rule-run}])
+
+(set M.check-scene-slot-routing check-scene-slot-routing)
 
 M
