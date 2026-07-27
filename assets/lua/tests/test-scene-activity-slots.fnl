@@ -1104,6 +1104,87 @@
 (table.insert tests {:name "Task 1: scene presentation target uses slot camera"
                      :fn scene-presentation-target-uses-slot-camera})
 
+;; ── R1-1: active slot without camera fails loudly ────────────────────
+
+(fn active-slot-without-camera-fails-loudly []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (scene:ensure-activity-slot "sandbox")
+  (scene:activate-activity-slot "sandbox")
+  ;; get-view-matrix must fail because the active slot has no camera
+  (local (ok-v err-v) (pcall (fn [] (scene:get-view-matrix))))
+  (assert (not ok-v)
+          "get-view-matrix must fail when active slot has no camera")
+  (assert (string.find (tostring err-v) "requires its own camera" 1 true)
+          (.. "get-view-matrix error must mention missing slot camera, got: "
+              (tostring err-v)))
+  ;; screen-pos-ray must also fail (it delegates to get-view-matrix)
+  (local (ok-s err-s) (pcall (fn [] (scene:screen-pos-ray {:x 100 :y 200}))))
+  (assert (not ok-s)
+          "screen-pos-ray must fail when active slot has no camera")
+  (assert (string.find (tostring err-s) "requires its own camera" 1 true)
+          (.. "screen-pos-ray error must mention missing slot camera, got: "
+              (tostring err-s)))
+  (drop-fixture fixture))
+
+(table.insert tests {:name "R1-1: active slot without camera fails loudly"
+                     :fn active-slot-without-camera-fails-loudly})
+
+;; ── R1-2: presentation target parameter handling and ownership ───────
+
+(fn presentation-target-screen-pos-ray-uses-slot-camera []
+  "R1-2: target:screen-pos-ray must use the slot-owned camera, not
+  the current active Scene camera.  Verify argument handling (receiver
+  parameter) and captured camera/projection ownership."
+  (with-restored-app-fields
+    [:viewport]
+    (fn []
+      (set app.viewport {:x 0 :y 0 :width 800 :height 600})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      ;; Ensure the scene has a valid projection for ray computation
+      (set scene.projection (glm.ortho -40 40 -30 30 -100.0 1000.0))
+      (local slot-camera (Camera {:position (glm.vec3 50 50 100)}))
+      (local slot (scene:ensure-activity-slot "sandbox" {:camera slot-camera}))
+      (scene:activate-activity-slot "sandbox")
+      (slot:expose-render-target! {:layers [:geometry]})
+      (local target (scene:presentation-target))
+      (assert target "presentation-target must return non-nil")
+      (assert target.camera "target must have camera")
+      ;; R1-2a: target:screen-pos-ray must handle receiver parameter correctly.
+      ;; When called as target:screen-pos-ray({:x 10 :y 20}), the first
+      ;; argument is the target object and the second is the pointer.
+      (local ray (target:screen-pos-ray {:x 10 :y 20}))
+      (assert ray "target:screen-pos-ray must return a ray")
+      (assert ray.origin "ray must have origin")
+      (assert ray.direction "ray must have direction")
+      ;; R1-2b: target.get-render-contexts must return slot.ctx
+      (local contexts (target:get-render-contexts))
+      (assert contexts "target:get-render-contexts must return a table")
+      (assert (= (type contexts) :table)
+              "target:get-render-contexts must return a table")
+      (assert (= (length contexts) 1)
+              (.. "expected exactly 1 render context, got " (tostring (length contexts))))
+      (assert (= (. contexts 1) slot.ctx)
+              "target:get-render-contexts must return the slot's ctx, not active-render-context")
+      ;; R1-2c: target:screen-pos-ray must use slot camera, not surface camera.
+      ;; Verify by moving the surface camera away and confirming the ray still
+      ;; uses the slot camera position.
+      (scene:set-camera (Camera {:position (glm.vec3 -999 -999 -999)}))
+      (local ray-after-surface-move (target:screen-pos-ray {:x 10 :y 20}))
+      (assert ray-after-surface-move "ray must still work after surface camera move")
+      (assert ray-after-surface-move.origin "ray origin must exist after surface camera move")
+      ;; The ray origin should be near slot-camera position (50,50,100), not the
+      ;; surface camera at (-999,-999,-999).
+      (assert (< (math.abs (- ray-after-surface-move.origin.x 50)) 200)
+              (.. "ray origin x should be near slot camera 50, got "
+                  (tostring ray-after-surface-move.origin.x)))
+      (slot-camera:drop)
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "R1-2: target screen-pos-ray uses slot camera and context"
+                     :fn presentation-target-screen-pos-ray-uses-slot-camera})
+
 ;; ── R2-1 ──────────────────────────────────────────────────────────────
 
 (fn inactive-capture-uses-authoritative-terrains []

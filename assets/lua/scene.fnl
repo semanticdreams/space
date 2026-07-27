@@ -2079,9 +2079,14 @@
   (set self.camera camera))
 
 (fn resolve-active-camera [self]
-  (or (and self.active-activity-slot
-           self.active-activity-slot.visible?
-           self.active-activity-slot.camera)
+  (if (and self.active-activity-slot
+           self.active-activity-slot.visible?)
+      (do
+        (assert self.active-activity-slot.camera
+                (.. "Active Scene activity slot " 
+                    (tostring self.active-activity-slot.activity-id)
+                    " requires its own camera; no slot camera set"))
+        self.active-activity-slot.camera)
       self.camera))
 
 (fn get-view-matrix [self]
@@ -2105,8 +2110,14 @@
      :projection self.projection
      :get-view-matrix (fn [] (slot.camera:get-view-matrix))
      :get-lighting-view-state (fn [] (LightingViewState.perspective slot.camera.position))
-     :get-render-contexts (fn [] [(active-render-context)])
-     :screen-pos-ray (fn [pos opts] (self:screen-pos-ray pos opts))}))
+     :get-render-contexts (fn [] [slot.ctx])
+     :screen-pos-ray (fn [_target pos opts]
+                       (local options (or opts {}))
+                       (when (not options.view)
+                         (set options.view (slot.camera:get-view-matrix)))
+                       (when (not options.projection)
+                         (set options.projection self.projection))
+                       (self:screen-pos-ray pos options))}))
 
 (fn get-triangle-vector [self]
   (. (active-render-context) :triangle-vector))
