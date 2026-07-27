@@ -923,7 +923,7 @@
                        :camera camera}))
   (set app.scene scene)
   (set app.layout-root scene.layout-root)
-  (scene:ensure-activity-slot "sandbox")
+  (scene:ensure-activity-slot "sandbox" {:camera camera})
   (scene:activate-activity-slot "sandbox")
   (scene:build-default)
 

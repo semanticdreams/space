@@ -353,7 +353,7 @@
                  (when options.containment-config
                    (set app.physics-containment-config options.containment-config))
                   (configure-test-physics-world {:config options.containment-config})
-                  (scene:ensure-activity-slot "sandbox")
+                   (scene:ensure-activity-slot "sandbox" {:camera camera})
                   (local sandbox-slot (scene:activate-activity-slot "sandbox"))
                  (assert sandbox-slot "setup-scene requires a valid sandbox slot after activation")
                  (scene:build-default)
