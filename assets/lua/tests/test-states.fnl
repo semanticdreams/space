@@ -2233,6 +2233,15 @@
   (local original-clickables app.clickables)
   (local original-hoverables app.hoverables)
   (local original-movables app.movables)
+  (local input {:on-key-down (fn [_self _payload]
+                               (set calls.input (+ calls.input 1))
+                               true)
+                :on-mouse-button-down (fn [_self _payload]
+                                        (set calls.input (+ calls.input 1))
+                                        true)})
+  (local states (States {:hud_provider command-hints-hud-provider}))
+  (states:add-state :normal {})
+  (states:set-state :normal)
   (set app.first-person-controls controls)
   (set app.presentation-input-controls (fn [] controls))
   (set app.clickables {:on-mouse-button-down (fn [_self _payload]
@@ -2247,15 +2256,6 @@
   (set app.movables {:on-mouse-motion (fn [_self _payload]
                                         (set calls.movables (+ calls.movables 1)))
                      :drag-active? (fn [_self] false)})
-  (local input {:on-key-down (fn [_self _payload]
-                               (set calls.input (+ calls.input 1))
-                               true)
-                :on-mouse-button-down (fn [_self _payload]
-                                        (set calls.input (+ calls.input 1))
-                                        true)})
-  (local states (States {:hud_provider command-hints-hud-provider}))
-  (states:add-state :normal {})
-  (states:set-state :normal)
   (local (ok err) (pcall (fn []
     (set-app-states! states)
     (InputState.connect-input input)
