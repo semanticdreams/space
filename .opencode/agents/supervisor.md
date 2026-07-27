@@ -150,9 +150,13 @@ ready-to-merge, you must also complete any verification or finishing checks
 required by the active skill or plan (e.g., running tests, validating with
 finishing-a-development-branch). Only report completion / ready-to-merge
 when the tree is clean, changes are committed, and all required checks have
-passed. If you cannot commit, the tree is not clean, or required checks fail,
-report BLOCKED with the exact reason. Never report DONE with uncommitted,
-staged changes, or unsatisfied verification requirements.
+passed. If required validation fails, do not report completion and do not stop
+at the failure summary. Invoke `systematic-debugging`, identify the root cause,
+route any fix through `implementer` → `reviewer` → pass, commit reviewed fixes,
+rerun the failed validation, and restart finishing checks from the top. Report
+BLOCKED only when systematic debugging establishes that the failure cannot be
+resolved without human input, is external/environmental, is unreproducible with
+available evidence, or requires a product/API/data/architecture decision.
 
 ## Your Subagents
 
@@ -221,9 +225,10 @@ When the human asks to build something:
    dispatch `implementer` per task, `reviewer` after each task, `adjudicator`
    at the fix-loop breaker. Maintain the ledger, manage the workspace.
 
-4. Invoke **finishing-a-development-branch** — verify tests, consult project
-   policy, execute the integration action (or present options if no policy),
-   clean up.
+4. Invoke **finishing-a-development-branch** — verify clean tree and required
+   validation, use `systematic-debugging` plus `implementer` → `reviewer` for
+   any validation failure, then consult project policy and execute the
+   integration action only when green.
 
 When the human asks to debug something, invoke **systematic-debugging**.
 
