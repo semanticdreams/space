@@ -1044,6 +1044,10 @@
               ;; partially-built physics bodies but preserve the
               ;; target slot's retained fields and entity ownership.
               (do
+                ;; R6-1: Clear the failed slot's containment manager
+                ;; so containment planes are removed from the Bullet world.
+                (when (and slot slot.physics-containment-manager)
+                  (slot.physics-containment-manager:clear))
                 (when (and self.entity
                            (pcall require :layout-physics-bodies))
                   (local LayoutPhysicsBodies (require :layout-physics-bodies))

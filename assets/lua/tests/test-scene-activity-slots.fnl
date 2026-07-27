@@ -2032,12 +2032,10 @@
   on the corrupt slot to verify rollback resets everything."
   (with-restored-app-fields
     [:lights-state :skybox-state :background-state :renderers
-     :engine :physics-containment-config :physics-containment-scene
-     :__physics-global-containment :lights]
+     :engine :lights]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
-      (local PhysicsContainment (require :physics-containment))
 
       ;; Mock lights — captures the last set state
       (var lights-state {:ambient {:enabled? false :color [0 0 0] :intensity 0.0}
@@ -2057,14 +2055,6 @@
             :set-background-state (fn [_ state] (set background-state state))})
       (set app.engine {:physics {:addRigidBody (fn [_phys _body])
                                   :removeRigidBody (fn [_phys _body])}})
-      ;; Track containment config
-      (var containment-installed? nil)
-      (local orig-ensure-installed PhysicsContainment.ensure-installed)
-      (set PhysicsContainment.ensure-installed
-           (fn [opts]
-             (set containment-installed? (and opts.config opts.config.enabled?))
-             (orig-ensure-installed opts)))
-      (set app.__physics-global-containment nil)
 
       (local fixture (make-scene))
       (local scene fixture.scene)
@@ -2148,12 +2138,15 @@
                    (= (. background-state.color 2) 0.0)
                    (= (. background-state.color 3) 0.0))
               "Background must be reset to default [0 0 0] after rollback")
-      ;;     (d) Containment: disabled
-      (assert (not containment-installed?)
-              "Physics containment must be not-installed/disabled after rollback")
+      ;;     (d) Containment: slot manager must have no active installation
+      ;;         after rollback.  The manager itself survives on the slot but
+      ;;         its planes are removed and config is disabled.
+      (let [sb-mgr sandbox-slot.physics-containment-manager]
+        (assert (or (not sb-mgr) (= sb-mgr.installation nil))
+                "Physics containment must be not-installed/disabled after rollback"))
+      (sandbox-slot.physics-containment-manager:drop)
+      (set sandbox-slot.physics-containment-manager nil)
 
-      ;; Restore PhysicsContainment.ensure-installed
-      (set PhysicsContainment.ensure-installed orig-ensure-installed)
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3c corrupt terrain activation no-previous-slot consistent cleanup"
@@ -2171,14 +2164,12 @@
     slot.scene-terrains) intact
   - Leave the slot invisible/inactive"
   (with-restored-app-fields
-    [:renderers :engine :lights :physics-containment-config
-     :physics-containment-scene :__physics-global-containment
+    [:renderers :engine :lights
      :skybox-state :background-state :lights-state]
     (fn []
       (local SkyboxState (require :skybox-state))
       (local BackgroundState (require :background-state))
       (local LayoutPhysicsBodies (require :layout-physics-bodies))
-      (local PhysicsContainment (require :physics-containment))
       ;; Ensure bt is loaded so physics-available? in layout-physics-bodies resolves
       (pcall require :bt)
 
@@ -2192,10 +2183,9 @@
             :set-background-state (fn [_ state])})
        (set app.lights {:get-state (fn [_] {:ambient {:enabled? false :color [0 0 0] :intensity 0} :directional [] :point [] :spot []})
                         :set-state (fn [_ _state])})
-      ;; Suppress containment
-      (local orig-ensure-installed PhysicsContainment.ensure-installed)
-      (set PhysicsContainment.ensure-installed (fn [_opts] true))
-      (set app.__physics-global-containment nil)
+      ;; Containment is handled by the slot's manager during activation.
+      ;; The slot's scene-state has :containment {:enabled? false}, so the
+      ;; manager will be created with disabled containment — no planes installed.
 
       (local fixture (make-scene))
       (local scene fixture.scene)
@@ -2348,7 +2338,6 @@
 
       ;; Restore mock
       (set LayoutPhysicsBodies.deactivate orig-deactivate)
-      (set PhysicsContainment.ensure-installed orig-ensure-installed)
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3d corrupt activation preserves retained slot content"
