@@ -139,8 +139,12 @@
   (assert (= result.status :violations) (.. "expected :violations, got " (tostring result.status)))
   (assert (= result.counts.total 1) "expected 1 diagnostic")
   (assert (= (# result.diagnostics) 1) "expected 1 diagnostic in list")
-  (assert (= (. (. result.diagnostics 1) :constraint-id) "test-rule")
-          "diagnostic should include constraint-id"))
+  (local d (. result.diagnostics 1))
+  (assert (= (. d :constraint-id) "test-rule") "diagnostic should include constraint-id")
+  ;; R1-2: every emitted diagnostic includes the runner's target
+  (assert (. d :target) "diagnostic should include target")
+  (assert (= (. d :target :kind) :files) "target kind should be files")
+  (assert (= (. d :target :name) "test-target") "target name should be test-target"))
 
 (fn runner-crashing-rule-returns-fail []
   (local Runner (require :constraints.runner))
@@ -151,8 +155,12 @@
   (assert (= result.status :fail) (.. "expected :fail, got " (tostring result.status)))
   (assert (= result.counts.total 1) "expected 1 diagnostic for crashing rule")
   (assert (= (# result.diagnostics) 1) "expected 1 diagnostic in list")
-  (assert (= (. (. result.diagnostics 1) :family) "framework")
-          "crash diagnostic should have family framework"))
+  (local d (. result.diagnostics 1))
+  (assert (= (. d :family) "framework") "crash diagnostic should have family framework")
+  ;; R1-2: framework-failure diagnostic includes the runner's target
+  (assert (. d :target) "crash diagnostic should include target")
+  (assert (= (. d :target :kind) :files) "target kind should be files")
+  (assert (= (. d :target :name) "test-target") "target name should be test-target"))
 
 (fn runner-status-precedence []
   (local Runner (require :constraints.runner))
@@ -225,6 +233,63 @@
   (assert exit-code "expected exit to be called")
   (assert (not= exit-code 0) (.. "violations should exit non-zero, got " (tostring exit-code))))
 
+;; R1-1: Runner.main tolerates nil opts (runtime zero-arg entry point)
+(fn runner-main-handles-nil-opts []
+  (local Runner (require :constraints.runner))
+  ;; The runtime calls module functions with no arguments.
+  ;; Verify Runner.main does not crash when opts is nil.
+  ;; We stub os.exit because the real one would terminate the test process.
+  (var exit-code nil)
+  (local orig-exit os.exit)
+  (tset os :exit (fn [code] (set exit-code code)))
+  (local (ok err) (pcall #(Runner.main)))  ;; nil opts
+  (tset os :exit orig-exit)
+  (assert ok (.. "Runner.main(nil) must not crash, got: " (tostring err)))
+  (assert exit-code "exit should have been called"))
+
+;; R1-3: timeout produces :interrupted status
+(fn runner-timeout-produces-interrupted []
+  (local Runner (require :constraints.runner))
+  ;; A busy-loop rule with a short timeout should be interrupted.
+  (fn busy-rule [_target]
+    ;; Tight loop: keep CPU busy so the timer hook fires
+    (var i 0)
+    (while true
+      (set i (+ i 1))))
+  (local result (Runner.run
+                  {:rules [busy-rule]
+                   :target {:kind :files :name "timeout-test"}
+                   :timeout-seconds 0.1}))
+  (assert (= result.status :interrupted)
+          (.. "expected :interrupted for timed-out rule, got " (tostring result.status)))
+  (assert (= result.counts.total 1) "expected 1 diagnostic for interrupted rule")
+  (assert (= (# result.diagnostics) 1) "expected 1 diagnostic in list")
+  (local d (. result.diagnostics 1))
+  (assert (. d :interrupted) "interrupted diagnostic should have :interrupted flag")
+  (assert (. d :target) "interrupted diagnostic should include target"))
+
+;; R1-3: interrupted wins precedence over fail
+(fn runner-interrupted-precedence-over-fail []
+  (local Runner (require :constraints.runner))
+  (local Diagnostics (require :constraints.diagnostics))
+  ;; A violation rule first, then a timed-out rule. Result should be :interrupted.
+  (fn busy-rule [_target]
+    (var i 0)
+    (while true
+      (set i (+ i 1))))
+  (local result (Runner.run
+                  {:rules [(fn [_target]
+                             (Diagnostics.violation
+                               {:constraint-id "v1"
+                                :family "style"
+                                :message "violation"
+                                :hint "fix"}))
+                           busy-rule]
+                   :target {:kind :files :name "precedence-interrupt"}
+                   :timeout-seconds 0.1}))
+  (assert (= result.status :interrupted)
+          (.. "violations + interrupted should be :interrupted, got " (tostring result.status))))
+
 ;; Register tests
 (table.insert tests {:name "diagnostic violation normalizes fields"
                      :fn diagnostic-violation-normalizes-fields})
@@ -254,6 +319,12 @@
                      :fn runner-main-prints-json-and-exits-zero-on-pass})
 (table.insert tests {:name "runner main prints JSON and exits nonzero on violations"
                      :fn runner-main-prints-json-and-exits-nonzero-on-violations})
+(table.insert tests {:name "runner main handles nil opts (runtime convention)"
+                     :fn runner-main-handles-nil-opts})
+(table.insert tests {:name "runner timeout produces interrupted status"
+                     :fn runner-timeout-produces-interrupted})
+(table.insert tests {:name "runner interrupted precedence over fail"
+                     :fn runner-interrupted-precedence-over-fail})
 
 (local main
   (fn []
