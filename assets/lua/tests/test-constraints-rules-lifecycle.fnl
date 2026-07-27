@@ -389,6 +389,127 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "file with function named disconnect-* should pass"))
 
+;; --- R1-3: handler-record cleanup loops ---
+
+(fn registration-cleanup-allows-loop-cleanup-over-handler-records []
+  "A file with multiple :connect registrations and a single disconnect call
+  inside a loop that iterates over handler records should pass — one loop
+  disconnect covers all stored registrations."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :definitions [{:kind :fn
+                                            :name "cleanup-handlers"
+                                            :top-level? true
+                                            :line 30 :column 1
+                                            :length 20
+                                            :form "(fn cleanup-handlers []
+  (each [_ record (ipairs handlers)]
+    (record.signal:disconnect record.handler true)))"}]
+                             :calls [{:callee "signal-a:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(signal-a:connect handler1)"}
+                                     {:callee "signal-b:connect"
+                                      :receiver nil :method nil
+                                      :line 12 :column 1
+                                      :form "(signal-b:connect handler2)"}
+                                     {:callee "signal-c:connect"
+                                      :receiver nil :method nil
+                                      :line 14 :column 1
+                                      :form "(signal-c:connect handler3)"}
+                                     {:callee "record.signal:disconnect"
+                                      :receiver nil :method nil
+                                      :line 32 :column 1
+                                      :form "(record.signal:disconnect record.handler true)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "loop cleanup over handler records should pass"))
+
+(fn registration-cleanup-allows-loop-cleanup-in-drop-function []
+  "A file with multiple :connect registrations where a function named 'drop'
+  contains an each-loop calling :disconnect should pass — the drop function
+  plus loop cleanup covers all registrations."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :definitions [{:kind :fn
+                                            :name "drop"
+                                            :top-level? true
+                                            :line 30 :column 1
+                                            :length 20
+                                            :form "(fn drop []
+  (each [_ record (ipairs view.handlers)]
+    (record.signal:disconnect record.handler true)))"}]
+                             :calls [{:callee "signal-a:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(signal-a:connect handler1)"}
+                                     {:callee "signal-b:connect"
+                                      :receiver nil :method nil
+                                      :line 12 :column 1
+                                      :form "(signal-b:connect handler2)"}
+                                     {:callee "record.signal:disconnect"
+                                      :receiver nil :method nil
+                                      :line 32 :column 1
+                                      :form "(record.signal:disconnect record.handler true)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "drop function with loop cleanup should pass"))
+
+(fn registration-cleanup-still-flags-no-cleanup-at-all []
+  "A file with :connect registrations and ZERO cleanup calls (even with a
+  function that has an 'each' loop — but no disconnect inside) should still
+  be flagged."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :definitions [{:kind :fn
+                                            :name "do-stuff"
+                                            :top-level? true
+                                            :line 30 :column 1
+                                            :length 10
+                                            :form "(fn do-stuff []
+  (each [_ x (ipairs items)]
+    (print x)))"}]
+                             :calls [{:callee "signal-a:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(signal-a:connect handler)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should still flag registrations with no cleanup calls at all")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
+          "diagnostic should have correct constraint-id"))
+
+(fn registration-cleanup-still-flags-connect-without-any-cleanup []
+  "A bare :connect with no cleanup calls and no loop function should still
+  be flagged — the original positive test must be preserved."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :calls [{:callee "event-system:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(event-system:connect handler)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for connect without cleanup")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
+          "diagnostic should have correct constraint-id"))
+
 (fn registration-cleanup-flags-file-with-partial-cleanup []
   "A file with two registrations but only one cleanup should produce diagnostics
   for the unmatched registration."
@@ -538,15 +659,18 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "file with when-pattern should pass — when is guard, not synthesis"))
 
-(fn required-runtime-allows-if-conditional []
-  "A file that uses if to branch on a sensitive global should NOT be flagged
-  as synthesis by default — if is complex conditional logic, not simple or-synthesis."
+;; --- R1-1: if-based synthesis should still be caught (but benign if branches should not) ---
+
+(fn required-runtime-flags-if-synthesizing-engine []
+  "A function using (if app.engine app.engine (make-debug-engine)) with an else
+  fallback that synthesizes a substitute should still be flagged — this is true
+  top-level sensitive-global fallback synthesis."
   (local Lifecycle (require :constraints.rules.lifecycle))
   (local rules (Lifecycle.rules))
   (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
   (assert rule "rule should be in rules list")
-  (local ff (make-file-fact {:path "/src/good-module.fnl"
-                             :module "good-module"
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
                              :accesses [{:path ["app" "engine"]
                                          :text "app.engine"
                                          :line 5 :column 1
@@ -561,7 +685,65 @@
     app.engine
     (make-debug-engine)))"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert (= result nil) "file with if-pattern should pass — if is conditional, not or-synthesis"))
+  (assert result "should produce diagnostics for if-synthesis pattern")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.required-runtime-fails-loudly")
+          "diagnostic should have correct constraint-id"))
+
+(fn required-runtime-flags-if-synthesizing-renderers []
+  "A function using (if app.renderers app.renderers {}) with an else fallback
+  that synthesizes a default empty table should be flagged."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :accesses [{:path ["app" "renderers"]
+                                         :text "app.renderers"
+                                         :line 5 :column 1
+                                         :form "app.renderers"}]
+                             :definitions [{:kind :fn
+                                            :name "get-renderers"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-renderers []
+  (if app.renderers
+    app.renderers
+    {}))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for if-synthesis of renderers")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.required-runtime-fails-loudly")
+          "diagnostic should have correct constraint-id"))
+
+(fn required-runtime-allows-if-benign-branch []
+  "A function using (if app.engine (process app.engine) (log-missing)) with
+  branching logic but NO synthesis of the global itself should NOT be flagged."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "engine"]
+                                         :text "app.engine"
+                                         :line 5 :column 1
+                                         :form "app.engine"}]
+                             :definitions [{:kind :fn
+                                            :name "maybe-process"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn maybe-process []
+  (if app.engine
+    (process app.engine)
+    (log-missing)))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "benign if branch should not be flagged as synthesis"))
 
 ;; --- Precision: guard patterns should NOT be flagged ---
 
@@ -658,6 +840,84 @@
   (or app.renderers.render-layer 0))"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "renderers subfield default should not be flagged"))
+
+;; --- R1-2: hyphenated sensitive globals must still be matched ---
+
+(fn required-runtime-flags-activity-registry-synthesis []
+  "A function using (or app.activity-registry {}) should be flagged —
+  hyphenated sensitive globals must not evade pattern matching."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :accesses [{:path ["app" "activity-registry"]
+                                         :text "app.activity-registry"
+                                         :line 5 :column 1
+                                         :form "app.activity-registry"}]
+                             :definitions [{:kind :fn
+                                            :name "get-registry"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-registry []
+  (or app.activity-registry {}))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for hyphenated global synthesis")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.required-runtime-fails-loudly")
+          "diagnostic should have correct constraint-id"))
+
+(fn required-runtime-flags-physics-containment-config-synthesis []
+  "A function using (or app.physics-containment-config {}) should be flagged —
+  multiple hyphens in sensitive globals must not break pattern matching."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :accesses [{:path ["app" "physics-containment-config"]
+                                         :text "app.physics-containment-config"
+                                         :line 5 :column 1
+                                         :form "app.physics-containment-config"}]
+                             :definitions [{:kind :fn
+                                            :name "get-config"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-config []
+  (or app.physics-containment-config {}))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for multi-hyphen global synthesis")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.required-runtime-fails-loudly")
+          "diagnostic should have correct constraint-id"))
+
+(fn required-runtime-allows-hyphenated-subfield-default []
+  "Subfield defaults for hyphenated globals should NOT be flagged."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.required-runtime-fails-loudly"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :accesses [{:path ["app" "activity-registry"]
+                                         :text "app.activity-registry"
+                                         :line 5 :column 1
+                                         :form "app.activity-registry"}]
+                             :definitions [{:kind :fn
+                                            :name "get-entry"
+                                            :top-level? true
+                                            :line 3 :column 1
+                                            :length 100
+                                            :form "(fn get-entry []
+  (or app.activity-registry.default-entry {}))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "hyphenated subfield default should not be flagged"))
 
 ;; --- Precision: genuine or-synthesis should still be flagged ---
 
@@ -1467,6 +1727,14 @@
                      :fn registration-cleanup-allows-disconnect-dash-helper-call})
 (table.insert tests {:name "registration-cleanup allows disconnect-dash function name"
                      :fn registration-cleanup-allows-disconnect-dash-function-name})
+(table.insert tests {:name "registration-cleanup allows loop cleanup over handler records"
+                     :fn registration-cleanup-allows-loop-cleanup-over-handler-records})
+(table.insert tests {:name "registration-cleanup allows loop cleanup in drop function"
+                     :fn registration-cleanup-allows-loop-cleanup-in-drop-function})
+(table.insert tests {:name "registration-cleanup still flags no cleanup at all"
+                     :fn registration-cleanup-still-flags-no-cleanup-at-all})
+(table.insert tests {:name "registration-cleanup still flags connect without any cleanup"
+                     :fn registration-cleanup-still-flags-connect-without-any-cleanup})
 (table.insert tests {:name "registration-cleanup flags file with partial cleanup"
                      :fn registration-cleanup-flags-file-with-partial-cleanup})
 
@@ -1481,8 +1749,12 @@
                      :fn required-runtime-flags-file-with-or-synthesizing-sensitive-global})
 (table.insert tests {:name "required-runtime allows when conditional execution"
                      :fn required-runtime-allows-when-conditional-execution})
-(table.insert tests {:name "required-runtime allows if conditional"
-                     :fn required-runtime-allows-if-conditional})
+(table.insert tests {:name "required-runtime flags if synthesizing engine"
+                     :fn required-runtime-flags-if-synthesizing-engine})
+(table.insert tests {:name "required-runtime flags if synthesizing renderers"
+                     :fn required-runtime-flags-if-synthesizing-renderers})
+(table.insert tests {:name "required-runtime allows if benign branch"
+                     :fn required-runtime-allows-if-benign-branch})
 (table.insert tests {:name "required-runtime allows and guard pattern"
                      :fn required-runtime-allows-and-guard-pattern})
 (table.insert tests {:name "required-runtime allows or with and guard"
@@ -1491,6 +1763,12 @@
                      :fn required-runtime-allows-subfield-default})
 (table.insert tests {:name "required-runtime allows renderers subfield default"
                      :fn required-runtime-allows-renderers-subfield-default})
+(table.insert tests {:name "required-runtime flags activity-registry synthesis"
+                     :fn required-runtime-flags-activity-registry-synthesis})
+(table.insert tests {:name "required-runtime flags physics-containment-config synthesis"
+                     :fn required-runtime-flags-physics-containment-config-synthesis})
+(table.insert tests {:name "required-runtime allows hyphenated subfield default"
+                     :fn required-runtime-allows-hyphenated-subfield-default})
 (table.insert tests {:name "required-runtime flags set+or synthesizing global"
                      :fn required-runtime-flags-file-with-set-or-synthesizing-global})
 (table.insert tests {:name "required-runtime flags or synthesizing engine"

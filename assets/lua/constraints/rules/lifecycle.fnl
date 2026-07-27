@@ -8,6 +8,10 @@
   (and s (>= (length s) (length suffix))
        (= (s:sub (- (length s) (- (length suffix) 1))) suffix)))
 
+(fn escape-pattern [s]
+  "Escape all Lua pattern magic characters in s for literal matching."
+  (s:gsub "[%^%$%(%)%%%.%[%]%*%+%-%?]" "%%%1"))
+
 (fn register? [c] (and c (or (= c :register) (= c "app.engine.events.updated:connect") (str-ends-with? c ":connect"))))
 (fn cleanup-call? [c]
   (and c
@@ -18,6 +22,21 @@
 (fn cleanup-fn-name? [n]
   (or (= n :cleanup) (= n :teardown) (= n :shutdown) (= n :unload) (= n :drop)
       (and n (or (n:match "^disconnect%-") (n:match "^unsubscribe%-")))))
+
+(fn has-loop-cleanup? [ff]
+  "Check if any function definition contains both a loop construct and a
+  cleanup call — evidence of handler-record loop cleanup."
+  (var found false)
+  (each [_ def (ipairs (or ff.definitions []))]
+    (when (and (not found) (= def.kind :fn) def.form)
+      (let [form def.form]
+        (when (and (or (form:find "each " 1 true) (form:find "for " 1 true)
+                       (form:find "icollect " 1 true))
+                   (or (form:find ":disconnect" 1 true) (form:find ":drop" 1 true)
+                       (form:find ":clear" 1 true) (form:find ":unregister" 1 true)
+                       (form:find "disconnect%-" 1 true) (form:find "unsubscribe%-" 1 true)))
+          (set found true)))))
+  found)
 
 (fn event-registration-cleanup-rule-run [ctx]
   (var diagnostics [])
@@ -40,7 +59,8 @@
       (when (and (= def.kind :fn) (cleanup-fn-name? def.name))
         (set has-cleanup-fn true)
         (table.insert cleanup-fn-names def.name)))
-    (when (and (> reg-count 0) (= cl-count 0) (not has-cleanup-fn))
+    (var has-loop-cl (has-loop-cleanup? ff))
+    (when (and (> reg-count 0) (= cl-count 0) (not has-cleanup-fn) (not has-loop-cl))
       (table.insert diagnostics
         (Diagnostics.violation
           {:constraint-id "lifecycle.event-registration-cleanup" :family "lifecycle"
@@ -51,7 +71,7 @@
                       :cleanup-forms cl-forms
                       :cleanup-functions cleanup-fn-names}
            :hint "add disconnect, unregister, clear, or drop calls or a cleanup function"})))
-    (when (and (> reg-count cl-count) (> cl-count 0) (not has-cleanup-fn))
+    (when (and (> reg-count cl-count) (> cl-count 0) (not has-cleanup-fn) (not has-loop-cl))
       (table.insert diagnostics
         (Diagnostics.violation
           {:constraint-id "lifecycle.event-registration-cleanup" :family "lifecycle"
@@ -78,29 +98,30 @@
       (each [_ def (ipairs (or ff.definitions []))]
         (when (and (= def.kind :fn) def.form)
           (var matched nil)
-          ;; Check for or-synthesis pattern: (or SENSITIVE_GLOBAL <default>)
-          ;; Use targeted pattern: must have (or <whitespace> GLOBAL <whitespace> <more>),
-          ;; not followed by a dot (which would mean subfield access).
+          ;; Check for or-synthesis and if-synthesis patterns.
+          ;; or-synthesis: (or SENSITIVE_GLOBAL <default>) — not followed by a dot (subfield).
+          ;; if-synthesis: (if SENSITIVE_GLOBAL SENSITIVE_GLOBAL <else>) — classic fallback.
           (each [_ sg (ipairs sensitive)]
             (when (not matched)
-              (let [sg-escaped (sg:gsub "%." "%%.")  ;; escape dots for pattern matching
-                    ;; Match (or GLOBAL followed by whitespace + more args (not just the global alone)
-                    or-pat (.. "%(or%s+" sg-escaped "%s+")]
-                (when (string.find def.form or-pat)
+              (let [sg-escaped (escape-pattern sg)
+                    or-pat (.. "%(or%s+" sg-escaped "%s+")
+                    if-pat (.. "%(if%s+" sg-escaped "%s+" sg-escaped)]
+                (when (or (string.find def.form or-pat)
+                          (string.find def.form if-pat))
                   (set matched sg)))))
           (when matched
             ;; Check for assert/error in the same function — if present, skip
             (var has-assert false)
             (when (or (string.find def.form "assert" 1 true) (string.find def.form "error" 1 true))
               (set has-assert true))
-            (when (not has-assert)
-              (table.insert diagnostics
-                (Diagnostics.violation
-                  {:constraint-id "lifecycle.required-runtime-fails-loudly" :family "lifecycle"
-                   :message (.. "function " (or def.name "<anonymous>") " synthesizes " matched " with or without assert/error")
-                   :file ff.path :line (or def.line 0) :column 0
-                   :evidence {:function-name (or def.name "<anonymous>") :sensitive-global matched}
-                   :hint "Assert required runtime state instead of silently synthesizing canonical state."}))))))))
+             (when (not has-assert)
+               (table.insert diagnostics
+                 (Diagnostics.violation
+                   {:constraint-id "lifecycle.required-runtime-fails-loudly" :family "lifecycle"
+                    :message (.. "function " (or def.name "<anonymous>") " synthesizes " matched " via or/if without assert/error")
+                    :file ff.path :line (or def.line 0) :column 0
+                    :evidence {:function-name (or def.name "<anonymous>") :sensitive-global matched}
+                    :hint "Assert required runtime state instead of silently synthesizing or falling back to a substitute canonical state."}))))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn M.rules []
