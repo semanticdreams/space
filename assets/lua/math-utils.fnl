@@ -33,16 +33,6 @@
   (assert (= (type x) :number) "camera position x must be a number")
   (assert (= (type y) :number) "camera position y must be a number")
   (assert (= (type z) :number) "camera position z must be a number")
-  ;; Pre-validate magnitude to keep exception inside the Lua stack.
-  ;; The C++ glm.vec3 constructor rejects non-finite components and
-  ;; magnitudes > 1e6f (1,000,000).  Mirroring that check here avoids
-  ;; a C++ sol2 "An exception occurred" noise line on stderr that is
-  ;; invisible to the caller but clutters test output.
-  (let [sq (+ (* x x) (* y y) (* z z))]
-    (when (or (not= sq sq)        ; NaN check
-              (= sq math.huge)     ; inf check
-              (> sq 1e12))         ; magnitude > 1e6 (1e6^2 = 1e12)
-      (error "vec3 magnitude exceeds threshold")))
   (glm.vec3 x y z))
 
 (fn array->quat [value]

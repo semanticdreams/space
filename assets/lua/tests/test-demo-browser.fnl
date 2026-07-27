@@ -3343,19 +3343,25 @@
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
   (set logging.warn original-warn)
-  (assert (= (length captured-warnings) 1)
-          (.. "Expected one position-sanitization warning, got "
-              (tostring (length captured-warnings))))
-  (assert (string.find (. captured-warnings 1) "dropping invalid restored panel position")
-          "Expected 'dropping invalid restored panel position' warning")
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
   (local restored-layout (and restored-element restored-element.layout))
+  ;; Guard warning assertions so cleanup always runs before rethrowing.
+  (var assertion-error nil)
+  (let [(aok aerr)
+        (pcall (fn []
+                 (assert (= (length captured-warnings) 1)
+                         (.. "Expected one position-sanitization warning, got "
+                             (tostring (length captured-warnings))))
+                 (assert (string.find (. captured-warnings 1) "dropping invalid restored panel position")
+                         "Expected 'dropping invalid restored panel position' warning")))]
+    (when (not aok) (set assertion-error aerr)))
   (set app.graph-map original-graph-map)
   (map:drop)
   (graph:drop)
   (cleanup)
+  (when assertion-error (error assertion-error))
   (assert ok
           (.. "Expected scene restore to sanitize poisoned positions, got: "
               (tostring err)))
@@ -3396,19 +3402,25 @@
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
   (set logging.warn original-warn)
-  (assert (= (length captured-warnings) 1)
-          (.. "Expected one size-sanitization warning, got "
-              (tostring (length captured-warnings))))
-  (assert (string.find (. captured-warnings 1) "replacing invalid restored panel size")
-          "Expected 'replacing invalid restored panel size' warning")
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
   (local restored-layout (and restored-element restored-element.layout))
+  ;; Guard warning assertions so cleanup always runs before rethrowing.
+  (var assertion-error nil)
+  (let [(aok aerr)
+        (pcall (fn []
+                 (assert (= (length captured-warnings) 1)
+                         (.. "Expected one size-sanitization warning, got "
+                             (tostring (length captured-warnings))))
+                 (assert (string.find (. captured-warnings 1) "replacing invalid restored panel size")
+                         "Expected 'replacing invalid restored panel size' warning")))]
+    (when (not aok) (set assertion-error aerr)))
   (set app.graph-map original-graph-map)
   (map:drop)
   (graph:drop)
   (cleanup)
+  (when assertion-error (error assertion-error))
   (assert ok
           (.. "Expected scene restore to sanitize poisoned sizes, got: "
               (tostring err)))
@@ -3453,17 +3465,23 @@
                                         :size [4 4 4]}]
                               :lights (LightSystemModule.default-state)}))))
   (set logging.warn original-warn)
-  (assert (= (length captured-warnings) 1)
-          (.. "Expected one legacy-panel skip warning, got "
-              (tostring (length captured-warnings))))
-  (assert (string.find (. captured-warnings 1) "skipping restored panel")
-          "Expected 'skipping restored panel' warning")
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
+  ;; Guard warning assertions so cleanup always runs before rethrowing.
+  (var assertion-error nil)
+  (let [(aok aerr)
+        (pcall (fn []
+                 (assert (= (length captured-warnings) 1)
+                         (.. "Expected one legacy-panel skip warning, got "
+                             (tostring (length captured-warnings))))
+                 (assert (string.find (. captured-warnings 1) "skipping restored panel")
+                         "Expected 'skipping restored panel' warning")))]
+    (when (not aok) (set assertion-error aerr)))
   (set app.graph-map original-graph-map)
   (map:drop)
   (graph:drop)
   (cleanup)
+  (when assertion-error (error assertion-error))
   (assert ok
           (.. "Expected scene restore to skip legacy panels without failing, got: "
               (tostring err)))
