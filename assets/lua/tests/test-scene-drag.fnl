@@ -171,9 +171,9 @@
             (assert (approx target-layout.position.x 5.0) "Drag should update layout X position")
             (assert (approx target-layout.position.y 5.5) "Drag should update layout Y position")
             (assert (approx target-layout.position.z 0.0) "Drag should keep layout on the ground plane")
-            (local root scene.layout-root)
-            (assert root "Scene should expose a layout root")
-            (assert (. root.layout-dirt.lookup target-layout) "Drag should mark layout node dirty")
+             (local active-root sandbox-slot.layout-root)
+             (assert active-root "Active sandbox slot should expose a layout root")
+             (assert (. active-root.layout-dirt.lookup target-layout) "Drag should mark layout node dirty")
 
             (app.engine.events.mouse-button-up.emit {:button 1})
             (assert (not (app.movables:drag-active?)) "Drag should end on mouse-up")))]
