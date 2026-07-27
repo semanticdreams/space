@@ -32,18 +32,20 @@
   relative to the first matching module root.
   Returns the original path if no root matches."
   (var module-name file-path)
+  (var found false)
   (each [_ root (ipairs module-roots)]
-    ;; Check if file is under this root (case-insensitive)
-    (let [root-lower (root:lower)
-          file-lower (file-path:lower)
-          root-prefix (.. root "/")]
-      (when (or (= file-lower root-lower)
-                (file-lower:match (.. "^" (root-lower:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1") "/")))
-        (let [relative (if (= (# file-path) (# root))
-                          file-path
-                          (file-path:sub (+ (# root) 2)))]
-          (let [no-ext (relative:gsub "%.fnl$" "")]
-            (set module-name (no-ext:gsub "/" ".")))))))
+    (when (not found)
+      ;; Check if file is under this root (case-insensitive)
+      (let [root-lower (root:lower)
+            file-lower (file-path:lower)]
+        (when (or (= file-lower root-lower)
+                  (file-lower:match (.. "^" (root-lower:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1") "/")))
+          (let [relative (if (= (# file-path) (# root))
+                            file-path
+                            (file-path:sub (+ (# root) 2)))]
+            (let [no-ext (relative:gsub "%.fnl$" "")]
+              (set module-name (no-ext:gsub "/" "."))
+              (set found true)))))))
   module-name)
 
 (fn M.node-text [source node]

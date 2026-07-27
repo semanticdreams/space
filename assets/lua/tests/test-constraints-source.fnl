@@ -249,6 +249,24 @@
     (assert (= r.module "baz.init")
             (.. "expected module 'baz.init', got '" (tostring r.module) "'")))))
 
+(fn source-first-matching-root-wins-for-overlap []
+  "Overlapping module roots: [root, root/foo] with file root/foo/bar.fnl
+  should yield module 'foo.bar' (first match), NOT 'bar' (second overwrite)."
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "foo"))
+    (fs.create-dirs subdir)
+    (make-file subdir "bar.fnl" "(+ 1 2)")
+    ;; Overlapping roots: dir and dir/foo both match
+    (local target {:kind :unit :name "overlap-test"
+                    :roots [dir] :module-roots [dir subdir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert r.module "record should have :module")
+    (assert (= r.module "foo.bar")
+            (.. "expected first-match module 'foo.bar', got '" (tostring r.module) "'")))))
+
 ;; --- Non-Fennel explicit file tests (R1-2) ---
 
 (fn source-files-target-rejects-non-fennel-paths []
@@ -337,6 +355,8 @@
                      :fn source-computes-module-name-from-root})
 (table.insert tests {:name "source computes module name for init.fnl"
                      :fn source-computes-module-name-for-init-fnl})
+(table.insert tests {:name "source first matching root wins for overlap"
+                     :fn source-first-matching-root-wins-for-overlap})
 (table.insert tests {:name "source files target rejects non-fennel paths"
                      :fn source-files-target-rejects-non-fennel-paths})
 (table.insert tests {:name "source files target includes fennel and excludes others"
