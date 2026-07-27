@@ -46,7 +46,8 @@
     (target:screen-pos-ray pos opts))
 
   (fn provider.input-controls [self]
-    runtime.first-person-controls)
+    (or (and app app.canvas-interactive? runtime.canvas-controls)
+        runtime.first-person-controls))
 
   (fn provider.camera [self opts]
     (local options (or opts {}))

@@ -1,4 +1,3 @@
-(local _ (require :main))
 (local glm (require :glm))
 (local BuildContext (require :build-context))
 (local GraphNodeCube (require :graph-node-cube))
@@ -13,8 +12,12 @@
 (fn graph-node-cube-lod-stops-updating-after-drop []
     (RuntimeTimers.clear)
     (local ctx (make-ui-context))
-    (local original-camera app.camera)
-    (set app.camera {:position (glm.vec3 0 0 20)})
+    ;; Install a fake presentation provider with a mutable test camera
+    ;; instead of mutating app.camera directly (presentation-owned camera).
+    (local test-cam {:position (glm.vec3 0 0 20)})
+    (local original-runtime app.active-world-runtime)
+    (set app.active-world-runtime
+         {:presentation {:camera (fn [_self _opts] test-cam)}})
     (local cube
         ((GraphNodeCube {:node {:key "cube-node"
                                 :label "Graph node cube label for lod checks and wrapping"}})
@@ -26,19 +29,19 @@
 
     (local front (. cube.faces 1))
     (local near-scale front.label-text.style.scale)
-    (set app.camera.position (glm.vec3 0 0 600))
+    (set test-cam.position (glm.vec3 0 0 600))
     (app.engine.events.updated:emit 16)
     (local far-scale front.label-text.style.scale)
     (assert (not (= near-scale far-scale))
             "GraphNodeCube should refresh LOD while mounted")
 
     (cube:drop)
-    (set app.camera.position (glm.vec3 0 0 20))
+    (set test-cam.position (glm.vec3 0 0 20))
     (app.engine.events.updated:emit 16)
     (assert (= front.label-text.style.scale far-scale)
             "GraphNodeCube drop should stop background LOD updates")
 
-    (set app.camera original-camera)
+    (set app.active-world-runtime original-runtime)
     (RuntimeTimers.clear))
 
 (table.insert tests {:name "GraphNodeCube LOD stops updating after drop"

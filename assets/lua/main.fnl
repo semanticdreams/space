@@ -1987,12 +1987,14 @@
   (when (not ui-paused)
     (when (and app.world-manager app.world-manager.update)
       (app.world-manager:update delta))
-    (let [audio-cam (app.presentation-camera)]
-      (when (and app.engine.audio audio-cam)
-        (local forward (audio-cam:get-forward))
-        (local up (audio-cam:get-up))
-        (app.engine.audio:setListenerPosition audio-cam.position)
-        (app.engine.audio:setListenerOrientation forward up)))
+    (let [provider (app.active-presentation)]
+      (when (and app.engine.audio provider)
+        (let [audio-cam (provider:audio-listener-camera)]
+          (when audio-cam
+            (local forward (audio-cam:get-forward))
+            (local up (audio-cam:get-up))
+            (app.engine.audio:setListenerPosition audio-cam.position)
+            (app.engine.audio:setListenerOrientation forward up)))))
     (when app.scene
       (run-section "scene" (fn [] (app.scene:update))))
     (when app.canvas
