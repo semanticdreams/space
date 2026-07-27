@@ -523,6 +523,230 @@
           "diagnostic should flag two-pcalls-second-in-body-restore"))
 
 ;; ======================================================================
+;; Precision: wrapper anonymous fn restoration (with-restored-app-fields)
+;; ======================================================================
+
+(fn mutation-restoration-allows-anonymous-fn-wrapped-by-restore-fields []
+  "Mutation inside anonymous fn inside with-restored-app-fields wrapper should pass."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-wrapper-restore"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 200
+                                             :form "(fn test-wrapper-restore []
+  (with-restored-app-fields [:engine :renderers]
+    (fn []
+      (set app.engine new-engine)
+      (set app.renderers custom))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 13 :column 1
+                                             :length 80
+                                             :form "(fn []
+      (set app.engine new-engine)
+      (set app.renderers custom))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 14 :column 1
+                                           :form "(set app.engine new-engine)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "renderers"]
+                                           :line 15 :column 1
+                                           :form "(set app.renderers custom)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "anonymous fn mutation wrapped by with-restored-app-fields in parent should pass"))
+
+(fn mutation-restoration-flags-anonymous-fn-without-wrapper []
+  "Mutation inside anonymous fn without any wrapper should still be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-no-wrapper"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 150
+                                             :form "(fn test-no-wrapper []
+  (fn []
+    (set app.engine new-engine)
+    (set app.renderers custom))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 12 :column 1
+                                           :form "(set app.engine new-engine)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag anonymous fn mutation without wrapper")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
+;; Precision: snapshot/restore helper pair
+;; ======================================================================
+
+(fn mutation-restoration-allows-snapshot-restore-helper-pair []
+  "Test functions using snapshot-app-fields + restore-app-fields! helpers should pass."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-snapshot-helper-pair"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-snapshot-helper-pair []
+  (local app-keys [:activity-registry :engine])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.engine custom-engine)
+  (do-test)
+  (restore-app-fields! app-snapshot))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 8 :column 1
+                                           :form "(set app.activity-registry nil)"
+                                           :enclosing-fn "test-snapshot-helper-pair"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 9 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "test-snapshot-helper-pair"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "snapshot-app-fields + restore-app-fields! helper pair should pass"))
+
+(fn mutation-restoration-flags-snapshot-helper-without-restore []
+  "Test with snapshot-app-fields but without restore-app-fields! should be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-snapshot-no-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn test-snapshot-no-restore []
+  (local app-keys [:activity-registry])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (do-test))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 8 :column 1
+                                           :form "(set app.activity-registry nil)"
+                                           :enclosing-fn "test-snapshot-no-restore"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag snapshot helper without restore call")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
+;; Precision: definition matching by line range for anonymous functions
+;; ======================================================================
+
+(fn mutation-restoration-matches-anonymous-def-by-line []
+  "Multiple anonymous fns in a file: should match the correct one by line containment."
+  (local rule (get-test-isolation-rule))
+  ;; File has two anonymous fns; the first has restoration, the second doesn't.
+  ;; The mutation is in the second, so it should be flagged.
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 1
+                                             :length 80
+                                             :form "(fn []
+  (let [orig app.renderers]
+    (set app.renderers custom1)
+    (set app.renderers orig)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 15 :column 1
+                                             :length 50
+                                             :form "(fn []
+  (set app.engine custom-engine))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 16 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag mutation in anonymous fn at line 16 without restoration")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
+;; Precision: setup/harness narrow exemption
+;; ======================================================================
+
+(fn mutation-restoration-allows-setup-test-env-in-runner []
+  "setup-test-env in runner.fnl is test infrastructure, not per-test mutation."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/home/user/project/assets/lua/tests/runner.fnl"
+                              :module "tests.runner"
+                              :definitions [{:kind :fn
+                                             :name "setup-test-env"
+                                             :top-level? true
+                                             :line 100 :column 1
+                                             :length 200
+                                             :form "(fn setup-test-env [verbose]
+  (set app.engine (Engine {}))
+  (set app.lights (LightSystem {})))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 102 :column 1
+                                           :form "(set app.engine (Engine {}))"
+                                           :enclosing-fn "setup-test-env"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "setup-test-env in runner.fnl should be exempt from test-isolation check"))
+
+(fn mutation-restoration-allows-init-test-app-in-harness []
+  "init-test-app in e2e/harness.fnl is test infrastructure, not per-test mutation."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/home/user/project/assets/lua/tests/e2e/harness.fnl"
+                              :module "tests.e2e.harness"
+                              :definitions [{:kind :fn
+                                             :name "init-test-app"
+                                             :top-level? true
+                                             :line 50 :column 1
+                                             :length 100
+                                             :form "(fn init-test-app []
+  (set app.engine (Engine {:headless true}))
+  (set app.engine.audio {}))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 52 :column 1
+                                           :form "(set app.engine (Engine {:headless true}))"
+                                           :enclosing-fn "init-test-app"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "init-test-app in e2e/harness.fnl should be exempt from test-isolation check"))
+
+(fn mutation-restoration-flags-setup-like-fn-in-other-file []
+  "A setup-like function in a non-infrastructure file should still be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/home/user/project/assets/lua/tests/test-something.fnl"
+                              :module "tests.test-something"
+                              :definitions [{:kind :fn
+                                             :name "setup-test-env"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 100
+                                             :form "(fn setup-test-env []
+  (set app.engine (Engine {})))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 12 :column 1
+                                           :form "(set app.engine (Engine {}))"
+                                           :enclosing-fn "setup-test-env"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag setup-test-env in non-runner file")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -586,6 +810,14 @@
 (table.insert tests {:name "mutation-restoration flags pcall pre-restore then mutate" :fn mutation-restoration-flags-pcall-pre-restore-then-mutate})
 (table.insert tests {:name "mutation-restoration flags pcall restore inside pcall body" :fn mutation-restoration-flags-pcall-restore-inside-pcall-body})
 (table.insert tests {:name "mutation-restoration flags two pcalls second in-body restore" :fn mutation-restoration-flags-two-pcalls-second-mutates-in-body-restore})
+(table.insert tests {:name "mutation-restoration allows anonymous fn wrapped by restore fields" :fn mutation-restoration-allows-anonymous-fn-wrapped-by-restore-fields})
+(table.insert tests {:name "mutation-restoration flags anonymous fn without wrapper" :fn mutation-restoration-flags-anonymous-fn-without-wrapper})
+(table.insert tests {:name "mutation-restoration allows snapshot restore helper pair" :fn mutation-restoration-allows-snapshot-restore-helper-pair})
+(table.insert tests {:name "mutation-restoration flags snapshot helper without restore" :fn mutation-restoration-flags-snapshot-helper-without-restore})
+(table.insert tests {:name "mutation-restoration matches anonymous def by line" :fn mutation-restoration-matches-anonymous-def-by-line})
+(table.insert tests {:name "mutation-restoration allows setup-test-env in runner" :fn mutation-restoration-allows-setup-test-env-in-runner})
+(table.insert tests {:name "mutation-restoration allows init-test-app in harness" :fn mutation-restoration-allows-init-test-app-in-harness})
+(table.insert tests {:name "mutation-restoration flags setup-like fn in other file" :fn mutation-restoration-flags-setup-like-fn-in-other-file})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})

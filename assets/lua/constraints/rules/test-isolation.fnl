@@ -28,6 +28,48 @@
   "Escape Lua pattern magic characters in a string."
   (s:gsub "[%]%[%%%.%*%+%-%?%(%)%^%$]" "%%%1"))
 
+(fn def-contains-line? [def line]
+  "Check if a function definition contains the given source line.
+   Computes end-line from the form text's newline count."
+  (var form-lines 0)
+  (each [_ _ (def.form:gmatch "\n")]
+    (set form-lines (+ form-lines 1)))
+  (let [end-line (+ def.line form-lines)]
+    (and (>= line def.line) (<= line end-line))))
+
+(fn find-containing-fn-defs [definitions line]
+  "Find all fn definitions that contain the given line.
+   Returns a list sorted by start-line descending (innermost first)."
+  (var result [])
+  (each [_ def (ipairs (or definitions []))]
+    (when (and (= def.kind :fn) (def-contains-line? def line))
+      (table.insert result def)))
+  (var sorted false)
+  (while (not sorted)
+    (set sorted true)
+    (for [i 1 (- (length result) 1)]
+      (let [a (. result i)
+            b (. result (+ i 1))]
+        (when (< a.line b.line)
+          (tset result i b)
+          (tset result (+ i 1) a)
+          (set sorted false)))))
+  result)
+
+(fn has-snapshot-restore-helper-pair? [fn-form]
+  "Check if the function form uses snapshot-app-fields + restore-app-fields! helper calls."
+  (if (string.find fn-form "snapshot-app-fields" 1 true)
+      (string.find fn-form "restore-app-fields!" 1 true)
+      false))
+
+(fn is-test-infrastructure-fn? [file-path fn-name]
+  "Narrow exemption for test environment construction functions that are
+   not per-test mutation risks."
+  (or (and (string.find file-path "/tests/runner.fnl" 1 true)
+           (= fn-name "setup-test-env"))
+      (and (string.find file-path "/tests/e2e/harness.fnl" 1 true)
+           (= fn-name "init-test-app"))))
+
 (fn position-to-file-line [fn-form fn-def-line byte-pos]
   "Convert a byte position in the form text to an approximate file line."
   (var line fn-def-line)
@@ -250,33 +292,60 @@
                 (var fn-form nil)
                 (var fn-def-line nil)
                 (when (not= fn-name "<top-level>")
-                  (each [_ def (ipairs (or ff.definitions []))]
-                    (when (and (= def.kind :fn) (= def.name fn-name))
-                      (set fn-form def.form)
-                      (set fn-def-line def.line))))
+                  (if (= fn-name "<anonymous>")
+                    ;; Anonymous functions: match by line containment (innermost)
+                    (let [containing (find-containing-fn-defs ff.definitions max-line)]
+                      (when (> (length containing) 0)
+                        (let [def (. containing 1)]
+                          (set fn-form def.form)
+                          (set fn-def-line def.line))))
+                    ;; Named functions: match by name (should be unique per file)
+                    (each [_ def (ipairs (or ff.definitions []))]
+                      (when (and (= def.kind :fn) (= def.name fn-name))
+                        (set fn-form def.form)
+                        (set fn-def-line def.line)))))
                 ;; Check restoration patterns (order-aware)
                 (var has-restoration false)
                 (when (and fn-form fn-def-line)
+                  ;; Narrow exemption: test infra setup functions
+                  (when (is-test-infrastructure-fn? ff.path fn-name)
+                    (set has-restoration true))
                   ;; Build path-segments from path-text
                   (local path-segments [])
                   (each [seg (path-text:gmatch "[^%.]+")]
                     (table.insert path-segments seg))
                   ;; Pattern 1: with-restored-app-fields (explicit)
-                  (when (string.find fn-form "with-restored-app-fields" 1 true)
+                  (when (and (not has-restoration)
+                             (string.find fn-form "with-restored-app-fields" 1 true))
                     (set has-restoration true))
+                  ;; Pattern 2: snapshot/restore helper pair
+                  (when (and (not has-restoration)
+                             (has-snapshot-restore-helper-pair? fn-form))
+                    (set has-restoration true))
+                  ;; Pattern 3: parent function wrapper for anonymous functions.
+                  ;; When the immediate enclosing fn is anonymous and its form
+                  ;; does not contain restoration evidence, check the containing
+                  ;; parent function for with-restored-app-fields or helpers.
+                  (when (and (not has-restoration) (= fn-name "<anonymous>"))
+                    (let [containing (find-containing-fn-defs ff.definitions fn-def-line)]
+                      (when (> (length containing) 1)
+                        (let [parent (. containing 2)]
+                          (when (or (string.find parent.form "with-restored-app-fields" 1 true)
+                                    (has-snapshot-restore-helper-pair? parent.form))
+                            (set has-restoration true))))))
                   ;; Determine whether the mutation is inside a pcall body.
                   ;; When it is, the restore must be outside/after that specific
-                  ;; pcall body (Pattern 3). When it is not, the standard
-                  ;; line-based ordering check applies (Pattern 2).
+                  ;; pcall body (Pattern 5). When it is not, the standard
+                  ;; line-based ordering check applies (Pattern 4).
                   (let [pcall-ranges (find-all-pcall-fn-ranges fn-form)
                         enclosing-pcall-end (find-enclosing-pcall-end-byte fn-form fn-def-line max-line pcall-ranges)]
-                    ;; Pattern 2: direct snapshot table restore (order-aware)
+                    ;; Pattern 4: direct snapshot table restore (order-aware)
                     ;; Only when the mutation is NOT inside a pcall body — if it
-                    ;; is inside, Pattern 3 handles the pcall-specific ordering.
+                    ;; is inside, Pattern 5 handles the pcall-specific ordering.
                     (when (and (not has-restoration) (not enclosing-pcall-end))
                       (when (has-concrete-restore-after-line? fn-form fn-def-line path-segments max-line)
                         (set has-restoration true)))
-                    ;; Pattern 3: pcall cleanup restore (order-aware)
+                    ;; Pattern 5: pcall cleanup restore (order-aware)
                     ;; The mutation is inside a pcall body, so the restore must be
                     ;; outside/after that specific pcall body's closing paren,
                     ;; not inside the protected mutation path.
