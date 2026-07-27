@@ -92,5 +92,3 @@ Fix any issues inline. No need to re-review — just fix and move on.
 
 **Automatic Progression:**
 After the spec review loop passes, proceed automatically to the writing-plans skill without waiting for user review. Only pause for the user if there is unresolved ambiguity, the user explicitly requested a review checkpoint, the action requires a permission prompt, or a genuine blocker is encountered.
-
-

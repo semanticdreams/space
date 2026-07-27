@@ -96,4 +96,3 @@ values copied verbatim from the spec.]
 
 - [ ] **Step 1: ...**
 - [ ] **Step 2: ...**
-

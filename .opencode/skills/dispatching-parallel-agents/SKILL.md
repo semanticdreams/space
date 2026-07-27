@@ -72,7 +72,7 @@ Issue all task dispatches in the same response — they run in parallel:
 ```text
 Use the task tool with subagent_type 'implementer' three times in one message:
 - "Fix agent-tool-abort.test.ts failures"
-- "Fix batch-completion-behavior.test.ts failures"  
+- "Fix batch-completion-behavior.test.ts failures"
 - "Fix tool-approval-race-conditions.test.ts failures"
 # All three run concurrently.
 ```
