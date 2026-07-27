@@ -2517,9 +2517,25 @@
     [:lights :renderers :engine]
     (fn []
       (local ActivitySceneState (require :activity-scene-state))
+      (local SkyboxState (require :skybox-state))
+      (local BackgroundState (require :background-state))
+      (local PhysicsContainment (require :physics-containment))
       (local AppProjection (require :app-projection))
       (when (not app.create-default-projection)
         (set app.create-default-projection AppProjection.create-default-projection))
+
+      ;; Derive expected empty service state shapes
+      (local empty (ActivitySceneState.empty-state))
+      (local expected-empty-lights empty.lights)
+      ;; Resolved format: what the renderer actually receives after
+      ;; apply-slot-service-state resolves the complete skybox for the
+      ;; current theme (nil = no active theme = use :default).
+      (local expected-empty-skybox
+        (SkyboxState.resolve-for-theme empty.skybox nil))
+      ;; Background is already in its normalized complete form.
+      (local expected-empty-background empty.background)
+      ;; Containment is already serialized by empty-containment.
+      (local expected-empty-containment empty.containment)
 
       ;; Mock lights — captures the last set state
       (var lights-state {:ambient {:enabled? false :color [0 0 0] :intensity 0.0}
@@ -2546,9 +2562,6 @@
 
       (local fixture (make-scene))
       (local scene fixture.scene)
-
-      ;; Pre-load the empty state for assertions
-      (local empty-state (ActivitySceneState.empty-state))
 
       ;; (1) Activate sandbox with non-empty service state (enabled lights,
       ;;     enabled skybox, custom background, enabled containment).
@@ -2586,43 +2599,77 @@
       (local drawing-slot (scene:ensure-activity-slot "drawing"))
       (scene:activate-activity-slot "drawing")
 
-      ;; (a) Lights must be reset to empty (ambient disabled)
+      ;; ── Lights: compare observed against expected empty lights ──────
       (assert (not lights-state.ambient.enabled?)
-              "Drawing activation must disable ambient light")
-      (assert (= (. empty-state.lights.ambient.color 1) 0.1)
-              "empty-state ambient red must be 0.1 for assertion reference")
-      ;; The set-state may write normalized empty lights with [0.1 0.1 0.1]
-      (assert (<= (math.abs (- (. lights-state.ambient.color 1) 0.1)) 0.01)
-              "Drawing activation must reset ambient light color to empty default")
+              (.. "ambient must be disabled, expected "
+                  (tostring expected-empty-lights.ambient.enabled?)))
+      (assert (= (length lights-state.directional)
+                 (length expected-empty-lights.directional))
+              (.. "directional array length mismatch, expected "
+                  (tostring (length expected-empty-lights.directional))))
+      (assert (= (length lights-state.point)
+                 (length expected-empty-lights.point))
+              (.. "point array length mismatch, expected "
+                  (tostring (length expected-empty-lights.point))))
+      (assert (= (length lights-state.spot)
+                 (length expected-empty-lights.spot))
+              (.. "spot array length mismatch, expected "
+                  (tostring (length expected-empty-lights.spot))))
+      ;; Compare ambient color components
+      (each [idx expected-v (ipairs expected-empty-lights.ambient.color)]
+        (assert (<= (math.abs (- (. lights-state.ambient.color idx) expected-v)) 0.01)
+                (.. "ambient.color[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. lights-state.ambient.color idx)))))
+      ;; Compare ambient intensity
+      (assert (<= (math.abs (- (. lights-state.ambient.intensity)
+                               expected-empty-lights.ambient.intensity)) 0.01)
+              (.. "ambient.intensity mismatch, expected "
+                  (tostring expected-empty-lights.ambient.intensity) " got "
+                  (tostring (. lights-state.ambient.intensity))))
 
-      ;; (b) Skybox must be disabled
-      (assert (not skybox-state.enabled?)
-              (.. "Drawing activation must disable skybox, got enabled?="
+      ;; ── Skybox: compare observed against resolved empty skybox ─────
+      (assert (= skybox-state.enabled? expected-empty-skybox.enabled?)
+              (.. "skybox enabled? mismatch, expected "
+                  (tostring expected-empty-skybox.enabled?) " got "
                   (tostring skybox-state.enabled?)))
+      (assert (= skybox-state.name expected-empty-skybox.name)
+              (.. "skybox name mismatch, expected "
+                  (tostring expected-empty-skybox.name) " got "
+                  (tostring skybox-state.name)))
+      (assert (<= (math.abs (- skybox-state.brightness
+                               expected-empty-skybox.brightness)) 0.01)
+              (.. "skybox brightness mismatch, expected "
+                  (tostring expected-empty-skybox.brightness) " got "
+                  (tostring skybox-state.brightness)))
+      (each [idx expected-v (ipairs expected-empty-skybox.tint-color)]
+        (assert (<= (math.abs (- (. skybox-state.tint-color idx) expected-v)) 0.01)
+                (.. "skybox tint-color[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. skybox-state.tint-color idx)))))
 
-      ;; (c) Background must be reset to neutral/default
-      (assert (and background-state
-                   (<= (math.abs (- (. background-state.color 1) 0.0)) 0.01)
-                   (<= (math.abs (- (. background-state.color 2) 0.0)) 0.01)
-                   (<= (math.abs (- (. background-state.color 3) 0.0)) 0.01))
-              "Drawing activation must reset background to neutral [0 0 0]")
+      ;; ── Background: compare observed against canonical empty bg ────
+      (each [idx expected-v (ipairs expected-empty-background.color)]
+        (assert (<= (math.abs (- (. background-state.color idx) expected-v)) 0.01)
+                (.. "background.color[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. background-state.color idx)))))
 
-      ;; (d) Drawing slot must own explicit empty service state
-      (assert drawing-slot.scene-state
-              "Empty slot must own explicit empty service state")
-
-      ;; (e) Drawing slot's containment manager must be disabled (not leaking
-      ;;     sandbox's enabled containment).  The manager exists on the slot
-      ;;     but its config must reflect empty containment (enabled? = false).
+      ;; ── Containment: compare manager.config against empty containment ─
       (assert drawing-slot.physics-containment-manager
               "Drawing slot should have a containment manager after activation")
-      (assert (and drawing-slot.physics-containment-manager.config
-                   (not drawing-slot.physics-containment-manager.config.enabled?))
-              "Drawing slot containment must be disabled (empty state)")
+      (local drawing-config drawing-slot.physics-containment-manager.config)
+      (assert drawing-config "Drawing containment manager must have config")
+      (assert (= drawing-config.enabled? expected-empty-containment.enabled?)
+              (.. "containment enabled? mismatch, expected "
+                  (tostring expected-empty-containment.enabled?) " got "
+                  (tostring drawing-config.enabled?)))
 
-      ;; (f) Empty drawing scene slot must not expose a render target
+      ;; ── Presentation target and slot state ──────────────────────────
       (assert (= (scene:presentation-target) nil)
               "Empty drawing scene slot must not expose a render target")
+      (assert drawing-slot.scene-state
+              "Empty slot must own explicit empty service state")
 
       (drop-fixture fixture))))
 
