@@ -818,6 +818,42 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should flag repeated-mutation-without-restore"))
 
+(fn mutation-restoration-flags-pcall-double-mutate-no-restore []
+  "A test file that uses pcall to wrap two mutations of a sensitive global
+  without any cleanup restore should be flagged. Two occurrences inside a
+  pcall block are not restoration evidence."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pcall-double-mutate"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-pcall-double-mutate []
+  (pcall (fn []
+    (set app.renderers custom1)
+    (set app.renderers custom2))))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 7 :column 1
+                                          :form "(set app.renderers custom1)"
+                                          :enclosing-fn "test-pcall-double-mutate"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom2)"
+                                          :enclosing-fn "test-pcall-double-mutate"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for pcall double-mutate without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag pcall-double-mutate-no-restore"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -979,6 +1015,8 @@
                      :fn mutation-restoration-flags-pcall-without-restore})
 (table.insert tests {:name "mutation-restoration flags repeated mutation without restore"
                      :fn mutation-restoration-flags-repeated-mutation-without-restore})
+(table.insert tests {:name "mutation-restoration flags pcall double-mutate without restore"
+                     :fn mutation-restoration-flags-pcall-double-mutate-no-restore})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"

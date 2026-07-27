@@ -39,16 +39,10 @@
           (when fn-form
             ;; Pattern 1: with-restored-app-fields macro/function
             (when (string.find fn-form "with-restored-app-fields" 1 true) (set has-restoration true))
-            ;; Pattern 2: pcall cleanup restore — requires pcall AND
-            ;; at least 2 path occurrences (mutation + restore)
-            (when (and (not has-restoration) (string.find fn-form "pcall" 1 true))
-              (let [pt (table.concat (or mutation.path []) ".")
-                    (start) (string.find fn-form pt 1 true)]
-                (when start
-                  (let [(start2) (string.find fn-form pt (+ start 1) true)]
-                    (when start2 (set has-restoration true))))))
-            ;; Pattern 3: direct snapshot table restore — requires
-            ;; at least 3 path occurrences (snapshot + mutation + restore)
+            ;; Pattern 2 & 3: direct snapshot table restore and pcall cleanup
+            ;; restore — both require at least 3 path occurrences
+            ;; (snapshot + mutation + restore) to distinguish actual restore
+            ;; from two mutations without cleanup
             (when (not has-restoration)
               (let [pt (table.concat (or mutation.path []) ".")
                     (start) (string.find fn-form pt 1 true)]
