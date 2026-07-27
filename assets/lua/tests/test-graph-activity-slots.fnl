@@ -132,6 +132,10 @@
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph-map graph-map)
+  ;; Pre-create canvas slots with activity-owned cameras so
+  ;; active-slot camera resolution does not fall back to the
+  ;; canvas constructor camera.
+  (canvas:ensure-activity-slot "graph" {:camera camera})
   (local (ok result)
     (pcall
       (fn []
@@ -298,6 +302,10 @@
   (set app.graph graph)
   (set app.graph-map graph-map)
   (set app.drawing-controller controller)
+  ;; Pre-create canvas slots with activity-owned cameras.
+  (canvas:ensure-activity-slot "graph" {:camera camera})
+  (canvas:ensure-activity-slot "drawing" {:camera camera})
+  (canvas:ensure-activity-slot "board" {:camera camera})
   (local (ok result)
     (pcall
       (fn []

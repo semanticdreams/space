@@ -343,6 +343,69 @@
   (graph-camera:drop)
   (drop-fixture fixture))
 
+;; --- R1 regression tests ---
+
+(fn r1-active-slot-camera-used-in-get-view-matrix []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (local canvas-camera fixture.camera)
+  (canvas-camera:set-position (glm.vec3 10 10 10))
+  (local slot-camera (Camera {:position (glm.vec3 50 60 70)}))
+  (canvas:ensure-activity-slot "graph" {:camera slot-camera})
+  (canvas:activate-activity-slot "graph")
+  (local view (canvas:get-view-matrix))
+  (assert view "get-view-matrix should return a valid matrix when active slot has camera")
+  (assert (not (= (canvas-camera:get-view-matrix) view))
+          "Active slot camera must be used for get-view-matrix, not the canvas constructor camera")
+  (slot-camera:drop)
+  (drop-fixture fixture))
+
+(fn r1-active-slot-without-camera-fails-loudly-in-get-view-matrix []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (canvas:ensure-activity-slot "graph")
+  (canvas:activate-activity-slot "graph")
+  (local (ok err) (pcall (fn [] (canvas:get-view-matrix))))
+  (assert (not ok)
+          "get-view-matrix must fail when active slot has no camera")
+  (assert (and (string.find (tostring err) "requires its own camera"))
+          (.. "Error must mention missing slot camera, got: " (tostring err)))
+  (drop-fixture fixture))
+
+(fn r2-activity-slot-state-restore-invokes-registered-panel-restorer []
+  (local fixture (make-canvas))
+  (local canvas fixture.canvas)
+  (local slot-camera (Camera {:position (glm.vec3 0 0 100)}))
+  (local slot (canvas:ensure-activity-slot "graph" {:camera slot-camera}))
+  (var restorer-called? false)
+  (var restorer-panel nil)
+  (slot:register-panel-restorer
+    "test-panel"
+    (fn [payload]
+      (set restorer-called? true)
+      (set restorer-panel payload))
+    "test-owner")
+  (local state {:camera {:position [0 0 100]}
+                :scale_factor 1.0
+                :panels [{:kind "test-panel"
+                          :position [10 20 30]
+                          :rotation [1 0 0 0]
+                          :size [1 1 1]}]})
+  (canvas:restore-activity-slot-state "graph" state)
+  (assert restorer-called?
+          "Registered panel restorer should be invoked during restore-activity-slot-state")
+  (assert (= restorer-panel.kind "test-panel")
+          "Restorer should receive the correct panel payload")
+  (slot-camera:drop)
+  (drop-fixture fixture))
+
+(table.insert tests {:name "R1: active slot camera used in get-view-matrix"
+                     :fn r1-active-slot-camera-used-in-get-view-matrix})
+(table.insert tests {:name "R1: active slot without camera fails loudly in get-view-matrix"
+                     :fn r1-active-slot-without-camera-fails-loudly-in-get-view-matrix})
+(table.insert tests {:name "R2: activity slot state restore invokes registered panel restorer"
+                     :fn r2-activity-slot-state-restore-invokes-registered-panel-restorer})
+
 (table.insert tests {:name "Task 2: empty canvas slot exposes no presentation target"
                      :fn empty-canvas-slot-exposes-no-presentation-target})
 (table.insert tests {:name "Task 2: canvas activity slots own independent cameras"

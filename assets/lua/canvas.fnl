@@ -356,8 +356,20 @@
       ((resolve-panel-restorer panel) panel))
     true)
 
-  (fn get-view-matrix [_canvas]
-    (camera:get-view-matrix))
+  (fn resolve-active-camera [self]
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?)
+        (do
+          (assert self.active-activity-slot.camera
+                  (.. "Active Canvas activity slot "
+                      (tostring self.active-activity-slot.activity-id)
+                      " requires its own camera; no slot camera set"))
+          self.active-activity-slot.camera)
+        self.camera))
+
+  (fn get-view-matrix [self]
+    (local active-camera (resolve-active-camera self))
+    (active-camera:get-view-matrix))
 
   (fn get-lighting-view-state [_canvas]
     (LightingViewState.orthographic (glm.vec3 0.0 0.0 1.0)))
@@ -716,9 +728,38 @@
         (set record.rotation layout-state.rotation)
         (set record.size layout-state.size)
         (table.insert panels record)))
-    {:camera camera-state
-     :scale_factor self.scale-factor
-     :panels panels})
+     {:camera camera-state
+      :scale_factor self.scale-factor
+      :panels panels})
+
+  (fn resolve-slot-panel-restorer [slot panel]
+    (local kind panel.kind)
+    (local registered-record (. slot.panel-restorers kind))
+    (local registered (and registered-record registered-record.restore))
+    (if registered
+        registered
+        (do
+          (local module-name panel.restorer-module)
+          (assert (= (type module-name) :string)
+                  (.. "Canvas.restore-activity-slot-state panel kind "
+                      kind
+                      " requires string :restorer-module or registered restorer"))
+          (local (ok module-or-error) (pcall require module-name))
+          (assert ok
+                  (.. "Canvas.restore-activity-slot-state failed requiring panel restorer module "
+                      module-name
+                      ": "
+                      (tostring module-or-error)))
+          (local module module-or-error)
+          (local restore (and module module.restore))
+          (assert (= (type restore) :function)
+                  (.. "Canvas.restore-activity-slot-state module "
+                      module-name
+                      " must export function :restore"))
+          (fn [payload]
+            (restore {:canvas self
+                      :target slot
+                      :panel payload})))))
 
   (fn restore-activity-slot-state [_canvas activity-id state]
     (assert (= (type activity-id) :string)
@@ -751,36 +792,7 @@
       (assert (= (type kind) :string) "Canvas.restore-activity-slot-state panel kind must be a string")
       (local restorer (resolve-slot-panel-restorer slot panel))
       (restorer panel))
-    true)
-
-  (fn resolve-slot-panel-restorer [slot panel]
-    (local kind panel.kind)
-    (local registered-record (. slot.panel-restorers kind))
-    (local registered (and registered-record registered-record.restore))
-    (if registered
-        registered
-        (do
-          (local module-name panel.restorer-module)
-          (assert (= (type module-name) :string)
-                  (.. "Canvas.restore-activity-slot-state panel kind "
-                      kind
-                      " requires string :restorer-module or registered restorer"))
-          (local (ok module-or-error) (pcall require module-name))
-          (assert ok
-                  (.. "Canvas.restore-activity-slot-state failed requiring panel restorer module "
-                      module-name
-                      ": "
-                      (tostring module-or-error)))
-          (local module module-or-error)
-          (local restore (and module module.restore))
-          (assert (= (type restore) :function)
-                  (.. "Canvas.restore-activity-slot-state module "
-                      module-name
-                      " must export function :restore"))
-          (fn [payload]
-            (restore {:canvas self
-                      :target slot
-                      :panel payload})))))
+     true)
 
   (set self.get-view-matrix get-view-matrix)
   (set self.get-lighting-view-state get-lighting-view-state)
