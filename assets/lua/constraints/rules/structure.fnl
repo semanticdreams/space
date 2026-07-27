@@ -16,22 +16,45 @@
 (fn str-contains? [s sub]
   (and s sub (string.find s sub 1 true)))
 
+;; Strip double-quoted string literals from source text so that pattern
+;; matching does not produce false positives on string contents.
+(fn strip-strings [s]
+  (s:gsub "\"[^\"]*\"" ""))
+
+;; Strip Fennel comments (; to end of line) from source text.
+;; Must be called after strip-strings to avoid removing semicolons
+;; that appear inside string literals.
+(fn strip-comments [s]
+  (let [lines []]
+    (each [line (s:gmatch "[^\n]*")]
+      (let [comment-pos (string.find line ";" 1 true)]
+        (if comment-pos
+            (table.insert lines (string.sub line 1 (- comment-pos 1)))
+            (table.insert lines line))))
+    (table.concat lines "\n")))
+
+(fn strip-strings-and-comments [s]
+  (strip-comments (strip-strings s)))
+
 (fn max-nesting-depth-rule-run [ctx]
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (let [metrics (or ff.metrics {})
-          measure (or metrics.max-nesting-depth 0)
+          funcs (or metrics.functions [])
           limit thresholds.max-nesting-depth]
-      (when (> measure limit)
-        (table.insert diagnostics
-          (Diagnostics.violation
-            {:constraint-id "structure.max-nesting-depth"
-             :family "structure-formatting"
-             :message (.. "max nesting depth " measure " exceeds limit of " limit " in " (or ff.module ff.path))
-             :file ff.path :line 0 :column 0
-             :evidence {:measure measure :limit limit
-                        :fingerprint (make-fingerprint "structure.max-nesting-depth" ff.path 0 (or ff.module ff.path))}
-             :hint (.. "Refactor deeply nested code into smaller functions to reduce nesting depth below " limit)})))))
+      (each [_ fn-info (ipairs funcs)]
+        (let [measure (or fn-info.max-nesting-depth 0)
+              fn-name (or fn-info.name (tostring fn-info.line))]
+          (when (> measure limit)
+            (table.insert diagnostics
+              (Diagnostics.violation
+                {:constraint-id "structure.max-nesting-depth"
+                 :family "structure-formatting"
+                 :message (.. "max nesting depth " measure " exceeds limit of " limit " in function " fn-name " of " (or ff.module ff.path))
+                 :file ff.path :line (or fn-info.line 0) :column (or fn-info.column 0)
+                 :evidence {:measure measure :limit limit :function-name fn-name
+                            :fingerprint (make-fingerprint "structure.max-nesting-depth" ff.path (or fn-info.line 0) fn-name)}
+                 :hint (.. "Refactor deeply nested code in " fn-name " into smaller functions to reduce nesting depth below " limit)})))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn max-function-length-rule-run [ctx]
@@ -104,7 +127,7 @@
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn definition-form-contains-let? [form]
-  (and form (str-contains? form "(let ")))
+  (and form (str-contains? (strip-strings-and-comments form) "(let ")))
 
 (fn export-key-contains-forbidden-word? [key]
   (and key
@@ -113,17 +136,20 @@
            (str-contains? key "alias"))))
 
 (fn fn-has-silent-fallback? [def calls]
-  "Check if a function contains (or ...) without assert or error."
+  "Check if a function contains (or ...) without assert or error.
+  Strips string literals and comments from the form text before matching
+  to avoid false positives on text inside strings or comments."
   (when (and def.form def.name (= def.kind :fn))
-    (when (string.find def.form "(or " 1 true)
-      (var has-assertion false)
-      (each [_ call (ipairs (or calls []))]
-        (when (and (not has-assertion)
-                   (= (or call.enclosing-fn "") def.name)
-                   (or (= call.callee "assert")
-                       (= call.callee "error")))
-          (set has-assertion true)))
-      (not has-assertion))))
+    (let [clean-form (strip-strings-and-comments def.form)]
+      (when (string.find clean-form "(or " 1 true)
+        (var has-assertion false)
+        (each [_ call (ipairs (or calls []))]
+          (when (and (not has-assertion)
+                     (= (or call.enclosing-fn "") def.name)
+                     (or (= call.callee "assert")
+                         (= call.callee "error")))
+            (set has-assertion true)))
+        (not has-assertion)))))
 
 (fn style-doctrine-rule-run [ctx]
   (var diagnostics [])

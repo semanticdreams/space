@@ -50,7 +50,7 @@
 ;; ======================================================================
 
 (fn max-nesting-depth-allows-depth-7 []
-  "A module with max nesting depth 7 should pass."
+  "A function with max nesting depth 7 (at threshold) should pass."
   (local Structure (require :constraints.rules.structure))
   (local rules (Structure.rules))
   (local rule (find-rule-by-id rules "structure.max-nesting-depth"))
@@ -58,15 +58,19 @@
   (local ff (make-file-fact {:path "/src/module.fnl"
                               :module "module"
                               :metrics {:module-lines 100
-                                        :max-nesting-depth 7
+                                        :max-nesting-depth 2
                                         :max-anonymous-callback-depth 1
                                         :max-table-literal-size 10
-                                        :functions []}}))
+                                        :functions [{:name "normal-fn"
+                                                     :line 10
+                                                     :column 1
+                                                     :length 50
+                                                     :max-nesting-depth 7}]}}))
   (local result (rule.run (make-ctx [ff])))
-  (assert (= result nil) "depth 7 should pass"))
+  (assert (= result nil) "function with depth 7 should pass"))
 
 (fn max-nesting-depth-flags-depth-8 []
-  "A module with max nesting depth 8 (exceeds threshold of 7) should produce a diagnostic."
+  "A function with max nesting depth 8 (exceeds threshold of 7) should produce a diagnostic."
   (local Structure (require :constraints.rules.structure))
   (local rules (Structure.rules))
   (local rule (find-rule-by-id rules "structure.max-nesting-depth"))
@@ -74,10 +78,14 @@
   (local ff (make-file-fact {:path "/src/deep-module.fnl"
                               :module "deep-module"
                               :metrics {:module-lines 100
-                                        :max-nesting-depth 8
+                                        :max-nesting-depth 2
                                         :max-anonymous-callback-depth 1
                                         :max-table-literal-size 10
-                                        :functions []}}))
+                                        :functions [{:name "deep-fn"
+                                                     :line 10
+                                                     :column 1
+                                                     :length 200
+                                                     :max-nesting-depth 8}]}}))
   (local result (rule.run (make-ctx [ff])))
   (assert result "should produce diagnostics for depth 8")
   (assert (= (type result) :table) "diagnostics should be a table")
@@ -89,7 +97,47 @@
   (assert (= d.file ff.path) "diagnostic should include file path")
   (assert d.evidence "diagnostic should include evidence")
   (assert (= d.evidence.measure 8) "evidence should report the measured value")
-  (assert (= d.evidence.limit 7) "evidence should report the limit"))
+  (assert (= d.evidence.limit 7) "evidence should report the limit")
+  (assert (= d.evidence.function-name "deep-fn")
+          "evidence should report the function name")
+  (assert d.evidence.fingerprint "evidence should include a fingerprint")
+  (assert (d.evidence.fingerprint:find "deep-fn" 1 true)
+          "fingerprint should contain the function name"))
+
+(fn max-nesting-depth-distinct-fingerprints []
+  "Two deep functions in the same file should produce distinct fingerprints,
+  so baselines for function A do not also suppress function B."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.max-nesting-depth"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/two-deep.fnl"
+                              :module "two-deep"
+                              :metrics {:module-lines 300
+                                        :max-nesting-depth 2
+                                        :max-anonymous-callback-depth 1
+                                        :max-table-literal-size 10
+                                        :functions [{:name "deep-fn-a"
+                                                     :line 10
+                                                     :column 1
+                                                     :length 150
+                                                     :max-nesting-depth 8}
+                                                    {:name "deep-fn-b"
+                                                     :line 200
+                                                     :column 1
+                                                     :length 100
+                                                     :max-nesting-depth 8}]}}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for two deep functions")
+  (assert (>= (length result) 2) "should have at least two diagnostics")
+  (local d1 (. result 1))
+  (local d2 (. result 2))
+  (assert d1.evidence.fingerprint "first diagnostic should have fingerprint")
+  (assert d2.evidence.fingerprint "second diagnostic should have fingerprint")
+  (assert (not= d1.evidence.fingerprint d2.evidence.fingerprint)
+          "fingerprints for distinct functions should differ")
+  (assert d1.line "first diagnostic should include the function line")
+  (assert d2.line "second diagnostic should include the function line"))
 
 ;; ======================================================================
 ;; structure.max-function-length
@@ -605,6 +653,189 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "local-only module should pass"))
 
+;; R1-2: let text inside string literals or comments should not be flagged
+(fn style-doctrine-allows-let-text-inside-string []
+  "A function whose source contains '(let ' as part of a string literal
+  should NOT be flagged — the rule checks form syntax, not raw text."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/string-let.fnl"
+                              :module "string-let"
+                              :definitions [{:kind :fn
+                                             :name "render"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 20
+                                             :form "(fn render []
+  \"example (let text)\")"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "let inside string literal should not be flagged"))
+
+(fn style-doctrine-allows-or-text-inside-string []
+  "A function whose source contains '(or ' inside a string literal
+  should NOT be flagged as a silent fallback."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/string-or.fnl"
+                              :module "string-or"
+                              :definitions [{:kind :fn
+                                             :name "format"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 20
+                                             :form "(fn format [x]
+  \"an (or expr) in a string\")"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "or inside string literal should not be flagged"))
+
+(fn style-doctrine-allows-let-text-after-comment []
+  "A function with '; comment containing (let)' in the same source text
+  should NOT be flagged — comments are not code."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/comment-let.fnl"
+                              :module "comment-let"
+                              :definitions [{:kind :fn
+                                             :name "render"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 40
+                                             :form "(fn render [x]
+  ;(let x 10) - old code
+  (* x 2))"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "let inside comment should not be flagged"))
+
+;; ======================================================================
+;; R1-3: Real Source/Facts integration — parse valid and invalid Fennel source
+;; ======================================================================
+
+(fn structure-source-facts-passes-valid-source []
+  "Valid Fennel source parsed through the tree-sitter fact extractor should
+  produce no diagnostics for a clean module under all structure rules."
+  (local Structure (require :constraints.rules.structure))
+  (local Facts (require :constraints.facts))
+  (local ts (require :tree-sitter))
+  (local rules (Structure.rules))
+  (local source "(fn small-fn [x]
+  (+ x 1))
+
+{:name \"test\"
+ :version 1}")
+  (local tree (ts.parse source {:language :fennel}))
+  (local root (tree:root))
+  (local file-records [{:target {:kind :repo :name :test}
+                         :path "/test/small.fnl"
+                         :module "test.small"
+                         :source source
+                         :root root}])
+  (local fact-db (Facts.extract file-records))
+  (local ctx {:target {:kind :repo :name :test}
+              :facts fact-db
+              :files []})
+  (each [_ rule (ipairs rules)]
+    (let [result (rule.run ctx)]
+      (assert (or (= result nil) (= (length result) 0))
+              (.. "rule " rule.id " should pass for clean source, got diagnostics")))))
+
+(fn structure-source-facts-flags-deep-nesting-via-facts []
+  "Deeply nested Fennel source parsed through the tree-sitter fact extractor
+  should produce a max-nesting-depth diagnostic at the offending function."
+  (local Structure (require :constraints.rules.structure))
+  (local Facts (require :constraints.facts))
+  (local ts (require :tree-sitter))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.max-nesting-depth"))
+  (assert rule "rule should be in rules list")
+  ;; Fennel source with deep nesting using list forms (when, each, print)
+  ;; tree-sitter counts list nodes, not let_form/each_form/if_form
+  ;; fn_form + 8 nested when lists → depth 9, max-nesting = 8 (> limit 7)
+  (local source "(fn deep-nest []
+  (when true
+    (when true
+      (when true
+        (when true
+          (when true
+            (when true
+              (when true
+                (when true
+                  (print :deep))))))))))")
+  (local tree (ts.parse source {:language :fennel}))
+  (local root (tree:root))
+  (local file-records [{:target {:kind :repo :name :test}
+                         :path "/test/deep-nest.fnl"
+                         :module "test.deep-nest"
+                         :source source
+                         :root root}])
+  (local fact-db (Facts.extract file-records))
+  (local ctx {:target {:kind :repo :name :test}
+              :facts fact-db
+              :files []})
+  (local result (rule.run ctx))
+  (assert result "real fact extraction should produce diagnostics for deep nesting")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "structure.max-nesting-depth")
+          "real-fact diagnostic should have correct constraint-id")
+  (assert d.evidence.fingerprint "real-fact diagnostic should include fingerprint"))
+
+;; ======================================================================
+;; Runner integration: violation diagnostic contract
+;; ======================================================================
+
+(fn structure-runner-violation-contract []
+  "When a rule produces violations, the runner must return non-pass status
+  and diagnostics that include target, file, constraint-id, and evidence.fingerprint."
+  (local Structure (require :constraints.rules.structure))
+  (local ConstraintRunner (require :constraints.runner))
+  (local rules (Structure.rules))
+  ;; Only run the max-nesting-depth rule against a file fact that exceeds the limit
+  (local nesting-rule (find-rule-by-id rules "structure.max-nesting-depth"))
+  (assert nesting-rule "nesting rule must be in rules list")
+  (local ff (make-file-fact {:path "/test/too-deep.fnl"
+                              :module "test.too-deep"
+                              :metrics {:module-lines 100
+                                        :max-nesting-depth 2
+                                        :max-anonymous-callback-depth 1
+                                        :max-table-literal-size 10
+                                        :functions [{:name "deep-fn"
+                                                     :line 5
+                                                     :column 1
+                                                     :length 80
+                                                     :max-nesting-depth 9}]}}))
+  (local fact-db (make-fact-db [ff]))
+  (local target {:kind :repo :name :test
+                 :facts fact-db
+                 :files []})
+  (local result (ConstraintRunner.run {:rules [nesting-rule]
+                                        :target target
+                                        :baseline-data false}))
+  (assert result "runner should return a result table")
+  (assert (= (type result.status) :string) "result should have a status")
+  (assert (not= result.status :pass)
+          (.. "expected non-pass status for violation, got " result.status))
+  (assert (>= (length result.diagnostics) 1)
+          "should have at least one diagnostic")
+  (local d (. result.diagnostics 1))
+  (assert d.target "diagnostic should include target")
+  (assert (= d.file "/test/too-deep.fnl")
+          (.. "diagnostic should report file, got " (tostring d.file)))
+  (assert (= d.constraint-id "structure.max-nesting-depth")
+          (.. "diagnostic should have correct constraint-id, got " (tostring d.constraint-id)))
+  (assert d.evidence.fingerprint "diagnostic should include evidence.fingerprint"))
+
 ;; ======================================================================
 ;; Structure metadata tests
 ;; ======================================================================
@@ -670,6 +901,8 @@
                      :fn max-nesting-depth-allows-depth-7})
 (table.insert tests {:name "max-nesting-depth flags depth 8"
                      :fn max-nesting-depth-flags-depth-8})
+(table.insert tests {:name "max-nesting-depth distinct fingerprints"
+                     :fn max-nesting-depth-distinct-fingerprints})
 
 ;; structure.max-function-length
 (table.insert tests {:name "max-function-length allows length 120"
@@ -722,6 +955,13 @@
                      :fn style-doctrine-allows-or-in-different-context})
 (table.insert tests {:name "style-doctrine allows non-let local"
                      :fn style-doctrine-allows-non-let-local})
+;; R1-2: string/comment safety
+(table.insert tests {:name "style-doctrine allows let text inside string"
+                     :fn style-doctrine-allows-let-text-inside-string})
+(table.insert tests {:name "style-doctrine allows or text inside string"
+                     :fn style-doctrine-allows-or-text-inside-string})
+(table.insert tests {:name "style-doctrine allows let text after comment"
+                     :fn style-doctrine-allows-let-text-after-comment})
 
 ;; Structure metadata
 (table.insert tests {:name "structure rules returns table with five rules"
@@ -732,6 +972,13 @@
 ;; Runner integration
 (table.insert tests {:name "structure rules executable by runner"
                      :fn structure-runner-executable})
+(table.insert tests {:name "structure runner violation contract"
+                     :fn structure-runner-violation-contract})
+;; R1-3: Source/Facts integration
+(table.insert tests {:name "structure source facts passes valid source"
+                     :fn structure-source-facts-passes-valid-source})
+(table.insert tests {:name "structure source facts flags deep nesting via facts"
+                     :fn structure-source-facts-flags-deep-nesting-via-facts})
 
 (local main
   (fn []
