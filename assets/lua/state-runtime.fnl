@@ -27,9 +27,9 @@
   app.clickables.active?)
 
 (fn active-controls []
-  (or (app.presentation-input-controls)
-      app.active-pointer-controls
-      app.first-person-controls))
+  (or (and app.presentation-input-controls
+           (app.presentation-input-controls))
+      app.active-pointer-controls))
 
 (fn movables-active? []
   (and app.movables

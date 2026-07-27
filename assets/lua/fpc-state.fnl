@@ -7,7 +7,8 @@
 (local KEY_ESCAPE 27)
 
 (fn require-controls [action]
-  (let [controls (app.presentation-input-controls)]
+  (let [controls (and app.presentation-input-controls
+                      (app.presentation-input-controls))]
     (assert controls
             (.. "FpcState requires presentation input controls for " action))
     controls))

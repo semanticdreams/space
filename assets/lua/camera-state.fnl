@@ -18,7 +18,8 @@
    :zero (string.byte "0")})
 
 (fn reset-camera! []
-  (local cam (app.presentation-camera {:required? true}))
+  (local cam (and app.presentation-camera
+                  (app.presentation-camera {:required? true})))
   (assert cam.set-position "camera-state expects camera:set-position")
   (assert cam.set-rotation "camera-state expects camera:set-rotation")
   (cam:set-position (glm.vec3 0 0 0))

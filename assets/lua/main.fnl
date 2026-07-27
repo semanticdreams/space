@@ -752,7 +752,6 @@
 (set app.layout-root nil)
 (set app.viewport nil)
 (app.set-viewport {:width 0 :height 0})
-(set app.camera nil)
 (set app.projection nil)
 (set app.scene nil)
 (set app.canvas nil)
@@ -1050,7 +1049,9 @@
                                        (= surface :canvas)))
   (if app.canvas-interactive?
       (set app.active-pointer-controls app.canvas-controls)
-      (set app.active-pointer-controls app.first-person-controls))
+      (set app.active-pointer-controls
+            (and app.presentation-input-controls
+                 (app.presentation-input-controls))))
   (emit-workspace-shell-changed (or reason "interaction-surface") previous)
   (mark-active-world-hud-dirty)
   surface)
@@ -1639,8 +1640,6 @@
   (set app.scene nil)
   (set app.canvas nil)
   (set app.active-world-runtime nil)
-  (set app.camera nil)
-  (set app.first-person-controls nil)
   (set app.canvas-controls nil)
   (set app.active-pointer-controls nil)
   (set app.preferred-interaction-surface :scene)
@@ -2091,10 +2090,8 @@
   (set app.canvas-unit nil)
   (set app.active-world-entry nil)
   (set app.active-world-runtime nil)
-  (set app.first-person-controls nil)
   (set app.canvas-controls nil)
   (set app.active-pointer-controls nil)
-  (set app.camera nil)
   (set app.graph nil)
   (set app.graph-map nil)
   (set app.graph-map-manager nil)
