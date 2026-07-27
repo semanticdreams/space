@@ -340,15 +340,22 @@
           (set self.debouncer
                (RuntimeTimers.Debouncer
                  {:delay-ms (or delay-ms default-debounce-ms)
-                  :callback
-                  (fn [payload]
-                    ;; Owner identity check: the captured owner must still
-                    ;; match and the manager must not have been dropped.
-                    (when (and payload
-                               (not self.dropped?)
-                               (= payload.owner self.owner))
-                      (self:ensure-installed {:scene payload.scene
-                                               :config payload.config})))}))
+                   :callback
+                   (fn [payload]
+                     ;; Owner identity check: the captured owner must still
+                     ;; match and the manager must not have been dropped.
+                     ;; R6-3: Also verify that the owner slot is still the
+                     ;; active/visible scene slot and still owns this exact
+                     ;; manager.  After a slot switch, the stale refresh
+                     ;; must no-op rather than installing into the wrong context.
+                     (when (and payload
+                                (not self.dropped?)
+                                (= payload.owner self.owner)
+                                (and payload.scene payload.scene.active-activity-slot
+                                     (= payload.scene.active-activity-slot self.owner)
+                                     (= (. self.owner :physics-containment-manager) self)))
+                       (self:ensure-installed {:scene payload.scene
+                                                :config payload.config})))}))
           self.debouncer)))
 
   ;; ── Public methods ─────────────────────────────────────────────────

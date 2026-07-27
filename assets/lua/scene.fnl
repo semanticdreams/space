@@ -862,6 +862,12 @@
         (local LayoutPhysicsBodies (require :layout-physics-bodies))
         (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
       (self.active-activity-slot:deactivate)
+      ;; R6-1: Clear previous slot's containment manager so its
+      ;; physics bodies are removed from the global Bullet world
+      ;; and any pending debounced refresh is cancelled.  The
+      ;; retained scene-state will reinstall if we roll back.
+      (when (and self.active-activity-slot.physics-containment-manager)
+        (self.active-activity-slot.physics-containment-manager:clear))
       ;; Clear active binding
       (set self.active-activity-slot nil)
       (set self.active-activity-slot-id nil))
@@ -1220,6 +1226,10 @@
                    (pcall require :layout-physics-bodies))
           (local LayoutPhysicsBodies (require :layout-physics-bodies))
           (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
+        ;; R6-1: Cancel any pending containment refresh and remove
+        ;; containment bodies from the global Bullet world.
+        (when slot.physics-containment-manager
+          (slot.physics-containment-manager:clear))
         ;; Unbind content aliases; slot retains ownership
         (set self.entity nil)
         (set self.scene-children nil)

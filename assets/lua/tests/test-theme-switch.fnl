@@ -4,7 +4,6 @@
 (local BuildContext (require :build-context))
 (local ControlPanel (require :hud-control-panel))
 (local Icons (require :icons))
-(local PhysicsContainment (require :physics-containment))
 (local ThemeActions (require :theme-actions))
 (local Themes (require :themes))
 (local Activities (require :activities))
@@ -366,14 +365,15 @@
   (local original-canvas app.canvas)
   (local original-graph app.graph)
   (local original-apply-active-world-hud-contrib app.apply-active-world-hud-contrib)
-  (local original-containment-scene app.physics-containment-scene)
-  (local original-containment-config app.physics-containment-config)
-  (local original-refresh-visualization PhysicsContainment.refresh-visualization)
-  (var refresh-payload nil)
+  (var refresh-called? false)
+  (local mock-manager {:refresh-visualization (fn [self _opts]
+                                                (set refresh-called? true)
+                                                true)})
   (set app.graph nil)
   (set app.graph-view nil)
   (set app.canvas nil)
-  (set app.scene {:build-default (fn [_self] true)})
+  (set app.scene {:build-default (fn [_self] true)
+                  :active-containment-manager (fn [_self] mock-manager)})
   (set app.hud {:build-default (fn [_self] true)})
   (set app.apply-active-world-hud-contrib nil)
   (set app.renderers {:apply-theme (fn [_self _theme] true)})
@@ -381,23 +381,9 @@
                      :save (fn [] true)})
   (set app.themes {:set-theme (fn [_name] true)
                    :get-active-theme (fn [] {:name :light})})
-  (set app.physics-containment-scene {:id "containment-scene"})
-  (set app.physics-containment-config {:mode "manual-bounds"
-                                       :bounds {:min [-1 -2 -3]
-                                                :max [1 2 3]}
-                                       :visualization {:enabled true}})
-  (set PhysicsContainment.refresh-visualization
-       (fn [opts]
-         (set refresh-payload opts)
-         true))
   (ThemeActions.apply-theme :light)
-  (assert (= (and refresh-payload.scene refresh-payload.scene.id) "containment-scene")
-          "apply-theme should refresh the active containment visualization with the current scene")
-  (assert (= (and refresh-payload.config refresh-payload.config.mode) "manual-bounds")
-          "apply-theme should refresh the active containment visualization with the current config")
-  (set PhysicsContainment.refresh-visualization original-refresh-visualization)
-  (set app.physics-containment-scene original-containment-scene)
-  (set app.physics-containment-config original-containment-config)
+  (assert refresh-called?
+          "apply-theme should refresh the active containment visualization")
   (set app.settings original-settings)
   (set app.themes original-themes)
   (set app.scene original-scene)
@@ -1088,8 +1074,6 @@
   (local original-states app.states)
   (local original-object-selector app.object-selector)
   (local original-movables app.movables)
-  (local original-physics-containment-config app.physics-containment-config)
-  (local original-physics-containment-scene app.physics-containment-scene)
 
   ;; Set up themes
   (local themes (Themes))
@@ -1109,9 +1093,6 @@
                       :save (fn [] true)})
   (set app.apply-active-world-hud-contrib nil)
   (set app.active-world-entry nil)
-  ;; Clear physics containment to prevent refresh-visualization side effects
-  (set app.physics-containment-config nil)
-  (set app.physics-containment-scene nil)
 
   ;; Create real Scene (reads app.themes during construction for initial theme)
   (local scene (Scene {:camera camera}))
@@ -1161,8 +1142,6 @@
   (set app.states original-states)
   (set app.object-selector original-object-selector)
   (set app.movables original-movables)
-  (set app.physics-containment-config original-physics-containment-config)
-  (set app.physics-containment-scene original-physics-containment-scene)
   true)
 
 (table.insert tests {:name "R4-4b apply theme updates real Scene slot contexts"

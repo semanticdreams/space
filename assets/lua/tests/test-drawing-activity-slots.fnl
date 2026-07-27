@@ -256,8 +256,10 @@
                      (= (. app.background-state.color 2) 0.3)
                      (= (. app.background-state.color 3) 0.4))
                 "Sandbox activation should apply custom background color")
-        (assert (and app.physics-containment-config app.physics-containment-config.enabled?)
-                "Sandbox containment should be enabled")
+        (let [sb-slot (scene:activity-slot "sandbox")
+              sb-manager (and sb-slot sb-slot.physics-containment-manager)]
+          (assert (and sb-manager sb-manager.config sb-manager.config.enabled?)
+                  "Sandbox containment should be enabled"))
         (let [sb-slot (scene:activity-slot "sandbox")]
           (assert (app.pointer-target-enabled? (. sb-slot :pointer-target))
                   "Sandbox pointer target should be enabled while sandbox is active"))
@@ -288,8 +290,11 @@
                      (= (. app.background-state.color 3) 0.0))
                 "Drawing activation should reset background to default")
         ;; Containment should be disabled
-        (assert (and app.physics-containment-config (not app.physics-containment-config.enabled?))
-                "Drawing activation should disable containment")
+        (let [d-slot (scene:activity-slot "drawing")
+              d-manager (and d-slot d-slot.physics-containment-manager)]
+          (assert (and d-manager d-manager.config
+                       (not d-manager.config.enabled?))
+                  "Drawing activation should disable containment"))
         ;; Sandbox pointer target should be rejected
         (let [sb-slot (scene:activity-slot "sandbox")]
           (assert (not (app.pointer-target-enabled? (. sb-slot :pointer-target)))
