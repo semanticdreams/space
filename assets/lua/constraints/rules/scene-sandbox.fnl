@@ -225,29 +225,35 @@
    "world-runtime.scene"
    "active-world-runtime.scene"])
 
-(local contract-call-patterns
+(local core-activation-call-patterns
   ["scene:ensure-activity-slot"
-   "scene:activate-activity-slot"
-   "ctx:set-root-actions!"
-   "ctx:set-update!"
-   "ctx:set-target-enabled!"])
+   "scene:activate-activity-slot"])
 
 (fn check-sandbox-uses-runtime-scene [diagnostics ff]
   "Check that sandbox-activity-unit.fnl activation function accesses runtime.scene.
-  Inspects function definitions that contain activation contract calls: at least
-  one such definition must also reference runtime.scene / world-runtime.scene in
-  its form text.  Falls back to a file-wide access scan only when no contract-
-  call-containing definition is found."
+  Ties evidence specifically to the activation-owning definition:
+  prefers the function named activate-sandbox-activity!; otherwise requires the
+  same definition that contains core slot activation calls (ensure/activate-activity-slot)
+  to contain the runtime.scene evidence.  Falls back to a file-wide access scan
+  only when no activation-owning definition is identified."
   (var found-scene false)
-  (var looked-at-activation-defs false)
-  ;; Find definitions whose form text contains activation contract calls.
+  (var activation-defs-checked false)
+  ;; First pass: look for the specifically-named activation function
   (each [_ def (ipairs (or ff.definitions []))]
-    (when (and def.form (form-contains-any? def.form contract-call-patterns))
-      (set looked-at-activation-defs true)
+    (when (and def.name (= def.name "activate-sandbox-activity!") def.form)
+      (set activation-defs-checked true)
       (when (form-contains-any? def.form scene-access-patterns)
         (set found-scene true))))
-  (if looked-at-activation-defs
-      ;; At least one definition contains activation calls — verify it also
+  ;; If no named activation function found, fall back to definitions that
+  ;; contain core slot activation calls (ensure/activate)
+  (when (not activation-defs-checked)
+    (each [_ def (ipairs (or ff.definitions []))]
+      (when (and def.form (form-contains-any? def.form core-activation-call-patterns))
+        (set activation-defs-checked true)
+        (when (form-contains-any? def.form scene-access-patterns)
+          (set found-scene true)))))
+  (if activation-defs-checked
+      ;; At least one activation-owning definition identified — verify it also
       ;; references the runtime scene.
       (when (not found-scene)
         (table.insert diagnostics
@@ -259,7 +265,7 @@
              :line 0 :column 0
              :evidence {:required-access "runtime.scene"}
              :hint "ensure sandbox activation obtains and uses runtime.scene / world-runtime.scene"})))
-      ;; No contract-call-containing definition found — fall back to
+      ;; No activation-owning definition found — fall back to
       ;; file-wide access check (activation code may be at top level).
       (do
         (set found-scene false)
