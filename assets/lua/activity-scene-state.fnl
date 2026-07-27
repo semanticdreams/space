@@ -146,6 +146,14 @@
      :skybox (normalize-skybox state.skybox (.. label ".skybox"))
      :background (normalize-background state.background (.. label ".background"))
      :containment (normalize-containment state.containment (.. label ".containment"))})
+  ;; R2-2: Preserve optional :camera field when supplied by an owning
+  ;; activity session.  Empty state must NOT create a camera, but
+  ;; an existing canonical camera state must survive normalization
+  ;; and reload so legacy top-level camera migration remains one-shot.
+  (when (= (type state.camera) :table)
+    (set cloned.camera
+         {:position (clone-table state.camera.position)
+          :rotation (clone-table state.camera.rotation)}))
   cloned)
 
 (fn ensure-session-scene! [activity-state id state-factory]

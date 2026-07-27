@@ -946,6 +946,22 @@
   (set self.update-projection update-projection)
   (set self.command-hints (CommandHints self))
   (set self.screen-pos-ray screen-pos-ray)
+  (fn presentation-target [self]
+    "Return a retained HUD presentation target that the runtime presentation
+    provider can include after scene and canvas so renderers draw all three
+    surfaces in scene/canvas/hud order.  HUD has no activity slot and no camera:
+    it uses its own orthographic projection and identity view matrix."
+    (when self.projection
+      {:kind :hud
+       :surface self
+       :slot nil
+       :camera nil
+       :projection self.projection
+       :get-view-matrix (fn [_target] (self:get-view-matrix))
+       :get-lighting-view-state (fn [_target] (self:get-lighting-view-state))
+       :get-render-contexts (fn [_target] [self])
+       :screen-pos-ray (fn [_target pos opts] (self:screen-pos-ray pos opts))}))
+  (set self.presentation-target presentation-target)
   (set self.add-panel-child add-panel-child)
   (set self.remove-panel-child remove-panel-child)
   (set self.find-panel-persistence find-panel-persistence)

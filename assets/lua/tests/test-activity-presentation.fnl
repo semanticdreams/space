@@ -75,18 +75,44 @@
               "default-screen-ray-target must use app.active-interaction-surface fallback"))
     (when app (set app.active-interaction-surface saved-active))))
 
-;; R1-3: HUD is not included in render targets unless explicitly activity-owned
-(fn provider-render-targets-excludes-global-hud []
-  ;; Temporarily set app.hud to verify it is NOT included
+;; R1-1: HUD must be included in render targets in scene/canvas/hud order
+(fn provider-render-targets-includes-hud-in-order []
+  (let [saved-hud (and app app.hud)
+        scene-target {:kind :scene}
+        canvas-target {:kind :canvas}
+        hud-target-maker (fn [] {:kind :hud :projection true
+                                  :get-view-matrix (fn [_t] true)
+                                  :get-lighting-view-state (fn [_t] true)
+                                  :get-render-contexts (fn [_t] [])})
+        hud-target (hud-target-maker)
+        runtime {:scene {:presentation-target (fn [_self] scene-target)}
+                 :canvas {:presentation-target (fn [_self] canvas-target)}}]
+    ;; Set app.hud with presentation-target so the provider can collect it
+    (when app (set app.hud {:presentation-target (fn [_self] hud-target)}))
+    (local provider (Presentation.for-runtime runtime))
+    (local targets (provider:render-targets))
+    (assert (= (length targets) 3)
+            (.. "render-targets must include scene, canvas, and hud; got " (length targets)
+                " targets"))
+    (assert (= (. targets 1) scene-target)
+            "targets[1] must be scene")
+    (assert (= (. targets 2) canvas-target)
+            "targets[2] must be canvas")
+    (assert (= (. targets 3) hud-target)
+            "targets[3] must be hud")
+    (when app (set app.hud saved-hud))))
+;; Complementary: HUD without presentable projection is not included
+(fn provider-render-targets-excludes-empty-hud []
   (let [saved-hud (and app app.hud)
         scene-target {:kind :scene}
         runtime {:scene {:presentation-target (fn [_self] scene-target)}
                  :canvas {:presentation-target (fn [_self] nil)}}]
-    (when app (set app.hud {:kind :hud}))
+    (when app (set app.hud {:projection nil ;; without projection, no presentation target
+                             :presentation-target (fn [_self] nil)}))
     (local provider (Presentation.for-runtime runtime))
     (local targets (provider:render-targets))
     (assert (= (length targets) 1)
-            (.. "render-targets must not include global app.hud, got " (length targets)
+            (.. "render-targets must exclude HUD without projection, got " (length targets)
                 " targets"))
     (assert (= (. targets 1) scene-target)
             "only explicit runtime-owned scene target must be present")
@@ -189,10 +215,36 @@
                      :fn provider-default-screen-ray-surface-selects-target})
 (table.insert tests {:name "Provider default-screen-ray-target fallback uses active interaction surface"
                      :fn provider-default-screen-ray-fallback-uses-active-interaction-surface})
-(table.insert tests {:name "Provider render-targets excludes global app.hud"
-                     :fn provider-render-targets-excludes-global-hud})
+;; R1-3: app.screen-pos-ray must fail loudly when no provider and no
+;; explicit target is supplied.  It must not silently fall back to
+;; app.scene or app.canvas.
+(fn app-screen-pos-ray-fails-without-provider-or-explicit-target []
+  (let [saved-runtime app.active-world-runtime
+        Main (require :main)]
+    (Main.install-app-shell!)
+    ;; No active runtime and no explicit target => must fail
+    (set app.active-world-runtime nil)
+    (let [(ok err) (pcall (fn [] (app.screen-pos-ray {:x 10 :y 20} {})))]
+      (assert (not ok)
+              "screen-pos-ray without provider must fail")
+      (assert (string.find (tostring err) "presentation provider")
+              (.. "error must mention presentation provider, got: " (tostring err))))
+    ;; Explicit target must still work even without provider
+    (let [explicit-ray "explicit-ray-result"
+          fake-target {:screen-pos-ray (fn [_self _pos _opts] explicit-ray)}
+          ray (app.screen-pos-ray {:x 1 :y 2} {:target fake-target})]
+      (assert (= ray explicit-ray)
+              "screen-pos-ray with explicit opts.target must work even without provider"))
+    (set app.active-world-runtime saved-runtime)))
+
+(table.insert tests {:name "Provider render-targets includes HUD in scene/canvas/hud order"
+                       :fn provider-render-targets-includes-hud-in-order})
+(table.insert tests {:name "Provider render-targets excludes empty HUD"
+                       :fn provider-render-targets-excludes-empty-hud})
+(table.insert tests {:name "app.screen-pos-ray fails without provider or explicit target"
+                       :fn app-screen-pos-ray-fails-without-provider-or-explicit-target})
 (table.insert tests {:name "app.screen-pos-ray delegates to runtime presentation"
-                     :fn app-screen-pos-ray-delegates-to-runtime-presentation})
+                      :fn app-screen-pos-ray-delegates-to-runtime-presentation})
 (table.insert tests {:name "state-runtime uses presentation controls"
                      :fn state-runtime-uses-presentation-controls})
 (table.insert tests {:name "provider input-controls has no cross-surface fallback"

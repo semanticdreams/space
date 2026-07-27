@@ -955,7 +955,39 @@
       true)))
 
 (table.insert tests {:name "skybox by-theme override survives normalization and reload"
-                     :fn skybox-by-theme-override-survives-normalization-and-reload})
+                      :fn skybox-by-theme-override-survives-normalization-and-reload})
+
+;; R2-2: Optional owner-supplied scene camera state must survive
+;; normalization and reload.  Legacy top-level camera must not overwrite
+;; existing canonical sandbox scene camera (one-shot migration).
+(fn scene-camera-survives-normalize-state []
+  (let [defaults (ActivitySceneState.default-sandbox-state)
+        camera {:position [1 2 3] :rotation [0 0 0 1]}
+        state-with-camera {:panels (or defaults.panels [])
+                           :terrains (or defaults.terrains [])
+                           :lights defaults.lights
+                           :skybox defaults.skybox
+                           :background defaults.background
+                           :containment defaults.containment
+                           :camera camera}
+        normalized (ActivitySceneState.normalize-state state-with-camera
+                                                       "test-scene-camera-survives")]
+    (assert (= (type normalized.camera) :table)
+            "camera must survive normalize-state")
+    (assert (= (. normalized.camera.position 1) 1))
+    (assert (= (. normalized.camera.position 2) 2))
+    (assert (= (. normalized.camera.position 3) 3))
+    (assert (= (. normalized.camera.rotation 1) 0))
+    (assert (= (. normalized.camera.rotation 4) 1))
+    ;; Empty state must NOT create a camera
+    (let [empty (ActivitySceneState.empty-state)
+          empty-normalized (ActivitySceneState.normalize-state empty
+                                                               "test-empty-no-camera")]
+      (assert (= empty-normalized.camera nil)
+              "empty state must not create a camera"))))
+
+(table.insert tests {:name "scene camera survives normalize-state (no implicit camera)"
+                      :fn scene-camera-survives-normalize-state})
 
 (fn legacy-camera-state-migrates-to-sandbox-session []
   ;; When a legacy world.json has top-level camera state, it must be

@@ -722,7 +722,7 @@
     (and (= (type value) :number)
          (= value value)
          (not (= value math.huge))
-         (not (= value (- math.huge)))))
+          (not (= value (- math.huge)))))
   (fn assert-finite-vec3 [vec label]
     (when (or (not vec)
               (not (finite-number? vec.x))
@@ -733,21 +733,18 @@
   (let [provider (app.active-presentation)]
     (if provider
         (provider:screen-pos-ray pos opts)
-        ;; Fallback: target-based delegation (HUD, etc.)
-        (let [preferred-target (resolve-screen-ray-target opts)]
-          (if (and preferred-target preferred-target.screen-pos-ray)
-              (let [options (if opts
-                              (let [copy {}]
-                                (each [k v (pairs opts)]
-                                  (set (. copy k) v))
-                                copy)
-                              {})]
-                (when (and (= preferred-target app.scene)
-                           (not options.projection)
-                           app.projection)
-                  (set options.projection app.projection))
-                (preferred-target:screen-pos-ray pos options))
-              (error "app.screen-pos-ray requires a presentation provider or target with screen-pos-ray"))))))
+        ;; No provider: only delegate to explicit targets (opts.target or
+        ;; opts.pointer-target).  Implicit fallback to app.scene/app.canvas
+        ;; is removed — callers must pass an explicit target or ensure an
+        ;; active presentation provider exists.
+        (let [options (or opts {})
+              explicit-target (or options.target options.pointer-target)]
+          (if (and explicit-target explicit-target.screen-pos-ray)
+              (let [copy {}]
+                (each [k v (pairs options)]
+                  (set (. copy k) v))
+                (explicit-target:screen-pos-ray pos copy))
+              (error "app.screen-pos-ray requires a presentation provider or explicit target with screen-pos-ray"))))))
 
 (set app.layout-root nil)
 (set app.viewport nil)

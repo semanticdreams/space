@@ -15,6 +15,11 @@
       (let [target (runtime.canvas:presentation-target)]
         (when target
           (table.insert targets target))))
+    ;; HUD target (retained surface via app.hud)
+    (when (and app app.hud app.hud.presentation-target)
+      (let [target (app.hud:presentation-target)]
+        (when target
+          (table.insert targets target))))
     targets)
 
   (fn provider.default-screen-ray-target [self opts]
