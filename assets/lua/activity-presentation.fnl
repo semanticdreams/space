@@ -28,12 +28,12 @@
               (= options.surface :canvas)
               (when (and runtime runtime.canvas runtime.canvas.presentation-target)
                 (runtime.canvas:presentation-target))))
-        (let [preferred (and runtime runtime.preferred-interaction-surface)]
-          (when preferred
-            (if (or (= preferred :scene) (= preferred "scene"))
+        (let [active-surface (and app app.active-interaction-surface)]
+          (when active-surface
+            (if (or (= active-surface :scene) (= active-surface "scene"))
                 (when (and runtime runtime.scene runtime.scene.presentation-target)
                   (runtime.scene:presentation-target))
-                (or (= preferred :canvas) (= preferred "canvas"))
+                (or (= active-surface :canvas) (= active-surface "canvas"))
                 (when (and runtime runtime.canvas runtime.canvas.presentation-target)
                   (runtime.canvas:presentation-target)))))))
 

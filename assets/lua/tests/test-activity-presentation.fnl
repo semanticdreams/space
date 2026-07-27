@@ -49,28 +49,31 @@
     (assert (= ray "scene-ray")
             (.. "screen-pos-ray via surface must delegate, got " (tostring ray)))))
 
-;; R1-2: fallback must use runtime.preferred-interaction-surface, not app
-(fn provider-default-screen-ray-fallback-uses-runtime-interaction-surface []
+;; R1-2: fallback must use app.active-interaction-surface (active wins over preferred)
+(fn provider-default-screen-ray-fallback-uses-active-interaction-surface []
   (local scene-target {:kind :scene
                        :screen-pos-ray (fn [_self _pos _opts]
-                                         "runtime-scene-ray")})
+                                         "active-scene-ray")})
   (local canvas-target {:kind :canvas
                         :screen-pos-ray (fn [_self _pos _opts]
-                                          "runtime-canvas-ray")})
+                                          "active-canvas-ray")})
+  ;; runtime prefers scene, but the active interaction surface is canvas
   (local runtime
     {:scene {:presentation-target (fn [_self] scene-target)}
      :canvas {:presentation-target (fn [_self] canvas-target)}
-     :preferred-interaction-surface :canvas})
+     :preferred-interaction-surface :scene})
   (local provider (Presentation.for-runtime runtime))
-  ;; The runtime prefers canvas; screen-ray without explicit surface should use that
-  (let [ray (provider:screen-pos-ray {:x 1 :y 2} {})]
-    (assert (= ray "runtime-canvas-ray")
-            (.. "screen-pos-ray fallback must use runtime.preferred-interaction-surface, got "
-                (tostring ray))))
-  ;; default-screen-ray-target must pick canvas when runtime prefers it
-  (let [target (provider:default-screen-ray-target {})]
-    (assert (= target canvas-target)
-            "default-screen-ray-target must use runtime.preferred-interaction-surface fallback")))
+  (let [saved-active (and app app.active-interaction-surface)]
+    (when app (set app.active-interaction-surface :canvas))
+    ;; Active surface (:canvas) must win over runtime preferred (:scene)
+    (let [ray (provider:screen-pos-ray {:x 1 :y 2} {})]
+      (assert (= ray "active-canvas-ray")
+              (.. "screen-pos-ray fallback must use app.active-interaction-surface, got "
+                  (tostring ray))))
+    (let [target (provider:default-screen-ray-target {})]
+      (assert (= target canvas-target)
+              "default-screen-ray-target must use app.active-interaction-surface fallback"))
+    (when app (set app.active-interaction-surface saved-active))))
 
 ;; R1-3: HUD is not included in render targets unless explicitly activity-owned
 (fn provider-render-targets-excludes-global-hud []
@@ -95,8 +98,8 @@
                      :fn provider-screen-ray-requires-target-camera})
 (table.insert tests {:name "Provider default-screen-ray-target uses opts.surface"
                      :fn provider-default-screen-ray-surface-selects-target})
-(table.insert tests {:name "Provider default-screen-ray-target fallback uses runtime interaction surface"
-                     :fn provider-default-screen-ray-fallback-uses-runtime-interaction-surface})
+(table.insert tests {:name "Provider default-screen-ray-target fallback uses active interaction surface"
+                     :fn provider-default-screen-ray-fallback-uses-active-interaction-surface})
 (table.insert tests {:name "Provider render-targets excludes global app.hud"
                      :fn provider-render-targets-excludes-global-hud})
 
