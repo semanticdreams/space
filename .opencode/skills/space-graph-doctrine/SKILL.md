@@ -1,13 +1,13 @@
 ---
-name: humpback-graph-doctrine
-description: Use when editing Humpback graph nodes, graph maps, graph views, graph persistence, graph topology, graph key loaders, or graph terminology.
+name: space-graph-doctrine
+description: Use when editing Space graph nodes, graph maps, graph views, graph persistence, graph topology, graph key loaders, or graph terminology.
 ---
 
-# Humpback Graph Doctrine
+# Space Graph Doctrine
 
 ## Use When
 
-Editing Humpback graph nodes, graph maps, graph views, graph persistence, graph topology, graph key loaders, or graph terminology.
+Editing Space graph nodes, graph maps, graph views, graph persistence, graph topology, graph key loaders, or graph terminology.
 
 ## Canonical References
 

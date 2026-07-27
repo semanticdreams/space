@@ -1,13 +1,13 @@
 ---
-name: humpback-fennel-ui
-description: Use when editing or designing Humpback Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.
+name: space-fennel-ui
+description: Use when editing or designing Space Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.
 ---
 
-# Humpback Fennel UI
+# Space Fennel UI
 
 ## Use When
 
-Editing or designing Humpback Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.
+Editing or designing Space Fennel widgets, layout, rendering adapters, interaction widgets, widget lifecycle, or widget tests.
 
 ## Canonical References
 

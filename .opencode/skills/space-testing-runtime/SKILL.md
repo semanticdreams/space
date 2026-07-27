@@ -1,13 +1,13 @@
 ---
-name: humpback-testing-runtime
-description: Use when running, adding, or debugging Humpback tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.
+name: space-testing-runtime
+description: Use when running, adding, or debugging Space tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.
 ---
 
-# Humpback Testing Runtime
+# Space Testing Runtime
 
 ## Use When
 
-Running, adding, or debugging Humpback tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.
+Running, adding, or debugging Space tests, E2E snapshots, remote-control debugging, profiling, build commands, or runtime harnesses.
 
 ## Canonical Commands
 
