@@ -8,6 +8,11 @@ Clean design is important, refactor when reasonable.
 
 The default base branch for pull requests and merges is `main`.
 
+For final validation and PR diff/base checks, use `origin/main` as the base
+branch reference — not local `main`. Local `main` may be stale or contain
+unrelated local commits. Use local `main` only when explicitly performing a
+local merge or integration operation that requires it.
+
 After implementation is complete — reviewed, committed, tests passing, tree
 clean — the default integration action is to push the current branch and create a
 pull request targeting `main`. Do this automatically; do not present an

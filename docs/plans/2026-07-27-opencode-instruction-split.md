@@ -533,7 +533,7 @@ Expected: first block has no moved-detail matches; later `rg` commands find all 
 Run:
 
 ```bash
-BASE=$(git merge-base HEAD main)
+BASE=$(git merge-base HEAD origin/main)
 git diff --name-only "$BASE"..HEAD -- src/ apps/ assets/ tests/ scripts/ CMakeLists.txt Makefile
 ```
 
@@ -544,7 +544,7 @@ Expected: no output.
 Run:
 
 ```bash
-BASE=$(git merge-base HEAD main)
+BASE=$(git merge-base HEAD origin/main)
 git diff --check "$BASE"..HEAD
 ```
 
