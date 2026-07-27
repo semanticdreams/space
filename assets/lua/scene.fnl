@@ -2345,9 +2345,18 @@
         (local metadata terrain-entry.metadata)
         (local record (and metadata metadata.record))
         (local query-record (and metadata (terrain-layout-record metadata)))
+        (local ray-opts {})
+        (each [k v (pairs (or opts {}))]
+          (set (. ray-opts k) v))
+        (when (and (not ray-opts.target)
+                   (not ray-opts.pointer-target)
+                   (or (not ray-opts.view)
+                       (not ray-opts.projection)
+                       (not ray-opts.viewport)))
+          (set ray-opts.target self))
         (local target
           (and query-record
-               (TerrainQuery.screen-rect-target query-record start-pos end-pos opts)))
+               (TerrainQuery.screen-rect-target query-record start-pos end-pos ray-opts)))
         (and target
              {:terrain-record record
               :terrain-id (and record record.id)
