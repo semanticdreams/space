@@ -510,6 +510,72 @@
   (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
           "diagnostic should have correct constraint-id"))
 
+;; --- R2-2: helper loops should be recognized; cleanup-like text without calls should not ---
+
+(fn registration-cleanup-allows-loop-with-disconnect-dash-helper []
+  "A file with multiple :connect registrations and a loop calling a
+  disconnect-input helper (extracted as a call fact) should pass —
+  the loop plus cleanup call covers all registrations."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :definitions [{:kind :fn
+                                            :name "cleanup-handlers"
+                                            :top-level? true
+                                            :line 30 :column 1
+                                            :length 20
+                                            :form "(fn cleanup-handlers []
+  (each [_ record (ipairs handlers)]
+    (disconnect-input record)))"}]
+                             :calls [{:callee "signal-a:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(signal-a:connect handler1)"}
+                                     {:callee "signal-b:connect"
+                                      :receiver nil :method nil
+                                      :line 12 :column 1
+                                      :form "(signal-b:connect handler2)"}
+                                     {:callee "disconnect-input"
+                                      :receiver nil :method nil
+                                      :line 32 :column 1
+                                      :form "(disconnect-input record)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "loop with disconnect-* helper call should pass"))
+
+(fn registration-cleanup-flags-file-with-loop-but-no-cleanup-calls []
+  "A file with :connect registrations where a function has an 'each' loop
+  and cleanup-like TEXT (:disconnect in a comment or similar) but ZERO
+  actual extracted cleanup CALLS should still be flagged — has-loop-cleanup?
+  must not suppress the no-cleanup diagnostic when cl-count is zero."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  ;; A loop with the text ':disconnect' inside a string, no actual disconnect call fact
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :definitions [{:kind :fn
+                                            :name "log-loop"
+                                            :top-level? true
+                                            :line 30 :column 1
+                                            :length 10
+                                            :form "(fn log-loop []
+  (each [_ x (ipairs items)]
+    (print \"use :disconnect to clean up\")))"}]
+                             :calls [{:callee "signal-a:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(signal-a:connect handler)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag no-cleanup when loop has :disconnect text but no cleanup calls")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
+          "diagnostic should have correct constraint-id"))
+
 (fn registration-cleanup-flags-file-with-partial-cleanup []
   "A file with two registrations but only one cleanup should produce diagnostics
   for the unmatched registration."
@@ -1735,6 +1801,10 @@
                      :fn registration-cleanup-still-flags-no-cleanup-at-all})
 (table.insert tests {:name "registration-cleanup still flags connect without any cleanup"
                      :fn registration-cleanup-still-flags-connect-without-any-cleanup})
+(table.insert tests {:name "registration-cleanup allows loop with disconnect-dash helper"
+                     :fn registration-cleanup-allows-loop-with-disconnect-dash-helper})
+(table.insert tests {:name "registration-cleanup flags loop but no cleanup calls"
+                     :fn registration-cleanup-flags-file-with-loop-but-no-cleanup-calls})
 (table.insert tests {:name "registration-cleanup flags file with partial cleanup"
                      :fn registration-cleanup-flags-file-with-partial-cleanup})
 

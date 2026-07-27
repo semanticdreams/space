@@ -10,7 +10,7 @@
 
 (fn escape-pattern [s]
   "Escape all Lua pattern magic characters in s for literal matching."
-  (s:gsub "[%^%$%(%)%%%.%[%]%*%+%-%?]" "%%%1"))
+  (s:gsub "([%^%$%(%)%%%.%[%]%*%+%-%?])" "%%%1"))
 
 (fn register? [c] (and c (or (= c :register) (= c "app.engine.events.updated:connect") (str-ends-with? c ":connect"))))
 (fn cleanup-call? [c]
@@ -30,11 +30,11 @@
   (each [_ def (ipairs (or ff.definitions []))]
     (when (and (not found) (= def.kind :fn) def.form)
       (let [form def.form]
-        (when (and (or (form:find "each " 1 true) (form:find "for " 1 true)
-                       (form:find "icollect " 1 true))
-                   (or (form:find ":disconnect" 1 true) (form:find ":drop" 1 true)
-                       (form:find ":clear" 1 true) (form:find ":unregister" 1 true)
-                       (form:find "disconnect%-" 1 true) (form:find "unsubscribe%-" 1 true)))
+         (when (and (or (form:find "each " 1 true) (form:find "for " 1 true)
+                        (form:find "icollect " 1 true))
+                    (or (form:find ":disconnect" 1 true) (form:find ":drop" 1 true)
+                        (form:find ":clear" 1 true) (form:find ":unregister" 1 true)
+                        (form:find "disconnect%-") (form:find "unsubscribe%-")))
           (set found true)))))
   found)
 
@@ -60,7 +60,7 @@
         (set has-cleanup-fn true)
         (table.insert cleanup-fn-names def.name)))
     (var has-loop-cl (has-loop-cleanup? ff))
-    (when (and (> reg-count 0) (= cl-count 0) (not has-cleanup-fn) (not has-loop-cl))
+    (when (and (> reg-count 0) (= cl-count 0) (not has-cleanup-fn))
       (table.insert diagnostics
         (Diagnostics.violation
           {:constraint-id "lifecycle.event-registration-cleanup" :family "lifecycle"
