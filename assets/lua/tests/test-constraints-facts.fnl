@@ -204,6 +204,69 @@
       (set found-tset true)))
   (assert found-tset "should find tset mutation"))
 
+;; --- R1-1: local definition name ---
+
+(fn local-definition-names-the-bound-symbol []
+  "A (local Scene (require :scene)) should emit a local definition named 'Scene'."
+  (local source "(local Scene (require :scene))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var found-scene false)
+  (each [_ d (ipairs ff.definitions)]
+    (when (and (= d.kind :local) (= d.name "Scene"))
+      (assert d.top-level? "local Scene should be top-level")
+      (set found-scene true)))
+  (assert found-scene "should find local definition named 'Scene'"))
+
+;; --- R1-2: method-style call ---
+
+(fn extracts-method-call []
+  "A (receiver:method arg) call should populate :callee, :receiver, and :method."
+  (local source "(fn activate [obj]\n  (obj:activate world))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var found-method-call false)
+  (each [_ c (ipairs ff.calls)]
+    (when (and c.receiver c.method (= c.receiver "obj") (= c.method "activate"))
+      (assert c.callee "method call should have :callee")
+      (set found-method-call true)))
+  (assert found-method-call "should find method call with receiver 'obj' and method 'activate'"))
+
+;; --- R1-3: top-level export table ---
+
+(fn extracts-top-level-export []
+  "A top-level module-return table {:main main} should produce export keys."
+  (local source "{:main main}\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var found-main false)
+  (each [_ e (ipairs ff.exports)]
+    (when (= e.key "main")
+      (set found-main true)))
+  (assert found-main "should find export key 'main' from top-level table"))
+
+;; --- R1-4: per-function nesting depth ---
+
+(fn per-function-nesting-depth-is-scoped []
+  "Sibling functions should each report their own nesting depth,
+  not be contaminated by earlier deeper siblings."
+  (local source "(fn deep-fn [x]\n  (fn inner [y]\n    (fn innermost [z]\n      (print z))))\n(fn shallow-fn [a]\n  (print a))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var deep-nesting nil)
+  (var shallow-nesting nil)
+  (each [_ f (ipairs ff.metrics.functions)]
+    (if (= f.name "deep-fn")
+        (set deep-nesting f.max-nesting-depth)
+        (= f.name "shallow-fn")
+        (set shallow-nesting f.max-nesting-depth)))
+  (assert deep-nesting "should find metric for deep-fn")
+  (assert shallow-nesting "should find metric for shallow-fn")
+  (assert (>= deep-nesting 2)
+          (.. "deep-fn should have nesting >= 2, got " (tostring deep-nesting)))
+  (assert (<= shallow-nesting 1)
+          (.. "shallow-fn should have nesting <= 1, got " (tostring shallow-nesting))))
+
 ;; Register all tests
 (table.insert tests {:name "facts extracts require module"
                      :fn extracts-require-module})
@@ -231,6 +294,14 @@
                      :fn extracts-global-definition})
 (table.insert tests {:name "facts extracts tset mutation"
                      :fn extracts-tset-mutation})
+(table.insert tests {:name "facts local definition names the bound symbol"
+                     :fn local-definition-names-the-bound-symbol})
+(table.insert tests {:name "facts extracts method call"
+                     :fn extracts-method-call})
+(table.insert tests {:name "facts extracts top-level export"
+                     :fn extracts-top-level-export})
+(table.insert tests {:name "facts per-function nesting depth is scoped"
+                     :fn per-function-nesting-depth-is-scoped})
 
 (local main
   (fn []

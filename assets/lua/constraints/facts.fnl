@@ -37,6 +37,13 @@
         (table.insert result c))))
   result)
 
+(fn split-colon-symbol [text]
+  "Split a colon-style symbol like 'obj:method' into [receiver method]."
+  (let [parts []]
+    (each [segment (text:gmatch "[^:]+")]
+      (table.insert parts segment))
+    parts))
+
 (fn split-dotted-symbol [text]
   "Split a dotted symbol like 'world.state.scene.panels' into path segments."
   (let [parts []]
@@ -136,37 +143,57 @@
         (when is-form
           (set depth (+ depth 1))
           (when (> depth max-depth)
-            (set max-depth depth)))
+            (set max-depth depth))
+          ;; Update per-frame max depth for all active function frames
+          (each [_ frame (ipairs fn-stack)]
+            (when (> depth frame.frame-max-depth)
+              (set frame.frame-max-depth depth))))
 
         ;; --- local_form ---
         (when (= node-type :local_form)
-          (let [ndc (non-delimiter-children node)]
-            (when (>= (length ndc) 1)
-              (let [name-node (. ndc 1)
-                    name-text (node-text source name-node)
-                    loc (node-line-col node)
-                    form (node-text source node)
-                    value-node (when (>= (length ndc) 2) (. ndc 2))]
-                (table.insert facts.definitions
-                  {:kind :local
-                   :name name-text
-                   :top-level? (= depth 1)
-                   :line loc.line
-                   :column loc.column
-                   :length (node:end-byte)
-                   :form form})
-                (when (and value-node (= (value-node:type) "list"))
-                  (let [vndc (non-delimiter-children value-node)]
-                    (when (and (>= (length vndc) 2)
-                               (= (node-text source (. vndc 1)) "require"))
-                      (let [mod-node (. vndc 2)
-                            mod-name (extract-module-name-from-string-node source mod-node)
-                            mod-loc (node-line-col value-node)]
-                        (table.insert facts.requires
-                          {:module mod-name
-                           :line mod-loc.line
-                           :column mod-loc.column
-                           :form (node-text source value-node)})))))))))
+          (let [loc (node-line-col node)
+                form (node-text source node)]
+            ;; local_form children: ( symbol(local) binding_pair(symbol_binding value) )
+            ;; Extract the binding name from symbol_binding inside binding_pair
+            (var local-name nil)
+            (var value-node nil)
+            (for [i 0 (- (node:child-count) 1)]
+              (let [c (node:child i)]
+                (if (= (c:type) "binding_pair")
+                    (for [j 0 (- (c:child-count) 1)]
+                      (let [bp-c (c:child j)]
+                        (if (= (bp-c:type) "symbol_binding")
+                            (set local-name (node-text source bp-c))
+                            (or (= (bp-c:type) "list")
+                                (= (bp-c:type) "table")
+                                (= (bp-c:type) "table_metadata")
+                                (= (bp-c:type) "sequential_table")
+                                (= (bp-c:type) "fn_form"))
+                            (set value-node bp-c))))
+                    (= (c:type) "symbol_binding")
+                    (set local-name (node-text source c)))))
+            (when local-name
+              (table.insert facts.definitions
+                {:kind :local
+                 :name local-name
+                 :top-level? (= depth 1)
+                 :line loc.line
+                 :column loc.column
+                 :length (node:end-byte)
+                 :form form})
+              ;; If value is a require form, extract module name
+              (when (and value-node (= (value-node:type) "list"))
+                (let [vndc (non-delimiter-children value-node)]
+                  (when (and (>= (length vndc) 2)
+                             (= (node-text source (. vndc 1)) "require"))
+                    (let [mod-node (. vndc 2)
+                          mod-name (extract-module-name-from-string-node source mod-node)
+                          mod-loc (node-line-col value-node)]
+                      (table.insert facts.requires
+                        {:module mod-name
+                         :line mod-loc.line
+                         :column mod-loc.column
+                         :form (node-text source value-node)}))))))))
 
         ;; --- fn_form ---
         (when (= node-type :fn_form)
@@ -188,7 +215,8 @@
                :start-depth depth
                :start-line loc.line
                :start-column loc.column
-               :anonymous? anonymous?})
+               :anonymous? anonymous?
+               :frame-max-depth depth})
             (when anonymous?
               (let [anon-d (- depth 1)]
                 (when (> anon-d max-anon-depth)
@@ -289,8 +317,16 @@
                           receiver (if (= head-type "multi_symbol")
                                        (let [parts (split-dotted-symbol head-text)]
                                          (. parts 1))
+                                       (= head-type "multi_symbol_method")
+                                       (let [parts (split-colon-symbol head-text)]
+                                         (. parts 1))
                                        nil)
-                          method (if (and (= head-type "multi_symbol")
+                          method (if (= head-type "multi_symbol_method")
+                                     (let [parts (split-colon-symbol head-text)]
+                                       (if (>= (length parts) 2)
+                                           (. parts (length parts))
+                                           nil))
+                                     (and (= head-type "multi_symbol")
                                           (>= (length (split-dotted-symbol head-text)) 2))
                                      (let [parts (split-dotted-symbol head-text)]
                                        (. parts (length parts)))
@@ -323,25 +359,26 @@
                 loc (node-line-col node)]
             (when (> table-size facts.metrics.max-table-literal-size)
               (set facts.metrics.max-table-literal-size table-size))
-            ;; Export keys from table-like nodes inside a function:
+            ;; Export keys from table-like nodes:
             ;; table has { table_pair(string key, value) ... }
             ;; table_metadata has { table_metadata_pair(string key, value) ... }
-            (when (>= (length fn-stack) 1)
-              (let [pair-type (table-pair-type node-type)]
-                (when pair-type
-                  (for [i 0 (- (node:child-count) 1)]
-                    (let [c (node:child i)]
-                      (when (= (c:type) pair-type)
-                        (for [j 0 (- (c:child-count) 1)]
-                          (let [tp-c (c:child j)]
-                            (when (= (tp-c:type) "string")
-                              (let [key-text (extract-module-name-from-string-node source tp-c)
-                                    key-loc (node-line-col c)]
-                                (table.insert facts.exports
-                                  {:key key-text
-                                   :line key-loc.line
-                                   :column key-loc.column
-                                   :form (node-text source c)})))))))))))))
+            ;; Extracted regardless of function nesting so top-level
+            ;; module-return tables (the dominant export pattern) are included.
+            (let [pair-type (table-pair-type node-type)]
+              (when pair-type
+                (for [i 0 (- (node:child-count) 1)]
+                  (let [c (node:child i)]
+                    (when (= (c:type) pair-type)
+                      (for [j 0 (- (c:child-count) 1)]
+                        (let [tp-c (c:child j)]
+                          (when (= (tp-c:type) "string")
+                            (let [key-text (extract-module-name-from-string-node source tp-c)
+                                  key-loc (node-line-col c)]
+                              (table.insert facts.exports
+                                {:key key-text
+                                 :line key-loc.line
+                                 :column key-loc.column
+                                 :form (node-text source c)}))))))))))))
 
         ;; Recurse into children
         (for [i 0 (- (node:child-count) 1)]
@@ -360,7 +397,7 @@
                    :line fn-info.start-line
                    :column fn-info.start-column
                    :length (math.max 1 fn-length)
-                   :max-nesting-depth (- max-depth fn-info.start-depth)}))))
+                   :max-nesting-depth (- fn-info.frame-max-depth fn-info.start-depth)}))))
           (set depth (- depth 1)))))
 
     (visit root)
