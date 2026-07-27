@@ -233,31 +233,40 @@
                                             :skybox (make-skybox-state)
                                             :background (make-background-state)}
                                     :hud {:panels []}}))
-    ;; Populate canonical activity session state, keeping legacy scene keys
-    ;; populated for tests that still reference them directly.
+    ;; Populate canonical sandbox session scene state when absent,
+    ;; preserving any existing activity metadata and keeping legacy
+    ;; scene keys populated for tests that still reference them directly.
     ;; Arrays (panels, terrains) shared by reference with legacy scene.
     ;; Lights, skybox, background use their own references to avoid
     ;; inadvertently materializing state when a test passes nil.
-    (local has-activity? (= (type state.activity) :table))
-    (when (not has-activity?)
+    (local has-complete-sandbox-scene?
+      (and (= (type state.activity) :table)
+           (= (type state.activity.sessions) :table)
+           (= (type state.activity.sessions.sandbox) :table)
+           (= (type state.activity.sessions.sandbox.scene) :table)))
+    (when (not has-complete-sandbox-scene?)
+      ;; Ensure intermediate tables exist, defaulting active_id if nil.
+      (when (not (= (type state.activity) :table))
+        (set state.activity {}))
+      (when (= state.activity.active_id nil)
+        (set state.activity.active_id "sandbox"))
+      (when (not (= (type state.activity.sessions) :table))
+        (set state.activity.sessions {}))
+      (when (not (= (type state.activity.sessions.sandbox) :table))
+        (set state.activity.sessions.sandbox {}))
       (local sandbox-lights (or state.scene.lights
                                 (LightSystemModule.default-state)))
       (local sandbox-skybox (or state.scene.skybox
                                 (make-skybox-state)))
       (local sandbox-background (or state.scene.background
                                     (make-background-state)))
-      (local sandbox-scene
-             {:panels state.scene.panels
-              :terrains state.scene.terrains
-              :lights sandbox-lights
-              :skybox sandbox-skybox
-              :background sandbox-background
-              :containment {:enabled? false}})
-      (local sandbox-session {:scene sandbox-scene})
-      (local sessions {:sandbox sandbox-session})
-      (set state.activity
-           {:active_id "sandbox"
-            :sessions sessions}))
+      (set state.activity.sessions.sandbox.scene
+           {:panels state.scene.panels
+            :terrains state.scene.terrains
+            :lights sandbox-lights
+            :skybox sandbox-skybox
+            :background sandbox-background
+            :containment {:enabled? false}}))
     {:id (or options.id "world-a")
      :name (or options.name "World A")
      :world {:state state
