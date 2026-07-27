@@ -56,12 +56,6 @@
           (set sorted false)))))
   result)
 
-(fn has-snapshot-restore-helper-pair? [fn-form]
-  "Check if the function form uses snapshot-app-fields + restore-app-fields! helper calls."
-  (if (string.find fn-form "snapshot-app-fields" 1 true)
-      (string.find fn-form "restore-app-fields!" 1 true)
-      false))
-
 (fn find-matching-close [text open-pos]
   "Find the matching close paren/bracket for the opener at open-pos.
    Returns the byte position of the matching close, or nil."
@@ -93,6 +87,33 @@
       (set snap-var v)))
   snap-var)
 
+(fn helper-snapshot-covers-path? [fn-form path-text]
+  "Check if the snapshot-app-fields call covers the given path.
+   Extracts keys from the literal vector argument and verifies path-text
+   starts with one of them.  If keys is a variable, accept as covering
+   since coverage cannot be statically determined."
+  (var covers false)
+  ;; For literal vector keys: (snapshot-app-fields [:k1 :k2 ...])
+  (let [vec-pat "%(snapshot%-app%-fields%s+%[(.-)%]%s*[%)%s]"]
+    (each [keys-str (fn-form:gmatch vec-pat)]
+      (when (not covers)
+        ;; Parse key strings from the vector content.
+        ;; Keys may be bare symbols (:keyword, symbol, or "string").
+        (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
+          (when (and (not covers) (> (length k) 0))
+            ;; Match if path equals the key, starts with key., or ends with .key
+            (let [key-pat (escape-pattern k)]
+              (when (or (= path-text k)
+                        (path-text:find (.. "^" key-pat "%.") 1 false)
+                        (path-text:find (.. "%." key-pat "$") 1 false))
+                (set covers true))))))))
+  ;; For variable keys: (snapshot-app-fields some-var ...) — accept as valid
+  (when (not covers)
+    (let [var-pat "%(snapshot%-app%-fields%s+([%w%-_]+)%s*[%)%s]"]
+      (each [_ (fn-form:gmatch var-pat)]
+        (set covers true))))
+  covers)
+
 (fn position-to-file-line [fn-form fn-def-line byte-pos]
   "Convert a byte position in the form text to an approximate file line."
   (var line fn-def-line)
@@ -101,74 +122,93 @@
       (set line (+ line 1))))
   line)
 
-(fn has-helper-restore-after-line? [fn-form fn-def-line min-line]
-  "Check for snapshot-app-fields + restore-app-fields! with restore after min-line.
-   Returns true only if the snapshot variable is captured and the restore
-   call occurs at or after min-line."
+(fn has-helper-restore-after-line? [fn-form fn-def-line path-text min-line]
+  "Check for snapshot-app-fields + restore-app-fields! with restore after min-line,
+   and the snapshot covers the given path."
   (let [snap-var (find-helper-snapshot-var fn-form)]
     (if (not snap-var) false
-        (let [pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
-          (var found false)
-          (var search-start 1)
-          (while (and (not found) search-start)
-            (let [(start end) (string.find fn-form pat search-start)]
-              (if start
-                  (let [restore-line (position-to-file-line fn-form fn-def-line start)]
-                    (if (>= restore-line min-line)
-                        (set found true)
-                        (set search-start (+ end 1))))
-                  (lua :break))))
-          found))))
+        (if (not (helper-snapshot-covers-path? fn-form path-text)) false
+            (let [pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
+              (var found false)
+              (var search-start 1)
+              (while (and (not found) search-start)
+                (let [(start end) (string.find fn-form pat search-start)]
+                  (if start
+                      (let [restore-line (position-to-file-line fn-form fn-def-line start)]
+                        (if (>= restore-line min-line)
+                            (set found true)
+                            (set search-start (+ end 1))))
+                      (lua :break))))
+              found)))))
 
-(fn has-helper-restore-after-byte? [fn-form min-byte]
-  "Check for snapshot-app-fields + restore-app-fields! with restore after min-byte."
+(fn has-helper-restore-after-byte? [fn-form path-text min-byte]
+  "Check for snapshot-app-fields + restore-app-fields! with restore after min-byte,
+   and the snapshot covers the given path."
   (let [snap-var (find-helper-snapshot-var fn-form)]
     (if (not snap-var) false
-        (let [pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
-          (var found false)
-          (var search-start 1)
-          (while (and (not found) search-start)
-            (let [(start end) (string.find fn-form pat search-start)]
-              (if start
-                  (if (>= start min-byte)
-                      (set found true)
-                      (set search-start (+ end 1)))
-                  (lua :break))))
-          found))))
+        (if (not (helper-snapshot-covers-path? fn-form path-text)) false
+            (let [pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
+              (var found false)
+              (var search-start 1)
+              (while (and (not found) search-start)
+                (let [(start end) (string.find fn-form pat search-start)]
+                  (if start
+                      (if (>= start min-byte)
+                          (set found true)
+                          (set search-start (+ end 1)))
+                      (lua :break))))
+              found)))))
 
-(fn anon-inside-wraf-body? [parent-form anon-form-text]
-  "Check if anon-form-text is inside a with-restored-app-fields body
-   in the parent form. Returns true only if the anonymous fn is textually
-   enclosed by a with-restored-app-fields call (past the [keys] argument)."
-  (let [(anon-pos) (string.find parent-form anon-form-text 1 true)]
-    (if (not anon-pos) false
-        (do
-          (var inside false)
-          (var search-pos 1)
-          (local token "with-restored-app-fields")
-          (local token-len (length token))
-          (while (and (not inside) search-pos)
-            (let [(token-start) (string.find parent-form token search-pos true)]
-              (if (and token-start (< token-start anon-pos))
-                  (do
-                    (var op nil)
-                    (for [i (- token-start 1) 1 -1]
-                      (when (and (not op) (= (parent-form:sub i i) "("))
-                        (set op i)))
-                    (if op
-                        (let [call-end (find-matching-close parent-form op)]
-                          (if (and call-end (< anon-pos call-end))
-                              (let [(lbracket) (string.find parent-form "[" token-start true)]
-                                (if lbracket
-                                    (let [keys-end (find-matching-close parent-form lbracket)]
-                                      (if (and keys-end (> anon-pos keys-end))
-                                          (set inside true)
-                                          (set search-pos (+ token-start token-len))))
-                                    (set search-pos (+ token-start token-len))))
-                              (set search-pos (+ call-end 1))))
-                        (set search-pos (+ token-start token-len))))
-                  (set search-pos nil))))
-          inside))))
+(fn skip-argument [text start]
+  "Skip past one S-expression argument (vector, list, or symbol) at start.
+   Returns byte position after the argument, or nil if text ends first."
+  ;; Skip leading whitespace
+  (var pos start)
+  (while (and (<= pos (length text))
+              (let [ch (text:sub pos pos)]
+                (or (= ch " ") (= ch "\n") (= ch "\t"))))
+    (set pos (+ pos 1)))
+  (if (> pos (length text)) nil
+      (let [ch (text:sub pos pos)]
+        (if (or (= ch "[") (= ch "("))
+            (let [close (find-matching-close text pos)]
+              (if close (+ close 1) nil))
+            ;; Symbol: scan to next delimiter or paren
+            (do
+              (var sp pos)
+              (while (and (<= sp (length text))
+                          (let [c (text:sub sp sp)]
+                            (not (or (= c " ") (= c "\n") (= c "\t") (= c ")")))))
+                (set sp (+ sp 1)))
+              sp)))))
+
+(fn anon-byte-inside-wraf-body? [parent-form anon-byte]
+  "Check if the byte position in parent-form falls inside a
+   with-restored-app-fields body (past the keys argument).
+   Handles both vector literal and variable key arguments."
+  (var inside false)
+  (var search-pos 1)
+  (local token "with-restored-app-fields")
+  (local token-len (length token))
+  (while (and (not inside) search-pos)
+    (let [(token-start) (string.find parent-form token search-pos true)]
+      (if (and token-start (< token-start anon-byte))
+          (do
+            (var op nil)
+            (for [i (- token-start 1) 1 -1]
+              (when (and (not op) (= (parent-form:sub i i) "("))
+                (set op i)))
+            (if op
+                (let [call-end (find-matching-close parent-form op)]
+                  (if (and call-end (< anon-byte call-end))
+                      (let [body-start (skip-argument parent-form (+ token-start token-len))]
+                        (if (and body-start (>= anon-byte body-start))
+                            (set inside true)
+                            (set search-pos (+ token-start token-len))))
+                      (set search-pos (+ call-end 1))))
+                (set search-pos (+ token-start token-len))))
+          (set search-pos nil))))
+  inside)
 
 (fn is-test-infrastructure-fn? [file-path fn-name]
   "Narrow exemption for test environment construction functions that are
@@ -377,12 +417,13 @@
           (let [fn-name (or mutation.enclosing-fn "<top-level>")
                 path-text (table.concat (or mutation.path []) ".")
                 ;; For anonymous functions, disambiguate by concrete definition
-                ;; start line so distinct anonymous fns get distinct groups.
+                ;; line + column so distinct anonymous fns get distinct groups,
+                ;; even same-line ones.
                 fn-key (if (= fn-name "<anonymous>")
                          (let [containing (find-containing-fn-defs ff.definitions mutation.line)]
                            (if (> (length containing) 0)
                                (let [def (. containing 1)]
-                                 (.. fn-name "@" def.line))
+                                 (.. fn-name "@" def.line ":" def.column))
                                fn-name))
                          fn-name)
                 key (.. fn-key "::" path-text)]
@@ -397,10 +438,13 @@
             (when sep
               (let [raw-fn-key (key:sub 1 (- sep 1))
                     path-text (key:sub (+ sep 2))
-                    ;; For anonymous fns with @LINE suffix, extract real fn-name and def-line
+                    ;; For anonymous fns with @LINE:COLUMN suffix, extract real fn-name and def-line
                     is-anon-key (raw-fn-key:find "<anonymous>@" 1 true)
                     fn-name (if is-anon-key "<anonymous>" raw-fn-key)
-                    anon-def-line (if is-anon-key (tonumber (raw-fn-key:sub 11)) nil)]
+                    anon-def-line (if is-anon-key
+                                    (let [rest (raw-fn-key:sub 11)]
+                                      (tonumber (rest:match "^([0-9]+)")))
+                                    nil)]
                 ;; Find the enclosing function form and its definition line
                 ;; Find the enclosing function form and its definition line
                 (var fn-form nil)
@@ -438,15 +482,13 @@
                   ;; The pcall-aware check below handles the ordering.
                   ;; We defer helper ordering to the pcall-aware section.
                   ;; Pattern 3: parent function wrapper for anonymous functions.
-                  ;; When the immediate enclosing fn is anonymous and its form
-                  ;; does not contain restoration evidence, check the containing
-                  ;; parent function.  The parent wrapper check must verify the
-                  ;; anonymous fn is textually inside a with-restored-app-fields body.
+                  ;; Uses byte-position containment to handle identical form text.
                   (when (and (not has-restoration) (= fn-name "<anonymous>"))
                     (let [containing (find-containing-fn-defs ff.definitions fn-def-line)]
                       (when (> (length containing) 1)
-                        (let [parent (. containing 2)]
-                          (when (anon-inside-wraf-body? parent.form fn-form)
+                        (let [parent (. containing 2)
+                              anon-byte (find-mutation-approx-byte parent.form parent.line fn-def-line)]
+                          (when (anon-byte-inside-wraf-body? parent.form anon-byte)
                             (set has-restoration true))))))
                   ;; Determine whether the mutation is inside a pcall body.
                   ;; When it is, the restore must be outside/after that specific
@@ -461,7 +503,7 @@
                         (set has-restoration true)))
                     ;; Pattern 4b: helper snapshot/restore pair (order-aware, non-pcall)
                     (when (and (not has-restoration) (not enclosing-pcall-end))
-                      (when (has-helper-restore-after-line? fn-form fn-def-line max-line)
+                      (when (has-helper-restore-after-line? fn-form fn-def-line path-text max-line)
                         (set has-restoration true)))
                     ;; Pattern 5a: pcall concrete restore (order-aware)
                     (when (and (not has-restoration) enclosing-pcall-end)
@@ -469,7 +511,7 @@
                         (set has-restoration true)))
                     ;; Pattern 5b: pcall helper restore (order-aware)
                     (when (and (not has-restoration) enclosing-pcall-end)
-                      (when (has-helper-restore-after-byte? fn-form enclosing-pcall-end)
+                      (when (has-helper-restore-after-byte? fn-form path-text enclosing-pcall-end)
                         (set has-restoration true)))))
                 ;; Emit diagnostic if no valid restoration found
                 (when (not has-restoration)

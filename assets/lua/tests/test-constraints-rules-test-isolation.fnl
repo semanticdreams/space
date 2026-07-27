@@ -876,6 +876,196 @@
           "unwrapped app.engine sibling mutation should be flagged"))
 
 ;; ======================================================================
+;; R1-1 round2: same-line anonymous fns must be distinct
+;; ======================================================================
+
+(fn mutation-restoration-flags-same-line-anon-leak-when-same-line-restores []
+  "R1-1 round2: Two anonymous functions on the same line mutating the same path.
+   One leaks, one restores (in a pcall). They must not collapse into one group."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-same-line-anons"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 200
+                                             :form "(fn test-same-line-anons []
+  (fn [] (set app.engine leaky)) (fn [] (let [orig app.engine] (set app.engine new) (set app.engine orig))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 3
+                                             :length 30
+                                             :form "(fn [] (set app.engine leaky))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 30
+                                             :length 70
+                                             :form "(fn [] (let [orig app.engine] (set app.engine new) (set app.engine orig)))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 10
+                                           :form "(set app.engine leaky)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 55
+                                           :form "(set app.engine new)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 70
+                                           :form "(set app.engine orig)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for the first leaking anon on same line")
+  (assert (> (length result) 0) "should have at least one diagnostic for the same-line leak"))
+
+;; ======================================================================
+;; R1-2 round2: snapshot helper must cover the mutated path
+;; ======================================================================
+
+(fn mutation-restoration-flags-snapshot-with-unrelated-keys []
+  "R1-2 round2: snapshot-app-fields covers only :renderers, but mutation
+   is on app.activity-registry. Rule should still flag the mutation."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-unrelated-snapshot"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-unrelated-snapshot []
+  (local snap (snapshot-app-fields [:renderers :engine]))
+  (set app.activity-registry nil)
+  (restore-app-fields! snap))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 8 :column 1
+                                           :form "(set app.activity-registry nil)"
+                                           :enclosing-fn "test-unrelated-snapshot"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag mutation when snapshot covers unrelated keys")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn mutation-restoration-allows-snapshot-covering-path []
+  "Snapshot covers app.engine, mutation is on app.engine subfield.
+   Restoration should be accepted."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-covered-snapshot"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-covered-snapshot []
+  (local snap (snapshot-app-fields [:engine]))
+  (set app.engine custom-engine)
+  (restore-app-fields! snap))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 8 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "test-covered-snapshot"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "snapshot covering app.engine with app.engine mutation should pass"))
+
+;; ======================================================================
+;; R1-3 round2: identical anonymous form text, different positions
+;; ======================================================================
+
+(fn mutation-restoration-flags-identical-anon-form-not-inside-wrapper []
+  "R1-3 round2: Two anonymous fns with identical form text.
+   One is wrapped by with-restored-app-fields, the other is a sibling.
+   The unwrapped sibling must still be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-identical-anons"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 250
+                                             :form "(fn test-identical-anons []
+  (with-restored-app-fields [:engine] (fn mut [] (set app.engine wrapped)))
+  (fn mut [] (set app.engine unwrapped)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 11 :column 40
+                                             :length 50
+                                             :form "(fn mut [] (set app.engine wrapped))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 12 :column 3
+                                             :length 50
+                                             :form "(fn mut [] (set app.engine unwrapped))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 11 :column 50
+                                           :form "(set app.engine wrapped)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 12 :column 10
+                                           :form "(set app.engine unwrapped)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for unwrapped identical-form sibling")
+  (local engine-diags [])
+  (each [_ d (ipairs result)]
+    (when (and d.evidence (= d.evidence.global-path "app.engine"))
+      (table.insert engine-diags d)))
+  (assert (> (length engine-diags) 0)
+          "unwrapped identical-form sibling should be flagged"))
+
+;; ======================================================================
+;; V1-1: variable-key with-restored-app-fields
+;; ======================================================================
+
+(fn mutation-restoration-allows-variable-key-wraf-wrapper []
+  "V1-1: with-restored-app-fields with variable key list (not literal vector).
+   The anonymous fn inside the wrapper should be recognized as properly restored."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-var-key-wrapper"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 200
+                                             :form "(fn test-var-key-wrapper []
+  (with-restored-app-fields bind-state-keys
+    (fn []
+      (set app.engine custom-engine)
+      (set app.renderers custom))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 13 :column 1
+                                             :length 80
+                                             :form "(fn []
+      (set app.engine custom-engine)
+      (set app.renderers custom))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 14 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "renderers"]
+                                           :line 15 :column 1
+                                           :form "(set app.renderers custom)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "variable-key with-restored-app-fields wrapper should be recognized"))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -950,6 +1140,11 @@
 (table.insert tests {:name "R1-1 flags first anon leak when second restores" :fn mutation-restoration-flags-first-anon-mutation-when-second-restores})
 (table.insert tests {:name "R1-2 flags helper restore before mutation" :fn mutation-restoration-flags-helper-restore-before-mutation})
 (table.insert tests {:name "R1-3 flags sibling anon not inside wrapper" :fn mutation-restoration-flags-sibling-anon-not-inside-wrapper})
+(table.insert tests {:name "R1-1r2 flags same-line anon leak" :fn mutation-restoration-flags-same-line-anon-leak-when-same-line-restores})
+(table.insert tests {:name "R1-2r2 flags snapshot with unrelated keys" :fn mutation-restoration-flags-snapshot-with-unrelated-keys})
+(table.insert tests {:name "R1-2r2 allows snapshot covering path" :fn mutation-restoration-allows-snapshot-covering-path})
+(table.insert tests {:name "R1-3r2 flags identical-form sibling" :fn mutation-restoration-flags-identical-anon-form-not-inside-wrapper})
+(table.insert tests {:name "V1-1 allows variable-key wraf wrapper" :fn mutation-restoration-allows-variable-key-wraf-wrapper})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
