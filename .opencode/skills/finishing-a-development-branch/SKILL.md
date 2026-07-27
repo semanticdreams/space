@@ -55,8 +55,10 @@ current branch and create a pull request targeting `main`"):
   1. Confirm the user has not explicitly requested a different integration action.
   2. Confirm the branch is safe for automatic integration (clean tree, tests
      passing — already confirmed in Steps 0–1).
-  3. If both checks pass: execute the default action automatically, skip the
-     integration menu, and proceed directly to Cleanup (Step 7).
+  3. If both checks pass: execute the default action automatically (push the
+     current branch and create a pull request targeting the base branch).
+     Keep the worktree for PR feedback and iteration — do not clean up.
+     Skip the integration menu and end the skill.
   4. If the user explicitly requested a different integration action: execute
      that action instead.
   5. If the branch cannot be integrated safely (e.g., unresolved merge conflicts
