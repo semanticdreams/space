@@ -221,8 +221,9 @@ When the human asks to build something:
    dispatch `implementer` per task, `reviewer` after each task, `adjudicator`
    at the fix-loop breaker. Maintain the ledger, manage the workspace.
 
-4. Invoke **finishing-a-development-branch** — verify tests, present
-   integration options, execute the human's choice, clean up.
+4. Invoke **finishing-a-development-branch** — verify tests, consult project
+   policy, execute the integration action (or present options if no policy),
+   clean up.
 
 When the human asks to debug something, invoke **systematic-debugging**.
 

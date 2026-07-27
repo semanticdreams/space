@@ -7,7 +7,7 @@ description: Use when implementation is complete, all tests pass, and you need t
 
 ## Overview
 
-**Core principle:** Verify clean tree → Verify tests → Detect environment → Present options → Execute choice → Clean up.
+**Core principle:** Verify clean tree → Verify tests → Consult project policy → Detect environment → Execute action (or present options if no policy) → Clean up.
 
 **Announce at start:** "I'm using the finishing-a-development-branch skill to complete this work."
 
@@ -39,11 +39,34 @@ Never auto-stage or auto-discard. Only allowlisted coordination-artifact files m
 
 Run the project's full test suite. Consult AGENTS.md for the correct test command.
 
-**If tests fail**, report the failures and stop — the menu comes after a green suite.
+**If tests fail**, report the failures and stop — integration comes after a green suite.
 
 **If tests pass:** continue to Step 2.
 
-## Step 2: Detect Environment
+## Step 2: Consult Project Policy
+
+Check `AGENTS.md` (or the project's equivalent integration-policy file) for default
+integration instructions. This step determines whether the integration action is
+automatic or requires presenting a menu.
+
+**If the project policy specifies a default integration action** (e.g., "push the
+current branch and create a pull request targeting `main`"):
+
+  1. Confirm the user has not explicitly requested a different integration action.
+  2. Confirm the branch is safe for automatic integration (clean tree, tests
+     passing — already confirmed in Steps 0–1).
+  3. If both checks pass: execute the default action automatically, skip the
+     integration menu, and proceed directly to Cleanup (Step 7).
+  4. If the user explicitly requested a different integration action: execute
+     that action instead.
+  5. If the branch cannot be integrated safely (e.g., unresolved merge conflicts
+     with the base branch): report the unsafe condition and fall through to the
+     integration menu so the user can decide.
+
+**If no project integration policy is found:** Continue to Step 3. The standard
+integration menu will be presented.
+
+## Step 3: Detect Environment
 
 ```bash
 GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
@@ -56,14 +79,16 @@ This determines which menu to show and how cleanup works:
 | State | Menu | Cleanup |
 |-------|------|---------|
 | `GIT_DIR == GIT_COMMON` (normal repo) | Standard 3 options | No worktree to clean up |
-| `GIT_DIR != GIT_COMMON`, named branch | Standard 3 options | Provenance-based (see Step 6) |
+| `GIT_DIR != GIT_COMMON`, named branch | Standard 3 options | Provenance-based (see Step 7) |
 | `GIT_DIR != GIT_COMMON`, detached HEAD | Reduced 2 options (no merge) | Externally managed — leave in place |
 
-## Step 3: Determine Base Branch
+## Step 4: Determine Base Branch
 
 The base branch is whatever this work forked from — usually named in the plan, the conversation, or the branch's upstream. If it is not already known, ask. Confirm before merging: merging into the wrong base is expensive to undo.
 
-## Step 4: Present Options
+## Step 5: Present Options
+
+**Only reached when no project integration policy applies** (see Step 2).
 
 **Normal repo and named-branch worktree — present exactly these 3 options:**
 
@@ -77,9 +102,10 @@ Implementation complete. What would you like to do?
 Which option?
 ```
 
-Present the menu exactly as written. The integration decision is the human's.
+Present the menu exactly as written. The integration decision is the human's when
+no project policy specifies an automatic action.
 
-## Step 5: Execute Choice
+## Step 6: Execute Choice
 
 ### Option 1: Merge Locally
 
@@ -93,7 +119,7 @@ git merge <feature-branch>
 
 If tests fail on the merged result: stop, leave everything in place, and investigate — nothing has been pushed, so the merge is local and recoverable.
 
-Once green: clean up the worktree (Step 6), then delete the branch:
+Once green: clean up the worktree (Step 7), then delete the branch:
 
 ```bash
 git branch -d <feature-branch>
@@ -107,7 +133,7 @@ Push the branch and create the pull request using the forge's tooling. Keep the 
 
 Report: "Keeping branch <name>. Worktree preserved at <path>."
 
-## Step 6: Cleanup Workspace
+## Step 7: Cleanup Workspace
 
 **If `GIT_DIR == GIT_COMMON`:** Normal repo, no worktree to clean up. Done.
 
@@ -133,6 +159,6 @@ git worktree prune
 | Excuse | Reality |
 |--------|---------|
 | "Tests passed earlier this session" | Run the suite on the tree you are about to integrate. A green run only proves the tree it ran on. |
-| "They obviously want it merged" | Integration is your human partner's decision. Present the menu and wait. |
+| "They obviously want it merged" | Follow the project's integration policy, not assumptions. If AGENTS.md specifies an automatic action (push + create PR), execute it. Only present the menu when no policy exists or branch-unsafe conditions block the automatic action. |
 | "The base branch is obviously main" | Confirm the fork point or ask. Merging into the wrong base is expensive to undo. |
 | "The push was rejected — force-push will fix it" | A rejected push means the remote moved. Investigate; force-push only on your human partner's explicit request. |
