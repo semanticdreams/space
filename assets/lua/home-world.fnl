@@ -659,22 +659,25 @@
     ;; Migrate legacy canvas camera into the selected/default canvas activity
     ;; session when no per-activity canvas camera exists yet.  Only the
     ;; active canvas activity receives the legacy camera, not all canvas
-    ;; activities.
+    ;; activities.  When no canvas activity is selected (e.g. active_id is
+    ;; nil or sandbox), the camera is migrated into the default canvas
+    ;; activity "graph" so it is available when graph activates.
     (let [canvas-camera-state (and world.state world.state.canvas
                                    world.state.canvas.camera)
           activity-state (and world.state world.state.activity)
           active-id (and activity-state activity-state.active_id)
-          ;; Only canvas activities are eligible
-          canvas-ids {:graph true :drawing true :board true}]
-      (when (and active-id
-                 (. canvas-ids active-id)
-                 (= (type canvas-camera-state) :table))
+          canvas-ids {:graph true :drawing true :board true}
+          ;; Use active-id if it is a canvas activity; otherwise default to "graph"
+          target-id (if (and active-id (. canvas-ids active-id))
+                       active-id
+                       "graph")]
+      (when (= (type canvas-camera-state) :table)
         (when (not (and activity-state.sessions
                         (= (type activity-state.sessions) :table)))
           (set activity-state.sessions {}))
-        (when (not (. activity-state.sessions active-id))
-          (set (. activity-state.sessions active-id) {}))
-        (let [session (. activity-state.sessions active-id)]
+        (when (not (. activity-state.sessions target-id))
+          (set (. activity-state.sessions target-id) {}))
+        (let [session (. activity-state.sessions target-id)]
           (when (not session.canvas-camera)
             (set session.canvas-camera
                  {:position (or canvas-camera-state.position [0 0 100])})
