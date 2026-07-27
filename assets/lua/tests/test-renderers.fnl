@@ -1010,6 +1010,44 @@
 (table.insert tests {:name "Renderers draw-target uses only active slot draw source"
                      :fn draw-target-uses-only-active-slot-draw-source})
 
+(fn renderer-uses-presentation-targets-not-app-surfaces []
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (var presentation-target-drawn? false)
+          (local target
+            {:kind :scene
+             :projection (glm.mat4 1)
+             :get-view-matrix (fn [_self]
+                                (set presentation-target-drawn? true)
+                                (glm.mat4 1))
+             :get-lighting-view-state (fn [_self]
+                                         (LightingViewState.orthographic (glm.vec3 0 0 1)))
+             :get-render-contexts (fn [_self] [])})
+          (local saved-runtime app.active-world-runtime)
+          (local saved-scene app.scene)
+          (local saved-canvas app.canvas)
+          (set app.scene {:projection (glm.mat4 1)
+                          :get-view-matrix (fn [_self]
+                                             (error "renderer read app.scene"))})
+          (set app.canvas {:projection (glm.mat4 1)
+                           :get-view-matrix (fn [_self]
+                                              (error "renderer read app.canvas"))})
+          (set app.active-world-runtime
+               {:presentation {:render-targets (fn [_self] [target])}})
+          (local renderers (Renderers))
+          (renderers:update)
+          (assert presentation-target-drawn?
+                  "Renderer must draw the runtime presentation target")
+          (set app.active-world-runtime saved-runtime)
+          (set app.scene saved-scene)
+          (set app.canvas saved-canvas))))))
+
+(table.insert tests {:name "Renderer uses presentation targets not app surfaces"
+                     :fn renderer-uses-presentation-targets-not-app-surfaces})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
