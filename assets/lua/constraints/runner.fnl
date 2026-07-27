@@ -1,6 +1,7 @@
 ;; Runner module for experimental Fennel constraints.
 ;; Aggregates rule execution, status precedence, and JSON output.
 
+(local Baseline (require :constraints.baseline))
 (local Diagnostics (require :constraints.diagnostics))
 (local json (require :json))
 
@@ -59,12 +60,14 @@
       (tset timed-out :flag true)
       (error (.. "rule timed out after " timeout-seconds "s") 2))))
 
-(fn M.run-rule [rule target timeout-seconds]
+(fn M.run-rule [rule target timeout-seconds rule-id]
   "Run a single rule function against a target using xpcall.
   Returns nil on pass, or a list of diagnostics on failure/crash/interrupt.
   Uses debug.traceback for crash diagnostics, debug.sethook for timeouts."
   (let [diagnostics []
-        rule-id (or (and (= (type rule) :table) (. rule :constraint-id)) :unknown-rule)
+        rule-id (or rule-id
+                    (and (= (type rule) :table) (. rule :constraint-id))
+                    :unknown-rule)
         timed-out {:flag false}
         on-error (make-error-handler diagnostics rule-id target timed-out)]
     (if (and timeout-seconds (> timeout-seconds 0)
@@ -84,48 +87,80 @@
 
 (fn M.run [opts]
   "Run a set of rules against a target.
-  opts: {:rules [] :target <target> :timeout-seconds <int|nil>}
+  opts: {:rules [] :target <target> :timeout-seconds <int|nil>
+         :baseline-data <table|nil>}
+  Rules may be functions, or tables with :fn (callable) and :id/:constraint-id.
+  When :baseline-data is a table, baseline policy is applied after all rules run.
   Returns {:status :pass|:violations|:fail|:interrupted
            :counts {:total <int> :by-family <table> :by-severity <table>}
            :diagnostics []}"
   (var status :pass)
   (let [rules (or opts.rules [])
         target (or opts.target {:kind :repo :name "default"})
-        all-diagnostics []]
+        all-diagnostics []
+        present-rule-ids []
+        baseline-data opts.baseline-data]
     (each [_ rule (ipairs rules)]
-      (let [result (M.run-rule rule target opts.timeout-seconds)]
-        (when result
-          ;; result is a list of diagnostics
-          (each [_ d (ipairs result)]
-            ;; Ensure every diagnostic identifies the target
-            (when (not (. d :target))
-              (tset d :target target))
-            (table.insert all-diagnostics d))
-          ;; Determine status from these diagnostics
-          (var worst :pass)
-          (each [_ d (ipairs result)]
-            (if (. d :interrupted)
-                (set worst (worse-status worst :interrupted))
-                (= d.family :framework)
-                (set worst (worse-status worst :fail))
-                (set worst (worse-status worst :violations))))
-          (set status (worse-status status worst)))))
-    (let [counts (Diagnostics.summary status all-diagnostics)]
-      {:status status
-       :counts counts
-       :diagnostics all-diagnostics})))
+      ;; Resolve the callable and rule id from the rule entry
+      (let [rule-fn (if (and (= (type rule) :table) (. rule :fn))
+                       (. rule :fn)
+                       rule)
+            rule-id (or (and (= (type rule) :table)
+                             (or (. rule :id) (. rule :constraint-id)))
+                        :unknown-rule)]
+        (table.insert present-rule-ids rule-id)
+        (let [result (M.run-rule rule-fn target opts.timeout-seconds rule-id)]
+          (when result
+            ;; result is a list of diagnostics
+            (each [_ d (ipairs result)]
+              ;; Ensure every diagnostic identifies the target
+              (when (not (. d :target))
+                (tset d :target target))
+              (table.insert all-diagnostics d))
+            ;; Determine status from these diagnostics
+            (var worst :pass)
+            (each [_ d (ipairs result)]
+              (if (. d :interrupted)
+                  (set worst (worse-status worst :interrupted))
+                  (= d.family :framework)
+                  (set worst (worse-status worst :fail))
+                  (set worst (worse-status worst :violations))))
+            (set status (worse-status status worst))))))
+    ;; Apply baseline policy after all rules run, if baseline data is provided
+    (if baseline-data
+        (let [baseline-result (Baseline.apply all-diagnostics baseline-data present-rule-ids)
+              ;; Replace all-diagnostics with the baseline-filtered list
+              filtered-diagnostics baseline-result.diagnostics]
+          ;; Append baseline diagnostics (worsened, stale, missing-required)
+          (each [_ bd (ipairs baseline-result.baseline-diagnostics)]
+            (when (not (. bd :target))
+              (tset bd :target target))
+            (table.insert filtered-diagnostics bd))
+          ;; Adjust status for baseline diagnostics
+          (when (> (# baseline-result.baseline-diagnostics) 0)
+            (set status (worse-status status :violations)))
+          (let [counts (Diagnostics.summary status filtered-diagnostics)]
+            {:status status
+             :counts counts
+             :diagnostics filtered-diagnostics}))
+        ;; No baseline data — return unfiltered diagnostics
+        (let [counts (Diagnostics.summary status all-diagnostics)]
+          {:status status
+           :counts counts
+           :diagnostics all-diagnostics}))))
 
 (fn M.main [opts]
   "Entry point for the constraints runner.
   Accepts injectable :print and :exit for testability; tolerates nil opts
   for the runtime's zero-argument module entry-point convention.
-  opts: {:rules [] :target <target> :print <fn> :exit <fn> :argv []}"
+  opts: {:rules [] :target <target> :print <fn> :exit <fn> :argv []
+         :baseline-data <table|nil>}"
   (local o (or opts {}))
   (let [print-fn (or o.print print)
         exit-fn (or o.exit os.exit)
         rules (or o.rules [])
         target (or o.target {:kind :repo :name "default"})
-        result (M.run {:rules rules :target target})]
+        result (M.run {:rules rules :target target :baseline-data o.baseline-data})]
     (print-fn (json.dumps result))
     (if (= result.status :pass)
         (exit-fn 0)

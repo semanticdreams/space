@@ -185,7 +185,8 @@
     :tests.test-external-unit-mcp
     :tests.test-constraints-runner
     :tests.test-constraints-source
-    :tests.test-constraints-facts]})
+    :tests.test-constraints-facts
+    :tests.test-constraints-baseline]})
 
 (local main
   (fn []
