@@ -126,10 +126,21 @@ Each constraint runs independently and contributes to one aggregate result:
 - `pass`: all constraints completed and emitted no diagnostics;
 - `violations`: one or more constraints completed and reported rule violations;
 - `fail`: a constraint or framework component crashed unexpectedly;
-- `interrupted`: a timeout or interruption stopped evaluation.
+- `interrupted`: a cooperative interruption stopped evaluation. In the MVP,
+  runner-owned timeouts are expected to interrupt CPU-bound Lua rule execution;
+  they are not required to preempt blocking native/C/library calls. Blocking
+  native calls are controlled by the outer process, CI, or shell timeout until a
+  future process-isolated rule runner is designed.
 
 Every status other than `pass` exits nonzero. The runner emits one structured
 summary containing status, counts by family/severity, and all diagnostics.
+
+The MVP runner is in-process. It may use Lua debug hooks or equivalent
+cooperative mechanisms to prevent pure-Lua busy loops from hanging forever, but
+it does not provide hard preemption for calls that block outside the Lua VM. A
+hard wall-clock timeout for arbitrary blocking calls is explicitly deferred to a
+future architecture based on process isolation or dedicated native timeout
+support.
 
 ## Diagnostics
 

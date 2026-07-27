@@ -31,6 +31,9 @@
 - The gate blocks when a baseline entry no longer matches the current code.
 - The gate blocks when a required constraint disappears.
 - The gate blocks when a constraint fails or is interrupted.
+- In the MVP, `:interrupted` covers cooperative/CPU-bound Lua interruption only;
+  blocking native/C/library calls are governed by outer process, CI, or shell
+  timeouts until a future process-isolated rule runner is designed.
 - Do not replace human review.
 - Do not replace unit/integration tests.
 - Do not require production modules to annotate themselves or import constraint modules.
@@ -246,6 +249,8 @@ In `assets/lua/constraints/runner.fnl`, implement:
 - `run-rule` using `xpcall` and `debug.traceback`;
 - status precedence `:interrupted` > `:fail` > `:violations` > `:pass`;
 - `run` accepting `{:rules [] :target target :timeout-seconds integer|nil}`;
+- `timeout-seconds` must interrupt CPU-bound Lua rule execution. It is not
+  required to preempt blocking native/C/library calls in the MVP.
 - `main` accepting injected `:argv`, `:print`, and `:exit` for tests;
 - JSON summary output using `(require :json).dumps`.
 
@@ -1132,6 +1137,8 @@ git commit -m "docs: document experimental constraints workflow"
 ## Acceptance Criteria
 
 - `make constraints` exists and exits nonzero for `violations`, `fail`, or `interrupted`.
+- `:interrupted` is produced for cooperative/CPU-bound Lua timeout cases; hard
+  preemption of blocking native calls is out of scope for this MVP.
 - `make test` depends on `constraints`.
 - CTest target `space_experimental_constraints` runs before `space_fnl_tests` and `space_fnl_tests_integration`.
 - `tree-sitter.parse` supports `{:language :fennel}` and reports source locations.
