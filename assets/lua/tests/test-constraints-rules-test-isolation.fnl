@@ -747,6 +747,135 @@
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
 ;; ======================================================================
+;; R1-1: anonymous grouping should not collapse distinct anonymous fns
+;; ======================================================================
+
+(fn mutation-restoration-flags-first-anon-mutation-when-second-restores []
+  "R1-1: Two anonymous functions mutating the same path. The first leaks,
+   the second restores. The leaking one should still be diagnosed."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-two-anon"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 250
+                                             :form "(fn test-two-anon []
+  (fn [] (set app.engine leaky-engine))
+  (fn [] (let [orig app.engine] (set app.engine new-engine) (set app.engine orig))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 6 :column 1
+                                             :length 50
+                                             :form "(fn [] (set app.engine leaky-engine))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 7 :column 1
+                                             :length 80
+                                             :form "(fn [] (let [orig app.engine] (set app.engine new-engine) (set app.engine orig)))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 6 :column 1
+                                           :form "(set app.engine leaky-engine)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 7 :column 1
+                                           :form "(set app.engine new-engine)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 7 :column 2
+                                           :form "(set app.engine orig)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for the first leaking anonymous mutation")
+  (assert (> (length result) 0) "should have at least one diagnostic for the leak"))
+
+;; ======================================================================
+;; R1-2: snapshot/restore helper pair must be order-aware
+;; ======================================================================
+
+(fn mutation-restoration-flags-helper-restore-before-mutation []
+  "R1-2: A function that calls snapshot-app-fields and restore-app-fields!
+   before the sensitive mutation should still be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-restore-before-mutate"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-restore-before-mutate []
+  (local app-snapshot (snapshot-app-fields [:activity-registry :engine]))
+  (restore-app-fields! app-snapshot)
+  (set app.activity-registry nil)
+  (do-test))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 9 :column 1
+                                           :form "(set app.activity-registry nil)"
+                                           :enclosing-fn "test-restore-before-mutate"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag mutation when restore happens before it")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
+;; R1-3: parent wrapper must contain the mutation, not just same parent
+;; ======================================================================
+
+(fn mutation-restoration-flags-sibling-anon-not-inside-wrapper []
+  "R1-3: Parent function with with-restored-app-fields around one callback,
+   but a separate sibling anonymous fn mutates without being wrapped.
+   The unwrapped sibling should still be flagged."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-sibling-wrapper"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 250
+                                             :form "(fn test-sibling-wrapper []
+  (with-restored-app-fields [:renderers]
+    (fn [] (set app.renderers custom-renderer)))
+  (fn [] (set app.engine custom-engine)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 12 :column 1
+                                             :length 60
+                                             :form "(fn [] (set app.renderers custom-renderer))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 15 :column 1
+                                             :length 60
+                                             :form "(fn [] (set app.engine custom-engine))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "renderers"]
+                                           :line 12 :column 1
+                                           :form "(set app.renderers custom-renderer)"
+                                           :enclosing-fn "<anonymous>"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 15 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for unwrapped sibling anonymous mutation")
+  (local engine-diags [])
+  (each [_ d (ipairs result)]
+    (when (and d.evidence (= d.evidence.global-path "app.engine"))
+      (table.insert engine-diags d)))
+  (assert (> (length engine-diags) 0)
+          "unwrapped app.engine sibling mutation should be flagged"))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -818,6 +947,9 @@
 (table.insert tests {:name "mutation-restoration allows setup-test-env in runner" :fn mutation-restoration-allows-setup-test-env-in-runner})
 (table.insert tests {:name "mutation-restoration allows init-test-app in harness" :fn mutation-restoration-allows-init-test-app-in-harness})
 (table.insert tests {:name "mutation-restoration flags setup-like fn in other file" :fn mutation-restoration-flags-setup-like-fn-in-other-file})
+(table.insert tests {:name "R1-1 flags first anon leak when second restores" :fn mutation-restoration-flags-first-anon-mutation-when-second-restores})
+(table.insert tests {:name "R1-2 flags helper restore before mutation" :fn mutation-restoration-flags-helper-restore-before-mutation})
+(table.insert tests {:name "R1-3 flags sibling anon not inside wrapper" :fn mutation-restoration-flags-sibling-anon-not-inside-wrapper})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
