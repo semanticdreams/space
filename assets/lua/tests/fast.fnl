@@ -189,7 +189,8 @@
     :tests.test-constraints-baseline
     :tests.test-constraints-rules-scene-sandbox
     :tests.test-constraints-rules-lifecycle
-    :tests.test-constraints-rules-layout]})
+    :tests.test-constraints-rules-layout
+    :tests.test-constraints-rules-structure]})
 
 (local main
   (fn []
