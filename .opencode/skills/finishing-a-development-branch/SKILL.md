@@ -46,7 +46,10 @@ Do all of the following:
    current `git status --porcelain`.
 2. Invoke `systematic-debugging` before proposing any fix.
 3. Identify and document the root cause. If root cause cannot be established,
-   continue gathering evidence or report BLOCKED with the missing evidence.
+   continue gathering evidence and debugging. Do not BLOCKED here on unknown
+   root cause alone; only report BLOCKED/HUMAN_DECISION_REQUIRED when
+   systematic debugging establishes one of the enumerated blocker conditions
+   below.
 4. Route any fix through `implementer` → `reviewer` → pass. The supervisor must
    not edit code, tests, `.opencode/**`, workflow files, or other non-allowlisted
    files directly.
