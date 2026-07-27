@@ -7,6 +7,7 @@
 (local {:Board Board} (require :board/core))
 (local BoardView (require :board/view))
 (local BuiltinStringEntity (require :board/builtin-string-entity))
+(local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
 
 (local owner {})
 
@@ -42,11 +43,22 @@
 
 (fn activate-board-view! []
   (local world-runtime (assert app.active-world-runtime
-                                "Board activity requires app.active-world-runtime"))
+                                 "Board activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                          "Board activity requires runtime.canvas"))
+                           "Board activity requires runtime.canvas"))
+
+  ;; Create or reuse a board canvas camera stored in runtime.activity-cameras.
+  (local slot-camera
+    (HomeWorldCanvasRuntime.ensure-activity-canvas-camera!
+      world-runtime
+      "board"
+      {:position (glm.vec3 0 0 100)}))
+
+  ;; Ensure the slot has the camera before activation
+  (canvas:ensure-activity-slot "board" {:camera slot-camera})
   (local slot (canvas:activate-activity-slot "board"))
   (slot:set-canvas-target-kind! :board)
+  (slot:expose-render-target! {:layers [:geometry :text]})
   (BuiltinStringEntity.register owner)
   (local retained-view? (not (= world-runtime.board-view nil)))
   (local board (or world-runtime.board (Board {})))

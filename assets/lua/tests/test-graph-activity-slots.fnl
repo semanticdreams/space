@@ -127,8 +127,10 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir})
+
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
   (set app.graph-map graph-map)
@@ -293,7 +295,8 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir
                   :drawing-controller controller
                   :board-state {:items [] :connectors []}})
@@ -497,7 +500,8 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
@@ -609,6 +613,30 @@
 
 (table.insert tests {:name "Graph activity scene isolation prevents sandbox inheritance"
                       :fn graph-activity-scene-isolation-prevents-sandbox-inheritance})
+
+(fn graph-and-drawing-do-not-share-canvas-camera []
+  ;; Graph and Drawing each own their canvas camera via
+  ;; ensure-activity-canvas-camera!.  Changing the graph slot camera
+  ;; must not affect the drawing slot camera.
+  (local Camera (require :camera))
+  (local canvas (Canvas {:camera (Camera {:position (glm.vec3 0 0 100)})
+                          :focus-manager (FocusManager {:root-name "graph-drawing-isolation"})}))
+  (canvas:ensure-activity-slot "graph" {:camera (Camera {:position (glm.vec3 0 0 100)})})
+  (canvas:ensure-activity-slot "drawing" {:camera (Camera {:position (glm.vec3 0 0 100)})})
+  (local graph-slot (canvas:activity-slot "graph"))
+  (assert graph-slot.camera "Graph slot must have a camera")
+  (local drawing-slot (canvas:activity-slot "drawing"))
+  (assert drawing-slot.camera "Drawing slot must have a camera")
+  (graph-slot.camera:set-position (glm.vec3 100 0 100))
+  (assert (not (= drawing-slot.camera.position.x 100))
+          "Drawing must not inherit Graph camera position")
+  (assert (= graph-slot.camera.position.x 100)
+          "Graph slot camera must reflect position change")
+  (canvas:drop)
+  true)
+
+(table.insert tests {:name "Graph and drawing do not share canvas camera"
+                     :fn graph-and-drawing-do-not-share-canvas-camera})
 
 (local main
   (fn []

@@ -957,6 +957,45 @@
 (table.insert tests {:name "skybox by-theme override survives normalization and reload"
                      :fn skybox-by-theme-override-survives-normalization-and-reload})
 
+(fn legacy-camera-state-migrates-to-sandbox-session []
+  ;; When a legacy world.json has top-level camera state, it must be
+  ;; migrated into activity.sessions.sandbox.scene.camera so the
+  ;; sandbox activity slot owns the camera instead of runtime globals.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      ;; Write legacy world.json with top-level camera
+      (write-world-json! world-dir
+        {:camera {:position [10 20 30]
+                  :rotation [1 0 0 0]}
+         :graph {:graph {:nodes [] :edges []} :views {:open-node-keys []}}
+         :scene {:panels []
+                 :terrains []
+                 :lights (LightSystemModule.default-state)
+                 :skybox (make-skybox-state)
+                 :background (make-background-state)}
+         :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      ;; Camera state should be migrated to sandbox session scene
+      (local sandbox-scene (sandbox-scene-state world))
+      (assert sandbox-scene "Expected sandbox scene after load")
+      (assert (= (type sandbox-scene.camera) :table)
+              "Expected sandbox scene to have migrated camera state")
+      (assert (= (. sandbox-scene.camera.position 1) 10)
+              (.. "Expected migrated camera position x=10, got "
+                  (tostring (. sandbox-scene.camera.position 1))))
+      (assert (= (. sandbox-scene.camera.position 2) 20))
+      (assert (= (. sandbox-scene.camera.position 3) 30))
+      true)))
+
+(table.insert tests {:name "legacy camera state migrates to sandbox session"
+                     :fn legacy-camera-state-migrates-to-sandbox-session})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

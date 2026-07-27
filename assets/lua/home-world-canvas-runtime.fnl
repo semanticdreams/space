@@ -1,10 +1,21 @@
 (local glm (require :glm))
+(local Camera (require :camera))
 (local Canvas (require :canvas))
 (local CanvasControls (require :canvas-controls))
 (local ObjectSelector (require :object-selector))
 (local Activities (require :activities))
 (local WorkspaceShellState (require :home-world-workspace-shell-state))
 (local viewport-utils (require :viewport-utils))
+(local ActivityCameraState (require :activity-camera-state))
+(local MathUtils (require :math-utils))
+(local CoordinateGuard (require :coordinate-guard))
+
+(local vec3->array MathUtils.vec3->array)
+(local quat->array MathUtils.quat->array)
+(local array->vec3 MathUtils.array->vec3)
+(local array->quat MathUtils.array->quat)
+(local safe-vec3? CoordinateGuard.safe-vec3?)
+(local sanitize-vec3 CoordinateGuard.sanitize-vec3)
 
 (fn clone-table [value]
   (if (= (type value) :table)
@@ -97,15 +108,21 @@
 
 (fn load-runtime-canvas-surface! [world runtime]
   (assert runtime "HomeWorldCanvasRuntime.load-runtime-canvas-surface! requires runtime")
-  (assert runtime.canvas-camera "HomeWorldCanvasRuntime requires runtime.canvas-camera")
   (assert runtime.focus-manager "HomeWorldCanvasRuntime requires runtime.focus-manager")
   (assert runtime.graph "HomeWorldCanvasRuntime requires runtime.graph")
   (assert runtime.drawing-controller "HomeWorldCanvasRuntime requires runtime.drawing-controller")
   (assert runtime.scene "HomeWorldCanvasRuntime requires runtime.scene")
   (drop-runtime-canvas-surface! runtime)
   (local canvas-state (or (and world.state world.state.canvas) {}))
+  ;; Create a default canvas surface camera.  Activity slots (graph, drawing, board)
+  ;; will install their own cameras via ensure-activity-canvas-camera!.
+  (local canvas-camera-state (or canvas-state.camera {}))
+  (local default-canvas-camera
+    (ActivityCameraState.camera-from-state
+      canvas-camera-state
+      {:position (glm.vec3 0 0 100)}))
   (local canvas
-    (Canvas {:camera runtime.canvas-camera
+    (Canvas {:camera default-canvas-camera
              :focus-manager runtime.focus-manager
              :focus-scope-name (.. "canvas:" world.id)
              :icons runtime.icons
@@ -114,7 +131,7 @@
              :scale-factor canvas-state.scale_factor}))
   (local canvas-controls
     (CanvasControls {:canvas canvas
-                     :camera runtime.canvas-camera}))
+                     :camera default-canvas-camera}))
   (local object-selector
     (ObjectSelector {:ctx-provider (fn []
                                      (selector-build-context canvas))
@@ -161,7 +178,35 @@
               "scene")))
   true)
 
+(fn ensure-activity-canvas-camera! [runtime activity-id defaults]
+  "Create or reuse a camera for a canvas activity slot.  The camera is stored in
+   runtime.activity-cameras.canvas[activity-id] and returned.
+   When a camera already exists for this activity, it is returned as-is.
+   defaults may contain {:position vec3} for the initial camera position."
+  (assert runtime "ensure-activity-canvas-camera! requires runtime")
+  (assert (= (type activity-id) :string)
+          "ensure-activity-canvas-camera! requires string activity-id")
+  (assert runtime.activity-cameras
+          "ensure-activity-canvas-camera! requires runtime.activity-cameras")
+  (when (not runtime.activity-cameras.canvas)
+    (set runtime.activity-cameras.canvas {}))
+  (local existing (. runtime.activity-cameras.canvas activity-id))
+  (when existing
+    (lua "return existing"))
+  (local options (or defaults {}))
+  (local state-position (and options options.position))
+  (local position
+    (if (safe-vec3? state-position)
+        state-position
+        (or options.position (glm.vec3 0 0 100))))
+  (local camera (ActivityCameraState.camera-from-state
+                  options
+                  {:position position}))
+  (set (. runtime.activity-cameras.canvas activity-id) camera)
+  camera)
+
 {:load-runtime-canvas-surface! load-runtime-canvas-surface!
  :drop-runtime-canvas-surface! drop-runtime-canvas-surface!
  :capture-runtime-canvas-unit-state capture-runtime-canvas-unit-state
- :restore-runtime-canvas-unit-state! restore-runtime-canvas-unit-state!}
+ :restore-runtime-canvas-unit-state! restore-runtime-canvas-unit-state!
+ :ensure-activity-canvas-camera! ensure-activity-canvas-camera!}

@@ -24,6 +24,7 @@
 (local SkyboxState (require :skybox-state))
 (local BackgroundState (require :background-state))
 (local ActivitySceneState (require :activity-scene-state))
+(local Presentation (require :activity-presentation))
 
 (local vec3->array (. MathUtils :vec3->array))
 (local quat->array (. MathUtils :quat->array))
@@ -645,6 +646,16 @@
     (local migrated-scene-state? (ActivitySceneState.migrate-legacy-world-state! world.state))
     (when (or migrated-scene-state? repaired-persisted-state?)
       (set repaired-persisted-state? true))
+    ;; Migrate legacy top-level camera state into the sandbox session
+    ;; so camera ownership moves from the runtime globals to the activity slot.
+    (let [sandbox-scene (resolve-sandbox-scene-state world)
+          camera-state (and world.state world.state.camera)]
+      (when (and sandbox-scene
+                 (= (type camera-state) :table)
+                 (not sandbox-scene.camera))
+        (set sandbox-scene.camera
+             {:position (or camera-state.position [0 0 30])
+              :rotation (or camera-state.rotation [1 0 0 0])})))
     (when repaired-persisted-state?
       (persist-loaded-state! world)))
 
@@ -656,12 +667,10 @@
     true)
 
   (fn resolve-runtime-containment-config [world]
-    (local runtime world.runtime)
-    (local runtime-config (and runtime runtime.physics-containment-config))
     (local sandbox-scene (resolve-sandbox-scene-state world))
     (local state-config (and sandbox-scene sandbox-scene.containment))
     (PhysicsContainment.serialize-config
-      (PhysicsContainment.normalize-config (or runtime-config state-config default-containment-config))))
+      (PhysicsContainment.normalize-config (or state-config default-containment-config))))
 
   (fn set-runtime-containment-config! [world config]
     (local serialized
@@ -673,8 +682,6 @@
       (local sandbox-scene (resolve-sandbox-scene-state world))
       (when sandbox-scene
         (set sandbox-scene.containment serialized)))
-    (when world.runtime
-      (set world.runtime.physics-containment-config serialized))
     serialized)
 
   (fn apply-runtime-containment! [world opts]
@@ -834,22 +841,12 @@
     (local options (or opts {}))
     (local capture-reason (or options.reason "unknown"))
     (local runtime world.runtime)
-    (local camera (and runtime runtime.camera))
     (local scene (and runtime runtime.scene))
     (local canvas (and runtime runtime.canvas))
     (local graph (and runtime runtime.graph))
     (local graph-map (and runtime runtime.graph-map))
     (local hud (and ctx ctx.hud))
     (local next-state (clone-table world.state))
-    (when camera
-      (local position (sanitize-vec3 camera.position (glm.vec3 0 0 30)))
-      (when (not (= position camera.position))
-        (logging.warn (string.format
-                        "[world] %s camera position out of bounds during capture; resetting to default"
-                        world.id)))
-      (set next-state.camera
-            {:position (vec3->array position)
-             :rotation (quat->array camera.rotation)}))
     (when (and runtime.graph-view runtime.graph-view.capture-state)
         (runtime.graph-view:capture-state))
     (if (and runtime.graph-map-manager runtime.graph-map-manager.capture-state)
@@ -962,33 +959,12 @@
     module)
 
   (fn create-runtime [world ctx]
-    (local camera-state (or (and world.state world.state.camera) {}))
-    (local (ok parsed-camera-position) (pcall array->vec3 camera-state.position))
-    (local loaded-camera-position (if ok parsed-camera-position nil))
-    (local camera-position
-      (sanitize-vec3 loaded-camera-position (glm.vec3 0 0 30)))
-    (when (not (= camera-position loaded-camera-position))
-      (logging.warn (string.format
-                      "[world] %s invalid camera restore position; using default"
-                      world.id)))
-    (local camera (Camera {:position camera-position}))
-    (local rotation (array->quat camera-state.rotation))
-    (when rotation
-      (camera:set-rotation rotation))
-
-    (local controls (FirstPersonControls {:camera camera}))
+    ;; Create a default scene surface camera.  Activity slots (e.g. sandbox)
+    ;; will install their own cameras via slot:set-camera and the scene's
+    ;; resolve-active-camera will prefer the active slot's camera.
+    (local default-scene-camera (Camera {:position (glm.vec3 0 0 30)}))
     (local canvas-state (or (and world.state world.state.canvas) {}))
     (local activity-state (or (and world.state world.state.activity) {}))
-    (local canvas-camera-state (or canvas-state.camera {}))
-    (local (ok-canvas parsed-canvas-position) (pcall array->vec3 canvas-camera-state.position))
-    (local loaded-canvas-position (if ok-canvas parsed-canvas-position nil))
-    (local canvas-camera-position
-      (sanitize-vec3 loaded-canvas-position (glm.vec3 0 0 100)))
-    (when (not (= canvas-camera-position loaded-canvas-position))
-      (logging.warn (string.format
-                      "[world] %s invalid canvas restore position; using default"
-                      world.id)))
-    (local canvas-camera (Camera {:position canvas-camera-position}))
     (local graph (Graph {:with-start false :entity-events? false}))
     (GraphKeyLoaders.register graph
                               {:world-manager (assert world.graph-world-manager
@@ -1012,7 +988,7 @@
       (Scene {:focus-manager ctx.focus-manager
               :debug-id (.. "scene:" world.id)
               :focus-scope scene-scope
-              :camera camera
+              :camera default-scene-camera
               :icons ctx.icons
               :states ctx.states
               :movables ctx.movables
@@ -1041,16 +1017,12 @@
       (resolve-runtime-containment-config world))
     (set-runtime-containment-config! world containment-config)
     (local runtime
-      {:camera camera
-       :world-dir world.dir
-       :canvas-camera canvas-camera
+      {:world-dir world.dir
        :focus-manager ctx.focus-manager
        :focus-root ctx.focus-root
        :icons ctx.icons
        :states ctx.states
        :movables ctx.movables
-       :physics-containment-config containment-config
-        :first-person-controls controls
         :scene-scope scene-scope
         :scene scene
         :graph graph
@@ -1061,6 +1033,8 @@
         :requested-activity-id activity-state.active_id
         :requested-activity-known? true
         :activity-session-state (clone-table (or activity-state.sessions {}))
+        :activity-cameras {:scene {} :canvas {}}
+        :activity-controls {:scene {} :canvas {}}
         :graph-view-states (clone-table (and activity-state.sessions
                                              activity-state.sessions.graph
                                              activity-state.sessions.graph.graph-view-states))
@@ -1079,6 +1053,9 @@
                    :start-scheduled? false
                    :scene-panels (clone-table (and sandbox-scene-state sandbox-scene-state.panels []))
         :scene-panel-index 1}})
+    ;; Install presentation provider on the runtime so renderers and input
+    ;; helpers can query activity-owned cameras and render targets.
+    (set runtime.presentation (Presentation.for-runtime runtime))
     (local sync-active-graph-map!
       (fn []
         (local active-graph-map (graph-map-manager:get-active-map))
@@ -1131,9 +1108,6 @@
     (when runtime
       (capture-runtime-state world ctx {:reason (or reason "clear-runtime")})
       (clear-active-runtime-containment! world)
-      (when runtime.first-person-controls
-        (runtime.first-person-controls:drop)
-        (set runtime.first-person-controls nil))
       (runtime:unload-canvas-runtime)
       (set runtime.drawing-controller nil)
       (when runtime.scene
@@ -1148,12 +1122,6 @@
       (when runtime.graph
         (runtime.graph:drop)
         (set runtime.graph nil))
-      (when runtime.canvas-camera
-        (runtime.canvas-camera:drop)
-        (set runtime.canvas-camera nil))
-      (when runtime.camera
-        (runtime.camera:drop)
-        (set runtime.camera nil))
       (set runtime.scene-scope nil)
       (set world.runtime nil)
       (when reason

@@ -67,6 +67,8 @@
           "drawing activity slot test expected rectangle commit to succeed")
   (local runtime {:canvas canvas
                   :scene scene
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
                   :drawing-controller controller})
   (set app.active-world-runtime runtime)
   (set app.canvas canvas)
@@ -210,7 +212,8 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}}
+                  :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir
                   :drawing-controller controller})
   (set app.active-world-runtime runtime)

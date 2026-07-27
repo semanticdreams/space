@@ -1,11 +1,13 @@
 (global app (or app {}))
 
+(local glm (require :glm))
 (local fs (require :fs))
 (local runtime (require :runtime))
 (local Activities (require :activities))
 (local DrawingInput (require :drawing/input))
 (local {:DrawingRender DrawingRender} (require :drawing/render))
 (local DrawingActivityActions (require :drawing-activity-actions))
+(local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
 
 (fn drawing-activity-owned-paths []
   (local lua-root (fs.join-path runtime.assets-path "lua"))
@@ -54,17 +56,29 @@
 
 (fn activate-drawing-render! []
   (local world-runtime (assert app.active-world-runtime
-                                "Drawing activity requires app.active-world-runtime"))
+                                 "Drawing activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                         "Drawing activity requires runtime.canvas"))
+                          "Drawing activity requires runtime.canvas"))
   (local controller (assert world-runtime.drawing-controller
-                             "Drawing activity requires runtime.drawing-controller"))
+                              "Drawing activity requires runtime.drawing-controller"))
+
+  ;; Create or reuse a drawing canvas camera stored in runtime.activity-cameras.
+  (local slot-camera
+    (HomeWorldCanvasRuntime.ensure-activity-canvas-camera!
+      world-runtime
+      "drawing"
+      {:position (glm.vec3 0 0 100)}))
+
+  ;; Ensure the slot has the camera before activation
+  (canvas:ensure-activity-slot "drawing" {:camera slot-camera})
   (local slot (canvas:activate-activity-slot "drawing"))
   (slot:set-canvas-target-kind! nil)
+  (slot:expose-render-target! {:layers [:geometry]})
   (local render (or world-runtime.drawing-render
                     (DrawingRender {:ctx slot.ctx
                                     :controller controller
-                                    :canvas canvas})))
+                                    :canvas canvas
+                                    :camera slot.camera})))
   (set slot.root render)
   (set world-runtime.drawing-render render)
   (set app.drawing-render render)

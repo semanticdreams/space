@@ -129,7 +129,7 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir
                   :drawing-controller controller
                   :board-state {:items [] :connectors []}})
@@ -780,7 +780,7 @@
                   :graph-map graph-map
                   :object-selector object-selector
                   :movables app.movables
-                  :canvas-camera camera
+                  :activity-cameras {:canvas {} :scene {}} :activity-controls {:canvas {} :scene {}}
                   :world-dir data-dir
                   :drawing-controller controller
                   :board-state {:items [] :connectors []}})

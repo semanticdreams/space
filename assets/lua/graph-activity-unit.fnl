@@ -1,11 +1,13 @@
 (global app (or app {}))
 
+(local glm (require :glm))
 (local fs (require :fs))
 (local runtime (require :runtime))
 (local Activities (require :activities))
 (local GraphView (require :graph/view))
 (local GraphActivityActions (require :graph-activity-actions))
 (local GraphMapSidebar (require :graph/map-sidebar))
+(local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
 (local {: entry : section} (require :command-hints))
 
 (var maps-changed-handler nil)
@@ -129,16 +131,27 @@
 
 (fn activate-graph-view! []
   (local world-runtime (assert app.active-world-runtime
-                                 "Graph activity requires app.active-world-runtime"))
+                                  "Graph activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                          "Graph activity requires runtime.canvas"))
+                           "Graph activity requires runtime.canvas"))
   (local graph-map (active-graph-map))
   (assert graph-map
           "Graph activity requires runtime.graph-map or graph-map-manager")
   (local object-selector (assert world-runtime.object-selector
-                                    "Graph activity requires runtime.object-selector"))
+                                     "Graph activity requires runtime.object-selector"))
+
+  ;; Create or reuse a graph canvas camera stored in runtime.activity-cameras.
+  (local slot-camera
+    (HomeWorldCanvasRuntime.ensure-activity-canvas-camera!
+      world-runtime
+      "graph"
+      {:position (glm.vec3 0 0 100)}))
+
+  ;; Ensure the slot has the camera before activation
+  (canvas:ensure-activity-slot "graph" {:camera slot-camera})
   (local slot (canvas:activate-activity-slot "graph"))
   (slot:set-canvas-target-kind! :graph-view)
+  (slot:expose-render-target! {:layers [:text]})
   (ensure-view-states world-runtime)
   (local map-id (view-state-key-for graph-map))
   (when (and world-runtime.graph-view
@@ -154,7 +167,7 @@
                      :selector object-selector
                      :view-target slot
                      :pointer-target slot.pointer-target
-                    :camera world-runtime.canvas-camera
+                    :camera slot.camera
                     :data-dir (assert world-runtime.world-dir
                                       "Graph activity requires runtime.world-dir")})))
    (set slot.root graph-view)
