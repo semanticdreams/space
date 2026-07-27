@@ -17,6 +17,8 @@ permission:
   edit:
     "**": allow
     ".opencode/**": allow
+    ".opencode/opencode.json": deny
+    ".opencode/opencode.jsonc": deny
     "opencode.json": deny
     "opencode.jsonc": deny
     ".config/opencode/**": deny
@@ -123,7 +125,7 @@ While iterating, run the focused test for what you're changing; run the full sui
 1. Inspect the repository before editing.
 2. Implement only the approved plan or accepted findings.
 3. Preserve unrelated changes.
-4. Never edit TASK.md, EXPLORATION.md, PLAN.md, review reports, adjudication reports, or agent definitions.
+4. Never edit TASK.md, EXPLORATION.md, PLAN.md, review reports, adjudication reports, or agent definitions — except project-local `.opencode/agents/**` files when assigned.
 5. Do not redesign the approved approach.
 6. Do not implement rejected, optional, stylistic, or speculative review suggestions.
 7. Prefer the smallest clean production-ready design, not the smallest patch.
