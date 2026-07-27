@@ -47,30 +47,38 @@
 
 (fn no-setters-in-layouters-rule-run [ctx]
   "Rule: flag calls to set-position/set-rotation/set-size/mark-layout-dirty/mark-measure-dirty
-  inside functions whose name contains 'layouter'."
+  inside functions whose name contains 'layouter', including anonymous functions bound to
+  :layouter keys in layout tables (which Task-4 names <anonymous>)."
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
-    ;; Find all layouter function names in this file
+    ;; Find all layouter function names in this file (named layouter fns)
     (var layouter-names {})
     (each [_ def (ipairs (or ff.definitions []))]
       (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
         (tset layouter-names def.name true)))
-    ;; If there are layouter functions, check their calls
-    (when (next layouter-names)
+    ;; Also detect layouter export keys for anonymous functions in :layouter (fn ...) style
+    (var has-layouter-export-key false)
+    (each [_ export (ipairs (or ff.exports []))]
+      (when (= export.key "layouter")
+        (set has-layouter-export-key true)))
+    ;; Check calls for forbidden setters inside layouter functions
+    (when (or (next layouter-names) has-layouter-export-key)
       (each [_ call (ipairs (or ff.calls []))]
-        (when (and call.enclosing-fn (. layouter-names call.enclosing-fn)
-                   (callee-is-forbidden-setter? call.callee))
+        (when (and (callee-is-forbidden-setter? call.callee)
+                   (or (. layouter-names (or call.enclosing-fn ""))
+                       (and has-layouter-export-key
+                            (= (or call.enclosing-fn "") "<anonymous>"))))
           (table.insert diagnostics
             (Diagnostics.violation
               {:constraint-id "layout.no-setters-in-layouters"
                :family "layout-rendering"
                :message (.. "forbidden setter " call.callee " inside layouter "
-                            call.enclosing-fn " in " (or ff.module ff.path))
+                            (or call.enclosing-fn "<anonymous>") " in " (or ff.module ff.path))
                :file ff.path
                :line (or call.line 0)
                :column (or call.column 0)
                :evidence {:callee call.callee
-                          :layouter call.enclosing-fn
+                          :layouter (or call.enclosing-fn "<anonymous>")
                           :form (or call.form "")}
                :hint "Inside layouters, assign child layout fields directly instead of calling setters that dirty layout mid-pass."}))))))
   (if (> (length diagnostics) 0) diagnostics nil))
@@ -89,7 +97,7 @@
    "scene-objects" true
    "scene-terrains" true})
 
-(local drop-evidence-calrees
+(local child-cleanup-calrees
   {"clear-children" true
    "drop-children" true})
 
@@ -100,18 +108,15 @@
 (fn has-child-creation-evidence? [ff]
   "Check if a file-fact has evidence of retained child creation."
   (var found false)
-  ;; Check calls to Layout or LayoutRoot
   (each [_ call (ipairs (or ff.calls []))]
     (when (. child-creation-callees call.callee)
       (set found true)))
-  ;; Check accesses to children, scene-children, scene-objects, scene-terrains
   (each [_ access (ipairs (or ff.accesses []))]
     (when (not found)
       (let [p (or access.path [])
             plen (length p)]
         (when (and (>= plen 2) (. child-creation-access-keys (. p plen)))
           (set found true)))))
-  ;; Check renderer child fields (e.g. renderer.children)
   (each [_ access (ipairs (or ff.accesses []))]
     (when (not found)
       (let [p (or access.path [])
@@ -122,41 +127,58 @@
           (set found true)))))
   found)
 
-(fn has-drop-evidence? [ff]
-  "Check if a file-fact has evidence of child drop/cleanup."
+(fn has-public-drop-path? [ff]
+  "Check if a module exposes a public drop path: a function named 'drop' OR
+  an export key 'drop' in the returned table."
   (var found false)
-  ;; Check for a function named 'drop'
   (each [_ def (ipairs (or ff.definitions []))]
     (when (and (= def.kind :fn) (= def.name "drop"))
       (set found true)))
-  ;; Check for :drop method calls
+  (each [_ export (ipairs (or ff.exports []))]
+    (when (and (not found) (= export.key "drop"))
+      (set found true)))
+  found)
+
+(fn has-child-cleanup-evidence? [ff]
+  "Check if a file-fact has evidence of child cleanup (any :drop call,
+  clear-children, or drop-children anywhere in the file)."
+  (var found false)
   (each [_ call (ipairs (or ff.calls []))]
     (when (and (not found) (callee-is-drop-method? call.callee))
       (set found true)))
-  ;; Check for clear-children or drop-children calls
   (each [_ call (ipairs (or ff.calls []))]
-    (when (and (not found) (. drop-evidence-calrees call.callee))
+    (when (and (not found) (. child-cleanup-calrees call.callee))
       (set found true)))
   found)
 
 (fn owned-child-drop-rule-run [ctx]
-  "Rule: flag modules creating retained children (Layout, LayoutRoot, scene-children, etc.)
-  without providing a drop path."
+  "Rule: flag modules creating retained children without providing a public
+  drop path AND child cleanup evidence."
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
-    (when (and (has-child-creation-evidence? ff)
-               (not (has-drop-evidence? ff)))
-      (table.insert diagnostics
-        (Diagnostics.violation
-          {:constraint-id "layout.owned-child-drop"
-           :family "layout-rendering"
-           :message (.. "retained child creation without drop in " (or ff.module ff.path))
-           :file ff.path
-           :line 0
-           :column 0
-           :evidence {:file ff.path
-                      :module (or ff.module ff.path)}
-           :hint "Provide a drop function, :drop method, clear-children, or drop-children for retained children"}))))
+    (when (has-child-creation-evidence? ff)
+      (let [has-drop-path (has-public-drop-path? ff)
+            has-cleanup (has-child-cleanup-evidence? ff)]
+        (when (not has-drop-path)
+          (table.insert diagnostics
+            (Diagnostics.violation
+              {:constraint-id "layout.owned-child-drop"
+               :family "layout-rendering"
+               :message (.. "retained child creation without public drop path in " (or ff.module ff.path))
+               :file ff.path :line 0 :column 0
+               :evidence {:file ff.path :module (or ff.module ff.path)
+                          :missing "drop definition or returned table :drop"}
+               :hint "Define a drop function or return a table with a :drop key for retained children"})))
+        (when (not has-cleanup)
+          (table.insert diagnostics
+            (Diagnostics.violation
+              {:constraint-id "layout.owned-child-drop"
+               :family "layout-rendering"
+               :message (.. "retained child creation without cleanup evidence in " (or ff.module ff.path))
+               :file ff.path :line 0 :column 0
+               :evidence {:file ff.path :module (or ff.module ff.path)
+                          :missing "child drop evidence"}
+               :hint "Add :drop calls, clear-children, or drop-children for retained children"}))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 ;; ---------------------------------------------------------------------------
@@ -168,8 +190,7 @@
    "hoverables" true})
 
 (fn access-is-interactive? [access]
-  "Check if an access record refers to clickables or hoverables
-  (either bare or as ctx.clickables / ctx.hoverables)."
+  "Check if an access record refers to clickables or hoverables."
   (let [p (or access.path [])
         plen (length p)
         last-seg (and (>= plen 1) (. p plen))]
@@ -184,37 +205,54 @@
         (set found true)))
     found))
 
-(fn fn-def-has-assert? [def]
-  "Check if a function definition's form text contains 'assert'."
+(fn fn-def-has-assert-form? [def]
+  "Check if a function definition's form text contains an actual assert call:
+  (assert ...) or (assert).  Returns false for 'assertion', 'assert-routing',
+  and string literals containing 'assert'."
   (and def.form def.kind (= def.kind :fn)
-       (string.find def.form "assert" 1 true)))
+       (or (string.find def.form "(assert " 1 true)
+           (string.find def.form "(assert)" 1 true))))
+
+(fn fn-def-form-has-bare-interactive? [def]
+  "Check if a function definition's form text contains bare 'clickables'
+  or 'hoverables' (not part of a dotted access like ctx.clickables)."
+  (when (and def.form def.kind (= def.kind :fn))
+    (var found false)
+    (each [kw _ (pairs interactive-access-patterns)]
+      (when (not found)
+        (let [bare-pat (.. "[^%.]" kw)]
+          (when (or (def.form:find bare-pat)
+                    (= (def.form:sub 1 (length kw)) kw))
+            (set found true)))))
+    found))
 
 (fn interactive-context-assertion-rule-run [ctx]
-  "Rule: flag interactive widgets using clickables or hoverables without assert
-  in the same enclosing function."
+  "Rule: flag interactive widgets using clickables or hoverables without an assert
+  form in the same enclosing function."
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
-    ;; Collect all unique interactive access texts from the file's access list
     (var interactive-access-texts [])
     (each [_ access (ipairs (or ff.accesses []))]
       (when (access-is-interactive? access)
         (let [text (or access.text "")]
           (var already false)
           (each [_ t (ipairs interactive-access-texts)]
-            (when (= t text)
-              (set already true)))
+            (when (= t text) (set already true)))
           (when (not already)
             (table.insert interactive-access-texts text)))))
-    ;; For each function definition that references an interactive access...
     (each [_ def (ipairs (or ff.definitions []))]
-      (when (fn-def-has-interactive-access? interactive-access-texts def)
-        ;; If the function does not have assert, flag it
-        (when (not (fn-def-has-assert? def))
-          ;; Find the specific interactive access text used in this function
+      (let [has-access (fn-def-has-interactive-access? interactive-access-texts def)
+            has-bare (fn-def-form-has-bare-interactive? def)]
+        (when (and (or has-access has-bare)
+                   (not (fn-def-has-assert-form? def)))
           (var access-used nil)
           (each [_ text (ipairs interactive-access-texts)]
             (when (and (not access-used) (string.find def.form text 1 true))
               (set access-used text)))
+          (when (not access-used)
+            (each [kw _ (pairs interactive-access-patterns)]
+              (when (and (not access-used) (string.find def.form kw 1 true))
+                (set access-used kw))))
           (table.insert diagnostics
             (Diagnostics.violation
               {:constraint-id "layout.interactive-context-assertion"
@@ -222,9 +260,7 @@
                :message (.. "function " (or def.name "<anonymous>") " uses "
                             (or access-used "interactive context") " without assert in "
                             (or ff.module ff.path))
-               :file ff.path
-               :line (or def.line 0)
-               :column (or def.column 0)
+               :file ff.path :line (or def.line 0) :column (or def.column 0)
                :evidence {:function-name (or def.name "<anonymous>")
                           :interactive-access (or access-used "clickables/hoverables")}
                :hint (.. "Assert that " (or access-used "the interactive context")
