@@ -3339,7 +3339,7 @@
                                         :node-key "poisoned-node"
                                         :label "poisoned restore target"
                                         :size [4 4 4]
-                                        :position [1001000 0 0]
+                                        :position [950000 0 0]
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
   (set logging.warn original-warn)
@@ -3397,7 +3397,7 @@
         (scene:restore-state {:panels [{:kind "graph-node-cube"
                                         :node-key "poisoned-size-node"
                                         :label "poisoned size restore target"
-                                        :size [1001000 4 4]
+                                        :size [950000 4 4]
                                         :position [0 0 0]
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
