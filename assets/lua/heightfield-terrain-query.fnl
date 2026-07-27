@@ -157,7 +157,8 @@
   (local options (or opts {}))
   (local view (or options.view
                   (and app.scene app.scene.get-view-matrix (app.scene:get-view-matrix))
-                  (and app.camera app.camera.get-view-matrix (app.camera:get-view-matrix))))
+                  (let [cam (app.presentation-camera)]
+                    (and cam cam.get-view-matrix (cam:get-view-matrix)))))
   (local projection (or options.projection
                         (and app.scene app.scene.projection)
                         app.projection))

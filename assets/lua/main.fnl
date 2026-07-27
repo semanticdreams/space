@@ -679,6 +679,27 @@
   (when app.hud
     (app.hud:reset-projection)))
 
+(fn app.active-presentation []
+  (and app.active-world-runtime
+       app.active-world-runtime.presentation))
+
+(fn app.presentation-screen-pos-ray [pos opts]
+  (let [provider (app.active-presentation)]
+    (assert provider "app.presentation-screen-pos-ray requires an active presentation provider")
+    (provider:screen-pos-ray pos opts)))
+
+(fn app.presentation-input-controls []
+  (let [provider (app.active-presentation)]
+    (and provider (provider:input-controls))))
+
+(fn app.presentation-camera [opts]
+  (let [provider (app.active-presentation)]
+    (if provider
+        (provider:camera opts)
+        (let [options (or opts {})]
+          (when options.required?
+            (assert provider "app.presentation-camera requires an active presentation provider"))))))
+
 (fn resolve-screen-ray-target [opts]
   (local options (or opts {}))
   (local explicit-target (or options.target options.pointer-target))
@@ -708,40 +729,25 @@
               (not (finite-number? vec.y))
               (not (finite-number? vec.z)))
       (error (.. "app.screen-pos-ray produced non-finite " label))))
-  (local preferred-target (resolve-screen-ray-target opts))
-  (if (and preferred-target preferred-target.screen-pos-ray)
-      (let [options (if opts
-                      (let [copy {}]
-                        (each [k v (pairs opts)]
-                          (set (. copy k) v))
-                        copy)
-                      {})]
-        (when (and (= preferred-target app.scene)
-                   (not options.projection)
-                   app.projection)
-          (set options.projection app.projection))
-        (preferred-target:screen-pos-ray pos options))
-      (let [options (or opts {})
-            viewport (viewport->table (or options.viewport app.viewport))
-            view (or options.view
-                     (and app.camera (app.camera:get-view-matrix)))
-            projection (or options.projection app.projection)]
-        (assert view "app.screen-pos-ray requires a view matrix")
-        (assert projection "app.screen-pos-ray requires a projection matrix")
-        (local sample-pos (or (viewport->input-pos pos viewport app.engine)
-                              {:x (+ viewport.x (/ viewport.width 2))
-                               :y (+ viewport.y (/ viewport.height 2))}))
-        (local px (number-or sample-pos.x viewport.x))
-        (local py (number-or sample-pos.y viewport.y))
-        (local inverted-y (- (+ viewport.height viewport.y) py))
-        (local viewport-vec (viewport->glm-vec4 viewport))
-        (local near (glm.unproject (glm.vec3 px inverted-y 0.0) view projection viewport-vec))
-        (local far (glm.unproject (glm.vec3 px inverted-y 1.0) view projection viewport-vec))
-        (local direction (glm.normalize (- far near)))
-        (assert-finite-vec3 near "near")
-        (assert-finite-vec3 far "far")
-        (assert-finite-vec3 direction "direction")
-        {:origin near :direction direction})))
+  ;; Try presentation provider first
+  (let [provider (app.active-presentation)]
+    (if provider
+        (provider:screen-pos-ray pos opts)
+        ;; Fallback: target-based delegation (HUD, etc.)
+        (let [preferred-target (resolve-screen-ray-target opts)]
+          (if (and preferred-target preferred-target.screen-pos-ray)
+              (let [options (if opts
+                              (let [copy {}]
+                                (each [k v (pairs opts)]
+                                  (set (. copy k) v))
+                                copy)
+                              {})]
+                (when (and (= preferred-target app.scene)
+                           (not options.projection)
+                           app.projection)
+                  (set options.projection app.projection))
+                (preferred-target:screen-pos-ray pos options))
+              (error "app.screen-pos-ray requires a presentation provider or target with screen-pos-ray"))))))
 
 (set app.layout-root nil)
 (set app.viewport nil)
@@ -1147,8 +1153,6 @@
              (not (= previous-requested-id nil)))))
   (set app.active-world-entry entry)
   (set app.active-world-runtime runtime)
-  (set app.camera (and runtime runtime.camera))
-  (set app.first-person-controls (and runtime runtime.first-person-controls))
   (set app.scene-focus-scope (and runtime runtime.scene-scope))
   (set app.canvas-focus-scope (and runtime runtime.canvas-scope))
   (set app.scene (and runtime runtime.scene))
@@ -1169,8 +1173,6 @@
   (set app.drawing-controller (and runtime runtime.drawing-controller))
   (set app.drawing-render nil)
   (set app.layout-root (and app.scene app.scene.layout-root))
-  (when (and app.scene app.scene.set-camera)
-    (app.scene:set-camera app.camera))
   (bind-hud-runtime)
   (when (and app.canvas app.canvas.build-context)
     (set app.canvas.build-context.object-selector app.object-selector))
@@ -1985,12 +1987,12 @@
   (when (not ui-paused)
     (when (and app.world-manager app.world-manager.update)
       (app.world-manager:update delta))
-    (when (and app.engine.audio app.camera)
-      (local cam app.camera)
-      (local forward (cam:get-forward))
-      (local up (cam:get-up))
-      (app.engine.audio:setListenerPosition cam.position)
-      (app.engine.audio:setListenerOrientation forward up))
+    (let [audio-cam (app.presentation-camera)]
+      (when (and app.engine.audio audio-cam)
+        (local forward (audio-cam:get-forward))
+        (local up (audio-cam:get-up))
+        (app.engine.audio:setListenerPosition audio-cam.position)
+        (app.engine.audio:setListenerOrientation forward up)))
     (when app.scene
       (run-section "scene" (fn [] (app.scene:update))))
     (when app.canvas

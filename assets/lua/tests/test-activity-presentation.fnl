@@ -92,6 +92,37 @@
             "only explicit runtime-owned scene target must be present")
     (when app (set app.hud saved-hud))))
 
+;; Task 4: presentation input delegation tests
+(fn app-screen-pos-ray-delegates-to-runtime-presentation []
+  (local Main (require :main))
+  (Main.install-app-shell!)
+  (var called-pos nil)
+  (local expected-ray {:origin :o :direction :d})
+  (local saved-runtime app.active-world-runtime)
+  (set app.active-world-runtime
+       {:presentation {:screen-pos-ray (fn [_self pos _opts]
+                                         (set called-pos pos)
+                                         expected-ray)}})
+  (local ray (app.screen-pos-ray {:x 4 :y 5} {}))
+  (assert (= ray expected-ray))
+  (assert (= called-pos.x 4))
+  (set app.active-world-runtime saved-runtime))
+
+(fn state-runtime-uses-presentation-controls []
+  (local Runtime (require :state-runtime))
+  (local controls {:on-mouse-wheel (fn [_self _payload] true)})
+  (local saved-runtime app.active-world-runtime)
+  (local saved-first-person app.first-person-controls)
+  (local saved-active-pointer app.active-pointer-controls)
+  (set app.first-person-controls nil)
+  (set app.active-pointer-controls nil)
+  (set app.active-world-runtime
+       {:presentation {:input-controls (fn [_self] controls)}})
+  (assert (= (Runtime.active-controls) controls))
+  (set app.active-world-runtime saved-runtime)
+  (set app.first-person-controls saved-first-person)
+  (set app.active-pointer-controls saved-active-pointer))
+
 (table.insert tests {:name "Provider returns only explicit targets"
                      :fn provider-returns-only-explicit-targets})
 (table.insert tests {:name "Provider screen ray requires target"
@@ -102,6 +133,10 @@
                      :fn provider-default-screen-ray-fallback-uses-active-interaction-surface})
 (table.insert tests {:name "Provider render-targets excludes global app.hud"
                      :fn provider-render-targets-excludes-global-hud})
+(table.insert tests {:name "app.screen-pos-ray delegates to runtime presentation"
+                     :fn app-screen-pos-ray-delegates-to-runtime-presentation})
+(table.insert tests {:name "state-runtime uses presentation controls"
+                     :fn state-runtime-uses-presentation-controls})
 
 (local main
   (fn []

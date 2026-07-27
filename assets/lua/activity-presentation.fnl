@@ -46,10 +46,19 @@
     (target:screen-pos-ray pos opts))
 
   (fn provider.input-controls [self]
-    nil)
+    runtime.first-person-controls)
+
+  (fn provider.camera [self opts]
+    (local options (or opts {}))
+    (local target (self:default-screen-ray-target options))
+    (if (and target target.camera)
+        target.camera
+        options.required?
+        (error "presentation camera not available: no render target with a camera is available")
+        nil))
 
   (fn provider.audio-listener-camera [self]
-    nil)
+    (self:camera {:required? false}))
 
   (fn provider.update [self delta]
     true)
