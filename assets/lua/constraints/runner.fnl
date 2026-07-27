@@ -100,7 +100,7 @@
   "Run a set of rules against a target.
   opts: {:rules [] :target <target> :timeout-seconds <int|nil>
          :baseline-data <table|nil|false>}
-  Rules may be functions, or tables with :fn (callable) and :id/:constraint-id.
+  Rules may be functions, or tables with :fn or :run (callable) and :id/:constraint-id.
   Defaults to loading the versioned baseline data; pass :baseline-data false to skip.
   Returns {:status :pass|:violations|:fail|:interrupted
            :counts {:total <int> :by-family <table> :by-severity <table>}
@@ -117,6 +117,8 @@
       ;; Resolve the callable and rule id from the rule entry
       (let [rule-fn (if (and (= (type rule) :table) (. rule :fn))
                        (. rule :fn)
+                       (and (= (type rule) :table) (. rule :run))
+                       (. rule :run)
                        rule)
             rule-id (or (and (= (type rule) :table)
                              (or (. rule :id) (. rule :constraint-id)))

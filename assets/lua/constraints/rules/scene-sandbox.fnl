@@ -24,14 +24,17 @@
     (not (not start))))
 
 (fn extract-string-arg-from-form [form]
-  "Extract the first string argument from a Fennel form string.
+  "Extract a string or keyword argument from a Fennel form string.
+  Prefers the last quoted string or last keyword (the argument, not method name).
   Returns the extracted string or nil."
-  (local quoted (or (form:match "\"([^\"]+)\"")
-                    (form:match ":[a-z][a-z-]*")))
-  (when quoted
-    (if (= (quoted:sub 1 1) ":")
-        (quoted:sub 2)
-        quoted)))
+  ;; Try quoted string first (e.g. \"sandbox\")
+  (var result (form:match "\"([^\"]+)\""))
+  ;; If no quoted string, find the LAST keyword (argument comes after method name)
+  (when (not result)
+    (each [kw (form:gmatch ":[a-z][a-z-]*")]
+      ;; Strip the leading : to get just the name
+      (set result (kw:sub 2))))
+  result)
 
 (fn call-exists-with-method? [calls callee]
   "Check if any call in the list has the given callee name."
@@ -57,16 +60,13 @@
       (set found c)))
   found)
 
-(fn find-call-with-method-arg [calls callee expected-arg]
-  "Find the first call with the given callee, and check if its form
-  contains the expected argument. Returns {:match? bool :call call}."
-  (var result {:match? false})
-  (each [_ c (ipairs calls)]
-    (when (= c.callee callee)
-      (let [arg (extract-string-arg-from-form c.form)]
-        (when (= arg expected-arg)
-          (set result {:match? true :call c})))))
-  result)
+(fn form-contains-any? [form patterns]
+  "Check if form string contains any of the given literal substrings."
+  (var found false)
+  (each [_ p (ipairs patterns)]
+    (when (string.find form p 1 true)
+      (set found true)))
+  found)
 
 ;; ---------------------------------------------------------------------------
 ;; Rule 1: scene.no-legacy-world-state-scene
@@ -113,36 +113,53 @@
    "drawing-activity-unit" "drawing"
    "board-activity-unit" "board"})
 
-(fn check-call-uses-foreign-slot [diagnostics ff basename expected-id method-name]
-  "Check if a scene method call in the file uses 'sandbox' instead of the expected id."
+(fn check-activity-slot-call [diagnostics ff basename expected-id method-name]
+  "Check that the module has the required Scene slot call with the correct id.
+  Flags: missing call, call with wrong id (any id other than expected-id)."
   (let [full-method (.. "scene:" method-name)
-        check-result (find-call-with-method-arg ff.calls full-method "sandbox")]
-    (when check-result.match?
-      (table.insert diagnostics
-        (Diagnostics.violation
-          {:constraint-id "scene.activity-slot-ownership"
-           :family "scene-sandbox"
-           :message (.. basename " calls " method-name " with \"sandbox\" instead of \"" expected-id "\"")
-           :file ff.path
-           :line (or check-result.call.line 0)
-           :column (or check-result.call.column 0)
-           :evidence {:call full-method
-                      :form (or check-result.call.form "")
-                      :actual-arg "sandbox"
-                      :expected-arg expected-id}
-           :hint (.. "replace \"sandbox\" with \"" expected-id "\" in the " method-name " call")})))))
+        existing-call (find-call-with-method ff.calls full-method)]
+    (if (not existing-call)
+        ;; Missing the required call entirely
+        (table.insert diagnostics
+          (Diagnostics.violation
+            {:constraint-id "scene.activity-slot-ownership"
+             :family "scene-sandbox"
+             :message (.. basename " is missing required call: " full-method)
+             :file ff.path
+             :line 0 :column 0
+             :evidence {:missing-call full-method
+                        :expected-id expected-id}
+             :hint (.. "add (" full-method " \"" expected-id "\") to " basename)}))
+        ;; Call exists — check if the slot id argument matches the expected id
+        (let [arg (extract-string-arg-from-form existing-call.form)]
+          (when (not (= arg expected-id))
+            (table.insert diagnostics
+              (Diagnostics.violation
+                {:constraint-id "scene.activity-slot-ownership"
+                 :family "scene-sandbox"
+                 :message (.. basename " calls " method-name " with \""
+                              (or arg "?") "\" instead of \"" expected-id "\"")
+                 :file ff.path
+                 :line (or existing-call.line 0)
+                 :column (or existing-call.column 0)
+                 :evidence {:call full-method
+                            :form (or existing-call.form "")
+                            :actual-arg (or arg "unknown")
+                            :expected-arg expected-id}
+                 :hint (.. "replace the id argument with \""
+                           expected-id "\" in the " method-name " call")})))))))
 
 (fn activity-slot-ownership-rule-run [ctx]
   "Rule: Graph, Drawing, and Board modules must call ensure/activate-activity-slot
-  with their own ids, not 'sandbox'."
+  with their own ids; missing calls or any wrong slot id are violations."
   (let [fact-db ctx.facts
         diagnostics []]
     (each [_ ff (ipairs (or fact-db.files []))]
       (let [basename (file-path-basename ff.path)
             expected-id (. activity-module-ids basename)]
         (when expected-id
-          (check-call-uses-foreign-slot diagnostics ff basename expected-id "ensure-activity-slot")
-          (check-call-uses-foreign-slot diagnostics ff basename expected-id "activate-activity-slot"))))
+          (check-activity-slot-call diagnostics ff basename expected-id "ensure-activity-slot")
+          (check-activity-slot-call diagnostics ff basename expected-id "activate-activity-slot"))))
     (if (> (length diagnostics) 0) diagnostics nil)))
 
 ;; ---------------------------------------------------------------------------
@@ -150,44 +167,91 @@
 ;; ---------------------------------------------------------------------------
 
 (local sandbox-contract-required-calls
-  [;; The core Scene slot management calls
-   {:callee "scene:ensure-activity-slot" :label "ensure-activity-slot sandbox"}
-   {:callee "scene:activate-activity-slot" :label "activate-activity-slot sandbox"}
+  [;; The core Scene slot management calls — must use "sandbox" id
+   {:callee "scene:ensure-activity-slot" :label "ensure-activity-slot sandbox"
+    :validate-arg "sandbox"}
+   {:callee "scene:activate-activity-slot" :label "activate-activity-slot sandbox"
+    :validate-arg "sandbox"}
    ;; Surface configuration: hide Canvas, prefer Scene
-   {:callee "ctx:set-surface-state!" :label "set-surface-state! (hide Canvas)"}
+   {:callee "ctx:set-surface-state!" :label "set-surface-state! (hide Canvas)"
+    :form-patterns [":visible? false" ":interactive? false"]}
    {:callee "ctx:set-preferred-interaction-surface!"
-    :label "set-preferred-interaction-surface! (prefer Scene)"}
-   ;; Action and routing installation
+    :label "set-preferred-interaction-surface! (prefer Scene)"
+    :validate-arg "scene"}
+   ;; Action and routing installation — presence only
    {:callee "ctx:set-root-actions!" :label "set-root-actions!"}
    {:callee "ctx:set-target-enabled!" :label "set-target-enabled!"}
-   ;; Update hook installation
+   ;; Update hook installation — presence only
    {:callee "ctx:set-update!" :label "set-update!"}])
 
 (fn check-sandbox-requires-runtime [diagnostics ff]
-  "Check that sandbox-activity-unit.fnl requires the runtime module."
-  (when (not (require-exists? ff.requires "runtime"))
+  "Check that sandbox-activity-unit.fnl requires the runtime.scene module."
+  (when (not (require-exists? ff.requires "runtime.scene"))
     (table.insert diagnostics
       (Diagnostics.violation
         {:constraint-id "scene.sandbox-activation-contract"
          :family "scene-sandbox"
-         :message "sandbox-activity-unit.fnl must require 'runtime'"
+         :message "sandbox-activity-unit.fnl must require 'runtime.scene'"
          :file ff.path
          :line 0 :column 0
-         :evidence {:required-require "runtime"}
-          :hint "add (local runtime (require :runtime)) to sandbox-activity-unit.fnl"}))))
+         :evidence {:required-require "runtime.scene"}
+         :hint "add (local runtime (require :runtime.scene)) to sandbox-activity-unit.fnl"}))))
 
 (fn check-single-contract-call [diagnostics ff req]
-  "Check a single required call in sandbox-activity-unit.fnl."
-  (when (not (call-exists-with-method? ff.calls req.callee))
-    (table.insert diagnostics
-      (Diagnostics.violation
-        {:constraint-id "scene.sandbox-activation-contract"
-         :family "scene-sandbox"
-         :message (.. "sandbox-activity-unit.fnl missing required call: " req.label)
-         :file ff.path
-         :line 0 :column 0
-         :evidence {:missing-call req.callee}
-         :hint (.. "add (" req.callee " ...) to the sandbox activation function")}))))
+  "Check a single required call in sandbox-activity-unit.fnl.
+  When validate-arg is set, checks that the first string/keyword argument matches.
+  When form-patterns is set, checks that the call form contains all expected patterns."
+  (let [existing-call (find-call-with-method ff.calls req.callee)]
+    (if (not existing-call)
+        ;; Missing the required call entirely
+        (table.insert diagnostics
+          (Diagnostics.violation
+            {:constraint-id "scene.sandbox-activation-contract"
+             :family "scene-sandbox"
+             :message (.. "sandbox-activity-unit.fnl missing required call: " req.label)
+             :file ff.path
+             :line 0 :column 0
+             :evidence {:missing-call req.callee}
+             :hint (.. "add (" req.callee " ...) to the sandbox activation function")}))
+        ;; Call exists — check argument validation if specified
+        (let [form (or existing-call.form "")]
+          (when req.validate-arg
+            (let [arg (extract-string-arg-from-form form)]
+              (when (not (= arg req.validate-arg))
+                (table.insert diagnostics
+                  (Diagnostics.violation
+                    {:constraint-id "scene.sandbox-activation-contract"
+                     :family "scene-sandbox"
+                     :message (.. "sandbox-activity-unit.fnl " req.callee " should use \""
+                                  req.validate-arg "\" but got \"" (or arg "?") "\"")
+                     :file ff.path
+                     :line (or existing-call.line 0)
+                     :column (or existing-call.column 0)
+                     :evidence {:call req.callee
+                                :form form
+                                :expected-arg req.validate-arg
+                                :actual-arg (or arg "unknown")}
+                     :hint (.. "change the argument in (" req.callee " ...) to \""
+                               req.validate-arg "\"")})))))
+          (when req.form-patterns
+            (let [missing-patterns []]
+              (each [_ p (ipairs req.form-patterns)]
+                (when (not (string.find form p 1 true))
+                  (table.insert missing-patterns p)))
+              (when (> (length missing-patterns) 0)
+                (table.insert diagnostics
+                  (Diagnostics.violation
+                    {:constraint-id "scene.sandbox-activation-contract"
+                     :family "scene-sandbox"
+                     :message (.. "sandbox-activity-unit.fnl " req.callee " missing required patterns: "
+                                  (table.concat missing-patterns ", "))
+                     :file ff.path
+                     :line (or existing-call.line 0)
+                     :column (or existing-call.column 0)
+                     :evidence {:call req.callee
+                                :form form
+                                :missing-patterns missing-patterns}
+                     :hint (.. "ensure (" req.callee " ...) includes the required configuration")})))))))))
 
 (fn sandbox-activation-contract-rule-run [ctx]
   "Rule: sandbox-activity-unit.fnl must follow the activation contract."
@@ -287,21 +351,25 @@
     :family "scene-sandbox"
     :targets [:repo]
     :kind :static
-    :run legacy-world-state-rule-run}
+    :run legacy-world-state-rule-run
+    :fn legacy-world-state-rule-run}
    {:id "scene.activity-slot-ownership"
     :family "scene-sandbox"
     :targets [:repo]
     :kind :static
-    :run activity-slot-ownership-rule-run}
+    :run activity-slot-ownership-rule-run
+    :fn activity-slot-ownership-rule-run}
    {:id "scene.sandbox-activation-contract"
     :family "scene-sandbox"
     :targets [:repo]
     :kind :static
-    :run sandbox-activation-contract-rule-run}
+    :run sandbox-activation-contract-rule-run
+    :fn sandbox-activation-contract-rule-run}
    {:id "scene.active-render-context-routing"
     :family "scene-sandbox"
     :targets [:repo]
     :kind :scenario
-    :run active-render-context-routing-rule-run}])
+    :run active-render-context-routing-rule-run
+    :fn active-render-context-routing-rule-run}])
 
 M
