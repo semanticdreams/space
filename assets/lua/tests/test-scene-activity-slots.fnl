@@ -2660,10 +2660,73 @@
               "Drawing slot should have a containment manager after activation")
       (local drawing-config drawing-slot.physics-containment-manager.config)
       (assert drawing-config "Drawing containment manager must have config")
-      (assert (= drawing-config.enabled? expected-empty-containment.enabled?)
+
+      ;; Compare every serialized field against the canonical empty config
+      (assert (= drawing-config.enabled?
+                 expected-empty-containment.enabled?)
               (.. "containment enabled? mismatch, expected "
                   (tostring expected-empty-containment.enabled?) " got "
                   (tostring drawing-config.enabled?)))
+
+      (assert (= drawing-config.mode
+                 expected-empty-containment.mode)
+              (.. "containment mode mismatch, expected "
+                  (tostring expected-empty-containment.mode) " got "
+                  (tostring drawing-config.mode)))
+
+      ;; Bounds: compare min/max triplets
+      (assert drawing-config.bounds
+              "Drawing containment config must have :bounds")
+      (each [idx expected-v (ipairs expected-empty-containment.bounds.min)]
+        (assert (<= (math.abs (- (. drawing-config.bounds.min idx) expected-v)) 0.01)
+                (.. "containment bounds.min[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. drawing-config.bounds.min idx)))))
+      (each [idx expected-v (ipairs expected-empty-containment.bounds.max)]
+        (assert (<= (math.abs (- (. drawing-config.bounds.max idx) expected-v)) 0.01)
+                (.. "containment bounds.max[" (tostring idx) "] mismatch, expected "
+                    (tostring expected-v) " got "
+                    (tostring (. drawing-config.bounds.max idx)))))
+
+      ;; Padding: compare horizontal, bottom, top
+      (assert drawing-config.padding
+              "Drawing containment config must have :padding")
+      (assert (<= (math.abs (- drawing-config.padding.horizontal
+                               expected-empty-containment.padding.horizontal)) 0.01)
+              (.. "containment padding.horizontal mismatch, expected "
+                  (tostring expected-empty-containment.padding.horizontal) " got "
+                  (tostring drawing-config.padding.horizontal)))
+      (assert (<= (math.abs (- drawing-config.padding.bottom
+                               expected-empty-containment.padding.bottom)) 0.01)
+              (.. "containment padding.bottom mismatch, expected "
+                  (tostring expected-empty-containment.padding.bottom) " got "
+                  (tostring drawing-config.padding.bottom)))
+      (assert (<= (math.abs (- drawing-config.padding.top
+                               expected-empty-containment.padding.top)) 0.01)
+              (.. "containment padding.top mismatch, expected "
+                  (tostring expected-empty-containment.padding.top) " got "
+                  (tostring drawing-config.padding.top)))
+
+      ;; Restitution, debounce-ms
+      (assert (<= (math.abs (- drawing-config.restitution
+                               expected-empty-containment.restitution)) 0.01)
+              (.. "containment restitution mismatch, expected "
+                  (tostring expected-empty-containment.restitution) " got "
+                  (tostring drawing-config.restitution)))
+      (assert (= drawing-config.debounce-ms
+                 expected-empty-containment.debounce-ms)
+              (.. "containment debounce-ms mismatch, expected "
+                  (tostring expected-empty-containment.debounce-ms) " got "
+                  (tostring drawing-config.debounce-ms)))
+
+      ;; Visualization
+      (assert drawing-config.visualization
+              "Drawing containment config must have :visualization")
+      (assert (= drawing-config.visualization.enabled
+                 expected-empty-containment.visualization.enabled)
+              (.. "containment visualization.enabled mismatch, expected "
+                  (tostring expected-empty-containment.visualization.enabled) " got "
+                  (tostring drawing-config.visualization.enabled)))
 
       ;; ── Presentation target and slot state ──────────────────────────
       (assert (= (scene:presentation-target) nil)
