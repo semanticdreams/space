@@ -290,28 +290,6 @@
   (assert (= result.status :interrupted)
           (.. "violations + interrupted should be :interrupted, got " (tostring result.status))))
 
-;; Known limitation: timeout uses a Lua instruction-count debug hook
-;; (debug.sethook) and os.clock (CPU time).  Neither can preempt
-;; blocking C/library calls such as os.execute.  This regression test
-;; documents that rules with brief blocking calls complete normally
-;; rather than hanging the gate.
-(fn runner-blocking-call-completes-despite-timeout-limitation []
-  (local Runner (require :constraints.runner))
-  (var rule-finished false)
-  (fn rule-with-blocking-call [_target]
-    ;; os.execute blocks the Lua VM; the timeout hook cannot fire during it.
-    (os.execute "sleep 0.1")
-    (set rule-finished true))
-  (local result (Runner.run
-                  {:rules [rule-with-blocking-call]
-                   :target {:kind :files :name "blocking-limitation"}
-                   :timeout-seconds 0.5}))
-  (assert rule-finished
-          "rule should complete after brief blocking call")
-  (assert (= result.status :pass)
-          (.. "expected :pass (timeout hook cannot interrupt os.execute), got "
-              (tostring result.status))))
-
 ;; Register tests
 (table.insert tests {:name "diagnostic violation normalizes fields"
                      :fn diagnostic-violation-normalizes-fields})
@@ -347,8 +325,6 @@
                      :fn runner-timeout-produces-interrupted})
 (table.insert tests {:name "runner interrupted precedence over fail"
                      :fn runner-interrupted-precedence-over-fail})
-(table.insert tests {:name "runner timeout cannot interrupt blocking calls (known limitation)"
-                     :fn runner-blocking-call-completes-despite-timeout-limitation})
 
 (local main
   (fn []

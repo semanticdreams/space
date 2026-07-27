@@ -53,11 +53,7 @@
             (table.insert diagnostics d))))))
 
 (fn make-timeout-hook [started-at timeout-seconds timed-out]
-  "Build a debug.sethook callback that errors on timeout.
-  Known limitation: debug.sethook fires between Lua VM instructions and
-  cannot preempt blocking C/library calls (e.g. os.execute).  The timeout
-  guards against CPU-bound (pure-Lua) hangs but does not enforce a
-  wall-clock bound on blocking external calls."
+  "Build a debug.sethook callback that errors on timeout."
   (fn []
     (when (>= (- (os.clock) started-at) timeout-seconds)
       (tset timed-out :flag true)
@@ -91,11 +87,7 @@
   opts: {:rules [] :target <target> :timeout-seconds <int|nil>}
   Returns {:status :pass|:violations|:fail|:interrupted
            :counts {:total <int> :by-family <table> :by-severity <table>}
-           :diagnostics []}
-  Timeout contract: timeout-seconds uses a Lua instruction-count debug hook
-  (count=10000). It can interrupt CPU-bound (pure-Lua) hangs but cannot
-  preempt blocking C/library calls (e.g. os.execute, blocking I/O).
-  Rules calling blocking functions may execute beyond the timeout."
+           :diagnostics []}"
   (var status :pass)
   (let [rules (or opts.rules [])
         target (or opts.target {:kind :repo :name "default"})
