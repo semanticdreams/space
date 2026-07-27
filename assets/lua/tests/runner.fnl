@@ -401,5 +401,13 @@
   (app.engine:shutdown)
   suite)
 
+(fn shutdown-test-env []
+  "Shut down the test environment: drop the app and reset it to an empty table."
+  (when (and app app.drop)
+    (app.drop))
+  (set app {}))
+
 {:run-modules run-modules
- :run-tests run-tests}
+ :run-tests run-tests
+ :setup-test-env setup-test-env
+ :shutdown-test-env shutdown-test-env}

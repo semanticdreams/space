@@ -186,7 +186,8 @@
     :tests.test-constraints-runner
     :tests.test-constraints-source
     :tests.test-constraints-facts
-    :tests.test-constraints-baseline]})
+    :tests.test-constraints-baseline
+    :tests.test-constraints-rules-scene-sandbox]})
 
 (local main
   (fn []
