@@ -30,29 +30,81 @@
     (set n (+ n 1)))
   n)
 
+(fn find-matching-paren [s open-pos]
+  "Find the position of the ')' that matches the '(' at open-pos.
+  Skips over strings (double and single quotes) to avoid false matches."
+  (var depth 1)
+  (var pos (+ open-pos 1))
+  (var in-double false)
+  (var in-single false)
+  (while (and (<= pos (length s)) (> depth 0))
+    (let [c (s:sub pos pos)]
+      (if in-double
+          (when (= c "\"") (set in-double false))
+          in-single
+          (when (= c "'") (set in-single false))
+          (= c "\"")
+          (set in-double true)
+          (= c "'")
+          (set in-single true)
+          (= c "(")
+          (set depth (+ depth 1))
+          (= c ")")
+          (set depth (- depth 1))))
+    (set pos (+ pos 1)))
+  (if (= depth 0) (- pos 1) nil))
+
+(fn find-all-loop-body-ranges [form base-line]
+  "Find line ranges for each loop body within a function form.
+  Returns a list of {start, end} line ranges.
+  A loop body is the entire (each ...) or (for ...) or (icollect ...) form."
+  (var ranges [])
+  (var pos 1)
+  (while (<= pos (length form))
+    (var found false)
+    (each [_ kw (ipairs ["each " "for " "icollect "])]
+      (when (not found)
+        (let [p (form:find kw pos true)]
+          (when (and p (> p 1) (= (form:sub (- p 1) (- p 1)) "("))
+            (set found true)
+            (let [open-pos (- p 1)
+                  close-pos (find-matching-paren form open-pos)]
+              (if close-pos
+                  (let [start-line (+ base-line (count-newlines (form:sub 1 open-pos)))
+                        end-line (+ base-line (count-newlines (form:sub 1 close-pos)))]
+                    (table.insert ranges {:start start-line :end end-line})
+                    (set pos (+ close-pos 1)))
+                  (set pos (+ p 1))))))))
+    (when (not found)
+      (set pos (+ (length form) 1))))
+  ranges)
+
 (fn has-loop-cleanup? [ff]
   "Check if any function definition contains a loop construct AND a real
-  cleanup call falls within its line range — structured by call location
-  (line number), not raw text substring matching.  This prevents false
-  suppression when a loop merely prints or comments about a cleanup call."
-  ;; Build line ranges for functions that contain loop constructs.
-  (var loop-fn-ranges [])
+  cleanup call falls within the loop body line range — structured by call
+  location (line number) and loop containment, not raw text or whole-function
+  approximation.  This prevents false suppression when a cleanup call lies
+  in the same function but outside the loop, or when a loop merely prints
+  or comments about a cleanup call."
+  ;; Build line ranges for loop bodies (not whole functions).
+  (var loop-body-ranges [])
   (each [_ def (ipairs (or ff.definitions []))]
     (when (and (= def.kind :fn) def.form
                (or (def.form:find "each " 1 true)
                    (def.form:find "for " 1 true)
                    (def.form:find "icollect " 1 true)))
-      (let [end-line (+ def.line (count-newlines def.form))]
-        (table.insert loop-fn-ranges {:start def.line :end end-line}))))
+      (let [body-ranges (find-all-loop-body-ranges def.form def.line)]
+        (each [_ r (ipairs body-ranges)]
+          (table.insert loop-body-ranges r)))))
   ;; Check by line range: a real cleanup call fact whose line falls
-  ;; inside a loop-bearing function.
-  (if (= (length loop-fn-ranges) 0)
+  ;; inside an actual loop body.
+  (if (= (length loop-body-ranges) 0)
       false
       (do
         (var found false)
         (each [_ call (ipairs (or ff.calls []))]
           (when (and (not found) (cleanup-call? call.callee) call.line)
-            (each [_ r (ipairs loop-fn-ranges)]
+            (each [_ r (ipairs loop-body-ranges)]
               (when (and (not found)
                          (>= call.line r.start)
                          (<= call.line r.end))

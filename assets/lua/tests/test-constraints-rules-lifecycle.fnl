@@ -623,6 +623,58 @@
   (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
           "diagnostic should have correct constraint-id"))
 
+;; --- R5-1: same-function cleanup call outside loop must still flag ---
+
+(fn registration-cleanup-flags-cleanup-outside-loop-with-fake-text-inside []
+  "A file with 2 registrations and 1 real cleanup call in the same function
+  but OUTSIDE (before) a loop. The loop body contains the exact cleanup-call
+  text in a string. has-loop-cleanup? must track loop body containment
+  (structured by paren-matching), not whole-function ranges — the cleanup
+  call outside the loop body is NOT loop-cleanup evidence."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  ;; Function at line 10:
+  ;;   line 11: (some-obj:disconnect handler1)  ← real cleanup, BEFORE loop
+  ;;   line 12-13: (each … (print "(some-obj:disconnect handler1)"))
+  ;;                The loop string contains the exact cleanup-call text,
+  ;;                but the real cleanup call at line 11 is outside the loop body.
+  ;; Old whole-function-range logic would treat line 11 as loop-cleanup
+  ;; evidence because it falls within the function range [10, 13].
+  ;; New loop-body-range logic correctly excludes it from [12, 13].
+  (local ff (make-file-fact {:path "/src/bad-module.fnl"
+                             :module "bad-module"
+                             :definitions [{:kind :fn
+                                            :name "process-handlers"
+                                            :top-level? true
+                                            :line 10 :column 1
+                                            :length 20
+                                            :form "(fn process-handlers []
+  (some-obj:disconnect handler1)
+  (each [_ x (ipairs items)]
+    (print \"(some-obj:disconnect handler1)\")))"}]
+                             :calls [{:callee "signal-a:connect"
+                                      :receiver nil :method nil
+                                      :line 5 :column 1
+                                      :form "(signal-a:connect handler1)"}
+                                     {:callee "signal-b:connect"
+                                      :receiver nil :method nil
+                                      :line 7 :column 1
+                                      :form "(signal-b:connect handler2)"}
+                                     ;; Real cleanup call AT LINE 11 — inside the
+                                     ;; same function but BEFORE the loop body.
+                                     {:callee "some-obj:disconnect"
+                                      :receiver nil :method nil
+                                      :line 11 :column 1
+                                      :form "(some-obj:disconnect handler1)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag insufficient cleanup — cleanup call is outside loop body")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
+          "diagnostic should have correct constraint-id"))
+
 (fn registration-cleanup-flags-file-with-partial-cleanup []
   "A file with two registrations but only one cleanup should produce diagnostics
   for the unmatched registration."
@@ -1853,9 +1905,11 @@
 (table.insert tests {:name "registration-cleanup flags loop but no cleanup calls"
                      :fn registration-cleanup-flags-file-with-loop-but-no-cleanup-calls})
 (table.insert tests {:name "registration-cleanup flags partial cleanup with fake loop text"
-                     :fn registration-cleanup-flags-partial-cleanup-with-fake-loop-text})
+                      :fn registration-cleanup-flags-partial-cleanup-with-fake-loop-text})
+(table.insert tests {:name "registration-cleanup flags cleanup outside loop with fake text inside"
+                      :fn registration-cleanup-flags-cleanup-outside-loop-with-fake-text-inside})
 (table.insert tests {:name "registration-cleanup flags file with partial cleanup"
-                     :fn registration-cleanup-flags-file-with-partial-cleanup})
+                      :fn registration-cleanup-flags-file-with-partial-cleanup})
 
 ;; lifecycle.required-runtime-fails-loudly
 (table.insert tests {:name "required-runtime allows file with no sensitive accesses"
