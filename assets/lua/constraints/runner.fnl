@@ -85,21 +85,34 @@
         (execute-guarded diagnostics rule target on-error))
     (if (= (# diagnostics) 0) nil diagnostics)))
 
+(fn compute-status [diagnostics]
+  "Compute the worst-case status from a list of diagnostics."
+  (var status :pass)
+  (each [_ d (ipairs diagnostics)]
+    (if (. d :interrupted)
+        (set status (worse-status status :interrupted))
+        (= d.family :framework)
+        (set status (worse-status status :fail))
+        (set status (worse-status status :violations))))
+  status)
+
 (fn M.run [opts]
   "Run a set of rules against a target.
   opts: {:rules [] :target <target> :timeout-seconds <int|nil>
-         :baseline-data <table|nil>}
+         :baseline-data <table|nil|false>}
   Rules may be functions, or tables with :fn (callable) and :id/:constraint-id.
-  When :baseline-data is a table, baseline policy is applied after all rules run.
+  Defaults to loading the versioned baseline data; pass :baseline-data false to skip.
   Returns {:status :pass|:violations|:fail|:interrupted
            :counts {:total <int> :by-family <table> :by-severity <table>}
            :diagnostics []}"
-  (var status :pass)
   (let [rules (or opts.rules [])
         target (or opts.target {:kind :repo :name "default"})
         all-diagnostics []
         present-rule-ids []
-        baseline-data opts.baseline-data]
+        ;; Default to loading versioned baseline data; false to skip; table to inject
+        baseline-data (if (= false opts.baseline-data)
+                         nil
+                         (or opts.baseline-data (Baseline.load)))]
     (each [_ rule (ipairs rules)]
       ;; Resolve the callable and rule id from the rule entry
       (let [rule-fn (if (and (= (type rule) :table) (. rule :fn))
@@ -116,17 +129,8 @@
               ;; Ensure every diagnostic identifies the target
               (when (not (. d :target))
                 (tset d :target target))
-              (table.insert all-diagnostics d))
-            ;; Determine status from these diagnostics
-            (var worst :pass)
-            (each [_ d (ipairs result)]
-              (if (. d :interrupted)
-                  (set worst (worse-status worst :interrupted))
-                  (= d.family :framework)
-                  (set worst (worse-status worst :fail))
-                  (set worst (worse-status worst :violations))))
-            (set status (worse-status status worst))))))
-    ;; Apply baseline policy after all rules run, if baseline data is provided
+              (table.insert all-diagnostics d))))))
+    ;; Apply baseline policy after all rules run, if baseline data is available
     (if baseline-data
         (let [baseline-result (Baseline.apply all-diagnostics baseline-data present-rule-ids)
               ;; Replace all-diagnostics with the baseline-filtered list
@@ -136,18 +140,20 @@
             (when (not (. bd :target))
               (tset bd :target target))
             (table.insert filtered-diagnostics bd))
-          ;; Adjust status for baseline diagnostics
-          (when (> (# baseline-result.baseline-diagnostics) 0)
-            (set status (worse-status status :violations)))
-          (let [counts (Diagnostics.summary status filtered-diagnostics)]
-            {:status status
+          ;; Recompute status from the final filtered diagnostics
+          ;; so that exact-match-suppressed diagnostics yield :pass when appropriate
+          (let [final-status (compute-status filtered-diagnostics)
+                counts (Diagnostics.summary final-status filtered-diagnostics)]
+            {:status final-status
              :counts counts
              :diagnostics filtered-diagnostics}))
-        ;; No baseline data — return unfiltered diagnostics
-        (let [counts (Diagnostics.summary status all-diagnostics)]
-          {:status status
+        ;; No baseline data — compute status from unfiltered diagnostics
+        (let [final-status (compute-status all-diagnostics)
+              counts (Diagnostics.summary final-status all-diagnostics)]
+          {:status final-status
            :counts counts
            :diagnostics all-diagnostics}))))
+
 
 (fn M.main [opts]
   "Entry point for the constraints runner.

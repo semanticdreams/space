@@ -120,7 +120,8 @@
   (local Runner (require :constraints.runner))
   (local result (Runner.run
                   {:rules [(fn [_target] nil)]
-                   :target {:kind :files :name "test-target"}}))
+                   :target {:kind :files :name "test-target"}
+                   :baseline-data false}))
   (assert (= result.status :pass) (.. "expected :pass, got " (tostring result.status)))
   (assert (= result.counts.total 0) "expected 0 diagnostics for no-op rule")
   (assert (= (# result.diagnostics) 0) "expected empty diagnostics list"))
@@ -135,7 +136,8 @@
                                 :family "style"
                                 :message "something wrong"
                                 :hint "fix it"}))]
-                   :target {:kind :files :name "test-target"}}))
+                   :target {:kind :files :name "test-target"}
+                   :baseline-data false}))
   (assert (= result.status :violations) (.. "expected :violations, got " (tostring result.status)))
   (assert (= result.counts.total 1) "expected 1 diagnostic")
   (assert (= (# result.diagnostics) 1) "expected 1 diagnostic in list")
@@ -151,7 +153,8 @@
   (local result (Runner.run
                   {:rules [(fn [_target]
                              (error "boom"))]
-                   :target {:kind :files :name "test-target"}}))
+                   :target {:kind :files :name "test-target"}
+                   :baseline-data false}))
   (assert (= result.status :fail) (.. "expected :fail, got " (tostring result.status)))
   (assert (= result.counts.total 1) "expected 1 diagnostic for crashing rule")
   (assert (= (# result.diagnostics) 1) "expected 1 diagnostic in list")
@@ -174,7 +177,8 @@
                                  :family "style"
                                  :message "issue"
                                  :hint "fix it"}))]
-                    :target {:kind :files :name "precedence-test"}}))
+                    :target {:kind :files :name "precedence-test"}
+                    :baseline-data false}))
   (assert (= result1.status :violations) (.. "pass + violations should be :violations, got " (tostring result1.status)))
   ;; violations + fail = fail
   (local result2 (Runner.run
@@ -186,7 +190,8 @@
                                  :hint "fix it"}))
                             (fn [_target]
                               (error "crash"))]
-                    :target {:kind :files :name "precedence-test"}}))
+                    :target {:kind :files :name "precedence-test"}
+                    :baseline-data false}))
   (assert (= result2.status :fail) (.. "violations + fail should be :fail, got " (tostring result2.status))))
 
 (fn runner-main-prints-json-and-exits-zero-on-pass []
@@ -198,7 +203,8 @@
   (Runner.main {:rules [(fn [_target] nil)]
                 :target {:kind :files :name "test"}
                 :print fake-print
-                :exit fake-exit})
+                :exit fake-exit
+                :baseline-data false})
   (assert printed "expected print to be called")
   (local json (require :json))
   (local (ok parsed) (pcall json.loads printed))
@@ -223,7 +229,8 @@
                              :hint "fix"}))]
                 :target {:kind :files :name "test"}
                 :print fake-print
-                :exit fake-exit})
+                :exit fake-exit
+                :baseline-data false})
   (assert printed "expected print to be called")
   (local json (require :json))
   (local (ok parsed) (pcall json.loads printed))
@@ -259,7 +266,8 @@
   (local result (Runner.run
                   {:rules [busy-rule]
                    :target {:kind :files :name "timeout-test"}
-                   :timeout-seconds 0.1}))
+                   :timeout-seconds 0.1
+                   :baseline-data false}))
   (assert (= result.status :interrupted)
           (.. "expected :interrupted for timed-out rule, got " (tostring result.status)))
   (assert (= result.counts.total 1) "expected 1 diagnostic for interrupted rule")
@@ -286,7 +294,8 @@
                                 :hint "fix"}))
                            busy-rule]
                    :target {:kind :files :name "precedence-interrupt"}
-                   :timeout-seconds 0.1}))
+                   :timeout-seconds 0.1
+                   :baseline-data false}))
   (assert (= result.status :interrupted)
           (.. "violations + interrupted should be :interrupted, got " (tostring result.status))))
 

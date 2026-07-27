@@ -282,6 +282,63 @@
       (set found-missing-rule true)))
   (assert found-missing-rule "expected a missing-required baseline diagnostic for scene.sandbox-activation-contract"))
 
+;; --- R1-1: Runner recomputes status after baseline suppression ---
+
+(fn runner-exact-baseline-match-returns-pass []
+  (local Runner (require :constraints.runner))
+  (local Diagnostics (require :constraints.diagnostics))
+  (local Baseline (require :constraints.baseline))
+  ;; A rule emits a diagnostic that exactly matches a reviewed baseline entry.
+  ;; After baseline filtering, the diagnostic is suppressed and status is :pass.
+  (local d (Diagnostics.violation
+             {:constraint-id "structure.max-nesting-depth"
+              :family "structure"
+              :message "nesting depth 12 exceeds max 8"
+              :evidence {:depth 12 :max 8 :measure 12}
+              :hint "reduce nesting"
+              :file "src/module.fnl"
+              :line 42}))
+  (local fp (Baseline.fingerprint d))
+  (local baseline-data
+    {:required-rule-ids ["structure.max-nesting-depth"]
+     :entries [{:constraint-id "structure.max-nesting-depth"
+                :file "src/module.fnl"
+                :line 42
+                :fingerprint fp
+                :measure 12
+                :reason "known violation"}]})
+  (local result (Runner.run
+                  {:rules [{:id "structure.max-nesting-depth"
+                            :fn (fn [_target] d)}]
+                   :target {:kind :files :name "test-target"}
+                   :baseline-data baseline-data}))
+  (assert (= result.status :pass)
+          (.. "expected :pass for exact baseline match, got " (tostring result.status)))
+  (assert (= result.counts.total 0)
+          (.. "expected 0 diagnostics after suppression, got " result.counts.total))
+  (assert (= (# result.diagnostics) 0)
+          (.. "expected empty diagnostics list, got " (# result.diagnostics))))
+
+;; --- R1-2: Runner loads default baseline data and enforces required rules ---
+
+(fn runner-default-baseline-enforces-required-rules []
+  (local Runner (require :constraints.runner))
+  ;; Run with one rule covering a single required-rule-id.
+  ;; Default baseline data is loaded; other required IDs should trigger missing-required.
+  (local result (Runner.run
+                  {:rules [{:id "structure.max-nesting-depth"
+                            :fn (fn [_target] nil)}]
+                   :target {:kind :files :name "test-target"}}))
+  (assert (not= result.status :pass)
+          "should not be :pass because required rules are missing by default")
+  (assert (> result.counts.total 0)
+          (.. "expected diagnostics from default baseline, got " result.counts.total))
+  (var found-missing false)
+  (each [_ d (ipairs result.diagnostics)]
+    (when (and (= d.family "baseline") d.missing-required)
+      (set found-missing true)))
+  (assert found-missing "expected at least one baseline.required-rule-missing diagnostic"))
+
 ;; Register tests
 (table.insert tests {:name "baseline fingerprint is deterministic"
                      :fn baseline-fingerprint-is-deterministic})
@@ -299,6 +356,10 @@
                      :fn baseline-load-returns-data})
 (table.insert tests {:name "runner applies baseline after rules"
                      :fn runner-applies-baseline-after-rules})
+(table.insert tests {:name "runner exact baseline match returns pass (R1-1)"
+                     :fn runner-exact-baseline-match-returns-pass})
+(table.insert tests {:name "runner default baseline enforces required rules (R1-2)"
+                     :fn runner-default-baseline-enforces-required-rules})
 
 (local main
   (fn []
