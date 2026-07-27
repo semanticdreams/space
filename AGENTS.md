@@ -21,6 +21,12 @@ explicitly requests a different integration action or when the branch state is
 unsafe (uncommitted changes, failing tests, unresolved merge conflicts with
 `main`).
 
+If required validation fails after implementation, review, or commit, do not
+finish, push, create a pull request, merge, or clean up the branch. Invoke the
+`systematic-debugging` skill, identify the root cause, route any fix through
+`implementer` → `reviewer` → pass, rerun validation, and only proceed with the
+default integration action when the required suite is green.
+
 ## Project Structure & Modules
 
 - `src/` holds the C++17 engine modules (rendering, physics, audio, bindings). Add new systems as matching `.cpp`/`.h` pairs. Engine Lua bindings live in `src/lua_engine.cpp`.

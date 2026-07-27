@@ -33,6 +33,7 @@ A 3D spatial computing platform with C++ and Fennel components needs specialized
 - **Remote control** (`remote-control.fnl`): ZeroMQ-based live Fennel evaluation for debugging running apps.
 - **CLI tools** (`tools/`): Remote control client, MCP remote server, torrent download/upload scripts.
 - OpenCode project guidance uses `AGENTS.md` for always-on repository facts and `.opencode/skills/space-*` for triggerable Space domain guidance; users must restart OpenCode after `.opencode/**` changes.
+- After implementation/review/commit, failed required validation is handled as a debugging task: supervisors invoke `systematic-debugging`, route fixes through `implementer` → `reviewer`, rerun validation, and finish or PR only when green.
 
 - **DEB/RPM packaging**: Per-distro DEB (ubuntu-22.04/24.04, debian-12/13) and RPM (fedora, opensuse-tumbleweed) packages via CMake/CPack. CEF runtime bundling in full-profile packages; minimal-profile packages exclude it. Distro smoke tests via xvfb + headless engine. AppImage and tarball distribution formats. See [Building space](/dev/building).
 

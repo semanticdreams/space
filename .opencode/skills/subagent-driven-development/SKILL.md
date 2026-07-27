@@ -124,6 +124,10 @@ After all tasks, dispatch the **reviewer** in FULL REVIEW MODE with the complete
 ## Finish
 
 When final review is clean, use the finishing-a-development-branch skill.
+If finishing validation fails, stay in coordination mode: follow the finishing
+skill's validation-failure loop, invoke `systematic-debugging`, route fixes
+through `implementer` → `reviewer` → pass, rerun validation, and only finish or
+PR when the required suite is green.
 
 ## Common Rationalizations
 
