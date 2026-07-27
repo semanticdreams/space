@@ -576,7 +576,10 @@
        :physics-body-count 0
        :scene-state nil
        :visible? false
-       :interactive? false})
+       :interactive? false
+       :camera nil
+       :controls nil
+       :render-target-spec nil})
     (set slot.pointer-target (make-slot-pointer-target slot))
     (set slot.ctx (make-slot-build-context slot slot-layout-root slot-focus-scope))
     (set slot.build-context slot.ctx)
@@ -638,6 +641,25 @@
                (slot-self.focus-scope:drop)
                (set slot-self.focus-scope nil))
              true))
+    (set slot.set-camera
+         (fn [slot-self camera]
+           (set slot-self.camera camera)
+           slot-self))
+    (set slot.set-controls
+         (fn [slot-self controls]
+           (set slot-self.controls controls)
+           slot-self))
+    (set slot.expose-render-target!
+         (fn [slot-self opts]
+           (assert slot-self.camera
+                   "Scene slot expose-render-target! requires a camera on the slot")
+           (local options (or opts {}))
+           (set slot-self.render-target-spec options)
+           slot-self))
+    (set slot.clear-render-target!
+         (fn [slot-self]
+           (set slot-self.render-target-spec nil)
+           slot-self))
     (slot:deactivate)
     slot)
 
@@ -665,17 +687,28 @@
       (apply-active-theme slot.build-context))
     true)
 
-  (fn ensure-activity-slot [_scene activity-id]
+  (fn ensure-activity-slot [_scene activity-id opts]
     (assert (= (type activity-id) :string)
             "Scene.ensure-activity-slot requires string activity id")
     (assert (> (# activity-id) 0)
             "Scene.ensure-activity-slot requires non-empty activity id")
     (local existing (. self.activity-slots activity-id))
     (if existing
-        existing
+        (do
+          (local options (or opts {}))
+          (when options.camera
+            (existing:set-camera options.camera))
+          (when options.controls
+            (existing:set-controls options.controls))
+          existing)
         (do
           (local ActivitySceneState (require :activity-scene-state))
           (local slot (make-activity-slot activity-id))
+          (local options (or opts {}))
+          (when options.camera
+            (slot:set-camera options.camera))
+          (when options.controls
+            (slot:set-controls options.controls))
           (set slot.scene-state (ActivitySceneState.empty-state))
           (set (. self.activity-slots activity-id) slot)
           slot)))
@@ -2045,14 +2078,35 @@
 (fn set-camera [self camera]
   (set self.camera camera))
 
+(fn resolve-active-camera [self]
+  (or (and self.active-activity-slot
+           self.active-activity-slot.visible?
+           self.active-activity-slot.camera)
+      self.camera))
+
 (fn get-view-matrix [self]
-  (assert self.camera "Scene.get-view-matrix requires self.camera")
-  (self.camera:get-view-matrix))
+  (local camera (resolve-active-camera self))
+  (assert camera "Scene.get-view-matrix requires a camera (active-slot or scene)")
+  (camera:get-view-matrix))
 
 (fn get-lighting-view-state [self]
-  (assert self.camera "Scene.get-lighting-view-state requires self.camera")
-  (assert self.camera.position "Scene.get-lighting-view-state requires self.camera.position")
-  (LightingViewState.perspective self.camera.position))
+  (local camera (resolve-active-camera self))
+  (assert camera "Scene.get-lighting-view-state requires a camera (active-slot or scene)")
+  (assert camera.position "Scene.get-lighting-view-state requires camera.position")
+  (LightingViewState.perspective camera.position))
+
+(fn presentation-target [self]
+  (local slot self.active-activity-slot)
+  (when (and slot slot.visible? slot.render-target-spec slot.camera)
+    {:kind :scene
+     :surface self
+     :slot slot
+     :camera slot.camera
+     :projection self.projection
+     :get-view-matrix (fn [] (slot.camera:get-view-matrix))
+     :get-lighting-view-state (fn [] (LightingViewState.perspective slot.camera.position))
+     :get-render-contexts (fn [] [(active-render-context)])
+     :screen-pos-ray (fn [pos opts] (self:screen-pos-ray pos opts))}))
 
 (fn get-triangle-vector [self]
   (. (active-render-context) :triangle-vector))
@@ -2467,6 +2521,7 @@
 (set self.set-camera set-camera)
 (set self.get-view-matrix get-view-matrix)
 (set self.get-lighting-view-state get-lighting-view-state)
+(set self.presentation-target presentation-target)
 (set self.get-triangle-vector get-triangle-vector)
 (set self.get-triangle-batches get-triangle-batches)
 (set self.get-line-vector get-line-vector)

@@ -1069,6 +1069,41 @@
 (table.insert tests {:name "Scene activate-activity-slot fails on unknown"
                         :fn activate-activity-slot-fails-on-unknown})
 
+;; ── Task 1: Scene Slot Presentation Targets ─────────────────────────
+
+(fn empty-scene-slot-exposes-no-presentation-target []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (scene:ensure-activity-slot "drawing")
+  (scene:activate-activity-slot "drawing")
+  (assert (= (scene:presentation-target) nil)
+          "An empty scene slot must not expose a render target")
+  (drop-fixture fixture))
+
+(fn scene-presentation-target-uses-slot-camera []
+  (local fixture (make-scene))
+  (local scene fixture.scene)
+  (local slot-camera-a (Camera {:position (glm.vec3 1 2 3)}))
+  (local slot-camera-b (Camera {:position (glm.vec3 10 20 30)}))
+  (local slot (scene:ensure-activity-slot "sandbox" {:camera slot-camera-a}))
+  (scene:activate-activity-slot "sandbox")
+  (slot:expose-render-target! {:layers [:geometry :text]})
+  (local target-a (scene:presentation-target))
+  (assert (= target-a.camera slot-camera-a)
+          "Scene target must use the slot-owned camera")
+  (slot:set-camera slot-camera-b)
+  (local target-b (scene:presentation-target))
+  (assert (= target-b.camera slot-camera-b)
+          "Changing the slot camera must change the presentation target camera")
+  (slot-camera-a:drop)
+  (slot-camera-b:drop)
+  (drop-fixture fixture))
+
+(table.insert tests {:name "Task 1: empty scene slot exposes no presentation target"
+                     :fn empty-scene-slot-exposes-no-presentation-target})
+(table.insert tests {:name "Task 1: scene presentation target uses slot camera"
+                     :fn scene-presentation-target-uses-slot-camera})
+
 ;; ── R2-1 ──────────────────────────────────────────────────────────────
 
 (fn inactive-capture-uses-authoritative-terrains []
