@@ -94,14 +94,13 @@
 
 (fn anonymous-def-is-layouter-callback? [def layouter-call-records]
   "Check if an anonymous definition's form text appears as a substring
-  of any :layouter call form, and the def is within a reasonable line
-  proximity of that call (def.line within 10 lines of the layouter call)."
+  of any :layouter call form — form-text containment proves the definition
+  is inside the Layout call.  No fixed line-distance cutoff is used."
   (when (not def.form) (lua "return false"))
   (var found false)
   (each [_ lc (ipairs layouter-call-records)]
     (when (and (not found)
-               (string.find lc.form def.form 1 true)
-               (<= (line-distance (or def.line 0) lc.line) 10))
+               (string.find lc.form def.form 1 true))
       (set found true)))
   found)
 
@@ -137,15 +136,39 @@
           (tset layouter-names def.name true)))
       ;; :layouter call records for anonymous correlation
       (var layouter-call-records (collect-layouter-call-records ff))
-      ;; Identify anonymous definitions that are inline layouter callbacks
-      ;; by checking both form-text match and line proximity to the
-      ;; :layouter call.  Store as a map from def line to form text.
-      (var layouter-anon-by-line {})
-      (each [_ def (ipairs (or ff.definitions []))]
-        (when (and (= def.kind :fn) (= def.name "<anonymous>")
-                   (anonymous-def-is-layouter-callback? def layouter-call-records))
-          (tset layouter-anon-by-line (or def.line 0) def.form)))
-      ;; Build sorted list of all fn definitions for enclosure resolution
+       ;; Identify anonymous definitions that are inline layouter callbacks
+       ;; by form-text containment — the def form appears as a substring
+       ;; of a :layouter call form.  Store as a map from def line to form text.
+       (var layouter-anon-by-line {})
+       (each [_ def (ipairs (or ff.definitions []))]
+         (when (and (= def.kind :fn) (= def.name "<anonymous>")
+                    (anonymous-def-is-layouter-callback? def layouter-call-records))
+           (tset layouter-anon-by-line (or def.line 0) def.form)))
+       ;; Resolve duplicate entries: when multiple anonymous defs share the
+       ;; same form text and that form appears in a layouter call, keep only
+       ;; the def closest to the layouter call line.  This avoids flagging an
+       ;; unrelated duplicate anonymous function that happens to have the same
+       ;; form text as an inline layouter callback.
+       (var form-counts {})
+       (each [line form (pairs layouter-anon-by-line)]
+         (tset form-counts form (+ 1 (or (. form-counts form) 0))))
+       (each [form count (pairs form-counts)]
+         (when (> count 1)
+           (var best-line nil)
+           (var best-dist nil)
+           (each [line lform (pairs layouter-anon-by-line)]
+             (when (= lform form)
+               (each [_ lc (ipairs layouter-call-records)]
+                 (when (string.find lc.form form 1 true)
+                   (let [dist (line-distance line lc.line)]
+                     (when (or (= best-dist nil) (< dist best-dist))
+                       (set best-dist dist)
+                       (set best-line line)))))))
+           (when best-line
+             (each [line lform (pairs layouter-anon-by-line)]
+               (when (and (= lform form) (not (= line best-line)))
+                 (tset layouter-anon-by-line line nil))))))
+       ;; Build sorted list of all fn definitions for enclosure resolution
       (var all-fn-defs (build-def-line-map ff.definitions))
       ;; Check each call
       (each [_ call (ipairs (or ff.calls []))]

@@ -1278,6 +1278,61 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "unrelated anonymous setter near layouter should not be flagged"))
 
+;; R5-1 adjudicated fix: long inline Layout form >10 lines from call start
+(fn no-setters-flags-long-inline-layouter-beyond-10-lines []
+  "A long multi-line Layout form starting at line 1 with :layouter (fn ...)
+  at line 15 containing a forbidden setter should still be flagged. The
+  anonymous function form is unambiguously contained in the Layout call form
+  text, so correlation does not need a fixed line-distance cutoff."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  ;; Simulate a long Layout call form. The call starts at line 1,
+  ;; the anonymous :layouter fn is at line 15 (> 10 lines from start),
+  ;; but the form text is unambiguously contained in the call form.
+  (local anon-form "(fn [self] (self:set-size 10 20))")
+  (local layout-call-form (.. "(Layout {:id :my-widget\n"
+                              "         :foo 1\n"
+                              "         :bar 2\n"
+                              "         :baz 3\n"
+                              "         :qux 4\n"
+                              "         :quux 5\n"
+                              "         :corge 6\n"
+                              "         :grault 7\n"
+                              "         :garply 8\n"
+                              "         :waldo 9\n"
+                              "         :fred 10\n"
+                              "         :plugh 11\n"
+                              "         :xyzzy 12\n"
+                              "         :thud 13\n"
+                              "         :layouter " anon-form "})"))
+  (local ff (make-file-fact {:path "/src/long-widget.fnl"
+                              :module "long-widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 15 :column 20
+                                             :length 100
+                                             :form anon-form}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 1 :column 1
+                                       :form layout-call-form
+                                       :enclosing-fn nil}
+                                      {:callee "self:set-size"
+                                       :receiver nil :method nil
+                                       :line 16 :column 1
+                                       :form "(self:set-size 10 20)"
+                                       :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for inline :layouter setter >10 lines from call start")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.no-setters-in-layouters")
+          "diagnostic should flag inline layouter setter in long form")
+  (assert (<= d.line 20) "setter line should be within the inline layouter def"))
+
 ;; R4-1: duplicate anonymous form same as inline layouter
 (fn no-setters-allows-unrelated-anonymous-with-duplicate-form []
   "A file with an inline :layouter (fn [obj] (obj:set-size 50 50)) and a
@@ -1552,6 +1607,9 @@
 ;; R4-1: comment-only clickables
 (table.insert tests {:name "interactive-assertion allows comment-only clickables"
                      :fn interactive-assertion-allows-comment-only-clickables})
+;; R5-1 adjudicated: long inline layouter beyond 10 lines from call start
+(table.insert tests {:name "no-setters flags long inline layouter beyond 10 lines"
+                     :fn no-setters-flags-long-inline-layouter-beyond-10-lines})
 ;; R5-1: duplicate anonymous form same as inline layouter
 (table.insert tests {:name "no-setters allows unrelated anonymous with duplicate form"
                      :fn no-setters-allows-unrelated-anonymous-with-duplicate-form})
