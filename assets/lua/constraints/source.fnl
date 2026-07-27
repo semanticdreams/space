@@ -8,18 +8,20 @@
 
 (fn list-fnl-files [root]
   "Recursively collect .fnl file paths under root, sorted lexicographically.
-  Excludes hidden directories (those starting with '.')."
+  Excludes hidden directories (those starting with '.').
+  Errors if root cannot be listed (unreadable, missing, etc.), with path context."
   (let [files []]
     (fn walk [dir]
       (let [(ok entries) (pcall #(fs.list-dir dir false))]
-        (when ok
-          (each [_ entry (ipairs entries)]
-            (if entry.is-dir
-                (walk entry.path)
-                (and entry.is-file
-                     (or (entry.name:match "%.fnl$")
-                         (entry.path:match "%.fnl$")))
-                (table.insert files (fs.absolute entry.path)))))))
+        (if (not ok)
+            (error (.. "failed to list directory " dir ": " (tostring entries)))
+            (each [_ entry (ipairs entries)]
+              (if entry.is-dir
+                  (walk entry.path)
+                  (and entry.is-file
+                       (or (entry.name:match "%.fnl$")
+                           (entry.path:match "%.fnl$")))
+                  (table.insert files (fs.absolute entry.path)))))))
     (walk root)
     ;; Sort lexicographically for deterministic ordering
     (table.sort files)
@@ -27,29 +29,22 @@
 
 (fn compute-module [file-path module-roots]
   "Compute a module name from file-path by removing .fnl and replacing / with .,
-  relative to the first matching module root."
+  relative to the first matching module root.
+  Returns the original path if no root matches."
   (var module-name file-path)
   (each [_ root (ipairs module-roots)]
-    (let [root-prefix (.. root "/")]
-      (when (and (or (= file-path root-prefix) true)
-                 ;; Check if file is under this root
-                 (let [root-lower (root:lower)
-                       file-lower (file-path:lower)]
-                   (or (= file-lower root-lower)
-                       (file-lower:match (.. "^" (root-lower:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1") "/")))))
-        ;; Strip root prefix
+    ;; Check if file is under this root (case-insensitive)
+    (let [root-lower (root:lower)
+          file-lower (file-path:lower)
+          root-prefix (.. root "/")]
+      (when (or (= file-lower root-lower)
+                (file-lower:match (.. "^" (root-lower:gsub "([%.%-%+%*%?%[%]%(%)%%])" "%%%1") "/")))
         (let [relative (if (= (# file-path) (# root))
                           file-path
                           (file-path:sub (+ (# root) 2)))]
-          ;; Remove .fnl extension
           (let [no-ext (relative:gsub "%.fnl$" "")]
-            ;; Replace / with .
-            (set module-name (no-ext:gsub "/" ".")))))
-      ;; Break on first match? No, use last match. Actually, first match should be enough.
-      ;; For simplicity, just use the first matching root
-      ;; (We could break here but we'll compute all and take the shortest)
-      )
-    module-name))
+            (set module-name (no-ext:gsub "/" ".")))))))
+  module-name)
 
 (fn M.node-text [source node]
   "Extract the substring of source covered by node's byte range.
@@ -79,14 +74,16 @@
     :tree TSTree
     :root TSNode} ...]"
   (var file-paths [])
-  ;; Collect files from roots
+  ;; Collect files from roots (may throw on unreadable root)
   (each [_ root (ipairs (or target.roots []))]
     (each [_ f (ipairs (list-fnl-files root))]
       (table.insert file-paths f)))
-  ;; Collect explicit files
+  ;; Collect explicit files — only .fnl paths
   (each [_ f (ipairs (or target.files []))]
-    (table.insert file-paths (fs.absolute f)))
-  ;; Deduplicate paths (sort by path)
+    (let [abs (fs.absolute f)]
+      (when (abs:match "%.fnl$")
+        (table.insert file-paths abs))))
+  ;; Deduplicate paths
   (table.sort file-paths)
   (var seen {})
   (local deduped [])

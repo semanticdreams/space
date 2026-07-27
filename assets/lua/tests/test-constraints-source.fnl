@@ -216,6 +216,84 @@
   (assert (= result.kind :unit) "kind should be :unit")
   (assert (= (# result.roots) 2) (.. "expected 2 roots, got " (# result.roots))))
 
+;; --- Module name computation tests (R1-1) ---
+
+(fn source-computes-module-name-from-root []
+  "A file under a module root should produce a dotted module name (no .fnl, / -> .)"
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "foo"))
+    (fs.create-dirs subdir)
+    (make-file subdir "bar.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "module-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert r.module "record should have :module")
+    (assert (= (type r.module) :string) "module should be a string")
+    (assert (= r.module "foo.bar")
+            (.. "expected module 'foo.bar', got '" (tostring r.module) "'")))))
+
+(fn source-computes-module-name-for-init-fnl []
+  "init.fnl files should produce a module name ending in .init"
+  (with-temp-dir (fn [dir]
+    (local subdir (fs.join-path dir "baz"))
+    (fs.create-dirs subdir)
+    (make-file subdir "init.fnl" "(+ 1 2)")
+    (local target {:kind :unit :name "init-test" :roots [dir] :module-roots [dir]})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1) (.. "expected 1 record, got " (# records)))
+    (local r (. records 1))
+    (assert r.module "record should have :module")
+    (assert (= r.module "baz.init")
+            (.. "expected module 'baz.init', got '" (tostring r.module) "'")))))
+
+;; --- Non-Fennel explicit file tests (R1-2) ---
+
+(fn source-files-target-rejects-non-fennel-paths []
+  "Explicit --file paths that are not .fnl should be excluded from discovery."
+  (with-temp-dir (fn [dir]
+    (local txt-path (make-file dir "readme.txt" "hello"))
+    (local target {:kind :files
+                    :name "file-filter"
+                    :files [txt-path]
+                    :roots []})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 0)
+            (.. "expected 0 records for non-fnl explicit file, got " (# records))))))
+
+(fn source-files-target-includes-fennel-and-excludes-others []
+  "Mixed explicit files: .fnl should be included, non-.fnl excluded."
+  (with-temp-dir (fn [dir]
+    (local fnl-path (make-file dir "code.fnl" "(+ 1 2)"))
+    (local txt-path (make-file dir "notes.txt" "text"))
+    (local target {:kind :files
+                    :name "mixed-files"
+                    :files [fnl-path txt-path]
+                    :roots []})
+    (local Source (require :constraints.source))
+    (local records (Source.discover target))
+    (assert (= (# records) 1)
+            (.. "expected 1 fennel record, got " (# records)))
+    (local r (. records 1))
+    (assert (= r.path fnl-path) "only .fnl file should be discovered"))))
+
+;; --- Missing/unreadable root tests (R1-3) ---
+
+(fn source-fails-loudly-on-nonexistent-root []
+  "A target root that does not exist should cause discovery to fail, not silently skip."
+  (with-temp-dir (fn [dir]
+    (local missing-root (fs.join-path dir "does-not-exist"))
+    (local target {:kind :unit :name "broken" :roots [missing-root]})
+    (local Source (require :constraints.source))
+    (local (ok err) (pcall #(Source.discover target)))
+    (assert (not ok)
+            "discover should fail for missing root, not silently skip")
+    (assert (string.find (tostring err) missing-root 1 true)
+            (.. "error should mention the missing root path, got: " (tostring err))))))
+
 ;; --- Repeated --file tests ---
 
 (fn targets-resolve-repeated-file []
@@ -255,6 +333,16 @@
                      :fn source-node-location-returns-line-and-column})
 (table.insert tests {:name "source walk visits all nodes depth-first"
                      :fn source-walk-visits-all-nodes-depth-first})
+(table.insert tests {:name "source computes module name from root"
+                     :fn source-computes-module-name-from-root})
+(table.insert tests {:name "source computes module name for init.fnl"
+                     :fn source-computes-module-name-for-init-fnl})
+(table.insert tests {:name "source files target rejects non-fennel paths"
+                     :fn source-files-target-rejects-non-fennel-paths})
+(table.insert tests {:name "source files target includes fennel and excludes others"
+                     :fn source-files-target-includes-fennel-and-excludes-others})
+(table.insert tests {:name "source fails loudly on nonexistent root"
+                     :fn source-fails-loudly-on-nonexistent-root})
 (table.insert tests {:name "targets resolve repeated --root"
                      :fn targets-resolve-repeated-root})
 (table.insert tests {:name "targets resolve repeated --file"
