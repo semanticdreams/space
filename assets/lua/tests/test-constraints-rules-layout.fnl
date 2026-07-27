@@ -1120,8 +1120,110 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "handle-clickables should not be flagged as bare clickables"))
 
-;; ======================================================================
-;; Structure tests
+;; R3-F1: string/comment text must not trigger bare-interactive
+(fn interactive-assertion-allows-string-containing-clickables []
+  "A function whose form text contains a string literal with ' clickables'
+  should NOT be flagged by the bare-interactive detector."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "log-missing"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 120
+                                             :form "(fn log-missing [ctx]
+  (when (not ctx.clickables)
+    (log \"missing clickables\")))"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 6 :column 1
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag the ctx.clickables access without assert")
+  ;; Verify only ONE diagnostic (for ctx.clickables, not for string content)
+  (assert (= (length result) 1) (.. "expected 1 diagnostic, got " (length result)))
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "diagnostic should be for ctx.clickables, not string content"))
+
+;; R3-F2: unrelated anonymous function far from layouter context
+(fn no-setters-allows-unrelated-anonymous-far-from-layouter []
+  "A file with layouter context at line 10 but a separate unrelated
+  anonymous function with a forbidden setter at line 100 (90 lines away)
+  should NOT flag the unrelated anonymous function."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  ;; Layouter context at line 10 via call form text
+  ;; Unrelated anonymous fn at line 100 with setter
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 100 :column 1
+                                             :length 100
+                                             :form "(fn [obj] (obj:set-size 50 50))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 10 :column 1
+                                       :form "(Layout {:layouter (fn [self] (self:set-flex 1))})"
+                                       :enclosing-fn nil}
+                                      {:callee "obj:set-size"
+                                       :receiver nil :method nil
+                                       :line 101 :column 1
+                                       :form "(obj:set-size 50 50)"
+                                       :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "unrelated anonymous function far from layouter should pass"))
+
+;; R3-F3: cross-anonymous-function assert must not correlate
+(fn interactive-assertion-flags-second-anonymous-without-own-assert []
+  "Two anonymous functions: one using clickables with assert, another
+  using clickables without assert.  The assert in the first must NOT
+  suppress the missing-assert diagnostic in the second."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  ;; Two anonymous fns in same file
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn [ctx]
+  (let [cs (assert clickables \"missing\")]
+    (process cs)))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 15 :column 1
+                                             :length 150
+                                             :form "(fn [ctx]
+  (when clickables
+    (handle clickables)))"}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 6 :column 1
+                                       :form "(assert clickables \"missing\")"
+                                       :enclosing-fn "<anonymous>"}]
+                              ;; No access facts for bare clickables (Task-4 doesn't emit)
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for second anonymous fn without assert")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "diagnostic should flag second anonymous fn without own assert"))
+
 ;; ======================================================================
 
 (fn layout-rules-returns-table-with-three-rules []
@@ -1261,6 +1363,15 @@
 ;; R1-5: handle-clickables negative
 (table.insert tests {:name "interactive-assertion allows handle-clickables identifier"
                      :fn interactive-assertion-allows-handle-clickables-identifier})
+;; R3-F1: string/comment text
+(table.insert tests {:name "interactive-assertion allows string containing clickables"
+                     :fn interactive-assertion-allows-string-containing-clickables})
+;; R3-F2: unrelated anonymous far from layouter
+(table.insert tests {:name "no-setters allows unrelated anonymous far from layouter"
+                     :fn no-setters-allows-unrelated-anonymous-far-from-layouter})
+;; R3-F3: cross-anonymous-function assert
+(table.insert tests {:name "interactive-assertion flags second anonymous without own assert"
+                     :fn interactive-assertion-flags-second-anonymous-without-own-assert})
 
 ;; Structure tests
 (table.insert tests {:name "layout rules returns table with three rules"

@@ -17,6 +17,11 @@
   "Check if a callee string ends with a method suffix."
   (str-ends-with? callee suffix))
 
+;; Strip double-quoted string literals from form text so that pattern
+;; matching does not produce false positives on string contents.
+(fn strip-strings [s]
+  (s:gsub "\"[^\"]*\"" ""))
+
 ;; ---------------------------------------------------------------------------
 ;; Rule 1: layout.no-setters-in-layouters
 ;; ---------------------------------------------------------------------------
@@ -49,22 +54,35 @@
 
 (fn file-has-layouter-context? [ff]
   "Heuristic: check if any call form text or export key indicates a layouter
-  is defined in this file.  Catches both named layouter functions and inline
-  :layouter (fn ...) table entries in Layout(...) calls."
+  is defined in this file."
   (var found false)
-  ;; Named layouter functions
   (each [_ def (ipairs (or ff.definitions []))]
     (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
       (set found true)))
-  ;; Export key
   (each [_ export (ipairs (or ff.exports []))]
     (when (and (not found) (= export.key "layouter"))
       (set found true)))
-  ;; Call form text contains :layouter (catches inline forms)
   (each [_ call (ipairs (or ff.calls []))]
     (when (and (not found) (string.find (or call.form "") ":layouter" 1 true))
       (set found true)))
   found)
+
+(fn collect-layouter-call-lines [ff]
+  "Return a list of line numbers where calls with :layouter in their form text appear."
+  (var lines [])
+  (each [_ call (ipairs (or ff.calls []))]
+    (when (string.find (or call.form "") ":layouter" 1 true)
+      (table.insert lines (or call.line 0))))
+  lines)
+
+(fn line-near? [line ref-lines]
+  "Check if line is within approximately 5 lines of any reference line.
+  Used to correlate anonymous functions with nearby layouter context."
+  (var near false)
+  (each [_ ref (ipairs ref-lines)]
+    (when (and (not near) (>= (math.abs (- line ref)) 0) (<= (math.abs (- line ref)) 5))
+      (set near true)))
+  near)
 
 (fn no-setters-in-layouters-rule-run [ctx]
   "Rule: flag calls to forbidden setters inside layouter functions
@@ -72,19 +90,22 @@
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (when (file-has-layouter-context? ff)
-      ;; Build layouter name set for named functions
       (var layouter-names {})
       (each [_ def (ipairs (or ff.definitions []))]
         (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
           (tset layouter-names def.name true)))
+      (var layouter-call-lines (if (not (next layouter-names))
+                                    (collect-layouter-call-lines ff)
+                                    []))
       (each [_ call (ipairs (or ff.calls []))]
         (when (callee-is-forbidden-setter? call.callee)
           (let [efn (or call.enclosing-fn "")]
             (when (or (. layouter-names efn)
-                      ;; In a file with layouter context, anonymous functions
-                      ;; are likely inline :layouter (fn ...) entries
+                      ;; Only flag anonymous functions near a layouter-context
+                      ;; call to avoid overbroad correlation.
                       (and (= efn "<anonymous>")
-                           (not (next layouter-names))))
+                           (not (next layouter-names))
+                           (line-near? (or call.line 0) layouter-call-lines)))
               (table.insert diagnostics
                 (Diagnostics.violation
                   {:constraint-id "layout.no-setters-in-layouters"
@@ -223,29 +244,41 @@
 
 (fn fn-def-has-bare-interactive? [def]
   "Check if a function definition's form text contains bare 'clickables'
-  or 'hoverables' as a standalone token (not part of a dotted access or
-  hyphenated identifier like 'handle-clickables')."
+  or 'hoverables' as standalone tokens, excluding string/comment text
+  and hyphenated identifiers.  String literals are stripped first."
   (when (and def.form def.kind (= def.kind :fn))
-    (var found false)
-    (each [kw _ (pairs interactive-access-patterns)]
-      (when (not found)
-        ;; Only match when preceded by whitespace, opening paren, or at start.
-        (let [after-space-pat (.. "[%s%(]" kw)]
-          (when (or (def.form:find after-space-pat)
-                    (= (def.form:sub 1 (length kw)) kw))
-            (set found true)))))
-    found))
+    (let [clean (strip-strings def.form)]
+      (var found false)
+      (each [kw _ (pairs interactive-access-patterns)]
+        (when (not found)
+          (let [after-space-pat (.. "[%s%(]" kw)]
+            (when (or (clean:find after-space-pat)
+                      (= (clean:sub 1 (length kw)) kw))
+              (set found true)))))
+      found)))
 
 (fn fn-def-has-assert-call? [calls def]
-  "Check whether any call in the same enclosing function is to 'assert'."
-  (when def.name
-    (var found false)
-    (each [_ call (ipairs calls)]
-      (when (and (not found)
-                 (= call.callee "assert")
-                 (= (or call.enclosing-fn "") (or def.name "")))
-        (set found true)))
-    found))
+  "Check whether any call in the same enclosing function is to 'assert'.
+  For anonymous functions, fall back to per-definition form-text detection
+  to avoid cross-anonymous-function correlation."
+  (if (not def.name)
+      false
+      (= def.name "<anonymous>")
+      ;; Anonymous functions: check the definition's own form text for
+      ;; an actual (assert ...) or (assert) call — no cross-correlation.
+      (do
+        (let [clean (strip-strings def.form)]
+          (or (clean:find "(assert " 1 true)
+              (clean:find "(assert)" 1 true))))
+      ;; Named functions: correlate via call facts.
+      (do
+        (var found false)
+        (each [_ call (ipairs calls)]
+          (when (and (not found)
+                     (= call.callee "assert")
+                     (= (or call.enclosing-fn "") (or def.name "")))
+            (set found true)))
+        found)))
 
 (fn interactive-context-assertion-rule-run [ctx]
   "Rule: flag interactive widgets using clickables or hoverables without
