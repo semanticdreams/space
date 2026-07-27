@@ -9,29 +9,40 @@
        (= (s:sub (- (length s) (- (length suffix) 1))) suffix)))
 
 (fn register? [c] (and c (or (= c :register) (= c "app.engine.events.updated:connect") (str-ends-with? c ":connect"))))
-(fn cleanup-call? [c] (and c (or (= c :disconnect) (= c :unregister) (= c :clear) (= c :drop) (str-ends-with? c ":disconnect") (str-ends-with? c ":drop"))))
+(fn cleanup-call? [c] (and c (or (= c :disconnect) (= c :unregister) (= c :clear) (= c :drop) (str-ends-with? c ":disconnect") (str-ends-with? c ":drop") (str-ends-with? c ":clear") (str-ends-with? c ":unregister"))))
 (fn cleanup-fn-name? [n] (or (= n :cleanup) (= n :teardown) (= n :shutdown) (= n :unload) (= n :drop)))
 
 (fn event-registration-cleanup-rule-run [ctx]
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (var reg-count 0)
+    (var reg-forms [])
     (each [_ call (ipairs (or ff.calls []))]
-      (when (register? call.callee) (set reg-count (+ reg-count 1))))
+      (when (register? call.callee)
+        (set reg-count (+ reg-count 1))
+        (table.insert reg-forms {:callee call.callee :line (or call.line 0) :form (or call.form "")})))
     (var cl-count 0)
+    (var cl-forms [])
     (each [_ call (ipairs (or ff.calls []))]
-      (when (cleanup-call? call.callee) (set cl-count (+ cl-count 1))))
+      (when (cleanup-call? call.callee)
+        (set cl-count (+ cl-count 1))
+        (table.insert cl-forms {:callee call.callee :line (or call.line 0) :form (or call.form "")})))
     (var has-cleanup-fn false)
+    (var cleanup-fn-names [])
     (each [_ def (ipairs (or ff.definitions []))]
       (when (and (= def.kind :fn) (cleanup-fn-name? def.name))
-        (set has-cleanup-fn true)))
+        (set has-cleanup-fn true)
+        (table.insert cleanup-fn-names def.name)))
     (when (and (> reg-count 0) (= cl-count 0) (not has-cleanup-fn))
       (table.insert diagnostics
         (Diagnostics.violation
           {:constraint-id "lifecycle.event-registration-cleanup" :family "lifecycle"
            :message (.. "event registration without cleanup in " (or ff.module ff.path))
            :file ff.path :line 0 :column 0
-           :evidence {:registrations true}
+           :evidence {:registration-count reg-count
+                      :registration-forms reg-forms
+                      :cleanup-forms cl-forms
+                      :cleanup-functions cleanup-fn-names}
            :hint "add disconnect, unregister, clear, or drop calls or a cleanup function"})))
     (when (and (> reg-count cl-count) (> cl-count 0) (not has-cleanup-fn))
       (table.insert diagnostics
@@ -39,7 +50,11 @@
           {:constraint-id "lifecycle.event-registration-cleanup" :family "lifecycle"
            :message (.. "insufficient cleanup in " (or ff.module ff.path) ": " reg-count " registrations but only " cl-count " cleanups")
            :file ff.path :line 0 :column 0
-           :evidence {:registrations true}
+           :evidence {:registration-count reg-count
+                      :registration-forms reg-forms
+                      :cleanup-forms cl-forms
+                      :cleanup-functions cleanup-fn-names
+                      :has-cleanup-function false}
            :hint "ensure each registration has a corresponding cleanup call or function"}))))
   (if (> (length diagnostics) 0) diagnostics nil))
 

@@ -155,7 +155,9 @@
           "diagnostic should have correct constraint-id")
   (assert (= d.family "lifecycle") "diagnostic should have family lifecycle")
   (assert (= d.file ff.path) "diagnostic should include file path")
-  (assert d.evidence "diagnostic should include evidence"))
+  (assert d.evidence "diagnostic should include evidence")
+  (assert (= d.evidence.registration-count 1) "evidence should report registration count")
+  (assert (> (length d.evidence.registration-forms) 0) "evidence should include registration forms"))
 
 (fn registration-cleanup-flags-file-with-app-engine-events-updated-connect []
   "app.engine.events.updated:connect is an explicit registration pattern
@@ -177,8 +179,9 @@
   (assert (= d.constraint-id "lifecycle.event-registration-cleanup")
           "diagnostic should have correct constraint-id")
   (assert d.evidence "diagnostic should include evidence")
-  ;; Evidence should include the registration form
-  (assert d.evidence.registrations "evidence should list registrations"))
+  ;; Evidence should include registration forms
+  (assert (> (length d.evidence.registration-forms) 0) "evidence should include registration forms")
+  (assert (= d.evidence.registration-count 1) "evidence should report registration count"))
 
 (fn registration-cleanup-flags-file-with-register-no-unregister []
   "register without unregister should produce a diagnostic."
@@ -281,6 +284,45 @@
                                       :form "(some-obj:connect handler)"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "file with function named shutdown should pass"))
+
+(fn registration-cleanup-allows-connect-with-clear-method []
+  "A file with connect registration and a :clear method call should pass.
+  clear and unregister should be recognized in method-call form too."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :calls [{:callee "some-signal:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(some-signal:connect handler)"}
+                                     {:callee "some-signal:clear"
+                                      :receiver nil :method nil
+                                      :line 25 :column 1
+                                      :form "(some-signal:clear)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with connect and :clear method should pass"))
+
+(fn registration-cleanup-allows-connect-with-unregister-method []
+  "A file with connect registration and a :unregister method call should pass."
+  (local Lifecycle (require :constraints.rules.lifecycle))
+  (local rules (Lifecycle.rules))
+  (local rule (find-rule-by-id rules "lifecycle.event-registration-cleanup"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/good-module.fnl"
+                             :module "good-module"
+                             :calls [{:callee "registry:connect"
+                                      :receiver nil :method nil
+                                      :line 10 :column 1
+                                      :form "(registry:connect handler)"}
+                                     {:callee "registry:unregister"
+                                      :receiver nil :method nil
+                                      :line 25 :column 1
+                                      :form "(registry:unregister handler)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with connect and :unregister method should pass"))
 
 (fn registration-cleanup-allows-function-named-unload []
   "A file with connect registration and a function named unload should pass."
@@ -711,6 +753,71 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should have correct constraint-id"))
 
+(fn mutation-restoration-flags-pcall-without-restore []
+  "A test file that uses pcall to mutate a sensitive global but does not
+  restore it should be flagged. Mere presence of pcall is not restoration."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pcall-no-restore"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 120
+                                            :form "(fn test-pcall-no-restore []
+  (pcall (fn []
+    (set app.renderers custom-fn))
+  (do-test))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom-fn)"
+                                          :enclosing-fn "test-pcall-no-restore"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for pcall without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag pcall-without-restore"))
+
+(fn mutation-restoration-flags-repeated-mutation-without-restore []
+  "A test file that mutates a sensitive global twice without restoring it
+  should be flagged. A second occurrence of the path is not restoration."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-double-mutate"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 120
+                                            :form "(fn test-double-mutate []
+  (set app.renderers custom1)
+  (do-something)
+  (set app.renderers custom2))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 6 :column 1
+                                          :form "(set app.renderers custom1)"
+                                          :enclosing-fn "test-double-mutate"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom2)"
+                                          :enclosing-fn "test-double-mutate"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for repeated mutation without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag repeated-mutation-without-restore"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -828,6 +935,10 @@
                      :fn registration-cleanup-allows-function-named-teardown})
 (table.insert tests {:name "registration-cleanup allows function named shutdown"
                      :fn registration-cleanup-allows-function-named-shutdown})
+(table.insert tests {:name "registration-cleanup allows connect with clear method"
+                     :fn registration-cleanup-allows-connect-with-clear-method})
+(table.insert tests {:name "registration-cleanup allows connect with unregister method"
+                     :fn registration-cleanup-allows-connect-with-unregister-method})
 (table.insert tests {:name "registration-cleanup allows function named unload"
                      :fn registration-cleanup-allows-function-named-unload})
 (table.insert tests {:name "registration-cleanup flags file with partial cleanup"
@@ -864,6 +975,10 @@
                      :fn mutation-restoration-flags-test-file-with-package-loaded-mutation})
 (table.insert tests {:name "mutation-restoration flags app.engine mutation"
                      :fn mutation-restoration-flags-test-file-with-app-engine-mutation})
+(table.insert tests {:name "mutation-restoration flags pcall without restore"
+                     :fn mutation-restoration-flags-pcall-without-restore})
+(table.insert tests {:name "mutation-restoration flags repeated mutation without restore"
+                     :fn mutation-restoration-flags-repeated-mutation-without-restore})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"
