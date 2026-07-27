@@ -57,8 +57,14 @@
 
   (fn provider.input-controls [self]
     (if (and app app.canvas-interactive?)
-        (or (resolve-active-slot-controls :canvas)
-            runtime.canvas-controls)
+        (let [slot-controls (resolve-active-slot-controls :canvas)]
+          (if slot-controls
+              slot-controls
+              ;; Only fall back to surface controls when no canvas slot is active.
+              ;; If a canvas slot IS active, slot-owned controls are authoritative.
+              (if (and runtime runtime.canvas runtime.canvas.active-activity-slot-id)
+                  nil
+                  runtime.canvas-controls)))
         (or (resolve-active-slot-controls :scene)
             runtime.first-person-controls)))
 

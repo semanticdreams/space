@@ -996,6 +996,67 @@
 (table.insert tests {:name "legacy camera state migrates to sandbox session"
                      :fn legacy-camera-state-migrates-to-sandbox-session})
 
+(fn legacy-canvas-camera-migrates-to-active-canvas-session []
+  ;; When a legacy world.json has canvas.camera and activity.active_id
+  ;; set to "graph" but NO activity.sessions.graph, the migration must
+  ;; create the session and copy the canvas camera into it.
+  ;; Unrelated canvas activities (drawing, board) must NOT receive it.
+  (with-temp-dir
+    (fn [root]
+      (local world-dir (fs.join-path root "world-a"))
+      (fs.create-dirs world-dir)
+      (write-world-json! world-dir
+        {:camera {:position [0 0 30] :rotation [1 0 0 0]}
+         :activity {:active_id "graph"
+                    :preferred_interaction_surface "canvas"
+                    :sessions {:sandbox {:scene {:panels []
+                                                 :terrains []
+                                                 :lights (LightSystemModule.default-state)
+                                                 :skybox (make-skybox-state)
+                                                 :background (make-background-state)
+                                                 :containment {:enabled? true}}}}}
+         :canvas {:camera {:position [50 60 100]}
+                  :scale_factor 1.0
+                  :panels []}
+         :drawing (let [DrawingDocument (require :drawing/document)]
+                    (DrawingDocument.default-state))
+         :physics {}
+         :graph {:graph {:nodes [] :edges []}}
+         :board {:items [] :connectors []}
+         :scene {}
+         :hud {:panels []}})
+      (local world (HomeWorld {:id "world-a"
+                               :name "home"
+                               :type "home"
+                               :dir world-dir}))
+      (world:init {})
+      ;; Graph session must be created with canvas camera
+      (local graph-session (and world.state.activity
+                                world.state.activity.sessions
+                                (. world.state.activity.sessions "graph")))
+      (assert (= (type graph-session) :table)
+              "Migration must create graph session when absent")
+      (assert (= (type graph-session.canvas-camera) :table)
+              "Graph session must have migrated canvas camera")
+      (assert (= (. graph-session.canvas-camera.position 1) 50)
+              (.. "Expected canvas camera x=50 for graph, got "
+                  (tostring (. graph-session.canvas-camera.position 1))))
+      (assert (= (. graph-session.canvas-camera.position 2) 60))
+      (assert (= (. graph-session.canvas-camera.position 3) 100))
+      ;; Drawing and board must NOT have canvas camera (unrelated activities)
+      (let [drawing-session (. world.state.activity.sessions "drawing")]
+        (when drawing-session
+          (assert (= drawing-session.canvas-camera nil)
+                  "Drawing must not receive legacy canvas camera")))
+      (let [board-session (. world.state.activity.sessions "board")]
+        (when board-session
+          (assert (= board-session.canvas-camera nil)
+                  "Board must not receive legacy canvas camera")))
+      true)))
+
+(table.insert tests {:name "legacy canvas camera migrates to active canvas session"
+                     :fn legacy-canvas-camera-migrates-to-active-canvas-session})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

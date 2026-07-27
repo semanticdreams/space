@@ -656,20 +656,30 @@
         (set sandbox-scene.camera
              {:position (or camera-state.position [0 0 30])
               :rotation (or camera-state.rotation [1 0 0 0])})))
-    ;; Migrate legacy canvas camera into canvas activity sessions when
-    ;; no per-activity canvas camera exists yet.
+    ;; Migrate legacy canvas camera into the selected/default canvas activity
+    ;; session when no per-activity canvas camera exists yet.  Only the
+    ;; active canvas activity receives the legacy camera, not all canvas
+    ;; activities.
     (let [canvas-camera-state (and world.state world.state.canvas
                                    world.state.canvas.camera)
           activity-state (and world.state world.state.activity)
-          sessions (and activity-state activity-state.sessions)]
-      (when (and sessions
+          active-id (and activity-state activity-state.active_id)
+          ;; Only canvas activities are eligible
+          canvas-ids {:graph true :drawing true :board true}]
+      (when (and active-id
+                 (. canvas-ids active-id)
                  (= (type canvas-camera-state) :table))
-        (each [_ activity-id (ipairs [:graph :drawing :board])]
-          (let [session (. sessions activity-id)]
-            (when (and session (= (type session) :table)
-                       (not session.canvas-camera))
-              (set session.canvas-camera
-                   {:position (or canvas-camera-state.position [0 0 100])}))))))
+        (when (not (and activity-state.sessions
+                        (= (type activity-state.sessions) :table)))
+          (set activity-state.sessions {}))
+        (when (not (. activity-state.sessions active-id))
+          (set (. activity-state.sessions active-id) {}))
+        (let [session (. activity-state.sessions active-id)]
+          (when (not session.canvas-camera)
+            (set session.canvas-camera
+                 {:position (or canvas-camera-state.position [0 0 100])})
+            (when (not repaired-persisted-state?)
+              (set repaired-persisted-state? true))))))
     (when repaired-persisted-state?
       (persist-loaded-state! world)))
 

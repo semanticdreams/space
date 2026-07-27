@@ -182,7 +182,8 @@
   "Create or reuse a camera for a canvas activity slot.  The camera is stored in
    runtime.activity-cameras.canvas[activity-id] and returned.
    When a camera already exists for this activity, it is returned as-is.
-   defaults may contain {:position vec3} for the initial camera position."
+   The initial camera position is resolved from: 1) pending session camera state,
+   2) the defaults argument.  defaults may contain {:position vec3}."
   (assert runtime "ensure-activity-canvas-camera! requires runtime")
   (assert (= (type activity-id) :string)
           "ensure-activity-canvas-camera! requires string activity-id")
@@ -193,14 +194,22 @@
   (local existing (. runtime.activity-cameras.canvas activity-id))
   (when existing
     (lua "return existing"))
-  (local options (or defaults {}))
-  (local state-position (and options options.position))
+  ;; Build the effective initial state: session state wins over defaults
+  (local session-camera-state
+    (and runtime.activity-session-state
+         (. runtime.activity-session-state activity-id)
+         (= (type (. runtime.activity-session-state activity-id)) :table)
+         (. (. runtime.activity-session-state activity-id) :canvas-camera)))
+  (local effective-defaults
+    (or session-camera-state (or defaults {})))
   (local position
-    (if (safe-vec3? state-position)
-        state-position
-        (or options.position (glm.vec3 0 0 100))))
+    (let [state-position (and effective-defaults effective-defaults.position)]
+      (if (safe-vec3? state-position)
+          state-position
+          (or (and effective-defaults effective-defaults.position)
+              (glm.vec3 0 0 100)))))
   (local camera (ActivityCameraState.camera-from-state
-                  options
+                  effective-defaults
                   {:position position}))
   (set (. runtime.activity-cameras.canvas activity-id) camera)
   camera)
