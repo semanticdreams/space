@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Resolve and ensure the working-tree directory SDD uses for one plan's
+# short-lived artifacts: task briefs, implementer reports, review packages,
+# and the progress ledger. Print the plan directory's absolute path.
+#
+# The workspace name is derived from the plan's repo-relative path (hashed) so
+# two plans with the same filename in different directories get distinct
+# workspaces. A `.plan-path` marker is written on first creation; on resume,
+# the marker validates that the workspace belongs to this exact plan.
+#
+# The workspace lives in the working tree (not under .git/) because Claude Code
+# treats .git/ as a protected path and denies agent writes there — which blocks
+# an implementer subagent from writing its report file. A self-ignoring
+# .gitignore at .superpowers/sdd/ keeps every plan's workspace out of
+# `git status` and out of accidental commits without modifying any tracked file.
+#
+# Usage: sdd-workspace PLAN_FILE
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "usage: sdd-workspace PLAN_FILE" >&2
+  exit 2
+fi
+
+plan=$1
+[ -f "$plan" ] || { echo "no such plan file: $plan" >&2; exit 2; }
+
+slug=$(basename "$plan" .md)
+[ -n "$slug" ] && [ "$slug" != "." ] && [ "$slug" != ".." ] \
+  || { echo "cannot derive a workspace name from: $plan" >&2; exit 2; }
+
+root=$(git rev-parse --show-toplevel)
+rel=$(realpath --relative-to="$root" "$plan" 2>/dev/null || echo "$plan")
+hash=$(echo "$rel" | sha256sum | cut -c1-8)
+base="$root/.superpowers/sdd"
+dir="$base/${slug}-${hash}"
+mkdir -p "$dir"
+printf '*\n' > "$base/.gitignore"
+
+# Record the resolved plan path on first creation.
+marker="$dir/.plan-path"
+if [ ! -f "$marker" ]; then
+  printf '%s\n' "$rel" > "$marker"
+fi
+
+# Validate that an existing workspace belongs to this plan.
+recorded=$(cat "$marker" 2>/dev/null || true)
+if [ -n "$recorded" ] && [ "$recorded" != "$rel" ]; then
+  echo "workspace $dir is bound to plan '$recorded', not '$rel'" >&2
+  echo "create a workspace for the correct plan or remove $dir" >&2
+  exit 5
+fi
+
+cd "$dir" && pwd
