@@ -607,16 +607,16 @@
     (set app.renderers custom)
     (do-test)
     (set app.renderers orig)))"}]
-                             :mutations [{:op :set
-                                          :path ["app" "renderers"]
-                                          :line 8 :column 1
-                                          :form "(set app.renderers custom)"
-                                          :enclosing-fn "test-with-restore"}
-                                         {:op :set
-                                          :path ["app" "renderers"]
-                                          :line 10 :column 1
-                                          :form "(set app.renderers orig)"
-                                          :enclosing-fn "test-with-restore"}]}))
+                              :mutations [{:op :set
+                                           :path ["app" "renderers"]
+                                           :line 7 :column 1
+                                           :form "(set app.renderers custom)"
+                                           :enclosing-fn "test-with-restore"}
+                                          {:op :set
+                                           :path ["app" "renderers"]
+                                           :line 9 :column 1
+                                           :form "(set app.renderers orig)"
+                                           :enclosing-fn "test-with-restore"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "test file with restoration should pass"))
 
@@ -666,16 +666,16 @@
              (set app.renderers custom)
              (do-test))
            (set app.renderers orig))))"}]
-                             :mutations [{:op :set
-                                          :path ["app" "renderers"]
-                                          :line 10 :column 1
-                                          :form "(set app.renderers custom)"
-                                          :enclosing-fn "test-pcall-restore"}
-                                         {:op :set
-                                          :path ["app" "renderers"]
-                                          :line 12 :column 1
-                                          :form "(set app.renderers orig)"
-                                          :enclosing-fn "test-pcall-restore"}]}))
+                              :mutations [{:op :set
+                                           :path ["app" "renderers"]
+                                           :line 8 :column 1
+                                           :form "(set app.renderers custom)"
+                                           :enclosing-fn "test-pcall-restore"}
+                                          {:op :set
+                                           :path ["app" "renderers"]
+                                           :line 10 :column 1
+                                           :form "(set app.renderers orig)"
+                                           :enclosing-fn "test-pcall-restore"}]}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "test file with pcall cleanup restore should pass"))
 
@@ -986,6 +986,84 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should flag snapshot+pcall+two-mutations-without-restore"))
 
+(fn mutation-restoration-flags-pre-restore-then-mutate []
+  "A function that snapshots, restores BEFORE the mutation, then mutates,
+  should be flagged. Order matters: the restore write must occur AFTER the
+  mutation, not before. A pre-restore followed by a later mutation leaves
+  the global in a mutated state."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  ;; form: (fn test-fn [] (let [orig app.renderers] (set app.renderers orig) (set app.renderers custom)))
+  ;; The restore is at line 6 (before mutation at line 7), so the final state is mutated.
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pre-restore-leak"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-pre-restore-leak []
+  (let [orig app.renderers]
+    (set app.renderers orig)
+    (do-something)
+    (set app.renderers custom)))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 6 :column 1
+                                          :form "(set app.renderers orig)"
+                                          :enclosing-fn "test-pre-restore-leak"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom)"
+                                          :enclosing-fn "test-pre-restore-leak"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for pre-restore then later mutation")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag pre-restore-then-mutate"))
+
+(fn mutation-restoration-flags-pcall-pre-restore-then-mutate []
+  "A function that restores BEFORE a pcall that mutates should be flagged.
+  The restore must be outside/after the pcall body, not before it."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  ;; form: (fn test-fn [] (let [orig app.renderers] (set app.renderers orig) (pcall (fn [] (set app.renderers custom)))))
+  ;; Restore at line 6, pcall mutation at line 8 — final state is mutated.
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pcall-pre-restore-leak"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-pcall-pre-restore-leak []
+  (let [orig app.renderers]
+    (set app.renderers orig)
+    (pcall (fn []
+      (set app.renderers custom)))))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 6 :column 1
+                                          :form "(set app.renderers orig)"
+                                          :enclosing-fn "test-pcall-pre-restore-leak"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom)"
+                                          :enclosing-fn "test-pcall-pre-restore-leak"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for pcall pre-restore then mutate")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag pcall-pre-restore-then-mutate"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -1155,6 +1233,10 @@
                      :fn mutation-restoration-flags-snapshot-two-mutations-without-restore})
 (table.insert tests {:name "mutation-restoration flags snapshot+pcall+two-mutations without restore"
                      :fn mutation-restoration-flags-snapshot-pcall-two-mutations-without-restore})
+(table.insert tests {:name "mutation-restoration flags pre-restore then mutate"
+                     :fn mutation-restoration-flags-pre-restore-then-mutate})
+(table.insert tests {:name "mutation-restoration flags pcall pre-restore then mutate"
+                     :fn mutation-restoration-flags-pcall-pre-restore-then-mutate})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"
