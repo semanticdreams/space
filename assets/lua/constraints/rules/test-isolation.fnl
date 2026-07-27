@@ -24,10 +24,54 @@
                   (when matches (set found true))))))
           found))))
 
+(fn count-set-writes [fn-form path-text table-part key-part]
+  "Count set/tset target occurrences for this path in the form text."
+  (var count 0)
+  (var pos 1)
+  (var done false)
+  (local set-pat (.. "(set " path-text))
+  (while (not done)
+    (let [(start) (string.find fn-form set-pat pos true)]
+      (if start
+          (do (set count (+ count 1))
+              (set pos (+ start 1)))
+          (set done true))))
+  ;; Also count tset writes
+  (when (and table-part key-part)
+    (var pos2 1)
+    (var done2 false)
+    (local tset-pat (.. "(tset " table-part " :" key-part))
+    (while (not done2)
+      (let [(start2) (string.find fn-form tset-pat pos2 true)]
+        (if start2
+            (do (set count (+ count 1))
+                (set pos2 (+ start2 1)))
+            (set done2 true)))))
+  count)
+
+(fn form-has-snapshot-evidence? [fn-form path-text]
+  "Check for snapshot patterns: the path appearing in a local binding or
+  let binding position where it is read, not written."
+  (or (string.find fn-form (.. "(local " path-text) 1 true)
+      (string.find fn-form (.. " " path-text ")") 1 true)
+      (string.find fn-form (.. " " path-text "]") 1 true)))
+
 (fn global-mutation-restoration-rule-run [ctx]
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (when (string.find ff.path "/tests/" 1 true)
+      ;; Pre-count mutations per function per path for restore detection
+      (var fn-mutation-counts {})
+      (each [_ mutation (ipairs (or ff.mutations []))]
+        (when (mutation-path-is-sensitive? mutation.path)
+          (let [pt (table.concat (or mutation.path []) ".")
+                fn-name (or mutation.enclosing-fn "<top-level>")]
+            (var entry (. fn-mutation-counts fn-name))
+            (when (not entry)
+              (set entry {})
+              (tset fn-mutation-counts fn-name entry))
+            (tset entry pt (+ (or (. entry pt) 0) 1)))))
+      ;; Now check each mutation
       (each [_ mutation (ipairs (or ff.mutations []))]
         (when (mutation-path-is-sensitive? mutation.path)
           (var fn-form nil)
@@ -37,20 +81,28 @@
                 (set fn-form def.form))))
           (var has-restoration false)
           (when fn-form
-            ;; Pattern 1: with-restored-app-fields macro/function
-            (when (string.find fn-form "with-restored-app-fields" 1 true) (set has-restoration true))
-            ;; Pattern 2 & 3: direct snapshot table restore and pcall cleanup
-            ;; restore — both require at least 3 path occurrences
-            ;; (snapshot + mutation + restore) to distinguish actual restore
-            ;; from two mutations without cleanup
-            (when (not has-restoration)
-              (let [pt (table.concat (or mutation.path []) ".")
-                    (start) (string.find fn-form pt 1 true)]
-                (when start
-                  (let [(start2) (string.find fn-form pt (+ start 1) true)]
-                    (when start2
-                      (let [(start3) (string.find fn-form pt (+ start2 1) true)]
-                        (when start3 (set has-restoration true)))))))))
+            (let [path-text (table.concat (or mutation.path []) ".")
+                  table-part (. (or mutation.path []) 1)
+                  key-part (. (or mutation.path []) 2)
+                  fn-name (or mutation.enclosing-fn "<top-level>")
+                  fn-counts (. fn-mutation-counts fn-name)
+                  mutation-count (or (and fn-counts (. fn-counts path-text)) 0)]
+              ;; Pattern 1: with-restored-app-fields
+              (when (string.find fn-form "with-restored-app-fields" 1 true)
+                (set has-restoration true))
+              ;; Pattern 2: direct snapshot restore (snapshot + extra writes)
+              (when (not has-restoration)
+                (var has-snapshot (form-has-snapshot-evidence? fn-form path-text))
+                (var write-count (count-set-writes fn-form path-text table-part key-part))
+                ;; If more writes than mutations, at least one is a restore
+                (when (and has-snapshot (> write-count mutation-count))
+                  (set has-restoration true)))
+              ;; Pattern 3: pcall cleanup restore (pcall + extra writes)
+              (when (not has-restoration)
+                (var write-count (count-set-writes fn-form path-text table-part key-part))
+                (when (and (string.find fn-form "pcall" 1 true)
+                           (> write-count mutation-count))
+                  (set has-restoration true)))))
           (when (not has-restoration)
             (table.insert diagnostics
               (Diagnostics.violation

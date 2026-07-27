@@ -854,6 +854,48 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
           "diagnostic should flag pcall-double-mutate-no-restore"))
 
+(fn mutation-restoration-flags-pcall-triple-mutate-no-restore []
+  "A test file that uses pcall to wrap three mutations of a sensitive global
+  without any cleanup restore should still be flagged. Three occurrences
+  inside a pcall are not restoration evidence."
+  (local TestIsolation (require :constraints.rules.test-isolation))
+  (local rules (TestIsolation.rules))
+  (local rule (find-rule-by-id rules "lifecycle.global-mutation-restoration"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                             :module "tests.test-bad"
+                             :definitions [{:kind :fn
+                                            :name "test-pcall-triple-mutate"
+                                            :top-level? true
+                                            :line 5 :column 1
+                                            :length 150
+                                            :form "(fn test-pcall-triple-mutate []
+  (pcall (fn []
+    (set app.renderers custom1)
+    (set app.renderers custom2)
+    (set app.renderers custom3))))"}]
+                             :mutations [{:op :set
+                                          :path ["app" "renderers"]
+                                          :line 7 :column 1
+                                          :form "(set app.renderers custom1)"
+                                          :enclosing-fn "test-pcall-triple-mutate"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 8 :column 1
+                                          :form "(set app.renderers custom2)"
+                                          :enclosing-fn "test-pcall-triple-mutate"}
+                                         {:op :set
+                                          :path ["app" "renderers"]
+                                          :line 9 :column 1
+                                          :form "(set app.renderers custom3)"
+                                          :enclosing-fn "test-pcall-triple-mutate"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics for pcall triple-mutate without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")
+          "diagnostic should flag pcall-triple-mutate-no-restore"))
+
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -1017,6 +1059,8 @@
                      :fn mutation-restoration-flags-repeated-mutation-without-restore})
 (table.insert tests {:name "mutation-restoration flags pcall double-mutate without restore"
                      :fn mutation-restoration-flags-pcall-double-mutate-no-restore})
+(table.insert tests {:name "mutation-restoration flags pcall triple-mutate without restore"
+                     :fn mutation-restoration-flags-pcall-triple-mutate-no-restore})
 
 ;; Structure tests
 (table.insert tests {:name "lifecycle rules returns table with two rules"
