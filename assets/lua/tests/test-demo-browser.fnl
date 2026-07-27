@@ -27,6 +27,7 @@
 (local fixtures (require :tests/http-fixtures))
 (local TestSupport (require :tests/test-support))
 (local StateSystemBindings (require :state-system-bindings))
+(local logging (require :logging))
 
 (local tests [])
 
@@ -1371,6 +1372,10 @@
                              :camera camera}))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
+  ;; Prove no forbidden app.camera fallback in the default-ray-opts path.
+  ;; setup-scene installs app.camera; explicitly nil it so the exercised
+  ;; code path cannot accidentally depend on the app-global camera reference.
+  (set app.camera nil)
   (local original-viewport app.viewport)
   (local original-projection app.projection)
   (local (ok err)
@@ -1415,10 +1420,10 @@
         (assert expected
                 "default-ray-opts fixture should derive an expected terrain target from the screen rect seam")
         (assert (= resolved-target.x0 expected.target.x0))
-        (assert (= resolved-target.z0 expected.target.z0))
-        (assert (= resolved-target.x1 expected.target.x1))
-        (assert (= resolved-target.z1 expected.target.z1))
-        (capture:drop))))
+         (assert (= resolved-target.z0 expected.target.z0))
+         (assert (= resolved-target.x1 expected.target.x1))
+         (assert (= resolved-target.z1 expected.target.z1))
+         (capture:drop))))
   (app.set-viewport original-viewport)
   (set app.projection original-projection)
   (cleanup)
@@ -3323,6 +3328,10 @@
   (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
+  ;; Capture expected sanitization warning to keep test output clean.
+  (local captured-warnings [])
+  (local original-warn logging.warn)
+  (set logging.warn (fn [msg] (table.insert captured-warnings msg)))
   (local (ok err)
     (pcall
       (fn []
@@ -3333,6 +3342,12 @@
                                         :position [1001000 0 0]
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
+  (set logging.warn original-warn)
+  (assert (= (length captured-warnings) 1)
+          (.. "Expected one position-sanitization warning, got "
+              (tostring (length captured-warnings))))
+  (assert (string.find (. captured-warnings 1) "dropping invalid restored panel position")
+          "Expected 'dropping invalid restored panel position' warning")
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
@@ -3366,6 +3381,10 @@
   (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
+  ;; Capture expected sanitization warning to keep test output clean.
+  (local captured-warnings [])
+  (local original-warn logging.warn)
+  (set logging.warn (fn [msg] (table.insert captured-warnings msg)))
   (local (ok err)
     (pcall
       (fn []
@@ -3376,6 +3395,12 @@
                                         :position [0 0 0]
                                         :rotation [1 0 0 0]}]
                               :lights (LightSystemModule.default-state)}))))
+  (set logging.warn original-warn)
+  (assert (= (length captured-warnings) 1)
+          (.. "Expected one size-sanitization warning, got "
+              (tostring (length captured-warnings))))
+  (assert (string.find (. captured-warnings 1) "replacing invalid restored panel size")
+          "Expected 'replacing invalid restored panel size' warning")
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (local restored-element (and restored-metadata restored-metadata.element))
@@ -3409,6 +3434,10 @@
   (map:add-node node {})
   (local initial-count (length (or scene.entity.children [])))
 
+  ;; Capture expected skip warning to keep test output clean.
+  (local captured-warnings [])
+  (local original-warn logging.warn)
+  (set logging.warn (fn [msg] (table.insert captured-warnings msg)))
   (local (ok err)
     (pcall
       (fn []
@@ -3423,6 +3452,12 @@
                                         :rotation [1 0 0 0]
                                         :size [4 4 4]}]
                               :lights (LightSystemModule.default-state)}))))
+  (set logging.warn original-warn)
+  (assert (= (length captured-warnings) 1)
+          (.. "Expected one legacy-panel skip warning, got "
+              (tostring (length captured-warnings))))
+  (assert (string.find (. captured-warnings 1) "skipping restored panel")
+          "Expected 'skipping restored panel' warning")
   (local final-count (length (or scene.entity.children [])))
   (local restored-metadata (. (or scene.entity.children []) final-count))
   (set app.graph-map original-graph-map)
