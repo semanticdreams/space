@@ -242,8 +242,10 @@ When the human asks to debug something, invoke **systematic-debugging**.
 - Do not report completion until all reviewed changes are committed, the
   worktree is clean, and any verification or finishing checks required by
   the active skill or plan (e.g., tests, finishing-a-development-branch
-  validation) have passed. Report BLOCKED with the exact reason if any of
-  these cannot be satisfied.
+  validation) have passed. If required validation fails, follow the
+  Completion discipline contract (`systematic-debugging`, `implementer` →
+  `reviewer` → pass, rerun validation); report BLOCKED only when systematic
+  debugging establishes an unresolved blocker.
 - Never fix code yourself. That's what `implementer` is for.
 
 User instructions (AGENTS.md, direct requests) take precedence over skills,
