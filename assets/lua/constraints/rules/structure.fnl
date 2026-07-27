@@ -16,18 +16,34 @@
 (fn str-contains? [s sub]
   (and s sub (string.find s sub 1 true)))
 
-;; Strip double-quoted string literals from source text so that pattern
-;; matching does not produce false positives on string contents.
-;; Uses a character-by-character scanner that correctly handles
-;; Fennel string escapes: a quote terminates the string only when
-;; preceded by an even number of consecutive backslashes.
-(fn strip-strings [s]
+;; Single-pass scanner that strips both Fennel strings and comments from
+;; source text so that pattern matching does not produce false positives
+;; on string or comment contents.
+;;
+;; State machine:
+;;   - In a comment (; to end of line): quotes are ordinary characters;
+;;     only a newline exits the comment.
+;;   - In a string ("..."): semicolons are ordinary characters; a quote
+;;     terminates the string only when preceded by an even number of
+;;     consecutive backslashes (Fennel backslash-parity rule).
+;;   - Only characters outside both strings and comments are kept.
+(fn strip-strings-and-comments [s]
   (let [result []]
     (var in-string false)
+    (var in-comment false)
     (var backslash-count 0)
     (for [i 1 (length s)]
       (let [ch (s:sub i i)]
-        (if in-string
+        (if in-comment
+            ;; In comment: only newline exits the comment
+            (if (= ch "\n")
+                (do
+                  (set in-comment false)
+                  (table.insert result ch))
+                ;; else: stay in comment, skip character
+                (values))
+            in-string
+            ;; In string: track backslash parity for quote termination
             (if (= ch "\\")
                 (set backslash-count (+ backslash-count 1))
                 (= ch "\"")
@@ -36,28 +52,16 @@
                     (set backslash-count 0)
                     ;; even backslashes: quote terminates the string
                     (set in-string false))
-                ;; any other char: not a quote, reset count
+                ;; any other char: reset count
                 (set backslash-count 0))
-            ;; not in string — only add non-string characters to result
-            (if (= ch "\"")
-                (set in-string true)
-                (table.insert result ch)))))
+            ;; Neither in string nor comment — interpret syntax characters
+            (= ch ";")
+            (set in-comment true)
+            (= ch "\"")
+            (set in-string true)
+            ;; ordinary character: keep it
+            (table.insert result ch))))
     (table.concat result)))
-
-;; Strip Fennel comments (; to end of line) from source text.
-;; Must be called after strip-strings to avoid removing semicolons
-;; that appear inside string literals.
-(fn strip-comments [s]
-  (let [lines []]
-    (each [line (s:gmatch "[^\n]*")]
-      (let [comment-pos (string.find line ";" 1 true)]
-        (if comment-pos
-            (table.insert lines (string.sub line 1 (- comment-pos 1)))
-            (table.insert lines line))))
-    (table.concat lines "\n")))
-
-(fn strip-strings-and-comments [s]
-  (strip-comments (strip-strings s)))
 
 (fn max-nesting-depth-rule-run [ctx]
   (var diagnostics [])

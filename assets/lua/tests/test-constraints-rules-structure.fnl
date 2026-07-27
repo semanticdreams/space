@@ -763,6 +763,63 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "or after escaped quote inside string should not be flagged"))
 
+;; R1-2 round 4: comment with unmatched quote before actual (let  / (or  forms
+;; A comment containing a " before a real (let ...) or (or ...) on the next line
+;; must still be flagged. The single-pass scanner must not let the " in the
+;; comment trigger string mode and strip subsequent real code.
+(fn style-doctrine-flags-let-after-comment-with-unmatched-quote []
+  "A function with a comment containing an unmatched \" before an actual
+  (let ...) form on the next line should STILL be flagged."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  ;; The comment '; note \"' has an unmatched quote.
+  ;; On the next line, there's a real (let ...) form.
+  (local ff (make-file-fact {:path "/src/comment-quote-let.fnl"
+                              :module "comment-quote-let"
+                              :definitions [{:kind :fn
+                                             :name "handler"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 20
+                                             :form "(fn handler [] ; note \"\n  (let x 1 x))"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag real (let ...) after comment with unmatched quote")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "structure.style-doctrine")
+          "diagnostic should have correct constraint-id")
+  (assert (= d.evidence.construct "let") "evidence should identify let construct"))
+
+(fn style-doctrine-flags-silent-fallback-after-comment-with-unmatched-quote []
+  "A function with a comment containing an unmatched \" before an actual
+  (or ...) silent fallback on the next line should STILL be flagged."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  ;; Comment with unmatched quote, then real (or ...) without assert/error
+  (local ff (make-file-fact {:path "/src/comment-quote-or.fnl"
+                              :module "comment-quote-or"
+                              :definitions [{:kind :fn
+                                             :name "get-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 20
+                                             :form "(fn get-widget [] ; note \"\n  (or required-widget default-widget))"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag real (or ...) fallback after comment with unmatched quote")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "structure.style-doctrine")
+          "diagnostic should have correct constraint-id")
+  (assert (= d.evidence.construct "silent-fallback") "evidence should identify silent-fallback construct"))
+
 ;; R1-2 round 3: escaped backslash before closing quote
 (fn style-doctrine-allows-let-in-string-ending-with-backslash []
   "A Fennel string ending with an escaped backslash before the closing
@@ -1062,6 +1119,11 @@
                      :fn style-doctrine-allows-let-in-string-ending-with-backslash})
 (table.insert tests {:name "style-doctrine allows or in string ending with backslash"
                      :fn style-doctrine-allows-or-in-string-ending-with-backslash})
+;; R1-2 round 4: positive detection after comment with unmatched quote
+(table.insert tests {:name "style-doctrine flags let after comment with unmatched quote"
+                     :fn style-doctrine-flags-let-after-comment-with-unmatched-quote})
+(table.insert tests {:name "style-doctrine flags silent fallback after comment with unmatched quote"
+                     :fn style-doctrine-flags-silent-fallback-after-comment-with-unmatched-quote})
 
 ;; Structure metadata
 (table.insert tests {:name "structure rules returns table with five rules"
