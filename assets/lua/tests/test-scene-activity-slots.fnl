@@ -620,9 +620,12 @@
               "Sandbox activation should apply custom background color")
 
       ;; R1-6: Assert Sandbox containment installs
-      (assert (not (= app.physics-containment-config nil))
-              "Sandbox activation should set physics-containment-config")
-      (assert app.physics-containment-config.enabled?
+      (local sandbox-slot (scene:activity-slot "sandbox"))
+      (local sandbox-manager sandbox-slot.physics-containment-manager)
+      (assert sandbox-manager "Sandbox slot should have a containment manager after activation")
+      (assert (not (= sandbox-manager.config nil))
+              "Sandbox activation should set containment config on manager")
+      (assert sandbox-manager.config.enabled?
               "Sandbox containment config should have enabled? true")
 
       ;; Restore graph with empty state
@@ -643,8 +646,11 @@
               "Graph activation with empty state should set neutral background")
 
       ;; R1-6: Assert Graph activation clears containment
-      (assert (and app.physics-containment-config
-                   (not app.physics-containment-config.enabled?))
+      (local graph-slot (scene:activity-slot "graph"))
+      (local graph-manager graph-slot.physics-containment-manager)
+      (assert graph-manager "Graph slot should have a containment manager after activation")
+      (assert (and graph-manager.config
+                   (not graph-manager.config.enabled?))
               "Graph activation should disable containment")
 
       ;; Capture graph state: should have empty terrain/panels
@@ -669,8 +675,10 @@
       (assert (= skybox-state.brightness 0.5)
               "Switching back to sandbox should restore skybox brightness")
       ;; R1-6: Assert Sandbox containment returns
-      (assert (and app.physics-containment-config
-                   app.physics-containment-config.enabled?)
+      (local sb-slot2 (scene:activity-slot "sandbox"))
+      (local sb-manager2 sb-slot2.physics-containment-manager)
+      (assert (and sb-manager2 sb-manager2.config
+                   sb-manager2.config.enabled?)
               "Switching back to sandbox should re-enable containment")
       ;; R1-6: Assert terrain record was preserved through switches
       (local sandbox-captured (scene:capture-activity-slot-state "sandbox"))
@@ -971,9 +979,7 @@
 (fn containment-enabled-flag-controls-install []
   ;; Task 2: Containment :enabled? false should clear and install nothing.
   (with-restored-app-fields
-    [:physics-containment-config :physics-containment-scene
-     :__physics-global-containment :__physics_containment_refresh_debouncer
-     :engine]
+    [:engine]
     (fn []
       (local PhysicsContainment (require :physics-containment))
       (local AppProjection (require :app-projection))
@@ -996,27 +1002,26 @@
 
       ;; Mock physics for ensure-installed
       (var installed-planes [])
-      (var cleared? false)
-      ;; Capture original clear to use within mock
-      (local original-clear PhysicsContainment.clear)
       (set app.engine {:physics {:addRigidBody (fn [_phys body] (table.insert installed-planes body))}})
-      ;; Override clear for test to detect it was called
-      (var ensure-installed-calls [])
-      (local orig-ensure-installed PhysicsContainment.ensure-installed)
+
+      ;; Create a manager
+      (local manager (PhysicsContainment.create-manager
+                       {:owner {}
+                        :physics app.engine.physics}))
 
       ;; Setup: install enabled containment
-      (orig-ensure-installed {:config {:enabled? true}})
+      (manager:ensure-installed {:config {:enabled? true}})
       (assert (> (length installed-planes) 0)
               "ensure-installed with enabled? true should install containment planes")
-      (assert (not (= app.physics-containment-config nil))
-              "ensure-installed should set physics-containment-config")
+      (assert (not (= manager.config nil))
+              "ensure-installed should set manager.config")
 
       ;; Clean up and test disabled
-      (original-clear)
+      (manager:clear)
       (set installed-planes [])
 
       ;; Install disabled containment: should clear and install nothing
-      (local result (orig-ensure-installed {:config {:enabled? false}}))
+      (local result (manager:ensure-installed {:config {:enabled? false}}))
       ;; When enabled? is false, ensure-installed clears and returns false
       (assert (= result false)
               "ensure-installed with enabled? false should return false")
@@ -1024,7 +1029,7 @@
               "ensure-installed with enabled? false should not install planes")
 
       ;; Clean up
-      (original-clear))))
+      (manager:drop))))
 
 (table.insert tests {:name "Scene activity slots return same slot on repeat"
                      :fn ensure-activity-slot-returns-same-slot})
@@ -1946,7 +1951,76 @@
       (drop-fixture fixture))))
 
 (table.insert tests {:name "R4-3b corrupt terrain activation rolls back to previous slot"
-                     :fn corrupt-terrain-activation-rolls-back-previous-slot})
+                      :fn corrupt-terrain-activation-rolls-back-previous-slot})
+
+;; ── Task 6: Stale containment refresh does not install into wrong slot ──
+
+(fn stale-containment-refresh-does-not-install-into-new-active-slot []
+  (with-restored-app-fields
+    [:engine]
+    (fn []
+      (local AppProjection (require :app-projection))
+      (when (not app.create-default-projection)
+        (set app.create-default-projection AppProjection.create-default-projection))
+      ;; Mock engine with events support for the debouncer.
+      ;; The debouncer uses updated:connect to subscribe and updated:emit
+      ;; to receive delta values.  We simulate the full event lifecycle.
+      (var update-handlers [])
+      (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                  :removeRigidBody (fn [_phys _body])}
+                        :events {:updated {:connect (fn [_self handler]
+                                                      (table.insert update-handlers handler)
+                                                      handler)
+                                          :disconnect (fn [_self handler _ok?]
+                                                        (for [i (length update-handlers) 1 -1]
+                                                          (when (= (. update-handlers i) handler)
+                                                            (table.remove update-handlers i)))
+                                                        true)
+                                          :emit (fn [_self delta]
+                                                  (each [_ handler (ipairs update-handlers)]
+                                                    (pcall (fn [] (handler delta)))))}}
+                        :now-ms (fn [self] 0)})
+      (local fixture (make-scene))
+      (local scene fixture.scene)
+      (scene:ensure-activity-slot "sandbox")
+      (scene:ensure-activity-slot "drawing")
+      ;; Verify no managers exist before activation
+      (assert (= (. (scene:activity-slot "drawing") :physics-containment-manager) nil)
+              "Drawing slot should have no manager before any activation")
+      (scene:activate-activity-slot "sandbox")
+      ;; After sandbox activation, drawing still has no manager
+      (assert (= (. (scene:activity-slot "drawing") :physics-containment-manager) nil)
+              "Drawing slot should have no manager after sandbox activation")
+      ;; Create the sandbox slot's containment manager
+      (local sandbox-slot (scene:activity-slot "sandbox"))
+      (local sandbox-manager (sandbox-slot:ensure-containment-manager))
+      (assert sandbox-manager "Sandbox slot should have a containment manager when active")
+      ;; Schedule a debounced refresh with a long delay
+      (sandbox-manager:schedule-refresh
+        {:scene scene
+         :config {:debounce-ms 10000
+                  :mode "manual-bounds"
+                  :bounds {:min [-10 -10 -10]
+                           :max [10 10 10]}}})
+      ;; Verify the debouncer was created
+      (assert sandbox-manager.debouncer "Sandbox manager should have a debouncer after schedule-refresh")
+      ;; Switch to drawing slot — this deactivates sandbox slot
+      (scene:activate-activity-slot "drawing")
+      ;; Fire the debounce by emitting a large delta.  The debounced callback
+      ;; captured the sandbox manager's owner identity.  The callback fires
+      ;; on the SANDBOX manager, not the drawing slot's manager.
+      (pcall (fn [] (app.engine.events.updated:emit 10000)))
+      ;; Assert: the drawing slot's manager must NOT have an active containment
+      ;; installation (the stale refresh from sandbox must not install into drawing).
+      (local drawing-slot2 (scene:activity-slot "drawing"))
+      (assert drawing-slot2.physics-containment-manager
+              "Drawing slot should have a manager from normal activation")
+      (assert (= drawing-slot2.physics-containment-manager.installation nil)
+              "Drawing slot manager must not have containment installation (stale refresh from sandbox)")
+      (drop-fixture fixture))))
+
+(table.insert tests {:name "Task 6: stale containment refresh does not install into new active slot"
+                     :fn stale-containment-refresh-does-not-install-into-new-active-slot})
 
 ;; ── R4-3c no-previous-slot rollback consistency ─────────────────────────
 

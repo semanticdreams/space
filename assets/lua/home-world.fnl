@@ -703,7 +703,6 @@
     (local serialized
       (PhysicsContainment.serialize-config
         (PhysicsContainment.normalize-config (or config default-containment-config))))
-    (set app.physics-containment-config serialized)
     (when world.state
       ;; Write to sandbox activity session scene
       (local sandbox-scene (resolve-sandbox-scene-state world))
@@ -717,16 +716,20 @@
       (set-runtime-containment-config! world (resolve-runtime-containment-config world)))
     (local scene (or options.scene
                      (and world.runtime world.runtime.scene)))
-    (PhysicsContainment.ensure-installed {:scene scene
-                                          :config config})
+    (if (and scene scene.active-containment-manager)
+        (let [manager (scene:active-containment-manager)]
+          (manager:ensure-installed {:scene scene :config config}))
+        false)
     config)
 
   (fn clear-active-runtime-containment! [world]
     (local runtime world.runtime)
     (local runtime-scene (and runtime runtime.scene))
-    (when (and runtime-scene
-               (= app.physics-containment-scene runtime-scene))
-      (PhysicsContainment.clear))
+    (when runtime-scene
+      (local manager (and runtime-scene runtime-scene.active-containment-manager
+                         (runtime-scene:active-containment-manager)))
+      (when manager
+        (manager:clear)))
     true)
 
   (fn apply-runtime-physics-policy! []
@@ -1019,11 +1022,14 @@
               :icons ctx.icons
               :states ctx.states
               :movables ctx.movables
-              :on-terrains-changed
-              (fn [updated-scene]
-                (PhysicsContainment.schedule-refresh
-                  {:scene updated-scene
-                   :config (resolve-runtime-containment-config world)}))
+               :on-terrains-changed
+               (fn [updated-scene]
+                 (local manager (and updated-scene updated-scene.active-containment-manager
+                                    (updated-scene:active-containment-manager)))
+                 (when manager
+                   (manager:schedule-refresh
+                     {:scene updated-scene
+                      :config (resolve-runtime-containment-config world)})))
                :graph graph
               :graph-map graph-map}))
     (local drawing-state

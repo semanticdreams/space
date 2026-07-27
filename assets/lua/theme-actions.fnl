@@ -1,4 +1,3 @@
-(local PhysicsContainment (require :physics-containment))
 (local Activities (require :activities))
 
 (fn workspace-shell-state []
@@ -95,9 +94,9 @@
               (app.hud:build-default)))
         (when (and app.renderers app.renderers.apply-theme)
           (app.renderers:apply-theme (and app.themes (app.themes.get-active-theme))))
-        (PhysicsContainment.refresh-visualization
-          {:scene app.physics-containment-scene
-           :config app.physics-containment-config})
+        (if (and app.scene app.scene.active-containment-manager)
+            (let [manager (app.scene:active-containment-manager)]
+              (manager:refresh-visualization {}))
         (reapply-active-world-skybox theme-name)
         (when (and app.settings app.settings.set-value app.settings.save)
           (app.settings.set-value "ui.theme"

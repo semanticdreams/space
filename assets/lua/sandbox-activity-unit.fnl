@@ -173,10 +173,12 @@
           (SkyboxState.resolve-for-theme empty.skybox nil)))
       (when (and app app.renderers app.renderers.set-background-state)
         (app.renderers:set-background-state empty.background))
-      ;; Clear containment through the real PhysicsContainment API.
+      ;; Clear containment through the sandbox slot's manager.
       ;; ensure-installed with enabled? false calls clear() internally.
-      (local PhysicsContainment (require :physics-containment))
-      (PhysicsContainment.ensure-installed {:config {:enabled? false} :scene scene})))
+      (let [slot (scene:activity-slot "sandbox")]
+        (when (and slot slot.ensure-containment-manager)
+          (let [manager (slot:ensure-containment-manager)]
+            (manager:ensure-installed {:config {:enabled? false} :scene scene}))))))
   true)
 
 (fn snapshot-sandbox-activity! []
