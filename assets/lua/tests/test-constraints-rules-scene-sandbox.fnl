@@ -268,7 +268,9 @@
 ;; --- Rule 3: scene.sandbox-activation-contract ---
 
 (fn sandbox-contract-passes-when-all-calls-present []
-  "sandbox-activity-unit with all required calls should pass."
+  "sandbox-activity-unit with all required calls should pass.
+  The activation function definition must contain both contract calls and
+  a runtime.scene / world-runtime.scene reference in its form text."
   (local SceneSandbox (require :constraints.rules.scene-sandbox))
   (local rules (SceneSandbox.rules))
   (local rule (find-rule-by-id rules "scene.sandbox-activation-contract"))
@@ -282,6 +284,20 @@
                                          :text "runtime.scene"
                                          :line 11 :column 1
                                          :form "runtime.scene"}]
+                             :definitions [{:kind :fn
+                                            :name "activate-sandbox-activity!"
+                                            :top-level? true
+                                            :line 15 :column 1
+                                            :length 1200
+                                            :form "(fn activate-sandbox-activity! [ctx]
+  (local scene (assert world-runtime.scene \"requires runtime.scene\"))
+  (scene:ensure-activity-slot \"sandbox\")
+  (scene:activate-activity-slot \"sandbox\")
+  (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
+  (ctx:set-preferred-interaction-surface! :scene)
+  (ctx:set-root-actions! sandbox-root-actions)
+  (ctx:set-target-enabled! sandbox-target-enabled?)
+  (ctx:set-update! sandbox-activity-update))"}]
                              :calls [{:callee "scene:ensure-activity-slot"
                                       :receiver nil :method nil
                                       :line 20 :column 1
@@ -486,6 +502,88 @@
     (when (= d.evidence.required-access "runtime.scene")
       (set found true)))
   (assert found "should flag missing runtime.scene access"))
+
+(fn sandbox-contract-flags-unrelated-runtime-scene-access []
+  "An unrelated runtime.scene access in a helper function should NOT satisfy the
+  activation contract when the activation function itself lacks scene access.
+  The rule ties runtime.scene evidence to the activation function definition."
+  (local SceneSandbox (require :constraints.rules.scene-sandbox))
+  (local rules (SceneSandbox.rules))
+  (local rule (find-rule-by-id rules "scene.sandbox-activation-contract"))
+  (assert rule "rule should be in rules list")
+  ;; Activation function definition has contract calls but NO runtime.scene reference.
+  ;; Helper function definition has runtime.scene but NO contract calls.
+  ;; File-wide accesses have a matching runtime.scene access.
+  ;; Expected: VIOLATION because the activation function itself does not access runtime.scene.
+  (local ff (make-file-fact {:path "/lua/sandbox-activity-unit.fnl"
+                             :module "sandbox-activity-unit"
+                             :requires [{:module "runtime"
+                                         :line 10 :column 1
+                                         :form "(require :runtime)"}]
+                             ;; File-wide access exists (from helper fn), but it's unrelated to activation
+                             :accesses [{:path ["runtime" "scene"]
+                                         :text "runtime.scene"
+                                         :line 100 :column 1
+                                         :form "runtime.scene"}]
+                             :definitions
+                             [{:kind :fn
+                               :name "activate-sandbox-activity!"
+                               :top-level? true
+                               :line 15 :column 1
+                               :length 500
+                                :form "(fn activate-sandbox-activity! [ctx]
+  ;; activation function: has contract calls but does NOT access the scene
+  (scene:ensure-activity-slot \"sandbox\")
+  (scene:activate-activity-slot \"sandbox\")
+  (ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})
+  (ctx:set-preferred-interaction-surface! :scene)
+  (ctx:set-root-actions! sandbox-root-actions)
+  (ctx:set-target-enabled! sandbox-target-enabled?)
+  (ctx:set-update! sandbox-activity-update))"}
+                              {:kind :fn
+                               :name "some-unrelated-helper"
+                               :top-level? true
+                               :line 95 :column 1
+                               :length 100
+                                                               :form "(fn some-unrelated-helper []
+  ;; unrelated helper accesses the scene — should NOT satisfy the activation contract
+  (print world-runtime.scene))"}]
+                             :calls [{:callee "scene:ensure-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 20 :column 1
+                                      :form "(scene:ensure-activity-slot \"sandbox\")"}
+                                     {:callee "scene:activate-activity-slot"
+                                      :receiver nil :method nil
+                                      :line 21 :column 1
+                                      :form "(scene:activate-activity-slot \"sandbox\")"}
+                                     {:callee "ctx:set-surface-state!"
+                                      :receiver nil :method nil
+                                      :line 22 :column 1
+                                      :form "(ctx:set-surface-state! {:canvas {:visible? false :interactive? false}})"}
+                                     {:callee "ctx:set-preferred-interaction-surface!"
+                                      :receiver nil :method nil
+                                      :line 23 :column 1
+                                      :form "(ctx:set-preferred-interaction-surface! :scene)"}
+                                     {:callee "ctx:set-root-actions!"
+                                      :receiver nil :method nil
+                                      :line 24 :column 1
+                                      :form "(ctx:set-root-actions! sandbox-root-actions)"}
+                                     {:callee "ctx:set-target-enabled!"
+                                      :receiver nil :method nil
+                                      :line 25 :column 1
+                                      :form "(ctx:set-target-enabled! sandbox-target-enabled?)"}
+                                     {:callee "ctx:set-update!"
+                                      :receiver nil :method nil
+                                      :line 26 :column 1
+                                      :form "(ctx:set-update! sandbox-activity-update)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should produce diagnostics — unrelated runtime.scene access does not satisfy activation contract")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var found-access-diag false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.required-access "runtime.scene")
+      (set found-access-diag true)))
+  (assert found-access-diag "should flag missing runtime.scene access in activation function"))
 
 (fn sandbox-contract-flags-wrong-require-module []
   "sandbox-activity-unit requiring 'not-runtime' instead of 'runtime' should produce diagnostic."
@@ -789,6 +887,8 @@
                      :fn sandbox-contract-flags-wrong-require-module})
 (table.insert tests {:name "sandbox-activation-contract flags missing runtime.scene access"
                      :fn sandbox-contract-flags-missing-runtime-scene-access})
+(table.insert tests {:name "sandbox-activation-contract flags unrelated runtime.scene access"
+                     :fn sandbox-contract-flags-unrelated-runtime-scene-access})
 (table.insert tests {:name "sandbox-activation-contract flags wrong ensure slot id"
                      :fn sandbox-contract-flags-wrong-ensure-slot-id})
 (table.insert tests {:name "sandbox-activation-contract flags canvas not hidden"

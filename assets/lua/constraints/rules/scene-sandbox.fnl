@@ -220,23 +220,62 @@
              (= (. p (- plen 1)) "world-runtime")
              (= (. p (- plen 1)) "active-world-runtime")))))
 
+(local scene-access-patterns
+  ["runtime.scene"
+   "world-runtime.scene"
+   "active-world-runtime.scene"])
+
+(local contract-call-patterns
+  ["scene:ensure-activity-slot"
+   "scene:activate-activity-slot"
+   "ctx:set-root-actions!"
+   "ctx:set-update!"
+   "ctx:set-target-enabled!"])
+
 (fn check-sandbox-uses-runtime-scene [diagnostics ff]
-  "Check that sandbox-activity-unit.fnl accesses runtime.scene (or equivalent
-  world-runtime.scene / app.active-world-runtime.scene)."
-  (var found false)
-  (each [_ a (ipairs (or ff.accesses []))]
-    (when (access-matches-scene-path? a)
-      (set found true)))
-  (when (not found)
-    (table.insert diagnostics
-      (Diagnostics.violation
-        {:constraint-id "scene.sandbox-activation-contract"
-         :family "scene-sandbox"
-         :message "sandbox-activity-unit.fnl must access runtime.scene (world-runtime.scene)"
-         :file ff.path
-         :line 0 :column 0
-         :evidence {:required-access "runtime.scene"}
-         :hint "ensure sandbox activation obtains and uses runtime.scene / world-runtime.scene"}))))
+  "Check that sandbox-activity-unit.fnl activation function accesses runtime.scene.
+  Inspects function definitions that contain activation contract calls: at least
+  one such definition must also reference runtime.scene / world-runtime.scene in
+  its form text.  Falls back to a file-wide access scan only when no contract-
+  call-containing definition is found."
+  (var found-scene false)
+  (var looked-at-activation-defs false)
+  ;; Find definitions whose form text contains activation contract calls.
+  (each [_ def (ipairs (or ff.definitions []))]
+    (when (and def.form (form-contains-any? def.form contract-call-patterns))
+      (set looked-at-activation-defs true)
+      (when (form-contains-any? def.form scene-access-patterns)
+        (set found-scene true))))
+  (if looked-at-activation-defs
+      ;; At least one definition contains activation calls — verify it also
+      ;; references the runtime scene.
+      (when (not found-scene)
+        (table.insert diagnostics
+          (Diagnostics.violation
+            {:constraint-id "scene.sandbox-activation-contract"
+             :family "scene-sandbox"
+             :message "sandbox-activity-unit.fnl activation function must access runtime.scene (world-runtime.scene)"
+             :file ff.path
+             :line 0 :column 0
+             :evidence {:required-access "runtime.scene"}
+             :hint "ensure sandbox activation obtains and uses runtime.scene / world-runtime.scene"})))
+      ;; No contract-call-containing definition found — fall back to
+      ;; file-wide access check (activation code may be at top level).
+      (do
+        (set found-scene false)
+        (each [_ a (ipairs (or ff.accesses []))]
+          (when (access-matches-scene-path? a)
+            (set found-scene true)))
+        (when (not found-scene)
+          (table.insert diagnostics
+            (Diagnostics.violation
+              {:constraint-id "scene.sandbox-activation-contract"
+               :family "scene-sandbox"
+               :message "sandbox-activity-unit.fnl must access runtime.scene (world-runtime.scene)"
+               :file ff.path
+               :line 0 :column 0
+               :evidence {:required-access "runtime.scene"}
+               :hint "ensure sandbox activation obtains and uses runtime.scene / world-runtime.scene"}))))))
 
 (fn check-single-contract-call [diagnostics ff req]
   "Check a single required call in sandbox-activity-unit.fnl.
