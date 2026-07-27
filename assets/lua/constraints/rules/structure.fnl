@@ -18,8 +18,14 @@
 
 ;; Strip double-quoted string literals from source text so that pattern
 ;; matching does not produce false positives on string contents.
+;; Uses a sentinel to protect Fennel escaped quotes (\\\") inside strings,
+;; then strips bare-quoted regions, then restores the escape sequences.
 (fn strip-strings [s]
-  (s:gsub "\"[^\"]*\"" ""))
+  (let [sentinel "\1"]  ;; byte 0x01, won't appear in Fennel source text
+    (-> s
+        (: :gsub "\\\"" sentinel)
+        (: :gsub "\"[^\"]*\"" "")
+        (: :gsub sentinel "\\\""))))
 
 ;; Strip Fennel comments (; to end of line) from source text.
 ;; Must be called after strip-strings to avoid removing semicolons

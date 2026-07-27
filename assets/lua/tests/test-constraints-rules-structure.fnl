@@ -718,6 +718,51 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "let inside comment should not be flagged"))
 
+;; R1-2 round 2: escaped quotes inside strings
+(fn style-doctrine-allows-let-text-after-escaped-quote []
+  "A Fennel string containing an escaped quote (\\\") before (let ...
+  should NOT be flagged. The \\\" is part of the string, not a terminator."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  ;; def.form contains a string with escaped quote before (let
+  ;; The form text bytes are: ... \"prefix \\\" (let text)\" ...
+  (local ff (make-file-fact {:path "/src/escaped-let.fnl"
+                              :module "escaped-let"
+                              :definitions [{:kind :fn
+                                             :name "render"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 30
+                                             :form "(fn render []
+  \"prefix \\\" (let text)\")"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "let after escaped quote inside string should not be flagged"))
+
+(fn style-doctrine-allows-or-text-after-escaped-quote []
+  "A Fennel string containing an escaped quote (\\\") before (or ...
+  should NOT be flagged as a silent fallback."
+  (local Structure (require :constraints.rules.structure))
+  (local rules (Structure.rules))
+  (local rule (find-rule-by-id rules "structure.style-doctrine"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/escaped-or.fnl"
+                              :module "escaped-or"
+                              :definitions [{:kind :fn
+                                             :name "format"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 30
+                                             :form "(fn format [x]
+  \"prefix \\\" (or x y)\")"}]
+                              :exports []
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "or after escaped quote inside string should not be flagged"))
+
 ;; ======================================================================
 ;; R1-3: Real Source/Facts integration — parse valid and invalid Fennel source
 ;; ======================================================================
@@ -962,6 +1007,10 @@
                      :fn style-doctrine-allows-or-text-inside-string})
 (table.insert tests {:name "style-doctrine allows let text after comment"
                      :fn style-doctrine-allows-let-text-after-comment})
+(table.insert tests {:name "style-doctrine allows let text after escaped quote"
+                     :fn style-doctrine-allows-let-text-after-escaped-quote})
+(table.insert tests {:name "style-doctrine allows or text after escaped quote"
+                     :fn style-doctrine-allows-or-text-after-escaped-quote})
 
 ;; Structure metadata
 (table.insert tests {:name "structure rules returns table with five rules"
