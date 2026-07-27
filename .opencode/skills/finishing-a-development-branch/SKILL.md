@@ -54,11 +54,12 @@ Do all of the following:
    skill from Step 0.
 6. Only continue to Step 2 when the required validation suite passes.
 
-If systematic debugging establishes that the failure is external, environmental,
-unrelated to this branch, unreproducible with available evidence, or requires a
-human product/API/data/architecture decision, report BLOCKED or
-HUMAN_DECISION_REQUIRED with the evidence. Do not push, PR, merge, or clean up
-while required validation is red.
+If systematic debugging establishes that the failure is external/environmental,
+unreproducible with available evidence, or requires a human product/API/data/
+architecture decision, report BLOCKED or HUMAN_DECISION_REQUIRED with the
+evidence. A failure that is merely unrelated to this branch but does not meet
+one of these BLOCKED criteria still requires the standard debug/fix/rerun loop.
+Do not push, PR, merge, or clean up while required validation is red.
 
 **If tests pass:** continue to Step 2.
 
@@ -138,7 +139,7 @@ git pull
 git merge <feature-branch>
 ```
 
-If tests fail on the merged result: stop, leave everything in place, and investigate — nothing has been pushed, so the merge is local and recoverable.
+If tests fail on the merged result: follow the Step 1 validation-failure loop — invoke `systematic-debugging`, route any fix through `implementer` → `reviewer` → pass, do not push/PR/merge/clean up while red, and rerun from Step 0 after reviewed fixes. Nothing has been pushed, so the merge is local and recoverable.
 
 Once green: clean up the worktree (Step 7), then delete the branch:
 
