@@ -97,7 +97,6 @@
     (local original-selector app.object-selector)
     (local original-runtime app.active-world-runtime)
     (local original-fpc app.first-person-controls)
-    (local original-presentation-controls app.presentation-input-controls)
     (local original-clickables app.clickables)
     (local original-movables app.movables)
     (local created-clickables (Clickables))
@@ -134,7 +133,6 @@
     (set app.object-selector selector)
     (set app.active-world-runtime
          {:presentation {:input-controls (fn [_self] fp)}})
-    (set app.presentation-input-controls (fn [] fp))
     (set app.first-person-controls nil)
     (set app.clickables created-clickables)
     (set app.movables nil)
@@ -163,7 +161,6 @@
           (assert (= fp-state.updates 1) "First-person controls should continue updating while selection is enabled"))))
     (set app.object-selector original-selector)
     (set app.active-world-runtime original-runtime)
-    (set app.presentation-input-controls original-presentation-controls)
     (set app.first-person-controls original-fpc)
     (set app.clickables original-clickables)
     (set app.movables original-movables)
@@ -180,7 +177,6 @@
     (local original-selector app.object-selector)
     (local original-runtime app.active-world-runtime)
     (local original-fpc app.first-person-controls)
-    (local original-presentation-controls app.presentation-input-controls)
     (local original-clickables app.clickables)
     (local original-movables app.movables)
     (local original-resizables app.resizables)
@@ -204,7 +200,6 @@
     (set app.object-selector selector)
     (set app.active-world-runtime
          {:presentation {:input-controls (fn [_self] fp)}})
-    (set app.presentation-input-controls (fn [] fp))
     (set app.first-person-controls nil)
     (set app.clickables {:active? false})
     (set app.movables nil)
@@ -224,7 +219,6 @@
                   "Disabled selection pointer target should leave mouse buttons for camera controls"))))
     (set app.object-selector original-selector)
     (set app.active-world-runtime original-runtime)
-    (set app.presentation-input-controls original-presentation-controls)
     (set app.first-person-controls original-fpc)
     (set app.clickables original-clickables)
     (set app.movables original-movables)
@@ -488,35 +482,35 @@
     (local original-viewport app.viewport)
     (local original-runtime app.active-world-runtime)
     (local original-camera app.camera)
-    (local original-presentation-camera app.presentation-camera)
     (local original-projection app.projection)
     (var camera nil)
-    (set app.viewport {:x 0 :y 0 :width 1600 :height 900})
-    (set camera (Camera {:position (glm.vec3 0 0 30)}))
-    (set app.active-world-runtime
-         {:presentation {:camera (fn [_self _opts] camera)}})
-    (set app.presentation-camera (fn [_opts] camera))
-    (set app.camera nil)
-    (when (not app.create-default-projection)
-      (set app.create-default-projection AppProjection.create-default-projection))
-    (set app.projection (app.create-default-projection))
-    (local selector (ObjectSelector {:enabled? true}))
-    (local selectable {:position (glm.vec3 -4.528 -9.146 0)})
-    (selector:set-selectables [selectable])
+    (var selector nil)
     (local (ok err)
       (pcall
         (fn []
+          (set app.viewport {:x 0 :y 0 :width 1600 :height 900})
+          (set camera (Camera {:position (glm.vec3 0 0 30)}))
+          (set app.active-world-runtime
+               {:presentation {:camera (fn [_self _opts] camera)}})
+          (set app.camera nil)
+          (when (not app.create-default-projection)
+            (set app.create-default-projection AppProjection.create-default-projection))
+          (set app.projection (app.create-default-projection))
+          (set selector (ObjectSelector {:enabled? true}))
+          (local selectable {:position (glm.vec3 -4.528 -9.146 0)})
+          (selector:set-selectables [selectable])
           (selector.box.changed:emit {:p1 {:x -5000 :y -5000}
                                       :p2 {:x 5000 :y 5000}})
           (assert (= (length selector.selected) 1)
                   "Selector should select nodes with default projection"))))
-    (selector:drop)
+    (when selector
+      (selector:drop)
+      (set selector nil))
     (when camera
       (camera:drop)
       (set camera nil))
     (set app.viewport original-viewport)
     (set app.active-world-runtime original-runtime)
-    (set app.presentation-camera original-presentation-camera)
     (set app.camera original-camera)
     (set app.projection original-projection)
     (when (not ok)
@@ -573,9 +567,34 @@
 
 (local main
   (fn []
+    ;; Production wrapper functions that delegate to app.active-world-runtime.presentation.
+    ;; The test runner's setup-test-env does (global app {}) which nukes these, so we
+    ;; install them before each test to exercise the real production delegation path.
+    (local presentation-input-controls-fn
+      (fn []
+        (let [provider (and app.active-world-runtime app.active-world-runtime.presentation)]
+          (and provider (provider:input-controls)))))
+    (local presentation-camera-fn
+      (fn [opts]
+        (let [provider (and app.active-world-runtime app.active-world-runtime.presentation)]
+          (if provider
+              (provider:camera opts)
+              (let [options (or opts {})]
+                (when options.required?
+                  (assert provider "app.presentation-camera requires an active presentation provider")))))))
+    (local active-presentation-fn
+      (fn []
+        (and app.active-world-runtime app.active-world-runtime.presentation)))
+    ;; Wrap each test to install the production wrappers before execution.
+    (each [_ test (ipairs tests)]
+      (local original-fn test.fn)
+      (set test.fn (fn []
+        (set app.presentation-input-controls presentation-input-controls-fn)
+        (set app.presentation-camera presentation-camera-fn)
+        (set app.active-presentation active-presentation-fn)
+        (original-fn))))
     (local runner (require :tests/runner))
-    (runner.run-tests {:name "selection"
-                       :tests tests})))
+    (runner.run-tests {:name "selection" :tests tests})))
 
 {:name "selection"
  :tests tests

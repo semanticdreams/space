@@ -1441,7 +1441,7 @@
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
   (local original-runtime app.active-world-runtime)
-  (local original-presentation-controls app.presentation-input-controls)
+
   (local original-states app.states)
   (var suspended-state nil)
   (local (ok err)
@@ -1502,7 +1502,6 @@
                          :drag-active? (fn [_self] false)})
         (set app.active-world-runtime
              {:presentation {:input-controls (fn [_self] fpc-stub)}})
-        (set app.presentation-input-controls (fn [] fpc-stub))
         (set app.first-person-controls nil)
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-button-down.emit {:button 1 :x 40 :y 50})
@@ -1531,7 +1530,6 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
   (set app.active-world-runtime original-runtime)
-  (set app.presentation-input-controls original-presentation-controls)
   (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
@@ -1549,7 +1547,7 @@
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
   (local original-runtime app.active-world-runtime)
-  (local original-presentation-controls app.presentation-input-controls)
+
   (local original-states app.states)
   (var suspended-state nil)
   (local original-screen-pos-terrain-domain-hit scene.screen-pos-terrain-domain-hit)
@@ -1614,7 +1612,6 @@
                          :drag-active? (fn [_self] false)})
         (set app.active-world-runtime
              {:presentation {:input-controls (fn [_self] fpc-stub)}})
-        (set app.presentation-input-controls (fn [] fpc-stub))
         (set app.first-person-controls nil)
         (TerrainPaintManager.begin capture)
         (app.engine.events.mouse-motion.emit {:x 60 :y 50})
@@ -1632,7 +1629,6 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
   (set app.active-world-runtime original-runtime)
-  (set app.presentation-input-controls original-presentation-controls)
   (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)
@@ -1651,7 +1647,7 @@
   (local original-resizables app.resizables)
   (local original-fpc app.first-person-controls)
   (local original-runtime app.active-world-runtime)
-  (local original-presentation-controls app.presentation-input-controls)
+
   (local original-states app.states)
   (var suspended-state nil)
   (var forwarded-wheel nil)
@@ -1699,7 +1695,6 @@
                          :drag-active? (fn [_self] false)})
         (set app.active-world-runtime
              {:presentation {:input-controls (fn [_self] fpc-stub)}})
-        (set app.presentation-input-controls (fn [] fpc-stub))
         (set app.first-person-controls nil)
         (local states (States))
         (states:add-state :normal {})
@@ -1741,7 +1736,6 @@
   (set app.resizables original-resizables)
   (set app.first-person-controls original-fpc)
   (set app.active-world-runtime original-runtime)
-  (set app.presentation-input-controls original-presentation-controls)
   (set-app-states! original-states)
   (TestSupport.resume-active-state suspended-state)
   (cleanup)

@@ -54,9 +54,7 @@
   (local original-movables app.movables)
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
-  (local original-presentation-camera app.presentation-camera)
   (local original-controls app.first-person-controls)
-  (local original-presentation-controls app.presentation-input-controls)
   (local original-runtime app.active-world-runtime)
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
@@ -107,20 +105,16 @@
     (set app.movables original-movables)
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
-    (set app.presentation-camera original-presentation-camera)
     (set app.first-person-controls original-controls)
-    (set app.presentation-input-controls original-presentation-controls)
     (set app.active-world-runtime original-runtime)
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
     (restore-states! original-states)
-    (set app.viewport original-viewport)
     (set app.create-default-projection original-create-default-projection)
     (set app.active-interaction-surface original-active-surface)
     (set app.scene-interactive? original-scene-interactive?)
     (set app.canvas-interactive? original-canvas-interactive?))
-
 
   (let [(ok err)
         (pcall
@@ -135,8 +129,6 @@
             (set app.active-world-runtime
                  {:presentation {:input-controls (fn [_self] controls)
                                  :camera (fn [_self _opts] camera)}})
-            (set app.presentation-input-controls (fn [] controls))
-            (set app.presentation-camera (fn [_opts] camera))
             (set app.camera nil)
             (set app.first-person-controls nil)
             (set app.create-default-projection AppProjection.create-default-projection)
@@ -199,9 +191,7 @@
   (local original-movables app.movables)
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
-  (local original-presentation-camera app.presentation-camera)
   (local original-controls app.first-person-controls)
-  (local original-presentation-controls app.presentation-input-controls)
   (local original-runtime app.active-world-runtime)
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
@@ -251,9 +241,7 @@
     (set app.movables original-movables)
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
-    (set app.presentation-camera original-presentation-camera)
     (set app.first-person-controls original-controls)
-    (set app.presentation-input-controls original-presentation-controls)
     (set app.active-world-runtime original-runtime)
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
@@ -277,8 +265,6 @@
             (set app.active-world-runtime
                  {:presentation {:input-controls (fn [_self] controls)
                                  :camera (fn [_self _opts] camera)}})
-            (set app.presentation-input-controls (fn [] controls))
-            (set app.presentation-camera (fn [_opts] camera))
             (set app.camera nil)
             (set app.first-person-controls nil)
             (set app.create-default-projection AppProjection.create-default-projection)
@@ -342,9 +328,7 @@
   (local original-movables app.movables)
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
-  (local original-presentation-camera app.presentation-camera)
   (local original-controls app.first-person-controls)
-  (local original-presentation-controls app.presentation-input-controls)
   (local original-runtime app.active-world-runtime)
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
@@ -394,9 +378,7 @@
     (set app.movables original-movables)
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
-    (set app.presentation-camera original-presentation-camera)
     (set app.first-person-controls original-controls)
-    (set app.presentation-input-controls original-presentation-controls)
     (set app.active-world-runtime original-runtime)
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
@@ -420,8 +402,6 @@
             (set app.active-world-runtime
                  {:presentation {:input-controls (fn [_self] controls)
                                  :camera (fn [_self _opts] camera)}})
-            (set app.presentation-input-controls (fn [] controls))
-            (set app.presentation-camera (fn [_opts] camera))
             (set app.camera nil)
             (set app.first-person-controls nil)
             (set app.create-default-projection AppProjection.create-default-projection)
@@ -507,9 +487,7 @@
   (local original-movables app.movables)
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
-  (local original-presentation-camera app.presentation-camera)
   (local original-controls app.first-person-controls)
-  (local original-presentation-controls app.presentation-input-controls)
   (local original-runtime app.active-world-runtime)
   (local original-canvas-controls app.canvas-controls)
   (local original-active-pointer-controls app.active-pointer-controls)
@@ -580,9 +558,7 @@
     (set app.movables original-movables)
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
-    (set app.presentation-camera original-presentation-camera)
     (set app.first-person-controls original-controls)
-    (set app.presentation-input-controls original-presentation-controls)
     (set app.active-world-runtime original-runtime)
     (set app.canvas-controls original-canvas-controls)
     (set app.active-pointer-controls original-active-pointer-controls)
@@ -628,8 +604,6 @@
          (set app.active-world-runtime
               {:presentation {:input-controls (fn [_self] controls)
                               :camera (fn [_self _opts] camera)}})
-         (set app.presentation-input-controls (fn [] controls))
-         (set app.presentation-camera (fn [_opts] camera))
          (set app.camera nil)
          (set app.first-person-controls nil)
          (set app.canvas-controls canvas-controls)
@@ -716,9 +690,34 @@
 
 (local main
   (fn []
+    ;; Production wrapper functions that delegate to app.active-world-runtime.presentation.
+    ;; The test runner's setup-test-env does (global app {}) which nukes these, so we
+    ;; install them before each test to exercise the real production delegation path.
+    (local presentation-input-controls-fn
+      (fn []
+        (let [provider (and app.active-world-runtime app.active-world-runtime.presentation)]
+          (and provider (provider:input-controls)))))
+    (local presentation-camera-fn
+      (fn [opts]
+        (let [provider (and app.active-world-runtime app.active-world-runtime.presentation)]
+          (if provider
+              (provider:camera opts)
+              (let [options (or opts {})]
+                (when options.required?
+                  (assert provider "app.presentation-camera requires an active presentation provider")))))))
+    (local active-presentation-fn
+      (fn []
+        (and app.active-world-runtime app.active-world-runtime.presentation)))
+    ;; Wrap each test to install the production wrappers before execution.
+    (each [_ test (ipairs tests)]
+      (local original-fn test.fn)
+      (set test.fn (fn []
+        (set app.presentation-input-controls presentation-input-controls-fn)
+        (set app.presentation-camera presentation-camera-fn)
+        (set app.active-presentation active-presentation-fn)
+        (original-fn))))
     (local runner (require :tests/runner))
-    (runner.run-tests {:name "scene-drag"
-                       :tests tests})))
+    (runner.run-tests {:name "scene-drag" :tests tests})))
 
 {:name "scene-drag"
  :tests tests
