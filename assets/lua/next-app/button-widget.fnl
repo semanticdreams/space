@@ -51,8 +51,8 @@
   (local focus-outline-width (or options.focus-outline-width 0.02))
   (local focusable? (not (= options.focusable? false)))
   (local focus-context options.focus)
-  (local clickables options.clickables)
-  (local hoverables options.hoverables)
+  (local clickables (assert options.clickables "ButtonWidget requires clickables"))
+  (local hoverables (assert options.hoverables "ButtonWidget requires hoverables"))
   (local system-cursors options.system-cursors)
 
   (local base-text-style
@@ -159,7 +159,6 @@
 
   (fn register-clickables []
     (when clickables
-      (assert clickables "ButtonWidget requires clickables for button registration")
       (when clickables.register
         (clickables:register button))
       (when clickables.register-right-click
@@ -169,7 +168,6 @@
 
   (fn unregister-clickables []
     (when clickables
-      (assert clickables "ButtonWidget requires clickables for button unregistration")
       (when clickables.unregister
         (clickables:unregister button))
       (when clickables.unregister-right-click
@@ -179,12 +177,10 @@
 
   (fn register-hoverables []
     (when (and hoverables hoverables.register)
-      (assert hoverables "ButtonWidget requires hoverables for hover registration")
       (hoverables:register button)))
 
   (fn unregister-hoverables []
     (when (and hoverables hoverables.unregister)
-      (assert hoverables "ButtonWidget requires hoverables for hover unregistration")
       (hoverables:unregister button)))
 
   (fn set-focus-state [_self value]

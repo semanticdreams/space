@@ -40,7 +40,9 @@
 (fn next-button-measures-label-and-emits-quad []
   (local button
     (ButtonWidget {:name "button-under-test"
-                   :text "Launch"}))
+                   :text "Launch"
+                   :clickables {:register (fn [_ _] nil) :unregister (fn [_ _] nil)}
+                   :hoverables {:register (fn [_ _] nil) :unregister (fn [_ _] nil)}}))
   (NextLayout.run-frame button 1.2 0.4 0)
   (assert (> button.measured-width 0))
   (assert (> button.measured-height 0))

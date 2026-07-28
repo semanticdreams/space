@@ -8,8 +8,8 @@
 
 (fn ToggleWidget [opts]
   (local options (or opts {}))
-  (local clickables options.clickables)
-  (local hoverables options.hoverables)
+  (local clickables (assert options.clickables "ToggleWidget requires clickables"))
+  (local hoverables (assert options.hoverables "ToggleWidget requires hoverables"))
   (local gap (or options.gap 0.08))
   (local width (or options.width 0.36))
   (local height (or options.height 0.16))
@@ -109,19 +109,15 @@
   (set toggle.drop
        (fn [self]
          (when (and clickables clickables.unregister)
-           (assert clickables "ToggleWidget requires clickables for drop cleanup")
            (clickables:unregister self))
          (when (and hoverables hoverables.unregister)
-           (assert hoverables "ToggleWidget requires hoverables for drop cleanup")
            (hoverables:unregister self))
          (self.changed:clear)
          (self.clicked:clear)))
 
   (when (and clickables clickables.register)
-    (assert clickables "ToggleWidget requires clickables for toggle registration")
     (clickables:register toggle))
   (when (and hoverables hoverables.register)
-    (assert hoverables "ToggleWidget requires hoverables for hover registration")
     (hoverables:register toggle))
   (set-track-color)
   toggle)

@@ -6,10 +6,20 @@
 
 (local tests [])
 
+(fn stub-clickables []
+  {:register (fn [_ _] nil)
+   :unregister (fn [_ _] nil)})
+
+(fn stub-hoverables []
+  {:register (fn [_ _] nil)
+   :unregister (fn [_ _] nil)})
+
 (fn toggle-widget-click-toggles-state-and-emits []
   (var changed-count 0)
   (local toggle (ToggleWidget {:text "Metrics"
-                               :checked? false}))
+                               :checked? false
+                               :clickables (stub-clickables)
+                               :hoverables (stub-hoverables)}))
   (toggle.changed.connect (fn [_event]
                             (set changed-count (+ changed-count 1))))
   (assert (= toggle.checked? false))
@@ -23,7 +33,9 @@
 (fn toggle-widget-layout-updates-knob-position []
   (local toggle (ToggleWidget {:checked? false
                                :width 0.4
-                               :height 0.2}))
+                               :height 0.2
+                               :clickables (stub-clickables)
+                               :hoverables (stub-hoverables)}))
   (NextLayout.run-frame toggle 0.6 0.3 0)
   (local off-x toggle.knob.local-x)
   (toggle:set-checked true)

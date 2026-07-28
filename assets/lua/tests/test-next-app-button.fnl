@@ -39,6 +39,19 @@
   (set stub.unregister (fn [_self _obj] (set state.unregister (+ state.unregister 1))))
   stub)
 
+
+(fn stub-clickables []
+  {:register (fn [_ _] nil)
+   :unregister (fn [_ _] nil)
+   :register-right-click (fn [_ _] nil)
+   :unregister-right-click (fn [_ _] nil)
+   :register-double-click (fn [_ _] nil)
+   :unregister-double-click (fn [_ _] nil)})
+
+(fn stub-hoverables []
+  {:register (fn [_ _] nil)
+   :unregister (fn [_ _] nil)})
+
 (fn make-system-cursors-stub []
   (local state {:calls [] :last nil})
   (local stub {:state state})
@@ -94,7 +107,8 @@
 (fn next-button-registers-with-clickables []
   (local clickables (make-clickables-stub))
   (local button (ButtonWidget {:text "A"
-                               :clickables clickables}))
+                               :clickables clickables
+                               :hoverables (make-hoverables-stub)}))
   (assert (= clickables.state.register 1))
   (assert (= clickables.state.register-right 1))
   (assert (= clickables.state.register-double 1))
@@ -106,7 +120,8 @@
 (fn next-button-registers-with-hoverables []
   (local hoverables (make-hoverables-stub))
   (local button (ButtonWidget {:text "A"
-                               :hoverables hoverables}))
+                               :hoverables hoverables
+                               :clickables (make-clickables-stub)}))
   (assert (= hoverables.state.register 1))
   (button:drop)
   (assert (= hoverables.state.unregister 1)))
@@ -116,6 +131,8 @@
   (var signal-count 0)
   (local button
     (ButtonWidget {:text "Emit"
+                   :clickables (make-clickables-stub)
+                   :hoverables (make-hoverables-stub)
                    :on-click (fn [_self _event]
                                (set callback-count (+ callback-count 1)))}))
   (button.clicked.connect (fn [_event]
@@ -132,7 +149,7 @@
                    :on-right-click (fn [_self _event]
                                      (set right-callbacks (+ right-callbacks 1)))
                    :on-double-click (fn [_self _event]
-                                      (set double-callbacks (+ double-callbacks 1)))}))
+                                      (set double-callbacks (+ double-callbacks 1))) :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:on-right-click {:button 2})
   (button:on-double-click {:button 1})
   (assert (= right-callbacks 1))
@@ -141,7 +158,7 @@
 (fn next-button-right-and-double-click-signals []
   (var right-count 0)
   (var double-count 0)
-  (local button (ButtonWidget {:text "Clicks"}))
+  (local button (ButtonWidget {:text "Clicks" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button.right-clicked.connect (fn [_event]
                                   (set right-count (+ right-count 1))))
   (button.double-clicked.connect (fn [_event]
@@ -152,7 +169,7 @@
   (assert (= double-count 1)))
 
 (fn next-button-intersect-misses-outside-bounds []
-  (local button (ButtonWidget {:text "Miss"}))
+  (local button (ButtonWidget {:text "Miss" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:set-frame 0.2 0.3 0 0.6 0.2 0 (glm.quat 1 0 0 0) {:mark-dirty? false})
   (button:run-layout 0.6 0.2 0)
   (NextLayout.run-frame button 0.6 0.2 0)
@@ -168,14 +185,14 @@
   (local hover (glm.vec4 0.6 0.5 0.4 1))
   (local button (ButtonWidget {:text "Hover"
                                :background-color base
-                               :hover-background-color hover}))
+                               :hover-background-color hover :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:on-hovered true)
   (assert (color= button.rectangle.color hover))
   (button:on-hovered false)
   (assert (color= button.rectangle.color base)))
 
 (fn next-button-defaults-to-theme-colors []
-  (local button (ButtonWidget {:text "Theme"}))
+  (local button (ButtonWidget {:text "Theme" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert (color= button.background-color button.rectangle.color))
   (assert button.hover-background-color)
   (assert button.pressed-background-color))
@@ -183,7 +200,7 @@
 (fn next-button-hover-updates-cursor []
   (local cursors (make-system-cursors-stub))
   (local button (ButtonWidget {:text "Cursor"
-                               :system-cursors cursors}))
+                               :system-cursors cursors :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:on-hovered true)
   (assert (= cursors.state.last "hand"))
   (button:on-hovered false)
@@ -192,18 +209,18 @@
 (fn next-button-icon-uses-icons-font []
   (local icons (make-icons-stub))
   (local button (ButtonWidget {:icon :star
-                               :icons icons}))
+                               :icons icons :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (local codepoints (button.text:get-text))
   (assert (= button.icon :star))
   (assert codepoints))
 
 (fn next-button-custom-child-used-directly []
   (local child (make-probe-node 0.2 0.1))
-  (local button (ButtonWidget {:child child}))
+  (local button (ButtonWidget {:child child :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert (= button.child child)))
 
 (fn next-button-centers-content-when-taller []
-  (local button (ButtonWidget {:text "Center"}))
+  (local button (ButtonWidget {:text "Center" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (run-frame button)
   (button:set-size 1.0 0.4 0)
   (NextLayout.run-frame button 1.0 0.4 0)
@@ -212,7 +229,7 @@
 (fn next-button-pressed-color []
   (local pressed (glm.vec4 0.8 0.1 0.1 1))
   (local button (ButtonWidget {:text "Press"
-                               :pressed-background-color pressed}))
+                               :pressed-background-color pressed :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:on-pressed true)
   (assert (color= button.rectangle.color pressed))
   (button:on-pressed false)
@@ -220,7 +237,7 @@
 
 (fn next-button-ghost-visibility []
   (local button (ButtonWidget {:text "Ghost"
-                               :variant :ghost}))
+                               :variant :ghost :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert (not (button.rectangle:visible?)))
   (button:on-hovered true)
   (assert (button.rectangle:visible?))
@@ -228,13 +245,13 @@
   (assert (not (button.rectangle:visible?))))
 
 (fn next-button-solid-keeps-visibility []
-  (local button (ButtonWidget {:text "Solid"}))
+  (local button (ButtonWidget {:text "Solid" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert (button.rectangle:visible?))
   (button:on-hovered false)
   (assert (button.rectangle:visible?)))
 
 (fn next-button-focus-overlay []
-  (local button (ButtonWidget {:text "Focus"}))
+  (local button (ButtonWidget {:text "Focus" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert button.focus-overlay)
   (assert (not (button.focus-overlay:visible?)))
   (button:on-click {:button 1})
@@ -244,7 +261,7 @@
 (fn next-button-focus-manager-integration []
   (local focus-data (make-focus-context))
   (local button (ButtonWidget {:text "Focus manager"
-                               :focus focus-data.focus}))
+                               :focus focus-data.focus :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert button.focus-node)
   (assert (not button.focused?))
   (button:on-click {:button 1})
@@ -263,7 +280,7 @@
   (local button (ButtonWidget {:icon :star
                                :icons icons
                                :text "Launch"
-                               :trailing trailing}))
+                               :trailing trailing :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (assert (= button.child.name "next-button-content"))
   (assert (= (length button.child.children) 3)))
 
@@ -280,13 +297,13 @@
   (assert (= button.enabled? true)))
 
 (fn next-button-set-text-updates-label []
-  (local button (ButtonWidget {:text "Before"}))
+  (local button (ButtonWidget {:text "Before" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:set-text "After")
   (assert (= (button.label:get-text) "After")))
 
 (fn next-button-set-color-updates-rectangle []
   (local color (glm.vec4 0.7 0.2 0.1 1))
-  (local button (ButtonWidget {:text "Tint"}))
+  (local button (ButtonWidget {:text "Tint" :clickables (stub-clickables) :hoverables (stub-hoverables)}))
   (button:set-color color)
   (assert (color= button.background-color color))
   (assert (color= button.rectangle.color color)))
