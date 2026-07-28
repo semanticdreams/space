@@ -295,43 +295,6 @@
   {:title title :subtitle subtitle :note note})
 
 (fn build-button-row [clickables hoverables focus-context]
-  (local buttons (build-button-row clickables hoverables focus-context))
-  (local run-button buttons.run-button)
-  (local inspect-button buttons.inspect-button)
-  (local ship-button buttons.ship-button)
-  (local button-row buttons.row)
-  {:run-button run-button
-   :inspect-button inspect-button
-   :ship-button ship-button
-   :row button-row})
-
-(fn build-ui-root [renderer-options]
-  (local router (InteractionRouter.new))
-  (local adapters (make-interaction-adapters router))
-  (local clickables adapters.clickables)
-  (local hoverables adapters.hoverables)
-  (var focus-context nil)
-  (when (= renderer-options.enable-focus true)
-    (local {: FocusManager} (require :focus))
-    (local manager (FocusManager {:root-name "next-app-focus"}))
-    (local root-scope (manager:get-root-scope))
-    (local scope (manager:create-scope {:name "next-app-scope"}))
-    (manager:attach scope root-scope)
-    (set focus-context {:manager manager
-                        :create-node (fn [_self opts]
-                                       (local node (manager:create-node opts))
-                                       (manager:attach node scope)
-                                       node)
-                        :attach-bounds (fn [_self node opts]
-                                         (when (and node opts opts.get-focus-bounds)
-                                           (set node.get-focus-bounds opts.get-focus-bounds)))})
-    (set router.focus-manager manager))
-
-  (local headers (build-header-texts renderer-options))
-  (local title headers.title)
-  (local subtitle headers.subtitle)
-  (local note headers.note)
-
   (local run-button
     (ButtonWidget {:name "next-button-run"
                    :text "Run"
@@ -365,7 +328,6 @@
                    :background-color (glm.vec4 0.62 0.30 0.86 0.96)
                    :hover-background-color (glm.vec4 0.69 0.36 0.91 1)
                    :pressed-background-color (glm.vec4 0.52 0.24 0.72 1)}))
-
   (local button-row
     (NextFlex.Flex {:name "next-button-row"
                     :axis :x
@@ -373,6 +335,43 @@
                     :children [(NextFlex.FlexChild run-button 1)
                                (NextFlex.FlexChild inspect-button 1)
                                (NextFlex.FlexChild ship-button 1)]}))
+  {:run-button run-button
+   :inspect-button inspect-button
+   :ship-button ship-button
+   :row button-row})
+
+(fn build-ui-root [renderer-options]
+  (local router (InteractionRouter.new))
+  (local adapters (make-interaction-adapters router))
+  (local clickables adapters.clickables)
+  (local hoverables adapters.hoverables)
+  (var focus-context nil)
+  (when (= renderer-options.enable-focus true)
+    (local {: FocusManager} (require :focus))
+    (local manager (FocusManager {:root-name "next-app-focus"}))
+    (local root-scope (manager:get-root-scope))
+    (local scope (manager:create-scope {:name "next-app-scope"}))
+    (manager:attach scope root-scope)
+    (set focus-context {:manager manager
+                        :create-node (fn [_self opts]
+                                       (local node (manager:create-node opts))
+                                       (manager:attach node scope)
+                                       node)
+                        :attach-bounds (fn [_self node opts]
+                                         (when (and node opts opts.get-focus-bounds)
+                                           (set node.get-focus-bounds opts.get-focus-bounds)))})
+    (set router.focus-manager manager))
+
+  (local headers (build-header-texts renderer-options))
+  (local title headers.title)
+  (local subtitle headers.subtitle)
+  (local note headers.note)
+
+  (local buttons (build-button-row clickables hoverables focus-context))
+  (local run-button buttons.run-button)
+  (local inspect-button buttons.inspect-button)
+  (local ship-button buttons.ship-button)
+  (local button-row buttons.row)
 
   (local perf-toggle
     (ToggleWidget {:name "next-toggle-perf"
