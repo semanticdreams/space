@@ -106,6 +106,12 @@
               nil))
         nil)))
 
+(fn enclosing-fn-name [fn-stack]
+  "Return the name of the innermost function on fn-stack, or nil."
+  (if (> (length fn-stack) 0)
+      (. (. fn-stack (length fn-stack)) :name)
+      nil))
+
 (fn extract-file-facts [record]
   "Extract all static facts from a single file record."
   (let [source record.source
@@ -174,18 +180,15 @@
                     (= (c:type) "symbol_binding")
                     (set local-name (node-text source c)))))
             (when local-name
-              (let [enclosing-fn (if (> (length fn-stack) 0)
-                                    (. (. fn-stack (length fn-stack)) :name)
-                                    nil)]
-                (table.insert facts.definitions
-                  {:kind :local
-                   :name local-name
-                   :top-level? (= depth 1)
-                   :line loc.line
-                   :column loc.column
-                   :length (node:end-byte)
-                   :form form
-                   :enclosing-fn enclosing-fn}))
+              (table.insert facts.definitions
+                {:kind :local
+                 :name local-name
+                 :top-level? (= depth 1)
+                 :line loc.line
+                 :column loc.column
+                 :length (node:end-byte)
+                 :form form
+                 :enclosing-fn (enclosing-fn-name fn-stack)})
               ;; If value is a require form, extract module name
               (when (and value-node (= (value-node:type) "list"))
                 (let [vndc (non-delimiter-children value-node)]
@@ -207,9 +210,7 @@
                 form (node-text source node)
                 is-top-level (= (length fn-stack) 0)
                 anonymous? (not fn-name)
-                enclosing-fn (if (> (length fn-stack) 0)
-                                 (. (. fn-stack (length fn-stack)) :name)
-                                 nil)]
+                enc-fn (enclosing-fn-name fn-stack)]
             (table.insert facts.definitions
               {:kind :fn
                :name (or fn-name "<anonymous>")
@@ -218,7 +219,7 @@
                :column loc.column
                :length (node:end-byte)
                :form form
-               :enclosing-fn enclosing-fn})
+               :enclosing-fn enc-fn})
             (table.insert fn-stack
               {:name (or fn-name "<anonymous>")
                :start-depth depth

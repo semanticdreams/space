@@ -601,22 +601,12 @@
   found)
 
  (fn parent-has-asserted-local-before-child? [calls parent child kw known-parent?]
-   "Scope-safe closure-helper bypass predicate.  Returns true if ALL of:
-   1) if known-parent? is true, parent-child relationship is trusted via
-      enclosing-fn metadata (no string.find check); otherwise parent.form
-      must contain child.form;
-   2) an assert call fact exists for callee 'assert' with enclosing-fn == parent.name
-      and call.line < child.line (conservative on same-line);
-   3) parent form text BEFORE the child occurrence (strings/comments stripped)
-      contains either:
-      a) (local kw (assert ...)) or (let [kw (assert ...)] ...), OR
-      b) (local kw ...) (separate-local pattern where assert is a separate call
-         that specifically targets kw — checked via assert-call-targets-kw?)."
+   "Scope-safe closure-helper bypass predicate.  When known-parent? is true,
+   parent-child relation is trusted via enclosing-fn metadata but position
+   is still verified via string.find for reliable prefix search."
    (when (and parent.form parent.name (not= parent.name "<anonymous>"))
-     (local child-pos (if known-parent?
-                         (if (= child.line nil) 0 child.line)
-                         (string.find parent.form child.form 1 true)))
-     (when (if known-parent? true child-pos)
+     (local child-pos (string.find parent.form child.form 1 true))
+     (when child-pos
        ;; Criterion 2: assert call in parent scope before child
        (var assert-before-child false)
        (each [_ call (ipairs calls)]
@@ -630,9 +620,8 @@
            (set assert-before-child true)))
        (when assert-before-child
          ;; Criterion 3: parent form before child contains the binding pattern
-         ;; If known-parent?, search entire parent form (not just prefix)
-         (local search-text (parent.form:sub 1 (if known-parent? (length parent.form) (- child-pos 1))))
-         (local no-strings (strip-strings search-text))
+         (local prefix (parent.form:sub 1 (- child-pos 1)))
+         (local no-strings (strip-strings prefix))
          (local clean (strip-comments no-strings))
          ;; Precompute all patterns for flat if chain
          (local local-assert-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
