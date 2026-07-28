@@ -595,6 +595,55 @@
   (assert flagged-helper
           "helper should be flagged when only guarded options.clickables without assert"))
 
+;; R1-1 regression: unrelated assert does not cover helper
+(fn interactive-assertion-flags-unrelated-assert []
+  "A nested helper using bare clickables should be flagged when the parent
+  binds (local clickables options.clickables) and has an unrelated assert
+  (assert ctx.theme ...) before the child.  Only asserts targeting the exact
+  keyword clickables prove the local safe for the closure bypass."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local build-form (.. "(fn make-widget [opts ctx]
+  (local options (or opts {}))
+  (local clickables options.clickables)
+  (assert ctx.theme \"theme required\")
+  " helper-form "
+  (helper))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 4 :column 3
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 3 :column 3
+                                       :form "(assert ctx.theme \"theme required\")"
+                                       :enclosing-fn "make-widget"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag helper when only unrelated assert, not clickables")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var flagged-helper false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "helper")
+      (set flagged-helper true)))
+  (assert flagged-helper
+          "helper should be flagged when unrelated assert does not cover clickables"))
+
 ;; Task 11: separate-local-then-assert pattern
 (table.insert tests {:name "interactive-assertion allows separate local clickables assert pattern"
                      :fn interactive-assertion-allows-separate-local-clickables-assert-pattern})
@@ -608,6 +657,9 @@
                      :fn interactive-assertion-flags-separate-local-with-assert-in-sibling})
 (table.insert tests {:name "interactive-assertion flags guarded options clickables only"
                      :fn interactive-assertion-flags-guarded-options-clickables-only})
+;; R1-1: unrelated assert does not enable bypass
+(table.insert tests {:name "interactive-assertion flags unrelated assert"
+                     :fn interactive-assertion-flags-unrelated-assert})
 
 ;; ==== Task 11: interaction-router router-owned collections ====
 

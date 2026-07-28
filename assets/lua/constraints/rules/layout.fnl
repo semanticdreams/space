@@ -616,16 +616,36 @@
               (local let-assert-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
               (if (clean:find let-assert-pat)
                   true
-                  ;; Try separate-local pattern: (local kw <anything>)
-                  ;; kw is bound as a local, and assert is a separate call
-                  ;; fact (already verified via assert-before-child above).
-                  (do
-                    (local local-any-pat (.. "%(local[%s\n]+" kw "[%s\n]"))
-                    (if (clean:find local-any-pat)
-                        true
-                        (do
-                          (local let-any-pat (.. "%(let[%s\n]+%[" kw "[%s\n]"))
-                          (if (clean:find let-any-pat) true false)))))))))))
+                   ;; Try separate-local pattern: (local kw <anything>)
+                   ;; kw is bound as a local, and assert is a separate call
+                   ;; fact.  Require the assert call to target kw — an
+                   ;; unrelated assert must not prove the local safe.
+                   (do
+                     (fn assert-call-targets-kw? [calls parent-name child-line kw-local]
+                       (var found false)
+                       (each [_ call (ipairs calls)]
+                         (when (and (not found)
+                                    (= call.callee "assert")
+                                    call.enclosing-fn
+                                    (= call.enclosing-fn parent-name)
+                                    call.line
+                                    child-line
+                                    (< call.line child-line)
+                                    call.form)
+                           (local call-no-strings (strip-strings call.form))
+                           (local call-clean (strip-comments call-no-strings))
+                           (local pat (.. "%(assert[%s\n]+" kw-local "[%s\n%)]"))
+                           (when (call-clean:find pat)
+                             (set found true))))
+                       found)
+                     (local local-any-pat (.. "%(local[%s\n]+" kw "[%s\n]"))
+                     (if (clean:find local-any-pat)
+                         (assert-call-targets-kw? calls parent.name child.line kw)
+                         (do
+                           (local let-any-pat (.. "%(let[%s\n]+%[" kw "[%s\n]"))
+                           (if (clean:find let-any-pat)
+                               (assert-call-targets-kw? calls parent.name child.line kw)
+                                false)))))))))))
 
 ;; ---- precision helpers for interactive-context-assertion ----
 

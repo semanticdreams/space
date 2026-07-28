@@ -8,15 +8,15 @@
 (local no-setters (require :tests.test-constraints-rules-layout-no-setters))
 (local child-drop (require :tests.test-constraints-rules-layout-child-drop))
 (local interactive (require :tests.test-constraints-rules-layout-interactive))
-(local interactive-precision (require :tests.test-constraints-rules-layout-interactive-precision))
 
 (local tests [])
 
 ;; Collect tests from split modules
+;; Note: interactive module already imports and merges interactive-precision tests;
+;; precision module must not be imported here to avoid double-registration.
 (each [_ t (ipairs no-setters.tests)] (table.insert tests t))
 (each [_ t (ipairs child-drop.tests)] (table.insert tests t))
 (each [_ t (ipairs interactive.tests)] (table.insert tests t))
-(each [_ t (ipairs interactive-precision.tests)] (table.insert tests t))
 
 ;; ======================================================================
 
