@@ -545,11 +545,13 @@
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "returned table :drop (fn ...) should satisfy public drop path"))
 
-;; R3-2: returned table :drop symbol to function satisfies public drop path
-(fn child-drop-allows-returned-table-drop-symbol []
-  "A file creating Layout where :drop references a function-valued local
-  (e.g., {:drop cleanup} where cleanup is (local cleanup (fn [] ...)))
-  should satisfy the public drop path."
+;; R3-2-negative: returned table :drop symbol is NOT accepted
+;; Symbolic :drop <symbol> resolution is not reliably available from
+;; file-facts. Only inline (fn ...)/(lambda ...) is accepted.
+(fn child-drop-flags-returned-table-drop-symbol []
+  "A returned table {:drop cleanup} where cleanup is a same-scope
+  function-valued local should NOT satisfy the public drop path —
+  symbolic resolution is not supported."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.owned-child-drop"))
@@ -584,7 +586,67 @@
                                        :form "(layout:drop)"
                                        :enclosing-fn "make-widget"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert (= result nil) "returned table :drop symbol-to-fn should satisfy public drop path"))
+  (assert result "returned table :drop symbol should flag missing public drop")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop for symbolic :drop"))
+
+;; V12-1: other-scope function-valued symbol regression
+;; make-widget returns {:drop cleanup} but cleanup is defined in an
+;; unrelated function/scope. Symbolic resolution must not accept the
+;; other-scope definition.
+(fn child-drop-flags-other-scope-drop-symbol []
+  "A child-creating function returning {:drop cleanup} where cleanup is
+  a function-valued local in a different scope should be flagged.
+  Symbolic :drop must not resolve across scopes."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "setup-cleanup"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 100
+                                             :form "(fn setup-cleanup []
+  (local cleanup (fn []
+    (print :cleaning-up))))"}
+                                            {:kind :local
+                                             :name "cleanup"
+                                             :top-level? false
+                                             :line 2 :column 3
+                                             :length 50
+                                             :form "(local cleanup (fn []
+  (print :cleaning-up)))"}
+                                            {:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn make-widget []
+  (let [layout (Layout {:child child})]
+    {:layout layout :drop cleanup}))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 6 :column 15
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn "make-widget"}
+                                      {:callee "layout:drop"
+                                       :receiver nil :method nil
+                                       :line 7 :column 5
+                                       :form "(layout:drop)"
+                                       :enclosing-fn "make-widget"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "other-scope :drop symbol should flag missing public drop")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop for other-scope symbol"))
 
 ;; R3-3: returned table :drop false/nil does NOT satisfy public drop path
 (fn child-drop-flags-returned-table-drop-false []
@@ -858,9 +920,12 @@
 ;; R3-1: returned table :drop (fn ...)
 (table.insert tests {:name "child-drop allows returned table drop fn"
                      :fn child-drop-allows-returned-table-drop-fn})
-;; R3-2: returned table :drop symbol to function
-(table.insert tests {:name "child-drop allows returned table drop symbol"
-                     :fn child-drop-allows-returned-table-drop-symbol})
+;; R3-2-negative: returned table :drop symbol is NOT accepted
+(table.insert tests {:name "child-drop flags returned table drop symbol"
+                     :fn child-drop-flags-returned-table-drop-symbol})
+;; V12-1: other-scope function-valued symbol regression
+(table.insert tests {:name "child-drop flags other-scope drop symbol"
+                     :fn child-drop-flags-other-scope-drop-symbol})
 ;; R3-3: returned table :drop false does not count
 (table.insert tests {:name "child-drop flags returned table drop false"
                      :fn child-drop-flags-returned-table-drop-false})

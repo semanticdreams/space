@@ -307,49 +307,36 @@
   found)
 
 (fn def-has-returned-drop? [ff def]
-  "Check if def returns a table with :drop (fn ...) or :drop (lambda ...)
-  or :drop <symbol> where symbol is a same-scope function-valued binding."
+  "Check if def returns a table with :drop (fn ...) or :drop (lambda ...).
+  Symbolic :drop <symbol> is NOT accepted — proven same-scope binding
+  detection is not reliably available from file-facts."
   (when (and def.form (def-creates-children? ff def.name))
-    (if (or (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
-            (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]"))
+    (if (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
         true
-        (let [(s e sym) (string.find def.form ":drop[%s\n]+([%w_%-]+)")]
-          (when sym
-            (var found-sym false)
-            (local all-defs (if (= ff.definitions nil) [] ff.definitions))
-            (each [_ other (ipairs all-defs)]
-              (when (and (not found-sym)
-                         (= other.name sym)
-                         (or (= other.kind :fn) (= other.kind :local))
-                         other.form
-                         (or (string.find other.form "(fn " 1 true)
-                             (string.find other.form "(lambda " 1 true))
-                         ;; Must be same-scope: the symbol name appears
-                         ;; within this def's form text.
-                         (string.find def.form sym 1 true))
-                (set found-sym true)))
-            found-sym)))))
+        (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]")
+        true
+        false)))
 
 (fn has-global-drop-path? [ff]
   "Check for file-level public drop paths: export key 'drop',
   definitions named 'drop', or set/tset mutations assigning .drop
   to a function literal."
   (var found false)
-  (each [_ export (ipairs (or ff.exports []))]
+  (each [_ export (ipairs (if (= ff.exports nil) [] ff.exports))]
     (when (= export.key "drop")
       (set found true)))
-  (each [_ def (ipairs (or ff.definitions []))]
+  (each [_ def (ipairs (if (= ff.definitions nil) [] ff.definitions))]
     (when (and (not found)
                (= def.name "drop")
-               (or (= def.kind :fn) (= def.kind :local)))
+               (if (= def.kind :fn) true (= def.kind :local) true false))
       (set found true)))
   ;; Recognize set/tset assignment of .drop to a function as a public
   ;; drop path.  This handles factory patterns like (set button.drop (fn ...))
   ;; and (tset obj :drop (fn ...)).  Must be a function assignment — non-fn
   ;; values like nil/false/symbol do NOT count as a public drop path.
-  (each [_ mut (ipairs (or ff.mutations []))]
+  (each [_ mut (ipairs (if (= ff.mutations nil) [] ff.mutations))]
     (when (and (not found)
-               (or (= mut.op :set) (= mut.op :tset)))
+               (if (= mut.op :set) true (= mut.op :tset) true false))
       (local p (if (= mut.path nil) [] mut.path))
       (local plen (length p))
       (when (and (>= plen 1) (= (. p plen) "drop")
