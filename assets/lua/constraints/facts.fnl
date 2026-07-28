@@ -409,6 +409,30 @@
                    :max-nesting-depth (- fn-info.frame-max-depth fn-info.start-depth)}))))
           (set depth (- depth 1)))))
 
+    ;; ERROR recovery: when tree-sitter produces an ERROR root (grammar
+    ;; limitation), scan flat children for op+fn+name at column 1 and push
+    ;; synthetic entries onto fn-stack so nested fn_forms get correct
+    ;; enclosing-fn attribution.
+    (when (= (root:type) "ERROR")
+      (var i 0)
+      (while (< i (root:child-count))
+        (let [c1 (root:child i)]
+          (when (and (= (c1:type) "(")
+                     (< (+ i 2) (root:child-count))
+                     (= (node-text source (root:child (+ i 1))) "fn")
+                     (= (. (root:child (+ i 1)) :type) "symbol")
+                     (= (. (root:child (+ i 2)) :type) "symbol"))
+            (let [fn-name (node-text source (root:child (+ i 2)))
+                  loc (node-line-col c1)]
+              (table.insert fn-stack
+                {:name fn-name
+                 :start-depth 0
+                 :start-line loc.line
+                 :start-column loc.column
+                 :anonymous? false
+                 :frame-max-depth 0}))))
+        (set i (+ i 1))))
+
     (visit root)
 
     ;; Finalize metrics
