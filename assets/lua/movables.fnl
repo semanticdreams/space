@@ -41,7 +41,7 @@
     (error (.. "Movables received non-finite " label))))
 
 (fn resolve-plane-normal [mode]
-  (local camera app.camera)
+  (local camera (app.presentation-camera))
   (if (= mode :up)
       (normalize-or
         (and camera camera.get-up (camera:get-up))

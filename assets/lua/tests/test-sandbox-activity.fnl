@@ -58,7 +58,15 @@
            {:activity-id activity-id
             :scene-state nil
             :visible? false
-            :interactive? false}))
+            :interactive? false
+            :camera nil
+            :controls nil
+            :render-target-spec nil
+            :physics-containment-manager nil
+            :set-camera (fn [self camera] (set self.camera camera) self)
+            :set-controls (fn [self controls] (set self.controls controls) self)
+            :expose-render-target! (fn [self opts] (set self.render-target-spec opts) self)
+            :clear-render-target! (fn [self] (set self.render-target-spec nil) self)}))
     (. slots activity-id))
   (fn activate-activity-slot [_self activity-id]
     (local slot (ensure-activity-slot _self activity-id))
@@ -82,7 +90,10 @@
   (fn capture-activity-slot-state [_self activity-id]
     (local slot (. slots activity-id))
     (and slot slot.scene-state))
+  (fn activity-slot [_self activity-id]
+    (. slots activity-id))
   {:ensure-activity-slot ensure-activity-slot
+   :activity-slot activity-slot
    :activate-activity-slot activate-activity-slot
    :deactivate-activity-slot deactivate-activity-slot
    :restore-activity-slot-state restore-activity-slot-state
@@ -587,15 +598,37 @@
   (local originals {})
   (each [_ name (ipairs mocked-modules)]
     (set (. originals name) (. package.loaded name)))
-  ;; Install mock PhysicsContainment that records calls precisely
+  ;; Install mock PhysicsContainment that records calls precisely while
+  ;; delegating all real module functionality.
   (var containment-calls [])
+  (local real-physics-containment (require :physics-containment))
   (set (. package.loaded :physics-containment)
-       {:clear (fn []
-                 (table.insert containment-calls :clear)
-                 true)
-        :ensure-installed (fn [opts]
-                            (table.insert containment-calls {:ensure-installed opts})
-                            true)})
+       {:available? real-physics-containment.available?
+        :default-mode real-physics-containment.default-mode
+        :default-manual-bounds real-physics-containment.default-manual-bounds
+        :default-padding real-physics-containment.default-padding
+        :default-restitution real-physics-containment.default-restitution
+        :default-debounce-ms real-physics-containment.default-debounce-ms
+        :default-visualization real-physics-containment.default-visualization
+        :default-config real-physics-containment.default-config
+        :normalize-config real-physics-containment.normalize-config
+        :serialize-config real-physics-containment.serialize-config
+        :automatic-terrain-bounds real-physics-containment.automatic-terrain-bounds
+        :resolve-active-bounds real-physics-containment.resolve-active-bounds
+        :create-manager (fn [opts]
+                          (local real-manager (real-physics-containment.create-manager opts))
+                          ;; Wrap manager methods to record calls
+                          (local orig-ensure-installed real-manager.ensure-installed)
+                          (local orig-clear real-manager.clear)
+                          (set real-manager.ensure-installed
+                               (fn [self install-opts]
+                                 (table.insert containment-calls {:ensure-installed install-opts})
+                                 (orig-ensure-installed self install-opts)))
+                          (set real-manager.clear
+                               (fn [self]
+                                 (table.insert containment-calls :clear)
+                                 (orig-clear self)))
+                          real-manager)})
   ;; Install mock LayoutPhysicsBodies that records deactivation calls
   (var physics-deactivate-calls [])
   (set (. package.loaded :layout-physics-bodies)
@@ -631,6 +664,9 @@
             (local AppProjection (require :app-projection))
             (when (not app.create-default-projection)
               (set app.create-default-projection AppProjection.create-default-projection))
+            ;; Minimal physics mock required by slot containment manager creation
+            (set app.engine {:physics {:addRigidBody (fn [_phys _body])
+                                        :removeRigidBody (fn [_phys _body])}})
             ;; Create a real Scene with a Camera so the real
             ;; deactivate-activity-slot path is exercised.
             (local camera (Camera {:position (glm.vec3 0 0 100)}))

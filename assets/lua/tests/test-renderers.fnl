@@ -1010,6 +1010,113 @@
 (table.insert tests {:name "Renderers draw-target uses only active slot draw source"
                      :fn draw-target-uses-only-active-slot-draw-source})
 
+(fn renderer-uses-presentation-targets-not-app-surfaces []
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (var presentation-target-drawn? false)
+          (local target
+            {:kind :scene
+             :projection (glm.mat4 1)
+             :get-view-matrix (fn [_self]
+                                (set presentation-target-drawn? true)
+                                (glm.mat4 1))
+             :get-lighting-view-state (fn [_self]
+                                         (LightingViewState.orthographic (glm.vec3 0 0 1)))
+             :get-render-contexts (fn [_self] [])})
+          (local saved-runtime app.active-world-runtime)
+          (local saved-scene app.scene)
+          (local saved-canvas app.canvas)
+          (set app.scene {:projection (glm.mat4 1)
+                          :get-view-matrix (fn [_self]
+                                             (error "renderer read app.scene"))})
+          (set app.canvas {:projection (glm.mat4 1)
+                           :get-view-matrix (fn [_self]
+                                              (error "renderer read app.canvas"))})
+          (set app.active-world-runtime
+               {:presentation {:render-targets (fn [_self] [target])}})
+          (local renderers (Renderers))
+          (renderers:update)
+          (assert presentation-target-drawn?
+                  "Renderer must draw the runtime presentation target")
+          (set app.active-world-runtime saved-runtime)
+          (set app.scene saved-scene)
+          (set app.canvas saved-canvas))))))
+
+(table.insert tests {:name "Renderer uses presentation targets not app surfaces"
+                     :fn renderer-uses-presentation-targets-not-app-surfaces})
+
+;; R1-1: Production-path test — runtime provides scene.presentation-target without
+;; pre-seeded runtime.presentation. The renderer must lazily construct the provider.
+(fn renderer-lazily-constructs-presentation-from-runtime []
+  (with-open-gl
+    (fn [_mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (var presentation-target-drawn? false)
+          (local target
+            {:kind :scene
+             :projection (glm.mat4 1)
+             :get-view-matrix (fn [_self]
+                                (set presentation-target-drawn? true)
+                                (glm.mat4 1))
+             :get-lighting-view-state (fn [_self]
+                                         (LightingViewState.orthographic (glm.vec3 0 0 1)))
+             :get-render-contexts (fn [_self] [])})
+          (local runtime
+            {:scene {:presentation-target (fn [_self] target)}
+             :canvas {:presentation-target (fn [_self] nil)}})
+          ;; Crucially: do NOT pre-seed runtime.presentation
+          (local saved-runtime app.active-world-runtime)
+          (local saved-scene app.scene)
+          (local saved-canvas app.canvas)
+          (set app.scene {:projection (glm.mat4 1)
+                          :get-view-matrix (fn [_self]
+                                             (error "renderer read app.scene"))})
+          (set app.canvas {:projection (glm.mat4 1)
+                           :get-view-matrix (fn [_self]
+                                              (error "renderer read app.canvas"))})
+          (set app.active-world-runtime runtime)
+          (local renderers (Renderers))
+          (renderers:update)
+          (assert presentation-target-drawn?
+                  "Renderer must lazily construct presentation provider from runtime")
+          (assert runtime.presentation
+                  "Renderer must install Presentation.for-runtime on the runtime")
+          (set app.active-world-runtime saved-runtime)
+          (set app.scene saved-scene)
+          (set app.canvas saved-canvas))))))
+
+(table.insert tests {:name "Renderer lazily constructs presentation provider from runtime"
+                      :fn renderer-lazily-constructs-presentation-from-runtime})
+
+(fn renderers-update-records-glViewport-calls []
+  (with-open-gl
+    (fn [mock]
+      (with-renderers-constructor-deps
+        (fn []
+          (local Renderers (reload-renderers-module))
+          (local renderers (Renderers))
+          (local saved-viewport app.viewport)
+          (set app.viewport {:x 10 :y 20 :width 640 :height 480})
+          (let [(ok result) (pcall #(renderers:update))]
+            (set app.viewport saved-viewport)
+            (assert ok (.. "renderers:update should not crash with viewport: " (tostring result))))
+          (local viewport-calls (mock:get-gl-calls "glViewport"))
+          (assert (>= (# viewport-calls) 1)
+                  (.. "expected at least one glViewport call, got " (# viewport-calls)))
+          (local call (. viewport-calls 1))
+          (assert (= call.args.x 10))
+          (assert (= call.args.y 20))
+          (assert (= call.args.width 640))
+          (assert (= call.args.height 480)))))))
+
+(table.insert tests {:name "Renderers update records glViewport calls"
+                      :fn renderers-update-records-glViewport-calls})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

@@ -73,7 +73,6 @@
 (fn with-scene [scene-opts f]
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
-  (local original-config app.physics-containment-config)
   (var scene nil)
   (local (ok result)
     (pcall
@@ -81,34 +80,38 @@
         (set scene (Scene scene-opts))
         (set app.scene scene)
         (set app.layout-root scene.layout-root)
-        ;; Activate a slot so content mutations pass the assertion;
-        ;; then clear containment config so tests start with a clean slate
+        ;; Activate a slot so content mutations pass the assertion
         (scene:ensure-activity-slot "sandbox")
         (scene:activate-activity-slot "sandbox")
-        (set app.physics-containment-config nil)
         (f scene))))
   (when scene
     (scene:drop))
-  (PhysicsContainment.clear)
   (set app.scene original-scene)
   (set app.layout-root original-layout-root)
-  (set app.physics-containment-config original-config)
   (if ok
       result
       (error result)))
 
+(fn make-manager []
+  "Create a test containment manager for tests that don't need a scene."
+  (assert app.engine.physics "Physics instance not available")
+  (PhysicsContainment.create-manager {:owner {}
+                                       :physics app.engine.physics}))
+
 (fn installs-default-manual-containment-box []
-  (PhysicsContainment.clear)
+  (local manager (make-manager))
+  (manager:clear)
   (local baseline (collision-object-count))
-  (assert (PhysicsContainment.ensure-installed {})
+  (assert (manager:ensure-installed {})
           "Expected default containment install to succeed")
-  (local installed app.__physics-global-containment)
+  (local installed manager.installation)
   (assert installed "Expected installed containment state")
   (assert (= (length installed.planes) 6) "Expected six containment planes")
   (assert (vec3= installed.bounds.min (glm.vec3 -500 -500 -500)))
   (assert (vec3= installed.bounds.max (glm.vec3 500 500 500)))
   (assert (= (collision-object-count) (+ baseline 6))
-          "Expected containment install to add six collision objects"))
+          "Expected containment install to add six collision objects")
+  (manager:drop))
 
 (fn automatic-terrain-bounds-respect-scene-transform-and-padding []
   (with-scene
@@ -116,9 +119,13 @@
      :rotation (glm.quat 1 0 0 0)}
     (fn [scene]
       (scene:build-default {:terrains [(flat-heightfield-record {:height 0.0})]})
-      (assert (PhysicsContainment.ensure-installed {:scene scene})
+      (local slot (scene:activity-slot "sandbox"))
+      (local manager (slot:ensure-containment-manager))
+      (assert (manager:ensure-installed
+                {:scene scene
+                 :config {:enabled? true}})
               "Expected automatic containment install to succeed")
-      (local installed app.__physics-global-containment)
+      (local installed manager.installation)
       (assert installed "Expected containment state")
       (assert (vec3= installed.bounds.min (glm.vec3 50 -150 20))
               "Expected containment min bounds to include terrain transform and padding")
@@ -131,17 +138,19 @@
      :rotation (glm.quat 1 0 0 0)}
     (fn [scene]
       (scene:build-default {:terrains []})
-      (PhysicsContainment.ensure-installed {:scene scene})
-      (assert (vec3= app.__physics-global-containment.bounds.min (glm.vec3 -500 -500 -500)))
+      (local slot (scene:activity-slot "sandbox"))
+      (local manager (slot:ensure-containment-manager))
+      (manager:ensure-installed {:scene scene :config {:enabled? true}})
+      (assert (vec3= manager.installation.bounds.min (glm.vec3 -500 -500 -500)))
       (scene:add-terrain-record (flat-heightfield-record {:height 0.0}))
-      (PhysicsContainment.schedule-refresh {:scene scene})
+      (manager:schedule-refresh {:scene scene})
       (app.engine.events.updated:emit 600)
-      (PhysicsContainment.schedule-refresh {:scene scene})
+      (manager:schedule-refresh {:scene scene})
       (app.engine.events.updated:emit 500)
-      (assert (vec3= app.__physics-global-containment.bounds.min (glm.vec3 -500 -500 -500))
+      (assert (vec3= manager.installation.bounds.min (glm.vec3 -500 -500 -500))
               "Containment should not refresh before the latest debounce deadline")
       (app.engine.events.updated:emit 500)
-      (assert (vec3= app.__physics-global-containment.bounds.min (glm.vec3 0 -150 0))
+      (assert (vec3= manager.installation.bounds.min (glm.vec3 0 -150 0))
               "Containment should refresh after the latest debounce deadline"))))
 
 (fn automatic-bounds-follow-terrain-transform-changes []
@@ -149,10 +158,13 @@
     {:position (glm.vec3 0 0 0)
      :rotation (glm.quat 1 0 0 0)
      :on-terrains-changed (fn [scene]
-                            (PhysicsContainment.schedule-refresh {:scene scene}))}
+                             (local manager (scene:active-containment-manager))
+                             (when manager
+                               (manager:schedule-refresh {:scene scene})))}
     (fn [scene]
       (scene:build-default {:terrains [(flat-heightfield-record {:height 0.0})]})
-      (assert (PhysicsContainment.ensure-installed {:scene scene}))
+      (local manager (scene:active-containment-manager))
+      (assert (manager:ensure-installed {:scene scene :config {:enabled? true}}))
       (local terrain-layout (and (. scene.scene-terrains 1)
                                  (. (. scene.scene-terrains 1) :element)
                                  (. (. (. scene.scene-terrains 1) :element) :layout)))
@@ -160,7 +172,7 @@
       (terrain-layout:set-position (glm.vec3 25 -80 35))
       (scene:update)
       (app.engine.events.updated:emit 1000)
-      (assert (vec3= app.__physics-global-containment.bounds.min (glm.vec3 25 -130 35))
+      (assert (vec3= manager.installation.bounds.min (glm.vec3 25 -130 35))
               "Containment should refresh after terrain transform changes"))))
 
 (fn clear-cancels-pending-refresh []
@@ -169,23 +181,27 @@
      :rotation (glm.quat 1 0 0 0)}
     (fn [scene]
       (scene:build-default {:terrains []})
-      (PhysicsContainment.ensure-installed {:scene scene})
+      (local manager (scene:active-containment-manager))
+      (manager:ensure-installed {:scene scene :config {:enabled? true}})
       (scene:add-terrain-record (flat-heightfield-record {:height 0.0}))
-      (PhysicsContainment.schedule-refresh {:scene scene})
-      (PhysicsContainment.clear)
+      (manager:schedule-refresh {:scene scene})
+      (manager:clear)
       (app.engine.events.updated:emit 1000)
-      (assert (= app.__physics-global-containment nil)
+      (assert (= manager.installation nil)
               "Clearing containment should cancel pending refreshes"))))
 
 (fn manual-bounds-block-horizontal-escape []
-  (local original-config app.physics-containment-config)
-  (PhysicsContainment.clear)
-  (set app.physics-containment-config {:mode "manual-bounds"
-                                       :bounds {:min [-50 -50 -50]
-                                                :max [50 50 50]}})
-  (assert (PhysicsContainment.ensure-installed
-            {:config app.physics-containment-config})
+  (local manager (make-manager))
+  (local baseline (collision-object-count))
+  (assert (manager:ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-50 -50 -50]
+                               :max [50 50 50]}}})
           "Expected manual containment install to succeed")
+  (assert (= (length manager.installation.planes) 6)
+          "Expected six containment planes")
+  (assert (= (collision-object-count) (+ baseline 6))
+          "Expected containment install to add six collision objects")
   (with-dynamic-box
     {:center (glm.vec3 0 0 0)
      :velocity (glm.vec3 60 0 0)}
@@ -197,17 +213,14 @@
               (string.format
                 "Containment should stop the body near the max-x wall (x=%.3f)"
                 center.x))))
-  (set app.physics-containment-config original-config))
+  (manager:drop))
 
 (fn manual-bounds-block-horizontal-escape-from-negative-side []
-  (local original-config app.physics-containment-config)
-  (PhysicsContainment.clear)
-  (set app.physics-containment-config {:mode "manual-bounds"
-                                       :bounds {:min [-50 -50 -50]
-                                                :max [50 50 50]}})
-  (assert (PhysicsContainment.ensure-installed
-            {:config app.physics-containment-config})
-          "Expected manual containment install to succeed")
+  (local manager (make-manager))
+  (manager:ensure-installed
+    {:config {:mode "manual-bounds"
+              :bounds {:min [-50 -50 -50]
+                       :max [50 50 50]}}})
   (with-dynamic-box
     {:center (glm.vec3 0 0 0)
      :velocity (glm.vec3 -60 0 0)}
@@ -219,18 +232,21 @@
               (string.format
                 "Containment should stop the body near the min-x wall (x=%.3f)"
                 center.x))))
-  (set app.physics-containment-config original-config))
+  (manager:drop))
 
 (fn automatic-bounds-follow-terrain-record-replacements []
   (with-scene
     {:position (glm.vec3 0 0 0)
      :rotation (glm.quat 1 0 0 0)
      :on-terrains-changed (fn [scene]
-                            (PhysicsContainment.schedule-refresh {:scene scene}))}
+                             (local manager (scene:active-containment-manager))
+                             (when manager
+                               (manager:schedule-refresh {:scene scene})))}
     (fn [scene]
       (scene:build-default {:terrains [(flat-heightfield-record {:id "terrain-a"
                                                                  :height 0.0})]})
-      (assert (PhysicsContainment.ensure-installed {:scene scene}))
+      (local manager (scene:active-containment-manager))
+      (assert (manager:ensure-installed {:scene scene :config {:enabled? true}}))
       (scene:replace-terrain-record
         "terrain-a"
         {:id "terrain-a"
@@ -249,14 +265,14 @@
                                                        21 22 23 24 25])]
                               15.0)}]})
       (app.engine.events.updated:emit 1000)
-      (local bounds app.__physics-global-containment.bounds)
-      (assert (vec3= app.__physics-global-containment.bounds.min (glm.vec3 10 -135 20))
+      (local bounds manager.installation.bounds)
+      (assert (vec3= manager.installation.bounds.min (glm.vec3 10 -135 20))
               (string.format
                 "Containment should refresh horizontal placement after terrain record replacement (actual min=%.3f,%.3f,%.3f)"
                 bounds.min.x
                 bounds.min.y
                 bounds.min.z))
-      (assert (vec3= app.__physics-global-containment.bounds.max (glm.vec3 130 415 60))
+      (assert (vec3= manager.installation.bounds.max (glm.vec3 130 415 60))
               (string.format
                 "Containment should refresh size and height after terrain record replacement (actual max=%.3f,%.3f,%.3f)"
                 bounds.max.x
@@ -286,48 +302,48 @@
   (local (ok err)
     (pcall
       (fn []
-        (PhysicsContainment.clear)
+        (local manager (make-manager))
         (var captured-color nil)
         (local expected-color (glm.vec4 0.31 0.62 0.93 0.24))
         (set app.themes
              {:get-active-theme
               (fn []
                 {:physics-containment {:visualization {:color expected-color}}})})
+        (local mock-scene
+          {:update (fn [_self])
+           :build-context {:lines {:create-line-batch
+                                   (fn [_self params]
+                                     (set captured-color params.color)
+                                     {:drop (fn [_batch])})}}
+           :resolve-active-build-context (fn [_self] nil)})
         (assert
-          (PhysicsContainment.ensure-installed
+          (manager:ensure-installed
             {:config {:mode "manual-bounds"
                       :bounds {:min [-10 -20 -30]
                                :max [10 20 30]}}
-             :scene {:update (fn [_self])
-                     :build-context {:lines {:create-line-batch
-                                             (fn [_self params]
-                                               (set captured-color params.color)
-                                               {:drop (fn [_batch])})}}}})
+             :scene mock-scene})
           "Expected themed containment visualization install to succeed")
         (assert (vec4= captured-color expected-color)
-                "Containment visualization should use the active theme color when config color is absent"))))
-  (PhysicsContainment.clear)
+                "Containment visualization should use the active theme color when config color is absent")
+        (manager:drop))))
   (set app.themes original-themes)
   (when (not ok)
     (error err)))
 
 (fn visualization-refreshes-on-theme-change []
   (local original-themes app.themes)
-  (local original-scene app.physics-containment-scene)
-  (local original-config app.physics-containment-config)
   (local (ok err)
     (pcall
       (fn []
-        (PhysicsContainment.clear)
+        (local manager (make-manager))
         (var create-colors [])
-        (var refreshed-colors [])
         (var active-color (glm.vec4 0.45 0.72 0.95 0.28))
         (set app.themes
              {:get-active-theme
               (fn []
                 {:physics-containment {:visualization {:color active-color}}})})
         (assert
-          (PhysicsContainment.ensure-installed
+          (manager:ensure-installed
             {:config {:mode "manual-bounds"
                       :bounds {:min [-10 -20 -30]
                                :max [10 20 30]}}
@@ -335,14 +351,10 @@
                      :build-context {:lines {:create-line-batch
                                              (fn [_self params]
                                                (table.insert create-colors params.color)
-                                               {:drop (fn [_batch])
-                                                :set-color (fn [_batch color]
-                                                             (table.insert refreshed-colors color))})}}}})
+                                               {:drop (fn [_batch])})}}}})
           "Expected containment visualization install to succeed")
         (set active-color (glm.vec4 0.14 0.31 0.58 0.42))
-        (assert (PhysicsContainment.refresh-visualization
-                  {:scene app.physics-containment-scene
-                   :config app.physics-containment-config})
+        (assert (manager:refresh-visualization {})
                 "Expected containment visualization refresh to succeed")
         (assert (= (length create-colors) 2)
                 "Containment visualization refresh should rebuild the line batch")
@@ -350,12 +362,8 @@
                 "Initial containment visualization should use the first theme color")
         (assert (vec4= (. create-colors 2) (glm.vec4 0.14 0.31 0.58 0.42))
                 "Containment visualization refresh should use the new theme color")
-        (assert (= (length refreshed-colors) 0)
-                "Containment visualization refresh should rebuild instead of mutating the old batch"))))
-  (PhysicsContainment.clear)
+        (manager:drop))))
   (set app.themes original-themes)
-  (set app.physics-containment-scene original-scene)
-  (set app.physics-containment-config original-config)
   (when (not ok)
     (error err)))
 
@@ -444,12 +452,10 @@
   active scene slot build context when a slot is active/visible, falling back
   to scene.build-context only when no active slot exists."
   (local original-themes app.themes)
-  (local original-scene app.physics-containment-scene)
-  (local original-config app.physics-containment-config)
   (local (ok err)
     (pcall
       (fn []
-        (PhysicsContainment.clear)
+        (local manager (make-manager))
         (var slot-ctx-used false)
         (var fallback-ctx-used false)
         (local slot-build-context
@@ -471,7 +477,7 @@
            (fn [_self]
              slot-build-context)})
         (assert
-          (PhysicsContainment.ensure-installed
+          (manager:ensure-installed
             {:config {:mode "manual-bounds"
                       :bounds {:min [-10 -20 -30]
                                :max [10 20 30]}}
@@ -482,11 +488,9 @@
         (assert slot-ctx-used
                 "Line batch must be created on active slot's build context")
         (assert (not fallback-ctx-used)
-                "Line batch must NOT be created on fallback scene.build-context when slot is active"))))
-  (PhysicsContainment.clear)
+                "Line batch must NOT be created on fallback scene.build-context when slot is active")
+        (manager:drop))))
   (set app.themes original-themes)
-  (set app.physics-containment-scene original-scene)
-  (set app.physics-containment-config original-config)
   (when (not ok)
     (error err)))
 
@@ -501,12 +505,10 @@
   must be recreated on the new slot's build context even when config,
   bounds, and mode are otherwise identical."
   (local original-themes app.themes)
-  (local original-scene app.physics-containment-scene)
-  (local original-config app.physics-containment-config)
   (local (ok err)
     (pcall
       (fn []
-        (PhysicsContainment.clear)
+        (local manager (make-manager))
         ;; Two distinct build contexts with tracked create-line-batch calls
         (var sandbox-create-count 0)
         (var graph-create-count 0)
@@ -532,7 +534,7 @@
 
         ;; (1) Install containment for the first time (sandbox slot active)
         (assert
-          (PhysicsContainment.ensure-installed
+          (manager:ensure-installed
             {:config {:mode "manual-bounds"
                       :bounds {:min [-10 -20 -30]
                                :max [10 20 30]}}
@@ -552,7 +554,7 @@
         ;;     The config/bounds/mode are unchanged, but the build context
         ;;     has changed.  R7-2 fix must force visualization recreation.
         (assert
-          (PhysicsContainment.ensure-installed
+          (manager:ensure-installed
             {:config {:mode "manual-bounds"
                       :bounds {:min [-10 -20 -30]
                                :max [10 20 30]}}
@@ -566,16 +568,49 @@
         ;; Graph line batch should now have been created
         (assert (= graph-create-count 1)
                 (.. "Expected 1 line batch on graph context after switch, got "
-                    (tostring graph-create-count))))))
-  (PhysicsContainment.clear)
+                    (tostring graph-create-count)))
+        (manager:drop))))
   (set app.themes original-themes)
-  (set app.physics-containment-scene original-scene)
-  (set app.physics-containment-config original-config)
   (when (not ok)
     (error err)))
 
 (table.insert tests {:name "R7-2b visualization refreshes on slot build-context change"
-                     :fn visualization-refreshes-on-slot-context-change})
+                      :fn visualization-refreshes-on-slot-context-change})
+
+;; ── Task 6: Manager ownership tests ────────────────────────────────────
+
+(fn containment-manager-requires-owner []
+  (local (ok err)
+    (pcall (fn []
+             (PhysicsContainment.create-manager
+               {:physics app.engine.physics}))))
+  (assert (not ok))
+  (assert (string.find (tostring err) "owner")
+          "Containment manager must require an owner"))
+
+(fn containment-managers-do-not-clear-each-other []
+  (local owner-a {})
+  (local owner-b {})
+  (local manager-a (PhysicsContainment.create-manager
+                     {:owner owner-a :physics app.engine.physics}))
+  (local manager-b (PhysicsContainment.create-manager
+                     {:owner owner-b :physics app.engine.physics}))
+  (assert (manager-a:ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-10 -10 -10] :max [10 10 10]}}}))
+  (assert (manager-b:ensure-installed
+            {:config {:mode "manual-bounds"
+                      :bounds {:min [-20 -20 -20] :max [20 20 20]}}}))
+  (manager-a:clear)
+  (assert manager-b.installation
+          "Clearing manager A must not drop manager B installation")
+  (manager-a:drop)
+  (manager-b:drop))
+
+(table.insert tests {:name "Task 6: containment manager requires owner"
+                     :fn containment-manager-requires-owner})
+(table.insert tests {:name "Task 6: containment managers do not clear each other"
+                     :fn containment-managers-do-not-clear-each-other})
 
 (local main
   (fn []

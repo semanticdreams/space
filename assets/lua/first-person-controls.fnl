@@ -70,7 +70,7 @@
 
 (fn FirstPersonControls [opts]
   (local options (or opts {}))
-  (local camera (or options.camera app.camera))
+  (local camera (assert options.camera "FirstPersonControls requires a camera"))
   (local delta-unit (or options.delta-unit :milliseconds))
   (assert camera "FirstPersonControls requires a camera")
 

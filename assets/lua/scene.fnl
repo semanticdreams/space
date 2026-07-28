@@ -576,7 +576,10 @@
        :physics-body-count 0
        :scene-state nil
        :visible? false
-       :interactive? false})
+       :interactive? false
+       :camera nil
+       :controls nil
+       :render-target-spec nil})
     (set slot.pointer-target (make-slot-pointer-target slot))
     (set slot.ctx (make-slot-build-context slot slot-layout-root slot-focus-scope))
     (set slot.build-context slot.ctx)
@@ -638,6 +641,39 @@
                (slot-self.focus-scope:drop)
                (set slot-self.focus-scope nil))
              true))
+    (set slot.set-camera
+         (fn [slot-self camera]
+           (set slot-self.camera camera)
+           slot-self))
+    (set slot.set-controls
+         (fn [slot-self controls]
+           (set slot-self.controls controls)
+           slot-self))
+    (set slot.expose-render-target!
+         (fn [slot-self opts]
+           (assert slot-self.camera
+                   "Scene slot expose-render-target! requires a camera on the slot")
+           (local options (or opts {}))
+           (set slot-self.render-target-spec options)
+           slot-self))
+    (set slot.clear-render-target!
+          (fn [slot-self]
+            (set slot-self.render-target-spec nil)
+            slot-self))
+    (set slot.ensure-containment-manager
+          (fn [slot-self]
+            (if slot-self.physics-containment-manager
+                slot-self.physics-containment-manager
+                (do
+                  (local PhysicsContainment (require :physics-containment))
+                  (assert (and app app.engine app.engine.physics)
+                          "Scene slot containment manager requires app.engine.physics")
+                  (local manager
+                    (PhysicsContainment.create-manager
+                      {:owner slot-self
+                       :physics app.engine.physics}))
+                  (set slot-self.physics-containment-manager manager)
+                  manager))))
     (slot:deactivate)
     slot)
 
@@ -653,6 +689,13 @@
         self.active-activity-slot.build-context
         self.build-context))
 
+  (fn active-containment-manager []
+    (if (and self.active-activity-slot
+             self.active-activity-slot.visible?
+             self.active-activity-slot.physics-containment-manager)
+        self.active-activity-slot.physics-containment-manager
+        nil))
+
   (fn resolve-active-layout-root []
     (if (and self.active-activity-slot
              self.active-activity-slot.visible?)
@@ -665,17 +708,28 @@
       (apply-active-theme slot.build-context))
     true)
 
-  (fn ensure-activity-slot [_scene activity-id]
+  (fn ensure-activity-slot [_scene activity-id opts]
     (assert (= (type activity-id) :string)
             "Scene.ensure-activity-slot requires string activity id")
     (assert (> (# activity-id) 0)
             "Scene.ensure-activity-slot requires non-empty activity id")
     (local existing (. self.activity-slots activity-id))
     (if existing
-        existing
+        (do
+          (local options (or opts {}))
+          (when options.camera
+            (existing:set-camera options.camera))
+          (when options.controls
+            (existing:set-controls options.controls))
+          existing)
         (do
           (local ActivitySceneState (require :activity-scene-state))
           (local slot (make-activity-slot activity-id))
+          (local options (or opts {}))
+          (when options.camera
+            (slot:set-camera options.camera))
+          (when options.controls
+            (slot:set-controls options.controls))
           (set slot.scene-state (ActivitySceneState.empty-state))
           (set (. self.activity-slots activity-id) slot)
           slot)))
@@ -698,18 +752,24 @@
       (if (and app app.renderers app.renderers.get-background-state)
           (scene:get-background-state)
           nil))
-    (local PhysicsContainment (require :physics-containment))
+    (local manager (and scene scene.active-containment-manager
+                        (scene:active-containment-manager)))
     (local containment
-      (if app.physics-containment-config
-          (PhysicsContainment.serialize-config app.physics-containment-config)
+      (if (and manager manager.config)
+          manager.config
           {:enabled? false}))
     {:lights lights
      :skybox skybox
      :background background
      :containment containment})
 
-  (fn apply-state-to-services [scene state]
-    (assert state "Scene.apply-state-to-services requires state")
+  (fn apply-slot-service-state [self slot state]
+    "Apply the canonical service state to engine globals and install
+    containment on the given slot.  Writes to app.lights, renderer
+    skybox/background as side effects, but the authoritative state
+    remains slot.scene-state."
+    (assert state "Scene.apply-slot-service-state requires state")
+    (assert slot "Scene.apply-slot-service-state requires slot")
     (local (ok err) (pcall
                     (fn []
                       (when (and state.lights
@@ -729,8 +789,8 @@
                                  app app.renderers app.renderers.set-background-state)
                         (app.renderers:set-background-state state.background))
                       (when state.containment
-                        (local PhysicsContainment (require :physics-containment))
-                        (PhysicsContainment.ensure-installed {:config state.containment :scene scene})))))
+                        (local manager (slot:ensure-containment-manager))
+                        (manager:ensure-installed {:config state.containment :scene self})))))
     (if (not ok)
         (do
           ;; Transactional rollback: reset all services to empty
@@ -741,21 +801,34 @@
               (when (and app app.lights app.lights.set-state)
                 (app.lights:set-state empty.lights))
               (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
-                ;; R2-2: Resolve empty.skybox from complete to renderer format.
                 (app.renderers.skybox:set-state
                   (SkyboxState.resolve-for-theme empty.skybox nil)))
               (when (and app app.renderers app.renderers.set-background-state)
                 (app.renderers:set-background-state empty.background))
-              (when app.engine
-                (local PhysicsContainment (require :physics-containment))
-                (PhysicsContainment.ensure-installed {:config empty.containment :scene scene}))))
+              ;; Clear containment via slot manager
+              (let [manager (and slot (slot:ensure-containment-manager))]
+                (when manager
+                  (manager:ensure-installed {:config empty.containment :scene self})))))
           (error err))
         true))
 
   (fn reset-services-to-empty [scene]
+    "Reset engine service globals (lights, skybox, background) and clear
+    any active slot's containment installation to the canonical empty state."
     (local ActivitySceneState (require :activity-scene-state))
     (local empty (ActivitySceneState.empty-state))
-    (apply-state-to-services scene empty))
+    (when (and app app.lights app.lights.set-state)
+      (app.lights:set-state empty.lights))
+    (when (and app app.renderers app.renderers.skybox app.renderers.skybox.set-state)
+      (app.renderers.skybox:set-state
+        (SkyboxState.resolve-for-theme empty.skybox nil)))
+    (when (and app app.renderers app.renderers.set-background-state)
+      (app.renderers:set-background-state empty.background))
+    ;; Clear containment via active slot manager if one exists
+    (let [active-slot (and scene scene.active-activity-slot)]
+      (when (and active-slot active-slot.physics-containment-manager)
+        (active-slot.physics-containment-manager:ensure-installed {:config empty.containment :scene scene})))
+    true)
 
   (fn assert-active-content-slot []
     (assert self.active-activity-slot
@@ -803,6 +876,12 @@
         (local LayoutPhysicsBodies (require :layout-physics-bodies))
         (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
       (self.active-activity-slot:deactivate)
+      ;; R6-1: Clear previous slot's containment manager so its
+      ;; physics bodies are removed from the global Bullet world
+      ;; and any pending debounced refresh is cancelled.  The
+      ;; retained scene-state will reinstall if we roll back.
+      (when (and self.active-activity-slot.physics-containment-manager)
+        (self.active-activity-slot.physics-containment-manager:clear))
       ;; Clear active binding
       (set self.active-activity-slot nil)
       (set self.active-activity-slot-id nil))
@@ -821,7 +900,7 @@
       (pcall
         (fn []
           (when slot.scene-state
-            (apply-state-to-services self slot.scene-state)))))
+            (self:apply-slot-service-state slot slot.scene-state)))))
     (if (not service-ok)
         (do
           ;; Rollback: reset services to empty, restore previous slot binding
@@ -840,7 +919,7 @@
             (set self.active-activity-slot-id previous-slot-id)
             ;; Restore previous services
             (when previous-slot.scene-state
-              (apply-state-to-services self previous-slot.scene-state))
+              (self:apply-slot-service-state previous-slot previous-slot.scene-state))
             ;; Reactivate physics
             (when (and previous-slot.entity
                        (pcall require :layout-physics-bodies))
@@ -968,7 +1047,7 @@
                 (set self.active-activity-slot-id previous-slot-id)
                 ;; Restore previous services
                 (when previous-slot.scene-state
-                  (apply-state-to-services self previous-slot.scene-state))
+                  (self:apply-slot-service-state previous-slot previous-slot.scene-state))
                 ;; Reactivate physics
                 (when (and previous-slot.entity
                            (pcall require :layout-physics-bodies))
@@ -979,6 +1058,10 @@
               ;; partially-built physics bodies but preserve the
               ;; target slot's retained fields and entity ownership.
               (do
+                ;; R6-1: Clear the failed slot's containment manager
+                ;; so containment planes are removed from the Bullet world.
+                (when (and slot slot.physics-containment-manager)
+                  (slot.physics-containment-manager:clear))
                 (when (and self.entity
                            (pcall require :layout-physics-bodies))
                   (local LayoutPhysicsBodies (require :layout-physics-bodies))
@@ -1090,7 +1173,7 @@
     (set slot.scene-state canonical)
     ;; If this slot is currently active, apply state and rebuild terrain immediately
     (when (= self.active-activity-slot slot)
-      (apply-state-to-services self canonical)
+      (self:apply-slot-service-state slot canonical)
       ;; R7-1: Reconcile runtime terrains exactly to canonical state,
       ;; using the same logic as activation: remove stale entries, replace
       ;; updated records, add missing records, and handle empty canonical
@@ -1161,6 +1244,10 @@
                    (pcall require :layout-physics-bodies))
           (local LayoutPhysicsBodies (require :layout-physics-bodies))
           (pcall LayoutPhysicsBodies.deactivate self.active-activity-slot.entity))
+        ;; R6-1: Cancel any pending containment refresh and remove
+        ;; containment bodies from the global Bullet world.
+        (when slot.physics-containment-manager
+          (slot.physics-containment-manager:clear))
         ;; Unbind content aliases; slot retains ownership
         (set self.entity nil)
         (set self.scene-children nil)
@@ -1170,12 +1257,19 @@
         (set self.demo-browser nil)
         (set self.physics-body-count 0)
         (set self.active-activity-slot nil)
-        (set self.active-activity-slot-id nil)))
+        (set self.active-activity-slot-id nil)
+        ;; Task 7: Reset engine services to empty so the deactivated
+        ;; slot's lights/skybox/background/containment state does not
+        ;; leak into the scene render path.
+        (reset-services-to-empty self)))
     slot)
 
   (fn drop-activity-slot [_scene activity-id]
     (local slot (activity-slot self activity-id))
     (when slot
+      (when slot.physics-containment-manager
+        (slot.physics-containment-manager:drop)
+        (set slot.physics-containment-manager nil))
       (slot:drop)
       (when (= self.active-activity-slot slot)
         (set self.active-activity-slot nil)
@@ -2045,14 +2139,46 @@
 (fn set-camera [self camera]
   (set self.camera camera))
 
+(fn resolve-active-camera [self]
+  (if (and self.active-activity-slot
+           self.active-activity-slot.visible?)
+      (do
+        (assert self.active-activity-slot.camera
+                (.. "Active Scene activity slot " 
+                    (tostring self.active-activity-slot.activity-id)
+                    " requires its own camera; no slot camera set"))
+        self.active-activity-slot.camera)
+      self.camera))
+
 (fn get-view-matrix [self]
-  (assert self.camera "Scene.get-view-matrix requires self.camera")
-  (self.camera:get-view-matrix))
+  (local camera (resolve-active-camera self))
+  (assert camera "Scene.get-view-matrix requires a camera (active-slot or scene)")
+  (camera:get-view-matrix))
 
 (fn get-lighting-view-state [self]
-  (assert self.camera "Scene.get-lighting-view-state requires self.camera")
-  (assert self.camera.position "Scene.get-lighting-view-state requires self.camera.position")
-  (LightingViewState.perspective self.camera.position))
+  (local camera (resolve-active-camera self))
+  (assert camera "Scene.get-lighting-view-state requires a camera (active-slot or scene)")
+  (assert camera.position "Scene.get-lighting-view-state requires camera.position")
+  (LightingViewState.perspective camera.position))
+
+(fn presentation-target [self]
+  (local slot self.active-activity-slot)
+  (when (and slot slot.visible? slot.render-target-spec slot.camera)
+    {:kind :scene
+     :surface self
+     :slot slot
+     :camera slot.camera
+     :projection self.projection
+     :get-view-matrix (fn [] (slot.camera:get-view-matrix))
+     :get-lighting-view-state (fn [] (LightingViewState.perspective slot.camera.position))
+     :get-render-contexts (fn [] [slot.ctx])
+     :screen-pos-ray (fn [_target pos opts]
+                       (local options (or opts {}))
+                       (when (not options.view)
+                         (set options.view (slot.camera:get-view-matrix)))
+                       (when (not options.projection)
+                         (set options.projection self.projection))
+                       (self:screen-pos-ray pos options))}))
 
 (fn get-triangle-vector [self]
   (. (active-render-context) :triangle-vector))
@@ -2219,9 +2345,18 @@
         (local metadata terrain-entry.metadata)
         (local record (and metadata metadata.record))
         (local query-record (and metadata (terrain-layout-record metadata)))
+        (local ray-opts {})
+        (each [k v (pairs (or opts {}))]
+          (set (. ray-opts k) v))
+        (when (and (not ray-opts.target)
+                   (not ray-opts.pointer-target)
+                   (or (not ray-opts.view)
+                       (not ray-opts.projection)
+                       (not ray-opts.viewport)))
+          (set ray-opts.target self))
         (local target
           (and query-record
-               (TerrainQuery.screen-rect-target query-record start-pos end-pos opts)))
+               (TerrainQuery.screen-rect-target query-record start-pos end-pos ray-opts)))
         (and target
              {:terrain-record record
               :terrain-id (and record record.id)
@@ -2456,6 +2591,9 @@
 (set self.restore-activity-slot-state restore-activity-slot-state)
 (set self.apply-active-theme-to-contexts apply-active-theme-to-contexts)
 (set self.resolve-active-build-context resolve-active-build-context)
+(set self.active-containment-manager active-containment-manager)
+(set self.apply-slot-service-state apply-slot-service-state)
+(set self.reset-services-to-empty reset-services-to-empty)
 (set self.add-light-ball add-light-ball)
 (set self.replace-terrain-record replace-terrain-record)
 (set self.add-terrain-record add-terrain-record)
@@ -2467,6 +2605,7 @@
 (set self.set-camera set-camera)
 (set self.get-view-matrix get-view-matrix)
 (set self.get-lighting-view-state get-lighting-view-state)
+(set self.presentation-target presentation-target)
 (set self.get-triangle-vector get-triangle-vector)
 (set self.get-triangle-batches get-triangle-batches)
 (set self.get-line-vector get-line-vector)

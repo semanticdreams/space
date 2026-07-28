@@ -261,24 +261,24 @@
                    :properties {:x {:type "number"} :y {:type "number"} :z {:type "number"}
                                 :yaw {:type "number"} :pitch {:type "number"}}
                    :required ["x" "y" "z"]}
-     :make-run (fn [app]
-                 (fn [args]
-                   (assert app.camera "space_scene_set_camera requires app.camera")
-                   (app.camera:set-position (glm.vec3 args.x args.y args.z))
-                   (when (or args.yaw args.pitch)
-                     (app.camera:set-rotation (or args.yaw 0) (or args.pitch 0)))
-                   "set"))})
+      :make-run (fn [app]
+                  (fn [args]
+                    (local camera (app.presentation-camera {:required? true}))
+                    (camera:set-position (glm.vec3 args.x args.y args.z))
+                    (when (or args.yaw args.pitch)
+                      (camera:set-rotation (or args.yaw 0) (or args.pitch 0)))
+                    "set"))})
 
   (adapters:register
     {:id "scene.reset-camera"
      :mcp-name "space_scene_reset_camera"
      :description "Reset the camera to default position."
      :inputSchema empty-schema
-     :make-run (fn [app]
-                 (fn [_args]
-                   (assert app.camera "space_scene_reset_camera requires app.camera")
-                   (app.camera:reset)
-                   "reset"))})
+      :make-run (fn [app]
+                  (fn [_args]
+                    (local camera (app.presentation-camera {:required? true}))
+                    (camera:reset)
+                    "reset"))})
 
   (adapters:register
     {:id "scene.screen-ray"
@@ -287,8 +287,7 @@
      :inputSchema {:type "object" :properties {:x {:type "number"} :y {:type "number"}} :required ["x" "y"]}
      :make-run (fn [app]
                  (fn [args]
-                   (assert app.scene "space_scene_screen_ray requires app.scene")
-                   (local ray (app.scene:screen-pos-ray {:x args.x :y args.y}))
+                   (local ray (app.presentation-screen-pos-ray {:x args.x :y args.y}))
                    (.. "origin=(" ray.origin.x "," ray.origin.y "," ray.origin.z ") dir=(" ray.direction.x "," ray.direction.y "," ray.direction.z ")")))})
 
   (adapters:register

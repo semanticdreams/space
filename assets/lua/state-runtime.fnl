@@ -27,8 +27,9 @@
   app.clickables.active?)
 
 (fn active-controls []
-  (or app.active-pointer-controls
-      app.first-person-controls))
+  (or (and app.presentation-input-controls
+           (app.presentation-input-controls))
+      app.active-pointer-controls))
 
 (fn movables-active? []
   (and app.movables
@@ -135,7 +136,7 @@
                   (assert focus-manager.focus-direction
                           "state runtime focus direction handling requires focus-manager:focus-direction")
                   (focus-manager:focus-direction {:direction direction
-                                                  :camera app.camera})
+                                                   :camera (app.presentation-camera)})
                   true))
             false))
       false))

@@ -123,6 +123,15 @@ Responsibilities:
 
 The first implementation does not need a broad generic compositor. It only needs one active slot per surface.
 
+## Activity-Owned Presentation
+
+- Activities expose render targets explicitly through Scene/Canvas/HUD slots.
+- Scene and Canvas slots own cameras; no activity receives a default app camera.
+- Renderers consume `runtime.presentation:render-targets()`.
+- Input, screen rays, and audio listener camera lookup use the active presentation provider.
+- Physics containment managers are owned by activity Scene slots.
+- Empty Scene slots are inert and expose no render target.
+
 ## Current Seams
 
 ### Canvas Modes Are Already App Behavior Controllers

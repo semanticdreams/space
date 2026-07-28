@@ -156,7 +156,8 @@
     (var lod-timer nil)
 
     (fn current-camera-position []
-      (and app.camera app.camera.position))
+      (let [cam (app.presentation-camera)]
+        (and cam cam.position)))
 
     (fn cube-center []
       (local layout cuboid.layout)

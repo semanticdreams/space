@@ -1,11 +1,14 @@
 (global app (or app {}))
 
+(local glm (require :glm))
 (local fs (require :fs))
 (local runtime (require :runtime))
 (local Activities (require :activities))
 (local GraphView (require :graph/view))
 (local GraphActivityActions (require :graph-activity-actions))
 (local GraphMapSidebar (require :graph/map-sidebar))
+(local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
+(local ActivityCameraState (require :activity-camera-state))
 (local {: entry : section} (require :command-hints))
 
 (var maps-changed-handler nil)
@@ -129,16 +132,31 @@
 
 (fn activate-graph-view! []
   (local world-runtime (assert app.active-world-runtime
-                                 "Graph activity requires app.active-world-runtime"))
+                                  "Graph activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                          "Graph activity requires runtime.canvas"))
+                           "Graph activity requires runtime.canvas"))
   (local graph-map (active-graph-map))
   (assert graph-map
           "Graph activity requires runtime.graph-map or graph-map-manager")
   (local object-selector (assert world-runtime.object-selector
-                                    "Graph activity requires runtime.object-selector"))
+                                     "Graph activity requires runtime.object-selector"))
+
+  ;; Create or reuse a graph canvas camera stored in runtime.activity-cameras.
+  (local slot-camera
+    (HomeWorldCanvasRuntime.ensure-activity-canvas-camera!
+      world-runtime
+      "graph"
+      {:position (glm.vec3 0 0 100)}))
+
+  ;; Create or reuse canvas controls bound to the slot camera.
+  (HomeWorldCanvasRuntime.ensure-activity-canvas-controls!
+    world-runtime "graph" slot-camera)
+
+  ;; Ensure the slot has the camera before activation
+  (canvas:ensure-activity-slot "graph" {:camera slot-camera})
   (local slot (canvas:activate-activity-slot "graph"))
   (slot:set-canvas-target-kind! :graph-view)
+  (slot:expose-render-target! {:layers [:text]})
   (ensure-view-states world-runtime)
   (local map-id (view-state-key-for graph-map))
   (when (and world-runtime.graph-view
@@ -154,7 +172,7 @@
                      :selector object-selector
                      :view-target slot
                      :pointer-target slot.pointer-target
-                    :camera world-runtime.canvas-camera
+                    :camera slot.camera
                     :data-dir (assert world-runtime.world-dir
                                       "Graph activity requires runtime.world-dir")})))
    (set slot.root graph-view)
@@ -329,14 +347,23 @@
 
 (fn snapshot-graph-activity! []
   (let [runtime (assert app.active-world-runtime
-                         "Graph activity snapshot requires app.active-world-runtime")
+                          "Graph activity snapshot requires app.active-world-runtime")
         scene (assert runtime.scene
-                       "Graph activity snapshot requires runtime.scene")
-        scene-state (scene:capture-activity-slot-state "graph")]
-    {:active? (= (Activities.active-activity-id) "graph")
-     :graph-view-state (capture-graph-view-state!)
-     :graph-view-states (clone-table (and runtime runtime.graph-view-states))
-     :scene scene-state}))
+                        "Graph activity snapshot requires runtime.scene")
+        scene-state (scene:capture-activity-slot-state "graph")
+        canvas-camera (and runtime.activity-cameras
+                           runtime.activity-cameras.canvas
+                           (. runtime.activity-cameras.canvas "graph"))
+        camera-state (and canvas-camera
+                          (ActivityCameraState.capture-camera canvas-camera))]
+    (local result
+      {:active? (= (Activities.active-activity-id) "graph")
+       :graph-view-state (capture-graph-view-state!)
+       :graph-view-states (clone-table (and runtime runtime.graph-view-states))
+       :scene scene-state})
+    (when camera-state
+      (set result.canvas-camera camera-state))
+    result))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -349,7 +376,14 @@
     (when state.graph-view-states
       (set app.active-world-runtime.graph-view-states (clone-table state.graph-view-states)))
     (when state.graph-view-state
-      (set app.active-world-runtime.graph-view-state state.graph-view-state)))
+      (set app.active-world-runtime.graph-view-state state.graph-view-state))
+    ;; Restore canvas camera position from persisted session state
+    (when (and state.canvas-camera
+               app.active-world-runtime.activity-cameras
+               app.active-world-runtime.activity-cameras.canvas)
+      (local camera (. app.active-world-runtime.activity-cameras.canvas "graph"))
+      (when camera
+        (ActivityCameraState.restore-camera! camera state.canvas-camera))))
   ;; Scene restore asserts runtime.scene even when app.active-world-runtime is nil,
   ;; matching Drawing and Board restore behaviour.  Tolerate nil state like
   ;; Drawing and Board — restore-state-arg may return nil when the first

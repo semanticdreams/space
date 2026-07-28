@@ -55,6 +55,7 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
@@ -105,11 +106,11 @@
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
     (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
     (restore-states! original-states)
-    (set app.viewport original-viewport)
     (set app.create-default-projection original-create-default-projection)
     (set app.active-interaction-surface original-active-surface)
     (set app.scene-interactive? original-scene-interactive?)
@@ -125,6 +126,11 @@
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
             (set app.create-default-projection AppProjection.create-default-projection)
             (set scene (Scene {:position (glm.vec3 0 0 0)
                                :rotation (glm.quat 1 0 0 0)
@@ -133,8 +139,6 @@
             (set app.clickables clickables)
             (set app.hoverables hoverables)
             (set app.movables movables)
-            (set app.camera camera)
-            (set app.first-person-controls controls)
             (set app.scene scene)
             (set app.layout-root scene.layout-root)
             (set app.active-interaction-surface :scene)
@@ -188,6 +192,7 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
@@ -237,6 +242,7 @@
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
     (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
@@ -256,6 +262,11 @@
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
             (set app.create-default-projection AppProjection.create-default-projection)
             (set scene (Scene {:position (glm.vec3 0 0 0)
                                :rotation (glm.quat 1 0 0 0)
@@ -264,8 +275,6 @@
             (set app.clickables clickables)
             (set app.hoverables hoverables)
             (set app.movables movables)
-            (set app.camera camera)
-            (set app.first-person-controls controls)
             (set app.scene scene)
             (set app.layout-root scene.layout-root)
             (set app.active-interaction-surface :scene)
@@ -320,6 +329,7 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
   (local original-hoverables app.hoverables)
   (local original-clickables app.clickables)
   (local original-events app.engine.events)
@@ -369,6 +379,7 @@
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
     (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
     (set app.hoverables original-hoverables)
     (set app.clickables original-clickables)
     (set app.engine.events original-events)
@@ -388,6 +399,11 @@
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
             (set app.create-default-projection AppProjection.create-default-projection)
             (set scene (Scene {:position (glm.vec3 0 0 0)
                                :rotation (glm.quat 1 0 0 0)
@@ -396,8 +412,6 @@
             (set app.clickables clickables)
             (set app.hoverables hoverables)
             (set app.movables movables)
-            (set app.camera camera)
-            (set app.first-person-controls controls)
             (set app.scene scene)
             (set app.layout-root scene.layout-root)
             (set app.active-interaction-surface :scene)
@@ -474,6 +488,7 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
   (local original-canvas-controls app.canvas-controls)
   (local original-active-pointer-controls app.active-pointer-controls)
   (local original-hoverables app.hoverables)
@@ -544,6 +559,7 @@
     (set app.intersectables original-intersectables)
     (set app.camera original-camera)
     (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
     (set app.canvas-controls original-canvas-controls)
     (set app.active-pointer-controls original-active-pointer-controls)
     (set app.hoverables original-hoverables)
@@ -583,11 +599,14 @@
         (set canvas (Canvas {:camera canvas-camera
                              :states app.states
                              :movables movables}))
-        (set canvas-controls (CanvasControls {:canvas canvas
+         (set canvas-controls (CanvasControls {:canvas canvas
                                               :camera canvas-camera}))
-        (set app.camera camera)
-        (set app.first-person-controls controls)
-        (set app.canvas-controls canvas-controls)
+         (set app.active-world-runtime
+              {:presentation {:input-controls (fn [_self] controls)
+                              :camera (fn [_self _opts] camera)}})
+         (set app.camera nil)
+         (set app.first-person-controls nil)
+         (set app.canvas-controls canvas-controls)
         (set app.scene scene)
         (set app.canvas canvas)
         (set app.layout-root scene.layout-root)
@@ -631,7 +650,7 @@
                 "scene should remain interactive while canvas is hidden")
         (assert (= app.canvas-interactive? false)
                 "hidden canvas should not remain interactive")
-        (assert (= app.active-pointer-controls app.first-person-controls)
+        (assert (= app.active-pointer-controls controls)
                 "scene controls should be restored when canvas is hidden")
         (app.set-canvas-visible true)
         (assert (= app.active-interaction-surface :canvas)
@@ -671,9 +690,12 @@
 
 (local main
   (fn []
+    ;; The test module's top-level (require :main) caches main.fnl before the runner's
+    ;; setup-test-env creates a fresh app global. Clear the cache so setup-test-env
+    ;; re-executes main.fnl and installs the production wrapper functions on the new app.
+    (set (. package.loaded :main) nil)
     (local runner (require :tests/runner))
-    (runner.run-tests {:name "scene-drag"
-                       :tests tests})))
+    (runner.run-tests {:name "scene-drag" :tests tests})))
 
 {:name "scene-drag"
  :tests tests

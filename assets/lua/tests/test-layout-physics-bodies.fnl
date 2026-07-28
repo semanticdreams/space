@@ -45,22 +45,23 @@
          (table.insert self.unregistered key)))
   movables)
 
+(var test-containment-manager nil)
+
 (fn configure-test-physics-world [opts]
   (local options (or opts {}))
-  (local config
-    (or options.config
-        app.physics-containment-config
-        (PhysicsContainment.default-config)))
+  (local config (or options.config (PhysicsContainment.default-config)))
   (when (and app.engine app.engine.physics)
     (app.engine.physics:setGravity 0 -25 0)
-    (PhysicsContainment.ensure-installed {:config config})))
+    (when (not test-containment-manager)
+      (set test-containment-manager
+           (PhysicsContainment.create-manager {:owner {} :physics app.engine.physics})))
+    (test-containment-manager:ensure-installed {:config config})))
 
 (fn setup-scene []
   (local original-scene app.scene)
   (local original-layout-root app.layout-root)
   (local original-movables app.movables)
   (local original-camera app.camera)
-  (local original-containment-config app.physics-containment-config)
   (var scene nil)
   (var camera nil)
 
@@ -75,8 +76,8 @@
     (set app.layout-root original-layout-root)
     (set app.movables original-movables)
     (set app.camera original-camera)
-    (PhysicsContainment.clear)
-    (set app.physics-containment-config original-containment-config))
+    (when test-containment-manager
+      (test-containment-manager:clear)))
 
   (let [(ok payload)
         (pcall (fn []
@@ -89,7 +90,7 @@
                  (set app.movables movables)
                  (set app.camera camera)
                   (configure-test-physics-world)
-                  (scene:ensure-activity-slot "sandbox")
+                   (scene:ensure-activity-slot "sandbox" {:camera camera})
                   (scene:activate-activity-slot "sandbox")
                   (scene:build-default)
                  {:scene scene :movables movables}))]
@@ -287,9 +288,7 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -500))
-  (configure-test-physics-world {:config app.physics-containment-config})
+  (configure-test-physics-world {:config (manual-containment-config -500)})
   (local panel-size {:value (glm.vec3 5 3 5)})
   (local panel-builder (make-probe-panel-builder panel-size))
 
@@ -311,7 +310,6 @@
                     (string.format
                       "Panel should settle near containment floor, not remain high (y=%.3f)"
                       panel.layout.position.y))))]
-    (set app.physics-containment-config original-config)
     (cleanup)
     (when (not ok)
       (error err))))
@@ -322,9 +320,7 @@
   (local setup (setup-scene))
   (local cleanup setup.cleanup)
   (local scene setup.scene-result.scene)
-  (local original-config app.physics-containment-config)
-  (set app.physics-containment-config (manual-containment-config -1500))
-  (configure-test-physics-world {:config app.physics-containment-config})
+  (configure-test-physics-world {:config (manual-containment-config -1500)})
   (local panel-size {:value (glm.vec3 5 3 5)})
   (local panel-builder (make-probe-panel-builder panel-size))
 
@@ -346,7 +342,6 @@
                 (string.format
                   "Panel should settle near configured containment floor, not remain high (y=%.3f)"
                   panel.layout.position.y)))))
-  (set app.physics-containment-config original-config)
   (cleanup)
   (when (not ok)
     (error err)))

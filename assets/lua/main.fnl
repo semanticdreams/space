@@ -679,6 +679,9 @@
   (when app.hud
     (app.hud:reset-projection)))
 
+(local PresentHelpers (require :app-presentation-helpers))
+(PresentHelpers.install-presentation-helpers! app)
+
 (fn resolve-screen-ray-target [opts]
   (local options (or opts {}))
   (local explicit-target (or options.target options.pointer-target))
@@ -701,52 +704,33 @@
     (and (= (type value) :number)
          (= value value)
          (not (= value math.huge))
-         (not (= value (- math.huge)))))
+          (not (= value (- math.huge)))))
   (fn assert-finite-vec3 [vec label]
     (when (or (not vec)
               (not (finite-number? vec.x))
               (not (finite-number? vec.y))
               (not (finite-number? vec.z)))
       (error (.. "app.screen-pos-ray produced non-finite " label))))
-  (local preferred-target (resolve-screen-ray-target opts))
-  (if (and preferred-target preferred-target.screen-pos-ray)
-      (let [options (if opts
-                      (let [copy {}]
-                        (each [k v (pairs opts)]
-                          (set (. copy k) v))
-                        copy)
-                      {})]
-        (when (and (= preferred-target app.scene)
-                   (not options.projection)
-                   app.projection)
-          (set options.projection app.projection))
-        (preferred-target:screen-pos-ray pos options))
-      (let [options (or opts {})
-            viewport (viewport->table (or options.viewport app.viewport))
-            view (or options.view
-                     (and app.camera (app.camera:get-view-matrix)))
-            projection (or options.projection app.projection)]
-        (assert view "app.screen-pos-ray requires a view matrix")
-        (assert projection "app.screen-pos-ray requires a projection matrix")
-        (local sample-pos (or (viewport->input-pos pos viewport app.engine)
-                              {:x (+ viewport.x (/ viewport.width 2))
-                               :y (+ viewport.y (/ viewport.height 2))}))
-        (local px (number-or sample-pos.x viewport.x))
-        (local py (number-or sample-pos.y viewport.y))
-        (local inverted-y (- (+ viewport.height viewport.y) py))
-        (local viewport-vec (viewport->glm-vec4 viewport))
-        (local near (glm.unproject (glm.vec3 px inverted-y 0.0) view projection viewport-vec))
-        (local far (glm.unproject (glm.vec3 px inverted-y 1.0) view projection viewport-vec))
-        (local direction (glm.normalize (- far near)))
-        (assert-finite-vec3 near "near")
-        (assert-finite-vec3 far "far")
-        (assert-finite-vec3 direction "direction")
-        {:origin near :direction direction})))
+  ;; Try presentation provider first
+  (let [provider (app.active-presentation)]
+    (if provider
+        (provider:screen-pos-ray pos opts)
+        ;; No provider: only delegate to explicit targets (opts.target or
+        ;; opts.pointer-target).  Implicit fallback to app.scene/app.canvas
+        ;; is removed — callers must pass an explicit target or ensure an
+        ;; active presentation provider exists.
+        (let [options (or opts {})
+              explicit-target (or options.target options.pointer-target)]
+          (if (and explicit-target explicit-target.screen-pos-ray)
+              (let [copy {}]
+                (each [k v (pairs options)]
+                  (set (. copy k) v))
+                (explicit-target:screen-pos-ray pos copy))
+              (error "app.screen-pos-ray requires a presentation provider or explicit target with screen-pos-ray"))))))
 
 (set app.layout-root nil)
 (set app.viewport nil)
 (app.set-viewport {:width 0 :height 0})
-(set app.camera nil)
 (set app.projection nil)
 (set app.scene nil)
 (set app.canvas nil)
@@ -1044,7 +1028,9 @@
                                        (= surface :canvas)))
   (if app.canvas-interactive?
       (set app.active-pointer-controls app.canvas-controls)
-      (set app.active-pointer-controls app.first-person-controls))
+      (set app.active-pointer-controls
+            (and app.presentation-input-controls
+                 (app.presentation-input-controls))))
   (emit-workspace-shell-changed (or reason "interaction-surface") previous)
   (mark-active-world-hud-dirty)
   surface)
@@ -1147,8 +1133,6 @@
              (not (= previous-requested-id nil)))))
   (set app.active-world-entry entry)
   (set app.active-world-runtime runtime)
-  (set app.camera (and runtime runtime.camera))
-  (set app.first-person-controls (and runtime runtime.first-person-controls))
   (set app.scene-focus-scope (and runtime runtime.scene-scope))
   (set app.canvas-focus-scope (and runtime runtime.canvas-scope))
   (set app.scene (and runtime runtime.scene))
@@ -1169,8 +1153,6 @@
   (set app.drawing-controller (and runtime runtime.drawing-controller))
   (set app.drawing-render nil)
   (set app.layout-root (and app.scene app.scene.layout-root))
-  (when (and app.scene app.scene.set-camera)
-    (app.scene:set-camera app.camera))
   (bind-hud-runtime)
   (when (and app.canvas app.canvas.build-context)
     (set app.canvas.build-context.object-selector app.object-selector))
@@ -1637,8 +1619,6 @@
   (set app.scene nil)
   (set app.canvas nil)
   (set app.active-world-runtime nil)
-  (set app.camera nil)
-  (set app.first-person-controls nil)
   (set app.canvas-controls nil)
   (set app.active-pointer-controls nil)
   (set app.preferred-interaction-surface :scene)
@@ -1985,12 +1965,14 @@
   (when (not ui-paused)
     (when (and app.world-manager app.world-manager.update)
       (app.world-manager:update delta))
-    (when (and app.engine.audio app.camera)
-      (local cam app.camera)
-      (local forward (cam:get-forward))
-      (local up (cam:get-up))
-      (app.engine.audio:setListenerPosition cam.position)
-      (app.engine.audio:setListenerOrientation forward up))
+    (let [provider (app.active-presentation)]
+      (when (and app.engine.audio provider)
+        (let [audio-cam (provider:audio-listener-camera)]
+          (when audio-cam
+            (local forward (audio-cam:get-forward))
+            (local up (audio-cam:get-up))
+            (app.engine.audio:setListenerPosition audio-cam.position)
+            (app.engine.audio:setListenerOrientation forward up)))))
     (when app.scene
       (run-section "scene" (fn [] (app.scene:update))))
     (when app.canvas
@@ -2087,10 +2069,8 @@
   (set app.canvas-unit nil)
   (set app.active-world-entry nil)
   (set app.active-world-runtime nil)
-  (set app.first-person-controls nil)
   (set app.canvas-controls nil)
   (set app.active-pointer-controls nil)
-  (set app.camera nil)
   (set app.graph nil)
   (set app.graph-map nil)
   (set app.graph-map-manager nil)

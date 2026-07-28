@@ -64,6 +64,8 @@
     :tests.test-cuboid
     :tests.test-main-events
     :tests.test-states
+      :tests.test-activity-presentation
+      :tests.test-activity-camera-state
       :tests.test-canvas-controls
       :tests.test-canvas-activity-slots
       :tests.test-scene-activity-slots

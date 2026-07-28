@@ -4,8 +4,9 @@
   (. ctx :app))
 
 (fn controls-from [ctx]
-  (or (. (app-from ctx) :active-pointer-controls)
-      (. (app-from ctx) :first-person-controls)))
+  (let [app-obj (app-from ctx)]
+    (when app-obj.presentation-input-controls
+      (app-obj.presentation-input-controls))))
 
 (fn selector-from [_ctx]
   (Runtime.selection-handler))

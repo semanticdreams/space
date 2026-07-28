@@ -1,11 +1,14 @@
 (global app (or app {}))
 
+(local glm (require :glm))
 (local fs (require :fs))
 (local runtime (require :runtime))
 (local Activities (require :activities))
 (local DrawingInput (require :drawing/input))
 (local {:DrawingRender DrawingRender} (require :drawing/render))
 (local DrawingActivityActions (require :drawing-activity-actions))
+(local HomeWorldCanvasRuntime (require :home-world-canvas-runtime))
+(local ActivityCameraState (require :activity-camera-state))
 
 (fn drawing-activity-owned-paths []
   (local lua-root (fs.join-path runtime.assets-path "lua"))
@@ -54,17 +57,33 @@
 
 (fn activate-drawing-render! []
   (local world-runtime (assert app.active-world-runtime
-                                "Drawing activity requires app.active-world-runtime"))
+                                 "Drawing activity requires app.active-world-runtime"))
   (local canvas (assert world-runtime.canvas
-                         "Drawing activity requires runtime.canvas"))
+                          "Drawing activity requires runtime.canvas"))
   (local controller (assert world-runtime.drawing-controller
-                             "Drawing activity requires runtime.drawing-controller"))
+                              "Drawing activity requires runtime.drawing-controller"))
+
+  ;; Create or reuse a drawing canvas camera stored in runtime.activity-cameras.
+  (local slot-camera
+    (HomeWorldCanvasRuntime.ensure-activity-canvas-camera!
+      world-runtime
+      "drawing"
+      {:position (glm.vec3 0 0 100)}))
+
+  ;; Create or reuse canvas controls bound to the slot camera.
+  (HomeWorldCanvasRuntime.ensure-activity-canvas-controls!
+    world-runtime "drawing" slot-camera)
+
+  ;; Ensure the slot has the camera before activation
+  (canvas:ensure-activity-slot "drawing" {:camera slot-camera})
   (local slot (canvas:activate-activity-slot "drawing"))
   (slot:set-canvas-target-kind! nil)
+  (slot:expose-render-target! {:layers [:geometry]})
   (local render (or world-runtime.drawing-render
                     (DrawingRender {:ctx slot.ctx
                                     :controller controller
-                                    :canvas canvas})))
+                                    :canvas canvas
+                                    :camera slot.camera})))
   (set slot.root render)
   (set world-runtime.drawing-render render)
   (set app.drawing-render render)
@@ -140,12 +159,21 @@
 
 (fn snapshot-drawing-activity! []
   (let [runtime (assert app.active-world-runtime
-                         "Drawing activity snapshot requires app.active-world-runtime")
+                          "Drawing activity snapshot requires app.active-world-runtime")
         scene (assert runtime.scene
-                       "Drawing activity snapshot requires runtime.scene")
-        scene-state (scene:capture-activity-slot-state "drawing")]
-    {:active? (= (Activities.active-activity-id) "drawing")
-     :scene scene-state}))
+                        "Drawing activity snapshot requires runtime.scene")
+        scene-state (scene:capture-activity-slot-state "drawing")
+        canvas-camera (and runtime.activity-cameras
+                           runtime.activity-cameras.canvas
+                           (. runtime.activity-cameras.canvas "drawing"))
+        camera-state (and canvas-camera
+                          (ActivityCameraState.capture-camera canvas-camera))]
+    (local result
+      {:active? (= (Activities.active-activity-id) "drawing")
+       :scene scene-state})
+    (when camera-state
+      (set result.canvas-camera camera-state))
+    result))
 
 (fn restore-state-arg [first _session maybe-state]
   (if (and first (. first :activity))
@@ -156,10 +184,18 @@
   (local state (restore-state-arg first session maybe-state))
   (when (and state state.scene)
     (let [runtime (assert app.active-world-runtime
-                           "Drawing activity restore requires app.active-world-runtime")
+                            "Drawing activity restore requires app.active-world-runtime")
           scene (assert runtime.scene
-                         "Drawing activity restore requires runtime.scene")]
+                          "Drawing activity restore requires runtime.scene")]
       (scene:restore-activity-slot-state "drawing" state.scene)))
+  ;; Restore canvas camera position from persisted session state
+  (when (and state state.canvas-camera
+             app.active-world-runtime
+             app.active-world-runtime.activity-cameras
+             app.active-world-runtime.activity-cameras.canvas)
+    (local camera (. app.active-world-runtime.activity-cameras.canvas "drawing"))
+    (when camera
+      (ActivityCameraState.restore-camera! camera state.canvas-camera)))
   (when (and state state.active?)
     (if app.set-active-activity
         (app.set-active-activity "drawing")
