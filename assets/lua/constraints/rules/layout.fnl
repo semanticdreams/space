@@ -666,14 +666,30 @@
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (var interactive-access-texts [])
+    ;; Check whether this file is the interaction-router module — its
+    ;; router.clickables / router.hoverables are internally owned arrays,
+    ;; not external routing services that need assertion.
+    (var is-interaction-router false)
+    (when (if (= (or ff.module "") "next-app.interaction-router")
+            true
+            (and ff.path (str-ends-with? ff.path "next-app/interaction-router.fnl")))
+      (set is-interaction-router true))
     (each [_ access (ipairs (or ff.accesses []))]
       (when (access-is-interactive? access)
         (let [text (or access.text "")]
-          (var already false)
-          (each [_ t (ipairs interactive-access-texts)]
-            (when (= t text) (set already true)))
-          (when (not already)
-            (table.insert interactive-access-texts text)))))
+          ;; Narrowly skip router.clickables / router.hoverables in the
+          ;; interaction-router module — these are receiver-owned
+          ;; infrastructure collections, not external ctx/app routing.
+          (var router-owned false)
+          (when is-interaction-router
+            (when (if (= text "router.clickables") true (= text "router.hoverables") true)
+              (set router-owned true)))
+          (when (not router-owned)
+            (var already false)
+            (each [_ t (ipairs interactive-access-texts)]
+              (when (= t text) (set already true)))
+            (when (not already)
+              (table.insert interactive-access-texts text))))))
     (let [calls (or ff.calls [])
           all-defs (or ff.definitions [])]
       (each [_ def (ipairs all-defs)]

@@ -306,6 +306,174 @@
   (assert flagged-helper
           "helper should be flagged when anonymous parent has asserted local"))
 
+;; ==== Task 11: interaction-router router-owned collections ====
+
+(fn interactive-assertion-allows-router-owned-clickables []
+  "Methods on InteractionRouter in next-app.interaction-router module that
+  access router.clickables (an internally owned array initialized in
+  InteractionRouter.new) should NOT be flagged.  These are receiver-owned
+  infrastructure collections, not external routing ctx/app services."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  ;; Model register-clickable: (fn [router node] (table.insert router.clickables node) node)
+  (local register-form "(fn [router node]
+  (table.insert router.clickables node)
+  node)")
+  ;; Model dispatch-click: (fn [router x y event] (local target (pick-topmost router.clickables x y)) target)
+  (local dispatch-form "(fn [router x y event]
+  (local target (pick-topmost router.clickables x y))
+  target)")
+  (local ff (make-file-fact {:path "/src/next-app/interaction-router.fnl"
+                              :module "next-app.interaction-router"
+                              :definitions [{:kind :fn
+                                             :name "InteractionRouter.new"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 500
+                                             :form "(fn InteractionRouter.new []
+  (local self (setmetatable {:clickables [] :hoverables []} InteractionRouter))
+  self)"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 3
+                                             :length (length register-form)
+                                             :form register-form}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 10 :column 3
+                                             :length (length dispatch-form)
+                                             :form dispatch-form}]
+                              :accesses [{:path ["router" "clickables"]
+                                          :text "router.clickables"
+                                          :line 5 :column 14
+                                          :form "router.clickables"}
+                                         {:path ["router" "clickables"]
+                                          :text "router.clickables"
+                                          :line 10 :column 17
+                                          :form "router.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (string.find (or d.file "") "interaction-router" 1 true)
+      (set flagged true)))
+  (assert (not flagged) "router.clickables in interaction-router module should pass"))
+
+(fn interactive-assertion-allows-router-owned-hoverables []
+  "Methods on InteractionRouter accessing router.hoverables should NOT be
+  flagged.  Same rationale as router.clickables — internally owned
+  infrastructure collections."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  ;; Model register-hoverable: (fn [router node] (table.insert router.hoverables node) node)
+  (local register-form "(fn [router node]
+  (table.insert router.hoverables node)
+  node)")
+  ;; Model dispatch-hover: (fn [router x y] (local target (pick-topmost router.hoverables x y)) target)
+  (local dispatch-form "(fn [router x y]
+  (local target (pick-topmost router.hoverables x y))
+  target)")
+  (local ff (make-file-fact {:path "/src/next-app/interaction-router.fnl"
+                              :module "next-app.interaction-router"
+                              :definitions [{:kind :fn
+                                             :name "InteractionRouter.new"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 500
+                                             :form "(fn InteractionRouter.new []
+  (local self (setmetatable {:clickables [] :hoverables []} InteractionRouter))
+  self)"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 5 :column 3
+                                             :length (length register-form)
+                                             :form register-form}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 9 :column 3
+                                             :length (length dispatch-form)
+                                             :form dispatch-form}]
+                              :accesses [{:path ["router" "hoverables"]
+                                          :text "router.hoverables"
+                                          :line 5 :column 14
+                                          :form "router.hoverables"}
+                                         {:path ["router" "hoverables"]
+                                          :text "router.hoverables"
+                                          :line 9 :column 17
+                                          :form "router.hoverables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (string.find (or d.file "") "interaction-router" 1 true)
+      (set flagged true)))
+  (assert (not flagged) "router.hoverables in interaction-router module should pass"))
+
+;; Regression: router.clickables in non-interaction-router file still flags
+(fn interactive-assertion-flags-router-clickables-outside-interaction-router []
+  "Accessing router.clickables in a file that is NOT next-app.interaction-router
+  should still be flagged.  Only the specific interaction-router module gets
+  the exemption for its internally owned collections."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/non-router-widget.fnl"
+                              :module "non-router-widget"
+                              :definitions [{:kind :fn
+                                             :name "use-router"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 120
+                                             :form "(fn use-router [router]
+  (each [_ c (ipairs router.clickables)]
+    (register c)))"}]
+                              :accesses [{:path ["router" "clickables"]
+                                          :text "router.clickables"
+                                          :line 2 :column 13
+                                          :form "router.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "router.clickables outside interaction-router should flag")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "should flag router.clickables in non-router file"))
+
+;; Regression: app.clickables still flags
+(fn interactive-assertion-flags-app-clickables []
+  "Accessing app.clickables should still be flagged.  The interaction-router
+  exemption must not bleed into app-level context routing."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/app-widget.fnl"
+                              :module "app-widget"
+                              :definitions [{:kind :fn
+                                             :name "render-widget"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn render-widget []
+  (let [cs app.clickables]
+    (process cs)))"}]
+                              :accesses [{:path ["app" "clickables"]
+                                          :text "app.clickables"
+                                          :line 6 :column 1
+                                          :form "app.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "app.clickables should still be flagged")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "should flag app.clickables"))
+
 ;; V12: scope-safe closure-helper bypass for button.fnl pattern
 (table.insert tests {:name "interactive-assertion allows button clickables pattern"
                      :fn interactive-assertion-allows-button-clickables-pattern})
@@ -318,5 +486,15 @@
 ;; R1-1: anonymous parent must NOT cover child helper
 (table.insert tests {:name "interactive-assertion flags anonymous parent asserted local"
                      :fn interactive-assertion-flags-anonymous-parent-asserted-local})
+
+;; Task 11: interaction-router router-owned collections
+(table.insert tests {:name "interactive-assertion allows router-owned clickables"
+                     :fn interactive-assertion-allows-router-owned-clickables})
+(table.insert tests {:name "interactive-assertion allows router-owned hoverables"
+                     :fn interactive-assertion-allows-router-owned-hoverables})
+(table.insert tests {:name "interactive-assertion flags router-clickables outside interaction-router"
+                     :fn interactive-assertion-flags-router-clickables-outside-interaction-router})
+(table.insert tests {:name "interactive-assertion flags app clickables"
+                     :fn interactive-assertion-flags-app-clickables})
 
 {:tests tests}
