@@ -454,14 +454,14 @@
 ;; ---- nested-def masking for outer-fn false positives ----
 
 (fn outer-only-form [def all-defs]
-  "Return def.form with nested named def forms blanked, so scanning
-  the outer function does not attribute inner function accesses to it."
+  "Return def.form with any nested definition forms blanked, so scanning
+  the outer function does not attribute inner function accesses to it.
+  All nested defs are blanked regardless of name, including <anonymous>."
   (var cleaned def.form)
   (each [_ other (ipairs all-defs)]
     (when (and (not= other def)
                cleaned
                other.form
-               (and other.name (not= other.name "") (not= other.name "<anonymous>"))
                (string.find cleaned other.form 1 true))
       (local start (string.find cleaned other.form 1 true))
       (set cleaned (.. (cleaned:sub 1 (- start 1))
@@ -482,6 +482,29 @@
         (do
           (local let-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
           (if (clean:find let-pat) true false)))))
+
+(fn has-bare-keyword? [form-text kw]
+  "Check if kw appears as a bare standalone token in form-text
+  (with strings/comments stripped), excluding hyphenated identifiers."
+  (when form-text
+    (local no-strings (strip-strings form-text))
+    (local clean (strip-comments no-strings))
+    (local after-space-pat (.. "[%s%(]" kw))
+    (if (clean:find after-space-pat)
+        true
+        (= (clean:sub 1 (length kw)) kw))))
+
+(fn shadows-keyword? [form-text kw]
+  "Check if form-text shadows kw with a local binding,
+  let binding, or parameter declaration."
+  (when form-text
+    (local no-strings (strip-strings form-text))
+    (local clean (strip-comments no-strings))
+    (if (clean:find (.. "%(local[%s\n]+" kw "[%s\n]"))
+        true
+        (if (clean:find (.. "%(let[%s\n]+%[" kw "[%s\n]"))
+            true
+            false))))
 
 ;; ---- precision helpers for interactive-context-assertion ----
 
@@ -568,25 +591,38 @@
                 has-bare (fn-def-has-bare-interactive? def cleaned)
                 asserted (fn-def-has-assert-call? calls def)]
             ;; Closure-helper bypass: if this def has bare interactive usage
-            ;; and no assert of its own, check whether a parent (enclosing)
-            ;; function asserts the keyword via (local kw (assert ...)).
-            (var skip-because-closure false)
+            ;; and no assert of its own, check per keyword whether a parent
+            ;; asserts it via (local kw (assert ...)) without shadowing.
+            (var bare-covered {})
             (when (and (not asserted) has-bare (not has-access)
                        (not (fn-def-has-dotted-interactive? def cleaned)))
               (each [kw _ (pairs interactive-access-patterns)]
-                (when (not skip-because-closure)
+                (when (and (not (. bare-covered kw))
+                           (has-bare-keyword? cleaned kw)
+                           (not (shadows-keyword? def.form kw)))
                   (each [_ parent (ipairs all-defs)]
-                    (when (and (not skip-because-closure)
+                    (when (and (not (. bare-covered kw))
                                (not= parent def)
                                parent.form
                                def.form
-                               cleaned
                                (string.find parent.form def.form 1 true)
                                (has-asserted-local? (outer-only-form parent all-defs) kw))
-                      (set skip-because-closure true))))))
-            (when (and (or has-access has-bare)
-                       (not asserted)
-                       (not skip-because-closure))
+                      (tset bare-covered kw true))))))
+            ;; Flag only if there is uncovered bare interactive usage
+            (var has-uncovered-bare false)
+            (when (and (not asserted) has-bare (not has-access)
+                       (not (fn-def-has-dotted-interactive? def cleaned)))
+              (each [kw _ (pairs interactive-access-patterns)]
+                (when (and (not has-uncovered-bare)
+                           (has-bare-keyword? cleaned kw)
+                           (not (. bare-covered kw)))
+                  (set has-uncovered-bare true))))
+            (when (and (not asserted)
+                       (if has-access
+                           true
+                           (and has-bare
+                                (not (fn-def-has-dotted-interactive? def cleaned))
+                                has-uncovered-bare)))
               (var access-used nil)
               (each [_ text (ipairs interactive-access-texts)]
                 (when (and (not access-used) (string.find cleaned text 1 true))

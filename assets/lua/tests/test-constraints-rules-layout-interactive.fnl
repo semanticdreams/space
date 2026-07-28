@@ -823,24 +823,34 @@
 
 (fn interactive-assertion-allows-closure-helper-with-asserted-local []
   "A nested helper function using bare clickables that was bound via
-  (local clickables (assert ...)) in the enclosing scope should pass."
+  (local clickables (assert ...)) in the enclosing scope should pass.
+  The helper is a SEPARATE definition with no own assert, relying
+  on the parent's asserted local via closure capture."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
   (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local widget-form (.. "(fn make-widget [ctx]
+  (local clickables (assert ctx.clickables \"missing\"))
+  (let [h " helper-form "]
+    (h)))"))
   (local ff (make-file-fact {:path "/src/widget.fnl"
                               :module "widget"
                               :definitions [{:kind :fn
                                              :name "make-widget"
                                              :top-level? true
                                              :line 1 :column 1
-                                             :length 200
-                                             :form "(fn make-widget [ctx]
-  (local clickables (assert ctx.clickables \"missing\"))
-  (let [h (fn helper []
-            (each [_ c (ipairs clickables)]
-              (register c)))]
-    (h)))"}]
+                                             :length (length widget-form)
+                                             :form widget-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 10
+                                             :length (length helper-form)
+                                             :form helper-form}]
                               :calls [{:callee "assert"
                                        :receiver nil :method nil
                                        :line 2 :column 16
@@ -851,7 +861,141 @@
                                           :line 2 :column 16
                                           :form "ctx.clickables"}]}))
   (local result (rule.run (make-ctx [ff])))
+  ;; Neither make-widget (has its own assert) nor helper (closure-captures
+  ;; asserted local) should be flagged
   (assert (= result nil) "closure helper using asserted local clickables should pass"))
+
+;; R6-2 negative: asserted clickables + bare hoverables still flags
+(fn interactive-assertion-flags-bare-hoverables-despite-asserted-clickables []
+  "A nested helper using bare hoverables should still be flagged even if
+  the enclosing parent asserts clickables.  The closure bypass must be
+  keyword-specific: asserting clickables does not excuse bare hoverables."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (each [_ h (ipairs hoverables)]
+    (display h)))")
+  (local widget-form (.. "(fn make-widget [ctx]
+  (local clickables (assert ctx.clickables \"missing\"))
+  (let [h " helper-form "]
+    (h)))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length widget-form)
+                                             :form widget-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 10
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 2 :column 16
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "make-widget"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 2 :column 16
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "bare hoverables should flag despite asserted clickables")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; R6-2 negative: shadowed clickables still flags
+(fn interactive-assertion-flags-shadowed-clickables []
+  "A nested helper that shadows clickables with its own (local clickables ...)
+  should still be flagged.  The parent's asserted local is shadowed."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (local clickables [])
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local widget-form (.. "(fn make-widget [ctx]
+  (local clickables (assert ctx.clickables \"missing\"))
+  (let [h " helper-form "]
+    (h)))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length widget-form)
+                                             :form widget-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 10
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 2 :column 16
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "make-widget"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 2 :column 16
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "shadowed clickables should still flag")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; R6-1: anonymous nested asserted build does not flag outer factory
+(fn interactive-assertion-allows-outer-with-anonymous-nested-assert []
+  "An outer factory containing an anonymous nested callback that asserts
+  ctx.clickables should NOT be flagged.  The anonymous nested body
+  must be blanked from the outer scan."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local anon-form "(fn [ctx]
+  (assert ctx.clickables \"missing\")
+  (set-clickables ctx.clickables))")
+  (local factory-form (.. "(fn make-factory [opts]
+  (let [callback " anon-form "]
+    (callback (make-ctx opts))))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-factory"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length factory-form)
+                                             :form factory-form}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 2 :column 16
+                                             :length (length anon-form)
+                                             :form anon-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 4 :column 3
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "<anonymous>"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 4 :column 3
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged-factory false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "make-factory")
+      (set flagged-factory true)))
+  (assert (not flagged-factory)
+          "outer factory should not be flagged for anonymous nested assert"))
 
 ;; ==== regression: unasserted bare access still flags ====
 
@@ -1002,6 +1146,15 @@
                      :fn interactive-assertion-allows-outer-factory-with-nested-assert})
 (table.insert tests {:name "interactive-assertion allows closure helper with asserted local"
                      :fn interactive-assertion-allows-closure-helper-with-asserted-local})
+;; R6-2 negative: bare hoverables despite asserted clickables
+(table.insert tests {:name "interactive-assertion flags bare hoverables despite asserted clickables"
+                     :fn interactive-assertion-flags-bare-hoverables-despite-asserted-clickables})
+;; R6-2 negative: shadowed clickables still flags
+(table.insert tests {:name "interactive-assertion flags shadowed clickables"
+                     :fn interactive-assertion-flags-shadowed-clickables})
+;; R6-1: anonymous nested assert does not flag outer
+(table.insert tests {:name "interactive-assertion allows outer with anonymous nested assert"
+                     :fn interactive-assertion-allows-outer-with-anonymous-nested-assert})
 (table.insert tests {:name "interactive-assertion flags unasserted bare access"
                      :fn interactive-assertion-flags-unasserted-bare-access})
 
