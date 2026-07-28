@@ -580,72 +580,70 @@
 
 ;; ---- precision helpers for interactive-context-assertion ----
 
-(fn parent-has-asserted-local-before-child? [calls parent child kw]
-  "Scope-safe closure-helper bypass predicate.  Returns true if ALL of:
-  1) parent.form contains child.form;
-  2) an assert call fact exists for callee 'assert' with enclosing-fn == parent.name
-     and call.line < child.line (conservative on same-line);
-  3) parent form text BEFORE the child occurrence (strings/comments stripped)
-     contains either:
-     a) (local kw (assert ...)) or (let [kw (assert ...)] ...), OR
-     b) (local kw ...) (separate-local pattern where assert is a separate call)."
-  (when (and parent.form child.form parent.name (not= parent.name "<anonymous>"))
-    (local child-pos (string.find parent.form child.form 1 true))
-    (when child-pos
-      ;; Check criterion 2: assert call in parent scope before child
-      (var assert-before-child false)
-      (each [_ call (ipairs calls)]
-        (when (and (not assert-before-child)
-                   (= call.callee "assert")
-                   call.enclosing-fn
-                   (= call.enclosing-fn parent.name)
-                   call.line
-                   child.line
-                   (< call.line child.line))
-          (set assert-before-child true)))
-      (when assert-before-child
-        ;; Check criterion 3: parent form before child contains the binding pattern
-        (local prefix (parent.form:sub 1 (- child-pos 1)))
-        (local no-strings (strip-strings prefix))
-        (local clean (strip-comments no-strings))
-        ;; Try strict pattern: (local kw (assert ...))
-        (local local-assert-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
-        (if (clean:find local-assert-pat)
-            true
-            (do
-              (local let-assert-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
-              (if (clean:find let-assert-pat)
-                  true
-                   ;; Try separate-local pattern: (local kw <anything>)
-                   ;; kw is bound as a local, and assert is a separate call
-                   ;; fact.  Require the assert call to target kw — an
-                   ;; unrelated assert must not prove the local safe.
-                   (do
-                     (fn assert-call-targets-kw? [calls parent-name child-line kw-local]
-                       (var found false)
-                       (each [_ call (ipairs calls)]
-                         (when (and (not found)
-                                    (= call.callee "assert")
-                                    call.enclosing-fn
-                                    (= call.enclosing-fn parent-name)
-                                    call.line
-                                    child-line
-                                    (< call.line child-line)
-                                    call.form)
-                           (local call-no-strings (strip-strings call.form))
-                           (local call-clean (strip-comments call-no-strings))
-                           (local pat (.. "%(assert[%s\n]+" kw-local "[%s\n%)]"))
-                           (when (call-clean:find pat)
-                             (set found true))))
-                       found)
-                     (local local-any-pat (.. "%(local[%s\n]+" kw "[%s\n]"))
-                     (if (clean:find local-any-pat)
-                         (assert-call-targets-kw? calls parent.name child.line kw)
-                         (do
-                           (local let-any-pat (.. "%(let[%s\n]+%[" kw "[%s\n]"))
-                           (if (clean:find let-any-pat)
-                               (assert-call-targets-kw? calls parent.name child.line kw)
-                                false)))))))))))
+(fn assert-call-targets-kw? [calls parent-name child-line kw]
+  "Return true if any assert call in parent scope before child-line
+  specifically asserts kw via its stripped call.form."
+  (var found false)
+  (each [_ call (ipairs calls)]
+    (when (and (not found)
+               (= call.callee "assert")
+               call.enclosing-fn
+               (= call.enclosing-fn parent-name)
+               call.line
+               child-line
+               (< call.line child-line)
+               call.form)
+      (local call-no-strings (strip-strings call.form))
+      (local call-clean (strip-comments call-no-strings))
+      (local pat (.. "%(assert[%s\n]+" kw "[%s\n%)]"))
+      (when (call-clean:find pat)
+        (set found true))))
+  found)
+
+ (fn parent-has-asserted-local-before-child? [calls parent child kw]
+   "Scope-safe closure-helper bypass predicate.  Returns true if ALL of:
+   1) parent.form contains child.form;
+   2) an assert call fact exists for callee 'assert' with enclosing-fn == parent.name
+      and call.line < child.line (conservative on same-line);
+   3) parent form text BEFORE the child occurrence (strings/comments stripped)
+      contains either:
+      a) (local kw (assert ...)) or (let [kw (assert ...)] ...), OR
+      b) (local kw ...) (separate-local pattern where assert is a separate call
+         that specifically targets kw — checked via assert-call-targets-kw?)."
+   (when (and parent.form child.form parent.name (not= parent.name "<anonymous>"))
+     (local child-pos (string.find parent.form child.form 1 true))
+     (when child-pos
+       ;; Check criterion 2: assert call in parent scope before child
+       (var assert-before-child false)
+       (each [_ call (ipairs calls)]
+         (when (and (not assert-before-child)
+                    (= call.callee "assert")
+                    call.enclosing-fn
+                    (= call.enclosing-fn parent.name)
+                    call.line
+                    child.line
+                    (< call.line child.line))
+           (set assert-before-child true)))
+       (when assert-before-child
+         ;; Check criterion 3: parent form before child contains the binding pattern
+         (local prefix (parent.form:sub 1 (- child-pos 1)))
+         (local no-strings (strip-strings prefix))
+         (local clean (strip-comments no-strings))
+         ;; Precompute all patterns for flat if chain
+         (local local-assert-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
+         (local let-assert-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
+         (local local-any-pat (.. "%(local[%s\n]+" kw "[%s\n]"))
+         (local let-any-pat (.. "%(let[%s\n]+%[" kw "[%s\n]"))
+         ;; Flat if chain — each condition/body at same depth
+         (if (clean:find local-assert-pat) true
+             (clean:find let-assert-pat) true
+             ;; Separate-local: must find local binding AND an assert
+             ;; call in parent before child that targets kw
+             (clean:find local-any-pat)
+             (assert-call-targets-kw? calls parent.name child.line kw)
+             (clean:find let-any-pat)
+             (assert-call-targets-kw? calls parent.name child.line kw)
+             false)))))
 
 ;; ---- precision helpers for interactive-context-assertion ----
 
