@@ -296,36 +296,40 @@
           (set found true)))))
   found)
 
-(fn def-has-child-creation? [ff def-name]
-  "Check if a specific function definition has child creation evidence
-  (Layout/LayoutRoot calls or child-creating accesses in its scope)."
+(fn def-creates-children? [ff def-name]
   (var found false)
-  (each [_ call (ipairs (or ff.calls []))]
+  (local calls (if (= ff.calls nil) [] ff.calls))
+  (each [_ call (ipairs calls)]
     (when (and (not found)
                (. child-creation-callees call.callee)
                (= (if (= call.enclosing-fn nil) "" call.enclosing-fn) def-name))
       (set found true)))
-  (each [_ access (ipairs (or ff.accesses []))]
-    (when (not found)
-      (let [p (or access.path [])
-            plen (length p)]
-        (when (and (>= plen 2) (. child-creation-access-keys (. p plen)))
-          (set found true)))))
-  (each [_ access (ipairs (or ff.accesses []))]
-    (when (not found)
-      (let [p (or access.path [])
-            plen (length p)]
-        (when (and (>= plen 2)
-                   (= (. p 1) "renderer")
-                   (. child-creation-access-keys (. p plen)))
-          (set found true)))))
   found)
 
-(fn has-public-drop-path? [ff]
-  "Check if a module exposes a public drop path: a function named 'drop'
-  (either fn or local definition), an export key 'drop', or a mutation
-  that assigns a .drop field (e.g., (set obj.drop (fn ...)) or
-  (tset obj :drop (fn ...)))."
+(fn def-has-returned-drop? [ff def]
+  "Check if def returns a table with :drop (fn ...) or :drop (lambda ...)
+  or :drop <symbol> where symbol is a function-valued def in the file."
+  (when (and def.form (def-creates-children? ff def.name))
+    (if (or (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
+            (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]"))
+        true
+        (let [(s e sym) (string.find def.form ":drop[%s\n]+([%w_%-]+)")]
+          (when sym
+            (var found-sym false)
+            (each [_ other (ipairs (or ff.definitions []))]
+              (when (and (not found-sym)
+                         (= other.name sym)
+                         (or (= other.kind :fn) (= other.kind :local))
+                         other.form
+                         (or (string.find other.form "(fn " 1 true)
+                             (string.find other.form "(lambda " 1 true)))
+                (set found-sym true)))
+            found-sym)))))
+
+(fn has-global-drop-path? [ff]
+  "Check for file-level public drop paths: export key 'drop',
+  definitions named 'drop', or set/tset mutations assigning .drop
+  to a function literal."
   (var found false)
   (each [_ export (ipairs (or ff.exports []))]
     (when (= export.key "drop")
@@ -335,29 +339,6 @@
                (= def.name "drop")
                (or (= def.kind :fn) (= def.kind :local)))
       (set found true)))
-  ;; Recognize returned table :drop entries — only when the same
-  ;; definition also has child creation evidence (same scope).
-  ;; Accept inline :drop (fn ...) / :drop (lambda ...), and
-  ;; :drop <symbol> when the symbol is a same-file function definition
-  ;; whose form contains a function literal.
-  (each [_ def (ipairs (or ff.definitions []))]
-    (when (and (not found) def.form
-               (def-has-child-creation? ff def.name))
-      (if (or (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
-              (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]"))
-          (set found true)
-          (let [(sym-start sym-end sym) (string.find def.form ":drop[%s\n]+([%w_%-]+)")]
-            (when sym
-              (each [_ other (ipairs (or ff.definitions []))]
-                (when (and (not found)
-                           (= other.name sym)
-                           (or (= other.kind :fn) (= other.kind :local))
-                           other.form
-                           (or (string.find other.form "(fn " 1 true)
-                               (string.find other.form "(lambda " 1 true)
-                               (string.find other.form "%%(fn " 1 true)
-                               (string.find other.form "%%(lambda " 1 true)))
-                  (set found true))))))))
   ;; Recognize set/tset assignment of .drop to a function as a public
   ;; drop path.  This handles factory patterns like (set button.drop (fn ...))
   ;; and (tset obj :drop (fn ...)).  Must be a function assignment — non-fn
@@ -389,9 +370,18 @@
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (when (has-child-creation-evidence? ff)
-      (let [has-drop-path (has-public-drop-path? ff)
-            has-cleanup (has-child-cleanup-evidence? ff)]
-        (when (not has-drop-path)
+      (let [has-global-drop (has-global-drop-path? ff)
+            has-cleanup (has-child-cleanup-evidence? ff)
+            all-defs (or ff.definitions [])]
+        (var has-drop (or has-global-drop false))
+        ;; Per-def returned-table :drop check
+        (when (not has-drop)
+          (each [_ def (ipairs all-defs)]
+            (when (and (not has-drop)
+                       (def-creates-children? ff def.name)
+                       (def-has-returned-drop? ff def))
+              (set has-drop true))))
+        (when (not has-drop)
           (table.insert diagnostics
             (Diagnostics.violation
               {:constraint-id "layout.owned-child-drop"
