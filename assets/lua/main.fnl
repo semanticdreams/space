@@ -679,26 +679,8 @@
   (when app.hud
     (app.hud:reset-projection)))
 
-(fn app.active-presentation []
-  (and app.active-world-runtime
-       app.active-world-runtime.presentation))
-
-(fn app.presentation-screen-pos-ray [pos opts]
-  (let [provider (app.active-presentation)]
-    (assert provider "app.presentation-screen-pos-ray requires an active presentation provider")
-    (provider:screen-pos-ray pos opts)))
-
-(fn app.presentation-input-controls []
-  (let [provider (app.active-presentation)]
-    (and provider (provider:input-controls))))
-
-(fn app.presentation-camera [opts]
-  (let [provider (app.active-presentation)]
-    (if provider
-        (provider:camera opts)
-        (let [options (or opts {})]
-          (when options.required?
-            (assert provider "app.presentation-camera requires an active presentation provider"))))))
+(local PresentHelpers (require :app-presentation-helpers))
+(PresentHelpers.install-presentation-helpers! app)
 
 (fn resolve-screen-ray-target [opts]
   (local options (or opts {}))

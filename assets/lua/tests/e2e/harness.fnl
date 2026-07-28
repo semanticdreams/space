@@ -26,6 +26,7 @@
 (local {: ControlPanelLayout} (require :hud-control-panel-layout))
 (local {: StatusPanelLayout} (require :hud-status-panel-layout))
 (local LightingViewState (require :lighting-view-state))
+(local PresentHelpers (require :app-presentation-helpers))
 
 (fn number-or [value fallback]
   (if (not (= value nil)) value fallback))
@@ -99,7 +100,8 @@
   (set app.create-default-projection AppProjection.create-default-projection)
   (configure-viewport width height)
   (AppBootstrap.init-renderers {:viewport app.viewport})
-  (ensure-activities!))
+  (ensure-activities!)
+  (PresentHelpers.install-presentation-helpers! app))
 
 (fn assert-font-ready [label]
   (local theme (app.themes.get-active-theme))
