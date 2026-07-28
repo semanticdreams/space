@@ -405,6 +405,21 @@
               (set found true)))))
       found)))
 
+(fn fn-def-has-dotted-interactive? [def]
+  "Check if a function definition's form text contains a dotted interactive
+  access like ctx.clickables, options.hoverables, app.clickables, etc.
+  Strips string literals and comments first to avoid false positives."
+  (when (and def.form def.kind (= def.kind :fn))
+    (let [no-strings (strip-strings def.form)
+          clean (strip-comments no-strings)]
+      (var found false)
+      (each [kw _ (pairs interactive-access-patterns)]
+        (when (not found)
+          (let [dotted-pat (.. "%." kw)]
+            (when (clean:find dotted-pat)
+              (set found true)))))
+      found)))
+
 (fn fn-def-has-assert-call? [calls def]
   "Check whether any call in the same enclosing function is to 'assert'.
   For anonymous functions, fall back to per-definition form-text detection
@@ -503,8 +518,12 @@
           (when params
             (each [kw _ (pairs interactive-access-patterns)]
               (when (and (not skip-because-param) (. params kw))
-                (when (fn-def-has-bare-interactive? def)
-                  (set skip-because-param true))))))
+                ;; Only skip if the function has NO dotted interactive access.
+                ;; A function with clickables as a parameter but also reading
+                ;; ctx.clickables must still be flagged.
+                (when (not (fn-def-has-dotted-interactive? def))
+                  (when (fn-def-has-bare-interactive? def)
+                    (set skip-because-param true)))))))
         (when (not skip-because-param)
           (let [has-access (fn-def-has-interactive-access? interactive-access-texts def)
                 has-bare (fn-def-has-bare-interactive? def)]
