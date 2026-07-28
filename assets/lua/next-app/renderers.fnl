@@ -519,9 +519,11 @@
    :router router
    :focus-context focus-context
    :run-button run-button
-   :inspect-button inspect-button
-   :ship-button ship-button
-   :search-input search-input
+    :inspect-button inspect-button
+    :ship-button ship-button
+    :perf-toggle perf-toggle
+    :logs-toggle logs-toggle
+    :search-input search-input
    :virtual-list virtual-list})
 
 (fn NextAppRenderers [opts]

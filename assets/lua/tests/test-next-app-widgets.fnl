@@ -63,45 +63,88 @@
 (table.insert tests {:name "Next button measures label and emits quad"
                      :fn next-button-measures-label-and-emits-quad})
 
-;; A5-1: integration coverage — exercise production build-ui-root path
+;; A6-1: precise integration coverage — exact registration counts and named nodes
 (fn build-ui-root-registers-widgets-with-router []
-  "Call the production build-ui-root and verify the returned router
-  contains the actual ButtonWidget and ToggleWidget nodes registered
-  via the adapter tables (not the adapter tables themselves)."
+  "Call the production build-ui-root and assert exact router registration
+  counts and that every expected widget node (by name) appears in the
+  appropriate router arrays."
   (local {: build-ui-root} (require :next-app/renderers))
-  ;; Minimal renderer options; build-ui-root uses defaults for most values
   (local result (build-ui-root {}))
   (local router result.router)
-  ;; All 3 buttons and 2 toggles register into router.clickables.
-  ;; ButtonWidget registers via register, register-right-click,
-  ;; register-double-click — each duplicates in the same array.
-  ;; ToggleWidget registers once per widget.
-  ;; So clickables count = 3 buttons × 3 methods + 2 toggles = 11.
-  (assert (>= (length router.clickables) 1)
-          "router.clickables should contain registered widget nodes")
-  ;; Nodes in router.clickables should be actual widget nodes, not adapter tables
+
+  ;; ---- exact clickables registration ----
+  ;; 3 buttons register × 3 methods each (register, register-right-click,
+  ;; register-double-click) + 2 toggles × 1 = 11
+  (assert (= (length router.clickables) 11)
+          (.. "router.clickables should be 11, got " (length router.clickables)))
+
+  ;; No entry is the adapter table (adapters have .register-right-click)
   (each [_ node (ipairs router.clickables)]
-    (assert node.width "registered clickable should have .width (widget node)")
     (assert (not (. node :register-right-click))
-            "registered clickable should not be the adapter table"))
-  ;; hoverables count = 3 buttons + 2 toggles = 5
-  (assert (>= (length router.hoverables) 1)
-          "router.hoverables should contain registered widget nodes")
+            (.. "clickables entry should not be adapter: " (tostring (. node :name))))
+    (assert node.width "clickables entry should be a widget node"))
+
+  ;; All five named widgets appear in router.clickables
+  (local widget-names ["next-button-run" "next-button-inspect" "next-button-ship"
+                        "next-toggle-perf" "next-toggle-logs"])
+  (each [_ expected-name (ipairs widget-names)]
+    (var found false)
+    (each [_ node (ipairs router.clickables)]
+      (when (= (. node :name) expected-name)
+        (set found true)))
+    (assert found (.. expected-name " should be in router.clickables")))
+
+  ;; ---- exact hoverables registration ----
+  ;; 3 buttons + 2 toggles = 5
+  (assert (= (length router.hoverables) 5)
+          (.. "router.hoverables should be 5, got " (length router.hoverables)))
+
   (each [_ node (ipairs router.hoverables)]
-    (assert node.width "registered hoverable should have .width (widget node)")
     (assert (not (. node :register))
-            "registered hoverable should not be the adapter table"))
-  ;; Key widget nodes are non-nil
-  (assert result.run-button "run-button should be non-nil")
-  (assert result.inspect-button "inspect-button should be non-nil")
-  (assert result.ship-button "ship-button should be non-nil")
-  (assert result.root "root should be non-nil")
-  ;; Drop buttons to clean up router registrations
+            (.. "hoverables entry should not be adapter: " (tostring (. node :name))))
+    (assert node.width "hoverables entry should be a widget node"))
+
+  (each [_ expected-name (ipairs widget-names)]
+    (var found false)
+    (each [_ node (ipairs router.hoverables)]
+      (when (= (. node :name) expected-name)
+        (set found true)))
+    (assert found (.. expected-name " should be in router.hoverables")))
+
+  ;; ---- returned named nodes ----
+  (assert result.run-button "run-button should be returned")
+  (assert result.inspect-button "inspect-button should be returned")
+  (assert result.ship-button "ship-button should be returned")
+  (assert result.perf-toggle "perf-toggle should be returned")
+  (assert result.logs-toggle "logs-toggle should be returned")
+  (assert result.root "root should be returned")
+
+  ;; ---- drop cleanup ----
+  ;; 3 buttons × 3 drop methods = 9 clickables removed; 2 toggles remain
   (result.run-button:drop)
   (result.inspect-button:drop)
   (result.ship-button:drop)
-  (assert (< (length router.clickables) 11)
-          "router.clickables should shrink after button drops"))
+  (assert (= (length router.clickables) 2)
+          (.. "router.clickables should be 2 after button drops, got "
+              (length router.clickables)))
+  ;; Remaining clickables are the toggles
+  (each [_ expected-name (ipairs ["next-toggle-perf" "next-toggle-logs"])]
+    (var found false)
+    (each [_ node (ipairs router.clickables)]
+      (when (= (. node :name) expected-name)
+        (set found true)))
+    (assert found (.. expected-name " should remain after button drops")))
+
+  ;; hoverables: 3 buttons dropped → 2 toggles remain
+  (assert (= (length router.hoverables) 2)
+          (.. "router.hoverables should be 2 after button drops, got "
+              (length router.hoverables)))
+  (result.perf-toggle:drop)
+  (result.logs-toggle:drop)
+  (assert (= (length router.clickables) 0)
+          "router.clickables should be empty after all drops")
+  (assert (= (length router.hoverables) 0)
+          "router.hoverables should be empty after all drops"))
 (table.insert tests {:name "build-ui-root registers widgets with router via adapters"
                      :fn build-ui-root-registers-widgets-with-router})
 
