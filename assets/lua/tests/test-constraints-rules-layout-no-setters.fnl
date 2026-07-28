@@ -713,6 +713,68 @@
   ;; rather than risk flagging the wrong (non-layouter) callback.
   )
 
+;; T11-1: sub-app:set-size inside layouter should NOT be flagged
+(fn no-setters-allows-sub-app-set-size-in-layouter []
+  "sub-app:set-size updates a framebuffer, not a layout object.
+  The rule should NOT flag it — only layout-object setters and dirtying
+  APIs should be forbidden inside layouters."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/sub-app-view.fnl"
+                              :module "sub-app-view"
+                              :definitions [{:kind :fn
+                                             :name "build-layouter"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn build-layouter [self]
+  (sub-app:set-size (/ self.size.x u) (/ self.size.y u))
+  (sub-app:update-quad self))"}]
+                              :calls [{:callee "sub-app:set-size"
+                                       :receiver nil :method nil
+                                       :line 6 :column 1
+                                       :form "(sub-app:set-size (/ self.size.x u) (/ self.size.y u))"
+                                       :enclosing-fn "build-layouter"}
+                                      {:callee "sub-app:update-quad"
+                                       :receiver nil :method nil
+                                       :line 7 :column 1
+                                       :form "(sub-app:update-quad self)"
+                                       :enclosing-fn "build-layouter"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil)
+          (.. "sub-app:set-size inside layouter should not be flagged "
+              "— non-layout object setters should be exempted")))
+
+;; T11-2: camera:set-size inside layouter should NOT be flagged
+(fn no-setters-allows-camera-set-size-in-layouter []
+  "camera:set-size is another non-layout object setter.
+  The rule should NOT flag it inside a layouter — only layout-object
+  setters should be forbidden."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/camera-view.fnl"
+                              :module "camera-view"
+                              :definitions [{:kind :fn
+                                             :name "camera-layouter"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn camera-layouter [ctx camera]
+  (camera:set-size 800 600))"}]
+                              :calls [{:callee "camera:set-size"
+                                       :receiver nil :method nil
+                                       :line 6 :column 1
+                                       :form "(camera:set-size 800 600)"
+                                       :enclosing-fn "camera-layouter"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil)
+          (.. "camera:set-size inside layouter should not be flagged "
+              "— non-layout object setters should be exempted")))
+
 ;; Register all no-setters tests
 ;; layout.no-setters-in-layouters
 (table.insert tests {:name "no-setters allows file without layouter"
@@ -759,5 +821,10 @@
                      :fn no-setters-skips-inline-layouter-setter-when-duplicate-anonymous-present})
 (table.insert tests {:name "no-setters skips ambiguous duplicate callbacks in same call"
                      :fn no-setters-skips-ambiguous-duplicate-callbacks-in-same-call})
+;; T11: non-layout receiver exemption
+(table.insert tests {:name "no-setters allows sub-app:set-size in layouter"
+                     :fn no-setters-allows-sub-app-set-size-in-layouter})
+(table.insert tests {:name "no-setters allows camera:set-size in layouter"
+                     :fn no-setters-allows-camera-set-size-in-layouter})
 
 {:tests tests}

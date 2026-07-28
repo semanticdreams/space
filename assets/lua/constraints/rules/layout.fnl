@@ -45,6 +45,10 @@
    "mark-layout-dirty" true
    "mark-measure-dirty" true})
 
+(local known-non-layout-receivers
+  {"sub-app" true
+   "camera" true})
+
 (local layouter-constructor-names
   {"Layout" true
    "LayoutRoot" true})
@@ -69,15 +73,28 @@
        (not (call-is-layouter-method? call))
        (string.find call.form fn-name 1 true)))
 
+(fn extract-receiver [callee]
+  "Extract the receiver name from a method-style callee string like 'sub-app:set-size'.
+  Returns nil if the callee is not a method call (no colon)."
+  (when callee
+    (let [colon-pos (string.find callee ":" 1 true)]
+      (when colon-pos
+        (callee:sub 1 (- colon-pos 1))))))
+
 (fn callee-is-forbidden-setter? [callee]
-  "Check if a callee is a forbidden setter."
+  "Check if a callee is a forbidden setter.
+  For method-style setters (e.g., child:set-size), also checks that the
+  receiver is not a known non-layout object (e.g., sub-app)."
   (if (. forbidden-setters callee)
       true
       (do
         (var found false)
         (each [setter _ (pairs forbidden-setters)]
           (when (and (not found) (callee-ends-with? callee setter))
-            (set found true)))
+            ;; Method-style setter: check if receiver is a known non-layout object
+            (let [receiver (extract-receiver callee)]
+              (when (not (. known-non-layout-receivers receiver))
+                (set found true)))))
         found)))
 
 (fn file-has-layouter-context? [ff]
