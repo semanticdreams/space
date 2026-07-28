@@ -410,15 +410,15 @@
   access like ctx.clickables, options.hoverables, app.clickables, etc.
   Strips string literals and comments first to avoid false positives."
   (when (and def.form def.kind (= def.kind :fn))
-    (let [no-strings (strip-strings def.form)
-          clean (strip-comments no-strings)]
-      (var found false)
-      (each [kw _ (pairs interactive-access-patterns)]
-        (when (not found)
-          (let [dotted-pat (.. "%." kw)]
-            (when (clean:find dotted-pat)
-              (set found true)))))
-      found)))
+    (local no-strings (strip-strings def.form))
+    (local clean (strip-comments no-strings))
+    (var found false)
+    (each [kw _ (pairs interactive-access-patterns)]
+      (when (not found)
+        (local dotted-pat (.. "%." kw))
+        (when (clean:find dotted-pat)
+          (set found true))))
+    found))
 
 (fn fn-def-has-assert-call? [calls def]
   "Check whether any call in the same enclosing function is to 'assert'.
