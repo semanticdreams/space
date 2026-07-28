@@ -84,11 +84,11 @@
           result))))
 
 (fn find-helper-snapshot-var [fn-form path-text]
-  "Find a snapshot variable whose snapshot keys cover the given path.
-   Returns the variable name, or nil if no snapshot covers the path.
+  "Find all snapshot variables whose snapshot keys cover the given path.
+   Returns a list of variable names, or empty list if none found.
    Pairs variable identity with coverage so that the restore variable
-   must be the same one whose snapshot covers the mutated path."
-  (var result nil)
+   must be one whose snapshot covers the mutated path."
+  (var result [])
   (var had-any-literal false)
   (var had-any-resolved false)
   (var first-unresolved-var nil)
@@ -96,38 +96,40 @@
   (local lit-pat "%(local%s+([%w%-_]+)%s+%(snapshot%-app%-fields%s+%[(.-)%]%s*%)%)")
   (each [var-name keys-str (fn-form:gmatch lit-pat)]
     (set had-any-literal true)
-    (when (not result)
-      (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
-        (when (and (not result) (> (length k) 0))
-          (local app-key (.. "app." k))
-          (local ekey (escape-pattern app-key))
-          (when (or (= path-text app-key)
-                    (path-text:find (.. "^" ekey "%.") 1 false))
-            (set result var-name))))))
+    (var covers false)
+    (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
+      (when (and (not covers) (> (length k) 0))
+        (local app-key (.. "app." k))
+        (local ekey (escape-pattern app-key))
+        (when (or (= path-text app-key)
+                  (path-text:find (.. "^" ekey "%.") 1 false))
+          (set covers true))))
+    (when covers (table.insert result var-name)))
   ;; Check variable-key snapshots: (local VAR (snapshot-app-fields KEY-VAR))
-  (when (not result)
+  (when (= (length result) 0)
     (local var-pat "%(local%s+([%w%-_]+)%s+%(snapshot%-app%-fields%s+([%w%-_]+)%s*%)%)")
     (each [snap-var key-var (fn-form:gmatch var-pat)]
-      (when (not result)
-        (local ekv (escape-pattern key-var))
-        (local local-pat (.. "%(local%s+" ekv "%s+%[(.-)%]"))
-        (var resolved false)
-        (each [keys-str (fn-form:gmatch local-pat)]
-          (set resolved true)
-          (set had-any-resolved true)
-          (when (not result)
-            (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
-              (when (and (not result) (> (length k) 0))
-                (local app-key (.. "app." k))
-                (local ekey (escape-pattern app-key))
-                (when (or (= path-text app-key)
-                          (path-text:find (.. "^" ekey "%.") 1 false))
-                  (set result snap-var))))))
-        (when (and (not resolved) (not first-unresolved-var))
-          (set first-unresolved-var snap-var)))))
+      (local ekv (escape-pattern key-var))
+      (local local-pat (.. "%(local%s+" ekv "%s+%[(.-)%]"))
+      (var this-resolved false)
+      (var this-covers false)
+      (each [keys-str (fn-form:gmatch local-pat)]
+        (set this-resolved true)
+        (set had-any-resolved true)
+        (when (not this-covers)
+          (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
+            (when (and (not this-covers) (> (length k) 0))
+              (local app-key (.. "app." k))
+              (local ekey (escape-pattern app-key))
+              (when (or (= path-text app-key)
+                        (path-text:find (.. "^" ekey "%.") 1 false))
+                (set this-covers true))))))
+      (when this-covers (table.insert result snap-var))
+      (when (and (not this-resolved) (not first-unresolved-var))
+        (set first-unresolved-var snap-var))))
   ;; Fallback: no literal, no resolved variable, but found unresolved var key → accept
-  (when (and (not result) (not had-any-literal) (not had-any-resolved) first-unresolved-var)
-    (set result first-unresolved-var))
+  (when (and (= (length result) 0) (not had-any-literal) (not had-any-resolved) first-unresolved-var)
+    (table.insert result first-unresolved-var))
   result)
 
 (fn position-to-file-line [fn-form fn-def-line byte-pos]
@@ -140,38 +142,44 @@
 
 (fn has-helper-restore-after-line? [fn-form fn-def-line path-text min-line]
   "Check for snapshot-app-fields + restore-app-fields! with restore after min-line.
-   The snapshot variable must both cover the path and be restored after the mutation."
-  (let [snap-var (find-helper-snapshot-var fn-form path-text)]
-    (if (not snap-var) false
-        (let [pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
-          (var found false)
-          (var search-start 1)
-          (while (and (not found) search-start)
-            (let [(start end) (string.find fn-form pat search-start)]
-              (if start
-                  (let [restore-line (position-to-file-line fn-form fn-def-line start)]
-                    (if (>= restore-line min-line)
-                        (set found true)
-                        (set search-start (+ end 1))))
-                  (lua :break))))
-          found))))
+   Any snapshot variable covering the path, when restored after the mutation, is accepted."
+  (local all-vars (find-helper-snapshot-var fn-form path-text))
+  (var found false)
+  (var vi 1)
+  (while (and (not found) (<= vi (length all-vars)))
+    (let [snap-var (. all-vars vi)
+          pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
+      (var search-start 1)
+      (while (and (not found) search-start)
+        (let [(start end) (string.find fn-form pat search-start)]
+          (if start
+              (let [restore-line (position-to-file-line fn-form fn-def-line start)]
+                (if (>= restore-line min-line)
+                    (set found true)
+                    (set search-start (+ end 1))))
+              (set search-start nil)))))
+    (set vi (+ vi 1)))
+  found)
 
 (fn has-helper-restore-after-byte? [fn-form path-text min-byte]
   "Check for snapshot-app-fields + restore-app-fields! with restore after min-byte.
-   The snapshot variable must both cover the path and be restored after the mutation."
-  (let [snap-var (find-helper-snapshot-var fn-form path-text)]
-    (if (not snap-var) false
-        (let [pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
-          (var found false)
-          (var search-start 1)
-          (while (and (not found) search-start)
-            (let [(start end) (string.find fn-form pat search-start)]
-              (if start
-                  (if (>= start min-byte)
-                      (set found true)
-                      (set search-start (+ end 1)))
-                  (lua :break))))
-          found))))
+   Any snapshot variable covering the path, when restored after the mutation, is accepted."
+  (local all-vars (find-helper-snapshot-var fn-form path-text))
+  (var found false)
+  (var vi 1)
+  (while (and (not found) (<= vi (length all-vars)))
+    (let [snap-var (. all-vars vi)
+          pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var))]
+      (var search-start 1)
+      (while (and (not found) search-start)
+        (let [(start end) (string.find fn-form pat search-start)]
+          (if start
+              (if (>= start min-byte)
+                  (set found true)
+                  (set search-start (+ end 1)))
+              (set search-start nil)))))
+    (set vi (+ vi 1)))
+  found)
 
 (fn skip-argument [text start]
   "Skip past one S-expression argument (vector, list, or symbol) at start.
@@ -271,7 +279,7 @@
                       (if (>= restore-line min-line)
                           (set found true)
                           (set search-start (+ end 1))))
-                    (lua :break)))))
+                    (set search-start nil)))))
           ;; Scan tset positions
           (when (and (not found) (>= (length path) 2))
             (let [plen (length path)]
@@ -298,7 +306,7 @@
                                 (if (>= restore-line min-line)
                                     (set found true)
                                     (set search-start (+ end2 1))))
-                              (lua :break)))))))))
+                              (set search-start nil)))))))))
           found))))
 
 (fn find-all-pcall-fn-ranges [fn-form]
@@ -392,7 +400,7 @@
                     (if (>= start min-byte)
                         (set found true)
                         (set search-start (+ end 1)))
-                    (lua :break)))))
+                    (set search-start nil)))))
           ;; Scan tset positions  
           (when (and (not found) (>= (length path) 2))
             (let [plen (length path)]
@@ -417,7 +425,7 @@
                               (if (>= start2 min-byte)
                                   (set found true)
                                   (set search-start (+ end2 1)))
-                              (lua :break)))))))))
+                              (set search-start nil)))))))))
           found))))
 
 (fn global-mutation-restoration-rule-run [ctx]

@@ -1239,8 +1239,37 @@
                                            :form "(set app.engine custom-engine)"
                                            :enclosing-fn "test-two-snap-nonrestored-covering"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert result "should flag engine mutation when only non-covering snapshot is restored")
-  (assert (> (length result) 0) "should have at least one diagnostic for non-restored covering snapshot"))
+   (assert result "should flag engine mutation when only non-covering snapshot is restored")
+   (assert (> (length result) 0) "should have at least one diagnostic for non-restored covering snapshot"))
+
+;; ======================================================================
+;; V4-1: any covering snapshot restore accepted
+;; ======================================================================
+
+(fn mutation-restoration-allows-later-covering-snapshot-restore []
+  "V4-1: Two snapshots both covering app.engine (s1 and s2).
+   Only the later one (s2) is restored after mutation.
+   This should pass because any covering snapshot var, when restored, is accepted."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-two-covering-snaps"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-two-covering-snaps []
+  (local s1 (snapshot-app-fields [:engine]))
+  (local s2 (snapshot-app-fields [:engine]))
+  (set app.engine custom-engine)
+  (restore-app-fields! s2))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 9 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "test-two-covering-snaps"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "V4-1: restore of any covering snapshot after mutation should pass"))
 
 ;; ======================================================================
 ;; Rules list structure tests
@@ -1327,6 +1356,7 @@
 (table.insert tests {:name "V2-3 allows snapshot covering subpath" :fn mutation-restoration-allows-snapshot-covering-subpath})
 (table.insert tests {:name "V2-3 flags var-key snapshot missing field" :fn mutation-restoration-flags-variable-key-snapshot-missing-field})
 (table.insert tests {:name "V3-1 flags two snapshots non-restored covering" :fn mutation-restoration-flags-two-snapshots-non-restored-covering})
+(table.insert tests {:name "V4-1 allows later covering snapshot restore" :fn mutation-restoration-allows-later-covering-snapshot-restore})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
