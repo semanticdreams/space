@@ -483,6 +483,7 @@
     (local original-runtime app.active-world-runtime)
     (local original-camera app.camera)
     (local original-projection app.projection)
+    (local original-create-default-projection app.create-default-projection)
     (var camera nil)
     (var selector nil)
     (local (ok err)
@@ -513,6 +514,7 @@
     (set app.active-world-runtime original-runtime)
     (set app.camera original-camera)
     (set app.projection original-projection)
+    (set app.create-default-projection original-create-default-projection)
     (when (not ok)
       (error err)))
 
@@ -567,32 +569,10 @@
 
 (local main
   (fn []
-    ;; Production wrapper functions that delegate to app.active-world-runtime.presentation.
-    ;; The test runner's setup-test-env does (global app {}) which nukes these, so we
-    ;; install them before each test to exercise the real production delegation path.
-    (local presentation-input-controls-fn
-      (fn []
-        (let [provider (and app.active-world-runtime app.active-world-runtime.presentation)]
-          (and provider (provider:input-controls)))))
-    (local presentation-camera-fn
-      (fn [opts]
-        (let [provider (and app.active-world-runtime app.active-world-runtime.presentation)]
-          (if provider
-              (provider:camera opts)
-              (let [options (or opts {})]
-                (when options.required?
-                  (assert provider "app.presentation-camera requires an active presentation provider")))))))
-    (local active-presentation-fn
-      (fn []
-        (and app.active-world-runtime app.active-world-runtime.presentation)))
-    ;; Wrap each test to install the production wrappers before execution.
-    (each [_ test (ipairs tests)]
-      (local original-fn test.fn)
-      (set test.fn (fn []
-        (set app.presentation-input-controls presentation-input-controls-fn)
-        (set app.presentation-camera presentation-camera-fn)
-        (set app.active-presentation active-presentation-fn)
-        (original-fn))))
+    ;; The test module's top-level (require :main) caches main.fnl before the runner's
+    ;; setup-test-env creates a fresh app global. Clear the cache so setup-test-env
+    ;; re-executes main.fnl and installs the production wrapper functions on the new app.
+    (set (. package.loaded :main) nil)
     (local runner (require :tests/runner))
     (runner.run-tests {:name "selection" :tests tests})))
 
