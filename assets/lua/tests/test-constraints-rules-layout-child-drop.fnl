@@ -646,6 +646,116 @@
       (set found-missing-drop true)))
   (assert found-missing-drop "should flag missing public drop for :drop nil"))
 
+;; R9-1: returned :drop in one function does NOT exempt creation in another
+(fn child-drop-flags-unrelated-returned-drop []
+  "A file where function A has a returned :drop but function B (different
+  scope) creates child Layout without any drop path should still flag
+  function B's creation."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "helper-with-drop"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 100
+                                             :form "(fn helper-with-drop []
+  {:drop (fn [] (print :cleanup))})"}
+                                            {:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn make-widget []
+  (Layout {:child child}))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 6 :column 3
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn "make-widget"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "unrelated returned :drop should not exempt other creation")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop for unrelated creation"))
+
+;; R9-2 negative: :drop symbol where symbol is non-function
+(fn child-drop-flags-returned-drop-non-fn-symbol []
+  "A returned table {:drop x} where x is a local bound to non-function
+  should NOT count as a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 200
+                                             :form "(fn make-widget []
+  (let [layout (Layout {:child child})
+        cleanup false]
+    {:layout layout :drop cleanup}))"}
+                                            {:kind :local
+                                             :name "cleanup"
+                                             :top-level? false
+                                             :line 3 :column 9
+                                             :length 20
+                                             :form "(local cleanup false)"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 2 :column 15
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn "make-widget"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "returned :drop non-fn symbol should still flag")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop for non-fn symbol"))
+
+;; R9-3: valid public drop path but missing cleanup evidence
+(fn child-drop-flags-missing-cleanup-with-returned-drop []
+  "A file with valid returned :drop but no :drop/clear-children/drop-children
+  call should still report missing cleanup evidence."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 150
+                                             :form "(fn make-widget []
+  (let [layout (Layout {:child child})]
+    {:layout layout :drop (fn [_]
+                            (layout:drop))}))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 2 :column 15
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn "make-widget"}]
+                              ;; No :drop/clear-children/drop-children call
+                              }))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should report missing cleanup despite valid returned :drop")
+  (var found-missing-cleanup false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "child drop evidence")
+      (set found-missing-cleanup true)))
+  (assert found-missing-cleanup "should flag missing child drop evidence"))
+
 
 ;; Register all child-drop tests
 ;; layout.owned-child-drop
@@ -709,5 +819,14 @@
 ;; R3-4: returned table :drop nil does not count
 (table.insert tests {:name "child-drop flags returned table drop nil"
                      :fn child-drop-flags-returned-table-drop-nil})
+;; R9-1: unrelated returned :drop does not exempt
+(table.insert tests {:name "child-drop flags unrelated returned drop"
+                     :fn child-drop-flags-unrelated-returned-drop})
+;; R9-2: :drop symbol where symbol is non-function
+(table.insert tests {:name "child-drop flags returned drop non-fn symbol"
+                     :fn child-drop-flags-returned-drop-non-fn-symbol})
+;; R9-3: valid :drop but missing cleanup
+(table.insert tests {:name "child-drop flags missing cleanup with returned drop"
+                     :fn child-drop-flags-missing-cleanup-with-returned-drop})
 
 {:tests tests}
