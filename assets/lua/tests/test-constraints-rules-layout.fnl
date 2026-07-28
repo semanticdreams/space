@@ -862,6 +862,113 @@
       (set found-missing-drop true)))
   (assert found-missing-drop "should flag missing public drop path for non-final drop mutation"))
 
+;; R2-4: non-function set/tset .drop does not count as public drop path
+(fn child-drop-flags-non-fn-drop-assignment []
+  "A file creating Layout with (set x.drop nil) or (set x.drop false)
+  should NOT be accepted as providing a public drop path.  Only function
+  assignments (set x.drop (fn ...)) count as a public drop API."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  ;; (set options.drop false) is not a public drop function
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :set
+                                           :path ["options" "drop"]
+                                           :line 10 :column 1
+                                           :form "(set options.drop false)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag retained Layout with non-fn drop assignment")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop path for non-fn drop assignment"))
+
+;; R2-5: set x.drop nil does not count as public drop
+(fn child-drop-flags-nil-drop-assignment []
+  "A file creating Layout with (set x.drop nil) should NOT count nil
+  assignment as a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout" :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :set
+                                           :path ["widget" "drop"]
+                                           :line 10 :column 1
+                                           :form "(set widget.drop nil)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag retained Layout with nil drop assignment")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop path for nil drop assignment"))
+
+;; R2-6: set x.drop some-symbol does not count as public drop
+(fn child-drop-flags-symbol-drop-assignment []
+  "A file creating Layout with (set x.drop some-fn) where some-fn is a symbol
+  (not a function literal) should NOT count as a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout" :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :set
+                                           :path ["widget" "drop"]
+                                           :line 10 :column 1
+                                           :form "(set widget.drop some-fn)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag retained Layout with symbol drop assignment")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop path for symbol drop assignment"))
+
+;; R2-7: tset x :drop false does not count as public drop
+(fn child-drop-flags-tset-false-drop-assignment []
+  "A file creating Layout with (tset obj :drop false) should NOT count
+  as a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout" :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :tset
+                                           :path ["obj" "drop"]
+                                           :line 10 :column 1
+                                           :form "(tset obj :drop false)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag retained Layout with tset false drop assignment")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop path for tset false drop assignment"))
+
 ;; ======================================================================
 ;; layout.interactive-context-assertion
 ;; ======================================================================
@@ -1210,6 +1317,37 @@
   (local d (. result 1))
   (assert (= d.constraint-id "layout.interactive-context-assertion")
           "real-fact diagnostic should flag bare clickables"))
+
+;; R1-2: real fact extraction test — helper skip (param-based)
+(fn interactive-assertion-allows-param-clickables-via-real-facts []
+  "Use the actual fact extractor to parse Fennel source containing
+  clickables as a bare parameter.  The real facts extractor emits no
+  bare access facts for single-symbol references, so the parameter-based
+  skip must work even without :accesses entries."
+  (local Facts (require :constraints.facts))
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  ;; Real Fennel source: clickables is a function parameter, not an access
+  (local source "(fn process-clicks [clickables]
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  ;; Extract facts using tree-sitter
+  (local ts (require :tree-sitter))
+  (local tree (ts.parse source {:language :fennel}))
+  (local root (tree:root))
+  (local file-records [{:target {:kind :repo :name :test}
+                         :path "/test/process-clicks.fnl"
+                         :module "test.process-clicks"
+                         :source source
+                         :root root}])
+  (local fact-db (Facts.extract file-records))
+  (local ctx {:target {:kind :repo :name :test}
+              :facts fact-db
+              :files []})
+  (local result (rule.run ctx))
+  (assert (= result nil) "real fact extraction should NOT flag param clickables helper"))
 
 ;; R1-4: assertion fn not real assert (call-based check)
 (fn interactive-assertion-flags-assertion-fn-not-real-assert []
@@ -1715,8 +1853,8 @@
   "A function that receives clickables as a bare parameter (e.g.,
   (fn helper [clickables]) where clickables is a direct parameter)
   should NOT be flagged.  The caller is responsible for the assert.
-  The function name must NOT contain 'clickables' or 'hoverables' so
-  the parameter-based skip is the only reason this test passes."
+  No synthetic :accesses are injected — real facts extraction does
+  not produce access records for bare single-symbol accesses."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
@@ -1731,10 +1869,7 @@
                                              :form "(fn process-clicks [clickables]
   (each [_ c (ipairs clickables)]
     (register c)))"}]
-                              :accesses [{:path ["clickables"]
-                                          :text "clickables"
-                                          :line 6 :column 1
-                                          :form "clickables"}]}))
+                              :accesses []}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "helper receiving clickables as bare parameter should pass"))
 
@@ -1743,8 +1878,7 @@
   "A function that receives hoverables as a bare parameter (e.g.,
   (fn helper [hoverables]) where hoverables is a direct parameter)
   should NOT be flagged — the caller already validated the context.
-  The function name must NOT contain 'hoverables' or 'clickables' so
-  the parameter-based skip is the only reason this test passes."
+  No synthetic :accesses are injected — matches real facts extraction."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
@@ -1759,39 +1893,40 @@
                                              :form "(fn setup-hover [hoverables]
   (each [_ h (ipairs hoverables)]
     (register-hover h)))"}]
-                              :accesses [{:path ["hoverables"]
-                                          :text "hoverables"
-                                          :line 6 :column 1
-                                          :form "hoverables"}]}))
+                              :accesses []}))
   (local result (rule.run (make-ctx [ff])))
   (assert (= result nil) "helper receiving hoverables as bare parameter should pass"))
 
-;; R1-8: name-based skip for helper functions
-(fn interactive-assertion-allows-name-based-helper []
-  "A function whose name contains 'clickables' or 'hoverables' (e.g.,
-  register-clickables, unregister-hoverables) should be treated as a
-  helper and NOT flagged.  The parent constructor is responsible for
-  the assert."
+;; R1-8R3: named function with clickables/hoverables in name + dot-access → flags
+(fn interactive-assertion-flags-named-dot-access []
+  "A function named render-clickables-panel that accesses ctx.clickables
+  directly via dot-access (not bare) should be FLAGGED despite the name.
+  The name-only exemption has been removed; only bare keyword parameters
+  trigger the helper skip."
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
   (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
   (assert rule "rule should be in rules list")
-  (local ff (make-file-fact {:path "/src/widget.fnl"
-                              :module "widget"
+  (local ff (make-file-fact {:path "/src/bad-widget.fnl"
+                              :module "bad-widget"
                               :definitions [{:kind :fn
-                                             :name "register-clickables"
+                                             :name "render-clickables-panel"
                                              :top-level? true
                                              :line 5 :column 1
-                                             :length 100
-                                             :form "(fn register-clickables [clickables]
-  (each [_ c (ipairs clickables)] (register c)))"}]
-                              ;; No assert call, no parameter skip for bare clickables
-                              :accesses [{:path ["clickables"]
-                                          :text "clickables"
+                                             :length 150
+                                             :form "(fn render-clickables-panel [ctx]
+  (each [_ c (ipairs ctx.clickables)]
+    (register c)))"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
                                           :line 6 :column 1
-                                          :form "clickables"}]}))
+                                          :form "ctx.clickables"}]}))
   (local result (rule.run (make-ctx [ff])))
-  (assert (= result nil) "helper named register-clickables should pass"))
+  (assert result "should flag named function with dot-access despite containing clickables in name")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "diagnostic should flag named dot-access without assert"))
 
 ;; R1-9: direct unasserted ctx/options/app access still flags
 (fn interactive-assertion-flags-direct-access-in-named-fn []
@@ -1946,6 +2081,18 @@
 ;; R2-3: non-final drop mutation still flags
 (table.insert tests {:name "child-drop flags non-final drop mutation"
                      :fn child-drop-flags-non-final-drop-mutation})
+;; R2-4: non-fn drop assignment does not count as public drop
+(table.insert tests {:name "child-drop flags non-fn drop assignment"
+                     :fn child-drop-flags-non-fn-drop-assignment})
+;; R2-5: nil drop assignment does not count
+(table.insert tests {:name "child-drop flags nil drop assignment"
+                     :fn child-drop-flags-nil-drop-assignment})
+;; R2-6: symbol drop assignment does not count
+(table.insert tests {:name "child-drop flags symbol drop assignment"
+                     :fn child-drop-flags-symbol-drop-assignment})
+;; R2-7: tset false drop assignment does not count
+(table.insert tests {:name "child-drop flags tset false drop assignment"
+                     :fn child-drop-flags-tset-false-drop-assignment})
 
 ;; layout.interactive-context-assertion
 (table.insert tests {:name "interactive-assertion allows file without clickables"
@@ -1974,6 +2121,9 @@
 ;; R1-2: real fact extraction
 (table.insert tests {:name "interactive-assertion flags bare clickables via real facts"
                      :fn interactive-assertion-flags-bare-clickables-via-real-facts})
+;; R1-2: real fact extraction — helper skip
+(table.insert tests {:name "interactive-assertion allows param clickables via real facts"
+                     :fn interactive-assertion-allows-param-clickables-via-real-facts})
 ;; R1-4: not real assert
 (table.insert tests {:name "interactive-assertion flags assertion fn not real assert"
                      :fn interactive-assertion-flags-assertion-fn-not-real-assert})
@@ -2018,9 +2168,9 @@
 ;; R1-7: parameter-based skip with hoverables
 (table.insert tests {:name "interactive-assertion allows parameter hoverables"
                      :fn interactive-assertion-allows-parameter-hoverables})
-;; R1-8: name-based skip for helpers
-(table.insert tests {:name "interactive-assertion allows name-based helper"
-                     :fn interactive-assertion-allows-name-based-helper})
+;; R1-8R3: named dot-access with clickables in name still flags
+(table.insert tests {:name "interactive-assertion flags named dot-access despite name"
+                     :fn interactive-assertion-flags-named-dot-access})
 ;; R1-9: direct unasserted access still flags
 (table.insert tests {:name "interactive-assertion flags direct access in named fn"
                      :fn interactive-assertion-flags-direct-access-in-named-fn})

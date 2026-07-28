@@ -312,13 +312,15 @@
       (set found true)))
   ;; Recognize set/tset assignment of .drop to a function as a public
   ;; drop path.  This handles factory patterns like (set button.drop (fn ...))
-  ;; and (tset obj :drop (fn ...)).
+  ;; and (tset obj :drop (fn ...)).  Must be a function assignment — non-fn
+  ;; values like nil/false/symbol do NOT count as a public drop path.
   (each [_ mut (ipairs (or ff.mutations []))]
     (when (and (not found)
                (or (= mut.op :set) (= mut.op :tset))
                (let [p (or mut.path [])
                      plen (length p)]
-                 (and (>= plen 1) (= (. p plen) "drop"))))
+                 (and (>= plen 1) (= (. p plen) "drop")
+                      (string.find (or mut.form "") "(fn " 1 true))))
       (set found true)))
   found)
 
@@ -492,32 +494,18 @@
     (let [calls (or ff.calls [])]
       (each [_ def (ipairs (or ff.definitions []))]
         (var skip-because-param false)
-        (var skip-because-name false)
-        ;; Check if any matching access text has its receiver as a function
-        ;; parameter — the caller already validated the context.
-        (when (and def.form (> (length interactive-access-texts) 0))
+        ;; Check if any bare interactive keyword (clickables/hoverables)
+        ;; is itself a function parameter — the caller validates context.
+        ;; This works even when the facts extractor produces no access
+        ;; facts for single-symbol bare accesses (which it doesn't).
+        (when def.form
           (local params (extract-fn-params def.form))
           (when params
-            (each [_ text (ipairs interactive-access-texts)]
-              (when (and (not skip-because-param) (string.find def.form text 1 true))
-                (local dot-pos (string.find text "." 1 true))
-                ;; Only skip when the access has NO dot and the bare
-                ;; interactive keyword (clickables/hoverables) is itself
-                ;; a parameter.  A dot-access like ctx.clickables through
-                ;; a wrapper parameter does NOT make the function safe;
-                ;; the function still needs its own assert.
-                (when (not dot-pos)
-                  (when (. params text)
-                    (set skip-because-param true)))))))
-        ;; Skip definitions whose own name contains the interactive keyword.
-        ;; E.g., register-clickables/unregister-hoverables have clickables/
-        ;; hoverables in their name because they're helpers; the parent
-        ;; constructor is responsible for the assert.
-        (when (and (not skip-because-param) def.name)
-          (each [kw _ (pairs interactive-access-patterns)]
-            (when (and (not skip-because-name) (string.find def.name kw 1 true))
-              (set skip-because-name true))))
-        (when (not (or skip-because-param skip-because-name))
+            (each [kw _ (pairs interactive-access-patterns)]
+              (when (and (not skip-because-param) (. params kw))
+                (when (fn-def-has-bare-interactive? def)
+                  (set skip-because-param true))))))
+        (when (not skip-because-param)
           (let [has-access (fn-def-has-interactive-access? interactive-access-texts def)
                 has-bare (fn-def-has-bare-interactive? def)]
             (when (and (or has-access has-bare)
