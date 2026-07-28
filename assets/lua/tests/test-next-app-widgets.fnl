@@ -63,53 +63,55 @@
 (table.insert tests {:name "Next button measures label and emits quad"
                      :fn next-button-measures-label-and-emits-quad})
 
-;; A6-1: precise integration coverage — exact registration counts and named nodes
+;; A7-1: occurrence-count helper + per-widget exact-count assertions
+(fn count-occurrences [arr name]
+  "Return how many nodes in arr have .name == name."
+  (var n 0)
+  (each [_ node (ipairs arr)]
+    (when (= (. node :name) name)
+      (set n (+ n 1))))
+  n)
+
 (fn build-ui-root-registers-widgets-with-router []
-  "Call the production build-ui-root and assert exact router registration
-  counts and that every expected widget node (by name) appears in the
-  appropriate router arrays."
+  "Call the production build-ui-root and assert exact per-widget
+  registration counts in router.clickables/hoverables."
   (local {: build-ui-root} (require :next-app/renderers))
   (local result (build-ui-root {}))
   (local router result.router)
 
-  ;; ---- exact clickables registration ----
-  ;; 3 buttons register × 3 methods each (register, register-right-click,
-  ;; register-double-click) + 2 toggles × 1 = 11
-  (assert (= (length router.clickables) 11)
-          (.. "router.clickables should be 11, got " (length router.clickables)))
+  ;; ---- per-widget clickables counts ----
+  ;; Buttons: register + register-right-click + register-double-click = 3 each
+  (local button-names ["next-button-run" "next-button-inspect" "next-button-ship"])
+  (each [_ name (ipairs button-names)]
+    (assert (= (count-occurrences router.clickables name) 3)
+            (.. name " should appear 3× in router.clickables, got "
+                (count-occurrences router.clickables name))))
+  ;; Toggles: register once = 1 each
+  (local toggle-names ["next-toggle-perf" "next-toggle-logs"])
+  (each [_ name (ipairs toggle-names)]
+    (assert (= (count-occurrences router.clickables name) 1)
+            (.. name " should appear 1× in router.clickables, got "
+                (count-occurrences router.clickables name))))
 
-  ;; No entry is the adapter table (adapters have .register-right-click)
+  ;; ---- per-widget hoverables counts (all appear once) ----
+  (each [_ name (ipairs button-names)]
+    (assert (= (count-occurrences router.hoverables name) 1)
+            (.. name " should appear 1× in router.hoverables, got "
+                (count-occurrences router.hoverables name))))
+  (each [_ name (ipairs toggle-names)]
+    (assert (= (count-occurrences router.hoverables name) 1)
+            (.. name " should appear 1× in router.hoverables, got "
+                (count-occurrences router.hoverables name))))
+
+  ;; ---- adapter sanity (no entry is the adapter table) ----
   (each [_ node (ipairs router.clickables)]
     (assert (not (. node :register-right-click))
-            (.. "clickables entry should not be adapter: " (tostring (. node :name))))
-    (assert node.width "clickables entry should be a widget node"))
-
-  ;; All five named widgets appear in router.clickables
-  (local widget-names ["next-button-run" "next-button-inspect" "next-button-ship"
-                        "next-toggle-perf" "next-toggle-logs"])
-  (each [_ expected-name (ipairs widget-names)]
-    (var found false)
-    (each [_ node (ipairs router.clickables)]
-      (when (= (. node :name) expected-name)
-        (set found true)))
-    (assert found (.. expected-name " should be in router.clickables")))
-
-  ;; ---- exact hoverables registration ----
-  ;; 3 buttons + 2 toggles = 5
-  (assert (= (length router.hoverables) 5)
-          (.. "router.hoverables should be 5, got " (length router.hoverables)))
-
+            (.. "clickable " (tostring (. node :name)) " should not be adapter"))
+    (assert node.width "clickable entry should be a widget node"))
   (each [_ node (ipairs router.hoverables)]
     (assert (not (. node :register))
-            (.. "hoverables entry should not be adapter: " (tostring (. node :name))))
-    (assert node.width "hoverables entry should be a widget node"))
-
-  (each [_ expected-name (ipairs widget-names)]
-    (var found false)
-    (each [_ node (ipairs router.hoverables)]
-      (when (= (. node :name) expected-name)
-        (set found true)))
-    (assert found (.. expected-name " should be in router.hoverables")))
+            (.. "hoverable " (tostring (. node :name)) " should not be adapter"))
+    (assert node.width "hoverable entry should be a widget node"))
 
   ;; ---- returned named nodes ----
   (assert result.run-button "run-button should be returned")
@@ -119,26 +121,25 @@
   (assert result.logs-toggle "logs-toggle should be returned")
   (assert result.root "root should be returned")
 
-  ;; ---- drop cleanup ----
-  ;; 3 buttons × 3 drop methods = 9 clickables removed; 2 toggles remain
+  ;; ---- drop cleanup with per-widget counts ----
   (result.run-button:drop)
   (result.inspect-button:drop)
   (result.ship-button:drop)
-  (assert (= (length router.clickables) 2)
-          (.. "router.clickables should be 2 after button drops, got "
-              (length router.clickables)))
-  ;; Remaining clickables are the toggles
-  (each [_ expected-name (ipairs ["next-toggle-perf" "next-toggle-logs"])]
-    (var found false)
-    (each [_ node (ipairs router.clickables)]
-      (when (= (. node :name) expected-name)
-        (set found true)))
-    (assert found (.. expected-name " should remain after button drops")))
+  ;; After 3 button drops: only toggles remain
+  (each [_ name (ipairs toggle-names)]
+    (assert (= (count-occurrences router.clickables name) 1)
+            (.. name " should still be 1× in clickables after button drops, got "
+                (count-occurrences router.clickables name))))
+  (each [_ name (ipairs button-names)]
+    (assert (= (count-occurrences router.clickables name) 0)
+            (.. name " should be 0× in clickables after drop, got "
+                (count-occurrences router.clickables name))))
+  (each [_ name (ipairs toggle-names)]
+    (assert (= (count-occurrences router.hoverables name) 1)
+            (.. name " should still be 1× in hoverables after button drops, got "
+                (count-occurrences router.hoverables name))))
 
-  ;; hoverables: 3 buttons dropped → 2 toggles remain
-  (assert (= (length router.hoverables) 2)
-          (.. "router.hoverables should be 2 after button drops, got "
-              (length router.hoverables)))
+  ;; Drop toggles → all arrays empty
   (result.perf-toggle:drop)
   (result.logs-toggle:drop)
   (assert (= (length router.clickables) 0)
