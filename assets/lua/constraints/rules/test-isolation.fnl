@@ -117,28 +117,29 @@
           (set covers true))))
     (when covers (table.insert result var-name)))
   ;; Check variable-key snapshots: (local VAR (snapshot-app-fields KEY-VAR))
-  (when (= (length result) 0)
-    (local var-pat "%(local%s+([%w%-_]+)%s+%(snapshot%-app%-fields%s+([%w%-_]+)%s*%)%)")
-    (each [snap-var key-var (fn-form:gmatch var-pat)]
-      (local ekv (escape-pattern key-var))
-      (local local-pat (.. "%(local%s+" ekv "%s+%[(.-)%]"))
-      (var this-resolved false)
-      (var this-covers false)
-      (each [keys-str (fn-form:gmatch local-pat)]
-        (set this-resolved true)
-        (set had-any-resolved true)
-        (when (not this-covers)
-          (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
-            (when (and (not this-covers) (> (length k) 0))
-              (local app-key (.. "app." k))
-              (local ekey (escape-pattern app-key))
-              (when (if (= path-text app-key) true
-                        (path-text:find (.. "^" ekey "%.") 1 false) true
-                        false)
-                (set this-covers true))))))
-      (when this-covers (table.insert result snap-var))
-      (when (and (not this-resolved) (not first-unresolved-var))
-        (set first-unresolved-var snap-var))))
+  ;; Always checked regardless of whether literal covering snapshots were found,
+  ;; so that mixed literal+variable-key snapshots are all collected (R2-1).
+  (local var-pat "%(local%s+([%w%-_]+)%s+%(snapshot%-app%-fields%s+([%w%-_]+)%s*%)%)")
+  (each [snap-var key-var (fn-form:gmatch var-pat)]
+    (local ekv (escape-pattern key-var))
+    (local local-pat (.. "%(local%s+" ekv "%s+%[(.-)%]"))
+    (var this-resolved false)
+    (var this-covers false)
+    (each [keys-str (fn-form:gmatch local-pat)]
+      (set this-resolved true)
+      (set had-any-resolved true)
+      (when (not this-covers)
+        (each [k (keys-str:gmatch ":?([%w%-%.]+)")]
+          (when (and (not this-covers) (> (length k) 0))
+            (local app-key (.. "app." k))
+            (local ekey (escape-pattern app-key))
+            (when (if (= path-text app-key) true
+                      (path-text:find (.. "^" ekey "%.") 1 false) true
+                      false)
+              (set this-covers true))))))
+    (when this-covers (table.insert result snap-var))
+    (when (and (not this-resolved) (not first-unresolved-var))
+      (set first-unresolved-var snap-var)))
   ;; Fallback: no literal, no resolved variable, but found unresolved var key -> accept
   (when (and (= (length result) 0) (not had-any-literal) (not had-any-resolved) first-unresolved-var)
     (table.insert result first-unresolved-var))
@@ -151,38 +152,6 @@
   (if (. result 1)
       {:start (. result 1) :end (. result 2)}
       nil))
-
-(fn position-to-file-line [fn-form fn-def-line byte-pos]
-  "Convert a byte position in the form text to an approximate file line."
-  (var line fn-def-line)
-  (local prefix (fn-form:sub 1 byte-pos))
-  (each [_ (prefix:gmatch "\n")]
-    (set line (+ line 1)))
-  line)
-
-(fn has-helper-restore-after-line? [fn-form fn-def-line path-text min-line]
-  "Check for snapshot-app-fields + restore-app-fields! with restore after min-line.
-   Any snapshot variable covering the path, when restored after the mutation, is accepted."
-  (local all-vars (find-helper-snapshot-var fn-form path-text))
-  (var found false)
-  (var vi 1)
-  (while (and (not found) (<= vi (length all-vars)))
-    (local snap-var (. all-vars vi))
-    (local pat (.. "restore%-app%-fields!%s+" (escape-pattern snap-var)))
-    (var search-start 1)
-    (while (and (not found) search-start)
-      (local s-e (find-substring fn-form pat search-start))
-      (if s-e
-          (do
-            (local start s-e.start)
-            (local end s-e.end)
-            (local restore-line (position-to-file-line fn-form fn-def-line start))
-            (if (>= restore-line min-line)
-                (set found true)
-                (set search-start (+ end 1))))
-          (set search-start nil)))
-    (set vi (+ vi 1)))
-  found)
 
 (fn has-helper-restore-after-byte? [fn-form path-text min-byte]
   "Check for snapshot-app-fields + restore-app-fields! with restore after min-byte.
@@ -289,67 +258,6 @@
         (set snap-var v))))
   snap-var)
 
-(fn has-concrete-restore-after-line? [fn-form fn-def-line path min-line]
-  "Check for concrete restore evidence at or after min-line in the source.
-   The function form must show both a snapshot of the path into a local
-   variable and a later write that sets the path back to that variable
-   at a source line >= min-line."
-  (local snap-var (find-snapshot-var fn-form path))
-  (if (not snap-var) false
-      (do
-        (local path-text (table.concat path "."))
-        (local escaped-path (path-text:gsub "%." "%%."))
-        (local escaped-var (escape-pattern snap-var))
-        (var found false)
-         ;; Scan (set path_text snap-var) positions
-         (local set-pat (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)"))
-         (var search-start 1)
-         (while (and (not found) search-start)
-           (local s-e (find-substring fn-form set-pat search-start))
-           (if s-e
-               (do
-                 (local start s-e.start)
-                 (local end s-e.end)
-                 (local restore-line (position-to-file-line fn-form fn-def-line start))
-                 (if (>= restore-line min-line)
-                     (set found true)
-                     (set search-start (+ end 1))))
-               (set search-start nil)))
-        ;; Scan tset positions
-        (when (and (not found) (>= (length path) 2))
-          (local plen (length path))
-          (local table-parts [])
-          (for [i 1 (- plen 1)]
-            (table.insert table-parts (. path i)))
-          (local tset-table (table.concat table-parts "."))
-          (local key (. path plen))
-          (local escaped-tset (tset-table:gsub "%." "%%."))
-          (local escaped-key (escape-pattern key))
-          (local pat1 (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var))
-          (local pat2 (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var))
-          (set search-start 1)
-          (while (and (not found) search-start)
-             (local s-e1 (find-substring fn-form pat1 search-start))
-             (if s-e1
-                 (do
-                   (local start1 s-e1.start)
-                   (local end1 s-e1.end)
-                   (local restore-line (position-to-file-line fn-form fn-def-line start1))
-                   (if (>= restore-line min-line)
-                       (set found true)
-                       (set search-start (+ end1 1))))
-                 (do
-                   (local s-e2 (find-substring fn-form pat2 search-start))
-                   (if s-e2
-                       (do
-                         (local start2 s-e2.start)
-                         (local end2 s-e2.end)
-                         (local restore-line (position-to-file-line fn-form fn-def-line start2))
-                         (if (>= restore-line min-line)
-                             (set found true)
-                             (set search-start (+ end2 1))))
-                       (set search-start nil))))))
-        found)))
 
 (fn try-extract-pcall-range [fn-form pcall-start]
   "Try to find the fn body end for a pcall+fn form starting at pcall-start.
@@ -428,9 +336,8 @@
 
 (fn has-concrete-restore-after-byte? [fn-form fn-def-line path min-byte]
   "Check for concrete restore evidence at a byte position >= min-byte.
-   Like has-concrete-restore-after-line? but compares start byte position
-   instead of approximate line number. Used for pcall where the restore
-   must be textually after the pcall body's closing paren."
+   Compares start byte positions instead of line numbers, supporting
+   same-line restore-before-mutation detection (R2-3)."
   (local snap-var (find-snapshot-var fn-form path))
   (if (not snap-var) false
       (do
@@ -587,25 +494,67 @@
        :evidence {:global-path path-text :enclosing-fn fn-name}
        :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))
 
+(fn check-mutation-restoration [ff fn-form fn-def-line fn-name path-text max-line max-col anon-def-col]
+  "Check all restoration patterns for a single mutation group.
+   Returns true if the mutation is properly restored."
+  (var has-restoration false)
+  (when (is-test-infrastructure-fn? ff.path fn-name)
+    (set has-restoration true))
+  (local path-segments [])
+  (each [seg (path-text:gmatch "[^%.]+")]
+    (table.insert path-segments seg))
+  (local min-byte (+ (find-mutation-approx-byte fn-form fn-def-line max-line)
+                     (math.max 0 (- max-col 1))))
+  (when (and (not has-restoration) (anon-byte-inside-wraf-body? fn-form min-byte))
+    (set has-restoration true))
+  (when (and (not has-restoration) (= fn-name "<anonymous>"))
+    (when (check-parent-wrapper ff fn-def-line anon-def-col)
+      (set has-restoration true)))
+  (local pcall-ranges (find-all-pcall-fn-ranges fn-form))
+  (local enclosing-pcall-end (find-enclosing-pcall-end-byte fn-form fn-def-line max-line pcall-ranges))
+  (when (and (not has-restoration) (not enclosing-pcall-end))
+    (when (has-concrete-restore-after-byte? fn-form fn-def-line path-segments min-byte)
+      (set has-restoration true)))
+  (when (and (not has-restoration) (not enclosing-pcall-end))
+    (when (has-helper-restore-after-byte? fn-form path-text min-byte)
+      (set has-restoration true)))
+  (when (and (not has-restoration) enclosing-pcall-end)
+    (when (has-concrete-restore-after-byte? fn-form fn-def-line path-segments enclosing-pcall-end)
+      (set has-restoration true)))
+  (when (and (not has-restoration) enclosing-pcall-end)
+    (when (has-helper-restore-after-byte? fn-form path-text enclosing-pcall-end)
+      (set has-restoration true)))
+  has-restoration)
+
 (fn global-mutation-restoration-rule-run [ctx]
   (var diagnostics [])
   (var files (. ctx.facts :files))
   (when (not files) (set files []))
   (each [_ ff (ipairs files)]
     (when (string.find ff.path "/tests/" 1 true)
-      ;; Step 1: collect max mutation line per (concrete fn, path) group
-      (var fn-path-max-line {})
+      ;; Step 1: collect max mutation position per (concrete fn, path) group
+      (var fn-path-max-info {})
       (var mutations ff.mutations)
       (when (not mutations) (set mutations []))
       (each [_ mutation (ipairs mutations)]
         (when (mutation-path-is-sensitive? mutation.path)
           (local key (build-mutation-group-key mutation ff))
-          (local current-max (if (. fn-path-max-line key) (. fn-path-max-line key) 0))
-          (when (> mutation.line current-max)
-            (tset fn-path-max-line key mutation.line))))
-      ;; Step 2: for each (fn, path) group, check restoration after max line
+          (local current (. fn-path-max-info key))
+          (local col (if mutation.column mutation.column 1))
+          (var should-update false)
+          (when (not current)
+            (set should-update true))
+          (when (and (not should-update) (> mutation.line current.line))
+            (set should-update true))
+          (when (and (not should-update) (= mutation.line current.line) (> col current.column))
+            (set should-update true))
+          (when should-update
+            (tset fn-path-max-info key {:line mutation.line :column col}))))
+      ;; Step 2: for each (fn, path) group, check restoration after max mutation position
       (var diagnosed {})
-      (each [key max-line (pairs fn-path-max-line)]
+      (each [key info (pairs fn-path-max-info)]
+        (local max-line info.line)
+        (local max-col info.column)
         (when (not (. diagnosed key))
           (local parsed (parse-group-key key))
           (when parsed
@@ -619,43 +568,11 @@
             ;; Check restoration patterns (order-aware)
             (var has-restoration false)
             (when (and fn-form fn-def-line)
-              ;; Narrow exemption: test infra setup functions
-              (when (is-test-infrastructure-fn? ff.path fn-name)
-                (set has-restoration true))
-              ;; Build path-segments from path-text
-              (local path-segments [])
-              (each [seg (path-text:gmatch "[^%.]+")]
-                (table.insert path-segments seg))
-              ;; Pattern 1: with-restored-app-fields (explicit)
-              (when (and (not has-restoration)
-                         (string.find fn-form "with-restored-app-fields" 1 true))
-                (set has-restoration true))
-              ;; Pattern 3: parent function wrapper for anonymous functions.
-              (when (and (not has-restoration) (= fn-name "<anonymous>"))
-                (when (check-parent-wrapper ff fn-def-line anon-def-col)
-                  (set has-restoration true)))
-              ;; Determine whether the mutation is inside a pcall body.
-              (local pcall-ranges (find-all-pcall-fn-ranges fn-form))
-              (local enclosing-pcall-end (find-enclosing-pcall-end-byte fn-form fn-def-line max-line pcall-ranges))
-              ;; Pattern 4a: direct snapshot table restore (order-aware, non-pcall)
-              (when (and (not has-restoration) (not enclosing-pcall-end))
-                (when (has-concrete-restore-after-line? fn-form fn-def-line path-segments max-line)
-                  (set has-restoration true)))
-              ;; Pattern 4b: helper snapshot/restore pair (order-aware, non-pcall)
-              (when (and (not has-restoration) (not enclosing-pcall-end))
-                (when (has-helper-restore-after-line? fn-form fn-def-line path-text max-line)
-                  (set has-restoration true)))
-              ;; Pattern 5a: pcall concrete restore (order-aware)
-              (when (and (not has-restoration) enclosing-pcall-end)
-                (when (has-concrete-restore-after-byte? fn-form fn-def-line path-segments enclosing-pcall-end)
-                  (set has-restoration true)))
-              ;; Pattern 5b: pcall helper restore (order-aware)
-              (when (and (not has-restoration) enclosing-pcall-end)
-                (when (has-helper-restore-after-byte? fn-form path-text enclosing-pcall-end)
-                  (set has-restoration true)))
+              (set has-restoration
+                   (check-mutation-restoration ff fn-form fn-def-line fn-name path-text max-line max-col anon-def-col)))
             ;; Emit diagnostic if no valid restoration found
             (when (not has-restoration)
-              (emit-mutation-diagnostic diagnostics diagnosed key ff path-text max-line fn-name))))))))
+              (emit-mutation-diagnostic diagnostics diagnosed key ff path-text max-line fn-name)))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 (fn M.rules []

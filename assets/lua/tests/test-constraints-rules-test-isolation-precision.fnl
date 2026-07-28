@@ -802,6 +802,120 @@
   (assert (= (rule.run (make-ctx [ff])) nil)
           "V4-1: restore of any covering snapshot after mutation should pass"))
 
+;; ======================================================================
+;; R2-1: mixed literal+variable-key snapshot coverage
+;; ======================================================================
+
+(fn mutation-restoration-allows-mixed-literal-variable-key-snapshot-restore []
+  "R2-1: Two snapshots: s1 literal [:engine], s2 via variable keys [:engine].
+   Mutate app.engine, restore only s2. Should pass because s2 covers engine
+   and any covering var when restored is accepted."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-mixed-snapshot"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-mixed-snapshot []
+  (local s1 (snapshot-app-fields [:engine]))
+  (local keys [:engine])
+  (local s2 (snapshot-app-fields keys))
+  (set app.engine custom-engine)
+  (restore-app-fields! s2))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 10 :column 1
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "test-mixed-snapshot"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "R2-1: restore of variable-key snapshot covering engine should pass when literal also exists"))
+
+;; ======================================================================
+;; R2-2: named-function with-restored-app-fields containment
+;; ======================================================================
+
+(fn mutation-restoration-flags-named-mutation-outside-wrapper []
+  "R2-2: Named function with with-restored-app-fields wrapper, but mutation
+   is textually outside the wrapper body. Should be diagnosed.
+   Previously broad substring check exempted the entire function."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-outside-wrapper"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-outside-wrapper []
+  (with-restored-app-fields [:engine]
+    (set app.engine wrapped))
+  (set app.engine leaky))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 8 :column 1
+                                           :form "(set app.engine wrapped)"
+                                           :enclosing-fn "test-outside-wrapper"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 10 :column 1
+                                           :form "(set app.engine leaky)"
+                                           :enclosing-fn "test-outside-wrapper"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R2-2: mutation outside wraf body should be diagnosed")
+  (assert (> (length result) 0) "should have at least one diagnostic for outside-wrapper mutation"))
+
+;; ======================================================================
+;; R2-3: same-line restore-before-mutation byte-aware ordering
+;; ======================================================================
+
+(fn mutation-restoration-flags-same-line-helper-restore-before-mutation []
+  "R2-3: Helper restore before same-line mutation should be flagged.
+   Byte-based comparison must detect restore is textually before the mutation."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-same-line-helper"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-same-line-helper []
+  (local snap (snapshot-app-fields [:engine]))
+  (restore-app-fields! snap) (set app.engine custom))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 7 :column 31
+                                           :form "(set app.engine custom)"
+                                           :enclosing-fn "test-same-line-helper"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R2-3: helper restore before same-line mutation should be flagged")
+  (assert (> (length result) 0) "should have at least one diagnostic for same-line helper leak"))
+
+(fn mutation-restoration-flags-same-line-direct-restore-before-mutation []
+  "R2-3: Direct concrete restore before same-line mutation should be flagged.
+   Byte-based comparison must detect restore is textually before the mutation."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-same-line-direct"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-same-line-direct []
+  (let [orig app.renderers]
+    (set app.renderers orig) (set app.renderers custom)))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "renderers"]
+                                           :line 7 :column 30
+                                           :form "(set app.renderers custom)"
+                                           :enclosing-fn "test-same-line-direct"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R2-3: direct restore before same-line mutation should be flagged")
+  (assert (> (length result) 0) "should have at least one diagnostic for same-line direct leak"))
+
 
 ;; ======================================================================
 ;; Register all precision tests
@@ -829,6 +943,10 @@
 (table.insert tests {:name "V2-3 flags var-key snapshot missing field" :fn mutation-restoration-flags-variable-key-snapshot-missing-field})
 (table.insert tests {:name "V3-1 flags two snapshots non-restored covering" :fn mutation-restoration-flags-two-snapshots-non-restored-covering})
 (table.insert tests {:name "V4-1 allows later covering snapshot restore" :fn mutation-restoration-allows-later-covering-snapshot-restore})
+(table.insert tests {:name "R2-1 allows mixed literal+variable-key snapshot restore" :fn mutation-restoration-allows-mixed-literal-variable-key-snapshot-restore})
+(table.insert tests {:name "R2-2 flags named mutation outside wrapper" :fn mutation-restoration-flags-named-mutation-outside-wrapper})
+(table.insert tests {:name "R2-3 flags same-line helper restore before mutation" :fn mutation-restoration-flags-same-line-helper-restore-before-mutation})
+(table.insert tests {:name "R2-3 flags same-line direct restore before mutation" :fn mutation-restoration-flags-same-line-direct-restore-before-mutation})
 
 (local main
   (fn []
