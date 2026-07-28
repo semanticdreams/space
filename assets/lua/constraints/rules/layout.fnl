@@ -602,15 +602,21 @@
 
  (fn parent-has-asserted-local-before-child? [calls parent child kw]
    "Scope-safe closure-helper bypass predicate.  Uses byte-span containment
-   when available, falling back to string.find."
+   when available, falling back to string.find.  When byte containment
+   holds, child-pos is computed as parent-relative offset + 1."
    (when (and parent.form parent.name (not= parent.name "<anonymous>"))
-     ;; Determine child position in parent: prefer byte span containment,
-     ;; then string.find
+     ;; Determine child position in parent form
      (local child-pos
        (if (and parent.start-byte parent.end-byte child.start-byte child.end-byte
                 (>= child.start-byte parent.start-byte)
                 (<= child.end-byte parent.end-byte))
-           child.start-byte  ;; use child's start byte as position marker
+           (let [rel-offset (- child.start-byte parent.start-byte)]
+             (if (and (>= rel-offset 0)
+                      (= (parent.form:sub (+ rel-offset 1)
+                                          (+ rel-offset (length child.form)))
+                         child.form))
+                 (+ rel-offset 1)  ;; 1-indexed position in parent.form
+                 (string.find parent.form child.form 1 true)))
            (string.find parent.form child.form 1 true)))
      (when child-pos
        ;; Criterion 2: assert call in parent scope before child
