@@ -1163,4 +1163,32 @@
 (table.insert tests {:name "interactive-assertion flags unasserted bare access"
                      :fn interactive-assertion-flags-unasserted-bare-access})
 
+;; BW: (local clickables (assert options.clickables ...)) before 4 nested helpers
+(fn interactive-assertion-allows-bw-asserted-locals-four-helpers []
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local rc "(fn reg-c [] (when clickables (clickables:register b)))")
+  (local uc "(fn unreg-c [] (when clickables (clickables:unregister b)))")
+  (local rh "(fn reg-h [] (when hoverables (hoverables:register b)))")
+  (local uh "(fn unreg-h [] (when hoverables (hoverables:unregister b)))")
+  (local src (.. "(fn bw [o]\n  (local clickables (assert o.clickables \"need\"))\n  (local hoverables (assert o.hoverables \"need\"))\n  " rc "\n  " uc "\n  " rh "\n  " uh "\n  (reg-c) (reg-h))"))
+  (local ff (make-file-fact {:path "/x.fnl" :module "x"
+    :definitions [{:kind :fn :name "bw" :top-level? true :line 1 :column 1 :length (length src) :form src}
+                  {:kind :fn :name "reg-c" :top-level? false :line 4 :column 3 :length (length rc) :form rc}
+                  {:kind :fn :name "unreg-c" :top-level? false :line 5 :column 3 :length (length uc) :form uc}
+                  {:kind :fn :name "reg-h" :top-level? false :line 6 :column 3 :length (length rh) :form rh}
+                  {:kind :fn :name "unreg-h" :top-level? false :line 7 :column 3 :length (length uh) :form uh}]
+    :calls [{:callee "assert" :line 2 :column 16 :form "(assert o.clickables \"need\")" :enclosing-fn "bw"}
+            {:callee "assert" :line 3 :column 16 :form "(assert o.hoverables \"need\")" :enclosing-fn "bw"}]
+    :accesses [{:path ["o" "clickables"] :text "o.clickables" :line 2 :column 16 :form "o.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (each [_ d (ipairs (or result []))]
+    (when (or (= d.evidence.function-name "reg-c") (= d.evidence.function-name "unreg-c")
+              (= d.evidence.function-name "reg-h") (= d.evidence.function-name "unreg-h"))
+      (assert false (.. "helper should not be flagged: " d.evidence.function-name)))))
+(table.insert tests {:name "interactive-assertion allows bw asserted locals all four helpers"
+                     :fn interactive-assertion-allows-bw-asserted-locals-four-helpers})
+
 {:tests tests}
