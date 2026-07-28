@@ -492,7 +492,8 @@
           (when (and (not= parent.name child.name)
                      (>= child.start-byte parent.start-byte)
                      (<= child.end-byte parent.end-byte))
-            (tset child :enclosing-fn parent.name)))))
+            (tset child :enclosing-fn parent.name)
+            (tset child :top-level? false)))))
     (each [_ call (ipairs calls)]
       (when (and (= call.enclosing-fn nil) call.line)
         (each [_ parent (ipairs synthetic-parents)]

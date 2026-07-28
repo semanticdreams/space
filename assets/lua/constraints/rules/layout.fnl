@@ -773,8 +773,10 @@
                                   (= parent.name def.enclosing-fn)
                                   (parent-has-asserted-local-before-child? calls parent def kw))
                          (set covered true))))
-                   ;; Fallback: scan all defs
-                   (when (not covered)
+                   ;; Fallback: scan all defs only when enclosing-fn is nil.
+                   ;; If a known parent exists but fails the check, leave the
+                   ;; child uncovered — do not scan unrelated/sibling parents.
+                   (when (and (not covered) (= def.enclosing-fn nil))
                      (each [_ parent (ipairs all-defs)]
                        (when (and (not covered)
                                   (not= parent def)

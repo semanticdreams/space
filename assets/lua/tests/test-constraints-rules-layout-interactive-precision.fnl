@@ -889,6 +889,14 @@
   (assert regh-found "should find register-hoverables definition")
   (assert unregh-found "should find unregister-hoverables definition")
   ;; Verify helpers have ButtonWidget as enclosing-fn
+  ;; Track BW byte span for containment checks
+  (var bw-def nil)
+  (each [_ d (ipairs (or ff.definitions []))]
+    (when (= d.name "ButtonWidget")
+      (set bw-def d)
+      (assert d.start-byte "ButtonWidget should have start-byte")
+      (assert d.end-byte "ButtonWidget should have end-byte")))
+  (assert bw-def "should find ButtonWidget definition in pass")
   (each [_ d (ipairs (or ff.definitions []))]
     (when (or (= d.name "register-clickables")
               (= d.name "unregister-clickables")
@@ -896,7 +904,18 @@
               (= d.name "unregister-hoverables"))
       (assert (= d.enclosing-fn "ButtonWidget")
               (.. d.name " should have enclosing-fn ButtonWidget, got "
-                  (tostring d.enclosing-fn)))))
+                  (tostring d.enclosing-fn)))
+      (assert d.start-byte (.. d.name " should have start-byte"))
+      (assert d.end-byte (.. d.name " should have end-byte"))
+      ;; Verify byte containment: child within ButtonWidget
+      (assert (>= d.start-byte bw-def.start-byte)
+              (.. d.name " start-byte not within ButtonWidget"))
+      (assert (<= d.end-byte bw-def.end-byte)
+              (.. d.name " end-byte not within ButtonWidget"))
+      ;; Helpers must NOT be top-level
+      (assert (= d.top-level? false)
+              (.. d.name " should have top-level? false, got "
+                  (tostring d.top-level?)))))
   ;; Run the interactive-context-assertion rule and assert no helper diagnostics
   (local Layout (require :constraints.rules.layout))
   (local rules (Layout.rules))
