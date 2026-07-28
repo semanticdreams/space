@@ -580,6 +580,41 @@
 
 ;; ---- precision helpers for interactive-context-assertion ----
 
+(fn parent-has-asserted-local-before-child? [calls parent child kw]
+  "Scope-safe closure-helper bypass predicate.  Returns true if ALL of:
+  1) parent.form contains child.form;
+  2) an assert call fact exists for callee 'assert' with enclosing-fn == parent.name
+     and call.line < child.line (conservative on same-line);
+  3) parent form text BEFORE the child occurrence (strings/comments stripped)
+     contains (local kw (assert ...)) or (let [kw (assert ...)] ...)."
+  (when (and parent.form child.form parent.name)
+    (local child-pos (string.find parent.form child.form 1 true))
+    (when child-pos
+      ;; Check criterion 2: assert call in parent scope before child
+      (var assert-before-child false)
+      (each [_ call (ipairs calls)]
+        (when (and (not assert-before-child)
+                   (= call.callee "assert")
+                   call.enclosing-fn
+                   (= call.enclosing-fn parent.name)
+                   call.line
+                   child.line
+                   (< call.line child.line))
+          (set assert-before-child true)))
+      (when assert-before-child
+        ;; Check criterion 3: parent form before child contains the binding pattern
+        (local prefix (parent.form:sub 1 (- child-pos 1)))
+        (local no-strings (strip-strings prefix))
+        (local clean (strip-comments no-strings))
+        (local local-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
+        (if (clean:find local-pat)
+            true
+            (do
+              (local let-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
+              (if (clean:find let-pat) true false)))))))
+
+;; ---- precision helpers for interactive-context-assertion ----
+
 (fn extract-fn-params [def-form]
   "Extract the parameter names from a function definition form.
   Returns a table of param-name→true, or nil on failure."
@@ -664,7 +699,10 @@
                 asserted (fn-def-has-assert-call? calls def)]
             ;; Closure-helper bypass: if this def has bare interactive usage
             ;; and no assert of its own, check per keyword whether a parent
-            ;; asserts it via (local kw (assert ...)) without shadowing.
+            ;; asserts it via (local kw (assert ...)) before the child def.
+            ;; Uses scope-safe parent-has-asserted-local-before-child?
+            ;; instead of the outer-only-form + has-asserted-local? approach
+            ;; which over-masked parent form text.
             (var bare-covered {})
             (when (and (not asserted) has-bare (not has-access)
                        (not (fn-def-has-dotted-interactive? def cleaned)))
@@ -675,10 +713,7 @@
                   (each [_ parent (ipairs all-defs)]
                     (when (and (not (. bare-covered kw))
                                (not= parent def)
-                               parent.form
-                               def.form
-                               (string.find parent.form def.form 1 true)
-                               (has-asserted-local? (outer-only-form parent all-defs) kw))
+                               (parent-has-asserted-local-before-child? calls parent def kw))
                       (tset bare-covered kw true))))))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
