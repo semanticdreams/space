@@ -303,6 +303,8 @@
                    :text "Run"
                    :variant :secondary
                    :focus focus-context
+                   :clickables router
+                   :hoverables router
                    :text-scale 0.06
                    :background-color (glm.vec4 0.15 0.46 0.95 0.96)
                    :hover-background-color (glm.vec4 0.20 0.52 0.98 1)
@@ -312,6 +314,8 @@
                    :text "Inspect"
                    :variant :secondary
                    :focus focus-context
+                   :clickables router
+                   :hoverables router
                    :text-scale 0.06
                    :background-color (glm.vec4 0.18 0.62 0.72 0.96)
                    :hover-background-color (glm.vec4 0.22 0.68 0.78 1)
@@ -321,6 +325,8 @@
                    :text "Ship"
                    :variant :secondary
                    :focus focus-context
+                   :clickables router
+                   :hoverables router
                    :text-scale 0.06
                    :background-color (glm.vec4 0.62 0.30 0.86 0.96)
                    :hover-background-color (glm.vec4 0.69 0.36 0.91 1)
@@ -338,6 +344,8 @@
     (ToggleWidget {:name "next-toggle-perf"
                    :text "Perf mode"
                    :checked? true
+                   :clickables router
+                   :hoverables router
                    :width 0.34
                    :height 0.16
                    :on-color (glm.vec4 0.22 0.80 0.56 1)
@@ -347,6 +355,8 @@
     (ToggleWidget {:name "next-toggle-logs"
                    :text "Verbose logs"
                    :checked? false
+                   :clickables router
+                   :hoverables router
                    :width 0.34
                    :height 0.16
                    :on-color (glm.vec4 0.22 0.80 0.56 1)
