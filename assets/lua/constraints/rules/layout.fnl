@@ -308,7 +308,7 @@
 
 (fn def-has-returned-drop? [ff def]
   "Check if def returns a table with :drop (fn ...) or :drop (lambda ...)
-  or :drop <symbol> where symbol is a function-valued def in the file."
+  or :drop <symbol> where symbol is a same-scope function-valued binding."
   (when (and def.form (def-creates-children? ff def.name))
     (if (or (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
             (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]"))
@@ -316,13 +316,17 @@
         (let [(s e sym) (string.find def.form ":drop[%s\n]+([%w_%-]+)")]
           (when sym
             (var found-sym false)
-            (each [_ other (ipairs (or ff.definitions []))]
+            (local all-defs (if (= ff.definitions nil) [] ff.definitions))
+            (each [_ other (ipairs all-defs)]
               (when (and (not found-sym)
                          (= other.name sym)
                          (or (= other.kind :fn) (= other.kind :local))
                          other.form
                          (or (string.find other.form "(fn " 1 true)
-                             (string.find other.form "(lambda " 1 true)))
+                             (string.find other.form "(lambda " 1 true))
+                         ;; Must be same-scope: the symbol name appears
+                         ;; within this def's form text.
+                         (string.find def.form sym 1 true))
                 (set found-sym true)))
             found-sym)))))
 
@@ -345,12 +349,12 @@
   ;; values like nil/false/symbol do NOT count as a public drop path.
   (each [_ mut (ipairs (or ff.mutations []))]
     (when (and (not found)
-               (or (= mut.op :set) (= mut.op :tset))
-               (let [p (or mut.path [])
-                     plen (length p)]
-                 (and (>= plen 1) (= (. p plen) "drop")
-                      (string.find (or mut.form "") "(fn " 1 true))))
-      (set found true)))
+               (or (= mut.op :set) (= mut.op :tset)))
+      (local p (if (= mut.path nil) [] mut.path))
+      (local plen (length p))
+      (when (and (>= plen 1) (= (. p plen) "drop")
+                 (string.find (if (= mut.form nil) "" mut.form) "(fn " 1 true))
+        (set found true))))
   found)
 
 (fn has-child-cleanup-evidence? [ff]
@@ -373,15 +377,39 @@
       (let [has-global-drop (has-global-drop-path? ff)
             has-cleanup (has-child-cleanup-evidence? ff)
             all-defs (or ff.definitions [])]
-        (var has-drop (or has-global-drop false))
-        ;; Per-def returned-table :drop check
-        (when (not has-drop)
+        ;; Track whether all child-creating defs have a drop path
+        (var all-covered has-global-drop)
+        (when (not has-global-drop)
+          (set all-covered true)
           (each [_ def (ipairs all-defs)]
-            (when (and (not has-drop)
+            (when (and all-covered
                        (def-creates-children? ff def.name)
-                       (def-has-returned-drop? ff def))
-              (set has-drop true))))
-        (when (not has-drop)
+                       (not (def-has-returned-drop? ff def)))
+              (set all-covered false)))
+          ;; Also check file-level creation (nil enclosing-fn) and access-based
+          (when all-covered
+            (each [_ call (ipairs (or ff.calls []))]
+              (when (and all-covered
+                         (. child-creation-callees call.callee)
+                         (= call.enclosing-fn nil))
+                (set all-covered false))))
+          (when all-covered
+            (each [_ access (ipairs (or ff.accesses []))]
+              (when all-covered
+                (local p (if (= access.path nil) [] access.path))
+                (local plen (length p))
+                (when (and (>= plen 2) (. child-creation-access-keys (. p plen)))
+                  (set all-covered false)))))
+          (when all-covered
+            (each [_ access (ipairs (or ff.accesses []))]
+              (when all-covered
+                (local p (if (= access.path nil) [] access.path))
+                (local plen (length p))
+                (when (and (>= plen 2)
+                           (= (. p 1) "renderer")
+                           (. child-creation-access-keys (. p plen)))
+                  (set all-covered false))))))
+        (when (not all-covered)
           (table.insert diagnostics
             (Diagnostics.violation
               {:constraint-id "layout.owned-child-drop"

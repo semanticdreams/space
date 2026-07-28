@@ -756,6 +756,54 @@
       (set found-missing-cleanup true)))
   (assert found-missing-cleanup "should flag missing child drop evidence"))
 
+;; V11-1: two child-creating functions, only one has returned :drop
+(fn child-drop-flags-two-creators-one-drop []
+  "File has two child-creating functions; only one returns :drop (fn ...).
+  The other must still report missing public drop."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "widget-a"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 100
+                                             :form "(fn widget-a []
+  (Layout {:child child}))"}
+                                            {:kind :fn
+                                             :name "widget-b"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn widget-b []
+  (let [layout (Layout {:child child})]
+    {:layout layout :drop (fn [_] (layout:drop))}))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 2 :column 3
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn "widget-a"}
+                                      {:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 6 :column 15
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn "widget-b"}
+                                      {:callee "layout:drop"
+                                       :receiver nil :method nil
+                                       :line 8 :column 5
+                                       :form "(layout:drop)"
+                                       :enclosing-fn "widget-b"}]}))
+  (var result (rule.run (make-ctx [ff])))
+  (assert result "should report missing drop for widget-a")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop for unreturned def"))
+
 
 ;; Register all child-drop tests
 ;; layout.owned-child-drop
@@ -828,5 +876,8 @@
 ;; R9-3: valid :drop but missing cleanup
 (table.insert tests {:name "child-drop flags missing cleanup with returned drop"
                      :fn child-drop-flags-missing-cleanup-with-returned-drop})
+;; V11-1: two child-creating functions, only one has returned :drop
+(table.insert tests {:name "child-drop flags two creators one drop"
+                     :fn child-drop-flags-two-creators-one-drop})
 
 {:tests tests}
