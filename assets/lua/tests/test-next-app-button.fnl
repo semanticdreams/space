@@ -175,10 +175,10 @@
   (NextLayout.run-frame button 0.6 0.2 0)
   (local ray {:origin (glm.vec3 2.0 2.0 -1)
               :direction (glm.vec3 0 0 1)})
-  (let [(hit point distance) (button:intersect ray)]
-    (assert (= hit false))
-    (assert (= point nil))
-    (assert (= distance nil))))
+  (local (hit point distance) (button:intersect ray))
+  (assert (= hit false))
+  (assert (= point nil))
+  (assert (= distance nil)))
 
 (fn next-button-hover-updates-color []
   (local base (glm.vec4 0.3 0.3 0.3 1))

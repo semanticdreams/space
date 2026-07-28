@@ -8,13 +8,35 @@
 (fn approx [a b]
   (< (math.abs (- a b)) 1e-5))
 
+(fn fixed-measure [self w h _mw _mh _md]
+  (self:set-measure w h 0))
+
+(fn fixed-layout [self w h width height depth]
+  (self:set-size width height depth {:mark-dirty? false}))
+
 (fn fixed-node [w h]
   (NextLayout.Node.new
     {:name "fixed"
-     :measure-fn (fn [self _mw _mh _md]
-                   (self:set-measure w h 0))
-     :layout-fn (fn [self width height depth]
-                  (self:set-size width height depth {:mark-dirty? false}))}))
+     :measure-fn (fn [self mw mh md] (fixed-measure self w h mw mh md))
+     :layout-fn (fn [self width height depth] (fixed-layout self w h width height depth))}))
+
+(fn noop-stub [& _args] nil)
+
+(fn make-noop-clickables []
+  {:register noop-stub
+   :unregister noop-stub
+   :register-right-click noop-stub
+   :unregister-right-click noop-stub
+   :register-double-click noop-stub
+   :unregister-double-click noop-stub})
+
+(fn make-noop-hoverables []
+  {:register noop-stub
+   :unregister noop-stub})
+
+(fn capture-batcher-quad [captured-ref]
+  {:add-quad (fn [_self payload]
+               (set (. captured-ref 1) payload))})
 
 (fn next-panel-measures-child-and-padding []
   (local child (fixed-node 0.6 0.2))
@@ -30,33 +52,33 @@
   (assert (approx child.local-x 0.1))
   (assert (approx child.local-y 0.05))
 
-  (var captured nil)
-  (local batcher {:add-quad (fn [_self payload]
-                              (set captured payload))})
+   (local captured [nil])
+  (local batcher (capture-batcher-quad captured))
   (panel:emit-quads batcher)
-  (assert captured "panel should emit quad payload")
-  (assert captured.matrix "panel quad payload should include matrix")
-  (assert captured.color "panel quad payload should include color"))
+  (local payload (. captured 1))
+  (assert payload "panel should emit quad payload")
+  (assert payload.matrix "panel quad payload should include matrix")
+  (assert payload.color "panel quad payload should include color"))
 
 (fn next-button-measures-label-and-emits-quad []
   (local button
     (ButtonWidget {:name "button-under-test"
                    :text "Launch"
-                   :clickables {:register (fn [_ _] nil) :unregister (fn [_ _] nil)}
-                   :hoverables {:register (fn [_ _] nil) :unregister (fn [_ _] nil)}}))
+                   :clickables (make-noop-clickables)
+                   :hoverables (make-noop-hoverables)}))
   (NextLayout.run-frame button 1.2 0.4 0)
   (assert (> button.measured-width 0))
   (assert (> button.measured-height 0))
   (assert (approx button.label.local-x (/ (- button.width button.label.width) 2)))
   (assert (approx button.label.local-y (/ (- button.height button.label.height) 2)))
 
-  (var captured nil)
-  (local batcher {:add-quad (fn [_self payload]
-                              (set captured payload))})
+  (local captured [nil])
+  (local batcher (capture-batcher-quad captured))
   (button:emit-quads batcher)
-  (assert captured "button should emit quad payload")
-  (assert captured.matrix "button quad payload should include matrix")
-  (assert captured.color "button quad payload should include color"))
+  (local payload (. captured 1))
+  (assert payload "button should emit quad payload")
+  (assert payload.matrix "button quad payload should include matrix")
+  (assert payload.color "button quad payload should include color"))
 
 (table.insert tests {:name "Next panel measures child and padding"
                      :fn next-panel-measures-child-and-padding})

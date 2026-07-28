@@ -266,21 +266,50 @@
                                :rotation (* twist (* base-rot-y base-rot-x))}))
               cuboids)))))
 
+(fn make-interaction-adapters [router]
+  ;; Adapter tables — widget-expected method names → router methods.
+  ;; Method-call arity: (clickables:register node) passes clickables as
+  ;; self and node as the first explicit arg.
+  (local clickables
+    {:register (fn [_self node] (router:register-clickable node))
+     :unregister (fn [_self node] (router:unregister-clickable node))
+     :register-right-click (fn [_self node] (router:register-clickable node))
+     :unregister-right-click (fn [_self node] (router:unregister-clickable node))
+     :register-double-click (fn [_self node] (router:register-clickable node))
+     :unregister-double-click (fn [_self node] (router:unregister-clickable node))})
+  (local hoverables
+    {:register (fn [_self node] (router:register-hoverable node))
+     :unregister (fn [_self node] (router:unregister-hoverable node))})
+  {:clickables clickables :hoverables hoverables})
+
+(fn build-header-texts [renderer-options]
+  (local title-text (if (= renderer-options.title nil) "Next App" renderer-options.title))
+  (local title-scale (if (= renderer-options.title-scale nil) 0.11 renderer-options.title-scale))
+  (local title (TextWidget {:name "next-app-title" :text title-text :scale title-scale}))
+  (local subtitle-text (if (= renderer-options.subtitle nil) "New widgets on next-layout" renderer-options.subtitle))
+  (local subtitle-scale (if (= renderer-options.subtitle-scale nil) 0.07 renderer-options.subtitle-scale))
+  (local subtitle (TextWidget {:name "next-app-subtitle" :text subtitle-text :scale subtitle-scale}))
+  (local note-text (if (= renderer-options.note nil) "Panel + Flex + Button + Toggle + Progress + SSBO text" renderer-options.note))
+  (local note-scale (if (= renderer-options.note-scale nil) 0.055 renderer-options.note-scale))
+  (local note (TextWidget {:name "next-app-note" :text note-text :scale note-scale}))
+  {:title title :subtitle subtitle :note note})
+
+(fn build-button-row [clickables hoverables focus-context]
+  (local buttons (build-button-row clickables hoverables focus-context))
+  (local run-button buttons.run-button)
+  (local inspect-button buttons.inspect-button)
+  (local ship-button buttons.ship-button)
+  (local button-row buttons.row)
+  {:run-button run-button
+   :inspect-button inspect-button
+   :ship-button ship-button
+   :row button-row})
+
 (fn build-ui-root [renderer-options]
   (local router (InteractionRouter.new))
-   ;; Adapter tables — widget-expected method names → router methods.
-   ;; Method-call arity: (clickables:register node) passes clickables as
-   ;; self and node as the first explicit arg.
-   (local clickables
-     {:register (fn [_self node] (router:register-clickable node))
-      :unregister (fn [_self node] (router:unregister-clickable node))
-      :register-right-click (fn [_self node] (router:register-clickable node))
-      :unregister-right-click (fn [_self node] (router:unregister-clickable node))
-      :register-double-click (fn [_self node] (router:register-clickable node))
-      :unregister-double-click (fn [_self node] (router:unregister-clickable node))})
-   (local hoverables
-     {:register (fn [_self node] (router:register-hoverable node))
-      :unregister (fn [_self node] (router:unregister-hoverable node))})
+  (local adapters (make-interaction-adapters router))
+  (local clickables adapters.clickables)
+  (local hoverables adapters.hoverables)
   (var focus-context nil)
   (when (= renderer-options.enable-focus true)
     (local {: FocusManager} (require :focus))
@@ -298,18 +327,10 @@
                                            (set node.get-focus-bounds opts.get-focus-bounds)))})
     (set router.focus-manager manager))
 
-  (local title
-    (TextWidget {:name "next-app-title"
-                 :text (or renderer-options.title "Next App")
-                 :scale (or renderer-options.title-scale 0.11)}))
-  (local subtitle
-    (TextWidget {:name "next-app-subtitle"
-                 :text (or renderer-options.subtitle "New widgets on next-layout")
-                 :scale (or renderer-options.subtitle-scale 0.07)}))
-  (local note
-    (TextWidget {:name "next-app-note"
-                 :text (or renderer-options.note "Panel + Flex + Button + Toggle + Progress + SSBO text")
-                 :scale (or renderer-options.note-scale 0.055)}))
+  (local headers (build-header-texts renderer-options))
+  (local title headers.title)
+  (local subtitle headers.subtitle)
+  (local note headers.note)
 
   (local run-button
     (ButtonWidget {:name "next-button-run"
