@@ -310,6 +310,22 @@
                (= def.name "drop")
                (or (= def.kind :fn) (= def.kind :local)))
       (set found true)))
+  ;; Recognize returned table :drop entries where :drop is followed
+  ;; by (fn ...) or (lambda ...), indicating a public drop function.
+  ;; Also recognize :drop <symbol> when the symbol names a function
+  ;; definition elsewhere in the file.
+  (each [_ def (ipairs (or ff.definitions []))]
+    (when (and (not found) def.form)
+      (if (or (string.find def.form ":drop[%s\n]*%(fn[%s\n%(]")
+              (string.find def.form ":drop[%s\n]*%(lambda[%s\n%(]"))
+          (set found true)
+          (let [(sym-start sym-end sym) (string.find def.form ":drop[%s\n]+([%w_%-]+)")]
+            (when sym
+              (each [_ other (ipairs (or ff.definitions []))]
+                (when (and (not found)
+                           (= other.name sym)
+                           (or (= other.kind :fn) (= other.kind :local)))
+                  (set found true))))))))
   ;; Recognize set/tset assignment of .drop to a function as a public
   ;; drop path.  This handles factory patterns like (set button.drop (fn ...))
   ;; and (tset obj :drop (fn ...)).  Must be a function assignment — non-fn
