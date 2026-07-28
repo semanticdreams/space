@@ -443,9 +443,11 @@
   {:line line :column col})
 
 (fn recover-error-root [source root definitions calls]
-  "When root is ERROR, scan source for top-level named fn forms and
-  add synthetic definitions. Then update child enclosing-fn via byte
-  containment for definitions and calls. Scope-safe."
+  "When root is ERROR, scan source for top-level named fn forms missing
+  from definitions, but ONLY add a synthetic parent when at least one
+  existing definition with nil enclosing-fn is byte-contained within it.
+  Then update that child (and calls). Scope-safe and narrow — no synthetic
+  parents for fully-parsed files."
   (when (= (root:type) "ERROR")
     (var scan-pos 1)
     (local source-len (length source))
@@ -469,21 +471,33 @@
                   (each [_ d (ipairs definitions)]
                     (when (= d.name fn-name) (set already true)))
                   (when (not already)
-                    (local lc (line-col-at-byte source fn-start))
-                    (local end-lc (line-col-at-byte source close-paren))
-                    (local parent-def
-                      {:kind :fn
-                       :name fn-name
-                       :top-level? true
-                       :line lc.line
-                       :column lc.column
-                       :start-byte (- fn-start 1)
-                       :end-byte close-paren
-                       :end-line end-lc.line
-                       :form (source:sub fn-start close-paren)
-                       :enclosing-fn nil})
-                    (table.insert definitions parent-def)
-                    (table.insert synthetic-parents parent-def)))))
+                    ;; Only add this parent if at least one child
+                    ;; with nil enclosing-fn is contained within.
+                    (local parent-start (- fn-start 1))
+                    (var has-orphan-child false)
+                    (each [_ child (ipairs definitions)]
+                      (when (and (not has-orphan-child)
+                                 (= child.enclosing-fn nil)
+                                 child.start-byte child.end-byte
+                                 (>= child.start-byte parent-start)
+                                 (<= child.end-byte close-paren))
+                        (set has-orphan-child true)))
+                    (when has-orphan-child
+                      (local lc (line-col-at-byte source fn-start))
+                      (local end-lc (line-col-at-byte source close-paren))
+                      (local parent-def
+                        {:kind :fn
+                         :name fn-name
+                         :top-level? true
+                         :line lc.line
+                         :column lc.column
+                         :start-byte parent-start
+                         :end-byte close-paren
+                         :end-line end-lc.line
+                         :form (source:sub fn-start close-paren)
+                         :enclosing-fn nil})
+                      (table.insert definitions parent-def)
+                      (table.insert synthetic-parents parent-def))))))
             (set scan-pos (if name-end name-end after-fn)))))
     (each [_ child (ipairs definitions)]
       (when (and (= child.enclosing-fn nil)
