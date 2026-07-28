@@ -268,17 +268,19 @@
 
 (fn build-ui-root [renderer-options]
   (local router (InteractionRouter.new))
-  ;; Adapter tables — widget-expected method names → router methods
-  (local clickables
-    {:register (fn [node] (router:register-clickable node))
-     :unregister (fn [node] (router:unregister-clickable node))
-     :register-right-click (fn [node] (router:register-clickable node))
-     :unregister-right-click (fn [node] (router:unregister-clickable node))
-     :register-double-click (fn [node] (router:register-clickable node))
-     :unregister-double-click (fn [node] (router:unregister-clickable node))})
-  (local hoverables
-    {:register (fn [node] (router:register-hoverable node))
-     :unregister (fn [node] (router:unregister-hoverable node))})
+   ;; Adapter tables — widget-expected method names → router methods.
+   ;; Method-call arity: (clickables:register node) passes clickables as
+   ;; self and node as the first explicit arg.
+   (local clickables
+     {:register (fn [_self node] (router:register-clickable node))
+      :unregister (fn [_self node] (router:unregister-clickable node))
+      :register-right-click (fn [_self node] (router:register-clickable node))
+      :unregister-right-click (fn [_self node] (router:unregister-clickable node))
+      :register-double-click (fn [_self node] (router:register-clickable node))
+      :unregister-double-click (fn [_self node] (router:unregister-clickable node))})
+   (local hoverables
+     {:register (fn [_self node] (router:register-hoverable node))
+      :unregister (fn [_self node] (router:unregister-hoverable node))})
   (var focus-context nil)
   (when (= renderer-options.enable-focus true)
     (local {: FocusManager} (require :focus))

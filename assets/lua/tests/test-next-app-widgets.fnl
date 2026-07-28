@@ -62,6 +62,54 @@
 (table.insert tests {:name "Next button measures label and emits quad"
                      :fn next-button-measures-label-and-emits-quad})
 
+;; A4-1: adapter arity — prove adapter methods forward widget nodes to router
+(fn build-ui-root-registers-widgets-with-router []
+  "Prove that adapter methods with _self+node arity forward the correct
+  widget node to the router, not the adapter table itself."
+  (local InteractionRouter (require :next-app/interaction-router))
+  (local router (InteractionRouter.new))
+  ;; Same adapter pattern as build-ui-root
+  (local clickables
+    {:register (fn [_self node] (router:register-clickable node))
+     :unregister (fn [_self node] (router:unregister-clickable node))
+     :register-right-click (fn [_self node] (router:register-clickable node))
+     :unregister-right-click (fn [_self node] (router:unregister-clickable node))
+     :register-double-click (fn [_self node] (router:register-clickable node))
+     :unregister-double-click (fn [_self node] (router:unregister-clickable node))})
+  (local hoverables
+    {:register (fn [_self node] (router:register-hoverable node))
+     :unregister (fn [_self node] (router:unregister-hoverable node))})
+  ;; Simulate widget method-call arity: (clickables:register node)
+  ;; passes clickables as self, node as first explicit arg
+  (local fake-button {:name "button-node"})
+  (local fake-toggle {:name "toggle-node"})
+  (clickables:register fake-button)
+  (clickables:register-right-click fake-toggle)
+  (hoverables:register fake-button)
+  (hoverables:register fake-toggle)
+  ;; Router arrays should contain the actual nodes, not adapters
+  (assert (= (length router.clickables) 2)
+          "router.clickables should have 2 registered nodes")
+  (assert (= (. router.clickables 1) fake-button)
+          "first clickable should be fake-button")
+  (assert (= (. router.clickables 2) fake-toggle)
+          "second clickable should be fake-toggle")
+  (assert (= (length router.hoverables) 2)
+          "router.hoverables should have 2 registered nodes")
+  (assert (= (. router.hoverables 1) fake-button)
+          "first hoverable should be fake-button")
+  (assert (= (. router.hoverables 2) fake-toggle)
+          "second hoverable should be fake-toggle")
+  ;; Unregister works too
+  (clickables:unregister fake-button)
+  (hoverables:unregister fake-toggle)
+  (assert (= (length router.clickables) 1)
+          "router.clickables should have 1 after unregister")
+  (assert (= (length router.hoverables) 1)
+          "router.hoverables should have 1 after unregister"))
+(table.insert tests {:name "build-ui-root registers widgets with router via adapters"
+                     :fn build-ui-root-registers-widgets-with-router})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
