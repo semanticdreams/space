@@ -494,7 +494,31 @@
        :evidence {:global-path path-text :enclosing-fn fn-name}
        :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))
 
-(fn check-mutation-restoration [ff fn-form fn-def-line fn-name path-text max-line max-col anon-def-col]
+(fn all-positions-inside-wrapper? [fn-form fn-def-line positions]
+  "Check if every mutation position is inside a with-restored-app-fields body.
+   Returns false if any mutation position is outside a wrapper."
+  (var all-inside true)
+  (each [_ pos (ipairs positions)]
+    (when all-inside
+      (local pos-byte (+ (find-mutation-approx-byte fn-form fn-def-line pos.line)
+                         (math.max 0 (- pos.column 1))))
+      (when (not (anon-byte-inside-wraf-body? fn-form pos-byte))
+        (set all-inside false))))
+  all-inside)
+
+(fn compute-max-position [positions]
+  "Find the maximum (line, column) position from a list of mutation positions."
+  (var max-line 0)
+  (var max-col 0)
+  (each [_ pos (ipairs positions)]
+    (when (if (> pos.line max-line) true
+              (and (= pos.line max-line) (> pos.column max-col)) true
+              false)
+      (set max-line pos.line)
+      (set max-col pos.column)))
+  {:line max-line :column max-col})
+
+(fn check-mutation-restoration [ff fn-form fn-def-line fn-name path-text positions max-line max-col anon-def-col]
   "Check all restoration patterns for a single mutation group.
    Returns true if the mutation is properly restored."
   (var has-restoration false)
@@ -504,8 +528,8 @@
   (each [seg (path-text:gmatch "[^%.]+")]
     (table.insert path-segments seg))
   (local min-byte (+ (find-mutation-approx-byte fn-form fn-def-line max-line)
-                     (math.max 0 (- max-col 1))))
-  (when (and (not has-restoration) (anon-byte-inside-wraf-body? fn-form min-byte))
+                      (math.max 0 (- max-col 1))))
+  (when (and (not has-restoration) (all-positions-inside-wrapper? fn-form fn-def-line positions))
     (set has-restoration true))
   (when (and (not has-restoration) (= fn-name "<anonymous>"))
     (when (check-parent-wrapper ff fn-def-line anon-def-col)
@@ -532,27 +556,21 @@
   (when (not files) (set files []))
   (each [_ ff (ipairs files)]
     (when (string.find ff.path "/tests/" 1 true)
-      ;; Step 1: collect max mutation position per (concrete fn, path) group
-      (var fn-path-max-info {})
+      ;; Step 1: collect all mutation positions per (concrete fn, path) group
+      (var fn-path-positions {})
       (var mutations ff.mutations)
       (when (not mutations) (set mutations []))
       (each [_ mutation (ipairs mutations)]
         (when (mutation-path-is-sensitive? mutation.path)
           (local key (build-mutation-group-key mutation ff))
-          (local current (. fn-path-max-info key))
           (local col (if mutation.column mutation.column 1))
-          (var should-update false)
-          (when (not current)
-            (set should-update true))
-          (when (and (not should-update) (> mutation.line current.line))
-            (set should-update true))
-          (when (and (not should-update) (= mutation.line current.line) (> col current.column))
-            (set should-update true))
-          (when should-update
-            (tset fn-path-max-info key {:line mutation.line :column col}))))
-      ;; Step 2: for each (fn, path) group, check restoration after max mutation position
+          (when (not (. fn-path-positions key))
+            (tset fn-path-positions key []))
+          (table.insert (. fn-path-positions key) {:line mutation.line :column col})))
+      ;; Step 2: for each (fn, path) group, check restoration for all mutation positions
       (var diagnosed {})
-      (each [key info (pairs fn-path-max-info)]
+      (each [key positions (pairs fn-path-positions)]
+        (local info (compute-max-position positions))
         (local max-line info.line)
         (local max-col info.column)
         (when (not (. diagnosed key))
@@ -569,7 +587,7 @@
             (var has-restoration false)
             (when (and fn-form fn-def-line)
               (set has-restoration
-                   (check-mutation-restoration ff fn-form fn-def-line fn-name path-text max-line max-col anon-def-col)))
+                   (check-mutation-restoration ff fn-form fn-def-line fn-name path-text positions max-line max-col anon-def-col)))
             ;; Emit diagnostic if no valid restoration found
             (when (not has-restoration)
               (emit-mutation-diagnostic diagnostics diagnosed key ff path-text max-line fn-name)))))))

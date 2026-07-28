@@ -833,6 +833,41 @@
           "R2-1: restore of variable-key snapshot covering engine should pass when literal also exists"))
 
 ;; ======================================================================
+;; V-R2-2: outside-before-wrapper same-path mutation
+;; ======================================================================
+
+(fn mutation-restoration-flags-outside-before-wrapper-same-path []
+  "V-R2-2: Named function with an outside-wrapper mutation of app.engine
+   that precedes a later same-path mutation inside a with-restored-app-fields
+   wrapper. The earlier outside leak should be diagnosed even though the
+   later mutation is wrapped (max position is inside wrapper)."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-outside-before-wrap"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-outside-before-wrap []
+  (set app.engine leaky)
+  (with-restored-app-fields [:engine]
+    (set app.engine wrapped)))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 6 :column 1
+                                           :form "(set app.engine leaky)"
+                                           :enclosing-fn "test-outside-before-wrap"}
+                                          {:op :set
+                                           :path ["app" "engine"]
+                                           :line 8 :column 1
+                                           :form "(set app.engine wrapped)"
+                                           :enclosing-fn "test-outside-before-wrap"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "V-R2-2: outside-before-wrap mutation should be diagnosed")
+  (assert (> (length result) 0) "should have at least one diagnostic for outside-before-wrap leak"))
+
+;; ======================================================================
 ;; R2-2: named-function with-restored-app-fields containment
 ;; ======================================================================
 
@@ -944,6 +979,7 @@
 (table.insert tests {:name "V3-1 flags two snapshots non-restored covering" :fn mutation-restoration-flags-two-snapshots-non-restored-covering})
 (table.insert tests {:name "V4-1 allows later covering snapshot restore" :fn mutation-restoration-allows-later-covering-snapshot-restore})
 (table.insert tests {:name "R2-1 allows mixed literal+variable-key snapshot restore" :fn mutation-restoration-allows-mixed-literal-variable-key-snapshot-restore})
+(table.insert tests {:name "V-R2-2 flags outside-before-wrapper same-path" :fn mutation-restoration-flags-outside-before-wrapper-same-path})
 (table.insert tests {:name "R2-2 flags named mutation outside wrapper" :fn mutation-restoration-flags-named-mutation-outside-wrapper})
 (table.insert tests {:name "R2-3 flags same-line helper restore before mutation" :fn mutation-restoration-flags-same-line-helper-restore-before-mutation})
 (table.insert tests {:name "R2-3 flags same-line direct restore before mutation" :fn mutation-restoration-flags-same-line-direct-restore-before-mutation})
