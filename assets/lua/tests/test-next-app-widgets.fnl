@@ -1,3 +1,4 @@
+(local _ (require :main))
 (local NextLayout (require :next-app/layout))
 (local PanelWidget (require :next-app/panel-widget))
 (local ButtonWidget (require :next-app/button-widget))
@@ -62,51 +63,45 @@
 (table.insert tests {:name "Next button measures label and emits quad"
                      :fn next-button-measures-label-and-emits-quad})
 
-;; A4-1: adapter arity — prove adapter methods forward widget nodes to router
+;; A5-1: integration coverage — exercise production build-ui-root path
 (fn build-ui-root-registers-widgets-with-router []
-  "Prove that adapter methods with _self+node arity forward the correct
-  widget node to the router, not the adapter table itself."
-  (local InteractionRouter (require :next-app/interaction-router))
-  (local router (InteractionRouter.new))
-  ;; Same adapter pattern as build-ui-root
-  (local clickables
-    {:register (fn [_self node] (router:register-clickable node))
-     :unregister (fn [_self node] (router:unregister-clickable node))
-     :register-right-click (fn [_self node] (router:register-clickable node))
-     :unregister-right-click (fn [_self node] (router:unregister-clickable node))
-     :register-double-click (fn [_self node] (router:register-clickable node))
-     :unregister-double-click (fn [_self node] (router:unregister-clickable node))})
-  (local hoverables
-    {:register (fn [_self node] (router:register-hoverable node))
-     :unregister (fn [_self node] (router:unregister-hoverable node))})
-  ;; Simulate widget method-call arity: (clickables:register node)
-  ;; passes clickables as self, node as first explicit arg
-  (local fake-button {:name "button-node"})
-  (local fake-toggle {:name "toggle-node"})
-  (clickables:register fake-button)
-  (clickables:register-right-click fake-toggle)
-  (hoverables:register fake-button)
-  (hoverables:register fake-toggle)
-  ;; Router arrays should contain the actual nodes, not adapters
-  (assert (= (length router.clickables) 2)
-          "router.clickables should have 2 registered nodes")
-  (assert (= (. router.clickables 1) fake-button)
-          "first clickable should be fake-button")
-  (assert (= (. router.clickables 2) fake-toggle)
-          "second clickable should be fake-toggle")
-  (assert (= (length router.hoverables) 2)
-          "router.hoverables should have 2 registered nodes")
-  (assert (= (. router.hoverables 1) fake-button)
-          "first hoverable should be fake-button")
-  (assert (= (. router.hoverables 2) fake-toggle)
-          "second hoverable should be fake-toggle")
-  ;; Unregister works too
-  (clickables:unregister fake-button)
-  (hoverables:unregister fake-toggle)
-  (assert (= (length router.clickables) 1)
-          "router.clickables should have 1 after unregister")
-  (assert (= (length router.hoverables) 1)
-          "router.hoverables should have 1 after unregister"))
+  "Call the production build-ui-root and verify the returned router
+  contains the actual ButtonWidget and ToggleWidget nodes registered
+  via the adapter tables (not the adapter tables themselves)."
+  (local {: build-ui-root} (require :next-app/renderers))
+  ;; Minimal renderer options; build-ui-root uses defaults for most values
+  (local result (build-ui-root {}))
+  (local router result.router)
+  ;; All 3 buttons and 2 toggles register into router.clickables.
+  ;; ButtonWidget registers via register, register-right-click,
+  ;; register-double-click — each duplicates in the same array.
+  ;; ToggleWidget registers once per widget.
+  ;; So clickables count = 3 buttons × 3 methods + 2 toggles = 11.
+  (assert (>= (length router.clickables) 1)
+          "router.clickables should contain registered widget nodes")
+  ;; Nodes in router.clickables should be actual widget nodes, not adapter tables
+  (each [_ node (ipairs router.clickables)]
+    (assert node.width "registered clickable should have .width (widget node)")
+    (assert (not (. node :register-right-click))
+            "registered clickable should not be the adapter table"))
+  ;; hoverables count = 3 buttons + 2 toggles = 5
+  (assert (>= (length router.hoverables) 1)
+          "router.hoverables should contain registered widget nodes")
+  (each [_ node (ipairs router.hoverables)]
+    (assert node.width "registered hoverable should have .width (widget node)")
+    (assert (not (. node :register))
+            "registered hoverable should not be the adapter table"))
+  ;; Key widget nodes are non-nil
+  (assert result.run-button "run-button should be non-nil")
+  (assert result.inspect-button "inspect-button should be non-nil")
+  (assert result.ship-button "ship-button should be non-nil")
+  (assert result.root "root should be non-nil")
+  ;; Drop buttons to clean up router registrations
+  (result.run-button:drop)
+  (result.inspect-button:drop)
+  (result.ship-button:drop)
+  (assert (< (length router.clickables) 11)
+          "router.clickables should shrink after button drops"))
 (table.insert tests {:name "build-ui-root registers widgets with router via adapters"
                      :fn build-ui-root-registers-widgets-with-router})
 

@@ -730,4 +730,5 @@
    :get-last-submit-stats (fn [_self] last-submit-stats)
    :drop drop})
 
-NextAppRenderers
+{:build-ui-root build-ui-root
+ :NextAppRenderers NextAppRenderers}
