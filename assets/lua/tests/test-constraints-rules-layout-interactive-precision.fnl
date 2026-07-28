@@ -852,4 +852,66 @@
 (table.insert tests {:name "interactive-assertion flags app clickables"
                      :fn interactive-assertion-flags-app-clickables})
 
+;; R1-3: real-file regression — production button-widget.fnl
+;; Uses Source.discover + Facts.extract on the real production file.
+;; Asserts ButtonWidget and all four helpers have correct ownership/spans,
+;; then asserts no helper diagnostics.
+(fn interactive-assertion-allows-production-buttonwidget []
+  (local fs (require :fs))
+  (local bw-path (fs.absolute "assets/lua/next-app/button-widget.fnl"))
+  (local Source (require :constraints.source))
+  (local Facts (require :constraints.facts))
+  (local target {:kind :unit
+                 :name "bw-regression"
+                 :files [bw-path]
+                 :roots []})
+  (local records (Source.discover target))
+  (assert (and records (> (length records) 0)) "should discover button-widget.fnl")
+  (local fact-db (Facts.extract records))
+  (assert fact-db "fact-db should not be nil")
+  (assert (>= (length fact-db.files) 1) "should have at least 1 file fact")
+  (local ff (. fact-db.files 1))
+  ;; Assert ButtonWidget and 4 helpers are present
+  (var bw-found false)
+  (var regc-found false)
+  (var unregc-found false)
+  (var regh-found false)
+  (var unregh-found false)
+  (each [_ d (ipairs (or ff.definitions []))]
+    (if (= d.name "ButtonWidget") (set bw-found true)
+        (= d.name "register-clickables") (set regc-found true)
+        (= d.name "unregister-clickables") (set unregc-found true)
+        (= d.name "register-hoverables") (set regh-found true)
+        (= d.name "unregister-hoverables") (set unregh-found true)))
+  (assert bw-found "should find ButtonWidget definition")
+  (assert regc-found "should find register-clickables definition")
+  (assert unregc-found "should find unregister-clickables definition")
+  (assert regh-found "should find register-hoverables definition")
+  (assert unregh-found "should find unregister-hoverables definition")
+  ;; Verify helpers have ButtonWidget as enclosing-fn
+  (each [_ d (ipairs (or ff.definitions []))]
+    (when (or (= d.name "register-clickables")
+              (= d.name "unregister-clickables")
+              (= d.name "register-hoverables")
+              (= d.name "unregister-hoverables"))
+      (assert (= d.enclosing-fn "ButtonWidget")
+              (.. d.name " should have enclosing-fn ButtonWidget, got "
+                  (tostring d.enclosing-fn)))))
+  ;; Run the interactive-context-assertion rule and assert no helper diagnostics
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local result (rule.run (make-ctx fact-db.files)))
+  (each [_ d (ipairs (or result []))]
+    (when (or (= d.evidence.function-name "register-clickables")
+              (= d.evidence.function-name "unregister-clickables")
+              (= d.evidence.function-name "register-hoverables")
+              (= d.evidence.function-name "unregister-hoverables"))
+      (assert false (.. "should not flag " d.evidence.function-name
+                        " — got diagnostic at line " (or d.line 0))))))
+
+(table.insert tests {:name "interactive-assertion allows production BW"
+                     :fn interactive-assertion-allows-production-buttonwidget})
+
 {:tests tests}

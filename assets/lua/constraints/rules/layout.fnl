@@ -606,12 +606,13 @@
    holds, child-pos is computed as parent-relative offset + 1."
    (when (and parent.form parent.name (not= parent.name "<anonymous>"))
      ;; Determine child position in parent form
-     (local child-pos
-       (if (and parent.start-byte parent.end-byte child.start-byte child.end-byte
-                (>= child.start-byte parent.start-byte)
-                (<= child.end-byte parent.end-byte))
-           (let [rel-offset (- child.start-byte parent.start-byte)]
-             (if (and (>= rel-offset 0)
+      (local child-pos
+        (if (and parent.start-byte parent.end-byte child.start-byte child.end-byte
+                 (>= child.start-byte parent.start-byte)
+                 (<= child.end-byte parent.end-byte))
+            (do
+              (local rel-offset (- child.start-byte parent.start-byte))
+              (if (and (>= rel-offset 0)
                       (= (parent.form:sub (+ rel-offset 1)
                                           (+ rel-offset (length child.form)))
                          child.form))
@@ -757,18 +758,30 @@
             ;; Uses scope-safe parent-has-asserted-local-before-child?
             ;; instead of the outer-only-form + has-asserted-local? approach
             ;; which over-masked parent form text.
-            (var bare-covered {})
-            (when (and (not asserted) has-bare (not has-access)
-                       (not (fn-def-has-dotted-interactive? def cleaned)))
-              (each [kw _ (pairs interactive-access-patterns)]
-                (when (and (not (. bare-covered kw))
-                           (has-bare-keyword? cleaned kw)
-                           (not (shadows-keyword? def.form kw)))
-                  (each [_ parent (ipairs all-defs)]
-                    (when (and (not (. bare-covered kw))
-                               (not= parent def)
-                               (parent-has-asserted-local-before-child? calls parent def kw))
-                      (tset bare-covered kw true))))))
+             (var bare-covered {})
+             (when (and (not asserted) has-bare (not has-access)
+                        (not (fn-def-has-dotted-interactive? def cleaned)))
+               (each [kw _ (pairs interactive-access-patterns)]
+                 (when (and (not (. bare-covered kw))
+                            (has-bare-keyword? cleaned kw)
+                            (not (shadows-keyword? def.form kw)))
+                   ;; Fast path: when enclosing-fn is known, check only that parent.
+                   (var covered false)
+                   (when def.enclosing-fn
+                     (each [_ parent (ipairs all-defs)]
+                       (when (and (not covered)
+                                  (= parent.name def.enclosing-fn)
+                                  (parent-has-asserted-local-before-child? calls parent def kw))
+                         (set covered true))))
+                   ;; Fallback: scan all defs
+                   (when (not covered)
+                     (each [_ parent (ipairs all-defs)]
+                       (when (and (not covered)
+                                  (not= parent def)
+                                  (parent-has-asserted-local-before-child? calls parent def kw))
+                         (set covered true))))
+                   (when covered
+                     (tset bare-covered kw true)))))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
             (when (and (not asserted) has-bare (not has-access)

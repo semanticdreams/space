@@ -186,7 +186,6 @@
                  :top-level? (= depth 1)
                  :line loc.line
                  :column loc.column
-                 :length (node:end-byte)
                  :start-byte (node:start-byte)
                  :end-byte (node:end-byte)
                  :form form
@@ -210,20 +209,17 @@
           (let [fn-name (fn-name-from-node source node)
                 loc (node-line-col node)
                 form (node-text source node)
-                is-top-level (= (length fn-stack) 0)
-                anonymous? (not fn-name)
-                enc-fn (enclosing-fn-name fn-stack)]
+                anonymous? (not fn-name)]
             (table.insert facts.definitions
               {:kind :fn
                :name (or fn-name "<anonymous>")
-               :top-level? is-top-level
+               :top-level? (= (length fn-stack) 0)
                :line loc.line
                :column loc.column
-               :length (node:end-byte)
                :start-byte (node:start-byte)
                :end-byte (node:end-byte)
                :form form
-               :enclosing-fn enc-fn})
+               :enclosing-fn (enclosing-fn-name fn-stack)})
             (table.insert fn-stack
               {:name (or fn-name "<anonymous>")
                :start-depth depth
@@ -253,16 +249,12 @@
                              :top-level? (= depth 1)
                              :line loc.line
                              :column loc.column
-                             :length (node:end-byte)
                              :form form}))))))))))
 
         ;; --- set_form (mutation) ---
         (when (= node-type :set_form)
           (let [loc (node-line-col node)
-                form (node-text source node)
-                enclosing-fn (if (> (length fn-stack) 0)
-                                 (. (. fn-stack (length fn-stack)) :name)
-                                 nil)]
+                form (node-text source node)]
             (var path nil)
             (for [i 0 (- (node:child-count) 1)]
               (when (not path)
@@ -283,16 +275,13 @@
                  :line loc.line
                  :column loc.column
                  :form form
-                 :enclosing-fn enclosing-fn}))))
+                 :enclosing-fn (enclosing-fn-name fn-stack)}))))
 
         ;; --- list (calls, require, tset) ---
         (when (= node-type :list)
           (let [ndc (non-delimiter-children node)
                 loc (node-line-col node)
-                form (node-text source node)
-                enclosing-fn (if (> (length fn-stack) 0)
-                                 (. (. fn-stack (length fn-stack)) :name)
-                                 nil)]
+                form (node-text source node)]
             (when (>= (length ndc) 1)
               (let [head (. ndc 1)
                     head-type (head:type)
@@ -319,13 +308,13 @@
                                                 p)
                                               [table-name key-text]))
                                         [])]
-                      (table.insert facts.mutations
-                        {:op :tset
-                         :path tset-path
-                         :line loc.line
-                         :column loc.column
-                         :form form
-                         :enclosing-fn enclosing-fn}))
+                       (table.insert facts.mutations
+                         {:op :tset
+                          :path tset-path
+                          :line loc.line
+                          :column loc.column
+                          :form form
+                          :enclosing-fn (enclosing-fn-name fn-stack)}))
                     ;; regular call
                     (let [callee head-text
                           receiver (if (= head-type "multi_symbol")
@@ -345,14 +334,14 @@
                                      (let [parts (split-dotted-symbol head-text)]
                                        (. parts (length parts)))
                                      nil)]
-                      (table.insert facts.calls
-                        {:callee callee
-                         :receiver receiver
-                         :method method
-                         :line loc.line
-                         :column loc.column
-                         :form form
-                         :enclosing-fn enclosing-fn})))))))
+                       (table.insert facts.calls
+                         {:callee callee
+                          :receiver receiver
+                          :method method
+                          :line loc.line
+                          :column loc.column
+                          :form form
+                          :enclosing-fn (enclosing-fn-name fn-stack)})))))))
 
         ;; --- multi_symbol (access path) ---
         (when (= node-type :multi_symbol)
@@ -421,6 +410,97 @@
 
     facts))
 
+;; ERROR recovery: when tree-sitter produces an ERROR root (Fennel
+;; grammar limitation, e.g., multi-segment fn names like ButtonWidget),
+;; scan source for top-level named fn forms not captured by the walk
+;; and add synthetic definitions with byte spans. Then update child def
+;; enclosing-fn via byte containment — scoped, no leak.
+(fn find-matching-paren [s start-byte]
+  "Find the 1-indexed position of the matching close paren for the
+   open paren at start-byte (also 1-indexed). Returns nil if not found."
+  (var depth 0)
+  (var pos start-byte)
+  (var found nil)
+  (while (and (<= pos (length s)) (= found nil))
+    (local c (s:sub pos pos))
+    (if (= c "(")
+        (set depth (+ depth 1))
+        (= c ")")
+        (do (set depth (- depth 1))
+            (when (= depth 0)
+              (set found pos))))
+    (set pos (+ pos 1)))
+  found)
+
+(fn line-col-at-byte [source target-byte]
+  "Return {:line :column} (1-indexed) for a 1-indexed byte position."
+  (var line 1)
+  (var col 1)
+  (for [i 1 (- target-byte 1)]
+    (if (= (source:sub i i) "\n")
+        (do (set line (+ line 1)) (set col 1))
+        (set col (+ col 1))))
+  {:line line :column col})
+
+(fn recover-error-root [source root definitions calls]
+  "When root is ERROR, scan source for top-level named fn forms and
+  add synthetic definitions. Then update child enclosing-fn via byte
+  containment for definitions and calls. Scope-safe."
+  (when (= (root:type) "ERROR")
+    (var scan-pos 1)
+    (local source-len (length source))
+    (local synthetic-parents [])
+    (while (<= scan-pos source-len)
+      (local fn-start (source:find "(fn " scan-pos true))
+      (if (not fn-start)
+          (set scan-pos (+ source-len 1))
+          (do
+            (local after-fn (+ fn-start 4))
+            (local name-start after-fn)
+            (local name-end (source:find "[%s%(%)%[%]]" name-start))
+            (when name-end
+              (local fn-name (source:sub name-start (- name-end 1)))
+              (when (and (> (length fn-name) 0)
+                         (not= fn-name "fn")
+                         (not= fn-name "lambda"))
+                (local close-paren (find-matching-paren source fn-start))
+                (when close-paren
+                  (var already false)
+                  (each [_ d (ipairs definitions)]
+                    (when (= d.name fn-name) (set already true)))
+                  (when (not already)
+                    (local lc (line-col-at-byte source fn-start))
+                    (local end-lc (line-col-at-byte source close-paren))
+                    (local parent-def
+                      {:kind :fn
+                       :name fn-name
+                       :top-level? true
+                       :line lc.line
+                       :column lc.column
+                       :start-byte (- fn-start 1)
+                       :end-byte close-paren
+                       :end-line end-lc.line
+                       :form (source:sub fn-start close-paren)
+                       :enclosing-fn nil})
+                    (table.insert definitions parent-def)
+                    (table.insert synthetic-parents parent-def)))))
+            (set scan-pos (if name-end name-end after-fn)))))
+    (each [_ child (ipairs definitions)]
+      (when (and (= child.enclosing-fn nil)
+                 child.start-byte child.end-byte)
+        (each [_ parent (ipairs synthetic-parents)]
+          (when (and (not= parent.name child.name)
+                     (>= child.start-byte parent.start-byte)
+                     (<= child.end-byte parent.end-byte))
+            (tset child :enclosing-fn parent.name)))))
+    (each [_ call (ipairs calls)]
+      (when (and (= call.enclosing-fn nil) call.line)
+        (each [_ parent (ipairs synthetic-parents)]
+          (when (and parent.line parent.end-line
+                     (>= call.line parent.line)
+                     (<= call.line parent.end-line))
+            (tset call :enclosing-fn parent.name)))))))
+
 (fn M.extract [file-records]
   "Extract static facts from a list of file records.
   Returns a fact-db:
@@ -430,6 +510,9 @@
         files []]
     (each [_ record (ipairs file-records)]
       (let [file-facts (extract-file-facts record)]
+        (recover-error-root record.source record.root
+                            file-facts.definitions
+                            file-facts.calls)
         (table.insert files file-facts)
         (tset by-file record.path file-facts)))
     {:files files
