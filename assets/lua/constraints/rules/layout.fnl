@@ -600,9 +600,11 @@
         (set found true))))
   found)
 
- (fn parent-has-asserted-local-before-child? [calls parent child kw]
+ (fn parent-has-asserted-local-before-child? [calls parent child kw known-parent?]
    "Scope-safe closure-helper bypass predicate.  Returns true if ALL of:
-   1) parent.form contains child.form;
+   1) if known-parent? is true, parent-child relationship is trusted via
+      enclosing-fn metadata (no string.find check); otherwise parent.form
+      must contain child.form;
    2) an assert call fact exists for callee 'assert' with enclosing-fn == parent.name
       and call.line < child.line (conservative on same-line);
    3) parent form text BEFORE the child occurrence (strings/comments stripped)
@@ -610,10 +612,12 @@
       a) (local kw (assert ...)) or (let [kw (assert ...)] ...), OR
       b) (local kw ...) (separate-local pattern where assert is a separate call
          that specifically targets kw — checked via assert-call-targets-kw?)."
-   (when (and parent.form child.form parent.name (not= parent.name "<anonymous>"))
-     (local child-pos (string.find parent.form child.form 1 true))
-     (when child-pos
-       ;; Check criterion 2: assert call in parent scope before child
+   (when (and parent.form parent.name (not= parent.name "<anonymous>"))
+     (local child-pos (if known-parent?
+                         (if (= child.line nil) 0 child.line)
+                         (string.find parent.form child.form 1 true)))
+     (when (if known-parent? true child-pos)
+       ;; Criterion 2: assert call in parent scope before child
        (var assert-before-child false)
        (each [_ call (ipairs calls)]
          (when (and (not assert-before-child)
@@ -625,9 +629,10 @@
                     (< call.line child.line))
            (set assert-before-child true)))
        (when assert-before-child
-         ;; Check criterion 3: parent form before child contains the binding pattern
-         (local prefix (parent.form:sub 1 (- child-pos 1)))
-         (local no-strings (strip-strings prefix))
+         ;; Criterion 3: parent form before child contains the binding pattern
+         ;; If known-parent?, search entire parent form (not just prefix)
+         (local search-text (parent.form:sub 1 (if known-parent? (length parent.form) (- child-pos 1))))
+         (local no-strings (strip-strings search-text))
          (local clean (strip-comments no-strings))
          ;; Precompute all patterns for flat if chain
          (local local-assert-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
@@ -758,11 +763,25 @@
                 (when (and (not (. bare-covered kw))
                            (has-bare-keyword? cleaned kw)
                            (not (shadows-keyword? def.form kw)))
-                  (each [_ parent (ipairs all-defs)]
-                    (when (and (not (. bare-covered kw))
-                               (not= parent def)
-                               (parent-has-asserted-local-before-child? calls parent def kw))
-                      (tset bare-covered kw true))))))
+                  ;; Fast path: use enclosing-fn metadata to find parent directly
+                  (var found-parent false)
+                  (when def.enclosing-fn
+                    (each [_ parent (ipairs all-defs)]
+                      (when (and (not found-parent)
+                                 (not= parent def)
+                                 (= parent.name def.enclosing-fn)
+                                 (parent-has-asserted-local-before-child? calls parent def kw true))
+                        (set found-parent true)
+                        (tset bare-covered kw true))))
+                  ;; Fallback: iterate all defs with string.find check
+                  (when (not found-parent)
+                    (each [_ parent (ipairs all-defs)]
+                      (when (and (not (. bare-covered kw))
+                                 (not= parent def)
+                                 parent.form
+                                 def.form
+                                 (parent-has-asserted-local-before-child? calls parent def kw false))
+                        (tset bare-covered kw true)))))))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
             (when (and (not asserted) has-bare (not has-access)

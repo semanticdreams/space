@@ -1185,15 +1185,15 @@
                                    :source source :root root}]))
   (local ctx {:target {:kind :repo :name :test} :facts fact-db :files []})
   (local result (rule.run ctx))
+  ;; Collect all diagnostics to check which helpers are flagged
   (var flagged nil)
   (each [_ d (ipairs (or result []))]
     (when (or (= d.evidence.function-name "register-clickables")
               (= d.evidence.function-name "unregister-clickables")
               (= d.evidence.function-name "register-hoverables")
               (= d.evidence.function-name "unregister-hoverables"))
-      (set flagged d.evidence.function-name)))
-  (assert (= flagged nil) (.. "flagged: " (or flagged "none"))))
+      (set flagged (.. (or flagged "") d.evidence.function-name " "))))
+  (assert (= flagged nil) (.. "flagged helpers: " (or flagged "none"))))
 (table.insert tests {:name "interactive-assertion allows ButtonWidget real facts four helpers"
                      :fn interactive-assertion-allows-buttonwidget-real-facts-four-helpers})
-
 {:tests tests}

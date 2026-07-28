@@ -174,14 +174,18 @@
                     (= (c:type) "symbol_binding")
                     (set local-name (node-text source c)))))
             (when local-name
-              (table.insert facts.definitions
-                {:kind :local
-                 :name local-name
-                 :top-level? (= depth 1)
-                 :line loc.line
-                 :column loc.column
-                 :length (node:end-byte)
-                 :form form})
+              (let [enclosing-fn (if (> (length fn-stack) 0)
+                                    (. (. fn-stack (length fn-stack)) :name)
+                                    nil)]
+                (table.insert facts.definitions
+                  {:kind :local
+                   :name local-name
+                   :top-level? (= depth 1)
+                   :line loc.line
+                   :column loc.column
+                   :length (node:end-byte)
+                   :form form
+                   :enclosing-fn enclosing-fn}))
               ;; If value is a require form, extract module name
               (when (and value-node (= (value-node:type) "list"))
                 (let [vndc (non-delimiter-children value-node)]
@@ -201,8 +205,11 @@
           (let [fn-name (fn-name-from-node source node)
                 loc (node-line-col node)
                 form (node-text source node)
-                is-top-level (= depth 1)
-                anonymous? (not fn-name)]
+                is-top-level (= (length fn-stack) 0)
+                anonymous? (not fn-name)
+                enclosing-fn (if (> (length fn-stack) 0)
+                                 (. (. fn-stack (length fn-stack)) :name)
+                                 nil)]
             (table.insert facts.definitions
               {:kind :fn
                :name (or fn-name "<anonymous>")
@@ -210,7 +217,8 @@
                :line loc.line
                :column loc.column
                :length (node:end-byte)
-               :form form})
+               :form form
+               :enclosing-fn enclosing-fn})
             (table.insert fn-stack
               {:name (or fn-name "<anonymous>")
                :start-depth depth
