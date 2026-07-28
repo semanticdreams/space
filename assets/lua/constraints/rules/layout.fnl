@@ -587,7 +587,7 @@
      and call.line < child.line (conservative on same-line);
   3) parent form text BEFORE the child occurrence (strings/comments stripped)
      contains (local kw (assert ...)) or (let [kw (assert ...)] ...)."
-  (when (and parent.form child.form parent.name)
+  (when (and parent.form child.form parent.name (not= parent.name "<anonymous>"))
     (local child-pos (string.find parent.form child.form 1 true))
     (when child-pos
       ;; Check criterion 2: assert call in parent scope before child

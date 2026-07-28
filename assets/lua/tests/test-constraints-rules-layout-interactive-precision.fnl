@@ -250,6 +250,62 @@
   (assert flagged-register-clickables
           "register-clickables should be flagged when assert comes after helper definition"))
 
+;; R1-1: anonymous parent must NOT cover child helper via closure bypass
+(fn interactive-assertion-flags-anonymous-parent-asserted-local []
+  "A nested helper using bare clickables inside an anonymous parent that
+  asserts (local clickables (assert ...)) should still be flagged.  The
+  closure-helper bypass requires a named parent; anonymous parents cannot
+  prove scope-safe coverage."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local anon-form (.. "(fn [ctx]
+  (local clickables (assert ctx.clickables \"missing\"))
+  " helper-form "
+  (helper))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length (.. "(fn make-widget [] " anon-form ")"))
+                                             :form (.. "(fn make-widget [] " anon-form ")")}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 2 :column 3
+                                             :length (length anon-form)
+                                             :form anon-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 3
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 2 :column 16
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "<anonymous>"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 2 :column 16
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag helper when parent is anonymous")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var flagged-helper false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "helper")
+      (set flagged-helper true)))
+  (assert flagged-helper
+          "helper should be flagged when anonymous parent has asserted local"))
+
 ;; V12: scope-safe closure-helper bypass for button.fnl pattern
 (table.insert tests {:name "interactive-assertion allows button clickables pattern"
                      :fn interactive-assertion-allows-button-clickables-pattern})
@@ -259,5 +315,8 @@
                      :fn interactive-assertion-flags-assert-in-sibling-not-parent})
 (table.insert tests {:name "interactive-assertion flags asserted local after helper"
                      :fn interactive-assertion-flags-asserted-local-after-helper})
+;; R1-1: anonymous parent must NOT cover child helper
+(table.insert tests {:name "interactive-assertion flags anonymous parent asserted local"
+                     :fn interactive-assertion-flags-anonymous-parent-asserted-local})
 
 {:tests tests}
