@@ -495,8 +495,8 @@
         (= (clean:sub 1 (length kw)) kw))))
 
 (fn shadows-keyword? [form-text kw]
-  "Check if form-text shadows kw with a local binding,
-  let binding, or parameter declaration."
+  "Check if form-text shadows or reassigns kw with a local binding,
+  let binding, set mutation, or parameter declaration."
   (when form-text
     (local no-strings (strip-strings form-text))
     (local clean (strip-comments no-strings))
@@ -504,7 +504,9 @@
         true
         (if (clean:find (.. "%(let[%s\n]+%[" kw "[%s\n]"))
             true
-            false))))
+            (if (clean:find (.. "(set " kw) 1 true)
+                true
+                false)))))
 
 ;; ---- precision helpers for interactive-context-assertion ----
 

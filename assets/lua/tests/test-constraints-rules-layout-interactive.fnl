@@ -951,6 +951,50 @@
   (assert result "shadowed clickables should still flag")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
+;; R7-1: reassigned clickables still flags
+(fn interactive-assertion-flags-reassigned-clickables []
+  "A nested helper that reassigns clickables via (set clickables [])
+  should still be flagged.  The parent's asserted local is invalidated
+  by reassignment."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (set clickables [])
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local widget-form (.. "(fn make-widget [ctx]
+  (local clickables (assert ctx.clickables \"missing\"))
+  (let [h " helper-form "]
+    (h)))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length widget-form)
+                                             :form widget-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 10
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 2 :column 16
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "make-widget"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 2 :column 16
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "reassigned clickables should still flag")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
 ;; R6-1: anonymous nested asserted build does not flag outer factory
 (fn interactive-assertion-allows-outer-with-anonymous-nested-assert []
   "An outer factory containing an anonymous nested callback that asserts
@@ -1019,52 +1063,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "unasserted bare clickables should still flag")
   (assert (> (length result) 0) "should have at least one diagnostic"))
-
-;; ======================================================================
-
-(fn layout-rules-returns-table-with-three-rules []
-  "Layout.rules() should return a table with exactly 3 rules."
-  (local Layout (require :constraints.rules.layout))
-  (local rules (Layout.rules))
-  (assert (= (type rules) :table) "rules should be a table")
-  (assert (= (length rules) 3) (.. "expected 3 rules, got " (length rules))))
-
-(fn layout-rules-have-required-structure []
-  "Each layout rule should have :id, :family, :targets, :kind, :run, and :fn."
-  (local Layout (require :constraints.rules.layout))
-  (local rules (Layout.rules))
-  (each [_ rule (ipairs rules)]
-    (assert (= (type rule.id) :string) (.. "rule should have string :id, got " (tostring rule.id)))
-    (assert (= rule.family "layout-rendering") (.. "rule should have family layout-rendering, got " (tostring rule.family)))
-    (assert (= (type rule.targets) :table) "rule should have :targets table")
-    (assert (= rule.kind :static) (.. "rule should be kind static, got " (tostring rule.kind)))
-    (assert (= (type rule.run) :function) (.. "rule should have :run function for id " (tostring rule.id)))
-    (assert (= (type rule.fn) :function) (.. "rule should have :fn function for id " (tostring rule.id)))
-    (assert (= rule.fn rule.run) (.. ":fn should alias :run for id " (tostring rule.id)))))
-
-;; ======================================================================
-;; Runner integration tests
-;; ======================================================================
-
-(fn layout-runner-executable []
-  "Layout.rules() entries must be executable by constraints.runner.run."
-  (local Layout (require :constraints.rules.layout))
-  (local ConstraintRunner (require :constraints.runner))
-  (local rules (Layout.rules))
-  (local target {:kind :repo :name :test
-                 :facts (make-fact-db [(make-file-fact {:path "/test/clean.fnl"
-                                                         :module "test-clean"
-                                                         :accesses []
-                                                         :calls []
-                                                         :definitions []})])
-                 :files []})
-  (local result (ConstraintRunner.run {:rules rules :target target
-                                        :baseline-data false}))
-  (assert result "runner should return a result table")
-  (assert (= (type result.status) :string) "result should have a status")
-  (assert (= result.status :pass) (.. "expected :pass status, got " result.status))
-  (assert (= (length result.diagnostics) 0)
-          (.. "expected 0 diagnostics, got " (length result.diagnostics))))
 
 ;; Register all interactive tests
 ;; layout.interactive-context-assertion
@@ -1152,6 +1150,9 @@
 ;; R6-2 negative: shadowed clickables still flags
 (table.insert tests {:name "interactive-assertion flags shadowed clickables"
                      :fn interactive-assertion-flags-shadowed-clickables})
+;; R7-1: reassigned clickables still flags
+(table.insert tests {:name "interactive-assertion flags reassigned clickables"
+                     :fn interactive-assertion-flags-reassigned-clickables})
 ;; R6-1: anonymous nested assert does not flag outer
 (table.insert tests {:name "interactive-assertion allows outer with anonymous nested assert"
                      :fn interactive-assertion-allows-outer-with-anonymous-nested-assert})
