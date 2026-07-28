@@ -159,6 +159,7 @@
 
   (fn register-clickables []
     (when clickables
+      (assert clickables "ButtonWidget requires clickables for button registration")
       (when clickables.register
         (clickables:register button))
       (when clickables.register-right-click
@@ -168,6 +169,7 @@
 
   (fn unregister-clickables []
     (when clickables
+      (assert clickables "ButtonWidget requires clickables for button unregistration")
       (when clickables.unregister
         (clickables:unregister button))
       (when clickables.unregister-right-click
@@ -177,10 +179,12 @@
 
   (fn register-hoverables []
     (when (and hoverables hoverables.register)
+      (assert hoverables "ButtonWidget requires hoverables for hover registration")
       (hoverables:register button)))
 
   (fn unregister-hoverables []
     (when (and hoverables hoverables.unregister)
+      (assert hoverables "ButtonWidget requires hoverables for hover unregistration")
       (hoverables:unregister button)))
 
   (fn set-focus-state [_self value]

@@ -109,15 +109,19 @@
   (set toggle.drop
        (fn [self]
          (when (and clickables clickables.unregister)
+           (assert clickables "ToggleWidget requires clickables for drop cleanup")
            (clickables:unregister self))
          (when (and hoverables hoverables.unregister)
+           (assert hoverables "ToggleWidget requires hoverables for drop cleanup")
            (hoverables:unregister self))
          (self.changed:clear)
          (self.clicked:clear)))
 
   (when (and clickables clickables.register)
+    (assert clickables "ToggleWidget requires clickables for toggle registration")
     (clickables:register toggle))
   (when (and hoverables hoverables.register)
+    (assert hoverables "ToggleWidget requires hoverables for hover registration")
     (hoverables:register toggle))
   (set-track-color)
   toggle)
