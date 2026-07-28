@@ -413,47 +413,41 @@
                    :max-nesting-depth (- fn-info.frame-max-depth fn-info.start-depth)}))))
           (set depth (- depth 1)))))
 
-    ;; ERROR recovery: when tree-sitter produces an ERROR root (grammar
-    ;; limitation), scan flat children for '(' + fn + name at column 1 and
-    ;; insert synthetic fn definitions with byte spans so byte-containment
-    ;; parent checks work for nested fn_forms inside the unparsed region.
+    ;; ERROR recovery: when tree-sitter produces an ERROR root, scan its
+    ;; direct children for '(' + 'fn' + 'name' patterns and create synthetic
+    ;; fn definitions with byte spans so nested fn_forms get parent context.
     (when (= (root:type) "ERROR")
-      (var i 0)
-      (while (< i (root:child-count))
-        (let [c1 (root:child i)]
-          (when (and (= (c1:type) "(")
-                     (< (+ i 2) (root:child-count))
-                     (= (node-text source (root:child (+ i 1))) "fn")
-                     (= (. (root:child (+ i 1)) :type) "symbol")
-                     (= (. (root:child (+ i 2)) :type) "symbol"))
-            (let [fn-name (node-text source (root:child (+ i 2)))
-                  loc (node-line-col c1)
-                  start-b (c1:start-byte)
-                  ;; Find matching close paren or use end of source
-                  end-b (source:len)]
-              ;; Insert synthetic fn definition so byte containment works
-              (table.insert facts.definitions
-                {:kind :fn
-                 :name fn-name
-                 :top-level? true
-                 :line loc.line
-                 :column loc.column
-                 :length end-b
-                 :start-byte start-b
-                 :end-byte end-b
-                 :form (source:sub (+ start-b 1) end-b)})
-              ;; Push to fn-stack for enclosing-fn attribution of children
-              (table.insert fn-stack
-                {:name fn-name
-                 :start-depth 0
-                 :start-line loc.line
-                 :start-column loc.column
-                 :anonymous? false
-                 :frame-max-depth 0}))))
-        (set i (+ i 1))))
-    ;; NOTE: synthetic fn-stack entries remain for the entire traversal
-    ;; because the unparsed region's closing ) is lost in ERROR recovery.
-    ;; For typical files this only affects the last function in the file.
+      (var ei 0)
+      (while (< ei (root:child-count))
+        (let [ec (root:child ei)]
+          (when (= (ec:type) "(")
+            (when (< (+ ei 2) (root:child-count))
+              (let [c1 (root:child (+ ei 1))
+                    c2 (root:child (+ ei 2))]
+                (when (and (= (c1:type) "symbol")
+                           (= (source:sub (+ (c1:start-byte) 1) (c1:end-byte)) "fn")
+                           (= (c2:type) "symbol"))
+                  (let [fn-name (source:sub (+ (c2:start-byte) 1) (c2:end-byte))
+                        loc (node-line-col ec)
+                        start-b (ec:start-byte)]
+                    (table.insert facts.definitions
+                      {:kind :fn
+                       :name fn-name
+                       :top-level? true
+                       :line loc.line
+                       :column loc.column
+                       :length (source:len)
+                       :start-byte start-b
+                       :end-byte (source:len)
+                       :form (source:sub (+ start-b 1) (source:len))})
+                    (table.insert fn-stack
+                      {:name fn-name
+                       :start-depth 0
+                       :start-line loc.line
+                       :start-column loc.column
+                       :anonymous? false
+                       :frame-max-depth 0})))))))
+        (set ei (+ ei 1))))
 
     (visit root)
 
