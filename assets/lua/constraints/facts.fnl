@@ -187,6 +187,8 @@
                  :line loc.line
                  :column loc.column
                  :length (node:end-byte)
+                 :start-byte (node:start-byte)
+                 :end-byte (node:end-byte)
                  :form form
                  :enclosing-fn (enclosing-fn-name fn-stack)})
               ;; If value is a require form, extract module name
@@ -218,6 +220,8 @@
                :line loc.line
                :column loc.column
                :length (node:end-byte)
+               :start-byte (node:start-byte)
+               :end-byte (node:end-byte)
                :form form
                :enclosing-fn enc-fn})
             (table.insert fn-stack
@@ -410,9 +414,9 @@
           (set depth (- depth 1)))))
 
     ;; ERROR recovery: when tree-sitter produces an ERROR root (grammar
-    ;; limitation), scan flat children for op+fn+name at column 1 and push
-    ;; synthetic entries onto fn-stack so nested fn_forms get correct
-    ;; enclosing-fn attribution.
+    ;; limitation), scan flat children for '(' + fn + name at column 1 and
+    ;; insert synthetic fn definitions with byte spans so byte-containment
+    ;; parent checks work for nested fn_forms inside the unparsed region.
     (when (= (root:type) "ERROR")
       (var i 0)
       (while (< i (root:child-count))
@@ -423,7 +427,22 @@
                      (= (. (root:child (+ i 1)) :type) "symbol")
                      (= (. (root:child (+ i 2)) :type) "symbol"))
             (let [fn-name (node-text source (root:child (+ i 2)))
-                  loc (node-line-col c1)]
+                  loc (node-line-col c1)
+                  start-b (c1:start-byte)
+                  ;; Find matching close paren or use end of source
+                  end-b (source:len)]
+              ;; Insert synthetic fn definition so byte containment works
+              (table.insert facts.definitions
+                {:kind :fn
+                 :name fn-name
+                 :top-level? true
+                 :line loc.line
+                 :column loc.column
+                 :length end-b
+                 :start-byte start-b
+                 :end-byte end-b
+                 :form (source:sub (+ start-b 1) end-b)})
+              ;; Push to fn-stack for enclosing-fn attribution of children
               (table.insert fn-stack
                 {:name fn-name
                  :start-depth 0
@@ -432,6 +451,9 @@
                  :anonymous? false
                  :frame-max-depth 0}))))
         (set i (+ i 1))))
+    ;; NOTE: synthetic fn-stack entries remain for the entire traversal
+    ;; because the unparsed region's closing ) is lost in ERROR recovery.
+    ;; For typical files this only affects the last function in the file.
 
     (visit root)
 

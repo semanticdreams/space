@@ -600,12 +600,18 @@
         (set found true))))
   found)
 
- (fn parent-has-asserted-local-before-child? [calls parent child kw known-parent?]
-   "Scope-safe closure-helper bypass predicate.  When known-parent? is true,
-   parent-child relation is trusted via enclosing-fn metadata but position
-   is still verified via string.find for reliable prefix search."
+ (fn parent-has-asserted-local-before-child? [calls parent child kw]
+   "Scope-safe closure-helper bypass predicate.  Uses byte-span containment
+   when available, falling back to string.find."
    (when (and parent.form parent.name (not= parent.name "<anonymous>"))
-     (local child-pos (string.find parent.form child.form 1 true))
+     ;; Determine child position in parent: prefer byte span containment,
+     ;; then string.find
+     (local child-pos
+       (if (and parent.start-byte parent.end-byte child.start-byte child.end-byte
+                (>= child.start-byte parent.start-byte)
+                (<= child.end-byte parent.end-byte))
+           child.start-byte  ;; use child's start byte as position marker
+           (string.find parent.form child.form 1 true)))
      (when child-pos
        ;; Criterion 2: assert call in parent scope before child
        (var assert-before-child false)
@@ -752,25 +758,11 @@
                 (when (and (not (. bare-covered kw))
                            (has-bare-keyword? cleaned kw)
                            (not (shadows-keyword? def.form kw)))
-                  ;; Fast path: use enclosing-fn metadata to find parent directly
-                  (var found-parent false)
-                  (when def.enclosing-fn
-                    (each [_ parent (ipairs all-defs)]
-                      (when (and (not found-parent)
-                                 (not= parent def)
-                                 (= parent.name def.enclosing-fn)
-                                 (parent-has-asserted-local-before-child? calls parent def kw true))
-                        (set found-parent true)
-                        (tset bare-covered kw true))))
-                  ;; Fallback: iterate all defs with string.find check
-                  (when (not found-parent)
-                    (each [_ parent (ipairs all-defs)]
-                      (when (and (not (. bare-covered kw))
-                                 (not= parent def)
-                                 parent.form
-                                 def.form
-                                 (parent-has-asserted-local-before-child? calls parent def kw false))
-                        (tset bare-covered kw true)))))))
+                  (each [_ parent (ipairs all-defs)]
+                    (when (and (not (. bare-covered kw))
+                               (not= parent def)
+                               (parent-has-asserted-local-before-child? calls parent def kw))
+                      (tset bare-covered kw true))))))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
             (when (and (not asserted) has-bare (not has-access)
