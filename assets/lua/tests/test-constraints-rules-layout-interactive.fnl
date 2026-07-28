@@ -771,6 +771,111 @@
   (assert (= d.constraint-id "layout.interactive-context-assertion")
           "diagnostic should flag direct access without assert"))
 
+;; ==== precision: outer factory not flagged for nested asserted build ====
+
+(fn interactive-assertion-allows-outer-factory-with-nested-assert []
+  "An outer factory function (e.g., Button) containing a nested build
+  function that asserts ctx.clickables should NOT be flagged at the
+  outer level.  The nested function's accesses must not be attributed
+  to the enclosing factory."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local build-form "(fn build [ctx]
+  (assert ctx.clickables \"missing\")
+  (set-clickables ctx.clickables))")
+  (local button-form (.. "(fn Button [opts]
+  (let [ctx (make-ctx opts)]
+    " build-form "
+    (build ctx)))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "Button"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length button-form)
+                                             :form button-form}
+                                            {:kind :fn
+                                             :name "build"
+                                             :top-level? false
+                                             :line 3 :column 3
+                                             :length (length build-form)
+                                             :form build-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 4 :column 3
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "build"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 4 :column 3
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged-button false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "Button")
+      (set flagged-button true)))
+  (assert (not flagged-button) "outer Button should not be flagged for nested build's accesses"))
+
+;; ==== precision: closure helper using asserted local passes ====
+
+(fn interactive-assertion-allows-closure-helper-with-asserted-local []
+  "A nested helper function using bare clickables that was bound via
+  (local clickables (assert ...)) in the enclosing scope should pass."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 200
+                                             :form "(fn make-widget [ctx]
+  (local clickables (assert ctx.clickables \"missing\"))
+  (let [h (fn helper []
+            (each [_ c (ipairs clickables)]
+              (register c)))]
+    (h)))"}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 2 :column 16
+                                       :form "(assert ctx.clickables \"missing\")"
+                                       :enclosing-fn "make-widget"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 2 :column 16
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "closure helper using asserted local clickables should pass"))
+
+;; ==== regression: unasserted bare access still flags ====
+
+(fn interactive-assertion-flags-unasserted-bare-access []
+  "A function using bare clickables without assert should still be flagged."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/bad-widget.fnl"
+                              :module "bad-widget"
+                              :definitions [{:kind :fn
+                                             :name "silent-user"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length 100
+                                             :form "(fn silent-user []
+  (each [_ c (ipairs clickables)]
+    (handle c)))"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "unasserted bare clickables should still flag")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
 ;; ======================================================================
 
 (fn layout-rules-returns-table-with-three-rules []
@@ -892,6 +997,13 @@
 ;; R1-9: direct unasserted access still flags
 (table.insert tests {:name "interactive-assertion flags direct access in named fn"
                      :fn interactive-assertion-flags-direct-access-in-named-fn})
+;; ==== new precision tests ====
+(table.insert tests {:name "interactive-assertion allows outer factory with nested assert"
+                     :fn interactive-assertion-allows-outer-factory-with-nested-assert})
+(table.insert tests {:name "interactive-assertion allows closure helper with asserted local"
+                     :fn interactive-assertion-allows-closure-helper-with-asserted-local})
+(table.insert tests {:name "interactive-assertion flags unasserted bare access"
+                     :fn interactive-assertion-flags-unasserted-bare-access})
 
 
 {:tests tests}

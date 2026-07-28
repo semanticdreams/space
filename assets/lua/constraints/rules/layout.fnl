@@ -380,21 +380,25 @@
         last-seg (and (>= plen 1) (. p plen))]
     (and last-seg (. interactive-access-patterns last-seg))))
 
-(fn fn-def-has-interactive-access? [access-texts def]
-  "Check if a function definition's form text contains one of the interactive access texts."
+(fn fn-def-has-interactive-access? [access-texts def cleaned-form]
+  "Check if a function definition's form text contains one of the interactive
+  access texts.  If cleaned-form is given, scan that instead of def.form."
   (when (and def.form def.kind (= def.kind :fn))
+    (local form (if (not= cleaned-form nil) cleaned-form def.form))
     (var found false)
     (each [_ pat (ipairs access-texts)]
-      (when (and (not found) (string.find def.form pat 1 true))
+      (when (and (not found) (string.find form pat 1 true))
         (set found true)))
     found))
 
-(fn fn-def-has-bare-interactive? [def]
+(fn fn-def-has-bare-interactive? [def cleaned-form]
   "Check if a function definition's form text contains bare 'clickables'
   or 'hoverables' as standalone tokens, excluding string/comment text
-  and hyphenated identifiers.  String literals and comments are stripped first."
+  and hyphenated identifiers.  String literals and comments are stripped first.
+  If cleaned-form is given, scan that instead of def.form."
   (when (and def.form def.kind (= def.kind :fn))
-    (let [no-strings (strip-strings def.form)
+    (local form (if (not= cleaned-form nil) cleaned-form def.form))
+    (let [no-strings (strip-strings form)
           clean (strip-comments no-strings)]
       (var found false)
       (each [kw _ (pairs interactive-access-patterns)]
@@ -405,12 +409,14 @@
               (set found true)))))
       found)))
 
-(fn fn-def-has-dotted-interactive? [def]
+(fn fn-def-has-dotted-interactive? [def cleaned-form]
   "Check if a function definition's form text contains a dotted interactive
   access like ctx.clickables, options.hoverables, app.clickables, etc.
-  Strips string literals and comments first to avoid false positives."
+  Strips string literals and comments first to avoid false positives.
+  If cleaned-form is given, scan that instead of def.form."
   (when (and def.form def.kind (= def.kind :fn))
-    (local no-strings (strip-strings def.form))
+    (local form (if (not= cleaned-form nil) cleaned-form def.form))
+    (local no-strings (strip-strings form))
     (local clean (strip-comments no-strings))
     (var found false)
     (each [kw _ (pairs interactive-access-patterns)]
@@ -444,6 +450,38 @@
                      (= (or call.enclosing-fn "") (or def.name "")))
             (set found true)))
         found)))
+
+;; ---- nested-def masking for outer-fn false positives ----
+
+(fn outer-only-form [def all-defs]
+  "Return def.form with nested named def forms blanked, so scanning
+  the outer function does not attribute inner function accesses to it."
+  (var cleaned def.form)
+  (each [_ other (ipairs all-defs)]
+    (when (and (not= other def)
+               cleaned
+               other.form
+               (and other.name (not= other.name "") (not= other.name "<anonymous>"))
+               (string.find cleaned other.form 1 true))
+      (local start (string.find cleaned other.form 1 true))
+      (set cleaned (.. (cleaned:sub 1 (- start 1))
+                       (string.rep "." (length other.form))
+                       (cleaned:sub (+ start (length other.form)))))))
+  cleaned)
+
+(fn has-asserted-local? [form-text kw]
+  "Check if form-text (with strings/comments stripped) contains
+  (local kw (assert ...)) or (let [kw (assert ...)] ...) indicating
+  kw was bound from an assert expression in this scope."
+  (when form-text
+    (local no-strings (strip-strings form-text))
+    (local clean (strip-comments no-strings))
+    (local pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
+    (if (clean:find pat)
+        true
+        (do
+          (local let-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
+          (if (clean:find let-pat) true false)))))
 
 ;; ---- precision helpers for interactive-context-assertion ----
 
@@ -506,13 +544,14 @@
             (when (= t text) (set already true)))
           (when (not already)
             (table.insert interactive-access-texts text)))))
-    (let [calls (or ff.calls [])]
-      (each [_ def (ipairs (or ff.definitions []))]
+    (let [calls (or ff.calls [])
+          all-defs (or ff.definitions [])]
+      (each [_ def (ipairs all-defs)]
         (var skip-because-param false)
-        ;; Check if any bare interactive keyword (clickables/hoverables)
-        ;; is itself a function parameter — the caller validates context.
-        ;; This works even when the facts extractor produces no access
-        ;; facts for single-symbol bare accesses (which it doesn't).
+        ;; Build a form that excludes nested named function definitions,
+        ;; so accesses inside nested functions are not attributed to the
+        ;; outer enclosing function (e.g., Button containing an asserted build).
+        (local cleaned (outer-only-form def all-defs))
         (when def.form
           (local params (extract-fn-params def.form))
           (when params
@@ -521,21 +560,40 @@
                 ;; Only skip if the function has NO dotted interactive access.
                 ;; A function with clickables as a parameter but also reading
                 ;; ctx.clickables must still be flagged.
-                (when (not (fn-def-has-dotted-interactive? def))
-                  (when (fn-def-has-bare-interactive? def)
+                (when (not (fn-def-has-dotted-interactive? def cleaned))
+                  (when (fn-def-has-bare-interactive? def cleaned)
                     (set skip-because-param true)))))))
         (when (not skip-because-param)
-          (let [has-access (fn-def-has-interactive-access? interactive-access-texts def)
-                has-bare (fn-def-has-bare-interactive? def)]
+          (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
+                has-bare (fn-def-has-bare-interactive? def cleaned)
+                asserted (fn-def-has-assert-call? calls def)]
+            ;; Closure-helper bypass: if this def has bare interactive usage
+            ;; and no assert of its own, check whether a parent (enclosing)
+            ;; function asserts the keyword via (local kw (assert ...)).
+            (var skip-because-closure false)
+            (when (and (not asserted) has-bare (not has-access)
+                       (not (fn-def-has-dotted-interactive? def cleaned)))
+              (each [kw _ (pairs interactive-access-patterns)]
+                (when (not skip-because-closure)
+                  (each [_ parent (ipairs all-defs)]
+                    (when (and (not skip-because-closure)
+                               (not= parent def)
+                               parent.form
+                               def.form
+                               cleaned
+                               (string.find parent.form def.form 1 true)
+                               (has-asserted-local? (outer-only-form parent all-defs) kw))
+                      (set skip-because-closure true))))))
             (when (and (or has-access has-bare)
-                       (not (fn-def-has-assert-call? calls def)))
+                       (not asserted)
+                       (not skip-because-closure))
               (var access-used nil)
               (each [_ text (ipairs interactive-access-texts)]
-                (when (and (not access-used) (string.find def.form text 1 true))
+                (when (and (not access-used) (string.find cleaned text 1 true))
                   (set access-used text)))
               (when (not access-used)
                 (each [kw _ (pairs interactive-access-patterns)]
-                  (when (and (not access-used) (string.find def.form kw 1 true))
+                  (when (and (not access-used) (string.find cleaned kw 1 true))
                     (set access-used kw))))
               (table.insert diagnostics
                 (Diagnostics.violation
