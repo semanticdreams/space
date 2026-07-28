@@ -53,6 +53,22 @@
   "Check if a function name indicates it is a layouter."
   (and name (string.find name "layouter" 1 true)))
 
+(fn call-is-layouter-method? [call]
+  "Check if a call fact is a method invocation where the method is 'layouter'.
+  These are method calls like (obj.layout:layouter), not Layout constructor
+  calls with :layouter keyword arguments."
+  (and call.method (= call.method "layouter")))
+
+(fn layouter-call-contains-fn-name? [call fn-name]
+  "Check if a call form text contains :layouter and the given function name
+  used as the :layouter value in a Layout constructor-like context."
+  (and call.form fn-name
+       (string.find call.form ":layouter" 1 true)
+       ;; The function name should appear near :layouter, not be the callee itself.
+       ;; Check that the callee is NOT a layouter method call (obj:layouter).
+       (not (call-is-layouter-method? call))
+       (string.find call.form fn-name 1 true)))
+
 (fn callee-is-forbidden-setter? [callee]
   "Check if a callee is a forbidden setter."
   (if (. forbidden-setters callee)
@@ -66,24 +82,74 @@
 
 (fn file-has-layouter-context? [ff]
   "Heuristic: check if any call form text or export key indicates a layouter
-  is defined in this file."
+  is defined in this file.  Excludes method calls like (obj:layouter) which
+  are invocations of an existing layouter, not definitions.
+  When non-method :layouter calls exist (Layout constructors), named functions
+  are only accepted if correlated with a call containing :layouter <name>.
+  When no :layouter calls exist at all, name-only matches are accepted."
   (var found false)
+  ;; Detect non-method :layouter calls and any :layouter calls at all.
+  (var has-non-method-layouter-call false)
+  (var has-any-layouter-call false)
+  (each [_ call (ipairs (or ff.calls []))]
+    (when (string.find (or call.form "") ":layouter" 1 true)
+      (set has-any-layouter-call true)
+      (when (not (call-is-layouter-method? call))
+        (set has-non-method-layouter-call true))))
+  ;; Named functions with 'layouter' in the name.
   (each [_ def (ipairs (or ff.definitions []))]
-    (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
-      (set found true)))
+    (when (and (not found) (= def.kind :fn) (fn-name-is-layouter? def.name))
+      (if has-non-method-layouter-call
+          ;; Non-method :layouter calls exist: require the function name
+          ;; to appear as a :layouter value in such a call.
+          (each [_ call (ipairs (or ff.calls []))]
+            (when (and (not found) (layouter-call-contains-fn-name? call def.name))
+              (set found true)))
+          (not has-any-layouter-call)
+          ;; No :layouter calls at all: accept name-only (existing tests).
+          (set found true))))
   (each [_ export (ipairs (or ff.exports []))]
     (when (and (not found) (= export.key "layouter"))
       (set found true)))
+  ;; Call forms containing :layouter — exclude method calls (obj:layouter).
   (each [_ call (ipairs (or ff.calls []))]
-    (when (and (not found) (string.find (or call.form "") ":layouter" 1 true))
+    (when (and (not found)
+               (string.find (or call.form "") ":layouter" 1 true)
+               (not (call-is-layouter-method? call)))
       (set found true)))
   found)
 
-(fn collect-layouter-call-records [ff]
-  "Return a list of {line, form} records for call forms containing :layouter."
-  (var records [])
+(fn name-is-verified-layouter? [ff def-name]
+  "Check if a function named def-name should be treated as a verified
+  layouter in file ff.  Uses the same logic as file-has-layouter-context?:
+  correlation with non-method :layouter calls when they exist, name-only
+  when no :layouter calls exist at all."
+  (var verified false)
+  ;; Quick pre-scan: are there any :layouter calls?
+  (var has-any-layouter-call false)
+  (var has-non-method-layouter-call false)
   (each [_ call (ipairs (or ff.calls []))]
     (when (string.find (or call.form "") ":layouter" 1 true)
+      (set has-any-layouter-call true)
+      (when (not (call-is-layouter-method? call))
+        (set has-non-method-layouter-call true))))
+  (if has-non-method-layouter-call
+      ;; Require correlation with a Layout constructor call.
+      (each [_ call (ipairs (or ff.calls []))]
+        (when (and (not verified) (layouter-call-contains-fn-name? call def-name))
+          (set verified true)))
+      (not has-any-layouter-call)
+      ;; No :layouter calls at all: accept name-only.
+      (set verified true))
+  verified)
+
+(fn collect-layouter-call-records [ff]
+  "Return a list of {line, form} records for call forms containing :layouter
+  as a keyword argument (not as a method call like obj:layouter)."
+  (var records [])
+  (each [_ call (ipairs (or ff.calls []))]
+    (when (and (string.find (or call.form "") ":layouter" 1 true)
+               (not (call-is-layouter-method? call)))
       (table.insert records {:line (or call.line 0) :form (or call.form "")})))
   records)
 
@@ -124,10 +190,11 @@
   (var diagnostics [])
   (each [_ ff (ipairs (or (. ctx.facts :files) []))]
     (when (file-has-layouter-context? ff)
-      ;; Named layouter functions (by name)
+      ;; Named layouter functions (by name), verified via correlation
       (var layouter-names {})
       (each [_ def (ipairs (or ff.definitions []))]
-        (when (and (= def.kind :fn) (fn-name-is-layouter? def.name))
+        (when (and (= def.kind :fn) (fn-name-is-layouter? def.name)
+                   (name-is-verified-layouter? ff def.name))
           (tset layouter-names def.name true)))
       ;; :layouter call records for anonymous correlation
       (var layouter-call-records (collect-layouter-call-records ff))
@@ -231,7 +298,9 @@
 
 (fn has-public-drop-path? [ff]
   "Check if a module exposes a public drop path: a function named 'drop'
-  (either fn or local definition) OR an export key 'drop'."
+  (either fn or local definition), an export key 'drop', or a mutation
+  that assigns a .drop field (e.g., (set obj.drop (fn ...)) or
+  (tset obj :drop (fn ...)))."
   (var found false)
   (each [_ export (ipairs (or ff.exports []))]
     (when (= export.key "drop")
@@ -240,6 +309,16 @@
     (when (and (not found)
                (= def.name "drop")
                (or (= def.kind :fn) (= def.kind :local)))
+      (set found true)))
+  ;; Recognize set/tset assignment of .drop to a function as a public
+  ;; drop path.  This handles factory patterns like (set button.drop (fn ...))
+  ;; and (tset obj :drop (fn ...)).
+  (each [_ mut (ipairs (or ff.mutations []))]
+    (when (and (not found)
+               (or (= mut.op :set) (= mut.op :tset))
+               (let [p (or mut.path [])
+                     plen (length p)]
+                 (and (>= plen 1) (= (. p plen) "drop"))))
       (set found true)))
   found)
 
@@ -349,6 +428,53 @@
             (set found true)))
         found)))
 
+;; ---- precision helpers for interactive-context-assertion ----
+
+(fn extract-fn-params [def-form]
+  "Extract the parameter names from a function definition form.
+  Returns a table of param-name→true, or nil on failure."
+  (var params {})
+  (when def-form
+    (var done false)
+    (each [_ kw (ipairs ["(fn " "(lambda "])]
+      (when (not done)
+        (local start (def-form:find kw 1 true))
+        (when start
+          (var pos (+ start (length kw)))
+          ;; Skip optional fn name past non-bracket/paren chars.
+          ;; Avoid (or ...) by using a flag-based loop.
+          (var still-scanning true)
+          (while (and (<= pos (length def-form)) still-scanning)
+            (local c (def-form:sub pos pos))
+            (if (= c "[") (set still-scanning false)
+                (= c "(") (set still-scanning false)
+                (= c ")") (set still-scanning false)
+                (= c "]") (set still-scanning false))
+            (when still-scanning
+              (set pos (+ pos 1))))
+          (when (and (<= pos (length def-form))
+                     (if (= (def-form:sub pos pos) "[") true
+                         (= (def-form:sub pos pos) "(") true
+                         false))
+            (local open-char (def-form:sub pos pos))
+            (local close-char (if (= open-char "[") "]" ")"))
+            (set pos (+ pos 1))
+            (local param-start pos)
+            (var depth 1)
+            (while (and (> depth 0) (<= pos (length def-form)))
+              (when (= (def-form:sub pos pos) open-char)
+                (set depth (+ depth 1)))
+              (when (= (def-form:sub pos pos) close-char)
+                (set depth (- depth 1)))
+              (when (> depth 0)
+                (set pos (+ pos 1))))
+            (when (= depth 0)
+              (local param-str (def-form:sub param-start (- pos 1)))
+              (each [name (param-str:gmatch "%S+")]
+                (tset params name true))))
+          (set done true)))))
+  (if (next params) params))
+
 (fn interactive-context-assertion-rule-run [ctx]
   "Rule: flag interactive widgets using clickables or hoverables without
   an actual assert call in the same enclosing function."
@@ -365,30 +491,57 @@
             (table.insert interactive-access-texts text)))))
     (let [calls (or ff.calls [])]
       (each [_ def (ipairs (or ff.definitions []))]
-        (let [has-access (fn-def-has-interactive-access? interactive-access-texts def)
-              has-bare (fn-def-has-bare-interactive? def)]
-          (when (and (or has-access has-bare)
-                     (not (fn-def-has-assert-call? calls def)))
-            (var access-used nil)
+        (var skip-because-param false)
+        (var skip-because-name false)
+        ;; Check if any matching access text has its receiver as a function
+        ;; parameter — the caller already validated the context.
+        (when (and def.form (> (length interactive-access-texts) 0))
+          (local params (extract-fn-params def.form))
+          (when params
             (each [_ text (ipairs interactive-access-texts)]
-              (when (and (not access-used) (string.find def.form text 1 true))
-                (set access-used text)))
-            (when (not access-used)
-              (each [kw _ (pairs interactive-access-patterns)]
-                (when (and (not access-used) (string.find def.form kw 1 true))
-                  (set access-used kw))))
-            (table.insert diagnostics
-              (Diagnostics.violation
-                {:constraint-id "layout.interactive-context-assertion"
-                 :family "layout-rendering"
-                 :message (.. "function " (or def.name "<anonymous>") " uses "
-                              (or access-used "interactive context") " without assert in "
-                              (or ff.module ff.path))
-                 :file ff.path :line (or def.line 0) :column (or def.column 0)
-                 :evidence {:function-name (or def.name "<anonymous>")
-                            :interactive-access (or access-used "clickables/hoverables")}
-                 :hint (.. "Assert that " (or access-used "the interactive context")
-                           " is available before using it")})))))))
+              (when (and (not skip-because-param) (string.find def.form text 1 true))
+                (local dot-pos (string.find text "." 1 true))
+                ;; Only skip when the access has NO dot and the bare
+                ;; interactive keyword (clickables/hoverables) is itself
+                ;; a parameter.  A dot-access like ctx.clickables through
+                ;; a wrapper parameter does NOT make the function safe;
+                ;; the function still needs its own assert.
+                (when (not dot-pos)
+                  (when (. params text)
+                    (set skip-because-param true)))))))
+        ;; Skip definitions whose own name contains the interactive keyword.
+        ;; E.g., register-clickables/unregister-hoverables have clickables/
+        ;; hoverables in their name because they're helpers; the parent
+        ;; constructor is responsible for the assert.
+        (when (and (not skip-because-param) def.name)
+          (each [kw _ (pairs interactive-access-patterns)]
+            (when (and (not skip-because-name) (string.find def.name kw 1 true))
+              (set skip-because-name true))))
+        (when (not (or skip-because-param skip-because-name))
+          (let [has-access (fn-def-has-interactive-access? interactive-access-texts def)
+                has-bare (fn-def-has-bare-interactive? def)]
+            (when (and (or has-access has-bare)
+                       (not (fn-def-has-assert-call? calls def)))
+              (var access-used nil)
+              (each [_ text (ipairs interactive-access-texts)]
+                (when (and (not access-used) (string.find def.form text 1 true))
+                  (set access-used text)))
+              (when (not access-used)
+                (each [kw _ (pairs interactive-access-patterns)]
+                  (when (and (not access-used) (string.find def.form kw 1 true))
+                    (set access-used kw))))
+              (table.insert diagnostics
+                (Diagnostics.violation
+                  {:constraint-id "layout.interactive-context-assertion"
+                   :family "layout-rendering"
+                   :message (.. "function " (or def.name "<anonymous>") " uses "
+                                (or access-used "interactive context") " without assert in "
+                                (or ff.module ff.path))
+                   :file ff.path :line (or def.line 0) :column (or def.column 0)
+                   :evidence {:function-name (or def.name "<anonymous>")
+                              :interactive-access (or access-used "clickables/hoverables")}
+                   :hint (.. "Assert that " (or access-used "the interactive context")
+                             " is available before using it")}))))))))
   (if (> (length diagnostics) 0) diagnostics nil))
 
 ;; ---------------------------------------------------------------------------

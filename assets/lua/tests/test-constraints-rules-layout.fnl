@@ -364,6 +364,104 @@
   (assert (= d.constraint-id "layout.no-setters-in-layouters")
           "diagnostic should flag inline :layouter (fn ...) via call form text"))
 
+;; R1-6: method call (obj:layouter) does NOT trigger false positive
+(fn no-setters-allows-layouter-method-call []
+  "A file where the only :layouter reference is a method call like
+  (obj.layout:layouter) should NOT be treated as a layouter context,
+  and thus forbidden setters inside it should NOT be flagged."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  ;; Method call: (obj.layout:layouter) — NOT a Layout constructor
+  (local ff (make-file-fact {:path "/src/normal-widget.fnl"
+                              :module "normal-widget"
+                              :definitions [{:kind :fn
+                                             :name "my-layouter"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn my-layouter [ctx]
+  (obj.layout:layouter {:a 1}))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method "layouter"
+                                       :line 6 :column 1
+                                       :form "(obj.layout:layouter {:a 1})"
+                                       :enclosing-fn "my-layouter"}
+                                      {:callee "ctx:set-size"
+                                       :receiver nil :method nil
+                                       :line 7 :column 1
+                                       :form "(ctx:set-size 10 20)"
+                                       :enclosing-fn "my-layouter"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "method call (obj:layouter) should not create false positive"))
+
+;; R1-7: named-function correlation with :layouter keyword
+(fn no-setters-flags-correlated-named-layouter []
+  "A file with a Layout constructor containing :layouter my-layouter
+  should correlate the named function via the call form, flagging
+  forbidden setters inside it."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "my-layouter"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 200
+                                             :form "(fn my-layouter [ctx child]
+  (child:set-position 10 20))"}]
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:layouter my-layouter})"
+                                       :enclosing-fn nil}
+                                      {:callee "child:set-position"
+                                       :receiver nil :method nil
+                                       :line 11 :column 1
+                                       :form "(child:set-position 10 20)"
+                                       :enclosing-fn "my-layouter"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag correlated named layouter with setter")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.no-setters-in-layouters")
+          "diagnostic should flag correlated named layouter"))
+
+;; R1-8: name-only layouter with NO :layouter call in file
+(fn no-setters-flags-name-only-layouter-no-call []
+  "A file with a function named my-layouter but no :layouter calls
+  at all should still accept it as a layouter (backwards compatibility
+  with existing name-based detection)."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.no-setters-in-layouters"))
+  (assert rule "rule should be in rules list")
+  ;; No :layouter call at all — name-only detection should still work
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "my-layouter"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn my-layouter [ctx child]
+  (child:set-position 5 5))"}]
+                              :calls [{:callee "child:set-position"
+                                       :receiver nil :method nil
+                                       :line 6 :column 1
+                                       :form "(child:set-position 5 5)"
+                                       :enclosing-fn "my-layouter"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag name-only layouter with setter (no :layouter call)")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.no-setters-in-layouters")
+          "diagnostic should flag name-only layouter"))
+
 ;; ======================================================================
 ;; layout.owned-child-drop
 ;; ======================================================================
@@ -682,6 +780,87 @@
     (when (= d.evidence.missing "drop definition or returned table :drop")
       (set found-missing-drop true)))
   (assert found-missing-drop "should flag missing public drop path"))
+
+;; R2-1: set-based drop assignment counts as public drop path
+(fn child-drop-allows-set-drop-assignment []
+  "A file creating Layout with (set obj.drop (fn ...)) should be
+  accepted as providing a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}
+                                      {:callee "button:drop"
+                                       :receiver nil :method nil
+                                       :line 12 :column 1
+                                       :form "(button:drop)"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :set
+                                           :path ["button" "drop"]
+                                           :line 10 :column 1
+                                           :form "(set button.drop (fn [] (print :cleanup)))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with set-based drop assignment should pass"))
+
+;; R2-2: tset-based drop assignment counts as public drop path
+(fn child-drop-allows-tset-drop-assignment []
+  "A file creating Layout with (tset obj :drop (fn ...)) should be
+  accepted as providing a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}
+                                      {:callee "widget:drop"
+                                       :receiver nil :method nil
+                                       :line 12 :column 1
+                                       :form "(widget:drop)"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :tset
+                                           :path ["widget" "drop"]
+                                           :line 10 :column 1
+                                           :form "(tset widget :drop (fn [] (clear-children)))"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "file with tset-based drop assignment should pass"))
+
+;; R2-3: mutation on non-final path segment is not recognized as drop
+(fn child-drop-flags-non-final-drop-mutation []
+  "A file with a mutation whose path ends differently (e.g., ['drop' 'inner'])
+  should NOT count as a public drop path."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :calls [{:callee "Layout"
+                                       :receiver nil :method nil
+                                       :line 5 :column 1
+                                       :form "(Layout {:child child})"
+                                       :enclosing-fn nil}]
+                              :mutations [{:op :set
+                                           :path ["drop" "inner"]
+                                           :line 10 :column 1
+                                           :form "(set drop.inner 42)"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag retained Layout without public drop path")
+  (var found-missing-drop false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "drop definition or returned table :drop")
+      (set found-missing-drop true)))
+  (assert found-missing-drop "should flag missing public drop path for non-final drop mutation"))
 
 ;; ======================================================================
 ;; layout.interactive-context-assertion
@@ -1531,6 +1710,121 @@
   (assert (= d.constraint-id "layout.interactive-context-assertion")
           "diagnostic should flag anonymous fn with commented-out assert"))
 
+;; R1-6: parameter-based skip — helper receives interactive access as bare parameter
+(fn interactive-assertion-allows-parameter-clickables []
+  "A function that receives clickables as a bare parameter (e.g.,
+  (fn helper [clickables]) where clickables is a direct parameter)
+  should NOT be flagged.  The caller is responsible for the assert.
+  The function name must NOT contain 'clickables' or 'hoverables' so
+  the parameter-based skip is the only reason this test passes."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "process-clicks"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn process-clicks [clickables]
+  (each [_ c (ipairs clickables)]
+    (register c)))"}]
+                              :accesses [{:path ["clickables"]
+                                          :text "clickables"
+                                          :line 6 :column 1
+                                          :form "clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "helper receiving clickables as bare parameter should pass"))
+
+;; R1-7: parameter-based skip with hoverables
+(fn interactive-assertion-allows-parameter-hoverables []
+  "A function that receives hoverables as a bare parameter (e.g.,
+  (fn helper [hoverables]) where hoverables is a direct parameter)
+  should NOT be flagged — the caller already validated the context.
+  The function name must NOT contain 'hoverables' or 'clickables' so
+  the parameter-based skip is the only reason this test passes."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "setup-hover"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn setup-hover [hoverables]
+  (each [_ h (ipairs hoverables)]
+    (register-hover h)))"}]
+                              :accesses [{:path ["hoverables"]
+                                          :text "hoverables"
+                                          :line 6 :column 1
+                                          :form "hoverables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "helper receiving hoverables as bare parameter should pass"))
+
+;; R1-8: name-based skip for helper functions
+(fn interactive-assertion-allows-name-based-helper []
+  "A function whose name contains 'clickables' or 'hoverables' (e.g.,
+  register-clickables, unregister-hoverables) should be treated as a
+  helper and NOT flagged.  The parent constructor is responsible for
+  the assert."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "register-clickables"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn register-clickables [clickables]
+  (each [_ c (ipairs clickables)] (register c)))"}]
+                              ;; No assert call, no parameter skip for bare clickables
+                              :accesses [{:path ["clickables"]
+                                          :text "clickables"
+                                          :line 6 :column 1
+                                          :form "clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "helper named register-clickables should pass"))
+
+;; R1-9: direct unasserted ctx/options/app access still flags
+(fn interactive-assertion-flags-direct-access-in-named-fn []
+  "A function that accesses ctx.clickables directly without assert and
+  whose name does NOT contain a skip pattern should still be flagged."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  ;; The function name does NOT contain 'clickables' or 'hoverables',
+  ;; and 'ctx' is not a parameter (it's a capture from outer scope in
+  ;; this synthetic test).
+  (local ff (make-file-fact {:path "/src/bad-widget.fnl"
+                              :module "bad-widget"
+                              :definitions [{:kind :fn
+                                             :name "render-button"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn render-button []
+  (let [cs ctx.clickables]
+    (process cs)))"}]
+                              :accesses [{:path ["ctx" "clickables"]
+                                          :text "ctx.clickables"
+                                          :line 6 :column 1
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag direct ctx.clickables access without assert")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "layout.interactive-context-assertion")
+          "diagnostic should flag direct access without assert"))
+
 ;; ======================================================================
 
 (fn layout-rules-returns-table-with-three-rules []
@@ -1605,6 +1899,15 @@
 ;; R1-1: inline :layouter via call form text
 (table.insert tests {:name "no-setters flags inline layouter via call form"
                      :fn no-setters-flags-inline-layouter-via-call-form})
+;; R1-6: method call does NOT trigger false positive
+(table.insert tests {:name "no-setters allows layouter method call (false-positive fix)"
+                     :fn no-setters-allows-layouter-method-call})
+;; R1-7: named-function correlation
+(table.insert tests {:name "no-setters flags correlated named layouter"
+                     :fn no-setters-flags-correlated-named-layouter})
+;; R1-8: name-only layouter (no :layouter call)
+(table.insert tests {:name "no-setters flags name-only layouter no call"
+                     :fn no-setters-flags-name-only-layouter-no-call})
 
 ;; layout.owned-child-drop
 (table.insert tests {:name "child-drop allows file without retained children"
@@ -1634,6 +1937,15 @@
                      :fn child-drop-flags-scene-terrains-without-drop})
 (table.insert tests {:name "child-drop flags renderer child without public drop"
                      :fn child-drop-flags-renderer-child-without-public-drop})
+;; R2-1: set-based drop assignment
+(table.insert tests {:name "child-drop allows set drop assignment"
+                     :fn child-drop-allows-set-drop-assignment})
+;; R2-2: tset-based drop assignment
+(table.insert tests {:name "child-drop allows tset drop assignment"
+                     :fn child-drop-allows-tset-drop-assignment})
+;; R2-3: non-final drop mutation still flags
+(table.insert tests {:name "child-drop flags non-final drop mutation"
+                     :fn child-drop-flags-non-final-drop-mutation})
 
 ;; layout.interactive-context-assertion
 (table.insert tests {:name "interactive-assertion allows file without clickables"
@@ -1700,6 +2012,18 @@
 ;; R4-3: comment-only assert in anonymous
 (table.insert tests {:name "interactive-assertion flags comment-only assert in anonymous"
                      :fn interactive-assertion-flags-comment-only-assert-in-anonymous})
+;; R1-6: parameter-based skip
+(table.insert tests {:name "interactive-assertion allows parameter clickables"
+                     :fn interactive-assertion-allows-parameter-clickables})
+;; R1-7: parameter-based skip with hoverables
+(table.insert tests {:name "interactive-assertion allows parameter hoverables"
+                     :fn interactive-assertion-allows-parameter-hoverables})
+;; R1-8: name-based skip for helpers
+(table.insert tests {:name "interactive-assertion allows name-based helper"
+                     :fn interactive-assertion-allows-name-based-helper})
+;; R1-9: direct unasserted access still flags
+(table.insert tests {:name "interactive-assertion flags direct access in named fn"
+                     :fn interactive-assertion-flags-direct-access-in-named-fn})
 
 ;; Structure tests
 (table.insert tests {:name "layout rules returns table with three rules"
