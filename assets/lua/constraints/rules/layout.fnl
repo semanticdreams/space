@@ -77,9 +77,9 @@
   "Extract the receiver name from a method-style callee string like 'sub-app:set-size'.
   Returns nil if the callee is not a method call (no colon)."
   (when callee
-    (let [colon-pos (string.find callee ":" 1 true)]
-      (when colon-pos
-        (callee:sub 1 (- colon-pos 1))))))
+    (local colon-pos (string.find callee ":" 1 true))
+    (when colon-pos
+      (callee:sub 1 (- colon-pos 1)))))
 
 (fn callee-is-forbidden-setter? [callee]
   "Check if a callee is a forbidden setter.
@@ -92,9 +92,9 @@
         (each [setter _ (pairs forbidden-setters)]
           (when (and (not found) (callee-ends-with? callee setter))
             ;; Method-style setter: check if receiver is a known non-layout object
-            (let [receiver (extract-receiver callee)]
-              (when (not (. known-non-layout-receivers receiver))
-                (set found true)))))
+            (local receiver (extract-receiver callee))
+            (when (not (. known-non-layout-receivers receiver))
+              (set found true))))
         found)))
 
 (fn file-has-layouter-context? [ff]
