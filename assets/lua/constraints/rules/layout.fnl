@@ -586,7 +586,9 @@
   2) an assert call fact exists for callee 'assert' with enclosing-fn == parent.name
      and call.line < child.line (conservative on same-line);
   3) parent form text BEFORE the child occurrence (strings/comments stripped)
-     contains (local kw (assert ...)) or (let [kw (assert ...)] ...)."
+     contains either:
+     a) (local kw (assert ...)) or (let [kw (assert ...)] ...), OR
+     b) (local kw ...) (separate-local pattern where assert is a separate call)."
   (when (and parent.form child.form parent.name (not= parent.name "<anonymous>"))
     (local child-pos (string.find parent.form child.form 1 true))
     (when child-pos
@@ -606,12 +608,24 @@
         (local prefix (parent.form:sub 1 (- child-pos 1)))
         (local no-strings (strip-strings prefix))
         (local clean (strip-comments no-strings))
-        (local local-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
-        (if (clean:find local-pat)
+        ;; Try strict pattern: (local kw (assert ...))
+        (local local-assert-pat (.. "%(local[%s\n]+" kw "[%s\n]+%(assert[%s\n]"))
+        (if (clean:find local-assert-pat)
             true
             (do
-              (local let-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
-              (if (clean:find let-pat) true false)))))))
+              (local let-assert-pat (.. "%(let[%s\n]+%[" kw "[%s\n]+%(assert[%s\n]"))
+              (if (clean:find let-assert-pat)
+                  true
+                  ;; Try separate-local pattern: (local kw <anything>)
+                  ;; kw is bound as a local, and assert is a separate call
+                  ;; fact (already verified via assert-before-child above).
+                  (do
+                    (local local-any-pat (.. "%(local[%s\n]+" kw "[%s\n]"))
+                    (if (clean:find local-any-pat)
+                        true
+                        (do
+                          (local let-any-pat (.. "%(let[%s\n]+%[" kw "[%s\n]"))
+                          (if (clean:find let-any-pat) true false)))))))))))
 
 ;; ---- precision helpers for interactive-context-assertion ----
 

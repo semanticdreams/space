@@ -306,6 +306,309 @@
   (assert flagged-helper
           "helper should be flagged when anonymous parent has asserted local"))
 
+;; ==== Task 11: separate-local-then-assert pattern ====
+
+(fn interactive-assertion-allows-separate-local-clickables-assert-pattern []
+  "Models menu-manager.fnl pattern: (local clickables (or options.clickables ...))
+  then (assert clickables ...) in the same parent, with a nested drop helper
+  using bare clickables.  Should pass because the local is asserted before child."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local drop-form "(fn drop [self]
+  (when clickables
+    (clickables:unregister cb)))")
+  (local build-form (.. "(fn MenuManager [opts]
+  (local options (or opts {}))
+  (local clickables (or options.clickables app.clickables))
+  (assert clickables \"MenuManager requires clickables\")
+  (var active-menu nil)
+  " drop-form "
+  (drop self))"))
+  (local ff (make-file-fact {:path "/src/menu-manager.fnl"
+                              :module "menu-manager"
+                              :definitions [{:kind :fn
+                                             :name "MenuManager"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "drop"
+                                             :top-level? false
+                                             :line 7 :column 3
+                                             :length (length drop-form)
+                                             :form drop-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 4 :column 3
+                                       :form "(assert clickables \"MenuManager requires clickables\")"
+                                       :enclosing-fn "MenuManager"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged-drop false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "drop")
+      (set flagged-drop true)))
+  (assert (not flagged-drop)
+          "drop using bare clickables from parent's separate local+assert should pass"))
+
+(fn interactive-assertion-allows-separate-local-clickables-graph-view-pattern []
+  "Models graph/view/init.fnl pattern: (local clickables (and ctx ctx.clickables))
+  then (assert clickables ...) in the same parent, with nested helpers
+  detach-presentation and install-presentation using bare clickables. Should pass."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local detach-form "(fn detach-presentation [node presentation]
+  (when clickables
+    (clickables:unregister presentation)))")
+  (local install-form "(fn install-presentation [node previous presentation]
+  (clickables:register presentation))")
+  (local build-form (.. "(fn GraphView [opts]
+  (local clickables (and ctx ctx.clickables))
+  (assert clickables \"GraphView requires clickables\")
+  " detach-form "
+  " install-form "
+  (detach-presentation node pres)
+  (install-presentation node prev pres))"))
+  (local ff (make-file-fact {:path "/src/graph/view/init.fnl"
+                              :module "graph.view.init"
+                              :definitions [{:kind :fn
+                                             :name "GraphView"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "detach-presentation"
+                                             :top-level? false
+                                             :line 4 :column 3
+                                             :length (length detach-form)
+                                             :form detach-form}
+                                            {:kind :fn
+                                             :name "install-presentation"
+                                             :top-level? false
+                                             :line 5 :column 3
+                                             :length (length install-form)
+                                             :form install-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 3 :column 3
+                                       :form "(assert clickables \"GraphView requires clickables\")"
+                                       :enclosing-fn "GraphView"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (or (= d.evidence.function-name "detach-presentation")
+              (= d.evidence.function-name "install-presentation"))
+      (set flagged true)))
+  (assert (not flagged)
+          "helpers using bare clickables from parent's separate local+assert should pass"))
+
+(fn interactive-assertion-flags-separate-local-clickables-no-assert []
+  "A nested helper using bare clickables should still be flagged when
+  the parent binds (local clickables ...) but there is NO assert call
+  fact for clickables in the parent scope."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local build-form (.. "(fn make-widget [opts]
+  (local options (or opts {}))
+  (local clickables (or options.clickables app.clickables))
+  " helper-form "
+  (helper))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 3
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls []
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag helper when separate local has no assert")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var flagged-helper false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "helper")
+      (set flagged-helper true)))
+  (assert flagged-helper
+          "helper should be flagged when separate local has no assert call"))
+
+(fn interactive-assertion-flags-separate-local-with-assert-after-helper []
+  "A nested helper using bare clickables should be flagged when the
+  parent binds (local clickables ...) then defines the helper, then
+  (assert clickables ...) AFTER the helper.  Assert must dominate."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local build-form (.. "(fn make-widget [opts]
+  (local options (or opts {}))
+  (local clickables (or options.clickables app.clickables))
+  " helper-form "
+  (assert clickables \"required\")
+  (helper))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 3
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 5 :column 3
+                                       :form "(assert clickables \"required\")"
+                                       :enclosing-fn "make-widget"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag helper when assert is after helper definition")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var flagged-helper false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "helper")
+      (set flagged-helper true)))
+  (assert flagged-helper
+          "helper should be flagged when assert is after helper definition"))
+
+(fn interactive-assertion-flags-separate-local-with-assert-in-sibling []
+  "A nested helper using bare clickables should be flagged when the
+  parent binds (local clickables ...) but the assert is only inside
+  a sister nested function, not the parent scope directly."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local prepare-form "(fn prepare [ctx]
+  (assert clickables \"required\"))")
+  (local helper-form "(fn helper []
+  (each [_ c (ipairs clickables)]
+    (register c)))")
+  (local build-form (.. "(fn make-widget [opts]
+  (local options (or opts {}))
+  (local clickables (or options.clickables app.clickables))
+  " prepare-form "
+  " helper-form "
+  (prepare ctx)
+  (helper))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "prepare"
+                                             :top-level? false
+                                             :line 3 :column 3
+                                             :length (length prepare-form)
+                                             :form prepare-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 4 :column 3
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls [{:callee "assert"
+                                       :receiver nil :method nil
+                                       :line 3 :column 10
+                                       :form "(assert clickables \"required\")"
+                                       :enclosing-fn "prepare"}]
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag helper when assert is only in sibling fn")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var flagged-helper false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "helper")
+      (set flagged-helper true)))
+  (assert flagged-helper
+          "helper should be flagged when assert is only in sibling function"))
+
+(fn interactive-assertion-flags-guarded-options-clickables-only []
+  "A nested helper using bare clickables from a guarded (options.clickables ...)
+  without assert should still be flagged.  Only explicit assert bypasses."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local helper-form "(fn helper []
+  (when clickables
+    (clickables:register node)))")
+  (local build-form (.. "(fn make-widget [opts]
+  (local options (or opts {}))
+  (local clickables options.clickables)
+  " helper-form "
+  (helper))"))
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "make-widget"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length build-form)
+                                             :form build-form}
+                                            {:kind :fn
+                                             :name "helper"
+                                             :top-level? false
+                                             :line 3 :column 3
+                                             :length (length helper-form)
+                                             :form helper-form}]
+                              :calls []
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag helper when only guarded options.clickables, no assert")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (var flagged-helper false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "helper")
+      (set flagged-helper true)))
+  (assert flagged-helper
+          "helper should be flagged when only guarded options.clickables without assert"))
+
+;; Task 11: separate-local-then-assert pattern
+(table.insert tests {:name "interactive-assertion allows separate local clickables assert pattern"
+                     :fn interactive-assertion-allows-separate-local-clickables-assert-pattern})
+(table.insert tests {:name "interactive-assertion allows separate local clickables graph view pattern"
+                     :fn interactive-assertion-allows-separate-local-clickables-graph-view-pattern})
+(table.insert tests {:name "interactive-assertion flags separate local clickables no assert"
+                     :fn interactive-assertion-flags-separate-local-clickables-no-assert})
+(table.insert tests {:name "interactive-assertion flags separate local with assert after helper"
+                     :fn interactive-assertion-flags-separate-local-with-assert-after-helper})
+(table.insert tests {:name "interactive-assertion flags separate local with assert in sibling"
+                     :fn interactive-assertion-flags-separate-local-with-assert-in-sibling})
+(table.insert tests {:name "interactive-assertion flags guarded options clickables only"
+                     :fn interactive-assertion-flags-guarded-options-clickables-only})
+
 ;; ==== Task 11: interaction-router router-owned collections ====
 
 (fn interactive-assertion-allows-router-owned-clickables []
