@@ -343,6 +343,72 @@
   (controls:drop)
   true)
 
+(fn flight-to-grounded-on-key-down-without-sampler-errors []
+  "When toggled to grounded without terrain sampler, on-key-down must error
+  before mutating any grounded state."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  ;; Toggle to grounded
+  (toolbar-state:toggle-camera-mode)
+  ;; Store pre-call camera position to verify no mutation
+  (local pre-y (glm.vec3 camera.position.x camera.position.y camera.position.z))
+  (local (ok err) (pcall controls.on-key-down controls {:key 32}))
+  (assert (not ok)
+          "on-key-down must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  ;; Camera position must not have been mutated before the error
+  (assert (= (. camera.position 2) (. pre-y 2))
+          (.. "Camera y must not change before dependency guard errors, got "
+              (tostring (. camera.position 2)) " (was " (tostring (. pre-y 2)) ")"))
+  (controls:drop)
+  true)
+
+(fn flight-to-grounded-on-mouse-button-down-without-sampler-errors []
+  "When toggled to grounded without terrain sampler, on-mouse-button-down must
+  error before mutating any grounded state."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  ;; Toggle to grounded
+  (toolbar-state:toggle-camera-mode)
+  (local (ok err) (pcall controls.on-mouse-button-down controls {:button 1 :x 100 :y 200}))
+  (assert (not ok)
+          "on-mouse-button-down must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
+(fn flight-to-grounded-on-mouse-motion-without-sampler-errors []
+  "When toggled to grounded without terrain sampler, on-mouse-motion must error
+  before mutating the camera, even when no drag is active."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  ;; Toggle to grounded
+  (toolbar-state:toggle-camera-mode)
+  (local (ok err) (pcall controls.on-mouse-motion controls {:x 110 :y 210}))
+  (assert (not ok)
+          "on-mouse-motion must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
 (table.insert tests {:name "flight mode delegates update to flight controls"
                      :fn flight-mode-delegates-update})
 (table.insert tests {:name "grounded mode skips flight update"
@@ -357,6 +423,12 @@
                       :fn grounded-mode-requires-terrain-sampler})
 (table.insert tests {:name "flight to grounded without sampler errors on update"
                       :fn flight-to-grounded-without-sampler-errors})
+(table.insert tests {:name "flight to grounded without sampler errors on key-down"
+                      :fn flight-to-grounded-on-key-down-without-sampler-errors})
+(table.insert tests {:name "flight to grounded without sampler errors on mouse-button-down"
+                      :fn flight-to-grounded-on-mouse-button-down-without-sampler-errors})
+(table.insert tests {:name "flight to grounded without sampler errors on mouse-motion"
+                      :fn flight-to-grounded-on-mouse-motion-without-sampler-errors})
 (table.insert tests {:name "grounded mouse look clamps pitch"
                      :fn grounded-mouse-look-clamps-pitch})
 (table.insert tests {:name "grounded Space sets positive vertical velocity"

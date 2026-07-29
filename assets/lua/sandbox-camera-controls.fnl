@@ -100,9 +100,13 @@
     (* movement-speed
        (if (grounded-action-active? :jump) 1.5 1.0)))
 
-  (fn grounded-sample-terrain-height []
+  (fn ensure-grounded-deps! []
+    "Assert that all dependencies required for grounded mode are present."
     (when (not options.terrain-sampler)
-      (error "SandboxCameraControls grounded mode requires terrain sampler (terrain-sampler)"))
+      (error "SandboxCameraControls grounded mode requires terrain sampler (terrain-sampler)")))
+
+  (fn grounded-sample-terrain-height []
+    (ensure-grounded-deps!)
     (let [sampled (options.terrain-sampler:height-at-world-point camera.position)]
       (if (finite-number? sampled) sampled 0.0)))
 
@@ -141,6 +145,7 @@
       (if (= toolbar-state.camera-mode :flight)
           (flight-controls:update delta)
           (do
+            (ensure-grounded-deps!)
             ;; Horizontal movement
             (when (or (grounded-action-active? :move-left)
                       (grounded-action-active? :move-right)
@@ -195,6 +200,7 @@
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-key-down payload)
         (do
+          (ensure-grounded-deps!)
           (set (. grounded-keys payload.key) true)
           (when (and (= payload.key default-key-mapping.jump)
                      (not grounded-airborne?))
@@ -204,7 +210,9 @@
   (fn on-key-up [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-key-up payload)
-        (set (. grounded-keys payload.key) nil)))
+        (do
+          (ensure-grounded-deps!)
+          (set (. grounded-keys payload.key) nil))))
 
   (fn on-mouse-wheel [self payload]
     (if (= toolbar-state.camera-mode :flight)
@@ -214,24 +222,30 @@
   (fn on-mouse-button-down [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-mouse-button-down payload)
-        (when (= payload.button SDL_BUTTON_LEFT)
-          (set grounded-drag-look-start {:x payload.x :y payload.y}))))
+        (do
+          (ensure-grounded-deps!)
+          (when (= payload.button SDL_BUTTON_LEFT)
+            (set grounded-drag-look-start {:x payload.x :y payload.y})))))
 
   (fn on-mouse-button-up [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-mouse-button-up payload)
-        (when (= payload.button SDL_BUTTON_LEFT)
-          (set grounded-drag-look-start nil))))
+        (do
+          (ensure-grounded-deps!)
+          (when (= payload.button SDL_BUTTON_LEFT)
+            (set grounded-drag-look-start nil)))))
 
   (fn on-mouse-motion [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-mouse-motion payload)
-        (when grounded-drag-look-start
-          (let [dx (- payload.x grounded-drag-look-start.x)
-                dy (- payload.y grounded-drag-look-start.y)]
-            (set grounded-drag-look-start {:x payload.x :y payload.y})
-            (camera:yaw (* dx mouse-look-speed))
-            (apply-grounded-pitch! (* dy mouse-look-speed))))))
+        (do
+          (ensure-grounded-deps!)
+          (when grounded-drag-look-start
+            (let [dx (- payload.x grounded-drag-look-start.x)
+                  dy (- payload.y grounded-drag-look-start.y)]
+              (set grounded-drag-look-start {:x payload.x :y payload.y})
+              (camera:yaw (* dx mouse-look-speed))
+              (apply-grounded-pitch! (* dy mouse-look-speed)))))))
 
   (fn on-gamepad-button-down [self payload]
     (if (= toolbar-state.camera-mode :flight)
