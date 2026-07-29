@@ -489,10 +489,26 @@
       (set enclosing cs)))
   enclosing)
 
+(fn restore-valid-for-var? [fn-form min-byte restore-start escaped-var]
+  "Returns true iff restore-start >= min-byte AND the snapshot variable
+   escaped-var is NOT rebound (via local or let) in the text between
+   min-byte and restore-start. If the variable was rebound, the restore
+   is invalid — it captures a post-mutation value."
+  (if (< restore-start min-byte) false
+      (do
+        (local between (fn-form:sub min-byte (- restore-start 1)))
+        (local local-pat (.. "%(local%s+" escaped-var "%s+"))
+        (local let-pat (.. "%(let%s+%[%s*" escaped-var "%s+"))
+        (if (between:find local-pat) false
+            (between:find let-pat) false
+            true))))
+
 (fn has-restore-after-byte-for-var? [fn-form path snap-var min-byte]
   "Check for concrete restore evidence at a byte position >= min-byte
    for a specific snapshot variable (no re-derivation of snap-var).
-   Compares start byte positions instead of line numbers."
+   Compares start byte positions instead of line numbers.
+   Rejects restores when snap-var is rebound between min-byte and the restore
+   position (e.g. (local VAR ...) or (let [VAR ...] ...) after pcall)."
   (local path-text (table.concat path "."))
   (local escaped-path (escape-pattern path-text))
   (local escaped-var (escape-pattern snap-var))
@@ -506,7 +522,7 @@
         (do
           (local start s-e.start)
           (local end s-e.end)
-          (if (>= start min-byte)
+          (if (restore-valid-for-var? fn-form min-byte start escaped-var)
               (set found true)
               (set search-start (+ end 1))))
         (set search-start nil)))
@@ -529,7 +545,7 @@
           (do
             (local start1 s-e1.start)
             (local end1 s-e1.end)
-            (if (>= start1 min-byte)
+            (if (restore-valid-for-var? fn-form min-byte start1 escaped-var)
                 (set found true)
                 (set search-start (+ end1 1))))
           (do
@@ -538,7 +554,7 @@
                 (do
                   (local start2 s-e2.start)
                   (local end2 s-e2.end)
-                  (if (>= start2 min-byte)
+                  (if (restore-valid-for-var? fn-form min-byte start2 escaped-var)
                       (set found true)
                       (set search-start (+ end2 1))))
                 (set search-start nil))))))

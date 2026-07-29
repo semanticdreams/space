@@ -1081,11 +1081,33 @@
   (assert (> (length result) 0) "should have at least one diagnostic")
   (local d (. result 1))
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
-
+(fn mutation-restoration-flags-same-name-rebound-after-pcall []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-same-name-rebound"
+                                             :top-level? true :line 5 :column 1 :length 300
+                                             :form "(fn test-same-name-rebound []
+  (local orig (and app.engine app.engine.width))
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (local orig (and app.engine app.engine.width))
+  (set app.engine.width orig))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false
+                                             :line 8 :column 1 :length 50
+                                  :form "(fn [] (set app.engine.width 100))"}]
+                                :mutations [{:op :set :path ["app" "engine" "width"]
+                                             :line 8 :column 1
+                                             :form "(set app.engine.width 100)"
+                                             :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1: same-name orig rebound after pcall, restore uses rebound value")
+  (assert (> (length result) 0))
+  (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
 ;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
-
 (fn test-isolation-rules-returns-table-with-one-rule []
   (local TestIsolation (require :constraints.rules.test-isolation))
   (local rules (TestIsolation.rules))
@@ -1165,10 +1187,10 @@
 (table.insert tests {:name "mutation-restoration flags invalid snap before valid after" :fn mutation-restoration-flags-invalid-snap-before-valid-after})
 (table.insert tests {:name "mutation-restoration flags helper parent pcall unsupported" :fn mutation-restoration-flags-helper-parent-pcall-unsupported})
 (table.insert tests {:name "mutation-restoration flags post pcall snapshot var restore" :fn mutation-restoration-flags-post-pcall-snapshot-var-restore})
+(table.insert tests {:name "mutation-restoration flags same name rebound after pcall" :fn mutation-restoration-flags-same-name-rebound-after-pcall})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
-
 (local main
   (fn []
     (local runner (require :tests/runner))
