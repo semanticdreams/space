@@ -1230,7 +1230,9 @@
   (fn get-hud-contrib [world]
     (local runtime world.runtime)
     (if runtime
-        {:left_dock_builder (ActivityDockView {})}
+        {:left_dock_builder (ActivityDockView
+                              {:top-reserve-height-provider
+                               (fn [] (or app.activity-top-toolbar-height 0))})}
         nil))
 
   (set self.init init)

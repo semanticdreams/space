@@ -18,8 +18,14 @@
       (adjust base (if (and theme (= theme.name :light)) -0.06 -0.04))
       (adjust base (if (and theme (= theme.name :light)) -0.03 0.0))))
 
-(fn HudExtendedSidebarView [sidebar]
+(fn HudExtendedSidebarView [sidebar opts]
   (assert sidebar "HudExtendedSidebarView requires sidebar")
+  (local options (or opts {}))
+  (fn top-reserve-height []
+    (local provider (and options options.top-reserve-height-provider))
+    (if provider
+        (math.max 0 (provider))
+        0))
   (fn build [ctx]
     (local theme (and ctx ctx.theme))
     (var root-layout nil)
@@ -151,10 +157,11 @@
       (set self.size (glm.vec3 allocated-width height 0))
       (local rail-offset (glm.vec3 (- allocated-width rail-w) 0 0))
       (local rail-position (+ base-position (base-rotation:rotate rail-offset)))
+      (local reserve (top-reserve-height))
       (when active-panel-entity
-        (local panel-offset (glm.vec3 (- allocated-width rail-w panel-width) 0 0))
+        (local panel-offset (glm.vec3 (- allocated-width rail-w panel-width) reserve 0))
         (set active-panel-entity.layout.position (+ base-position (base-rotation:rotate panel-offset)))
-        (set active-panel-entity.layout.size (glm.vec3 panel-width height 0))
+        (set active-panel-entity.layout.size (glm.vec3 panel-width (math.max 0 (- height reserve)) 0))
         (set active-panel-entity.layout.rotation base-rotation)
         (set active-panel-entity.layout.clip-region self.clip-region)
         (set active-panel-entity.layout.depth-offset-index (+ base-depth 1))

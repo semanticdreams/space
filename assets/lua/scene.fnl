@@ -144,6 +144,7 @@
                              :owner (or movable.owner element)
                              :pointer-target movable.pointer-target
                              :on-drag-start movable.on-drag-start
+                             :on-drag-update movable.on-drag-update
                              :on-drag-end movable.on-drag-end})))
   entries)
 
@@ -1293,6 +1294,7 @@
            :key entry.key
            :owner entry.owner
            :on-drag-start entry.on-drag-start
+           :on-drag-update entry.on-drag-update
            :on-drag-end entry.on-drag-end})))
 
   (fn register-movable-entries [self entity entries]
@@ -1308,6 +1310,7 @@
         (when handle (set options.handle handle))
         (when entry.pointer-target (set options.pointer-target entry.pointer-target))
         (when entry.on-drag-start (set options.on-drag-start entry.on-drag-start))
+        (when entry.on-drag-update (set options.on-drag-update entry.on-drag-update))
         (when entry.on-drag-end (set options.on-drag-end entry.on-drag-end))
         (local key (or entry.key widget entry))
         (when key
@@ -2313,7 +2316,15 @@
                    :h01 info.h01
                    :h10 info.h10
                    :h11 info.h11}))))
-  best)
+   best)
+
+(fn height-at-world-point [self world-point]
+  "Return the terrain height at the given world point.  Returns 0 (default
+  ground plane) when no terrain covers the point."
+  (let [info (terrain-surface-under-point self world-point)]
+    (if (and info info.world-surface-y)
+        info.world-surface-y
+        0)))
 
 (fn screen-pos-terrain-hit [self pos opts]
   (self:raycast-terrain (self:screen-pos-ray pos opts)))
@@ -2620,6 +2631,7 @@
 (set self.screen-pos-ray screen-pos-ray)
 (set self.raycast-terrain raycast-terrain)
 (set self.terrain-surface-under-point terrain-surface-under-point)
+(set self.height-at-world-point height-at-world-point)
 (set self.screen-pos-terrain-hit screen-pos-terrain-hit)
 (set self.screen-pos-terrain-domain-hit screen-pos-terrain-domain-hit)
 (set self.screen-rect-terrain-target screen-rect-terrain-target)

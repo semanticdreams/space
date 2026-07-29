@@ -756,6 +756,328 @@
     (set (. package.loaded name) (. originals name)))
   (if ok result (error result)))
 
+;; ---------------------------------------------------------------------------
+;; Toolbar integration tests (Task 2)
+;; ---------------------------------------------------------------------------
+
+(fn sandbox-activation-creates-toolbar-state []
+  "Sandbox activation must create or reuse runtime.sandbox-toolbar-state
+  and set app.sandbox-toolbar-state."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      ;; Runtime must have sandbox-toolbar-state
+      (assert app.active-world-runtime.sandbox-toolbar-state
+              "Sandbox activation must create runtime.sandbox-toolbar-state")
+      (assert (= app.sandbox-toolbar-state
+                 app.active-world-runtime.sandbox-toolbar-state)
+              "app.sandbox-toolbar-state must point to runtime.sandbox-toolbar-state")
+      true)))
+
+(fn sandbox-activation-installs-toolbar-builder []
+  "Sandbox activation must install app.activity-top-toolbar-builder."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      (assert (= (type app.activity-top-toolbar-builder) :function)
+              "Sandbox activation must install activity-top-toolbar-builder")
+      true)))
+
+(fn sandbox-activation-installs-object-move-predicate []
+  "Sandbox activation must install object move predicate returning state value."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      (assert (= (type app.activity-object-move-predicate) :function)
+              "Sandbox activation must install object move predicate")
+      (assert (= (app.activity-object-move-predicate) false)
+              "Object move predicate must return false by default")
+      true)))
+
+(fn sandbox-activation-installs-drag-attachment-provider []
+  "Sandbox activation must install drag attachment provider returning state value."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      (assert (= (type app.activity-drag-attachment-provider) :function)
+              "Sandbox activation must install drag attachment provider")
+      (assert (= (app.activity-drag-attachment-provider) :center)
+              "Drag attachment provider must return :center by default")
+      true)))
+
+;; R1-3: Runtime.drag-attachment-mode returns correct mode
+(fn runtime-drag-attachment-mode-respects-provider []
+  "Runtime.drag-attachment-mode must return :center when no provider
+  installed, :anchor when provider returns :anchor, and :center when
+  provider returns nil or non-anchor value."
+  (local Runtime (require :state-runtime))
+  (with-restored-app
+    [:activity-drag-attachment-provider]
+    (fn []
+      ;; No provider installed
+      (set app.activity-drag-attachment-provider nil)
+      (assert (= (Runtime.drag-attachment-mode) :center)
+              "drag-attachment-mode must return :center when no provider")
+      ;; Provider returns :anchor
+      (set app.activity-drag-attachment-provider (fn [] :anchor))
+      (assert (= (Runtime.drag-attachment-mode) :anchor)
+              "drag-attachment-mode must return :anchor when provider returns :anchor")
+      ;; Provider returns :center
+      (set app.activity-drag-attachment-provider (fn [] :center))
+      (assert (= (Runtime.drag-attachment-mode) :center)
+              "drag-attachment-mode must return :center when provider returns :center")
+      ;; Provider returns some other value
+      (set app.activity-drag-attachment-provider (fn [] :other))
+      (assert (= (Runtime.drag-attachment-mode) :center)
+              "drag-attachment-mode must return :center for non-anchor provider value")
+      true)))
+
+(fn sandbox-snapshot-includes-toolbar-state []
+  "Sandbox snapshot must include toolbar state under scene.toolbar."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state
+     :engine]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      (var now-ms 0)
+      (set app.engine {:now-ms (fn [_self] (set now-ms (+ now-ms 16)) now-ms)})
+      (local empty-svc (ActivitySceneState.empty-state))
+      (var captured-state {:panels []
+                           :lights empty-svc.lights
+                           :skybox empty-svc.skybox
+                           :background empty-svc.background
+                           :containment empty-svc.containment
+                           :terrains []})
+      (set mock-scene.capture-activity-slot-state
+           (fn [_self _activity-id] captured-state))
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      ;; Snapshot and verify toolbar state
+      (local snapshot-result (sandbox-unit.snapshot-sandbox-activity!))
+      (assert snapshot-result "Snapshot must return result")
+      (assert snapshot-result.scene "Snapshot must have scene")
+      (assert (= (type snapshot-result.scene.toolbar) :table)
+              (.. "Snapshot scene must include toolbar, got " (tostring (type snapshot-result.scene.toolbar))))
+      (assert (= snapshot-result.scene.toolbar.camera-mode "flight")
+              "Snapshot toolbar camera-mode must be 'flight'")
+      (assert (= snapshot-result.scene.toolbar.object-move-enabled? false)
+              "Snapshot toolbar object-move-enabled? must be false")
+      (assert (= snapshot-result.scene.toolbar.drag-attachment "center")
+              "Snapshot toolbar drag-attachment must be 'center'")
+      true)))
+
+(fn sandbox-restore-includes-toolbar-state []
+  "Sandbox restore must restore scene.toolbar into the toolbar state."
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state
+     :engine]
+    (fn []
+      (ensure-built-in-activities!)
+      (local mock-scene (make-mock-scene))
+      (var now-ms 0)
+      (set app.engine {:now-ms (fn [_self] (set now-ms (+ now-ms 16)) now-ms)})
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}})
+      (set app.scene mock-scene)
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (Activities.activate-activity "sandbox")
+      ;; Verify default state
+      (local toolbar-state app.active-world-runtime.sandbox-toolbar-state)
+      (assert toolbar-state "Toolbar state must exist")
+      (assert (= toolbar-state.camera-mode :flight)
+              "Default camera-mode must be :flight")
+      ;; Restore with custom toolbar state
+      (local session {:scene {:panels []
+                              :toolbar {:camera-mode "grounded"
+                                        :object-move-enabled? true
+                                        :drag-attachment "anchor"}}})
+      (sandbox-unit.restore-sandbox-activity! nil session session)
+      (assert (= toolbar-state.camera-mode :grounded)
+              "After restore, camera-mode must be :grounded")
+      (assert (= toolbar-state.object-move-enabled? true)
+              "After restore, object-move-enabled? must be true")
+      (assert (= toolbar-state.drag-attachment :anchor)
+              "After restore, drag-attachment must be :anchor")
+      true)))
+
+(fn sandbox-activation-reuses-previous-raw-controls []
+  "When a previous raw FirstPersonControls is stored at
+  activity-controls.scene.sandbox (without a wrapper), activation must
+  reuse it as the flight-controls inside the new SandboxCameraControls
+  wrapper."
+  (local FirstPersonControlsModule (require :first-person-controls))
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state]
+    (fn []
+      (ensure-built-in-activities!)
+      ;; Deactivate any lingering sandbox FIRST before setting up controls,
+      ;; otherwise deactivation would clear our pre-populated state.
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (local mock-scene (make-mock-scene))
+      ;; Create a real Camera for the controls
+      (local Camera (require :camera))
+      (local glm (require :glm))
+      (local camera (Camera {:position (glm.vec3 0 0 30)}))
+      ;; Create a previous raw FirstPersonControls
+      (local raw-controls (FirstPersonControlsModule.FirstPersonControls
+                            {:camera camera}))
+      ;; Give it a marker so we can identify it later
+      (set raw-controls._test-marker true)
+      ;; Set up runtime with the pre-populated raw controls at sandbox key
+      (local activity-controls {:scene {"sandbox" raw-controls}})
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}
+                                      :activity-cameras {:scene {"sandbox" camera}}
+                                      :activity-controls activity-controls})
+      (set app.scene mock-scene)
+      (Activities.activate-activity "sandbox")
+      ;; After activation, the wrapper should be at sandbox key
+      (local wrapper (. activity-controls.scene "sandbox"))
+      (assert wrapper "Activation must store wrapper at sandbox key")
+      (assert (= (type wrapper.flight-controls) :table)
+              "Wrapper must have flight-controls")
+      ;; The wrapper's flight-controls should be the original raw controls
+      (assert wrapper.flight-controls._test-marker
+              "Wrapper flight-controls must be the previous raw controls")
+      true)))
+
 (table.insert tests {:name "sandbox activity unit registers spec"
                      :fn sandbox-activity-unit-registers-spec})
 (table.insert tests {:name "sandbox activation sets scene interaction surface"
@@ -777,7 +1099,23 @@
 (table.insert tests {:name "snapshot preserves remaining hydration queue panels"
                      :fn sandbox-snapshot-preserves-remaining-hydration-panels})
 (table.insert tests {:name "deactivation resets services when no successor slot"
-                     :fn sandbox-deactivation-resets-services-when-no-successor})
+                      :fn sandbox-deactivation-resets-services-when-no-successor})
+(table.insert tests {:name "sandbox activation creates toolbar state"
+                      :fn sandbox-activation-creates-toolbar-state})
+(table.insert tests {:name "sandbox activation installs toolbar builder"
+                      :fn sandbox-activation-installs-toolbar-builder})
+(table.insert tests {:name "sandbox activation installs object move predicate"
+                      :fn sandbox-activation-installs-object-move-predicate})
+(table.insert tests {:name "sandbox activation installs drag attachment provider"
+                      :fn sandbox-activation-installs-drag-attachment-provider})
+(table.insert tests {:name "Runtime.drag-attachment-mode respects provider"
+                      :fn runtime-drag-attachment-mode-respects-provider})
+(table.insert tests {:name "snapshot includes toolbar state"
+                      :fn sandbox-snapshot-includes-toolbar-state})
+(table.insert tests {:name "restore includes toolbar state"
+                      :fn sandbox-restore-includes-toolbar-state})
+(table.insert tests {:name "activation reuses previous raw FirstPersonControls"
+                      :fn sandbox-activation-reuses-previous-raw-controls})
 
 (local main
   (fn []

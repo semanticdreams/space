@@ -71,7 +71,11 @@
       :tests.test-scene-activity-slots
       :tests.test-activity-retention
       :tests.test-home-world-scene-activity-state
-      :tests.test-sandbox-activity
+     :tests.test-sandbox-activity
+     :tests.test-sandbox-toolbar-state
+     :tests.test-sandbox-toolbar-view
+     :tests.test-camera-animation
+     :tests.test-sandbox-camera-controls
       :tests.test-graph-activity-slots
      :tests.test-drawing-activity-slots
      :tests.test-board

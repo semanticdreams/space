@@ -10,6 +10,10 @@
 (local Graph (require :graph/init))
 (local GraphMap (require :graph/map))
 
+(local Logging (require :logging))
+(local Movables (require :movables))
+(local Intersectables (require :intersectables))
+
 (local tests [])
 (local approx (. MathUtils :approx))
 
@@ -423,6 +427,361 @@
           (.. "Scene update should recover from out-of-bounds physics transform, got: "
               (tostring err))))
 
+(fn physics-anchor-mode-records-relative-anchor []
+  (assert bt "Anchor drag test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-drag-attachment-provider)
+  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                  :skip-cuboid true
+                                                  :position (glm.vec3 0 12 0)}))
+            (assert panel "Expected panel for anchor drag test")
+            (local entry (find-physics-entry-for-element scene panel))
+            (assert (and entry entry.body) "Expected runtime physics body for anchor drag")
+
+            ;; Collect movables from the entity
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (local movables-entries (LayoutPhysicsBodies.collect-movables scene.entity))
+            (var anchor-entry nil)
+            (each [_ m (ipairs movables-entries)]
+              (when (and (not anchor-entry)
+                         (= m.target panel.layout))
+                (set anchor-entry m)))
+            (assert anchor-entry "Should find movable entry pointing to panel layout")
+            (assert anchor-entry.on-drag-update "Anchor mode should include on-drag-update callback")
+
+            ;; Simulate drag start to compute relative anchor
+            (local hit-point (glm.vec3 1 2 3))
+            (set entry.dragging true)
+            (local drag {:hit-point hit-point})
+            (local movable-stub {:target panel.layout})
+
+            ;; on-drag-start records dragging state and relative anchor
+            (when anchor-entry.on-drag-start
+              (anchor-entry.on-drag-start movable-stub drag {:button 1}))
+            (assert entry.dragging "Entry should be in dragging state after drag start")
+            (assert drag.relative-anchor "Anchor mode should record relative-anchor on drag start")
+            (assert (approx drag.relative-anchor.x (- 1.0 2.0))
+                    (string.format "relative-anchor x should be hit-point.x - body-center.x, got %.3f"
+                                   (or drag.relative-anchor.x 0)))
+            (assert (approx drag.relative-anchor.y (- 2.0 14.0))
+                    (string.format "relative-anchor y should be hit-point.y - body-center.y, got %.3f"
+                                   (or drag.relative-anchor.y 0)))
+            (assert (approx drag.relative-anchor.z (- 3.0 2.0))
+                    (string.format "relative-anchor z should be hit-point.z - body-center.z, got %.3f"
+                                   (or drag.relative-anchor.z 0)))))]
+    (cleanup)
+    (set app.activity-drag-attachment-provider original-provider)
+    (when (not ok)
+      (error err))))
+
+(fn physics-anchor-mode-calls-applyForceAtPosition-during-drag []
+  (assert bt "Anchor force test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-drag-attachment-provider)
+  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                  :skip-cuboid true
+                                                  :position (glm.vec3 0 12 0)}))
+            (assert panel "Expected panel for anchor force test")
+            (local entry (find-physics-entry-for-element scene panel))
+            (assert (and entry entry.body) "Expected runtime physics body")
+
+            ;; Collect movables
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (local movables-entries (LayoutPhysicsBodies.collect-movables scene.entity))
+            (var anchor-entry nil)
+            (each [_ m (ipairs movables-entries)]
+              (when (and (not anchor-entry)
+                         (= m.target panel.layout))
+                (set anchor-entry m)))
+            (assert anchor-entry "Should find anchor-mode movable entry")
+
+            ;; Create a fake body that records applyForceAtPosition calls
+            (var force-recorded nil)
+            (var activate-called false)
+            (local original-body entry.body)
+            (set entry.body
+                 {:applyForceAtPosition (fn [_self force rel-pos]
+                                         (set force-recorded {:force force :rel-pos rel-pos}))
+                  :forceActivationState (fn [_self state]
+                                          nil)
+                  :activate (fn [_self _force]
+                              (set activate-called true))
+                  :getCenterOfMassTransform (fn [_self]
+                                              (local t (bt.Transform))
+                                              (t:setIdentity)
+                                              (t:setOrigin (bt.Vector3 2 2 2))
+                                              t)})
+
+            ;; Start drag at a known hit point
+            (local hit-point (glm.vec3 1 2 3))
+            (local drag {:entry anchor-entry
+                         :hit-point hit-point
+                         :started? false
+                         :plane {:point hit-point
+                                 :normal (glm.vec3 0 1 0)}
+                         :plane-mode :forward
+                         :offset (glm.vec3 0 0 0)})
+            (set entry.dragging true)
+
+            ;; Call on-drag-start if present
+            (when anchor-entry.on-drag-start
+              (anchor-entry.on-drag-start anchor-entry drag {:button 1}))
+
+            ;; Build update table and call on-drag-update
+            (local update {:payload {:button 1 :x 5 :y 6 :mod 0}
+                           :pointer (glm.vec3 5 6 0)
+                           :ray {:origin (glm.vec3 5 6 10)
+                                 :direction (glm.vec3 0 0 -1)}
+                           :hit (glm.vec3 5 6 0)
+                           :new-position (glm.vec3 5 6 0)
+                           :plane drag.plane})
+            (local handled? (anchor-entry.on-drag-update anchor-entry drag update))
+
+            ;; Restore original body
+            (set entry.body original-body)
+
+            (assert force-recorded "Anchor mode should call applyForceAtPosition during drag")
+            (assert activate-called "Anchor mode should activate the body")
+            (assert handled? "Anchor mode on-drag-update should return true to suppress teleport")))]
+    (cleanup)
+    (set app.activity-drag-attachment-provider original-provider)
+    (when (not ok)
+      (error err))))
+
+(fn physics-center-mode-allows-default-teleport []
+  (assert bt "Center mode test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-drag-attachment-provider)
+  (set app.activity-drag-attachment-provider (fn [] :center))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                  :skip-cuboid true
+                                                  :position (glm.vec3 0 12 0)}))
+            (assert panel "Expected panel for center-mode drag test")
+
+            ;; Collect movables
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (local movables-entries (LayoutPhysicsBodies.collect-movables scene.entity))
+            (var center-entry nil)
+            (each [_ m (ipairs movables-entries)]
+              (when (and (not center-entry)
+                         (= m.target panel.layout))
+                (set center-entry m)))
+            (assert center-entry "Should find center-mode movable entry")
+            (assert center-entry.on-drag-update "Movable entry should have on-drag-update")
+
+            ;; For center mode, on-drag-update should return false (allow teleport)
+            (local drag {:entry center-entry
+                         :hit-point (glm.vec3 0 0 0)
+                         :started? true
+                         :plane {:point (glm.vec3 0 0 0)
+                                 :normal (glm.vec3 0 1 0)}
+                         :offset (glm.vec3 0 0 0)})
+            (local update {:payload {:button 1 :x 5 :y 6 :mod 0}
+                           :pointer (glm.vec3 5 6 0)
+                           :ray {:origin (glm.vec3 5 6 10)
+                                 :direction (glm.vec3 0 0 -1)}
+                           :hit (glm.vec3 5 6 0)
+                           :new-position (glm.vec3 5 6 0)
+                           :plane drag.plane})
+            (local handled? (center-entry.on-drag-update center-entry drag update))
+            (assert (not handled?)
+                    "Center mode on-drag-update should return false to allow default teleport")))]
+    (cleanup)
+    (set app.activity-drag-attachment-provider original-provider)
+    (when (not ok)
+      (error err))))
+
+(fn physics-anchor-mode-errors-if-applyForceAtPosition-absent []
+  (assert bt "Missing-API test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-drag-attachment-provider)
+  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                  :skip-cuboid true
+                                                  :position (glm.vec3 0 12 0)}))
+            (assert panel "Expected panel for missing-API test")
+            (local entry (find-physics-entry-for-element scene panel))
+            (assert (and entry entry.body) "Expected runtime physics body")
+
+            ;; Collect movables
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (local movables-entries (LayoutPhysicsBodies.collect-movables scene.entity))
+            (var anchor-entry nil)
+            (each [_ m (ipairs movables-entries)]
+              (when (and (not anchor-entry)
+                         (= m.target panel.layout))
+                (set anchor-entry m)))
+            (assert anchor-entry "Should find anchor-mode movable entry")
+
+            ;; Replace body with one missing applyForceAtPosition
+            (local original-body entry.body)
+            (set entry.body
+                 {:activate (fn [_self _force] nil)
+                  :forceActivationState (fn [_self _state] nil)
+                  :getCenterOfMassTransform (fn [_self]
+                                              (local t (bt.Transform))
+                                              (t:setIdentity)
+                                              (t:setOrigin (bt.Vector3 2 2 2))
+                                              t)})
+            ;; No applyForceAtPosition on this fake body
+
+            (set entry.dragging true)
+            (local drag {:entry anchor-entry
+                         :hit-point (glm.vec3 0 0 0)
+                         :started? true
+                         :plane {:point (glm.vec3 0 0 0)
+                                 :normal (glm.vec3 0 1 0)}
+                         :offset (glm.vec3 0 0 0)})
+            (local update {:payload {:button 1 :x 5 :y 6 :mod 0}
+                           :pointer (glm.vec3 5 6 0)
+                           :ray {:origin (glm.vec3 5 6 10)
+                                 :direction (glm.vec3 0 0 -1)}
+                           :hit (glm.vec3 5 6 0)
+                           :new-position (glm.vec3 5 6 0)
+                           :plane drag.plane})
+
+            (local (call-ok call-err) (pcall (fn [] (anchor-entry.on-drag-update anchor-entry drag update))))
+            ;; Restore original body
+            (set entry.body original-body)
+
+            (assert (not call-ok)
+                    "Anchor mode should error when applyForceAtPosition is absent")
+            (assert (string.find (tostring call-err) "applyForceAtPosition")
+                    (string.format
+                      "Error should mention applyForceAtPosition, got: %s"
+                      (tostring call-err)))))]
+    (cleanup)
+    (set app.activity-drag-attachment-provider original-provider)
+    (when (not ok)
+      (error err))))
+
+(fn physics-anchor-drag-end-preserves-body-rotation []
+  (assert bt "Anchor drag end test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-drag-attachment-provider)
+  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                  :skip-cuboid true
+                                                  :position (glm.vec3 0 12 0)}))
+            (assert panel "Expected panel for anchor drag end test")
+            (local entry (find-physics-entry-for-element scene panel))
+            (assert (and entry entry.body) "Expected runtime physics body")
+
+            ;; Collect movables
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (local movables-entries (LayoutPhysicsBodies.collect-movables scene.entity))
+            (var anchor-entry nil)
+            (each [_ m (ipairs movables-entries)]
+              (when (and (not anchor-entry)
+                         (= m.target panel.layout))
+                (set anchor-entry m)))
+            (assert anchor-entry "Should find anchor-mode movable entry")
+            (assert anchor-entry.on-drag-end "Anchor mode should include on-drag-end callback")
+
+            ;; Use the real Bullet body. Set its transform to a known position
+            ;; and a non-identity rotation before calling on-drag-end, so that
+            ;; syncMovedRigidBody receives a real btRigidBody pointer (safety).
+            ;; The body must be added to the physics world before on-drag-end
+            ;; calls syncMovedRigidBody, otherwise the C++ binding segfaults.
+            (when (not entry.body-active?)
+              (app.engine.physics:addRigidBody entry.body)
+              (set entry.body-active? true))
+            (local half-sqrt2 (/ (math.sqrt 2) 2))
+            (local body-center (bt.Vector3 10 20 30))
+            (local body-rotation (bt.Quaternion 0 half-sqrt2 0 half-sqrt2))
+            (local transform (bt.Transform))
+            (transform:setIdentity)
+            (transform:setOrigin body-center)
+            (transform:setRotation body-rotation)
+            (entry.body:setWorldTransform transform)
+            (when (and entry.rigid entry.rigid.motion-state)
+              (entry.rigid.motion-state:setWorldTransform transform))
+
+            ;; Set a non-zero linear velocity so we can verify that
+            ;; apply-layout-to-body was NOT called (it would zero it).
+            (entry.body:setLinearVelocity (bt.Vector3 1 2 3))
+
+            ;; Mark entry as dragging so on-drag-end path executes
+            (set entry.dragging true)
+
+            ;; Call on-drag-end
+            (anchor-entry.on-drag-end anchor-entry)
+
+            ;; Assert layout rotation was set from body rotation (preserves body rotation)
+            (assert (approx panel.layout.rotation.w (body-rotation:w))
+                    "Layout rotation.w should match body rotation w")
+            (assert (approx panel.layout.rotation.x (body-rotation:x))
+                    "Layout rotation.x should match body rotation x")
+            (assert (approx panel.layout.rotation.y (body-rotation:y))
+                    "Layout rotation.y should match body rotation y")
+            (assert (approx panel.layout.rotation.z (body-rotation:z))
+                    "Layout rotation.z should match body rotation z")
+
+            ;; Assert layout position was set from body position
+            ;; Body center is at (10, 20, 30), half-size is (2, 2, 2)
+            ;; layout-position = body-center - rotation * half
+            ;; rotation is 45 deg around Y: half rotated ≈ (2.828, 2, 0)
+            ;; layout-position ≈ (7.172, 18, 30)
+            ;; We just verify it's not the original position (0, 12, 0)
+            (assert (not (vec3-approx= panel.layout.position (glm.vec3 0 12 0)))
+                    "Layout position should be updated from body transform, not remain at (0 12 0)")
+
+            ;; Verify apply-layout-to-body was NOT called by checking that
+            ;; linear velocity was not zeroed (apply-layout-to-body calls
+            ;; setLinearVelocity(0, 0, 0)).
+            ;; getLinearVelocity returns a btVector3 with .x .y .z field access.
+            (local final-velocity (entry.body:getLinearVelocity))
+            (assert (not (and (approx final-velocity.x 0)
+                              (approx final-velocity.y 0)
+                              (approx final-velocity.z 0)))
+                    "Anchor drag end should NOT call apply-layout-to-body; body velocity should not be zeroed")))]
+    (cleanup)
+    (set app.activity-drag-attachment-provider original-provider)
+    (when (not ok)
+      (error err))))
+
 (table.insert tests {:name "Physical panels collide with each other"
                      :fn physical-panels-collide-with-each-other})
 (table.insert tests {:name "Physical panel collides with Perlin terrain"
@@ -439,6 +798,16 @@
                      :fn graph-node-cube-add-does-not-crash-after-ms-fpc-update})
 (table.insert tests {:name "Physics sync recovers from out-of-bounds body transform"
                      :fn physics-sync-recovers-from-out-of-bounds-body-transform})
+(table.insert tests {:name "Physics anchor mode records relative anchor"
+                     :fn physics-anchor-mode-records-relative-anchor})
+(table.insert tests {:name "Physics anchor mode calls applyForceAtPosition during drag"
+                     :fn physics-anchor-mode-calls-applyForceAtPosition-during-drag})
+(table.insert tests {:name "Physics center mode allows default teleport"
+                     :fn physics-center-mode-allows-default-teleport})
+(table.insert tests {:name "Physics anchor mode errors if applyForceAtPosition absent"
+                     :fn physics-anchor-mode-errors-if-applyForceAtPosition-absent})
+(table.insert tests {:name "Physics anchor drag end preserves body rotation"
+                     :fn physics-anchor-drag-end-preserves-body-rotation})
 
 (local main
   (fn []

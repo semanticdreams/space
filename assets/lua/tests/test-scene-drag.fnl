@@ -681,12 +681,575 @@
   (when (not ok)
     (error err)))
 
+(fn no-alt-drag-blocked-without-predicate []
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (local original-movables app.movables)
+  (local original-intersectables app.intersectables)
+  (local original-camera app.camera)
+  (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-events app.engine.events)
+  (local original-states app.states)
+  (local original-viewport app.viewport)
+  (local original-create-default-projection app.create-default-projection)
+  (local original-active-surface app.active-interaction-surface)
+  (local original-scene-interactive? app.scene-interactive?)
+  (local original-canvas-interactive? app.canvas-interactive?)
+  (local original-predicate app.activity-object-move-predicate)
+  (var scene nil)
+  (var movables nil)
+  (var intersector nil)
+  (var clickables nil)
+  (var hoverables nil)
+  (var camera nil)
+  (var controls nil)
+  (var state nil)
+  (var target-layout nil)
+
+  (fn cleanup []
+    (when state
+      (state.on-leave)
+      (set state nil))
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (when movables
+      (movables:drop)
+      (set movables nil))
+    (when intersector
+      (intersector:drop)
+      (set intersector nil))
+    (when clickables
+      (clickables:drop)
+      (set clickables nil))
+    (when hoverables
+      (hoverables:drop)
+      (set hoverables nil))
+    (when controls
+      (controls:drop)
+      (set controls nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables)
+    (set app.intersectables original-intersectables)
+    (set app.camera original-camera)
+    (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
+    (set app.hoverables original-hoverables)
+    (set app.clickables original-clickables)
+    (set app.engine.events original-events)
+    (restore-states! original-states)
+    (set app.create-default-projection original-create-default-projection)
+    (set app.active-interaction-surface original-active-surface)
+    (set app.scene-interactive? original-scene-interactive?)
+    (set app.canvas-interactive? original-canvas-interactive?)
+    (set app.activity-object-move-predicate original-predicate))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (reset-engine-events)
+            (set intersector (Intersectables))
+            (set clickables (Clickables {:intersectables intersector}))
+            (set hoverables (Hoverables {:intersectables intersector}))
+            (set movables (Movables {:intersectables intersector}))
+            (set camera (Camera {:position (glm.vec3 0 0 10)}))
+            (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
+            (set app.create-default-projection AppProjection.create-default-projection)
+            (set scene (Scene {:position (glm.vec3 0 0 0)
+                               :rotation (glm.quat 1 0 0 0)
+                               :camera camera}))
+            (set app.intersectables intersector)
+            (set app.clickables clickables)
+            (set app.hoverables hoverables)
+            (set app.movables movables)
+            (set app.scene scene)
+            (set app.layout-root scene.layout-root)
+            (set app.active-interaction-surface :scene)
+            (set app.scene-interactive? true)
+            (set app.canvas-interactive? false)
+            (scene:ensure-activity-slot "sandbox")
+            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+            (assert sandbox-slot "No-Alt drag test requires a valid sandbox slot")
+            (scene:build
+              (fn [_ctx]
+                (set target-layout
+                     (Layout {:name "no-alt-drag-target"
+                              :measurer (fn [self]
+                                          (set self.measure (glm.vec3 1 1 1)))
+                              :layouter (fn [self]
+                                          (set self.size self.measure))}))
+                {:layout target-layout
+                 :drop (fn [_] (target-layout:drop))}))
+            (scene:update)
+            (set scene.screen-pos-ray
+                 (fn [_self pointer _opts]
+                   {:origin (glm.vec3 pointer.x pointer.y 10)
+                    :direction (glm.vec3 0 0 -1)}))
+
+            ;; Ensure no predicate is installed
+            (set app.activity-object-move-predicate nil)
+
+            (set state (NormalState))
+            (bind-normal-state! state)
+            (state.on-enter)
+
+            ;; Fire mouse-down without Alt modifier (mod 0)
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
+
+            (assert (not (app.movables:drag-active?))
+                    "No-Alt drag should NOT start when predicate is nil")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn no-alt-drag-blocked-when-predicate-returns-false []
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (local original-movables app.movables)
+  (local original-intersectables app.intersectables)
+  (local original-camera app.camera)
+  (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-events app.engine.events)
+  (local original-states app.states)
+  (local original-viewport app.viewport)
+  (local original-create-default-projection app.create-default-projection)
+  (local original-active-surface app.active-interaction-surface)
+  (local original-scene-interactive? app.scene-interactive?)
+  (local original-canvas-interactive? app.canvas-interactive?)
+  (local original-predicate app.activity-object-move-predicate)
+  (var scene nil)
+  (var movables nil)
+  (var intersector nil)
+  (var clickables nil)
+  (var hoverables nil)
+  (var camera nil)
+  (var controls nil)
+  (var state nil)
+  (var target-layout nil)
+
+  (fn cleanup []
+    (when state
+      (state.on-leave)
+      (set state nil))
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (when movables
+      (movables:drop)
+      (set movables nil))
+    (when intersector
+      (intersector:drop)
+      (set intersector nil))
+    (when clickables
+      (clickables:drop)
+      (set clickables nil))
+    (when hoverables
+      (hoverables:drop)
+      (set hoverables nil))
+    (when controls
+      (controls:drop)
+      (set controls nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables)
+    (set app.intersectables original-intersectables)
+    (set app.camera original-camera)
+    (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
+    (set app.hoverables original-hoverables)
+    (set app.clickables original-clickables)
+    (set app.engine.events original-events)
+    (restore-states! original-states)
+    (set app.create-default-projection original-create-default-projection)
+    (set app.active-interaction-surface original-active-surface)
+    (set app.scene-interactive? original-scene-interactive?)
+    (set app.canvas-interactive? original-canvas-interactive?)
+    (set app.activity-object-move-predicate original-predicate))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (reset-engine-events)
+            (set intersector (Intersectables))
+            (set clickables (Clickables {:intersectables intersector}))
+            (set hoverables (Hoverables {:intersectables intersector}))
+            (set movables (Movables {:intersectables intersector}))
+            (set camera (Camera {:position (glm.vec3 0 0 10)}))
+            (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
+            (set app.create-default-projection AppProjection.create-default-projection)
+            (set scene (Scene {:position (glm.vec3 0 0 0)
+                               :rotation (glm.quat 1 0 0 0)
+                               :camera camera}))
+            (set app.intersectables intersector)
+            (set app.clickables clickables)
+            (set app.hoverables hoverables)
+            (set app.movables movables)
+            (set app.scene scene)
+            (set app.layout-root scene.layout-root)
+            (set app.active-interaction-surface :scene)
+            (set app.scene-interactive? true)
+            (set app.canvas-interactive? false)
+            (scene:ensure-activity-slot "sandbox")
+            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+            (assert sandbox-slot "Predicate-false drag test requires a valid sandbox slot")
+            (scene:build
+              (fn [_ctx]
+                (set target-layout
+                     (Layout {:name "predicate-false-drag-target"
+                              :measurer (fn [self]
+                                          (set self.measure (glm.vec3 1 1 1)))
+                              :layouter (fn [self]
+                                          (set self.size self.measure))}))
+                {:layout target-layout
+                 :drop (fn [_] (target-layout:drop))}))
+            (scene:update)
+            (set scene.screen-pos-ray
+                 (fn [_self pointer _opts]
+                   {:origin (glm.vec3 pointer.x pointer.y 10)
+                    :direction (glm.vec3 0 0 -1)}))
+
+            ;; Install predicate returning false
+            (set app.activity-object-move-predicate (fn [] false))
+
+            (set state (NormalState))
+            (bind-normal-state! state)
+            (state.on-enter)
+
+            ;; Fire mouse-down without Alt modifier
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
+
+            (assert (not (app.movables:drag-active?))
+                    "No-Alt drag should NOT start when predicate returns false")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn no-alt-drag-enabled-when-predicate-returns-true []
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (local original-movables app.movables)
+  (local original-intersectables app.intersectables)
+  (local original-camera app.camera)
+  (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-events app.engine.events)
+  (local original-states app.states)
+  (local original-viewport app.viewport)
+  (local original-create-default-projection app.create-default-projection)
+  (local original-active-surface app.active-interaction-surface)
+  (local original-scene-interactive? app.scene-interactive?)
+  (local original-canvas-interactive? app.canvas-interactive?)
+  (local original-predicate app.activity-object-move-predicate)
+  (var scene nil)
+  (var movables nil)
+  (var intersector nil)
+  (var clickables nil)
+  (var hoverables nil)
+  (var camera nil)
+  (var controls nil)
+  (var state nil)
+  (var target-layout nil)
+
+  (fn cleanup []
+    (when state
+      (state.on-leave)
+      (set state nil))
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (when movables
+      (movables:drop)
+      (set movables nil))
+    (when intersector
+      (intersector:drop)
+      (set intersector nil))
+    (when clickables
+      (clickables:drop)
+      (set clickables nil))
+    (when hoverables
+      (hoverables:drop)
+      (set hoverables nil))
+    (when controls
+      (controls:drop)
+      (set controls nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables)
+    (set app.intersectables original-intersectables)
+    (set app.camera original-camera)
+    (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
+    (set app.hoverables original-hoverables)
+    (set app.clickables original-clickables)
+    (set app.engine.events original-events)
+    (restore-states! original-states)
+    (set app.create-default-projection original-create-default-projection)
+    (set app.active-interaction-surface original-active-surface)
+    (set app.scene-interactive? original-scene-interactive?)
+    (set app.canvas-interactive? original-canvas-interactive?)
+    (set app.activity-object-move-predicate original-predicate))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (reset-engine-events)
+            (set intersector (Intersectables))
+            (set clickables (Clickables {:intersectables intersector}))
+            (set hoverables (Hoverables {:intersectables intersector}))
+            (set movables (Movables {:intersectables intersector}))
+            (set camera (Camera {:position (glm.vec3 0 0 10)}))
+            (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
+            (set app.create-default-projection AppProjection.create-default-projection)
+            (set scene (Scene {:position (glm.vec3 0 0 0)
+                               :rotation (glm.quat 1 0 0 0)
+                               :camera camera}))
+            (set app.intersectables intersector)
+            (set app.clickables clickables)
+            (set app.hoverables hoverables)
+            (set app.movables movables)
+            (set app.scene scene)
+            (set app.layout-root scene.layout-root)
+            (set app.active-interaction-surface :scene)
+            (set app.scene-interactive? true)
+            (set app.canvas-interactive? false)
+            (scene:ensure-activity-slot "sandbox")
+            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+            (assert sandbox-slot "Predicate-true drag test requires a valid sandbox slot")
+            (scene:build
+              (fn [_ctx]
+                (set target-layout
+                     (Layout {:name "predicate-true-drag-target"
+                              :measurer (fn [self]
+                                          (set self.measure (glm.vec3 1 1 1)))
+                              :layouter (fn [self]
+                                          (set self.size self.measure))}))
+                {:layout target-layout
+                 :drop (fn [_] (target-layout:drop))}))
+            (scene:update)
+            (set scene.screen-pos-ray
+                 (fn [_self pointer _opts]
+                   {:origin (glm.vec3 pointer.x pointer.y 10)
+                    :direction (glm.vec3 0 0 -1)}))
+
+            ;; Install predicate returning true
+            (set app.activity-object-move-predicate (fn [] true))
+
+            (set state (NormalState))
+            (bind-normal-state! state)
+            (state.on-enter)
+
+            ;; Fire mouse-down without Alt modifier
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+            (app.engine.events.mouse-motion.emit {:x 5.25 :y 5.75 :mod 0})
+
+            (assert (app.movables:drag-active?)
+                    "No-Alt drag should start when predicate returns true")
+            (assert target-layout "Scene should create a target layout")
+            (assert (approx target-layout.position.x 5.0)
+                    "No-Alt drag should update layout X position when predicate allows")
+            (assert (approx target-layout.position.y 5.5)
+                    "No-Alt drag should update layout Y position when predicate allows")
+
+            (app.engine.events.mouse-button-up.emit {:button 1})
+            (assert (not (app.movables:drag-active?))
+                    "Drag should end on mouse-up")))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
+(fn click-without-drag-threshold-remains-click []
+  (local original-scene app.scene)
+  (local original-layout-root app.layout-root)
+  (local original-movables app.movables)
+  (local original-intersectables app.intersectables)
+  (local original-camera app.camera)
+  (local original-controls app.first-person-controls)
+  (local original-runtime app.active-world-runtime)
+  (local original-hoverables app.hoverables)
+  (local original-clickables app.clickables)
+  (local original-events app.engine.events)
+  (local original-states app.states)
+  (local original-viewport app.viewport)
+  (local original-create-default-projection app.create-default-projection)
+  (local original-active-surface app.active-interaction-surface)
+  (local original-scene-interactive? app.scene-interactive?)
+  (local original-canvas-interactive? app.canvas-interactive?)
+  (local original-predicate app.activity-object-move-predicate)
+  (var scene nil)
+  (var movables nil)
+  (var intersector nil)
+  (var clickables nil)
+  (var hoverables nil)
+  (var camera nil)
+  (var controls nil)
+  (var state nil)
+  (var target-layout nil)
+
+  (fn cleanup []
+    (when state
+      (state.on-leave)
+      (set state nil))
+    (when scene
+      (scene:drop)
+      (set scene nil))
+    (when movables
+      (movables:drop)
+      (set movables nil))
+    (when intersector
+      (intersector:drop)
+      (set intersector nil))
+    (when clickables
+      (clickables:drop)
+      (set clickables nil))
+    (when hoverables
+      (hoverables:drop)
+      (set hoverables nil))
+    (when controls
+      (controls:drop)
+      (set controls nil))
+    (when camera
+      (camera:drop)
+      (set camera nil))
+    (set app.scene original-scene)
+    (set app.layout-root original-layout-root)
+    (set app.movables original-movables)
+    (set app.intersectables original-intersectables)
+    (set app.camera original-camera)
+    (set app.first-person-controls original-controls)
+    (set app.active-world-runtime original-runtime)
+    (set app.hoverables original-hoverables)
+    (set app.clickables original-clickables)
+    (set app.engine.events original-events)
+    (restore-states! original-states)
+    (set app.create-default-projection original-create-default-projection)
+    (set app.active-interaction-surface original-active-surface)
+    (set app.scene-interactive? original-scene-interactive?)
+    (set app.canvas-interactive? original-canvas-interactive?)
+    (set app.activity-object-move-predicate original-predicate))
+
+  (let [(ok err)
+        (pcall
+          (fn []
+            (reset-engine-events)
+            (set intersector (Intersectables))
+            (set clickables (Clickables {:intersectables intersector}))
+            (set hoverables (Hoverables {:intersectables intersector}))
+            (set movables (Movables {:intersectables intersector}))
+            (set camera (Camera {:position (glm.vec3 0 0 10)}))
+            (set controls (FirstPersonControls {:camera camera}))
+            (set app.active-world-runtime
+                 {:presentation {:input-controls (fn [_self] controls)
+                                 :camera (fn [_self _opts] camera)}})
+            (set app.camera nil)
+            (set app.first-person-controls nil)
+            (set app.create-default-projection AppProjection.create-default-projection)
+            (set scene (Scene {:position (glm.vec3 0 0 0)
+                               :rotation (glm.quat 1 0 0 0)
+                               :camera camera}))
+            (set app.intersectables intersector)
+            (set app.clickables clickables)
+            (set app.hoverables hoverables)
+            (set app.movables movables)
+            (set app.scene scene)
+            (set app.layout-root scene.layout-root)
+            (set app.active-interaction-surface :scene)
+            (set app.scene-interactive? true)
+            (set app.canvas-interactive? false)
+            (scene:ensure-activity-slot "sandbox")
+            (local sandbox-slot (scene:activate-activity-slot "sandbox"))
+            (assert sandbox-slot "Click-without-drag test requires a valid sandbox slot")
+            (scene:build
+              (fn [_ctx]
+                (set target-layout
+                     (Layout {:name "click-without-drag-target"
+                              :measurer (fn [self]
+                                          (set self.measure (glm.vec3 1 1 1)))
+                              :layouter (fn [self]
+                                          (set self.size self.measure))}))
+                {:layout target-layout
+                 :drop (fn [_] (target-layout:drop))}))
+            (scene:update)
+            (set scene.screen-pos-ray
+                 (fn [_self pointer _opts]
+                   {:origin (glm.vec3 pointer.x pointer.y 10)
+                    :direction (glm.vec3 0 0 -1)}))
+
+            ;; Install predicate returning true (so no-Alt drag is allowed)
+            (set app.activity-object-move-predicate (fn [] true))
+
+            (set state (NormalState))
+            (bind-normal-state! state)
+            (state.on-enter)
+
+            ;; Record initial position
+            (local initial-x target-layout.position.x)
+            (local initial-y target-layout.position.y)
+
+            ;; Fire mouse-down without Alt, but mouse-motion is tiny (within threshold)
+            (app.engine.events.mouse-button-down.emit {:button 1 :x 0.25 :y 0.25 :mod 0})
+            (app.engine.events.mouse-motion.emit {:x 0.26 :y 0.26 :mod 0})
+
+            (assert (not (app.movables:drag-active?))
+                    "Tiny motion below threshold should not start drag")
+            (assert (approx target-layout.position.x initial-x)
+                    "Click without drag should not move layout X")
+            (assert (approx target-layout.position.y initial-y)
+                    "Click without drag should not move layout Y")
+
+            (app.engine.events.mouse-button-up.emit {:button 1})))]
+    (cleanup)
+    (when (not ok)
+      (error err))))
+
 (table.insert tests {:name "Normal state drags real scene entity" :fn drag-through-normal-state-moves-scene-entity})
 (table.insert tests {:name "Normal state drags scene ball" :fn drag-through-normal-state-moves-scene-ball})
 (table.insert tests {:name "Normal state drags runtime physics body"
                      :fn drag-through-normal-state-moves-scene-physics-body})
 (table.insert tests {:name "Normal state keeps scene alt-drag when canvas is hidden"
                      :fn drag-through-normal-state-moves-scene-entity-when-canvas-hidden})
+(table.insert tests {:name "No-Alt drag blocked without predicate"
+                     :fn no-alt-drag-blocked-without-predicate})
+(table.insert tests {:name "No-Alt drag blocked when predicate returns false"
+                     :fn no-alt-drag-blocked-when-predicate-returns-false})
+(table.insert tests {:name "No-Alt drag enabled when predicate returns true"
+                     :fn no-alt-drag-enabled-when-predicate-returns-true})
+(table.insert tests {:name "Click without drag threshold remains click"
+                     :fn click-without-drag-threshold-remains-click})
 
 (local main
   (fn []

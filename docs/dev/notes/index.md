@@ -67,6 +67,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Render Capture](./render-capture)
 - [Resize Bugs](./resize-bugs)
 - [Ripgrep](./ripgrep)
+- [Sandbox Interaction Toolbar](./sandbox-interaction-toolbar)
 - [Scene Terrain Recovery](./scene-terrain-recovery)
 - [Sdl3 Input Migration](./sdl3-input-migration)
 - [Selection](./selection)

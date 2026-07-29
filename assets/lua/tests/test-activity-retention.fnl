@@ -1070,6 +1070,55 @@
 (table.insert tests {:name "Board activity restore fails loudly without runtime.scene"
                       :fn board-restore-fails-loudly-without-runtime-scene})
 
+(fn activity-hooks-include-toolbar-and-sandbox-interaction-providers []
+  (local app-keys [:active-world-runtime
+                   :activity-registry
+                   :activities-changed
+                   :active-activity-id])
+  (local app-snapshot (snapshot-app-fields app-keys))
+  (set app.activity-registry nil)
+  (set app.activities-changed nil)
+  (set app.active-activity-id nil)
+  (set app.active-world-runtime {})
+  (set app.activity-top-toolbar-builder nil)
+  (set app.activity-object-move-predicate nil)
+  (set app.activity-drag-attachment-provider nil)
+  (local toolbar-builder (fn [] :toolbar-builder))
+  (local move-predicate (fn [] :move-predicate))
+  (local drag-provider (fn [] :drag-provider))
+  (local (ok result)
+    (pcall
+      (fn []
+        (Activities.register-activity
+          {:id "toolbar-test"
+           :label "Toolbar Test"
+           :activate (fn [ctx]
+                       (ctx:set-top-toolbar-builder! toolbar-builder)
+                       (ctx:set-object-move-predicate! move-predicate)
+                       (ctx:set-drag-attachment-provider! drag-provider)
+                       {})})
+        (Activities.activate-activity "toolbar-test")
+        (assert (= app.activity-top-toolbar-builder toolbar-builder)
+                "app.activity-top-toolbar-builder should be set after activation")
+        (assert (= app.activity-object-move-predicate move-predicate)
+                "app.activity-object-move-predicate should be set after activation")
+        (assert (= app.activity-drag-attachment-provider drag-provider)
+                "app.activity-drag-attachment-provider should be set after activation")
+        (Activities.deactivate-active-activity)
+        (assert (= app.activity-top-toolbar-builder nil)
+                "app.activity-top-toolbar-builder should be nil after deactivation")
+        (assert (= app.activity-object-move-predicate nil)
+                "app.activity-object-move-predicate should be nil after deactivation")
+        (assert (= app.activity-drag-attachment-provider nil)
+                "app.activity-drag-attachment-provider should be nil after deactivation")
+        true)))
+  (pcall (fn [] (Activities.unregister-activity "toolbar-test")))
+  (restore-app-fields! app-snapshot)
+  (if ok result (error result)))
+
+(table.insert tests {:name "Activity hooks include toolbar and sandbox interaction providers"
+                     :fn activity-hooks-include-toolbar-and-sandbox-interaction-providers})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

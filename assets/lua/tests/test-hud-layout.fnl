@@ -236,6 +236,43 @@
           "tiles should reserve exactly the natural right dock width")
   (entity:drop))
 
+(fn top-toolbar-reserves-center-column-between-full-height-rails []
+  (local hud {:world-units-per-pixel 1
+              :margin-px 0
+              :half-width 50
+              :half-height 20})
+  (local ctx (BuildContext {:pointer-target hud}))
+  (local builder
+    (HudLayout.make-hud-builder
+      {:control-builder (fixed-widget "control" (glm.vec3 100 3 0))
+       :status-builder (fixed-widget "status" (glm.vec3 100 2 0))
+       :left-dock-builder (fixed-widget "left" (glm.vec3 5 7 0))
+       :right-dock-builder (fixed-widget "right" (glm.vec3 6 7 0))
+       :top-toolbar-builder (fixed-widget "toolbar" (glm.vec3 20 4 0))}))
+  (local entity (builder ctx))
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 0 0 0))
+  (set entity.layout.size entity.layout.measure)
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  (assert entity.top-toolbar-root "top-toolbar-root should be created when top-toolbar-builder is set")
+  (assert (= entity.top-toolbar-root.layout.size.x 89) ; 100 - 5 - 6
+          (.. "top-toolbar width should be 89 (= 100 - 5 - 6), got " entity.top-toolbar-root.layout.size.x))
+  (assert (= entity.top-toolbar-root.layout.size.y 4)
+          (.. "top-toolbar height should be 4, got " entity.top-toolbar-root.layout.size.y))
+  (assert (= entity.left-dock-root.layout.size.y 35) ; 40 - control 3 - status 2
+          (.. "left dock should remain full-height 35, got " entity.left-dock-root.layout.size.y))
+  (assert (= entity.right-dock-root.layout.size.y 35)
+          (.. "right dock should remain full-height 35, got " entity.right-dock-root.layout.size.y))
+  (assert (= entity.tiles-root.layout.size.y 31) ; middle 35 - toolbar 4
+          (.. "tiles height should be 31 (= 35 - 4), got " entity.tiles-root.layout.size.y))
+  (entity:drop))
+
+(table.insert tests {:name "Hud layout top toolbar reserves center column between full-height rails"
+                     :fn top-toolbar-reserves-center-column-between-full-height-rails})
+
 (table.insert tests {:name "Hud layout left dock fills canvas band height"
                      :fn left-dock-fills-canvas-band-height})
 (table.insert tests {:name "Hud layout left dock reserves width from tiles"

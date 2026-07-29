@@ -42,15 +42,18 @@
 
 (fn with-camera [forward body]
   (local original app.camera)
+  (local original-presentation-camera app.presentation-camera)
   (local original-scene-interactive? app.scene-interactive?)
   (local original-canvas-interactive? app.canvas-interactive?)
   (local original-active-surface app.active-interaction-surface)
   (set app.camera {:get-forward (fn [_] forward)})
+  (set app.presentation-camera (fn [_opts] {:get-forward (fn [_] forward)}))
   (set app.scene-interactive? true)
   (set app.canvas-interactive? false)
   (set app.active-interaction-surface :scene)
   (let [(ok result) (pcall body)]
     (set app.camera original)
+    (set app.presentation-camera original-presentation-camera)
     (set app.scene-interactive? original-scene-interactive?)
     (set app.canvas-interactive? original-canvas-interactive?)
     (set app.active-interaction-surface original-active-surface)
@@ -60,10 +63,13 @@
 
 (fn with-camera-vectors [forward up body]
   (local original app.camera)
+  (local original-presentation-camera app.presentation-camera)
   (set app.camera {:get-forward (fn [_] forward)
                    :get-up (fn [_] up)})
+  (set app.presentation-camera (fn [_opts] {:get-forward (fn [_] forward) :get-up (fn [_] up)}))
   (let [(ok result) (pcall body)]
     (set app.camera original)
+    (set app.presentation-camera original-presentation-camera)
     (when (not ok)
       (error result))
     result))
@@ -484,6 +490,121 @@
       (assert (approx layout.position.z prior-z)
               "Forward drag should keep Z on the forward plane"))))
 
+(fn movables-on-drag-start-receives-entry-drag-and-payload []
+  (with-camera (glm.vec3 0 0 -1)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector}))
+      (local layout (make-layout))
+      (var start-drag nil)
+      (var start-payload nil)
+      (movables:register {:layout layout}
+                         {:key layout
+                          :on-drag-start (fn [entry drag payload]
+                                           (set start-drag drag)
+                                           (set start-payload payload))})
+      (set intersector.selection-point (glm.vec3 0 0 0))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0 :mod 256})
+      (movables:on-mouse-motion {:x 10 :y 0 :mod 256})
+      (assert start-drag "Expected on-drag-start to receive drag arg")
+      (assert start-payload "Expected on-drag-start to receive payload arg")
+      (assert start-drag.hit-point "Expected drag to include hit-point on start"))))
+
+(fn movables-on-drag-update-receives-update-new-position []
+  (with-camera (glm.vec3 0 0 -1)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector :drag-threshold 0}))
+      (local layout (make-layout))
+      (set layout.position (glm.vec3 4 5 6))
+      (var update-new-position nil)
+      (movables:register {:layout layout}
+                         {:key layout
+                          :on-drag-update (fn [entry drag update]
+                                            (set update-new-position update.new-position)
+                                            false)})
+      (set intersector.selection-point (glm.vec3 1 2 3))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (set intersector.next-ray {:origin (glm.vec3 2 3 10)
+                                 :direction (glm.vec3 0 0 -1)})
+      (movables:on-mouse-motion {:x 5 :y 6})
+      (assert update-new-position "Expected on-drag-update to receive update.new-position")
+      (assert (approx update-new-position.x 5) "Update new-position x should match expected")
+      (assert (approx update-new-position.y 6) "Update new-position y should match expected"))))
+
+(fn movables-on-drag-update-true-suppresses-default-set-position []
+  (with-camera (glm.vec3 0 0 -1)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector :drag-threshold 0}))
+      (local layout (make-layout))
+      (set layout.position (glm.vec3 4 5 6))
+      (var default-set-position-called? false)
+      (local original-set-position layout.set-position)
+      (set layout.set-position
+           (fn [self pos]
+             (set default-set-position-called? true)
+             (original-set-position self pos)))
+      (movables:register {:layout layout}
+                         {:key layout
+                          :on-drag-update (fn [entry drag update]
+                                            true)})
+      (set intersector.selection-point (glm.vec3 1 2 3))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (set intersector.next-ray {:origin (glm.vec3 2 3 10)
+                                 :direction (glm.vec3 0 0 -1)})
+      (movables:on-mouse-motion {:x 5 :y 6})
+      (assert (not default-set-position-called?)
+              "Default set-position should NOT be called when on-drag-update returns true"))))
+
+(fn movables-on-drag-update-false-calls-default-set-position []
+  (with-camera (glm.vec3 0 0 -1)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector :drag-threshold 0}))
+      (local layout (make-layout))
+      (set layout.position (glm.vec3 4 5 6))
+      (var default-set-position-called? false)
+      (local original-set-position layout.set-position)
+      (set layout.set-position
+           (fn [self pos]
+             (set default-set-position-called? true)
+             (original-set-position self pos)))
+      (movables:register {:layout layout}
+                         {:key layout
+                          :on-drag-update (fn [entry drag update]
+                                            false)})
+      (set intersector.selection-point (glm.vec3 1 2 3))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (set intersector.next-ray {:origin (glm.vec3 2 3 10)
+                                 :direction (glm.vec3 0 0 -1)})
+      (movables:on-mouse-motion {:x 5 :y 6})
+      (assert default-set-position-called?
+              "Default set-position should be called when on-drag-update returns false"))))
+
+(fn movables-on-drag-end-receives-entry-and-drag []
+  (with-camera (glm.vec3 0 0 -1)
+    (fn []
+      (local intersector (make-intersector))
+      (local movables (Movables {:intersectables intersector :drag-threshold 0}))
+      (local layout (make-layout))
+      (var end-drag nil)
+      (var drag-still-engaged-during-callback? false)
+      (movables:register {:layout layout}
+                         {:key layout
+                          :on-drag-end (fn [entry drag]
+                                         (set end-drag drag)
+                                         (set drag-still-engaged-during-callback?
+                                              (movables:drag-engaged?)))})
+      (set intersector.selection-point (glm.vec3 0 0 0))
+      (movables:on-mouse-button-down {:button 1 :x 0 :y 0})
+      (movables:on-mouse-button-up {:button 1})
+      (assert end-drag "Expected on-drag-end to receive drag arg")
+      (assert drag-still-engaged-during-callback?
+              "Expected drag to still be engaged during on-drag-end callback, before clear")
+      (assert (not (movables:drag-engaged?))
+              "Expected drag to be cleared after on-drag-end callback"))))
+
 (table.insert tests {:name "Movables register/unregister layouts" :fn movables-register-and-unregister})
 (table.insert tests {:name "Movables update layout positions while dragging" :fn movables-update-position-while-dragging})
 (table.insert tests {:name "Movables stop drag when pointer target disabled"
@@ -497,6 +618,11 @@
 (table.insert tests {:name "Movables fire drag start/end hooks" :fn movables-fire-drag-hooks})
 (table.insert tests {:name "Movables shift drag uses camera up plane" :fn movables-shift-drag-uses-up-plane})
 (table.insert tests {:name "Movables shift toggle restores forward plane" :fn movables-shift-toggle-restores-forward-plane})
+(table.insert tests {:name "Movables on-drag-start receives entry drag and payload" :fn movables-on-drag-start-receives-entry-drag-and-payload})
+(table.insert tests {:name "Movables on-drag-update receives update new position" :fn movables-on-drag-update-receives-update-new-position})
+(table.insert tests {:name "Movables on-drag-update true suppresses default set-position" :fn movables-on-drag-update-true-suppresses-default-set-position})
+(table.insert tests {:name "Movables on-drag-update false calls default set-position" :fn movables-on-drag-update-false-calls-default-set-position})
+(table.insert tests {:name "Movables on-drag-end receives entry and drag" :fn movables-on-drag-end-receives-entry-and-drag})
 
 (local main
   (fn []

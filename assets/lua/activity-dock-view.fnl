@@ -43,7 +43,13 @@
       (adjust base (if (and theme (= theme.name :light)) -0.06 -0.04))
       (adjust base (if (and theme (= theme.name :light)) -0.03 0.0))))
 
-(fn ActivityDockView [_opts]
+(fn ActivityDockView [opts]
+  (local options (or opts {}))
+  (fn top-reserve-height []
+    (local provider (and options options.top-reserve-height-provider))
+    (if provider
+        (math.max 0 (provider))
+        0))
   (local build
     (fn [ctx]
     (var root-layout nil)
@@ -154,7 +160,16 @@
         (set content-entity.layout.rotation self.rotation)
         (set content-entity.layout.clip-region self.clip-region)
         (set content-entity.layout.depth-offset-index self.depth-offset-index)
-        (content-entity.layout:layouter)))
+        (content-entity.layout:layouter)
+        (when active-dock-entity
+          (local reserve (top-reserve-height))
+          (when (> reserve 0)
+            (local entity-layout active-dock-entity.layout)
+            (local current-y (or entity-layout.position.y 0))
+            (local current-h (or entity-layout.size.y 0))
+            (set entity-layout.position.y (+ current-y reserve))
+            (set entity-layout.size.y (math.max 0 (- current-h reserve)))
+            (entity-layout:layouter)))))
 
     (set root-layout
          (Layout {:name "activity-dock"

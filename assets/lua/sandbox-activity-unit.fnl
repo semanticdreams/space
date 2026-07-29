@@ -4,9 +4,12 @@
 (local fs (require :fs))
 (local Camera (require :camera))
 (local {: FirstPersonControls} (require :first-person-controls))
+(local {: SandboxCameraControls} (require :sandbox-camera-controls))
 (local Activities (require :activities))
 (local SandboxActivityActions (require :sandbox-activity-actions))
 (local ActivityCameraState (require :activity-camera-state))
+(local SandboxToolbarState (require :sandbox-toolbar-state))
+(local SandboxToolbarView (require :sandbox-toolbar-view))
 
 (fn sandbox-activity-owned-paths []
   (local runtime (require :runtime))
@@ -101,6 +104,12 @@
   ;; existing retained state provides the canonical scene data.
   (scene:ensure-activity-slot "sandbox")
 
+  ;; Toolbar state: create or reuse (must be before controls — they need it)
+  (local toolbar-state (or world-runtime.sandbox-toolbar-state
+                            (SandboxToolbarState {})))
+  (set world-runtime.sandbox-toolbar-state toolbar-state)
+  (set app.sandbox-toolbar-state toolbar-state)
+
   ;; Create or reuse a sandbox scene camera from the activity session.
   ;; Each activity owns its camera; the sandbox camera is stored in
   ;; runtime.activity-cameras.scene.sandbox.
@@ -112,10 +121,28 @@
                               (set (. world-runtime.activity-cameras.scene "sandbox") cam)
                               cam))))
   (when world-runtime.activity-controls
-    (set sandbox-controls (or (. world-runtime.activity-controls.scene "sandbox")
-                               (let [ctrl (FirstPersonControls {:camera sandbox-camera})]
-                                 (set (. world-runtime.activity-controls.scene "sandbox") ctrl)
-                                 ctrl))))
+    ;; Check for a previous raw FirstPersonControls at the sandbox key
+    ;; (i.e. before the wrapper existed). If present, reuse it as the inner
+    ;; flight-controls so any accumulated state (key tracking, etc.) is preserved.
+    (local previous-raw (and world-runtime.activity-controls.scene
+                             (. world-runtime.activity-controls.scene "sandbox")))
+    ;; Create or reuse inner flight controls (raw FirstPersonControls)
+    (local flight-controls (or (. world-runtime.activity-controls.scene "sandbox-flight")
+                                (and previous-raw
+                                     (not previous-raw.flight-controls)
+                                     previous-raw)
+                                (let [ctrl (FirstPersonControls {:camera sandbox-camera})]
+                                  (set (. world-runtime.activity-controls.scene "sandbox-flight") ctrl)
+                                  ctrl)))
+    ;; Ensure the raw controls reference is stored at sandbox-flight for cleanup
+    (when (not (. world-runtime.activity-controls.scene "sandbox-flight"))
+      (set (. world-runtime.activity-controls.scene "sandbox-flight") flight-controls))
+    ;; Wrap in SandboxCameraControls (handles flight/grounded camera mode)
+    (set sandbox-controls (SandboxCameraControls {:camera sandbox-camera
+                                                    :toolbar-state toolbar-state
+                                                    :flight-controls flight-controls
+                                                    :terrain-sampler scene}))
+    (set (. world-runtime.activity-controls.scene "sandbox") sandbox-controls))
   ;; Install camera and controls on the scene slot
   (local slot (scene:activity-slot "sandbox"))
   (when sandbox-camera
@@ -135,6 +162,10 @@
   (ctx:set-target-enabled! sandbox-target-enabled?)
   ;; Incremental hydration: restore queued panels one per frame
   (ctx:set-update! sandbox-activity-update)
+  ;; Install toolbar hooks
+  (ctx:set-top-toolbar-builder! (SandboxToolbarView toolbar-state))
+  (ctx:set-object-move-predicate! (fn [] (= toolbar-state.object-move-enabled? true)))
+  (ctx:set-drag-attachment-provider! (fn [] toolbar-state.drag-attachment))
   {:activity-id "sandbox"})
 
 (fn slice-array-from [entries start-index]
@@ -161,6 +192,12 @@
   (when (and app.active-world-runtime app.active-world-runtime.scene)
     (local scene app.active-world-runtime.scene)
     (scene:deactivate-activity-slot "sandbox"))
+  (set app.sandbox-toolbar-state nil)
+  (when (and app.active-world-runtime app.active-world-runtime.activity-controls)
+    ;; Clean up the flight controls wrapper reference; the scene slot
+    ;; handles the rest.
+    (set (. app.active-world-runtime.activity-controls.scene "sandbox-flight") nil)
+    (set (. app.active-world-runtime.activity-controls.scene "sandbox") nil))
   true)
 
 (fn snapshot-sandbox-activity! []
@@ -186,6 +223,9 @@
         ;; across save/reload cycles.
         (when camera
           (set captured.camera (ActivityCameraState.capture-camera camera)))
+        ;; Persist toolbar state
+        (when runtime.sandbox-toolbar-state
+          (set captured.toolbar (runtime.sandbox-toolbar-state:capture-state)))
         {:scene captured})
       nil))
 
@@ -198,10 +238,14 @@
     (app.active-world-runtime.scene:restore-activity-slot-state "sandbox" scene-state))
   ;; Restore camera position from the persisted session state
   (when (and scene-state scene-state.camera
-             app.active-world-runtime app.active-world-runtime.activity-cameras)
+              app.active-world-runtime app.active-world-runtime.activity-cameras)
     (local camera (. app.active-world-runtime.activity-cameras.scene "sandbox"))
     (when camera
       (ActivityCameraState.restore-camera! camera scene-state.camera)))
+  ;; Restore toolbar state
+  (when (and scene-state scene-state.toolbar
+              app.active-world-runtime app.active-world-runtime.sandbox-toolbar-state)
+    (app.active-world-runtime.sandbox-toolbar-state:restore-state scene-state.toolbar))
   true)
 
 (fn load-sandbox-activity! []
