@@ -503,17 +503,17 @@
           (when (not keys-str2) (set keys-str2 ks)))
         (if keys-str2
             keys-str2
-            ;; Try module-level local definitions
+            ;; Try module-level local definitions — only direct literal vector
+            ;; bindings (e.g. (local VAR [...])), not computed expressions
+            ;; containing vectors (e.g. (local VAR (compute-keys [...]))).
             (do
               (var found-keys nil)
               (var defs (if definitions definitions []))
               (each [_ def (ipairs defs)]
                 (when (and (= def.kind :local) (= def.name var-name) def.form (not found-keys))
-                  (local vec-pat "%[(.-)%]")
-                  (local vec-start (string.find def.form vec-pat))
-                  (when vec-start
-                    (each [ks (def.form:gmatch vec-pat)]
-                      (when (not found-keys) (set found-keys ks))))))
+                  ;; Use same strict pattern as same-form check: must be direct literal binding
+                  (each [ks (def.form:gmatch local-pat)]
+                    (when (not found-keys) (set found-keys ks)))))
               found-keys)))))
 
 (fn wrapper-covers-path? [form body-start path-text definitions]

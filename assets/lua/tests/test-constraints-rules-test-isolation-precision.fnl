@@ -1099,6 +1099,53 @@
   (assert (> (length result) 0) "T11-4: should have at least one diagnostic"))
 
 ;; ======================================================================
+;; T11-5: non-literal module-level variable key still flags
+;; ======================================================================
+
+(fn mutation-restoration-flags-nonliteral-module-var-key []
+  "T11-5: Module-level local with computed expression containing a vector
+   must NOT be resolved. (local keys (compute-keys [:engine])) should be
+   unresolved and the mutation should still be flagged."
+  (local rule (get-test-isolation-rule))
+  ;; Build file-facts with a :local-kind definition whose form is a
+  ;; computed expression, not a direct literal vector binding.
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; Add module-level local with computed expression
+  (table.insert ff.definitions {:kind :local
+                                 :name "keys"
+                                 :top-level? true
+                                 :line 5 :column 1
+                                 :form "(local keys (compute-keys [:engine :renderers]))"})
+  ;; Add the named test function
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-nonliteral-keys"
+                                 :top-level? true
+                                 :line 10 :column 1
+                                 :length 150
+                                 :form "(fn test-nonliteral-keys []
+  (with-restored-app-fields keys
+    (fn []
+      (set app.engine custom-engine))))"})
+  ;; Add the wrapper body anonymous fn
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 13 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  ;; Add the mutation
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 14 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "T11-5: non-literal module-level variable should be unresolved and flagged")
+  (assert (> (length result) 0) "T11-5: should have at least one diagnostic"))
+
+;; ======================================================================
 ;; Register all precision tests
 ;; ======================================================================
 
@@ -1133,6 +1180,7 @@
 (table.insert tests {:name "T11-2 flags wrapper missing key" :fn mutation-restoration-flags-wrapper-missing-key})
 (table.insert tests {:name "T11-3 real-file regression activity-slots" :fn mutation-restoration-real-file-regression-activity-slots})
 (table.insert tests {:name "T11-4 flags variable-key missing field" :fn mutation-restoration-flags-variable-key-missing-field})
+(table.insert tests {:name "T11-5 flags nonliteral module var key" :fn mutation-restoration-flags-nonliteral-module-var-key})
 
 (local main
   (fn []
