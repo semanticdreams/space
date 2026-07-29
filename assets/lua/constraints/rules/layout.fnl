@@ -564,19 +564,70 @@
         true
         (= (clean:sub 1 (length kw)) kw))))
 
+(fn extract-fn-params [def-form]
+  "Extract the parameter names from a function definition form.
+  Returns a table of param-name→true, or nil on failure."
+  (var params {})
+  (when def-form
+    (var done false)
+    (each [_ kw (ipairs ["(fn " "(lambda "])]
+      (when (not done)
+        (local start (def-form:find kw 1 true))
+        (when start
+          (var pos (+ start (length kw)))
+          ;; Skip optional fn name past non-bracket/paren chars.
+          ;; Avoid (or ...) by using a flag-based loop.
+          (var still-scanning true)
+          (while (and (<= pos (length def-form)) still-scanning)
+            (local c (def-form:sub pos pos))
+            (if (= c "[") (set still-scanning false)
+                (= c "(") (set still-scanning false)
+                (= c ")") (set still-scanning false)
+                (= c "]") (set still-scanning false))
+            (when still-scanning
+              (set pos (+ pos 1))))
+          (when (and (<= pos (length def-form))
+                     (if (= (def-form:sub pos pos) "[") true
+                         (= (def-form:sub pos pos) "(") true
+                         false))
+            (local open-char (def-form:sub pos pos))
+            (local close-char (if (= open-char "[") "]" ")"))
+            (set pos (+ pos 1))
+            (local param-start pos)
+            (var depth 1)
+            (while (and (> depth 0) (<= pos (length def-form)))
+              (when (= (def-form:sub pos pos) open-char)
+                (set depth (+ depth 1)))
+              (when (= (def-form:sub pos pos) close-char)
+                (set depth (- depth 1)))
+              (when (> depth 0)
+                (set pos (+ pos 1))))
+            (when (= depth 0)
+              (local param-str (def-form:sub param-start (- pos 1)))
+              (each [name (param-str:gmatch "%S+")]
+                (tset params name true))))
+          (set done true)))))
+  (if (next params) params))
+
 (fn shadows-keyword? [form-text kw]
   "Check if form-text shadows or reassigns kw with a local binding,
   let binding, set mutation, or parameter declaration."
   (when form-text
     (local no-strings (strip-strings form-text))
     (local clean (strip-comments no-strings))
-    (if (clean:find (.. "%(local[%s\n]+" kw "[%s\n]"))
+    (local local-pat (.. "%(local[%s\n]+" kw "[%s\n]"))
+    (local let-pat (.. "%(let[%s\n]+%[" kw "[%s\n]"))
+    (local set-pat (.. "(set " kw))
+    (if (clean:find local-pat)
         true
-        (if (clean:find (.. "%(let[%s\n]+%[" kw "[%s\n]"))
-            true
-            (if (clean:find (.. "(set " kw) 1 true)
-                true
-                false)))))
+        (clean:find let-pat)
+        true
+        (clean:find set-pat 1 true)
+        true
+        ;; Detect parameter declarations (e.g. (fn name [kw ...] ...))
+        (do
+          (local params-table (extract-fn-params form-text))
+          (if (and params-table (. params-table kw)) true false)))))
 
 (fn fn-def-constructs-local-kw? [ff def cleaned-form kw]
   "Check if kw is locally constructed as an adapter table in def's body.
@@ -669,52 +720,6 @@
              (assert-call-targets-kw? calls parent.name child.line kw)
              false)))))
 
-;; ---- precision helpers for interactive-context-assertion ----
-
-(fn extract-fn-params [def-form]
-  "Extract the parameter names from a function definition form.
-  Returns a table of param-name→true, or nil on failure."
-  (var params {})
-  (when def-form
-    (var done false)
-    (each [_ kw (ipairs ["(fn " "(lambda "])]
-      (when (not done)
-        (local start (def-form:find kw 1 true))
-        (when start
-          (var pos (+ start (length kw)))
-          ;; Skip optional fn name past non-bracket/paren chars.
-          ;; Avoid (or ...) by using a flag-based loop.
-          (var still-scanning true)
-          (while (and (<= pos (length def-form)) still-scanning)
-            (local c (def-form:sub pos pos))
-            (if (= c "[") (set still-scanning false)
-                (= c "(") (set still-scanning false)
-                (= c ")") (set still-scanning false)
-                (= c "]") (set still-scanning false))
-            (when still-scanning
-              (set pos (+ pos 1))))
-          (when (and (<= pos (length def-form))
-                     (if (= (def-form:sub pos pos) "[") true
-                         (= (def-form:sub pos pos) "(") true
-                         false))
-            (local open-char (def-form:sub pos pos))
-            (local close-char (if (= open-char "[") "]" ")"))
-            (set pos (+ pos 1))
-            (local param-start pos)
-            (var depth 1)
-            (while (and (> depth 0) (<= pos (length def-form)))
-              (when (= (def-form:sub pos pos) open-char)
-                (set depth (+ depth 1)))
-              (when (= (def-form:sub pos pos) close-char)
-                (set depth (- depth 1)))
-              (when (> depth 0)
-                (set pos (+ pos 1))))
-            (when (= depth 0)
-              (local param-str (def-form:sub param-start (- pos 1)))
-              (each [name (param-str:gmatch "%S+")]
-                (tset params name true))))
-          (set done true)))))
-  (if (next params) params))
 
 (fn build-bare-covered [def cleaned calls all-defs]
    "Build a set of keywords whose bare usage in def is covered by a
@@ -734,26 +739,33 @@
                       (= parent.name def.enclosing-fn)
                       (parent-has-asserted-local-before-child? calls parent def kw))
              (set covered true)))
-         ;; Walk up ancestor chain when immediate parent lacks the assert.
-         ;; Rejects coverage if any intervening ancestor shadows the keyword.
-         (when (not covered)
-           (var ancestor nil)
-           (each [_ p (ipairs all-defs)]
-             (when (and (not ancestor) (= p.name def.enclosing-fn))
-               (set ancestor p)))
-           (var current ancestor)
-           (var max-depth 10)
-           (var depth 0)
-           (while (and current (not covered)
-                       (< depth max-depth)
-                       current.enclosing-fn
-                       (not= current.enclosing-fn "<anonymous>"))
-             (var next-ancestor nil)
-             (each [_ p (ipairs all-defs)]
-               (when (and (not next-ancestor)
-                          (= p.name current.enclosing-fn)
-                          (not= p.name current.name))
-                 (set next-ancestor p)))
+          ;; Walk up ancestor chain when immediate parent lacks the assert.
+          ;; Rejects coverage if any intervening ancestor shadows the keyword.
+          ;; Resolves ancestors using byte/form containment, not just name equality,
+          ;; to prevent cross-contamination from duplicate helper names.
+          (when (not covered)
+            (var ancestor nil)
+            (each [_ p (ipairs all-defs)]
+              (when (and (not ancestor) (= p.name def.enclosing-fn)
+                         (child-pos-in-parent p def))
+                (set ancestor p)))
+            (var current ancestor)
+            (var max-depth 10)
+            (var depth 0)
+            (while (and current (not covered)
+                        (< depth max-depth)
+                        current.enclosing-fn
+                        (not= current.enclosing-fn "<anonymous>"))
+              (var next-ancestor nil)
+              (each [_ p (ipairs all-defs)]
+                (when (and (not next-ancestor)
+                           (= p.name current.enclosing-fn)
+                           (not= p.name current.name)
+                           ;; Must byte/form-contain the child, not just the
+                           ;; current ancestor, to avoid picking a same-name
+                           ;; definition from a different lexical branch.
+                           (child-pos-in-parent p def))
+                  (set next-ancestor p)))
              (var intervening-shadows false)
              (when (shadows-keyword? current.form kw)
                (set intervening-shadows true))

@@ -150,11 +150,132 @@
   (assert flagged
     "intermediate parent shadows clickables, anonymous drop should still be flagged"))
 
+;; ==== R1-1 regression: intervening ancestor binds kw as parameter ====
+
+(fn interactive-assertion-flags-grandparent-assert-with-intervening-param []
+  "Grandparent build asserts (local clickables (assert ...)), but intermediate
+  make-row receives clickables as a parameter (fn make-row [clickables] ...).
+  The nested anonymous drop uses the parameterized clickables, not the
+  grandparent's asserted local. Should still be flagged."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule)
+  (local drop-form "(fn [self] (clickables:unregister self))")
+  ;; make-row has [clickables] as parameter — shadows grandparent's local
+  (local make-row-form (.. "(fn make-row [clickables]"
+                           "(local row-widget {})"
+                           "(set row-widget.drop " drop-form ") row-widget)"))
+  (local build-form (.. "(fn build [ctx]\n"
+                        "  (local clickables (assert ctx.clickables \"missing\"))\n"
+                        "  " make-row-form ")"))
+  (local outer-form (.. "(fn AgentPresetList [controller] " build-form ")"))
+  (local ff (make-file-fact
+    {:path "/src/preset-list.fnl" :module "preset-list"
+     :definitions [{:kind :fn :name "AgentPresetList" :top-level? true
+                    :line 1 :column 1
+                    :length (length outer-form) :form outer-form}
+                   {:kind :fn :name "build" :top-level? false
+                    :enclosing-fn "AgentPresetList"
+                    :line 2 :column 3
+                    :length (length build-form) :form build-form}
+                   {:kind :fn :name "make-row" :top-level? false
+                    :enclosing-fn "build"
+                    :line 10 :column 5
+                    :length (length make-row-form) :form make-row-form}
+                   {:kind :fn :name "<anonymous>" :top-level? false
+                    :enclosing-fn "make-row"
+                    :line 13 :column 7
+                    :length (length drop-form) :form drop-form}]
+     :calls [{:callee "assert" :receiver nil :method nil
+              :line 3 :column 16
+              :form "(assert ctx.clickables \"missing\")"
+              :enclosing-fn "build"}]
+     :accesses [{:text "ctx.clickables" :path ["ctx" "clickables"]
+                 :line 3 :column 16 :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.line 13) (set flagged true)))
+  (assert flagged
+    "intervening fn param shadows clickables, anonymous drop should still be flagged"))
+
+;; ==== R1-2 regression: duplicate-name helpers do not cross-contaminate ====
+
+(fn interactive-assertion-flags-duplicate-name-ancestor-mismatch []
+  "Two sibling build functions each contain a make-row definition. build-a has
+  assert; build-b does not. The anonymous drop is inside build-b's make-row.
+  The ancestor walk must use byte/form containment to select the correct
+  make-row (build-b's), not the first-by-name make-row (build-a's)."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule)
+  (local drop-form "(fn [self] (clickables:unregister self))")
+  ;; build-b's make-row: no assert in enclosing build-b
+  (local make-row-b-form (.. "(fn make-row [row child-ctx]"
+                             "(local row-widget {})"
+                             "(set row-widget.drop " drop-form ") row-widget)"))
+  (local build-b-form (.. "(fn build-b [ctx]\n"
+                          "  (local theme ctx.theme)\n"
+                          "  " make-row-b-form ")"))
+  ;; build-a's make-row: has assert
+  (local make-row-a-form "(fn make-row [row child-ctx] (local row-widget {}) row-widget)")
+  (local build-a-form (.. "(fn build-a [ctx]\n"
+                          "  (local clickables (assert ctx.clickables \"missing\"))\n"
+                          "  " make-row-a-form ")"))
+  (local outer-form (.. "(fn AgentPresetList [controller] " build-a-form " " build-b-form ")"))
+  ;; Place build-a's make-row FIRST in all-defs (it will be picked by name-first
+  ;; if containment is not checked). build-b's make-row is the correct one.
+  (local ff (make-file-fact
+    {:path "/src/preset-list.fnl" :module "preset-list"
+     :definitions [{:kind :fn :name "AgentPresetList" :top-level? true
+                    :line 1 :column 1
+                    :length (length outer-form) :form outer-form}
+                   {:kind :fn :name "build-a" :top-level? false
+                    :enclosing-fn "AgentPresetList"
+                    :line 2 :column 3
+                    :length (length build-a-form) :form build-a-form}
+                   ;; build-a's make-row (FIRST in all-defs — wrong ancestor)
+                   {:kind :fn :name "make-row" :top-level? false
+                    :enclosing-fn "build-a"
+                    :line 4 :column 5
+                    :length (length make-row-a-form) :form make-row-a-form}
+                   {:kind :fn :name "build-b" :top-level? false
+                    :enclosing-fn "AgentPresetList"
+                    :line 7 :column 3
+                    :length (length build-b-form) :form build-b-form}
+                   ;; build-b's make-row (correct ancestor — contains the child)
+                   {:kind :fn :name "make-row" :top-level? false
+                    :enclosing-fn "build-b"
+                    :line 9 :column 5
+                    :length (length make-row-b-form) :form make-row-b-form}
+                   {:kind :fn :name "<anonymous>" :top-level? false
+                    :enclosing-fn "make-row" ;; ambiguous by name
+                    :line 11 :column 7
+                    :length (length drop-form) :form drop-form}]
+     :calls [{:callee "assert" :receiver nil :method nil
+              :line 3 :column 16
+              :form "(assert ctx.clickables \"missing\")"
+              :enclosing-fn "build-a"}]
+     :accesses [{:text "ctx.clickables" :path ["ctx" "clickables"]
+                 :line 3 :column 16 :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.line 11) (set flagged true)))
+  (assert flagged
+    "duplicate-name sibling should not cross-contaminate; anonymous drop should still be flagged"))
+
 (table.insert tests {:name "interactive-assertion allows grandparent asserted clickables make-row pattern"
                      :fn interactive-assertion-allows-grandparent-asserted-clickables-make-row})
 (table.insert tests {:name "interactive-assertion allows grandparent separate local assert graph view pattern"
                      :fn interactive-assertion-allows-grandparent-separate-local-assert-graph-view})
 (table.insert tests {:name "interactive-assertion flags grandparent assert with intervening shadow"
                      :fn interactive-assertion-flags-grandparent-assert-with-intervening-shadow})
+(table.insert tests {:name "interactive-assertion-flags-grandparent-assert-with-intervening-param"
+                     :fn interactive-assertion-flags-grandparent-assert-with-intervening-param})
+(table.insert tests {:name "interactive-assertion-flags-duplicate-name-ancestor-mismatch"
+                     :fn interactive-assertion-flags-duplicate-name-ancestor-mismatch})
 
 {:tests tests}
