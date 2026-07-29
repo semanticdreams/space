@@ -883,6 +883,95 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
 
 ;; ======================================================================
+;; R1-1: snapshot after pcall must flag (data integrity)
+;; ======================================================================
+
+(fn mutation-restoration-flags-snapshot-after-pcall-in-parent []
+  "R1-1: parent-scope pcall restoration must reject snapshot taken AFTER the pcall."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-snapshot-after-pcall"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 250
+                                             :form "(fn test-snapshot-after-pcall []
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (local orig (and app.engine app.engine.width))
+  (set app.engine.width orig))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 7 :column 1
+                                             :length 50
+                                  :form "(fn [] (set app.engine.width 100))"}]
+                                :mutations [{:op :set
+                                             :path ["app" "engine" "width"]
+                                             :line 7 :column 1
+                                             :form "(set app.engine.width 100)"
+                                             :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1: should flag when parent snapshot is taken after pcall")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+;; ======================================================================
+;; R1-2: let binding with (and ...) snapshot
+;; ======================================================================
+
+(fn mutation-restoration-allows-let-and-guarded-snapshot []
+  "R1-2: (let [orig (and app.engine app.engine.width)] ...) snapshot should be recognized."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-let-and"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-let-and []
+  (let [orig (and app.engine app.engine.width)]
+    (pcall (fn []
+      (set app.engine.width 100)))
+    (set app.engine.width orig)))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 8 :column 1
+                                            :form "(set app.engine.width 100)"
+                                            :enclosing-fn "test-let-and"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "R1-2: let (and ...) snapshot + pcall restore should pass"))
+
+(fn mutation-restoration-flags-let-and-with-unrelated-guard []
+  "R1-2 negative: (let [orig (and condition app.engine.width)] ...) should not count."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-let-bad-guard"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-let-bad-guard []
+  (let [orig (and some-flag app.engine.width)]
+    (pcall (fn []
+      (set app.engine.width 200)))
+    (set app.engine.width orig)))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 8 :column 1
+                                            :form "(set app.engine.width 200)"
+                                            :enclosing-fn "test-let-bad-guard"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-2 negative: should flag (let [orig (and unrelated path)] ...)")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -959,6 +1048,9 @@
 (table.insert tests {:name "mutation-restoration allows anon pcall parent restore" :fn mutation-restoration-allows-anon-pcall-parent-restore})
 (table.insert tests {:name "mutation-restoration flags anon pcall no parent restore" :fn mutation-restoration-flags-anon-pcall-no-parent-restore})
 (table.insert tests {:name "mutation-restoration flags parent restore outside pcall" :fn mutation-restoration-flags-parent-restore-outside-pcall})
+(table.insert tests {:name "mutation-restoration flags snapshot after pcall in parent" :fn mutation-restoration-flags-snapshot-after-pcall-in-parent})
+(table.insert tests {:name "mutation-restoration allows let and guarded snapshot" :fn mutation-restoration-allows-let-and-guarded-snapshot})
+(table.insert tests {:name "mutation-restoration flags let and with unrelated guard" :fn mutation-restoration-flags-let-and-with-unrelated-guard})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})

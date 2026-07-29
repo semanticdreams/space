@@ -269,8 +269,10 @@
 
 (fn try-and-snapshot-var [fn-form path-text]
   "Try to find a snapshot variable from a nil-guarded (and ...) form.
-   Returns the variable name or nil."
+   Returns the variable name or nil. Supports both (local VAR (and ...)) and
+   (let [VAR (and ...)] ...) patterns."
   (var snap-var nil)
+  ;; Check (local VAR (and ...)) patterns
   (each [var-name and-body (fn-form:gmatch (.. "%(local%s+([^%s]+)%s+%(and%s+(.-)%)%s*%)"))]
     (when (not snap-var)
       (local operands [])
@@ -278,6 +280,15 @@
         (table.insert operands op))
       (when (check-and-operands operands path-text)
         (set snap-var var-name))))
+  ;; Check (let [VAR (and ...)] ...) patterns
+  (when (not snap-var)
+    (each [var-name and-body (fn-form:gmatch (.. "%(let%s*%[%s*([^%s]+)%s+%(and%s+(.-)%)%s*%]"))]
+      (when (not snap-var)
+        (local operands [])
+        (each [op (and-body:gmatch "[^%s]+")]
+          (table.insert operands op))
+        (when (check-and-operands operands path-text)
+          (set snap-var var-name)))))
   snap-var)
 
 (fn find-snapshot-var [fn-form path]
@@ -435,24 +446,105 @@
                        (set search-start nil))))))
         found)))
 
+(fn find-pcall-call-start [form-text pcall-byte]
+  "Given the byte position of 'p' in 'pcall', find the opening '(' of the pcall call.
+   Returns the byte position of '(' or nil."
+  (var pos (- pcall-byte 1))
+  (while (and (>= pos 1))
+    (local ch (form-text:sub pos pos))
+    (if (= ch "(") (lua "break")
+        (= ch " ") (set pos (- pos 1))
+        (= ch "\n") (set pos (- pos 1))
+        (= ch "\t") (set pos (- pos 1))
+        #(set pos nil)))
+  (if (and pos (>= pos 1) (= (form-text:sub pos pos) "(")) pos nil))
+
+(fn find-snapshot-binding-byte [fn-form snap-var path-text]
+  "Find the byte position of a snapshot binding for snap-var targeting path-text.
+   Checks (local SNAP-VAR path), (local SNAP-VAR (and ... path)), and (let [...]) patterns.
+   Returns the byte position of the opening '(' or nil."
+  (local escaped-var (escape-pattern snap-var))
+  (local escaped-path (escape-pattern path-text))
+  ;; Check (local SNAP-VAR path-text)
+  (local direct-pat (.. "%(local%s+" escaped-var "%s+" escaped-path))
+  (var pos (string.find fn-form direct-pat))
+  ;; Check (local SNAP-VAR (and ...)) 
+  (when (not pos)
+    (local and-pat (.. "%(local%s+" escaped-var "%s+%(and%s+"))
+    (set pos (string.find fn-form and-pat)))
+  ;; Check (let [SNAP-VAR path-text] ...)
+  (when (not pos)
+    (local let-pat (.. "%(let%s*%[%s*" escaped-var "%s+" escaped-path))
+    (set pos (string.find fn-form let-pat)))
+  ;; Check (let [SNAP-VAR (and ...)] ...)
+  (when (not pos)
+    (local let-and-pat (.. "%(let%s*%[%s*" escaped-var "%s+%(and%s+"))
+    (set pos (string.find fn-form let-and-pat)))
+  pos)
+
+(fn find-all-pcall-call-spans [form-text pcall-ranges]
+  "Given a form text and pre-computed pcall fn-ranges, compute pcall CALL spans.
+   Returns a list of {:call-start :call-end} for each pcall call.
+   call-start is the '(' before 'pcall', call-end is the matching ')' via paren-matching."
+  (var spans [])
+  (each [_ range (ipairs pcall-ranges)]
+    (var pcall-byte nil)
+    ;; Find the 'pcall' text near this fn-start by searching backwards
+    (for [search (- range.fn-start 2) (- range.fn-start 10) -1]
+      (when (and (not pcall-byte) (>= search 1))
+        (when (= (form-text:sub search (+ search 4)) "pcall")
+          (set pcall-byte search))))
+    (when pcall-byte
+      (local call-start (find-pcall-call-start form-text pcall-byte))
+      (when call-start
+        (local call-end (find-matching-close form-text call-start))
+        (when call-end
+          (table.insert spans {:call-start call-start :call-end call-end})))))
+  spans)
+
+(fn find-enclosing-call-span [call-spans form-text form-line max-line]
+  "Find which call span (if any) encloses the mutation position.
+   Returns {:call-start :call-end} or nil."
+  (local mutation-byte (find-mutation-approx-byte form-text form-line max-line))
+  (var enclosing nil)
+  (each [_ cs (ipairs call-spans)]
+    (when (and (not enclosing) (<= cs.call-start mutation-byte) (>= cs.call-end mutation-byte))
+      (set enclosing cs)))
+  enclosing)
+
+(fn snapshot-before-pcall-and-restore-after? [parent-form parent-line path-segments path-text enclosing-span]
+  "Check if the parent has a snapshot binding BEFORE the pcall call start
+   and a concrete restore AFTER the pcall call end.
+   Returns true if both conditions are met."
+  (local snap-var (find-snapshot-var parent-form path-segments))
+  (if (not snap-var) false
+      (do
+        (local snap-byte (find-snapshot-binding-byte parent-form snap-var path-text))
+        (if (not snap-byte) false
+            (if (>= snap-byte enclosing-span.call-start) false
+                (if (has-concrete-restore-after-byte? parent-form parent-line path-segments enclosing-span.call-end) true
+                    (has-helper-restore-after-byte? parent-form path-text enclosing-span.call-end) true
+                    false))))))
+
 (fn check-parent-pcall-restoration [ff fn-def-line anon-def-col path-text path-segments max-line]
   "Check if an anonymous fn inside a pcall has parent-scope snapshot/restore.
-   Returns true if the parent function has snapshot before pcall + restore after pcall."
+   Returns true if the parent function has snapshot BEFORE pcall + restore AFTER pcall."
   (local containing (find-containing-fn-defs ff.definitions fn-def-line anon-def-col))
   (if (<= (length containing) 1) false
       (do
         (local parent (. containing 2))
         (if (not (and parent.form parent.line)) false
             (do
-              (local parent-pcall-ranges (find-all-pcall-fn-ranges parent.form))
-              (if (<= (length parent-pcall-ranges) 0) false
+              (local pcall-ranges (find-all-pcall-fn-ranges parent.form))
+              (if (<= (length pcall-ranges) 0) false
                   (do
-                    (local parent-enclosing-pcall-end
-                      (find-enclosing-pcall-end-byte parent.form parent.line max-line parent-pcall-ranges))
-                    (if (not parent-enclosing-pcall-end) false
-                        (if (has-concrete-restore-after-byte? parent.form parent.line path-segments parent-enclosing-pcall-end) true
-                            (has-helper-restore-after-byte? parent.form path-text parent-enclosing-pcall-end) true
-                            false)))))))))
+                    (local pcall-end (find-enclosing-pcall-end-byte parent.form parent.line max-line pcall-ranges))
+                    (if (not pcall-end) false
+                        (do
+                          (local call-spans (find-all-pcall-call-spans parent.form pcall-ranges))
+                          (local enclosing-span (find-enclosing-call-span call-spans parent.form parent.line max-line))
+                          (if (not enclosing-span) false
+                              (snapshot-before-pcall-and-restore-after? parent.form parent.line path-segments path-text enclosing-span)))))))))))
 
 ;; --- Extracted helpers for global-mutation-restoration-rule-run ---
 
