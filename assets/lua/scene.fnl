@@ -144,6 +144,7 @@
                              :owner (or movable.owner element)
                              :pointer-target movable.pointer-target
                              :on-drag-start movable.on-drag-start
+                             :on-drag-update movable.on-drag-update
                              :on-drag-end movable.on-drag-end})))
   entries)
 
@@ -1293,6 +1294,7 @@
            :key entry.key
            :owner entry.owner
            :on-drag-start entry.on-drag-start
+           :on-drag-update entry.on-drag-update
            :on-drag-end entry.on-drag-end})))
 
   (fn register-movable-entries [self entity entries]
@@ -1308,6 +1310,7 @@
         (when handle (set options.handle handle))
         (when entry.pointer-target (set options.pointer-target entry.pointer-target))
         (when entry.on-drag-start (set options.on-drag-start entry.on-drag-start))
+        (when entry.on-drag-update (set options.on-drag-update entry.on-drag-update))
         (when entry.on-drag-end (set options.on-drag-end entry.on-drag-end))
         (local key (or entry.key widget entry))
         (when key

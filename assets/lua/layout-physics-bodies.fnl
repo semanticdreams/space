@@ -468,6 +468,44 @@
       (table.remove entries remove-idx)
       entry)))
 
+(fn drag-attachment-mode []
+  (if (and app.activity-drag-attachment-provider
+           (= (app.activity-drag-attachment-provider) :anchor))
+      :anchor
+      :center))
+
+(fn compute-body-center [entry]
+  (if (and entry.body entry.body.getCenterOfMassTransform)
+      (let [transform (entry.body:getCenterOfMassTransform)
+            origin (transform:getOrigin)]
+        (glm.vec3 (or origin.x 0) (or origin.y 0) (or origin.z 0)))
+      (let [layout (and entry.positioned entry.positioned.layout)]
+        (if layout
+            (+ layout.position
+               (layout.rotation:rotate (half-size entry)))
+            (glm.vec3 0 0 0)))))
+
+(fn apply-anchor-force! [entry relative-anchor desired-world-position]
+  (local spring-strength 35.0)
+  (local body entry.body)
+  (local body-center (compute-body-center entry))
+  (local current-anchor-world
+    (+ body-center relative-anchor))
+  (local spring-force
+    (* (- desired-world-position current-anchor-world)
+       (glm.vec3 spring-strength spring-strength spring-strength)))
+  ;; Apply velocity damping if getVelocityInLocalPoint is available
+  (local damped-force
+    (if body.getVelocityInLocalPoint
+        (let [velocity (body:getVelocityInLocalPoint (bt-glm-vec3 relative-anchor))]
+          (- spring-force (* (physics-glm-vec3 velocity) (glm.vec3 4.0 4.0 4.0))))
+        spring-force))
+  (body:applyForceAtPosition (bt-glm-vec3 damped-force)
+                              (bt-glm-vec3 relative-anchor))
+  ;; Activate the body
+  (when body.activate
+    (body:activate true)))
+
 (fn create-movable-entry [entity entry]
   (local target (and entry.positioned entry.positioned.layout))
   (when target
@@ -479,6 +517,21 @@
      (fn [_movable]
        (set entry.dragging true)
        (ensure-body-matches-layout-size entry))
+     :on-drag-update
+     (fn [movable drag update]
+       (local mode (drag-attachment-mode))
+       (if (= mode :anchor)
+           (do
+             (assert entry.body "Anchor drag requires a physics body on the entry")
+             (assert entry.body.applyForceAtPosition
+                     "Anchor drag requires body:applyForceAtPosition binding")
+             (local body-center (compute-body-center entry))
+             (when (not drag.relative-anchor)
+               (set drag.relative-anchor
+                    (- drag.hit-point body-center)))
+             (apply-anchor-force! entry drag.relative-anchor update.new-position)
+             true)
+           false))
      :on-drag-end
      (fn [_movable]
        (set entry.dragging false)

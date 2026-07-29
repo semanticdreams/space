@@ -63,7 +63,8 @@
      (when (and (not ((. ctx :event-consumed?)))
                 mouse-down
                 (= payload.button SDL_BUTTON_LEFT)
-                (Runtime.alt-held? payload))
+                (or (Runtime.alt-held? payload)
+                    (Runtime.activity-object-move-enabled? payload)))
        (mouse-down app.movables payload)))})
 
 (local SelectionMouseButtonDown
