@@ -33,6 +33,7 @@ permission:
     "git push -u origin automation/daily-devlog/*": allow
     "git push --set-upstream origin automation/daily-devlog/*": allow
     "git push origin HEAD:refs/heads/automation/daily-devlog/*": allow
+    "gh *": deny
     "gh auth status*": allow
     "gh pr create --base main --head automation/daily-devlog/* *": allow
     "gh pr view*": allow

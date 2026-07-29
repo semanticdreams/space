@@ -14,6 +14,7 @@ This skill turns a scheduled Orca/OpenCode run into a reviewed, brief devlog PR.
 1. Verify a clean dedicated checkout with `git status --porcelain`; stop if dirty.
 2. Verify the checkout is on a branch that can safely create `automation/daily-devlog/YYYY-MM-DD` from `origin/main`.
 3. Verify `gh auth status` before relying on PR creation or auto-merge.
+4. Verify branch protection rules and required status checks are active on the target repository before attempting auto-merge; do not assume they are available just because `gh auth status` succeeds.
 
 ## Workflow
 
@@ -57,11 +58,11 @@ Run `cd docs && npm run devlog:indices && npm run docs:build`. Inspect the final
 
 ## Commit, Push, and PR
 
-Commit after review. Push only `automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD` when authenticated. Use `gh pr merge --auto --squash automation/daily-devlog/YYYY-MM-DD` only when available. Never push directly to `origin/main`.
+Commit after review. Push only `automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD` when authenticated. Verify branch protection and required checks are active before attempting auto-merge. Use `gh pr merge --auto --squash automation/daily-devlog/YYYY-MM-DD` only when protection rules and checks are confirmed available. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
 
 ## Fail-Closed Cases
 
-Stop with a clear BLOCKED summary when the checkout is dirty, credentials are missing, `gh` is unavailable, validation fails, branch protection or checks prevent auto-merge, or the diff includes unexpected files.
+Stop with a clear BLOCKED summary when the checkout is dirty, credentials are missing, `gh` is unavailable, validation fails, branch protection or required status checks are unavailable or cannot be verified, auto-merge cannot proceed, or the diff includes unexpected files.
 
 ## Red Flags
 
