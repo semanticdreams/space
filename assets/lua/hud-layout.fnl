@@ -139,6 +139,7 @@
   (local middle-overlay-root (make-overlay-root))
   (local left-dock-builder options.left-dock-builder)
   (local right-dock-builder options.right-dock-builder)
+  (local top-toolbar-builder options.top-toolbar-builder)
   (local control-wrapper (FullWidth {:name "control-panel-wrapper"
                                      :child control-builder}))
   (local status-wrapper (FullWidth {:name "status-panel-wrapper"
@@ -152,11 +153,28 @@
     (local middle-overlay (middle-overlay-root ctx))
     (local left-dock (and left-dock-builder (left-dock-builder ctx)))
     (local right-dock (and right-dock-builder (right-dock-builder ctx)))
+    (local top-toolbar (and top-toolbar-builder (top-toolbar-builder ctx)))
     (local hud (or ctx.pointer-target {}))
+    (local scene-stack
+      ((Stack {:depth-offset-step panel-depth-layer-step
+               :children [(fn [_ctx] tiles)
+                          (fn [_ctx] float)
+                          (fn [_ctx] middle-overlay)]})
+       ctx))
+    (local center-children [])
+    (when top-toolbar
+      (table.insert center-children (FlexChild (fn [_ctx] top-toolbar))))
+    (table.insert center-children (FlexChild (fn [_ctx] scene-stack) 1))
+    (local center-column
+      ((Flex {:axis 2
+              :xalign :stretch
+              :yspacing 0
+              :children center-children})
+       ctx))
     (local base-children [])
     (when left-dock
       (table.insert base-children (FlexChild (fn [_ctx] left-dock))))
-    (table.insert base-children (FlexChild (fn [_ctx] tiles) 1))
+    (table.insert base-children (FlexChild (fn [_ctx] center-column) 1))
     (when right-dock
       (table.insert base-children (FlexChild (fn [_ctx] right-dock))))
     (local middle-base
@@ -165,18 +183,12 @@
               :yalign :stretch
               :children base-children})
        ctx))
-    (local middle-stack
-      ((Stack {:depth-offset-step panel-depth-layer-step
-               :children [(fn [_ctx] middle-base)
-                          (fn [_ctx] float)
-                          (fn [_ctx] middle-overlay)]})
-       ctx))
     (local bands
       ((Flex {:axis 2
               :xalign :stretch
               :yspacing 0
               :children [(FlexChild (fn [_ctx] control))
-                         (FlexChild (fn [_ctx] middle-stack) 1)
+                         (FlexChild (fn [_ctx] middle-base) 1)
                          (FlexChild (fn [_ctx] status))]})
        ctx))
 
@@ -216,6 +228,8 @@
         (control:update))
       (when (and status status.update)
         (status:update))
+      (when (and top-toolbar top-toolbar.update)
+        (top-toolbar:update))
       (when (and tiles tiles.update)
         (tiles:update))
       (when (and float float.update)
@@ -230,12 +244,14 @@
     (fn drop [self]
       (self.layout:drop)
       (bands:drop)
-      (overlay:drop))
+      (overlay:drop)
+      (when top-toolbar
+        (top-toolbar:drop)))
 
     {:layout layout
      :update update
      :bands-root bands
-     :middle-root middle-stack
+     :middle-root scene-stack
      :control-root control
      :status-root status
      :tiles-root tiles
@@ -244,6 +260,7 @@
      :right-dock-root right-dock
      :middle-overlay-root middle-overlay
      :overlay-root overlay
+     :top-toolbar-root top-toolbar
      :drop drop}))
 
 {:FullWidth FullWidth

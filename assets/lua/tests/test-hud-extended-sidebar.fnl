@@ -852,6 +852,41 @@
 (table.insert tests {:name "view collapsed panel remains effectively culled"
                      :fn view-collapsed-panel-remains-effectively-culled})
 
+(fn expanded-panel-reserves-toolbar-height-while-rail-remains-full-height []
+  (local sidebar (HudExtendedSidebar))
+  (sidebar:register-entry {:id :test
+                            :icon :test_icon
+                            :label "Test"
+                            :build-panel (fn [ctx]
+                                           ((make-test-panel "test-panel" (glm.vec3 38 10 0)) ctx))})
+  (sidebar:select :test)
+  (local ctx (make-widget-ctx))
+  (local entity ((HudExtendedSidebarView sidebar {:top-reserve-height-provider (fn [] 4)}) ctx))
+  (entity:update)
+  (entity:update)
+  (entity.layout:measurer)
+  (set entity.layout.position (glm.vec3 10 0 0))
+  (set entity.layout.size (glm.vec3 100 30 0))
+  (set entity.layout.rotation (glm.quat 1 0 0 0))
+  (set entity.layout.clip-region nil)
+  (set entity.layout.depth-offset-index 0)
+  (entity.layout:layouter)
+  ;; The first child is the active panel, the second is the rail
+  (local panel-layout (. entity.layout.children 1))
+  (local rail-layout (. entity.layout.children 2))
+  (assert rail-layout "rail should be present")
+  (assert (approx rail-layout.size.y 30)
+          (.. "rail should remain full-height 30, got " rail-layout.size.y))
+  (assert panel-layout "panel should be present when expanded")
+  (assert (approx panel-layout.position.y 4)
+          (.. "panel y should be offset by reserve height 4, got " panel-layout.position.y))
+  (assert (approx panel-layout.size.y 26)
+          (.. "panel height should be 26 (= 30 - 4), got " panel-layout.size.y))
+  (entity:drop))
+
+(table.insert tests {:name "Expanded panel reserves toolbar height while rail remains full-height"
+                     :fn expanded-panel-reserves-toolbar-height-while-rail-remains-full-height})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

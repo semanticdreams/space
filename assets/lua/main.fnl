@@ -107,6 +107,7 @@
 (local OpencodeSdk (require :llm/providers/opencode))
 (local HudExtendedSidebar (require :hud-extended-sidebar))
 (local HudExtendedSidebarView (require :hud-extended-sidebar-view))
+(local ActivityTopToolbarView (require :activity-top-toolbar-view))
 (local fennel-cache (require :fennel-cache))
 (local bytecode-enabled
   (do
@@ -955,7 +956,11 @@
       (set hud-opts.left-dock-builder contrib.left_dock_builder))
     (when app.agent-runner
       (ensure-extended-sidebar!)
-      (set hud-opts.right-dock-builder (HudExtendedSidebarView app.extended-sidebar)))
+      (set hud-opts.right-dock-builder
+           (HudExtendedSidebarView app.extended-sidebar
+                                   {:top-reserve-height-provider
+                                    (fn [] (or app.activity-top-toolbar-height 0))})))
+    (set hud-opts.top-toolbar-builder (ActivityTopToolbarView {}))
     (app.hud:build-default hud-opts)
     (clear-active-world-hud-overlay)
     (when contrib.overlay
