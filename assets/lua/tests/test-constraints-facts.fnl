@@ -422,6 +422,31 @@
   (assert (= check-fixture.enclosing-fn "valid?")
           (.. "check should have enclosing-fn=valid?, got " (tostring check-fixture.enclosing-fn))))
 
+;; --- R1-2: Corrected child span used for containment ---
+
+(fn fix-enclosing-fn-uses-corrected-child-span []
+  "When a child definition has a wrong tree-sitter span (e.g. end-byte
+   extends past the parent), fix-enclosing-fn-by-span should use the
+   corrected source-text span from span-for-fn-def for containment.
+   Without R1-2 fix, the child would not be contained by any parent and
+   would be marked top-level."
+  (local Facts (require :constraints.facts))
+  (local source "(fn outer [x]\n  (fn inner [y]\n    (+ x y)))\n")
+  ;; Simulate definitions with wrong tree-sitter spans:
+  ;; inner's end-byte is 9999 — way past outer's real span of ~41
+  (local definitions
+    [{:kind :fn :name "outer" :start-byte 0  :end-byte 41   :line 1 :column 1}
+     {:kind :fn :name "inner" :start-byte 20 :end-byte 9999 :line 2 :column 3}])
+  ;; No recovered parents
+  (local recovered-parents [])
+  (Facts.fix-enclosing-fn-by-span source definitions recovered-parents)
+  ;; inner should be enclosed by outer (corrected span used, not tree-sitter 9999)
+  (assert (= (. definitions 2 :enclosing-fn) "outer")
+          (.. "inner should have enclosing-fn=outer, got "
+              (tostring (. definitions 2 :enclosing-fn))))
+  (assert (= (. definitions 2 :top-level?) false)
+          "inner should not be top-level"))
+
 ;; Register all tests
 (table.insert tests {:name "facts extracts require module"
                      :fn extracts-require-module})
@@ -467,6 +492,8 @@
                      :fn enclosing-fn-parent-with-hyphens})
 (table.insert tests {:name "facts enclosing fn parent with question mark"
                      :fn enclosing-fn-parent-with-question-mark})
+(table.insert tests {:name "facts fix-enclosing-fn uses corrected child span"
+                     :fn fix-enclosing-fn-uses-corrected-child-span})
 
 (local main
   (fn []

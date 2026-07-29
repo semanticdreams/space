@@ -592,6 +592,13 @@
             (tset child :enclosing-fn nil)
             (tset child :top-level? true))))))
 
+(fn M.fix-enclosing-fn-by-span [source definitions recovered-parents]
+  "Correct enclosing-fn for all function definitions using smallest
+   containing function span. Uses source-text paren matching to compute
+   accurate byte spans, since tree-sitter assigns wrong spans in ERROR trees.
+   Exported for testing R1-2 corrected-child-span coverage."
+  (fix-enclosing-fn-by-span source definitions recovered-parents))
+
 (fn M.extract [file-records]
   "Extract static facts from a list of file records.
   Returns a fact-db:
