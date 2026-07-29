@@ -468,12 +468,64 @@
                 (set ffd def.line)))
             {:fn-form ffm :fn-def-line ffd}))))
 
-(fn wrapper-covers-path? [form body-start path-text]
+(fn check-keys-string-coverage [keys-str path-text]
+  "Given a keys string (e.g. ':renderers :engine'), check if path-text is covered."
+  (local app-key (if (path-text:match "^app%.") (path-text:sub 5) path-text))
+  (var covers false)
+  (each [k (keys-str:gmatch ":?([%w%-_]+)")]
+    (when (and (not covers) (> (length k) 0))
+      (if (= k app-key)
+          (set covers true)
+          (do
+            (local ek (escape-pattern k))
+            (when (app-key:find (.. "^" ek "%.") 1 false)
+              (set covers true))))))
+  covers)
+
+(fn resolve-variable-keys-vector [form var-name definitions]
+  "Try to resolve a variable to its literal vector binding.
+   Scans for (local VAR [...]) or (let [VAR [...]] ...) in the form,
+   or looks for a :local-kind definition matching var-name in definitions.
+   Returns the keys string from the vector, or nil if unresolved."
+  ;; Try in the form first
+  (local local-pat (.. "%(local%s+" (escape-pattern var-name) "%s+%[(.-)%]%s*%)"))
+  (local local-start (string.find form local-pat))
+  (if local-start
+      (do
+        (var keys-str nil)
+        (each [ks (form:gmatch local-pat)]
+          (when (not keys-str) (set keys-str ks)))
+        keys-str)
+      (do
+        (local let-pat (.. "%(let%s*%[.-" (escape-pattern var-name) "%s+%[(.-)%]"))
+        (var keys-str2 nil)
+        (each [ks (form:gmatch let-pat)]
+          (when (not keys-str2) (set keys-str2 ks)))
+        (if keys-str2
+            keys-str2
+            ;; Try module-level local definitions
+            (do
+              (var found-keys nil)
+              (var defs (if definitions definitions []))
+              (each [_ def (ipairs defs)]
+                (when (and (= def.kind :local) (= def.name var-name) def.form (not found-keys))
+                  (local vec-pat "%[(.-)%]")
+                  (local vec-start (string.find def.form vec-pat))
+                  (when vec-start
+                    (each [ks (def.form:gmatch vec-pat)]
+                      (when (not found-keys) (set found-keys ks))))))
+              found-keys)))))
+
+(fn wrapper-covers-path? [form body-start path-text definitions]
   "Check if the with-restored-app-fields key argument (just before body-start)
    covers the given path-text (e.g. 'app.engine').
    body-start is the byte position of the wrapper body (after keys argument).
-   Scans backwards from body-start to find the key argument, then checks
-   if path-text is covered by any key (literal or variable)."
+   definitions is an optional list of module-level definitions to resolve
+   variable keys when they're not bound in the function form.
+   Scans backwards from body-start to find the key argument.
+   For literal vector keys, checks coverage directly.
+   For variable keys, attempts to resolve the variable to a literal vector;
+   returns false if the variable cannot be resolved (conservative)."
   (var key-arg-end (- body-start 1))
   (while (and (>= key-arg-end 1))
     (local ch (form:sub key-arg-end key-arg-end))
@@ -483,6 +535,7 @@
   (var key-arg-start nil)
   (local ch-end (form:sub key-arg-end key-arg-end))
   (if (= ch-end "]")
+      ;; Literal vector: find opening [, extract keys, check coverage
       (do
         (var depth 0)
         (var i key-arg-end)
@@ -499,33 +552,46 @@
             false
             (do
               (local keys-str (form:sub (+ key-arg-start 1) (- key-arg-end 1)))
-              (local app-key (if (path-text:match "^app%.") (path-text:sub 5) path-text))
-              (var covers false)
-              (each [k (keys-str:gmatch ":?([%w%-_]+)")]
-                (when (and (not covers) (> (length k) 0))
-                  (if (= k app-key)
-                      (set covers true)
-                      (do
-                        (local ek (escape-pattern k))
-                        (when (app-key:find (.. "^" ek "%.") 1 false)
-                          (set covers true))))))
-              covers)))
-      true))
+              (check-keys-string-coverage keys-str path-text))))
+      ;; Variable/symbol key: try to resolve to literal vector
+      (do
+        ;; Extract the variable name (scan backwards from key-arg-end)
+        (var sym-start key-arg-end)
+        (while (and (>= sym-start 1))
+          (local sc (form:sub sym-start sym-start))
+          (if (string.find sc "[%w%-_%.]" 1 false)
+              (set sym-start (- sym-start 1))
+              (lua :break)))
+        (set sym-start (+ sym-start 1))
+        (local var-name (form:sub sym-start key-arg-end))
+        (if (<= (length var-name) 0)
+            false
+            (do
+              (local resolved-keys (resolve-variable-keys-vector form var-name definitions))
+              (if resolved-keys
+                  (check-keys-string-coverage resolved-keys path-text)
+                  false))))))
 
-(fn check-positions-inside-covering-wraf? [parent-form parent-line positions path-text]
+(fn check-positions-inside-covering-wraf? [parent-form parent-line positions path-text definitions]
   "Check if every mutation position byte in parent-form is inside a
    with-restored-app-fields body whose keys cover path-text.
-   Returns true if all positions are covered, false otherwise."
+   Returns true if all positions are covered, false otherwise.
+   Requires mutation positions to fall within the form bounds
+   (find-mutation-approx-byte can return bytes beyond form length
+   when target line exceeds form line count)."
   (var all-covered true)
   (var pi 1)
   (while (and all-covered (<= pi (length positions)))
     (local pos (. positions pi))
     (local pos-byte (+ (find-mutation-approx-byte parent-form parent-line pos.line)
                        (math.max 0 (- pos.column 1))))
-    (local wraf-result (anon-byte-inside-wraf-body? parent-form pos-byte))
-    (if wraf-result
-        (when (not (wrapper-covers-path? parent-form wraf-result.body-start path-text))
-          (set all-covered false))
+    (if (<= pos-byte (length parent-form))
+        (do
+          (local wraf-result (anon-byte-inside-wraf-body? parent-form pos-byte))
+          (if wraf-result
+              (when (not (wrapper-covers-path? parent-form wraf-result.body-start path-text definitions))
+                (set all-covered false))
+              (set all-covered false)))
         (set all-covered false))
     (set pi (+ pi 1)))
   all-covered)
@@ -533,7 +599,10 @@
 (fn check-any-parent-wrapper [ff fn-def-line anon-def-col positions path-text max-line max-col]
   "Fallback: scan all fn definitions in the file to find any parent function
    whose form text contains a with-restored-app-fields wrapper that covers
-   the actual mutation positions and the mutated path."
+   the actual mutation positions and the mutated path.
+   Requires candidate definitions to actually contain the mutation line
+   (computed from form newline count) to prevent false suppression from
+   unrelated earlier wrappers."
   (var found false)
   (var di 1)
   (var defs ff.definitions)
@@ -541,8 +610,13 @@
   (while (and (not found) (<= di (length defs)))
     (local def (. defs di))
     (when (and (= def.kind :fn) def.form (> max-line def.line))
-      (when (check-positions-inside-covering-wraf? def.form def.line positions path-text)
-        (set found true)))
+      ;; Verify line containment: the candidate form must extend to max-line
+      (var form-nls 0)
+      (each [_ _ (def.form:gmatch "\n")] (set form-nls (+ form-nls 1)))
+      (local def-end-line (+ def.line form-nls))
+      (when (<= max-line def-end-line)
+        (when (check-positions-inside-covering-wraf? def.form def.line positions path-text ff.definitions)
+          (set found true))))
     (set di (+ di 1)))
   found)
 
@@ -560,7 +634,7 @@
         (var pi 2)
         (while (and (not found-restored) (<= pi (length containing)))
           (local parent (. containing pi))
-          (when (check-positions-inside-covering-wraf? parent.form parent.line positions path-text)
+          (when (check-positions-inside-covering-wraf? parent.form parent.line positions path-text ff.definitions)
             (set found-restored true))
           (set pi (+ pi 1)))
         (if found-restored true
@@ -578,7 +652,7 @@
        :evidence {:global-path path-text :enclosing-fn fn-name}
        :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))
 
-(fn all-positions-inside-covering-wrapper? [fn-form fn-def-line positions path-text]
+(fn all-positions-inside-covering-wrapper? [fn-form fn-def-line positions path-text definitions]
   "Check if every mutation position is inside a with-restored-app-fields body
    whose key argument covers the given path-text.
    Returns false if any mutation position is outside a covering wrapper."
@@ -587,11 +661,11 @@
     (when all-inside
       (local pos-byte (+ (find-mutation-approx-byte fn-form fn-def-line pos.line)
                          (math.max 0 (- pos.column 1))))
-      (local wraf-result (anon-byte-inside-wraf-body? fn-form pos-byte))
-      (if wraf-result
-          (when (not (wrapper-covers-path? fn-form wraf-result.body-start path-text))
-            (set all-inside false))
-          (set all-inside false))))
+       (local wraf-result (anon-byte-inside-wraf-body? fn-form pos-byte))
+       (if wraf-result
+           (when (not (wrapper-covers-path? fn-form wraf-result.body-start path-text definitions))
+             (set all-inside false))
+           (set all-inside false))))
   all-inside)
 
 (fn compute-max-position [positions]
@@ -617,7 +691,7 @@
     (table.insert path-segments seg))
   (local min-byte (+ (find-mutation-approx-byte fn-form fn-def-line max-line)
                       (math.max 0 (- max-col 1))))
-  (when (and (not has-restoration) (all-positions-inside-covering-wrapper? fn-form fn-def-line positions path-text))
+  (when (and (not has-restoration) (all-positions-inside-covering-wrapper? fn-form fn-def-line positions path-text ff.definitions))
     (set has-restoration true))
   (when (and (not has-restoration) (= fn-name "<anonymous>"))
     (when (check-parent-wrapper ff fn-def-line anon-def-col positions path-text max-line max-col)

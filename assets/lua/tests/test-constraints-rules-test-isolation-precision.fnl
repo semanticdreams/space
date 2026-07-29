@@ -560,7 +560,8 @@
 ;; ======================================================================
 
 (fn mutation-restoration-allows-variable-key-wraf-wrapper []
-  "V1-1: with-restored-app-fields with variable key list (not literal vector).
+  "V1-1: with-restored-app-fields with variable key list (not literal vector),
+   where the variable is bound to a literal vector in the same form.
    The anonymous fn inside the wrapper should be recognized as properly restored."
   (local rule (get-test-isolation-rule))
   (local ff (make-file-fact {:path "/tests/test-module.fnl"
@@ -571,6 +572,7 @@
                                              :line 10 :column 1
                                              :length 200
                                              :form "(fn test-var-key-wrapper []
+  (local bind-state-keys [:engine :renderers])
   (with-restored-app-fields bind-state-keys
     (fn []
       (set app.engine custom-engine)
@@ -967,7 +969,7 @@
                                              :name "test-sameline-wrapper"
                                              :top-level? true
                                              :line 10 :column 1
-                                             :length 150
+                                             :length 200
                                              :form "(fn test-sameline-wrapper []
   (with-restored-app-fields [:engine]
     (fn []
@@ -982,12 +984,12 @@
                                             {:kind :fn
                                              :name "<anonymous>"
                                              :top-level? false
-                                             :line 14 :column 35
+                                             :line 13 :column 38
                                              :length 10
                                              :form "(fn [_] x)"}]
                               :mutations [{:op :set
                                            :path ["app" "engine"]
-                                           :line 14 :column 7
+                                           :line 13 :column 7
                                            :form "(set app.engine {:physics {:step (fn [_] x)}})"
                                            :enclosing-fn "<anonymous>"}]}))
   (assert (= (rule.run (make-ctx [ff])) nil)
@@ -1061,6 +1063,42 @@
       (assert true "T11-3: pass - no diagnostics returned")))
 
 ;; ======================================================================
+;; T11-4: variable-key wrapper missing the mutated field still flags
+;; ======================================================================
+
+(fn mutation-restoration-flags-variable-key-missing-field []
+  "T11-4: Variable key list resolved to [:renderers] but mutation is on
+   app.engine. The resolved key must include the mutated path."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-var-key-missing"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 150
+                                             :form "(fn test-var-key-missing []
+  (local my-keys [:renderers])
+  (with-restored-app-fields my-keys
+    (fn []
+      (set app.engine custom-engine))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 14 :column 5
+                                             :length 15
+                                             :form "(fn []
+      (set app.engine custom-engine))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 15 :column 7
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "T11-4: resolved variable key missing field should flag")
+  (assert (> (length result) 0) "T11-4: should have at least one diagnostic"))
+
+;; ======================================================================
 ;; Register all precision tests
 ;; ======================================================================
 
@@ -1094,6 +1132,7 @@
 (table.insert tests {:name "T11-1 allows same-line nested callback in wrapper" :fn mutation-restoration-allows-sameline-nested-callback-in-wrapper})
 (table.insert tests {:name "T11-2 flags wrapper missing key" :fn mutation-restoration-flags-wrapper-missing-key})
 (table.insert tests {:name "T11-3 real-file regression activity-slots" :fn mutation-restoration-real-file-regression-activity-slots})
+(table.insert tests {:name "T11-4 flags variable-key missing field" :fn mutation-restoration-flags-variable-key-missing-field})
 
 (local main
   (fn []
