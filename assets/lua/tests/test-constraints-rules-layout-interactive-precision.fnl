@@ -1023,7 +1023,7 @@
     {:register (fn [_self node] (router:register-clickable node))
      :unregister (fn [_self node] (router:unregister-clickable node))})
   {:clickables clickables})")
-  (local ff (make-file-fact {:path "/src/renderers.fnl"
+  (local ff (make-file-fact {:path "/repo/next-app/renderers.fnl"
                               :module "next-app.renderers"
                               :definitions [{:kind :fn
                                              :name "make-interaction-adapters"
@@ -1053,7 +1053,7 @@
     {:register (fn [_self node] (router:register-hoverable node))
      :unregister (fn [_self node] (router:unregister-hoverable node))})
   {:hoverables hoverables})")
-  (local ff (make-file-fact {:path "/src/renderers.fnl"
+  (local ff (make-file-fact {:path "/repo/next-app/renderers.fnl"
                               :module "next-app.renderers"
                               :definitions [{:kind :fn
                                              :name "make-interaction-adapters"
@@ -1086,7 +1086,7 @@
     {:register (fn [_self node] (router:register-hoverable node))
      :unregister (fn [_self node] (router:unregister-hoverable node))})
   {:clickables clickables :hoverables hoverables})")
-  (local ff (make-file-fact {:path "/src/renderers.fnl"
+  (local ff (make-file-fact {:path "/repo/next-app/renderers.fnl"
                               :module "next-app.renderers"
                               :definitions [{:kind :fn
                                              :name "make-interaction-adapters"

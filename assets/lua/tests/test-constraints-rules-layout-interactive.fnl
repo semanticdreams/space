@@ -1068,7 +1068,6 @@
 ;; Import V12 precision tests
 (local precision (require :tests.test-constraints-rules-layout-interactive-precision))
 (each [_ t (ipairs precision.tests)] (table.insert tests t))
-
 ;; Register all interactive tests
 ;; layout.interactive-context-assertion
 (table.insert tests {:name "interactive-assertion allows file without clickables"
@@ -1162,5 +1161,39 @@
 (table.insert tests {:name "interactive-assertion allows outer with anonymous nested assert"
                      :fn interactive-assertion-allows-outer-with-anonymous-nested-assert})
 (table.insert tests {:name "interactive-assertion flags unasserted bare access"
-                     :fn interactive-assertion-flags-unasserted-bare-access})
+                      :fn interactive-assertion-flags-unasserted-bare-access})
+;; R1-1: unrelated test-helper local clickables stays flagged
+(fn interactive-assertion-flags-unrelated-test-helper-local-clickables []
+  "An unrelated test helper (e.g., with-temp-env) that locally constructs a
+  clickables stub table should still be flagged — the exemption is scoped to
+  next-app.renderers make-interaction-adapters only."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn with-temp-env [f]
+  (local dir (make-temp-dir))
+  (local store (LinkEntityStore {:base-dir dir}))
+  (local graph (Graph {:with-start false :link-store store}))
+  (local clickables {:register (fn []) :unregister (fn [])
+                      :register-double-click (fn []) :unregister-double-click (fn [])})
+  (local ctx (BuildContext {:clickables clickables})))")
+  (local ff (make-file-fact {:path "/repo/tests/test-link-entity-crash.fnl"
+                              :module "tests.test-link-entity-crash"
+                              :definitions [{:kind :fn
+                                             :name "with-temp-env"
+                                             :top-level? true
+                                             :line 15 :column 1
+                                             :length (length form)
+                                             :form form}]
+                              :calls []
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "with-temp-env")
+      (set flagged true)))
+  (assert flagged "unrelated test helper with local clickables stub should still be flagged"))
+(table.insert tests {:name "interactive-assertion flags unrelated test helper local clickables"
+                     :fn interactive-assertion-flags-unrelated-test-helper-local-clickables})
 {:tests tests}

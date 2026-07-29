@@ -578,14 +578,16 @@
                 true
                 false)))))
 
-(fn fn-def-constructs-local-kw? [def cleaned-form kw]
-  "Check if kw is locally constructed as a local binding in the function body.
-  E.g., (local clickables {:register ...}) or (local clickables ...).
-  Only applies when the function has no enclosing parent scope — nested
-  helpers that shadow parent keywords should still be flagged.
-  Uses the raw def.form, not the cleaned version from outer-only-form,
-  to avoid false negatives from nested-def blanking."
-  (when (and def.form def.kind (= def.kind :fn) (not def.enclosing-fn))
+(fn fn-def-constructs-local-kw? [ff def cleaned-form kw]
+  "Check if kw is locally constructed as an adapter table in def's body.
+  Narrowed to the reviewed production pattern: only next-app.renderers
+  module, function make-interaction-adapters."
+  (when (and ff ff.module ff.path
+             def.form def.kind (= def.kind :fn)
+             (not def.enclosing-fn)
+             ff.module (= ff.module "next-app.renderers")
+             def.name (= def.name "make-interaction-adapters")
+             (if (ff.path:find "next-app/renderers.fnl" 1 true) true false))
     (local no-strings (strip-strings def.form))
     (local clean (strip-comments no-strings))
     (local local-pat (.. "%(local[%s\n]+" kw "[%s\n]+%{"))
@@ -807,8 +809,9 @@
                 (set bare-covered (build-bare-covered def cleaned calls all-defs))
                 ;; Locally constructed adapter tables (e.g., (local clickables {:register ...}))
                 ;; are owned infrastructure, not external services requiring assertion.
+                ;; Narrowed to the reviewed next-app.renderers make-interaction-adapters pattern.
                 (each [kw _ (pairs interactive-access-patterns)]
-                  (when (fn-def-constructs-local-kw? def cleaned kw)
+                  (when (fn-def-constructs-local-kw? ff def cleaned kw)
                     (tset bare-covered kw true))))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
