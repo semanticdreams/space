@@ -715,6 +715,55 @@
 
 (table.insert tests {:name "R1-1f flags markers in string literals" :fn mutation-restoration-flags-marker-substrings-in-strings})
 
+;; ======================================================================
+;; R1-1g: Marker substrings in comments — must not match
+;; ======================================================================
+
+(fn mutation-restoration-flags-marker-substrings-in-comments []
+  "R1-1g: A malformed helper that puts the marker substrings inside
+   Fennel comments around (pcall f) should NOT be accepted. The
+   validation must use actual Fennel forms, not comment text."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; Malformed helper: marker substrings only in comments
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 150
+                                 :form "(fn with-restored-app [fields f]
+  ; (. snapshot key) (. app key) — not actual code
+  (local (ok result) (pcall f))
+  ; (. app key) (. snapshot key) — not actual code
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-comments-only"
+                                 :top-level? true
+                                 :line 14 :column 1
+                                 :length 120
+                                 :form "(fn test-comments-only []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 16 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 17 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1g: should flag — markers only in comments")
+  (assert (> (length result) 0) "R1-1g: should have at least one diagnostic"))
+
+(table.insert tests {:name "R1-1g flags markers in comments" :fn mutation-restoration-flags-marker-substrings-in-comments})
+
 (local main
   (fn []
     (local runner (require :tests/runner))

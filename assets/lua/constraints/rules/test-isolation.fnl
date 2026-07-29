@@ -11,6 +11,18 @@
 (fn strip-strings [s]
   (s:gsub "\"[^\"]*\"" ""))
 
+;; Strip Fennel comments (; to end of line) from form text. Must be
+;; called after strip-strings to avoid removing semicolons that appear
+;; inside string literals.
+(fn strip-comments [s]
+  (local lines [])
+  (each [line (s:gmatch "[^\n]*")]
+    (local comment-pos (string.find line ";" 1 true))
+    (if comment-pos
+        (table.insert lines (string.sub line 1 (- comment-pos 1)))
+        (table.insert lines line)))
+  (table.concat lines "\n"))
+
 (fn path-prefix-matches? [mp sg-parts plen]
   "Check if the mutation path head matches the sensitive-global path prefix."
   (local slen (length sg-parts))
@@ -305,8 +317,8 @@
    into snapshot table, runs (pcall f), then restores fields from
    snapshot back to app.
    Requires correct ordering: snapshot before (pcall f), restore after.
-   Strips string literals before matching to avoid false positives
-   from marker substrings appearing in quoted text.
+   Strips string literals and comments before matching to avoid false
+   positives from marker substrings appearing in non-code text.
    Returns true only when all three ordered markers are present."
   (var defs definitions)
   (when (not defs) (set defs []))
@@ -315,9 +327,9 @@
   (while (and (not found) (<= di (length defs)))
     (local def (. defs di))
     (when (and (= def.kind :fn) (= def.name "with-restored-app") def.form)
-      ;; Strip string literals so marker substrings in strings
-      ;; cannot cause false positives.
-      (local clean (strip-strings def.form))
+      ;; Strip string literals and comments so marker substrings in
+      ;; non-code text cannot cause false positives.
+      (local clean (strip-comments (strip-strings def.form)))
       ;; Find the (pcall f) position in the stripped form —
       ;; this is the ordering anchor.
       (local pcall-pos (string.find clean "(pcall f)" 1 true))
