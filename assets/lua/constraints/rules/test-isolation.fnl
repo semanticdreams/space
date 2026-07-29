@@ -6,6 +6,11 @@
 
 (local sensitive ["app.renderers" "app.lights" "app.engine" "app.activity-registry" "app.physics-containment-config" "package.loaded"])
 
+;; Strip double-quoted string literals from form text so that pattern
+;; matching does not produce false positives on string contents.
+(fn strip-strings [s]
+  (s:gsub "\"[^\"]*\"" ""))
+
 (fn path-prefix-matches? [mp sg-parts plen]
   "Check if the mutation path head matches the sensitive-global path prefix."
   (local slen (length sg-parts))
@@ -300,6 +305,8 @@
    into snapshot table, runs (pcall f), then restores fields from
    snapshot back to app.
    Requires correct ordering: snapshot before (pcall f), restore after.
+   Strips string literals before matching to avoid false positives
+   from marker substrings appearing in quoted text.
    Returns true only when all three ordered markers are present."
   (var defs definitions)
   (when (not defs) (set defs []))
@@ -308,21 +315,25 @@
   (while (and (not found) (<= di (length defs)))
     (local def (. defs di))
     (when (and (= def.kind :fn) (= def.name "with-restored-app") def.form)
-      (local form def.form)
-      ;; Find the (pcall f) position first — this is the ordering anchor
-      (local pcall-pos (string.find form "(pcall f)" 1 true))
+      ;; Strip string literals so marker substrings in strings
+      ;; cannot cause false positives.
+      (local clean (strip-strings def.form))
+      ;; Find the (pcall f) position in the stripped form —
+      ;; this is the ordering anchor.
+      (local pcall-pos (string.find clean "(pcall f)" 1 true))
       (when pcall-pos
         ;; Check 1: snapshot-direction assignment BEFORE pcall
-        ;; Pattern: (set (. snapshot key) (. app key)) must appear before pcall
+        ;; Pattern: (set (. snapshot key) (. app key)) must appear
+        ;; before pcall in the stripped form.
         (var has-snapshot false)
-        (when (string.find form "(. snapshot key) (. app key)" 1 true)
-          (local snap-pos (string.find form "(. snapshot key) (. app key)" 1 true))
-          (when (< (if snap-pos snap-pos 0) pcall-pos)
-            (set has-snapshot true)))
+        (local snap-pos (string.find clean "(. snapshot key) (. app key)" 1 true))
+        (when (and snap-pos (< snap-pos pcall-pos))
+          (set has-snapshot true))
         ;; Check 2: restore-direction assignment AFTER pcall
-        ;; Pattern: (set (. app key) (. snapshot key)) must appear after pcall
+        ;; Pattern: (set (. app key) (. snapshot key)) must appear
+        ;; after pcall in the stripped form.
         (var has-restore false)
-        (when (string.find form "(. app key) (. snapshot key)" (+ pcall-pos 1) true)
+        (when (string.find clean "(. app key) (. snapshot key)" (+ pcall-pos 1) true)
           (set has-restore true))
         (when (and has-snapshot has-restore)
           (set found true))))

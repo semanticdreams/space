@@ -666,6 +666,55 @@
 (table.insert tests {:name "R1-1e flags pcall before snapshot+restore" :fn mutation-restoration-flags-pcall-before-snapshot-restore})
 (table.insert tests {:name "R1-2b flags suffix callee name" :fn mutation-restoration-flags-suffix-callee-name})
 
+;; ======================================================================
+;; R1-1f: Marker substrings in string literals — must not match
+;; ======================================================================
+
+(fn mutation-restoration-flags-marker-substrings-in-strings []
+  "R1-1f: A malformed helper that puts the marker substrings inside
+   string literals around (pcall f) should NOT be accepted. The
+   validation must check actual Fennel forms, not arbitrary text."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; Malformed helper: marker substrings only in string literals
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 150
+                                 :form "(fn with-restored-app [fields f]
+  (print \"(. snapshot key) (. app key)\")
+  (local (ok result) (pcall f))
+  (print \"(. app key) (. snapshot key)\")
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-strings-only"
+                                 :top-level? true
+                                 :line 14 :column 1
+                                 :length 120
+                                 :form "(fn test-strings-only []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 16 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 17 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1f: should flag — markers only in string literals")
+  (assert (> (length result) 0) "R1-1f: should have at least one diagnostic"))
+
+(table.insert tests {:name "R1-1f flags markers in string literals" :fn mutation-restoration-flags-marker-substrings-in-strings})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
