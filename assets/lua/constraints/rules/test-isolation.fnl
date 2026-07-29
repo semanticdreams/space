@@ -459,29 +459,6 @@
         #(set pos nil)))
   (if (and pos (>= pos 1) (= (form-text:sub pos pos) "(")) pos nil))
 
-(fn find-snapshot-binding-byte [fn-form snap-var path-text]
-  "Find the byte position of a snapshot binding for snap-var targeting path-text.
-   Checks (local SNAP-VAR path), (local SNAP-VAR (and ... path)), and (let [...]) patterns.
-   Returns the byte position of the opening '(' or nil."
-  (local escaped-var (escape-pattern snap-var))
-  (local escaped-path (escape-pattern path-text))
-  ;; Check (local SNAP-VAR path-text)
-  (local direct-pat (.. "%(local%s+" escaped-var "%s+" escaped-path))
-  (var pos (string.find fn-form direct-pat))
-  ;; Check (local SNAP-VAR (and ...)) 
-  (when (not pos)
-    (local and-pat (.. "%(local%s+" escaped-var "%s+%(and%s+"))
-    (set pos (string.find fn-form and-pat)))
-  ;; Check (let [SNAP-VAR path-text] ...)
-  (when (not pos)
-    (local let-pat (.. "%(let%s*%[%s*" escaped-var "%s+" escaped-path))
-    (set pos (string.find fn-form let-pat)))
-  ;; Check (let [SNAP-VAR (and ...)] ...)
-  (when (not pos)
-    (local let-and-pat (.. "%(let%s*%[%s*" escaped-var "%s+%(and%s+"))
-    (set pos (string.find fn-form let-and-pat)))
-  pos)
-
 (fn find-all-pcall-call-spans [form-text pcall-ranges]
   "Given a form text and pre-computed pcall fn-ranges, compute pcall CALL spans.
    Returns a list of {:call-start :call-end} for each pcall call.
@@ -513,18 +490,18 @@
   enclosing)
 
 (fn snapshot-before-pcall-and-restore-after? [parent-form parent-line path-segments path-text enclosing-span]
-  "Check if the parent has a snapshot binding BEFORE the pcall call start
+  "Check if the parent has a valid snapshot binding BEFORE the pcall call start
    and a concrete restore AFTER the pcall call end.
+   Searches only the text before the pcall for snapshot bindings, ensuring
+   the snapshot cannot be taken after the mutation.
    Returns true if both conditions are met."
-  (local snap-var (find-snapshot-var parent-form path-segments))
+  ;; Search only the text before the pcall call start
+  (local before-text (parent-form:sub 1 (- enclosing-span.call-start 1)))
+  (local snap-var (find-snapshot-var before-text path-segments))
   (if (not snap-var) false
-      (do
-        (local snap-byte (find-snapshot-binding-byte parent-form snap-var path-text))
-        (if (not snap-byte) false
-            (if (>= snap-byte enclosing-span.call-start) false
-                (if (has-concrete-restore-after-byte? parent-form parent-line path-segments enclosing-span.call-end) true
-                    (has-helper-restore-after-byte? parent-form path-text enclosing-span.call-end) true
-                    false))))))
+      (if (has-concrete-restore-after-byte? parent-form parent-line path-segments enclosing-span.call-end) true
+          (has-helper-restore-after-byte? parent-form path-text enclosing-span.call-end) true
+          false)))
 
 (fn check-parent-pcall-restoration [ff fn-def-line anon-def-col path-text path-segments max-line]
   "Check if an anonymous fn inside a pcall has parent-scope snapshot/restore.

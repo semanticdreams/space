@@ -972,6 +972,79 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
 
 ;; ======================================================================
+;; R1-1r2: Invalid-before/valid-after same-name binding + helper parent pcall
+;; ======================================================================
+
+(fn mutation-restoration-flags-invalid-snap-before-valid-after []
+  "R1-1 regression: invalid (and some-flag path) binding before pcall,
+   valid (and guard path) binding after pcall. Must flag because the
+   pre-pcall snapshot is invalid."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-invalid-then-valid"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 300
+                                             :form "(fn test-invalid-then-valid []
+  (local orig (and some-flag app.engine.width))
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (local orig (and app.engine app.engine.width))
+  (set app.engine.width orig))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 8 :column 1
+                                             :length 50
+                                  :form "(fn [] (set app.engine.width 100))"}]
+                                :mutations [{:op :set
+                                             :path ["app" "engine" "width"]
+                                             :line 8 :column 1
+                                             :form "(set app.engine.width 100)"
+                                             :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag — invalid snap before pcall, valid snap after pcall")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+(fn mutation-restoration-flags-helper-parent-pcall-unsupported []
+  "Negative: helper-only parent pcall snapshots are conservatively unsupported.
+   When only snapshot-app-fields/restore-app-fields! helpers exist in parent,
+   the parent-pcall path does not recognize them and the diagnostic remains."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-helper-only"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 250
+                                             :form "(fn test-helper-only []
+  (local snap (snapshot-app-fields [:engine]))
+  (pcall (fn []
+    (set app.engine {:now-ms (fn [s] 0)})))
+  (restore-app-fields! snap))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 8 :column 1
+                                             :length 50
+                                  :form "(fn [] (set app.engine {:now-ms (fn [s] 0)}))"}]
+                                :mutations [{:op :set
+                                             :path ["app" "engine"]
+                                             :line 8 :column 1
+                                             :form "(set app.engine {:now-ms (fn [s] 0)})"
+                                             :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag — helper-only parent pcall not supported")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -1051,6 +1124,8 @@
 (table.insert tests {:name "mutation-restoration flags snapshot after pcall in parent" :fn mutation-restoration-flags-snapshot-after-pcall-in-parent})
 (table.insert tests {:name "mutation-restoration allows let and guarded snapshot" :fn mutation-restoration-allows-let-and-guarded-snapshot})
 (table.insert tests {:name "mutation-restoration flags let and with unrelated guard" :fn mutation-restoration-flags-let-and-with-unrelated-guard})
+(table.insert tests {:name "mutation-restoration flags invalid snap before valid after" :fn mutation-restoration-flags-invalid-snap-before-valid-after})
+(table.insert tests {:name "mutation-restoration flags helper parent pcall unsupported" :fn mutation-restoration-flags-helper-parent-pcall-unsupported})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
