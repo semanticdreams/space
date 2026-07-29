@@ -1045,6 +1045,44 @@
   (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
 
 ;; ======================================================================
+;; R1-1r3: pre-pcall snapshot A, post-pcall snapshot B, restore uses B
+;; ======================================================================
+
+(fn mutation-restoration-flags-post-pcall-snapshot-var-restore []
+  "Pre-pcall has valid snapshot var A, post-pcall has different valid snapshot var B,
+   restore uses B. Must flag because restore is not tied to pre-pcall snapshot."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-diff-var-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 300
+                                             :form "(fn test-diff-var-restore []
+  (local orig-a (and app.engine app.engine.width))
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (local orig-b (and app.engine app.engine.width))
+  (set app.engine.width orig-b))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 8 :column 1
+                                             :length 50
+                                  :form "(fn [] (set app.engine.width 100))"}]
+                                :mutations [{:op :set
+                                             :path ["app" "engine" "width"]
+                                             :line 8 :column 1
+                                             :form "(set app.engine.width 100)"
+                                             :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag — restore uses post-pcall snapshot var, not pre-pcall")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -1126,6 +1164,7 @@
 (table.insert tests {:name "mutation-restoration flags let and with unrelated guard" :fn mutation-restoration-flags-let-and-with-unrelated-guard})
 (table.insert tests {:name "mutation-restoration flags invalid snap before valid after" :fn mutation-restoration-flags-invalid-snap-before-valid-after})
 (table.insert tests {:name "mutation-restoration flags helper parent pcall unsupported" :fn mutation-restoration-flags-helper-parent-pcall-unsupported})
+(table.insert tests {:name "mutation-restoration flags post pcall snapshot var restore" :fn mutation-restoration-flags-post-pcall-snapshot-var-restore})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})

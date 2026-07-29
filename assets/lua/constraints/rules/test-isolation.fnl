@@ -489,19 +489,72 @@
       (set enclosing cs)))
   enclosing)
 
-(fn snapshot-before-pcall-and-restore-after? [parent-form parent-line path-segments path-text enclosing-span]
+(fn has-restore-after-byte-for-var? [fn-form path snap-var min-byte]
+  "Check for concrete restore evidence at a byte position >= min-byte
+   for a specific snapshot variable (no re-derivation of snap-var).
+   Compares start byte positions instead of line numbers."
+  (local path-text (table.concat path "."))
+  (local escaped-path (escape-pattern path-text))
+  (local escaped-var (escape-pattern snap-var))
+  (var found false)
+  ;; Scan (set path_text snap-var) positions
+  (local set-pat (.. "%(set%s+" escaped-path "%s+" escaped-var "%s*%)"))
+  (var search-start 1)
+  (while (and (not found) search-start)
+    (local s-e (find-substring fn-form set-pat search-start))
+    (if s-e
+        (do
+          (local start s-e.start)
+          (local end s-e.end)
+          (if (>= start min-byte)
+              (set found true)
+              (set search-start (+ end 1))))
+        (set search-start nil)))
+  ;; Scan tset positions  
+  (when (and (not found) (>= (length path) 2))
+    (local plen (length path))
+    (local table-parts [])
+    (for [i 1 (- plen 1)]
+      (table.insert table-parts (. path i)))
+    (local tset-table (table.concat table-parts "."))
+    (local key (. path plen))
+    (local escaped-tset (escape-pattern tset-table))
+    (local escaped-key (escape-pattern key))
+    (local pat1 (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var))
+    (local pat2 (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var))
+    (set search-start 1)
+    (while (and (not found) search-start)
+      (local s-e1 (find-substring fn-form pat1 search-start))
+      (if s-e1
+          (do
+            (local start1 s-e1.start)
+            (local end1 s-e1.end)
+            (if (>= start1 min-byte)
+                (set found true)
+                (set search-start (+ end1 1))))
+          (do
+            (local s-e2 (find-substring fn-form pat2 search-start))
+            (if s-e2
+                (do
+                  (local start2 s-e2.start)
+                  (local end2 s-e2.end)
+                  (if (>= start2 min-byte)
+                      (set found true)
+                      (set search-start (+ end2 1))))
+                (set search-start nil))))))
+  found)
+
+(fn snapshot-before-pcall-and-restore-after? [parent-form path-segments path-text enclosing-span]
   "Check if the parent has a valid snapshot binding BEFORE the pcall call start
-   and a concrete restore AFTER the pcall call end.
-   Searches only the text before the pcall for snapshot bindings, ensuring
-   the snapshot cannot be taken after the mutation.
-   Returns true if both conditions are met."
-  ;; Search only the text before the pcall call start
+   and that exact snapshot variable is concretely restored AFTER the pcall call end.
+   Searches only the text before the pcall for snapshot bindings. Uses the pre-pcall
+   snap-var directly for the restore check — does NOT re-derive from the full form.
+   Helper snapshots (snapshot-app-fields/restore-app-fields!) are conservatively
+   unsupported in parent-pcall path."
   (local before-text (parent-form:sub 1 (- enclosing-span.call-start 1)))
   (local snap-var (find-snapshot-var before-text path-segments))
   (if (not snap-var) false
-      (if (has-concrete-restore-after-byte? parent-form parent-line path-segments enclosing-span.call-end) true
-          (has-helper-restore-after-byte? parent-form path-text enclosing-span.call-end) true
-          false)))
+      (has-restore-after-byte-for-var? parent-form path-segments snap-var enclosing-span.call-end)))
 
 (fn check-parent-pcall-restoration [ff fn-def-line anon-def-col path-text path-segments max-line]
   "Check if an anonymous fn inside a pcall has parent-scope snapshot/restore.
@@ -521,7 +574,7 @@
                           (local call-spans (find-all-pcall-call-spans parent.form pcall-ranges))
                           (local enclosing-span (find-enclosing-call-span call-spans parent.form parent.line max-line))
                           (if (not enclosing-span) false
-                              (snapshot-before-pcall-and-restore-after? parent.form parent.line path-segments path-text enclosing-span)))))))))))
+                              (snapshot-before-pcall-and-restore-after? parent.form path-segments path-text enclosing-span)))))))))))
 
 ;; --- Extracted helpers for global-mutation-restoration-rule-run ---
 
