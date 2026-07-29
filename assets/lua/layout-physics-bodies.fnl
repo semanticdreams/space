@@ -289,10 +289,17 @@
   {:body body
    :world-position
    (if entry.dragging
-       (do
-         (apply-layout-to-body entry)
-         (+ positioned.layout.position
-            (positioned.layout.rotation:rotate (half-size entry))))
+       (if (= (drag-attachment-mode) :anchor)
+           (if transform
+               (do
+                 (local origin (transform:getOrigin))
+                 (physics-glm-vec3 origin))
+               (+ positioned.layout.position
+                  (positioned.layout.rotation:rotate (half-size entry))))
+           (do
+             (apply-layout-to-body entry)
+             (+ positioned.layout.position
+                (positioned.layout.rotation:rotate (half-size entry)))))
        (if transform
            (do
              (local origin (transform:getOrigin))
@@ -514,9 +521,12 @@
      :key entry
      :owner entry.positioned
      :on-drag-start
-     (fn [_movable]
-       (set entry.dragging true)
-       (ensure-body-matches-layout-size entry))
+      (fn [_movable drag _payload]
+        (set entry.dragging true)
+        (ensure-body-matches-layout-size entry)
+        (when (= (drag-attachment-mode) :anchor)
+          (set drag.relative-anchor
+               (- drag.hit-point (compute-body-center entry)))))
      :on-drag-update
      (fn [movable drag update]
        (local mode (drag-attachment-mode))
@@ -533,20 +543,37 @@
              true)
            false))
      :on-drag-end
-     (fn [_movable]
-       (set entry.dragging false)
-       (local base (entity-transform entity))
-       (local inverse (base.rotation:inverse))
-       (local world-center (+ target.position (target.rotation:rotate (half-size entry))))
-       (update-entry-offset-from-world-center! entry base.position inverse world-center)
-       (when (and entry.positioned entry.positioned.layout)
-         (entry.positioned.layout:mark-layout-dirty))
-       (ensure-body-matches-layout-size entry)
-       (apply-layout-to-body entry)
-       (activate-entry-body! entry)
-       (when entry.body
-         (sync-moved-body entry.body)
-         (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
+      (fn [_movable]
+        (set entry.dragging false)
+        (local base (entity-transform entity))
+        (local inverse (base.rotation:inverse))
+        (local mode (drag-attachment-mode))
+        (if (= mode :anchor)
+            (let [body-center (compute-body-center entry)
+                  entry-half (half-size entry)
+                  layout-rotation (or target.rotation (glm.quat 1 0 0 0))
+                  layout-position (- body-center (layout-rotation:rotate entry-half))]
+              (set target.position layout-position)
+              (update-entry-offset-from-world-center! entry base.position inverse body-center)
+              (when (and entry.positioned entry.positioned.layout)
+                (entry.positioned.layout:mark-layout-dirty))
+              (ensure-body-matches-layout-size entry)
+              (apply-layout-to-body entry)
+              (activate-entry-body! entry)
+              (when entry.body
+                (sync-moved-body entry.body)
+                (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
+            (do
+              (local world-center (+ target.position (target.rotation:rotate (half-size entry))))
+              (update-entry-offset-from-world-center! entry base.position inverse world-center)
+              (when (and entry.positioned entry.positioned.layout)
+                (entry.positioned.layout:mark-layout-dirty))
+              (ensure-body-matches-layout-size entry)
+              (apply-layout-to-body entry)
+              (activate-entry-body! entry)
+              (when entry.body
+                (sync-moved-body entry.body)
+                (entry.body:applyForce (bt.Vector3 0 -0.5 0))))))
      }))
 
 (fn collect-movables [entity]

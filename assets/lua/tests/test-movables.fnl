@@ -589,14 +589,21 @@
       (local movables (Movables {:intersectables intersector :drag-threshold 0}))
       (local layout (make-layout))
       (var end-drag nil)
+      (var drag-still-engaged-during-callback? false)
       (movables:register {:layout layout}
                          {:key layout
                           :on-drag-end (fn [entry drag]
-                                         (set end-drag drag))})
+                                         (set end-drag drag)
+                                         (set drag-still-engaged-during-callback?
+                                              (movables:drag-engaged?)))})
       (set intersector.selection-point (glm.vec3 0 0 0))
       (movables:on-mouse-button-down {:button 1 :x 0 :y 0})
       (movables:on-mouse-button-up {:button 1})
-      (assert end-drag "Expected on-drag-end to receive drag arg"))))
+      (assert end-drag "Expected on-drag-end to receive drag arg")
+      (assert drag-still-engaged-during-callback?
+              "Expected drag to still be engaged during on-drag-end callback, before clear")
+      (assert (not (movables:drag-engaged?))
+              "Expected drag to be cleared after on-drag-end callback"))))
 
 (table.insert tests {:name "Movables register/unregister layouts" :fn movables-register-and-unregister})
 (table.insert tests {:name "Movables update layout positions while dragging" :fn movables-update-position-while-dragging})

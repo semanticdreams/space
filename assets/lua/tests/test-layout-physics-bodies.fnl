@@ -461,12 +461,23 @@
             ;; Simulate drag start to compute relative anchor
             (local hit-point (glm.vec3 1 2 3))
             (set entry.dragging true)
+            (local drag {:hit-point hit-point})
             (local movable-stub {:target panel.layout})
 
-            ;; on-drag-start records dragging state
+            ;; on-drag-start records dragging state and relative anchor
             (when anchor-entry.on-drag-start
-              (anchor-entry.on-drag-start movable-stub))
-            (assert entry.dragging "Entry should be in dragging state after drag start")))]
+              (anchor-entry.on-drag-start movable-stub drag {:button 1}))
+            (assert entry.dragging "Entry should be in dragging state after drag start")
+            (assert drag.relative-anchor "Anchor mode should record relative-anchor on drag start")
+            (assert (approx drag.relative-anchor.x (- 1.0 2.0))
+                    (string.format "relative-anchor x should be hit-point.x - body-center.x, got %.3f"
+                                   (or drag.relative-anchor.x 0)))
+            (assert (approx drag.relative-anchor.y (- 2.0 14.0))
+                    (string.format "relative-anchor y should be hit-point.y - body-center.y, got %.3f"
+                                   (or drag.relative-anchor.y 0)))
+            (assert (approx drag.relative-anchor.z (- 3.0 2.0))
+                    (string.format "relative-anchor z should be hit-point.z - body-center.z, got %.3f"
+                                   (or drag.relative-anchor.z 0)))))]
     (cleanup)
     (set app.activity-drag-attachment-provider original-provider)
     (when (not ok)
@@ -532,7 +543,7 @@
 
             ;; Call on-drag-start if present
             (when anchor-entry.on-drag-start
-              (anchor-entry.on-drag-start anchor-entry))
+              (anchor-entry.on-drag-start anchor-entry drag {:button 1}))
 
             ;; Build update table and call on-drag-update
             (local update {:payload {:button 1 :x 5 :y 6 :mod 0}

@@ -93,9 +93,9 @@
       (local entry self.drag.entry)
       (local started? (and self.drag self.drag.started?))
       (local drag self.drag)
-      (set self.drag nil)
       (when (and started? entry entry.on-drag-end)
-        (entry.on-drag-end entry drag))))
+        (entry.on-drag-end entry drag))
+      (set self.drag nil)))
 
   (fn start-drag [_self drag payload]
     (when (and drag (not drag.started?))
