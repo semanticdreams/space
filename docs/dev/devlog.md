@@ -1,5 +1,20 @@
 # Devlog
 
+## 2026-07-14
+By mid-July, the project consolidated its operating loop around panel transfer, the repository workbench, conversation-first supervision, and the new VitePress knowledge base, turning months of scattered architecture notes into a navigable map for future graph, world-building, and live-development milestones.
+
+## 2026-06-15
+June pushed Space toward portability and broader authoring workflows, pairing Windows cross-compilation and packaging smoke-test work with board canvas mode, semantic connectors, item selection, and hot-reload cache cleanup so the workspace could travel beyond the original Linux development loop.
+
+## 2026-05-08
+May shifted the project toward live agent-assisted development: the agent runner, presets, MCP transport, OpenCode streaming, reloadable units, user-code scanning, and Lua-owned HTTP pieces started turning Space into an environment that can inspect and reshape itself while it runs.
+
+## 2026-04-16
+April was a stabilization pass for the growing world-building system, tightening lifecycle ownership, signal cleanup, composable state handling, stylus drawing, Yojimbo experiments, and canvas modes so interactive surfaces could grow without silent callbacks or tangled mode logic.
+
+## 2026-03-18
+March turned the newly merged Lua/Fennel stack into a world-building platform: terrain heightfields, graph editing, exposed world entities, lighting, and containment work converged so scenes were no longer just rendered surfaces but editable environments connected through the graph.
+
 ## 2026-02-16
 Restructured docs: combined public docs with dev docs in a new VitePress project, deployed via GitHub Pages to spaceui.org.
 A recent attempt at creating a new instanced quad based rectangle and text rendering system stalled, see code in next-app. Live development is needed to understand the system and harmonize layout and rendering designs.
@@ -9,6 +24,9 @@ Added Xapian bindings for in-app search. Fixed input text alignment for inputs w
 
 ## 2026-02-08
 Status: Most features from the Python prototype have been recreated in the new Fennel/C++ implementation over the last few months.
+
+## 2025-10-01
+By October, Space's Python prototype had become a staging ground for a deeper Lua/Fennel migration: the long-lived branch carried the engine toward a scriptable UI and graph-centered runtime, keeping the momentum from the September Fennel rendering experiments while avoiding noisy mainline churn until the new architecture could land as a coherent replacement.
 
 ## 2025-09-24
 Changed to load classes in Python prototype directly from z folder rather than through DB-based entities
