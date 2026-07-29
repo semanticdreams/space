@@ -22,6 +22,7 @@ Architecture notes, design sketches, debugging logs, and explorations. These are
 - [Codex Sdk Fennel](./codex-sdk-fennel)
 - [Colormath Parity](./colormath-parity)
 - [Composable States](./composable-states)
+- [Daily Devlog Automation](./daily-devlog-automation)
 - [Depth Precision Long Distance](./depth-precision-long-distance)
 - [Devlog Social Rendering](./devlog-social-rendering)
 - [Directional Focus Traversal](./directional-focus-traversal)
