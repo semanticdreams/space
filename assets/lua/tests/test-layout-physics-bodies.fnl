@@ -720,38 +720,34 @@
             (assert anchor-entry "Should find anchor-mode movable entry")
             (assert anchor-entry.on-drag-end "Anchor mode should include on-drag-end callback")
 
-            ;; Set up a fake body with known position and a non-identity rotation.
-            ;; The key assertion: after on-drag-end, layout rotation must match
-            ;; the body rotation (not some stale pre-drag value).
-            (var set-world-transform-called false)
-            (local body-position (bt.Vector3 10 20 30))
-            ;; Body rotated 45 degrees around Y axis
+            ;; Use the real Bullet body. Set its transform to a known position
+            ;; and a non-identity rotation before calling on-drag-end, so that
+            ;; syncMovedRigidBody receives a real btRigidBody pointer (safety).
+            ;; The body must be added to the physics world before on-drag-end
+            ;; calls syncMovedRigidBody, otherwise the C++ binding segfaults.
+            (when (not entry.body-active?)
+              (app.engine.physics:addRigidBody entry.body)
+              (set entry.body-active? true))
             (local half-sqrt2 (/ (math.sqrt 2) 2))
+            (local body-center (bt.Vector3 10 20 30))
             (local body-rotation (bt.Quaternion 0 half-sqrt2 0 half-sqrt2))
-            (local original-body entry.body)
-            (set entry.body
-                 {:getCenterOfMassTransform (fn [_self]
-                                              (local t (bt.Transform))
-                                              (t:setIdentity)
-                                              (t:setOrigin body-position)
-                                              (t:setRotation body-rotation)
-                                              t)
-                  :setWorldTransform (fn [_self _transform]
-                                      (set set-world-transform-called true))
-                  :setLinearVelocity (fn [_self _v] nil)
-                  :forceActivationState (fn [_self _state] nil)
-                  :activate (fn [_self _force] nil)
-                  :applyForce (fn [_self _f] nil)
-                  :applyForceAtPosition (fn [_self _f _p] nil)})
+            (local transform (bt.Transform))
+            (transform:setIdentity)
+            (transform:setOrigin body-center)
+            (transform:setRotation body-rotation)
+            (entry.body:setWorldTransform transform)
+            (when (and entry.rigid entry.rigid.motion-state)
+              (entry.rigid.motion-state:setWorldTransform transform))
+
+            ;; Set a non-zero linear velocity so we can verify that
+            ;; apply-layout-to-body was NOT called (it would zero it).
+            (entry.body:setLinearVelocity (bt.Vector3 1 2 3))
 
             ;; Mark entry as dragging so on-drag-end path executes
             (set entry.dragging true)
 
             ;; Call on-drag-end
             (anchor-entry.on-drag-end anchor-entry)
-
-            ;; Restore original body
-            (set entry.body original-body)
 
             ;; Assert layout rotation was set from body rotation (preserves body rotation)
             (assert (approx panel.layout.rotation.w (body-rotation:w))
@@ -766,15 +762,21 @@
             ;; Assert layout position was set from body position
             ;; Body center is at (10, 20, 30), half-size is (2, 2, 2)
             ;; layout-position = body-center - rotation * half
-            ;; rotation is 45 deg around Y: half rotated = roughly (-1.414, 2, 1.414)
-            ;; layout-position ≈ (10 + 1.414, 20 - 2, 30 - 1.414) = (11.414, 18, 28.586)
+            ;; rotation is 45 deg around Y: half rotated ≈ (2.828, 2, 0)
+            ;; layout-position ≈ (7.172, 18, 30)
             ;; We just verify it's not the original position (0, 12, 0)
             (assert (not (vec3-approx= panel.layout.position (glm.vec3 0 12 0)))
                     "Layout position should be updated from body transform, not remain at (0 12 0)")
 
-            ;; Assert apply-layout-to-body (setWorldTransform) was NOT called for anchor mode
-            (assert (not set-world-transform-called)
-                    "Anchor drag end should NOT call apply-layout-to-body; body transform already correct")))]
+            ;; Verify apply-layout-to-body was NOT called by checking that
+            ;; linear velocity was not zeroed (apply-layout-to-body calls
+            ;; setLinearVelocity(0, 0, 0)).
+            ;; getLinearVelocity returns a btVector3 with .x .y .z field access.
+            (local final-velocity (entry.body:getLinearVelocity))
+            (assert (not (and (approx final-velocity.x 0)
+                              (approx final-velocity.y 0)
+                              (approx final-velocity.z 0)))
+                    "Anchor drag end should NOT call apply-layout-to-body; body velocity should not be zeroed")))]
     (cleanup)
     (set app.activity-drag-attachment-provider original-provider)
     (when (not ok)
