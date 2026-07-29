@@ -521,15 +521,21 @@
             (tset call :enclosing-fn parent.name))))))
   synthetic-parents)
 
+(fn escape-lua-pattern [s]
+  "Escape Lua pattern magic characters in s for use in string.find patterns."
+  (s:gsub "([%^%$%(%)%%%.%[%]%*%+%-%?])" "%%%1"))
+
 (fn span-for-fn-def [source d]
   "Compute the real byte span of a fn definition from source text
    by finding its '(fn <name>' pattern and matching parens.
    Returns nil if the span cannot be determined."
   (local name-str (if (= d.name "<anonymous>") nil d.name))
   (when name-str
-    (local pattern (.. "%(fn " name-str "[%s%(%)%[%]]"))
+    (local escaped-name (escape-lua-pattern name-str))
+    (local pattern (.. "%(fn " escaped-name "[%s%(%)%[%]]"))
     (local search-pos (if d.start-byte (math.max 1 d.start-byte) 1))
-    (local match-pos (source:find pattern (- search-pos 20)))
+    (local init (math.max 1 (- search-pos 20)))
+    (local match-pos (source:find pattern init))
     (when match-pos
       (local end-pos (find-matching-paren source match-pos))
       (when end-pos
@@ -556,15 +562,24 @@
                              :start-byte rp.start-byte
                              :end-byte rp.end-byte})))
 
-  ;; For each child definition, find the smallest containing parent
+  ;; For each child definition, find the smallest containing parent.
+  ;; Use corrected source-text spans for the child when available;
+  ;; fall back to tree-sitter spans only when source-text matching fails.
   (each [_ child (ipairs definitions)]
-    (when (and child.start-byte child.end-byte)
+    (local child-span (span-for-fn-def source child))
+    (local child-start (if child-span
+                           child-span.start-byte
+                           child.start-byte))
+    (local child-end (if child-span
+                         child-span.end-byte
+                         child.end-byte))
+    (when (and child-start child-end)
       (var best-parent nil)
       (var best-span nil)
       (each [_ parent (ipairs all-fns)]
         (when (and (not= parent.name child.name)
-                   (>= child.start-byte parent.start-byte)
-                   (<= child.end-byte parent.end-byte))
+                   (>= child-start parent.start-byte)
+                   (<= child-end parent.end-byte))
           (local span (- parent.end-byte parent.start-byte))
           (when (if (= best-parent nil) true (< span best-span) true false)
             (set best-parent parent)

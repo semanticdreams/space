@@ -290,9 +290,8 @@
    register-hoverables was misattributed to pointer-from-payload."
   (local assets-path (or (os.getenv "SPACE_ASSETS_PATH") "/home/ubuntu/space/space/assets"))
   (local scroll-path (fs.join-path assets-path "lua/scroll-view.fnl"))
-  (when (not (fs.exists scroll-path))
-    (print "SKIP: scroll-view.fnl not found (expected in CI)")
-    (os.exit 0))
+  (assert (fs.exists scroll-path)
+          (.. "scroll-view.fnl fixture required at " scroll-path " — set SPACE_ASSETS_PATH"))
   (local target {:kind :files
                  :name "facts-enclosing-test"
                  :files [scroll-path]
@@ -336,7 +335,92 @@
 
   ;; unregister-hoverables should be enclosed by build, NOT pointer-from-payload
   (assert (= unreg-hoverables.enclosing-fn "build")
-          (.. "unregister-hoverables should have enclosing-fn=build, got " (tostring unreg-hoverables.enclosing-fn))))
+          (.. "unregister-hoverables should have enclosing-fn=build, got " (tostring unreg-hoverables.enclosing-fn)))
+
+  ;; R1-3: helpers must be non-top-level
+  (assert (= reg-hoverables.top-level? false)
+          "register-hoverables should not be top-level")
+  (assert (= unreg-hoverables.top-level? false)
+          "unregister-hoverables should not be top-level")
+
+  ;; R1-3: assert call for hoverables in build's scope must precede helpers
+  (var hoverables-assert-line nil)
+  (each [_ c (ipairs (or ff.calls []))]
+    (when (and (= c.callee "assert") (= c.enclosing-fn "build"))
+      (local form-str (if c.form c.form ""))
+      (when (form-str:find "hoverables" 1 true)
+        (set hoverables-assert-line c.line))))
+  (assert hoverables-assert-line
+          "should find assert(hoverables ...) call enclosed by build")
+  (assert (< hoverables-assert-line reg-hoverables.line)
+          "assert for hoverables must precede register-hoverables")
+  (assert (< hoverables-assert-line unreg-hoverables.line)
+          "assert for hoverables must precede unregister-hoverables")
+
+  ;; R1-3: no layout.interactive-context-assertion diagnostics for scroll-view
+  (local Layout (require :constraints.rules.layout))
+  (var rule nil)
+  (each [_ r (ipairs (Layout.rules))]
+    (when (= r.id "layout.interactive-context-assertion")
+      (set rule r)))
+  (assert rule "should find interactive-context-assertion rule")
+  (local diags (rule.run {:facts fact-db :target {:kind :repo :name :test}}))
+  (var scroll-diags 0)
+  (each [_ d (ipairs (or diags []))]
+    (when (= d.file scroll-path)
+      (set scroll-diags (+ scroll-diags 1))))
+  (assert (= scroll-diags 0)
+          (.. "expected 0 ScrollView interactive diagnostics, got " scroll-diags)))
+
+;; --- R1-1: Enclosing function parent at byte zero ---
+
+(fn enclosing-fn-parent-at-byte-zero []
+  "A parent function at the very start of the file (byte 0) should
+   still be found by span-for-fn-def. The search init must be clamped."
+  (local source "(fn outer [x]\n  (fn inner [y]\n    (+ x y)))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var inner-fixture nil)
+  (each [_ d (ipairs ff.definitions)]
+    (when (and (= d.kind :fn) (= d.name "inner"))
+      (set inner-fixture d)))
+  (assert inner-fixture "should find inner definition")
+  (assert (= inner-fixture.enclosing-fn "outer")
+          (.. "inner should have enclosing-fn=outer, got " (tostring inner-fixture.enclosing-fn)))
+  (assert (= inner-fixture.top-level? false)
+          "inner should not be top-level"))
+
+;; --- R1-1: Enclosing function parent with hyphens ---
+
+(fn enclosing-fn-parent-with-hyphens []
+  "A parent function with hyphens in its name (e.g. make-widget) should
+   be found by span-for-fn-def. The hyphen must be escaped."
+  (local source "(fn make-widget [opts]\n  (fn helper [x]\n    (+ x 1)))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var helper-fixture nil)
+  (each [_ d (ipairs ff.definitions)]
+    (when (and (= d.kind :fn) (= d.name "helper"))
+      (set helper-fixture d)))
+  (assert helper-fixture "should find helper definition")
+  (assert (= helper-fixture.enclosing-fn "make-widget")
+          (.. "helper should have enclosing-fn=make-widget, got " (tostring helper-fixture.enclosing-fn))))
+
+;; --- R1-1: Enclosing function parent with question mark ---
+
+(fn enclosing-fn-parent-with-question-mark []
+  "A parent function with ? in its name (Fennel convention for predicates)
+   should be found by span-for-fn-def."
+  (local source "(fn valid? [x]\n  (fn check [y]\n    x))\n")
+  (local fact-db (extract-from-source source))
+  (local ff (. fact-db.files 1))
+  (var check-fixture nil)
+  (each [_ d (ipairs ff.definitions)]
+    (when (and (= d.kind :fn) (= d.name "check"))
+      (set check-fixture d)))
+  (assert check-fixture "should find check definition")
+  (assert (= check-fixture.enclosing-fn "valid?")
+          (.. "check should have enclosing-fn=valid?, got " (tostring check-fixture.enclosing-fn))))
 
 ;; Register all tests
 (table.insert tests {:name "facts extracts require module"
@@ -377,6 +461,12 @@
                      :fn exports-are-restricted-to-top-level-tables})
 (table.insert tests {:name "facts enclosing fn uses smallest containing span"
                      :fn enclosing-fn-uses-smallest-containing-span})
+(table.insert tests {:name "facts enclosing fn parent at byte zero"
+                     :fn enclosing-fn-parent-at-byte-zero})
+(table.insert tests {:name "facts enclosing fn parent with hyphens"
+                     :fn enclosing-fn-parent-with-hyphens})
+(table.insert tests {:name "facts enclosing fn parent with question mark"
+                     :fn enclosing-fn-parent-with-question-mark})
 
 (local main
   (fn []
