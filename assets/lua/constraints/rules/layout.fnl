@@ -578,6 +578,19 @@
                 true
                 false)))))
 
+(fn fn-def-constructs-local-kw? [def cleaned-form kw]
+  "Check if kw is locally constructed as a local binding in the function body.
+  E.g., (local clickables {:register ...}) or (local clickables ...).
+  Only applies when the function has no enclosing parent scope — nested
+  helpers that shadow parent keywords should still be flagged.
+  Uses the raw def.form, not the cleaned version from outer-only-form,
+  to avoid false negatives from nested-def blanking."
+  (when (and def.form def.kind (= def.kind :fn) (not def.enclosing-fn))
+    (local no-strings (strip-strings def.form))
+    (local clean (strip-comments no-strings))
+    (local local-pat (.. "%(local[%s\n]+" kw "[%s\n]+%{"))
+    (if (clean:find local-pat) true false)))
+
 ;; ---- precision helpers for interactive-context-assertion ----
 
 (fn assert-call-targets-kw? [calls parent-name child-line kw]
@@ -788,10 +801,15 @@
            (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
                  has-bare (fn-def-has-bare-interactive? def cleaned)
                  asserted (fn-def-has-assert-call? calls def)]
-             (var bare-covered {})
-             (when (and (not asserted) has-bare (not has-access)
-                        (not (fn-def-has-dotted-interactive? def cleaned)))
-               (set bare-covered (build-bare-covered def cleaned calls all-defs)))
+              (var bare-covered {})
+              (when (and (not asserted) has-bare (not has-access)
+                         (not (fn-def-has-dotted-interactive? def cleaned)))
+                (set bare-covered (build-bare-covered def cleaned calls all-defs))
+                ;; Locally constructed adapter tables (e.g., (local clickables {:register ...}))
+                ;; are owned infrastructure, not external services requiring assertion.
+                (each [kw _ (pairs interactive-access-patterns)]
+                  (when (fn-def-constructs-local-kw? def cleaned kw)
+                    (tset bare-covered kw true))))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
             (when (and (not asserted) has-bare (not has-access)

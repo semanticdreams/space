@@ -935,6 +935,7 @@
                                             {:kind :fn
                                              :name "helper"
                                              :top-level? false
+                                             :enclosing-fn "make-widget"
                                              :line 3 :column 10
                                              :length (length helper-form)
                                              :form helper-form}]

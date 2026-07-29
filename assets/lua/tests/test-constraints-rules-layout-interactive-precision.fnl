@@ -1007,4 +1007,177 @@
 (table.insert tests {:name "interactive-assertion allows ButtonWidget real facts four helpers"
                       :fn interactive-assertion-allows-buttonwidget-real-facts-four-helpers})
 
+;; ==== local adapter construction ====
+
+(fn interactive-assertion-allows-local-clickables-adapter-construction []
+  "A function that locally constructs clickables as a table literal and returns
+  it should pass — this is owned infrastructure construction, not consuming
+  an external routing service without assertion.
+  Models renderers.fnl make-interaction-adapters pattern."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn make-interaction-adapters [router]
+  (local clickables
+    {:register (fn [_self node] (router:register-clickable node))
+     :unregister (fn [_self node] (router:unregister-clickable node))})
+  {:clickables clickables})")
+  (local ff (make-file-fact {:path "/src/renderers.fnl"
+                              :module "next-app.renderers"
+                              :definitions [{:kind :fn
+                                             :name "make-interaction-adapters"
+                                             :top-level? true
+                                             :line 269 :column 1
+                                             :length (length form)
+                                             :form form}]
+                              :calls []
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "make-interaction-adapters")
+      (set flagged true)))
+  (assert (not flagged)
+          "locally constructed clickables adapter should not be flagged"))
+
+(fn interactive-assertion-allows-local-hoverables-adapter-construction []
+  "A function that locally constructs hoverables as a table literal and returns
+  it should pass — same as clickables."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn make-interaction-adapters [router]
+  (local hoverables
+    {:register (fn [_self node] (router:register-hoverable node))
+     :unregister (fn [_self node] (router:unregister-hoverable node))})
+  {:hoverables hoverables})")
+  (local ff (make-file-fact {:path "/src/renderers.fnl"
+                              :module "next-app.renderers"
+                              :definitions [{:kind :fn
+                                             :name "make-interaction-adapters"
+                                             :top-level? true
+                                             :line 269 :column 1
+                                             :length (length form)
+                                             :form form}]
+                              :calls []
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "make-interaction-adapters")
+      (set flagged true)))
+  (assert (not flagged)
+          "locally constructed hoverables adapter should not be flagged"))
+
+(fn interactive-assertion-allows-local-both-adapters-construction []
+  "A function that locally constructs both clickables and hoverables as table
+  literals and returns them should pass."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn make-interaction-adapters [router]
+  (local clickables
+    {:register (fn [_self node] (router:register-clickable node))
+     :unregister (fn [_self node] (router:unregister-clickable node))})
+  (local hoverables
+    {:register (fn [_self node] (router:register-hoverable node))
+     :unregister (fn [_self node] (router:unregister-hoverable node))})
+  {:clickables clickables :hoverables hoverables})")
+  (local ff (make-file-fact {:path "/src/renderers.fnl"
+                              :module "next-app.renderers"
+                              :definitions [{:kind :fn
+                                             :name "make-interaction-adapters"
+                                             :top-level? true
+                                             :line 269 :column 1
+                                             :length (length form)
+                                             :form form}]
+                              :calls []
+                              :accesses []}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "make-interaction-adapters")
+      (set flagged true)))
+  (assert (not flagged)
+          "locally constructed both adapters should not be flagged"))
+
+;; Negative: locally constructed clickables, but hoverables from external source
+(fn interactive-assertion-flags-external-hoverables-despite-local-clickables []
+  "A function that locally constructs clickables but uses hoverables from an
+  external source (options.hoverables) should still be flagged."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn make-adapters [options]
+  (local clickables
+    {:register (fn [_self n] nil)
+     :unregister (fn [_self n] nil)})
+  (local hoverables options.hoverables)
+  (hoverables:register widget))")
+  (local ff (make-file-fact {:path "/src/mixed.fnl"
+                              :module "mixed"
+                              :definitions [{:kind :fn
+                                             :name "make-adapters"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length form)
+                                             :form form}]
+                              :calls []
+                              :accesses [{:text "options.hoverables"
+                                          :path ["options" "hoverables"]
+                                          :line 4 :column 1
+                                          :form "options.hoverables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "make-adapters")
+      (set flagged true)))
+  (assert flagged "externally sourced hoverables should still be flagged"))
+
+;; Negative: locally constructed but also dotted access
+(fn interactive-assertion-flags-local-construction-with-dotted-access []
+  "A function that locally constructs clickables but also uses dotted
+  .clickables access should still be flagged."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn configure [ctx]
+  (local clickables {:register (fn [_self n] nil)})
+  (ctx.clickables:register widget))")
+  (local ff (make-file-fact {:path "/src/mixed.fnl"
+                              :module "mixed"
+                              :definitions [{:kind :fn
+                                             :name "configure"
+                                             :top-level? true
+                                             :line 1 :column 1
+                                             :length (length form)
+                                             :form form}]
+                              :calls []
+                              :accesses [{:text "ctx.clickables"
+                                          :path ["ctx" "clickables"]
+                                          :line 2 :column 1
+                                          :form "ctx.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (var flagged false)
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "configure")
+      (set flagged true)))
+  (assert flagged "local construction with dotted access should still be flagged"))
+
+(table.insert tests {:name "interactive-assertion allows local clickables adapter construction"
+                     :fn interactive-assertion-allows-local-clickables-adapter-construction})
+(table.insert tests {:name "interactive-assertion allows local hoverables adapter construction"
+                     :fn interactive-assertion-allows-local-hoverables-adapter-construction})
+(table.insert tests {:name "interactive-assertion allows local both adapters construction"
+                     :fn interactive-assertion-allows-local-both-adapters-construction})
+(table.insert tests {:name "interactive-assertion flags external hoverables despite local clickables"
+                     :fn interactive-assertion-flags-external-hoverables-despite-local-clickables})
+(table.insert tests {:name "interactive-assertion flags local construction with dotted access"
+                     :fn interactive-assertion-flags-local-construction-with-dotted-access})
+
 {:tests tests}
