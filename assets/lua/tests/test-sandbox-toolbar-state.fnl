@@ -171,6 +171,21 @@
   (local (ok _) (pcall state.restore-state state nil))
   (assert ok "restore-state must accept nil payload without error"))
 
+(fn sandbox-toolbar-state-constructor-rejects-non-boolean-object-move-enabled []
+  "Construction with explicit non-boolean object-move-enabled? must error."
+  (local (ok err) (pcall SandboxToolbarState {:object-move-enabled? "false"}))
+  (assert (not ok) "Constructor must error on string 'false' for object-move-enabled?")
+  (assert (err:find "boolean")
+          (.. "Error must mention boolean, got: " (tostring err)))
+  (local (ok2 err2) (pcall SandboxToolbarState {:object-move-enabled? 1}))
+  (assert (not ok2) "Constructor must error on number 1 for object-move-enabled?")
+  (local (ok3 _) (pcall SandboxToolbarState {:object-move-enabled? true}))
+  (assert ok3 "Constructor must accept true for object-move-enabled?")
+  (local (ok4 _) (pcall SandboxToolbarState {:object-move-enabled? false}))
+  (assert ok4 "Constructor must accept false for object-move-enabled?")
+  (local (ok5 _) (pcall SandboxToolbarState {}))
+  (assert ok5 "Constructor must accept nil (default) for object-move-enabled?"))
+
 (table.insert tests {:name "sandbox toolbar state defaults"
                       :fn sandbox-toolbar-state-defaults})
 (table.insert tests {:name "sandbox toolbar state changed signal fires on mutation"
@@ -198,7 +213,9 @@
 (table.insert tests {:name "sandbox toolbar state restore rejects non-table payload"
                       :fn sandbox-toolbar-state-restore-rejects-non-table-payload})
 (table.insert tests {:name "sandbox toolbar state restore accepts nil payload"
-                      :fn sandbox-toolbar-state-restore-accepts-nil-payload})
+                       :fn sandbox-toolbar-state-restore-accepts-nil-payload})
+(table.insert tests {:name "sandbox toolbar state constructor rejects non-boolean object move enabled"
+                       :fn sandbox-toolbar-state-constructor-rejects-non-boolean-object-move-enabled})
 
 (local main
   (fn []

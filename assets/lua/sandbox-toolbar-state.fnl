@@ -6,7 +6,14 @@
 (fn SandboxToolbarState [opts]
   (local options (or opts {}))
   (var camera-mode (or options.camera-mode :flight))
-  (var object-move-enabled? (= options.object-move-enabled? true))
+  (var object-move-enabled?
+    (if (= options.object-move-enabled? nil)
+        false
+        (= (type options.object-move-enabled?) :boolean)
+        options.object-move-enabled?
+        (error (.. "object-move-enabled? must be boolean, got "
+                   (tostring (type options.object-move-enabled?))
+                   ": " (tostring options.object-move-enabled?)))))
   (var drag-attachment (or options.drag-attachment :center))
 
   (when (not (. valid-camera-modes camera-mode))
