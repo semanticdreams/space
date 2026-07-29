@@ -242,9 +242,48 @@
            (= fn-name "init-test-app")) true
       false))
 
+(fn operand-is-path-prefix? [op path-text]
+  "Check if op is a strict path prefix of path-text (followed by . or end)."
+  (local ol (length op))
+  (local pl (length path-text))
+  (if (< pl ol) false
+      (not (= (path-text:sub 1 ol) op)) false
+      (> pl ol) (= (path-text:sub (+ ol 1) (+ ol 1)) ".")
+      true))
+
+(fn all-operands-are-prefixes? [operands path-text]
+  "Check that all operands (except the last) are path prefixes of path-text."
+  (var all-prefixes true)
+  (for [i 1 (- (length operands) 1)]
+    (when (and all-prefixes (not (operand-is-path-prefix? (. operands i) path-text)))
+      (set all-prefixes false)))
+  all-prefixes)
+
+(fn check-and-operands [operands path-text]
+  "Validate (and ...) operands: final operand must be exact path, all prior
+   must be path-prefix guards. Returns true if valid."
+  (local nops (length operands))
+  (if (<= nops 0) false
+      (not (= (. operands nops) path-text)) false
+      (all-operands-are-prefixes? operands path-text)))
+
+(fn try-and-snapshot-var [fn-form path-text]
+  "Try to find a snapshot variable from a nil-guarded (and ...) form.
+   Returns the variable name or nil."
+  (var snap-var nil)
+  (each [var-name and-body (fn-form:gmatch (.. "%(local%s+([^%s]+)%s+%(and%s+(.-)%)%s*%)"))]
+    (when (not snap-var)
+      (local operands [])
+      (each [op (and-body:gmatch "[^%s]+")]
+        (table.insert operands op))
+      (when (check-and-operands operands path-text)
+        (set snap-var var-name))))
+  snap-var)
+
 (fn find-snapshot-var [fn-form path]
   "Find the first snapshot variable bound to the given path via let or local.
-   Returns the variable name as a string, or nil if none found."
+   Returns the variable name as a string, or nil if none found.
+   Supports nil-guarded snapshots via (and guard1 ... guardN exact-path)."
   (local path-text (table.concat path "."))
   (local escaped-path (escape-pattern path-text))
   (var snap-var nil)
@@ -257,6 +296,9 @@
     (each [v (fn-form:gmatch (.. "%(local%s+([^%s]+)%s+" escaped-path))]
       (when (not snap-var)
         (set snap-var v))))
+  ;; Check (local VAR (and ...) ...) nil-guarded snapshots
+  (when (not snap-var)
+    (set snap-var (try-and-snapshot-var fn-form path-text)))
   snap-var)
 
 
@@ -392,6 +434,25 @@
                              (set search-start (+ end2 1))))
                        (set search-start nil))))))
         found)))
+
+(fn check-parent-pcall-restoration [ff fn-def-line anon-def-col path-text path-segments max-line]
+  "Check if an anonymous fn inside a pcall has parent-scope snapshot/restore.
+   Returns true if the parent function has snapshot before pcall + restore after pcall."
+  (local containing (find-containing-fn-defs ff.definitions fn-def-line anon-def-col))
+  (if (<= (length containing) 1) false
+      (do
+        (local parent (. containing 2))
+        (if (not (and parent.form parent.line)) false
+            (do
+              (local parent-pcall-ranges (find-all-pcall-fn-ranges parent.form))
+              (if (<= (length parent-pcall-ranges) 0) false
+                  (do
+                    (local parent-enclosing-pcall-end
+                      (find-enclosing-pcall-end-byte parent.form parent.line max-line parent-pcall-ranges))
+                    (if (not parent-enclosing-pcall-end) false
+                        (if (has-concrete-restore-after-byte? parent.form parent.line path-segments parent-enclosing-pcall-end) true
+                            (has-helper-restore-after-byte? parent.form path-text parent-enclosing-pcall-end) true
+                            false)))))))))
 
 ;; --- Extracted helpers for global-mutation-restoration-rule-run ---
 
@@ -709,6 +770,12 @@
       (set has-restoration true)))
   (when (and (not has-restoration) enclosing-pcall-end)
     (when (has-helper-restore-after-byte? fn-form path-text enclosing-pcall-end)
+      (set has-restoration true)))
+  ;; Parent-scope pcall restoration: when the anonymous fn form lacks
+  ;; snapshot/restore (because they're in the parent), check the parent
+  ;; function's form for snapshot before pcall + restore after pcall.
+  (when (and (not has-restoration) (= fn-name "<anonymous>"))
+    (when (check-parent-pcall-restoration ff fn-def-line anon-def-col path-text path-segments max-line)
       (set has-restoration true)))
   has-restoration)
 

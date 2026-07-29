@@ -662,6 +662,227 @@
           "multiple non-restore mutations then restore after last should pass"))
 
 ;; ======================================================================
+;; (and ...) nil-guarded snapshot tests
+;; ======================================================================
+
+(fn mutation-restoration-allows-and-guarded-subpath-snapshot []
+  "Positive: (and app.engine app.engine.width) snapshot + pcall mutate + restore after pcall passes."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-and-subpath"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-and-subpath []
+  (local orig (and app.engine app.engine.width))
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (set app.engine.width orig))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 8 :column 1
+                                            :form "(set app.engine.width 100)"
+                                            :enclosing-fn "test-and-subpath"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "guarded subpath (and app.engine app.engine.width) snapshot + pcall restore should pass"))
+
+(fn mutation-restoration-allows-and-guarded-whole-object-snapshot []
+  "Positive: (and app app.engine) whole-object snapshot + pcall mutate + restore after pcall passes."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-and-whole"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-and-whole []
+  (local prev (and app app.engine))
+  (pcall (fn []
+    (set app.engine {:now-ms (fn [s] 0)})))
+  (set app.engine prev))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine"]
+                                            :line 8 :column 1
+                                            :form "(set app.engine {:now-ms (fn [s] 0)})"
+                                            :enclosing-fn "test-and-whole"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "guarded whole-object (and app app.engine) snapshot + pcall restore should pass"))
+
+(fn mutation-restoration-flags-or-guarded-snapshot []
+  "Negative: (or ...) snapshot does not count as exact snapshot."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-or-guard"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-or-guard []
+  (local orig (or app.engine.width 100))
+  (pcall (fn []
+    (set app.engine.width 200)))
+  (set app.engine.width orig))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 8 :column 1
+                                            :form "(set app.engine.width 200)"
+                                            :enclosing-fn "test-or-guard"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag (or ...) snapshot — not an exact snapshot")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+(fn mutation-restoration-flags-and-with-unrelated-guard []
+  "Negative: (and condition app.engine.width) where condition is not a path prefix should not count."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-unrelated-guard"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-unrelated-guard []
+  (local orig (and some-condition app.engine.width))
+  (pcall (fn []
+    (set app.engine.width 200)))
+  (set app.engine.width orig))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 8 :column 1
+                                            :form "(set app.engine.width 200)"
+                                            :enclosing-fn "test-unrelated-guard"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag (and condition path) where condition is not a path prefix")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+(fn mutation-restoration-flags-pcall-restore-before-mutate-and-guard []
+  "Negative: restore before pcall then later unguarded mutation should still flag."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-restore-before-leak"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 250
+                                             :form "(fn test-restore-before-leak []
+  (local orig (and app.engine app.engine.width))
+  (set app.engine.width orig)
+  (pcall (fn []
+    (set app.engine.width 300))))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 6 :column 1
+                                            :form "(set app.engine.width orig)"
+                                            :enclosing-fn "test-restore-before-leak"}
+                                           {:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 9 :column 1
+                                            :form "(set app.engine.width 300)"
+                                            :enclosing-fn "test-restore-before-leak"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag restore before pcall + later unguarded mutation")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+;; ======================================================================
+;; Parent-scope pcall restoration tests
+;; ======================================================================
+
+(fn mutation-restoration-allows-anon-pcall-parent-restore []
+  "Positive: anonymous fn inside pcall; mutation attributed to <anonymous>; parent named fn has snapshot/restore around pcall."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-parent-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 250
+                                             :form "(fn test-parent-restore []
+  (local orig (and app.engine app.engine.width))
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (set app.engine.width orig))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 8 :column 1
+                                             :length 50
+                                  :form "(fn [] (set app.engine.width 100))"}]
+                                :mutations [{:op :set
+                                             :path ["app" "engine" "width"]
+                                             :line 8 :column 1
+                                             :form "(set app.engine.width 100)"
+                                             :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "anonymous pcall-body mutation restored by parent snapshot/restore after pcall should pass"))
+
+(fn mutation-restoration-flags-anon-pcall-no-parent-restore []
+  "Negative: anonymous fn inside pcall; parent has no snapshot or restore — flag."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-anon-no-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-anon-no-restore []
+  (pcall (fn []
+    (set app.engine.width 100)))
+  (do-test))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 7 :column 1
+                                             :length 40
+                                  :form "(fn [] (set app.engine.width 100))"}]
+                                :mutations [{:op :set
+                                             :path ["app" "engine" "width"]
+                                             :line 7 :column 1
+                                             :form "(set app.engine.width 100)"
+                                             :enclosing-fn "test-anon-no-restore"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag anonymous pcall mutation without parent restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+(fn mutation-restoration-flags-parent-restore-outside-pcall []
+  "Negative: parent restore should not suppress a mutation outside pcall body when the mutation was not inside pcall."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl"
+                              :module "tests.test-bad"
+                              :definitions [{:kind :fn
+                                             :name "test-outside-pcall"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-outside-pcall []
+  (set app.engine.width 100)
+  (pcall (fn []
+    (do-something)))
+  (do-test))"}]
+                               :mutations [{:op :set
+                                            :path ["app" "engine" "width"]
+                                            :line 7 :column 1
+                                            :form "(set app.engine.width 100)"
+                                            :enclosing-fn "test-outside-pcall"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag mutation outside pcall body without snapshot or restore")
+  (assert (> (length result) 0) "should have at least one diagnostic")
+  (local d (. result 1))
+  (assert (= d.constraint-id "lifecycle.global-mutation-restoration")))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -730,6 +951,14 @@
 (table.insert tests {:name "mutation-restoration flags unrelated RHS hyphenated path" :fn mutation-restoration-flags-unrelated-rhs-hyphenated-path})
 (table.insert tests {:name "mutation-restoration flags restore before later mutation hyphenated" :fn mutation-restoration-flags-restore-before-later-mutation-hyphenated-path})
 (table.insert tests {:name "mutation-restoration allows multi nonrestore then restore hyphenated" :fn mutation-restoration-allows-multi-nonrestore-then-restore-hyphenated})
+(table.insert tests {:name "mutation-restoration allows and guarded subpath snapshot" :fn mutation-restoration-allows-and-guarded-subpath-snapshot})
+(table.insert tests {:name "mutation-restoration allows and guarded whole object snapshot" :fn mutation-restoration-allows-and-guarded-whole-object-snapshot})
+(table.insert tests {:name "mutation-restoration flags or guarded snapshot" :fn mutation-restoration-flags-or-guarded-snapshot})
+(table.insert tests {:name "mutation-restoration flags and with unrelated guard" :fn mutation-restoration-flags-and-with-unrelated-guard})
+(table.insert tests {:name "mutation-restoration flags pcall restore before mutate and guard" :fn mutation-restoration-flags-pcall-restore-before-mutate-and-guard})
+(table.insert tests {:name "mutation-restoration allows anon pcall parent restore" :fn mutation-restoration-allows-anon-pcall-parent-restore})
+(table.insert tests {:name "mutation-restoration flags anon pcall no parent restore" :fn mutation-restoration-flags-anon-pcall-no-parent-restore})
+(table.insert tests {:name "mutation-restoration flags parent restore outside pcall" :fn mutation-restoration-flags-parent-restore-outside-pcall})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
