@@ -729,9 +729,14 @@
               (when (= t text) (set already true)))
             (when (not already)
               (table.insert interactive-access-texts text))))))
-    (let [calls (or ff.calls [])
-          all-defs (or ff.definitions [])]
-      (each [_ def (ipairs all-defs)]
+     (let [calls (or ff.calls [])
+           all-defs (or ff.definitions [])]
+       ;; Merge recovered synthetic parents (from ERROR recovery)
+       ;; so the closure-helper bypass can find the parent definition.
+       (when ff.recovered-parents
+         (each [_ rp (ipairs ff.recovered-parents)]
+           (table.insert all-defs rp)))
+       (each [_ def (ipairs all-defs)]
         (var skip-because-param false)
         ;; Build a form that excludes nested named function definitions,
         ;; so accesses inside nested functions are not attributed to the

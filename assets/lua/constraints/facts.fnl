@@ -444,14 +444,15 @@
 
 (fn recover-error-root [source root definitions calls]
   "When root is ERROR, scan source for top-level named fn forms missing
-  from definitions, but ONLY add a synthetic parent when at least one
+  from definitions, but ONLY create a synthetic parent when at least one
   existing definition with nil enclosing-fn is byte-contained within it.
-  Then update that child (and calls). Scope-safe and narrow — no synthetic
-  parents for fully-parsed files."
+  Returns the list of synthetic parents (NOT inserted into definitions,
+  so structure rules do not see them). Updates child enclosing-fn and
+  call enclosing-fn in-place. Scope-safe and narrow."
+  (local synthetic-parents [])
   (when (= (root:type) "ERROR")
     (var scan-pos 1)
     (local source-len (length source))
-    (local synthetic-parents [])
     (while (<= scan-pos source-len)
       (local fn-start (source:find "(fn " scan-pos true))
       (if (not fn-start)
@@ -471,8 +472,6 @@
                   (each [_ d (ipairs definitions)]
                     (when (= d.name fn-name) (set already true)))
                   (when (not already)
-                    ;; Only add this parent if at least one child
-                    ;; with nil enclosing-fn is contained within.
                     (local parent-start (- fn-start 1))
                     (var has-orphan-child false)
                     (each [_ child (ipairs definitions)]
@@ -485,7 +484,7 @@
                     (when has-orphan-child
                       (local lc (line-col-at-byte source fn-start))
                       (local end-lc (line-col-at-byte source close-paren))
-                      (local parent-def
+                      (table.insert synthetic-parents
                         {:kind :fn
                          :name fn-name
                          :top-level? true
@@ -495,9 +494,7 @@
                          :end-byte close-paren
                          :end-line end-lc.line
                          :form (source:sub fn-start close-paren)
-                         :enclosing-fn nil})
-                      (table.insert definitions parent-def)
-                      (table.insert synthetic-parents parent-def))))))
+                         :enclosing-fn nil}))))))
             (set scan-pos (if name-end name-end after-fn)))))
     (each [_ child (ipairs definitions)]
       (when (and (= child.enclosing-fn nil)
@@ -514,7 +511,8 @@
           (when (and parent.line parent.end-line
                      (>= call.line parent.line)
                      (<= call.line parent.end-line))
-            (tset call :enclosing-fn parent.name)))))))
+            (tset call :enclosing-fn parent.name))))))
+  synthetic-parents)
 
 (fn M.extract [file-records]
   "Extract static facts from a list of file records.
@@ -524,10 +522,12 @@
   (let [by-file {}
         files []]
     (each [_ record (ipairs file-records)]
-      (let [file-facts (extract-file-facts record)]
-        (recover-error-root record.source record.root
-                            file-facts.definitions
-                            file-facts.calls)
+      (let [file-facts (extract-file-facts record)
+            recovered (recover-error-root record.source record.root
+                                          file-facts.definitions
+                                          file-facts.calls)]
+        (when (> (length recovered) 0)
+          (tset file-facts :recovered-parents recovered))
         (table.insert files file-facts)
         (tset by-file record.path file-facts)))
     {:files files

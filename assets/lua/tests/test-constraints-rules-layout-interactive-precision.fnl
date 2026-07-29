@@ -871,13 +871,19 @@
   (assert fact-db "fact-db should not be nil")
   (assert (>= (length fact-db.files) 1) "should have at least 1 file fact")
   (local ff (. fact-db.files 1))
-  ;; Assert ButtonWidget and 4 helpers are present
+  ;; Build merged def list: definitions + recovered parents (from ERROR recovery)
+  (local all-defs [])
+  (each [_ d (ipairs (or ff.definitions []))]
+    (table.insert all-defs d))
+  (each [_ rp (ipairs (or ff.recovered-parents []))]
+    (table.insert all-defs rp))
+  ;; Assert ButtonWidget and 4 helpers are present (in merged list)
   (var bw-found false)
   (var regc-found false)
   (var unregc-found false)
   (var regh-found false)
   (var unregh-found false)
-  (each [_ d (ipairs (or ff.definitions []))]
+  (each [_ d (ipairs all-defs)]
     (if (= d.name "ButtonWidget") (set bw-found true)
         (= d.name "register-clickables") (set regc-found true)
         (= d.name "unregister-clickables") (set unregc-found true)
@@ -889,15 +895,15 @@
   (assert regh-found "should find register-hoverables definition")
   (assert unregh-found "should find unregister-hoverables definition")
   ;; Verify helpers have ButtonWidget as enclosing-fn
-  ;; Track BW byte span for containment checks
+  ;; Track BW byte span for containment checks (from recovered parents)
   (var bw-def nil)
-  (each [_ d (ipairs (or ff.definitions []))]
+  (each [_ d (ipairs all-defs)]
     (when (= d.name "ButtonWidget")
       (set bw-def d)
       (assert d.start-byte "ButtonWidget should have start-byte")
       (assert d.end-byte "ButtonWidget should have end-byte")))
   (assert bw-def "should find ButtonWidget definition in pass")
-  (each [_ d (ipairs (or ff.definitions []))]
+  (each [_ d (ipairs all-defs)]
     (when (or (= d.name "register-clickables")
               (= d.name "unregister-clickables")
               (= d.name "register-hoverables")
