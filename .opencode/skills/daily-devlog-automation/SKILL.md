@@ -58,7 +58,7 @@ Run `cd docs && npm run devlog:indices && npm run docs:build`. Inspect the final
 
 ## Commit, Push, and PR
 
-Commit after review. Push only `automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD` when authenticated. Verify branch protection and required checks are active before attempting auto-merge. Use `gh pr merge --auto --squash automation/daily-devlog/YYYY-MM-DD` only when protection rules and checks are confirmed available. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
+Commit after review. Push using `git push origin HEAD:refs/heads/automation/daily-devlog/YYYY-MM-DD`. Use `gh pr create --base main --head automation/daily-devlog/YYYY-MM-DD --fill` when authenticated. Verify branch protection and required checks are active before attempting auto-merge. Use `gh pr merge --auto --squash automation/daily-devlog/YYYY-MM-DD` only when protection rules and checks are confirmed available. Do not enable auto-merge merely because `gh` is authenticated. Never push directly to `origin/main`.
 
 ## Fail-Closed Cases
 

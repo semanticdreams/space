@@ -29,15 +29,12 @@ permission:
     "git push*": ask
     "git push origin opencode/workflow-debug/*": allow
     "git push origin main": ask
-    "git push origin automation/daily-devlog/*": allow
-    "git push -u origin automation/daily-devlog/*": allow
-    "git push --set-upstream origin automation/daily-devlog/*": allow
-    "git push origin HEAD:refs/heads/automation/daily-devlog/*": allow
+    "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
     "gh *": deny
     "gh auth status*": allow
-    "gh pr create --base main --head automation/daily-devlog/* *": allow
-    "gh pr view*": allow
-    "gh pr merge --auto --squash automation/daily-devlog/*": allow
+    "gh pr create --base main --head automation/daily-devlog/????-??-?? --fill": allow
+    "gh pr view automation/daily-devlog/????-??-??": allow
+    "gh pr merge --auto --squash automation/daily-devlog/????-??-??": allow
     "git push origin --delete *": ask
     "git push *--force*": deny
     "git push * -f*": deny
