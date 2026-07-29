@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "docs:dev": "node scripts/generate-devlog-index.mjs && node scripts/sync-space-icon.mjs && vitepress dev",
-    "docs:build": "node scripts/generate-devlog-index.mjs && node scripts/sync-space-icon.mjs && vitepress build",
+    "test": "npm run test:scripts",
+    "journal:index": "node scripts/generate-journal-index.mjs",
+    "devlog:index": "node scripts/generate-devlog-index.mjs",
+    "devlog:indices": "npm run journal:index && npm run devlog:index",
+    "test:scripts": "node --test scripts/test-*.mjs",
+    "docs:dev": "npm run devlog:indices && node scripts/sync-space-icon.mjs && vitepress dev",
+    "docs:build": "npm run devlog:indices && node scripts/sync-space-icon.mjs && vitepress build",
     "docs:preview": "vitepress preview"
   },
   "keywords": [],

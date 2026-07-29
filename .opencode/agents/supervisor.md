@@ -29,6 +29,12 @@ permission:
     "git push*": ask
     "git push origin opencode/workflow-debug/*": allow
     "git push origin main": ask
+    "git push origin HEAD:refs/heads/automation/daily-devlog/????-??-??": allow
+    "gh *": deny
+    "gh auth status*": allow
+    "gh pr create --base main --head automation/daily-devlog/????-??-?? --fill": allow
+    "gh pr view automation/daily-devlog/????-??-??": allow
+    "gh pr merge --auto --squash automation/daily-devlog/????-??-??": allow
     "git push origin --delete *": ask
     "git push *--force*": deny
     "git push * -f*": deny
@@ -98,6 +104,9 @@ before implementation skills.
 - If a request touches Space tests, E2E snapshots, remote-control debugging,
   profiling, build commands, or runtime harnesses, invoke `space-testing-runtime`
   before planning or implementation.
+- If a request says "Run the repo's daily devlog automation" or otherwise asks
+  for scheduled/daily devlog automation, invoke `daily-devlog-automation`
+  before dispatching implementation work.
 - Keep process skills first when they apply; do not invoke project skills for
   incidental overlap.
 
