@@ -2,6 +2,7 @@
 (local bt (require :bt))
 (local CoordinateGuard (require :coordinate-guard))
 (local logging (require :logging))
+(local Runtime (require :state-runtime))
 
 (local safe-vec3? CoordinateGuard.safe-vec3?)
 
@@ -281,10 +282,7 @@
       (set entry.spawn (glm.vec3 local-offset.x local-offset.y local-offset.z))))
 
 (fn drag-attachment-mode []
-  (if (and app.activity-drag-attachment-provider
-           (= (app.activity-drag-attachment-provider) :anchor))
-      :anchor
-      :center))
+  (Runtime.drag-attachment-mode))
 
 (fn resolve-entry-world-state [entry base-position base-rotation positioned]
   (local body entry.body)

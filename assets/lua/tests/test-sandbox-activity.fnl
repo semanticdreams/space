@@ -893,6 +893,33 @@
               "Drag attachment provider must return :center by default")
       true)))
 
+;; R1-3: Runtime.drag-attachment-mode returns correct mode
+(fn runtime-drag-attachment-mode-respects-provider []
+  "Runtime.drag-attachment-mode must return :center when no provider
+  installed, :anchor when provider returns :anchor, and :center when
+  provider returns nil or non-anchor value."
+  (local Runtime (require :state-runtime))
+  (with-restored-app
+    [:activity-drag-attachment-provider]
+    (fn []
+      ;; No provider installed
+      (set app.activity-drag-attachment-provider nil)
+      (assert (= (Runtime.drag-attachment-mode) :center)
+              "drag-attachment-mode must return :center when no provider")
+      ;; Provider returns :anchor
+      (set app.activity-drag-attachment-provider (fn [] :anchor))
+      (assert (= (Runtime.drag-attachment-mode) :anchor)
+              "drag-attachment-mode must return :anchor when provider returns :anchor")
+      ;; Provider returns :center
+      (set app.activity-drag-attachment-provider (fn [] :center))
+      (assert (= (Runtime.drag-attachment-mode) :center)
+              "drag-attachment-mode must return :center when provider returns :center")
+      ;; Provider returns some other value
+      (set app.activity-drag-attachment-provider (fn [] :other))
+      (assert (= (Runtime.drag-attachment-mode) :center)
+              "drag-attachment-mode must return :center for non-anchor provider value")
+      true)))
+
 (fn sandbox-snapshot-includes-toolbar-state []
   "Sandbox snapshot must include toolbar state under scene.toolbar."
   (with-restored-app
@@ -1081,6 +1108,8 @@
                       :fn sandbox-activation-installs-object-move-predicate})
 (table.insert tests {:name "sandbox activation installs drag attachment provider"
                       :fn sandbox-activation-installs-drag-attachment-provider})
+(table.insert tests {:name "Runtime.drag-attachment-mode respects provider"
+                      :fn runtime-drag-attachment-mode-respects-provider})
 (table.insert tests {:name "snapshot includes toolbar state"
                       :fn sandbox-snapshot-includes-toolbar-state})
 (table.insert tests {:name "restore includes toolbar state"

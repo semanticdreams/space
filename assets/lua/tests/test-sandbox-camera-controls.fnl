@@ -409,6 +409,144 @@
   (controls:drop)
   true)
 
+;; R1-1: y-channel syncs from current camera Y when entering grounded mode
+(fn flight-to-grounded-syncs-y-channel-from-current-camera-y []
+  "When camera is at Y=20 in flight mode and toggles to grounded,
+  the first grounded frame must start terrain smoothing from
+  current camera Y (20), not from the Y value captured at construction (0)."
+  (local camera (make-fake-camera))
+  (camera:set-position (glm.vec3 0 20 0))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local fake-sampler (make-fake-terrain-sampler 0))
+  ;; Construct controls in flight mode at camera Y=0 (construction time)
+  (camera:set-position (glm.vec3 0 0 0))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls
+                                           :terrain-sampler fake-sampler}))
+  ;; Move camera to Y=20 while in flight mode
+  (camera:set-position (glm.vec3 0 20 0))
+  ;; Toggle to grounded
+  (toolbar-state:toggle-camera-mode)
+  ;; First grounded update: should start smoothing from current Y (20),
+  ;; not from the Y at construction (0). With terrain=0, eye-height=2,
+  ;; target = 2. Smoothing should move from 20 toward 2 without jumping.
+  (controls:update 16)
+  (local after-one camera.position.y)
+  (assert (< after-one 20.0)
+          (.. "Camera should move toward terrain from 20, got " (tostring after-one)))
+  (assert (> after-one 5.0)
+          (.. "Camera should not jump far in one frame from 20, got " (tostring after-one)))
+  (controls:drop)
+  true)
+
+;; R1-1: on landing, y-channel snaps to target-y (terrain+eye-height),
+;; not to the potentially-below-target integrated new-y.
+(fn grounded-landing-snaps-channel-to-target-y-not-below-terrain []
+  "After an airborne descent where the integrated new-y falls below
+  terrain+eye-height, landing must snap the smoothing channel to
+  target-y (terrain+eye-height), not to the below-ground new-y.
+  After landing, camera must remain at terrain+eye-height without
+  dipping below it."
+  (local camera (make-fake-camera))
+  (camera:set-position (glm.vec3 0 10 0))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local fake-sampler (make-fake-terrain-sampler 3.0))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls
+                                           :terrain-sampler fake-sampler
+                                           :eye-height 2.0
+                                           :gravity 50.0}))
+  ;; Let the camera fall and land. With gravity 50.0, it will overshoot.
+  ;; The target is 3.0 + 2.0 = 5.0 — this should settle after many frames.
+  (for [_ 1 100]
+    (controls:update 16))
+  ;; After settling, camera should be at or near terrain + eye-height = 5.0
+  (assert (>= camera.position.y 4.8)
+          (.. "Camera should not go below terrain+eye-height after landing, got "
+              (tostring camera.position.y)))
+  (assert (<= camera.position.y 5.2)
+          (.. "Camera should land near terrain+eye-height (5.0), got "
+              (tostring camera.position.y)))
+  (controls:drop)
+  true)
+
+;; R1-2: grounded gamepad/wheel handlers error when terrain sampler is missing
+(fn grounded-wheel-errors-without-terrain-sampler []
+  "When toggled to grounded without terrain sampler, on-mouse-wheel must error."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  (toolbar-state:toggle-camera-mode)
+  (local (ok err) (pcall controls.on-mouse-wheel controls {:x 0 :y 5}))
+  (assert (not ok)
+          "on-mouse-wheel must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
+(fn grounded-gamepad-button-down-errors-without-terrain-sampler []
+  "When toggled to grounded without terrain sampler, on-gamepad-button-down must error."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  (toolbar-state:toggle-camera-mode)
+  (local (ok err) (pcall controls.on-gamepad-button-down controls {:button 0 :which 0}))
+  (assert (not ok)
+          "on-gamepad-button-down must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
+(fn grounded-gamepad-axis-motion-errors-without-terrain-sampler []
+  "When toggled to grounded without terrain sampler, on-gamepad-axis-motion must error."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  (toolbar-state:toggle-camera-mode)
+  (local (ok err) (pcall controls.on-gamepad-axis-motion controls {:axis 0 :value 0.5 :which 0}))
+  (assert (not ok)
+          "on-gamepad-axis-motion must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
+(fn grounded-gamepad-removed-errors-without-terrain-sampler []
+  "When toggled to grounded without terrain sampler, on-gamepad-removed must error."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  (toolbar-state:toggle-camera-mode)
+  (local (ok err) (pcall controls.on-gamepad-removed controls {:which 0}))
+  (assert (not ok)
+          "on-gamepad-removed must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
 (table.insert tests {:name "flight mode delegates update to flight controls"
                      :fn flight-mode-delegates-update})
 (table.insert tests {:name "grounded mode skips flight update"
@@ -440,7 +578,19 @@
 (table.insert tests {:name "drop delegates to flight controls"
                      :fn drop-delegates-to-flight-controls})
 (table.insert tests {:name "flight mode delegates key handlers"
-                     :fn flight-mode-delegates-key-handlers})
+                      :fn flight-mode-delegates-key-handlers})
+(table.insert tests {:name "flight to grounded syncs y-channel from current camera Y"
+                      :fn flight-to-grounded-syncs-y-channel-from-current-camera-y})
+(table.insert tests {:name "grounded landing snaps channel to target-y not below terrain"
+                      :fn grounded-landing-snaps-channel-to-target-y-not-below-terrain})
+(table.insert tests {:name "grounded wheel errors without terrain sampler"
+                      :fn grounded-wheel-errors-without-terrain-sampler})
+(table.insert tests {:name "grounded gamepad-button-down errors without terrain sampler"
+                      :fn grounded-gamepad-button-down-errors-without-terrain-sampler})
+(table.insert tests {:name "grounded gamepad-axis-motion errors without terrain sampler"
+                      :fn grounded-gamepad-axis-motion-errors-without-terrain-sampler})
+(table.insert tests {:name "grounded gamepad-removed errors without terrain sampler"
+                      :fn grounded-gamepad-removed-errors-without-terrain-sampler})
 
 (local main
   (fn []

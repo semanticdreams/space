@@ -78,10 +78,15 @@
   (var grounded-mouse-pos nil)
   (var grounded-pitch 0.0)
 
+  ;; Track camera mode so we can detect flight→grounded transitions
+  ;; and sync the y-channel from the camera's current Y before
+  ;; the first grounded terrain update.
+  (var prev-camera-mode toolbar-state.camera-mode)
+
   (local y-channel (CameraAnimation.scalar-channel
-                     {:value (vec3-y camera.position)
-                      :target (vec3-y camera.position)
-                      :smoothing-rate 8.0}))
+                      {:value (vec3-y camera.position)
+                       :target (vec3-y camera.position)
+                       :smoothing-rate 8.0}))
 
   (fn apply-grounded-pitch! [delta]
     "Apply a pitch delta clamped to [pitch-min, pitch-max]."
@@ -121,11 +126,14 @@
                  (- grounded-vertical-velocity (* gravity delta-seconds)))
             (let [new-y (+ current-y (* grounded-vertical-velocity delta-seconds))]
               (if (<= new-y target-y)
-                  ;; Land: snap to terrain+eye-height and clear airborne state
+                  ;; Land: snap channel to target-y (not new-y which could
+                  ;; be below terrain+eye-height), then set camera to target-y
+                  ;; so the next frame's smoothing starts at the correct
+                  ;; terrain-following height.
                   (do
                     (set grounded-vertical-velocity 0.0)
                     (set grounded-airborne? false)
-                    (y-channel:snap new-y)
+                    (y-channel:snap target-y)
                     (y-channel:set-target target-y)
                     (camera:set-position
                       (glm.vec3 (vec3-x camera.position) target-y (vec3-z camera.position))))
@@ -140,12 +148,25 @@
               (camera:set-position
                 (glm.vec3 (vec3-x camera.position) smoothed-y (vec3-z camera.position))))))))
 
+  (fn sync-y-channel-on-flight-to-grounded-transition! []
+    "When entering grounded mode from flight, synchronize the smoothing
+    channel to the camera's current Y so terrain following starts from
+    the right value instead of a stale construction-time Y."
+    (when (and (= toolbar-state.camera-mode :grounded)
+               (not (= prev-camera-mode :grounded)))
+      (let [current-y (vec3-y camera.position)]
+        (y-channel:snap current-y)
+        (y-channel:set-target current-y))))
+
   (fn update [self delta]
-    (let [delta-seconds (delta->seconds delta delta-unit)]
-      (if (= toolbar-state.camera-mode :flight)
+    (let [delta-seconds (delta->seconds delta delta-unit)
+          current-mode toolbar-state.camera-mode]
+      (if (= current-mode :flight)
           (flight-controls:update delta)
           (do
             (ensure-grounded-deps!)
+            ;; Sync y-channel from current camera Y on flight→grounded transition.
+            (sync-y-channel-on-flight-to-grounded-transition!)
             ;; Horizontal movement
             (when (or (grounded-action-active? :move-left)
                       (grounded-action-active? :move-right)
@@ -175,7 +196,9 @@
             (when (grounded-action-active? :look-left)
               (camera:yaw (* -1 delta-seconds 1.0)))
             ;; Gravity and terrain following
-            (grounded-apply-gravity-and-terrain delta-seconds)))))
+            (grounded-apply-gravity-and-terrain delta-seconds)))
+      ;; Track camera mode for next frame's transition detection
+      (set prev-camera-mode current-mode)))
 
   (fn drop [self]
     (flight-controls:drop)
@@ -217,7 +240,9 @@
   (fn on-mouse-wheel [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-mouse-wheel payload)
-        nil))  ;; grounded mode: wheel is a no-op
+        (do
+          (ensure-grounded-deps!)
+          nil)))  ;; grounded mode: wheel is a no-op
 
   (fn on-mouse-button-down [self payload]
     (if (= toolbar-state.camera-mode :flight)
@@ -250,17 +275,23 @@
   (fn on-gamepad-button-down [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-gamepad-button-down payload)
-        nil))
+        (do
+          (ensure-grounded-deps!)
+          nil)))
 
   (fn on-gamepad-axis-motion [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-gamepad-axis-motion payload)
-        nil))
+        (do
+          (ensure-grounded-deps!)
+          nil)))
 
   (fn on-gamepad-removed [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-gamepad-removed payload)
-        nil))
+        (do
+          (ensure-grounded-deps!)
+          nil)))
 
   {:update update
    :drop drop
