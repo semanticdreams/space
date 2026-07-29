@@ -246,7 +246,7 @@
   "Find the first snapshot variable bound to the given path via let or local.
    Returns the variable name as a string, or nil if none found."
   (local path-text (table.concat path "."))
-  (local escaped-path (path-text:gsub "%." "%%."))
+  (local escaped-path (escape-pattern path-text))
   (var snap-var nil)
   ;; Check (let [VAR path ...] ...) patterns
   (each [v (fn-form:gmatch (.. "%(let%s*%[%s*([^%s]+)%s+" escaped-path))]
@@ -343,7 +343,7 @@
   (if (not snap-var) false
       (do
         (local path-text (table.concat path "."))
-        (local escaped-path (path-text:gsub "%." "%%."))
+        (local escaped-path (escape-pattern path-text))
         (local escaped-var (escape-pattern snap-var))
         (var found false)
          ;; Scan (set path_text snap-var) positions
@@ -367,7 +367,7 @@
              (table.insert table-parts (. path i)))
            (local tset-table (table.concat table-parts "."))
            (local key (. path plen))
-           (local escaped-tset (tset-table:gsub "%." "%%."))
+            (local escaped-tset (escape-pattern tset-table))
            (local escaped-key (escape-pattern key))
            (local pat1 (.. "%(tset%s+" escaped-tset "%s+:%s*" escaped-key "%s+" escaped-var))
            (local pat2 (.. "%(tset%s+" escaped-tset "%s+\"%s*" escaped-key "%s*\"%s+" escaped-var))

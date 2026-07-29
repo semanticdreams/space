@@ -523,6 +523,145 @@
           "diagnostic should flag two-pcalls-second-in-body-restore"))
 
 ;; ======================================================================
+;; Precision: hyphenated path (e.g. app.activity-registry) restore detection
+;; ======================================================================
+
+(fn mutation-restoration-allows-hyphenated-path-restore []
+  "hyphenated path app.activity-registry: snapshot + mutate + restore = no diagnostic."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-hyphen-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-hyphen-restore []
+  (local prev app.activity-registry)
+  (set app.activity-registry nil)
+  (do-test)
+  (set app.activity-registry prev))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 8 :column 1
+                                           :form "(set app.activity-registry nil)"
+                                           :enclosing-fn "test-hyphen-restore"}
+                                          {:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 10 :column 1
+                                           :form "(set app.activity-registry prev)"
+                                           :enclosing-fn "test-hyphen-restore"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "hyphenated path with snapshot+mutate+restore should pass"))
+
+(fn mutation-restoration-flags-hyphenated-path-no-restore []
+  "hyphenated path app.activity-registry: mutation without restore should still flag."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-hyphen-no-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 100
+                                             :form "(fn test-hyphen-no-restore []
+  (set app.activity-registry nil)
+  (do-test))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 7 :column 1
+                                           :form "(set app.activity-registry nil)"
+                                           :enclosing-fn "test-hyphen-no-restore"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag hyphenated path mutation without restore")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn mutation-restoration-flags-unrelated-rhs-hyphenated-path []
+  "hyphenated path app.activity-registry: restore RHS must match snapshot var."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-unrelated-rhs"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 150
+                                             :form "(fn test-unrelated-rhs []
+  (local prev app.activity-registry)
+  (set app.activity-registry some-other-var)
+  (do-test))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 8 :column 1
+                                           :form "(set app.activity-registry some-other-var)"
+                                           :enclosing-fn "test-unrelated-rhs"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag when RHS does not match snapshot var")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn mutation-restoration-flags-restore-before-later-mutation-hyphenated-path []
+  "Restore before a later non-restore mutation should still flag."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-restore-before-mutate"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-restore-before-mutate []
+  (local prev app.activity-registry)
+  (set app.activity-registry prev)
+  (do-test)
+  (set app.activity-registry custom))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 7 :column 1
+                                           :form "(set app.activity-registry prev)"
+                                           :enclosing-fn "test-restore-before-mutate"}
+                                          {:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 9 :column 1
+                                           :form "(set app.activity-registry custom)"
+                                           :enclosing-fn "test-restore-before-mutate"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag when later mutation follows restore")
+  (assert (> (length result) 0) "should have at least one diagnostic"))
+
+(fn mutation-restoration-allows-multi-nonrestore-then-restore-hyphenated []
+  "Multiple non-restore mutations then restore after last = no diagnostic."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-multi-mutate-restore"
+                                             :top-level? true
+                                             :line 5 :column 1
+                                             :length 200
+                                             :form "(fn test-multi-mutate-restore []
+  (local prev app.activity-registry)
+  (set app.activity-registry custom1)
+  (set app.activity-registry custom2)
+  (set app.activity-registry prev))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 7 :column 1
+                                           :form "(set app.activity-registry custom1)"
+                                           :enclosing-fn "test-multi-mutate-restore"}
+                                          {:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 8 :column 1
+                                           :form "(set app.activity-registry custom2)"
+                                           :enclosing-fn "test-multi-mutate-restore"}
+                                          {:op :set
+                                           :path ["app" "activity-registry"]
+                                           :line 9 :column 1
+                                           :form "(set app.activity-registry prev)"
+                                           :enclosing-fn "test-multi-mutate-restore"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "multiple non-restore mutations then restore after last should pass"))
+
+;; ======================================================================
 ;; Rules list structure tests
 ;; ======================================================================
 
@@ -586,6 +725,11 @@
 (table.insert tests {:name "mutation-restoration flags pcall pre-restore then mutate" :fn mutation-restoration-flags-pcall-pre-restore-then-mutate})
 (table.insert tests {:name "mutation-restoration flags pcall restore inside pcall body" :fn mutation-restoration-flags-pcall-restore-inside-pcall-body})
 (table.insert tests {:name "mutation-restoration flags two pcalls second in-body restore" :fn mutation-restoration-flags-two-pcalls-second-mutates-in-body-restore})
+(table.insert tests {:name "mutation-restoration allows hyphenated path restore" :fn mutation-restoration-allows-hyphenated-path-restore})
+(table.insert tests {:name "mutation-restoration flags hyphenated path no restore" :fn mutation-restoration-flags-hyphenated-path-no-restore})
+(table.insert tests {:name "mutation-restoration flags unrelated RHS hyphenated path" :fn mutation-restoration-flags-unrelated-rhs-hyphenated-path})
+(table.insert tests {:name "mutation-restoration flags restore before later mutation hyphenated" :fn mutation-restoration-flags-restore-before-later-mutation-hyphenated-path})
+(table.insert tests {:name "mutation-restoration allows multi nonrestore then restore hyphenated" :fn mutation-restoration-allows-multi-nonrestore-then-restore-hyphenated})
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
