@@ -7,6 +7,8 @@
 (local Activities (require :activities))
 (local SandboxActivityActions (require :sandbox-activity-actions))
 (local ActivityCameraState (require :activity-camera-state))
+(local SandboxToolbarState (require :sandbox-toolbar-state))
+(local SandboxToolbarView (require :sandbox-toolbar-view))
 
 (fn sandbox-activity-owned-paths []
   (local runtime (require :runtime))
@@ -135,6 +137,15 @@
   (ctx:set-target-enabled! sandbox-target-enabled?)
   ;; Incremental hydration: restore queued panels one per frame
   (ctx:set-update! sandbox-activity-update)
+  ;; Toolbar state: create or reuse
+  (local toolbar-state (or world-runtime.sandbox-toolbar-state
+                           (SandboxToolbarState {})))
+  (set world-runtime.sandbox-toolbar-state toolbar-state)
+  (set app.sandbox-toolbar-state toolbar-state)
+  ;; Install toolbar hooks
+  (ctx:set-top-toolbar-builder! (SandboxToolbarView toolbar-state))
+  (ctx:set-object-move-predicate! (fn [] (= toolbar-state.object-move-enabled? true)))
+  (ctx:set-drag-attachment-provider! (fn [] toolbar-state.drag-attachment))
   {:activity-id "sandbox"})
 
 (fn slice-array-from [entries start-index]
@@ -161,6 +172,7 @@
   (when (and app.active-world-runtime app.active-world-runtime.scene)
     (local scene app.active-world-runtime.scene)
     (scene:deactivate-activity-slot "sandbox"))
+  (set app.sandbox-toolbar-state nil)
   true)
 
 (fn snapshot-sandbox-activity! []
@@ -186,6 +198,9 @@
         ;; across save/reload cycles.
         (when camera
           (set captured.camera (ActivityCameraState.capture-camera camera)))
+        ;; Persist toolbar state
+        (when runtime.sandbox-toolbar-state
+          (set captured.toolbar (runtime.sandbox-toolbar-state:capture-state)))
         {:scene captured})
       nil))
 
@@ -198,10 +213,14 @@
     (app.active-world-runtime.scene:restore-activity-slot-state "sandbox" scene-state))
   ;; Restore camera position from the persisted session state
   (when (and scene-state scene-state.camera
-             app.active-world-runtime app.active-world-runtime.activity-cameras)
+              app.active-world-runtime app.active-world-runtime.activity-cameras)
     (local camera (. app.active-world-runtime.activity-cameras.scene "sandbox"))
     (when camera
       (ActivityCameraState.restore-camera! camera scene-state.camera)))
+  ;; Restore toolbar state
+  (when (and scene-state scene-state.toolbar
+              app.active-world-runtime app.active-world-runtime.sandbox-toolbar-state)
+    (app.active-world-runtime.sandbox-toolbar-state:restore-state scene-state.toolbar))
   true)
 
 (fn load-sandbox-activity! []
