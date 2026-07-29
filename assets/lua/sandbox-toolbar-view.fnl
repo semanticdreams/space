@@ -1,5 +1,22 @@
 (local Button (require :button))
 (local {: Flex : FlexChild} (require :flex))
+(local widget-theme-utils (require :widget-theme-utils))
+
+(fn find-button-text-widget [button]
+  "Find the Text widget inside a button's internal structure.
+  When buttons have both icon and text, button.text is a Flex whose
+  children are metadata wrappers {:flex N :element <entity>}."
+  (when button.text
+    (if button.text.set-text
+        button.text
+        (and button.text.children (= (type button.text.children) :table))
+        (do
+          (var found nil)
+          (each [_ child (ipairs button.text.children)]
+            (when (and (not found) (= (type child) :table) child.element child.element.set-text)
+              (set found child.element)))
+          found)
+        nil)))
 
 (fn SandboxToolbarView [state]
   (fn build [ctx]
@@ -10,7 +27,7 @@
     ;; Camera mode button builder
     (local camera-btn-builder
       (Button {:icon "flight"
-               :text "Camera"
+               :text "Flight"
                :variant (if (= state.camera-mode :grounded) :primary :secondary)
                :padding [0.4 0.4]
                :on-click (fn [_button _event]
@@ -36,11 +53,11 @@
 
     ;; Build Flex layout
     (local flex (Flex {:axis 1
-                       :yalign :center
-                       :children
-                       [(FlexChild camera-btn-builder 0)
-                        (FlexChild object-move-btn-builder 0)
-                        (FlexChild drag-attachment-btn-builder 0)]}))
+                        :yalign :center
+                        :children
+                        [(FlexChild camera-btn-builder 0)
+                         (FlexChild object-move-btn-builder 0)
+                         (FlexChild drag-attachment-btn-builder 0)]}))
 
     (local root (flex ctx))
 
@@ -57,32 +74,57 @@
     (when (and drag-attachment-btn drag-attachment-btn.layout)
       (set drag-attachment-btn.layout.name "sandbox-toolbar-drag-attachment"))
 
-    (fn update [self]
-      ;; Update camera mode button variant
+    (fn resolve-and-apply-variant [btn new-variant]
+      "Re-resolve button theme colors for a new variant and update the button."
+      (when (not (= btn.variant new-variant))
+        (set btn.variant new-variant)
+        (local resolved (widget-theme-utils.resolve-button-colors ctx {:variant new-variant}))
+        (set btn.background-color resolved.background)
+        (set btn.hover-background-color resolved.hover)
+        (set btn.pressed-background-color resolved.pressed)
+        (set btn.foreground-color resolved.foreground)
+        (btn:update-background-color {:mark-layout-dirty? true})))
+
+    (fn update-camera-button []
       (when camera-btn
-        (local new-variant (if (= state.camera-mode :grounded) :primary :secondary))
-        (when (not (= camera-btn.variant new-variant))
-          (set camera-btn.variant new-variant)
-          (camera-btn:update-background-color {:mark-layout-dirty? true})))
+        ;; Update text label between Flight and Grounded
+        (let [new-label (if (= state.camera-mode :grounded) "Grounded" "Flight")
+              text-widget (find-button-text-widget camera-btn)]
+          (when (and text-widget text-widget.set-text)
+            (text-widget:set-text new-label {:mark-measure-dirty? true})))
+        ;; Update variant and re-resolve colors
+        (resolve-and-apply-variant camera-btn
+                                   (if (= state.camera-mode :grounded) :primary :secondary))))
 
-      ;; Update object move button variant
+    (fn update-object-move-button []
       (when object-move-btn
-        (local new-variant (if state.object-move-enabled? :primary :secondary))
-        (when (not (= object-move-btn.variant new-variant))
-          (set object-move-btn.variant new-variant)
-          (object-move-btn:update-background-color {:mark-layout-dirty? true})))
+        (resolve-and-apply-variant object-move-btn
+                                   (if state.object-move-enabled? :primary :secondary))))
 
-      ;; Update drag attachment button variant
+    (fn update-drag-attachment-button []
       (when drag-attachment-btn
-        (local new-variant (if (= state.drag-attachment :anchor) :primary :secondary))
-        (when (not (= drag-attachment-btn.variant new-variant))
-          (set drag-attachment-btn.variant new-variant)
-          (drag-attachment-btn:update-background-color {:mark-layout-dirty? true}))))
+        (resolve-and-apply-variant drag-attachment-btn
+                                   (if (= state.drag-attachment :anchor) :primary :secondary))))
+
+    (fn update [self]
+      (update-camera-button)
+      (update-object-move-button)
+      (update-drag-attachment-button))
 
     ;; Wire state change signal to update
-    (state.changed:connect (fn [] (update root)))
+    (local changed-handler (fn [] (update root)))
+    (state.changed:connect changed-handler)
 
     (set root.update update)
+
+    ;; Wrap root.drop to disconnect from state.changed before delegating to
+    ;; the original Flex drop, preventing stale callbacks on rebuilt toolbars.
+    (local original-drop root.drop)
+    (set root.drop (fn [self]
+                     (state.changed:disconnect changed-handler true)
+                     (when original-drop
+                       (original-drop self))))
+
     root)
 
   build)

@@ -30,11 +30,12 @@
                               :flight)))
 
   (fn set-object-move-enabled! [self enabled?]
-    (local next-enabled? (not (not enabled?)))
-    (when (not (= object-move-enabled? next-enabled?))
-      (set object-move-enabled? next-enabled?)
-      (changed:emit next-enabled?))
-    next-enabled?)
+    (when (not (= (type enabled?) :boolean))
+      (error (.. "object-move-enabled? must be boolean, got " (tostring (type enabled?)) ": " (tostring enabled?))))
+    (when (not (= object-move-enabled? enabled?))
+      (set object-move-enabled? enabled?)
+      (changed:emit enabled?))
+    enabled?)
 
   (fn toggle-object-move-enabled! [self]
     (self:set-object-move-enabled! (not object-move-enabled?)))
@@ -58,20 +59,21 @@
      :drag-attachment (if (= drag-attachment :center) "center" "anchor")})
 
   (fn restore-state [self payload]
-    (when payload
-      (when (= (type payload) :table)
-        (when (not (= (. payload :camera-mode) nil))
-          (let [value (. payload :camera-mode)]
-            (self:set-camera-mode (if (= value "flight") :flight
-                                      (= value "grounded") :grounded
-                                      (error (.. "Invalid camera mode in restore: " (tostring value)))))))
-        (when (not (= (. payload :object-move-enabled?) nil))
-          (self:set-object-move-enabled! (. payload :object-move-enabled?)))
-        (when (not (= (. payload :drag-attachment) nil))
-          (let [value (. payload :drag-attachment)]
-            (self:set-drag-attachment (if (= value "center") :center
-                                          (= value "anchor") :anchor
-                                          (error (.. "Invalid drag attachment in restore: " (tostring value)))))))))
+    (when (not (= payload nil))
+      (when (not (= (type payload) :table))
+        (error (.. "restore-state payload must be a table or nil, got " (type payload))))
+      (when (not (= (. payload :camera-mode) nil))
+        (let [value (. payload :camera-mode)]
+          (self:set-camera-mode (if (= value "flight") :flight
+                                    (= value "grounded") :grounded
+                                    (error (.. "Invalid camera mode in restore: " (tostring value)))))))
+      (when (not (= (. payload :object-move-enabled?) nil))
+        (self:set-object-move-enabled! (. payload :object-move-enabled?)))
+      (when (not (= (. payload :drag-attachment) nil))
+        (let [value (. payload :drag-attachment)]
+          (self:set-drag-attachment (if (= value "center") :center
+                                        (= value "anchor") :anchor
+                                        (error (.. "Invalid drag attachment in restore: " (tostring value))))))))
     true)
 
   (local state

@@ -143,6 +143,34 @@
   (assert (= state.drag-attachment :center)
           "drag-attachment must be :center after second toggle"))
 
+(fn sandbox-toolbar-state-rejects-non-boolean-object-move-enabled []
+  "set-object-move-enabled! must error on non-boolean values."
+  (local state (SandboxToolbarState {}))
+  (local (ok err) (pcall state.set-object-move-enabled! state "false"))
+  (assert (not ok) "set-object-move-enabled! must error on string false")
+  (assert (err:find "boolean")
+          (.. "Error must mention boolean, got: " (tostring err)))
+  (local (ok2 err2) (pcall state.set-object-move-enabled! state 1))
+  (assert (not ok2) "set-object-move-enabled! must error on number")
+  (local (ok3 err3) (pcall state.set-object-move-enabled! state nil))
+  (assert (not ok3) "set-object-move-enabled! must error on nil"))
+
+(fn sandbox-toolbar-state-restore-rejects-non-table-payload []
+  "restore-state must error when payload is non-nil and not a table."
+  (local state (SandboxToolbarState {}))
+  (local (ok err) (pcall state.restore-state state "bad"))
+  (assert (not ok) "restore-state must error on string payload")
+  (assert (err:find "table")
+          (.. "Error must mention table, got: " (tostring err)))
+  (local (ok2 err2) (pcall state.restore-state state 42))
+  (assert (not ok2) "restore-state must error on number payload"))
+
+(fn sandbox-toolbar-state-restore-accepts-nil-payload []
+  "restore-state must accept nil payload without error."
+  (local state (SandboxToolbarState {}))
+  (local (ok _) (pcall state.restore-state state nil))
+  (assert ok "restore-state must accept nil payload without error"))
+
 (table.insert tests {:name "sandbox toolbar state defaults"
                       :fn sandbox-toolbar-state-defaults})
 (table.insert tests {:name "sandbox toolbar state changed signal fires on mutation"
@@ -165,6 +193,12 @@
                       :fn sandbox-toolbar-state-toggle-object-move-enabled})
 (table.insert tests {:name "sandbox toolbar state toggle drag attachment"
                       :fn sandbox-toolbar-state-toggle-drag-attachment})
+(table.insert tests {:name "sandbox toolbar state rejects non-boolean object move enabled"
+                      :fn sandbox-toolbar-state-rejects-non-boolean-object-move-enabled})
+(table.insert tests {:name "sandbox toolbar state restore rejects non-table payload"
+                      :fn sandbox-toolbar-state-restore-rejects-non-table-payload})
+(table.insert tests {:name "sandbox toolbar state restore accepts nil payload"
+                      :fn sandbox-toolbar-state-restore-accepts-nil-payload})
 
 (local main
   (fn []
