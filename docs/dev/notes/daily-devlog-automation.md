@@ -46,6 +46,7 @@ The automation fails closed when credentials, `gh` authentication, branch protec
 Regenerate docs indexes and validate the build:
 
 ```bash
+cd docs
 npm run devlog:indices
 npm run docs:build
 ```
