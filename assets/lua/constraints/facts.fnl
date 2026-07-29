@@ -442,13 +442,53 @@
         (set col (+ col 1))))
   {:line line :column col})
 
+(fn try-recover-synthetic-parent [source fn-start definitions]
+  "Given a byte position where '(fn ' starts, attempt to recover a named
+  fn form as a synthetic parent. Returns the parent-def table if at least
+  one orphan child is byte-contained, or nil if the fn is already known
+  or has no orphan children."
+  (local after-fn (+ fn-start 4))
+  (local name-start after-fn)
+  (local name-end (source:find "[%s%(%)%[%]]" name-start))
+  (when name-end
+    (local fn-name (source:sub name-start (- name-end 1)))
+    (when (and (> (length fn-name) 0)
+               (not= fn-name "fn")
+               (not= fn-name "lambda"))
+      (local close-paren (find-matching-paren source fn-start))
+      (when close-paren
+        (var already false)
+        (each [_ d (ipairs definitions)]
+          (when (= d.name fn-name) (set already true)))
+        (when (not already)
+          (local parent-start (- fn-start 1))
+          (var has-orphan-child false)
+          (each [_ child (ipairs definitions)]
+            (when (and (not has-orphan-child)
+                       (= child.enclosing-fn nil)
+                       child.start-byte child.end-byte
+                       (>= child.start-byte parent-start)
+                       (<= child.end-byte close-paren))
+              (set has-orphan-child true)))
+          (when has-orphan-child
+            (local lc (line-col-at-byte source fn-start))
+            (local end-lc (line-col-at-byte source close-paren))
+            {:kind :fn
+             :name fn-name
+             :top-level? true
+             :line lc.line
+             :column lc.column
+             :start-byte parent-start
+             :end-byte close-paren
+             :end-line end-lc.line
+             :form (source:sub fn-start close-paren)
+             :enclosing-fn nil}))))))
+
 (fn recover-error-root [source root definitions calls]
-  "When root is ERROR, scan source for top-level named fn forms missing
-  from definitions, but ONLY create a synthetic parent when at least one
-  existing definition with nil enclosing-fn is byte-contained within it.
-  Returns the list of synthetic parents (NOT inserted into definitions,
-  so structure rules do not see them). Updates child enclosing-fn and
-  call enclosing-fn in-place. Scope-safe and narrow."
+  "When root is ERROR, scan source for top-level named fn forms and
+  recover synthetic parents for orphan children. Returns the list of
+  synthetic parents (NOT inserted into definitions). Also updates child
+  enclosing-fn and call enclosing-fn in-place."
   (local synthetic-parents [])
   (when (= (root:type) "ERROR")
     (var scan-pos 1)
@@ -458,44 +498,11 @@
       (if (not fn-start)
           (set scan-pos (+ source-len 1))
           (do
-            (local after-fn (+ fn-start 4))
-            (local name-start after-fn)
-            (local name-end (source:find "[%s%(%)%[%]]" name-start))
-            (when name-end
-              (local fn-name (source:sub name-start (- name-end 1)))
-              (when (and (> (length fn-name) 0)
-                         (not= fn-name "fn")
-                         (not= fn-name "lambda"))
-                (local close-paren (find-matching-paren source fn-start))
-                (when close-paren
-                  (var already false)
-                  (each [_ d (ipairs definitions)]
-                    (when (= d.name fn-name) (set already true)))
-                  (when (not already)
-                    (local parent-start (- fn-start 1))
-                    (var has-orphan-child false)
-                    (each [_ child (ipairs definitions)]
-                      (when (and (not has-orphan-child)
-                                 (= child.enclosing-fn nil)
-                                 child.start-byte child.end-byte
-                                 (>= child.start-byte parent-start)
-                                 (<= child.end-byte close-paren))
-                        (set has-orphan-child true)))
-                    (when has-orphan-child
-                      (local lc (line-col-at-byte source fn-start))
-                      (local end-lc (line-col-at-byte source close-paren))
-                      (table.insert synthetic-parents
-                        {:kind :fn
-                         :name fn-name
-                         :top-level? true
-                         :line lc.line
-                         :column lc.column
-                         :start-byte parent-start
-                         :end-byte close-paren
-                         :end-line end-lc.line
-                         :form (source:sub fn-start close-paren)
-                         :enclosing-fn nil}))))))
-            (set scan-pos (if name-end name-end after-fn)))))
+            (local parent (try-recover-synthetic-parent source fn-start definitions))
+            (local name-end (source:find "[%s%(%)%[%]]" (+ fn-start 4)))
+            (when parent
+              (table.insert synthetic-parents parent))
+            (set scan-pos (if name-end name-end (+ fn-start 4))))))
     (each [_ child (ipairs definitions)]
       (when (and (= child.enclosing-fn nil)
                  child.start-byte child.end-byte)
@@ -519,18 +526,18 @@
   Returns a fact-db:
   {:files [file-facts ...]
    :by-file {path file-facts}}"
-  (let [by-file {}
-        files []]
-    (each [_ record (ipairs file-records)]
-      (let [file-facts (extract-file-facts record)
-            recovered (recover-error-root record.source record.root
-                                          file-facts.definitions
-                                          file-facts.calls)]
-        (when (> (length recovered) 0)
-          (tset file-facts :recovered-parents recovered))
-        (table.insert files file-facts)
-        (tset by-file record.path file-facts)))
+  (local by-file {})
+  (local files [])
+  (each [_ record (ipairs file-records)]
+      (local file-facts (extract-file-facts record))
+      (local recovered (recover-error-root record.source record.root
+                                           file-facts.definitions
+                                           file-facts.calls))
+      (when (> (length recovered) 0)
+        (tset file-facts :recovered-parents recovered))
+      (table.insert files file-facts)
+      (tset by-file record.path file-facts))
     {:files files
-     :by-file by-file}))
+     :by-file by-file})
 
 M

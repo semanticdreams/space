@@ -600,25 +600,27 @@
         (set found true))))
   found)
 
+ (fn child-pos-in-parent [parent child]
+   "Compute child's 1-indexed position in parent.form via byte containment,
+   falling back to string.find when byte data is unavailable or mismatched."
+   (if (and parent.start-byte parent.end-byte child.start-byte child.end-byte
+            (>= child.start-byte parent.start-byte)
+            (<= child.end-byte parent.end-byte))
+       (do
+         (local rel-offset (- child.start-byte parent.start-byte))
+         (if (and (>= rel-offset 0)
+                  (= (parent.form:sub (+ rel-offset 1)
+                                      (+ rel-offset (length child.form)))
+                     child.form))
+             (+ rel-offset 1)
+             (string.find parent.form child.form 1 true)))
+       (string.find parent.form child.form 1 true)))
+
  (fn parent-has-asserted-local-before-child? [calls parent child kw]
    "Scope-safe closure-helper bypass predicate.  Uses byte-span containment
-   when available, falling back to string.find.  When byte containment
-   holds, child-pos is computed as parent-relative offset + 1."
+   when available, falling back to string.find."
    (when (and parent.form parent.name (not= parent.name "<anonymous>"))
-     ;; Determine child position in parent form
-      (local child-pos
-        (if (and parent.start-byte parent.end-byte child.start-byte child.end-byte
-                 (>= child.start-byte parent.start-byte)
-                 (<= child.end-byte parent.end-byte))
-            (do
-              (local rel-offset (- child.start-byte parent.start-byte))
-              (if (and (>= rel-offset 0)
-                      (= (parent.form:sub (+ rel-offset 1)
-                                          (+ rel-offset (length child.form)))
-                         child.form))
-                 (+ rel-offset 1)  ;; 1-indexed position in parent.form
-                 (string.find parent.form child.form 1 true)))
-           (string.find parent.form child.form 1 true)))
+     (local child-pos (child-pos-in-parent parent child))
      (when child-pos
        ;; Criterion 2: assert call in parent scope before child
        (var assert-before-child false)
@@ -699,6 +701,31 @@
           (set done true)))))
   (if (next params) params))
 
+(fn build-bare-covered [def cleaned calls all-defs]
+   "Build a set of keywords whose bare usage in def is covered by a
+   parent scope that asserts the keyword before the child."
+   (var bare-covered {})
+   (each [kw _ (pairs interactive-access-patterns)]
+     (when (and (not (. bare-covered kw))
+                (has-bare-keyword? cleaned kw)
+                (not (shadows-keyword? def.form kw)))
+       (var covered false)
+       (when def.enclosing-fn
+         (each [_ parent (ipairs all-defs)]
+           (when (and (not covered)
+                      (= parent.name def.enclosing-fn)
+                      (parent-has-asserted-local-before-child? calls parent def kw))
+             (set covered true))))
+       (when (and (not covered) (= def.enclosing-fn nil))
+         (each [_ parent (ipairs all-defs)]
+           (when (and (not covered)
+                      (not= parent def)
+                      (parent-has-asserted-local-before-child? calls parent def kw))
+             (set covered true))))
+       (when covered
+         (tset bare-covered kw true))))
+   bare-covered)
+
 (fn interactive-context-assertion-rule-run [ctx]
   "Rule: flag interactive widgets using clickables or hoverables without
   an actual assert call in the same enclosing function."
@@ -757,42 +784,14 @@
                 (when (not (fn-def-has-dotted-interactive? def cleaned))
                   (when (fn-def-has-bare-interactive? def cleaned)
                     (set skip-because-param true)))))))
-        (when (not skip-because-param)
-          (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
-                has-bare (fn-def-has-bare-interactive? def cleaned)
-                asserted (fn-def-has-assert-call? calls def)]
-            ;; Closure-helper bypass: if this def has bare interactive usage
-            ;; and no assert of its own, check per keyword whether a parent
-            ;; asserts it via (local kw (assert ...)) before the child def.
-            ;; Uses scope-safe parent-has-asserted-local-before-child?
-            ;; instead of the outer-only-form + has-asserted-local? approach
-            ;; which over-masked parent form text.
+         (when (not skip-because-param)
+           (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
+                 has-bare (fn-def-has-bare-interactive? def cleaned)
+                 asserted (fn-def-has-assert-call? calls def)]
              (var bare-covered {})
              (when (and (not asserted) has-bare (not has-access)
                         (not (fn-def-has-dotted-interactive? def cleaned)))
-               (each [kw _ (pairs interactive-access-patterns)]
-                 (when (and (not (. bare-covered kw))
-                            (has-bare-keyword? cleaned kw)
-                            (not (shadows-keyword? def.form kw)))
-                   ;; Fast path: when enclosing-fn is known, check only that parent.
-                   (var covered false)
-                   (when def.enclosing-fn
-                     (each [_ parent (ipairs all-defs)]
-                       (when (and (not covered)
-                                  (= parent.name def.enclosing-fn)
-                                  (parent-has-asserted-local-before-child? calls parent def kw))
-                         (set covered true))))
-                   ;; Fallback: scan all defs only when enclosing-fn is nil.
-                   ;; If a known parent exists but fails the check, leave the
-                   ;; child uncovered — do not scan unrelated/sibling parents.
-                   (when (and (not covered) (= def.enclosing-fn nil))
-                     (each [_ parent (ipairs all-defs)]
-                       (when (and (not covered)
-                                  (not= parent def)
-                                  (parent-has-asserted-local-before-child? calls parent def kw))
-                         (set covered true))))
-                   (when covered
-                     (tset bare-covered kw true)))))
+               (set bare-covered (build-bare-covered def cleaned calls all-defs)))
             ;; Flag only if there is uncovered bare interactive usage
             (var has-uncovered-bare false)
             (when (and (not asserted) has-bare (not has-access)

@@ -971,4 +971,40 @@
 (table.insert tests {:name "interactive-assertion does not mutate definitions"
                      :fn interactive-assertion-does-not-mutate-definitions})
 
+;; Moved from interactive file to stay under 1200-line module limit:
+;; synthetic real-fact ButtonWidget four-helper regression
+(fn interactive-assertion-allows-buttonwidget-real-facts-four-helpers []
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local source "(fn ButtonWidget [opts]
+  (local options (or opts {}))
+  (local clickables (assert options.clickables \"need clickables\"))
+  (local hoverables (assert options.hoverables \"need hoverables\"))
+  (fn register-clickables [] (when clickables (clickables:register b)))
+  (fn unregister-clickables [] (when clickables (clickables:unregister b)))
+  (fn register-hoverables [] (when hoverables (hoverables:register b)))
+  (fn unregister-hoverables [] (when hoverables (hoverables:unregister b))))")
+  (local ts (require :tree-sitter))
+  (local tree (ts.parse source {:language :fennel}))
+  (local root (tree:root))
+  (local Facts (require :constraints.facts))
+  (local fact-db (Facts.extract [{:target {:kind :repo :name :test}
+                                   :path "/t/bw.fnl" :module "bw"
+                                   :source source :root root}]))
+  (local ctx {:target {:kind :repo :name :test} :facts fact-db :files []})
+  (local result (rule.run ctx))
+  (var flagged nil)
+  (each [_ d (ipairs (or result []))]
+    (when (or (= d.evidence.function-name "register-clickables")
+              (= d.evidence.function-name "unregister-clickables")
+              (= d.evidence.function-name "register-hoverables")
+              (= d.evidence.function-name "unregister-hoverables"))
+      (set flagged (.. (or flagged "") d.evidence.function-name " "))))
+  (assert (= flagged nil) (.. "flagged helpers: " (or flagged "none"))))
+
+(table.insert tests {:name "interactive-assertion allows ButtonWidget real facts four helpers"
+                      :fn interactive-assertion-allows-buttonwidget-real-facts-four-helpers})
+
 {:tests tests}

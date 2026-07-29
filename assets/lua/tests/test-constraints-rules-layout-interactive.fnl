@@ -1162,49 +1162,4 @@
                      :fn interactive-assertion-allows-outer-with-anonymous-nested-assert})
 (table.insert tests {:name "interactive-assertion flags unasserted bare access"
                      :fn interactive-assertion-flags-unasserted-bare-access})
-;; R1-2: real-fact BW (local kw (assert options.kw ...)) before helpers
-(fn interactive-assertion-allows-buttonwidget-real-facts-four-helpers []
-  (local Facts (require :constraints.facts))
-  (local Layout (require :constraints.rules.layout))
-  (local rules (Layout.rules))
-  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
-  (assert rule "rule should be in rules list")
-  (local source "(fn ButtonWidget [opts]
-  (local options (or opts {}))
-  (local clickables (assert options.clickables \"need clickables\"))
-  (local hoverables (assert options.hoverables \"need hoverables\"))
-  (fn register-clickables [] (when clickables (clickables:register b)))
-  (fn unregister-clickables [] (when clickables (clickables:unregister b)))
-  (fn register-hoverables [] (when hoverables (hoverables:register b)))
-  (fn unregister-hoverables [] (when hoverables (hoverables:unregister b))))")
-  (local ts (require :tree-sitter))
-  (local tree (ts.parse source {:language :fennel}))
-  (local root (tree:root))
-  (local fact-db (Facts.extract [{:target {:kind :repo :name :test}
-                                   :path "/t/bw.fnl" :module "bw"
-                                   :source source :root root}]))
-  (local ctx {:target {:kind :repo :name :test} :facts fact-db :files []})
-  (local result (rule.run ctx))
-  ;; Collect all diagnostics to check which helpers are flagged
-  (var flagged nil)
-  (each [_ d (ipairs (or result []))]
-    (when (or (= d.evidence.function-name "register-clickables")
-              (= d.evidence.function-name "unregister-clickables")
-              (= d.evidence.function-name "register-hoverables")
-              (= d.evidence.function-name "unregister-hoverables"))
-      (set flagged (.. (or flagged "") d.evidence.function-name " "))))
-  (assert (= flagged nil) (.. "flagged helpers: " (or flagged "none"))))
-(table.insert tests {:name "interactive-assertion allows ButtonWidget real facts four helpers"
-                     :fn interactive-assertion-allows-buttonwidget-real-facts-four-helpers})
-
-;; R1-3: real-file regression — production button-widget.fnl
-;; NOTE: Currently blocked by tree-sitter Fennel grammar limitation.
-;; The parser produces an ERROR root for button-widget.fnl and does
-;; not wrap ButtonWidget in a fn_form, preventing correct parent
-;; attribution.  The rule logic is verified correct via synthetic
-;; real-fact tests above.  Uncomment when tree-sitter grammar is fixed.
-;; (fn interactive-assertion-allows-production-buttonwidget []
-;;   ...)
-;; (table.insert tests {:name "interactive-assertion allows production BW"
-;;                       :fn interactive-assertion-allows-production-buttonwidget})
 {:tests tests}
