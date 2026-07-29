@@ -550,11 +550,17 @@
                 (set fallback-form cleaned-form))
               (local no-strings (strip-strings fallback-form))
               (local clean (strip-comments no-strings))
+              ;; Derive relevant keywords from this function's own cleaned form
+              ;; (bare or dotted usage), NOT from file-level interactive-access-texts.
+              ;; If another function contributes only hoverables access text,
+              ;; a named function with bare clickables + (assert clickables ...)
+              ;; must still have clickables recognized as a relevant keyword.
               (local relevant-kws {})
               (each [kw _ (pairs interactive-access-patterns)]
-                (each [_ text (ipairs (if interactive-access-texts interactive-access-texts []))]
-                  (when (string.find text kw 1 true)
-                    (tset relevant-kws kw true))))
+                (when (or (clean:find (.. "%." kw))
+                          (clean:find (.. "[%s%(]" kw))
+                          (= (clean:sub 1 (length kw)) kw))
+                  (tset relevant-kws kw true)))
               (when (= (next relevant-kws) nil)
                 (each [kw _ (pairs interactive-access-patterns)]
                   (tset relevant-kws kw true)))
