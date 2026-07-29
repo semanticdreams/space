@@ -521,6 +521,62 @@
             (tset call :enclosing-fn parent.name))))))
   synthetic-parents)
 
+(fn span-for-fn-def [source d]
+  "Compute the real byte span of a fn definition from source text
+   by finding its '(fn <name>' pattern and matching parens.
+   Returns nil if the span cannot be determined."
+  (local name-str (if (= d.name "<anonymous>") nil d.name))
+  (when name-str
+    (local pattern (.. "%(fn " name-str "[%s%(%)%[%]]"))
+    (local search-pos (if d.start-byte (math.max 1 d.start-byte) 1))
+    (local match-pos (source:find pattern (- search-pos 20)))
+    (when match-pos
+      (local end-pos (find-matching-paren source match-pos))
+      (when end-pos
+        {:start-byte match-pos :end-byte end-pos}))))
+
+(fn fix-enclosing-fn-by-span [source definitions recovered-parents]
+  "Correct enclosing-fn for all function definitions using smallest
+   containing function span. Uses source-text paren matching to compute
+   accurate byte spans, since tree-sitter assigns wrong spans in ERROR trees."
+  (local all-fns [])
+
+  ;; Collect function spans: use source-text spans for parsed definitions,
+  ;; and trust recovered-parent spans (they come from source-text matching).
+  (each [_ d (ipairs definitions)]
+    (when (= d.kind :fn)
+      (local span (span-for-fn-def source d))
+      (when span
+        (table.insert all-fns {:name d.name
+                               :start-byte span.start-byte
+                               :end-byte span.end-byte}))))
+  (each [_ rp (ipairs (if recovered-parents recovered-parents []))]
+    (when (and rp.start-byte rp.end-byte)
+      (table.insert all-fns {:name rp.name
+                             :start-byte rp.start-byte
+                             :end-byte rp.end-byte})))
+
+  ;; For each child definition, find the smallest containing parent
+  (each [_ child (ipairs definitions)]
+    (when (and child.start-byte child.end-byte)
+      (var best-parent nil)
+      (var best-span nil)
+      (each [_ parent (ipairs all-fns)]
+        (when (and (not= parent.name child.name)
+                   (>= child.start-byte parent.start-byte)
+                   (<= child.end-byte parent.end-byte))
+          (local span (- parent.end-byte parent.start-byte))
+          (when (if (= best-parent nil) true (< span best-span) true false)
+            (set best-parent parent)
+            (set best-span span))))
+      (if best-parent
+          (do
+            (tset child :enclosing-fn best-parent.name)
+            (tset child :top-level? false))
+          (do
+            (tset child :enclosing-fn nil)
+            (tset child :top-level? true))))))
+
 (fn M.extract [file-records]
   "Extract static facts from a list of file records.
   Returns a fact-db:
@@ -535,6 +591,9 @@
                                            file-facts.calls))
       (when (> (length recovered) 0)
         (tset file-facts :recovered-parents recovered))
+      ;; Fix enclosing-fn using smallest containing span (byte containment
+      ;; is more reliable than fn-stack when tree-sitter produces ERROR)
+      (fix-enclosing-fn-by-span record.source file-facts.definitions recovered)
       (table.insert files file-facts)
       (tset by-file record.path file-facts))
     {:files files

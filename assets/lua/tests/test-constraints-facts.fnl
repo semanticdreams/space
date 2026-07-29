@@ -282,6 +282,62 @@
   (assert (= (. ff.exports 1 :key) "main")
           "the single export should be 'main'"))
 
+;; --- R2-2: Enclosing function uses smallest containing span ---
+
+(fn enclosing-fn-uses-smallest-containing-span []
+  "Nested sibling functions should be attributed to the smallest containing
+   function, not an earlier sibling. Regression for scroll-view.fnl where
+   register-hoverables was misattributed to pointer-from-payload."
+  (local assets-path (or (os.getenv "SPACE_ASSETS_PATH") "/home/ubuntu/space/space/assets"))
+  (local scroll-path (fs.join-path assets-path "lua/scroll-view.fnl"))
+  (when (not (fs.exists scroll-path))
+    (print "SKIP: scroll-view.fnl not found (expected in CI)")
+    (os.exit 0))
+  (local target {:kind :files
+                 :name "facts-enclosing-test"
+                 :files [scroll-path]
+                 :module-roots [(fs.join-path assets-path "lua")]})
+  (local Source (require :constraints.source))
+  (local Facts (require :constraints.facts))
+  (local records (Source.discover target))
+  (local fact-db (Facts.extract records))
+  (local ff (. fact-db.files 1))
+
+  ;; Helper: find definition by name (also checks recovered parents)
+  (fn find-def [name]
+    (var result nil)
+    (each [_ d (ipairs ff.definitions)]
+      (when (= d.name name)
+        (set result d)))
+    (when (not result)
+      (local rps (if ff.recovered-parents ff.recovered-parents []))
+      (each [_ rp (ipairs rps)]
+        (when (= rp.name name)
+          (set result rp))))
+    result)
+
+  (local build-def (find-def "build"))
+  (local scrollview-def (find-def "ScrollView"))
+  (local reg-hoverables (find-def "register-hoverables"))
+  (local unreg-hoverables (find-def "unregister-hoverables"))
+
+  (assert build-def "should find build definition")
+  (assert scrollview-def "should find ScrollView definition")
+  (assert reg-hoverables "should find register-hoverables definition")
+  (assert unreg-hoverables "should find unregister-hoverables definition")
+
+  ;; build should be enclosed by ScrollView
+  (assert (= build-def.enclosing-fn "ScrollView")
+          (.. "build should have enclosing-fn=ScrollView, got " (tostring build-def.enclosing-fn)))
+
+  ;; register-hoverables should be enclosed by build, NOT pointer-from-payload
+  (assert (= reg-hoverables.enclosing-fn "build")
+          (.. "register-hoverables should have enclosing-fn=build, got " (tostring reg-hoverables.enclosing-fn)))
+
+  ;; unregister-hoverables should be enclosed by build, NOT pointer-from-payload
+  (assert (= unreg-hoverables.enclosing-fn "build")
+          (.. "unregister-hoverables should have enclosing-fn=build, got " (tostring unreg-hoverables.enclosing-fn))))
+
 ;; Register all tests
 (table.insert tests {:name "facts extracts require module"
                      :fn extracts-require-module})
@@ -319,6 +375,8 @@
                      :fn per-function-nesting-depth-is-scoped})
 (table.insert tests {:name "facts exports are restricted to top-level tables"
                      :fn exports-are-restricted-to-top-level-tables})
+(table.insert tests {:name "facts enclosing fn uses smallest containing span"
+                     :fn enclosing-fn-uses-smallest-containing-span})
 
 (local main
   (fn []
