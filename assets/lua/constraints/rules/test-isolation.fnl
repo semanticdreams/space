@@ -317,8 +317,9 @@
    into snapshot table, runs (pcall f), then restores fields from
    snapshot back to app.
    Requires correct ordering: snapshot before (pcall f), restore after.
-   Strips string literals and comments before matching to avoid false
-   positives from marker substrings appearing in non-code text.
+   Validates against concrete (set ...) assignment forms — does not
+   accept raw operand substrings in non-assignment contexts (e.g. print).
+   Strips string literals and comments before matching.
    Returns true only when all three ordered markers are present."
   (var defs definitions)
   (when (not defs) (set defs []))
@@ -335,17 +336,21 @@
       (local pcall-pos (string.find clean "(pcall f)" 1 true))
       (when pcall-pos
         ;; Check 1: snapshot-direction assignment BEFORE pcall
-        ;; Pattern: (set (. snapshot key) (. app key)) must appear
-        ;; before pcall in the stripped form.
+        ;; Must be an actual (set (. snapshot key) (. app key)) form
+        ;; — not raw operands in print/other non-set contexts.
+        ;; Lua pattern matches (set<ws>(.<ws>snapshot<ws>key)<ws>(.<ws>app<ws>key)
+        ;; with flexible whitespace (including newlines) between tokens.
         (var has-snapshot false)
-        (local snap-pos (string.find clean "(. snapshot key) (. app key)" 1 true))
+        (local snap-pat "%(set%s+%(%.%s*snapshot%s+key%)%s+%(%.%s*app%s+key%)")
+        (local snap-pos (string.find clean snap-pat 1 false))
         (when (and snap-pos (< snap-pos pcall-pos))
           (set has-snapshot true))
         ;; Check 2: restore-direction assignment AFTER pcall
-        ;; Pattern: (set (. app key) (. snapshot key)) must appear
-        ;; after pcall in the stripped form.
+        ;; Must be an actual (set (. app key) (. snapshot key)) form.
+        ;; Lua pattern matches (set<ws>(.<ws>app<ws>key)<ws>(.<ws>snapshot<ws>key)
         (var has-restore false)
-        (when (string.find clean "(. app key) (. snapshot key)" (+ pcall-pos 1) true)
+        (local rest-pat "%(set%s+%(%.%s*app%s+key%)%s+%(%.%s*snapshot%s+key%)")
+        (when (string.find clean rest-pat (+ pcall-pos 1) false)
           (set has-restore true))
         (when (and has-snapshot has-restore)
           (set found true))))

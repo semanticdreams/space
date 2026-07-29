@@ -764,6 +764,57 @@
 
 (table.insert tests {:name "R1-1g flags markers in comments" :fn mutation-restoration-flags-marker-substrings-in-comments})
 
+;; ======================================================================
+;; R1-1h: Operand substrings in non-set forms (e.g., print) — must flag
+;; ======================================================================
+
+(fn mutation-restoration-flags-non-set-operands-around-pcall []
+  "R1-1h: A malformed helper that uses (print (. snapshot key) (. app key))
+   before (pcall f) and (print (. app key) (. snapshot key)) after pcall
+   should NOT be accepted. The operands appear in non-assignment (print)
+   contexts — the validation must require actual (set ...) assignment forms.
+   This is the core regression for the concrete-assignment-shape fix."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; Malformed helper: operands in print calls, not actual set assignments
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 150
+                                 :form "(fn with-restored-app [fields f]
+  (print (. snapshot key) (. app key))
+  (local (ok result) (pcall f))
+  (print (. app key) (. snapshot key))
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-print-operands"
+                                 :top-level? true
+                                 :line 14 :column 1
+                                 :length 120
+                                 :form "(fn test-print-operands []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 16 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 17 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1h: should flag — operands in print, not set assignments")
+  (assert (> (length result) 0) "R1-1h: should have at least one diagnostic"))
+
+(table.insert tests {:name "R1-1h flags non-set operands around pcall" :fn mutation-restoration-flags-non-set-operands-around-pcall})
+
 (local main
   (fn []
     (local runner (require :tests/runner))
