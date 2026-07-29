@@ -320,6 +320,233 @@
                 (.. "T11-WRA-RF: expected 0 sandbox-activity diagnostics, got " sandbox-count)))
       (assert true "T11-WRA-RF: pass - no diagnostics returned")))
 
+;; ======================================================================
+;; R1-1: Tightened helper definition semantic-shape matching
+;; ======================================================================
+
+(fn mutation-restoration-flags-with-restored-app-def-missing-snapshot-loop []
+  "R1-1a: Same-file with-restored-app helper that has a restore loop and
+   pcall(f) but NO snapshot loop (no (. snapshot key) (. app key) pattern)
+   should NOT suppress diagnostics. The helper must have all three markers."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; with-restored-app without snapshot loop — just pcall + restore
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 100
+                                 :form "(fn with-restored-app [fields f]
+  (local (ok result) (pcall f))
+  (each [_ key (ipairs fields)]
+    (set (. app key) (. snapshot key)))
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-no-snapshot"
+                                 :top-level? true
+                                 :line 12 :column 1
+                                 :length 120
+                                 :form "(fn test-no-snapshot []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 14 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 15 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1a: should flag — helper def missing snapshot loop")
+  (assert (> (length result) 0) "R1-1a: should have at least one diagnostic"))
+
+(fn mutation-restoration-flags-with-restored-app-def-missing-restore-loop []
+  "R1-1b: Same-file with-restored-app helper that snapshots and runs pcall(f)
+   but has NO restore loop should NOT suppress diagnostics."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; with-restored-app without restore loop
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 100
+                                 :form "(fn with-restored-app [fields f]
+  (local snapshot {})
+  (each [_ key (ipairs fields)]
+    (set (. snapshot key) (. app key)))
+  (local (ok result) (pcall f))
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-no-restore"
+                                 :top-level? true
+                                 :line 14 :column 1
+                                 :length 120
+                                 :form "(fn test-no-restore []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 16 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 17 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1b: should flag — helper def missing restore loop")
+  (assert (> (length result) 0) "R1-1b: should have at least one diagnostic"))
+
+(fn mutation-restoration-flags-with-restored-app-def-pcall-of-other-fn []
+  "R1-1c: Same-file with-restored-app helper that calls (pcall g) on some
+   other function g (not the f parameter) should NOT suppress diagnostics.
+   The helper must call (pcall f) specifically — the wrapper callback."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; with-restored-app calling pcall on wrong function
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 120
+                                 :form "(fn with-restored-app [fields f]
+  (local snapshot {})
+  (each [_ key (ipairs fields)]
+    (set (. snapshot key) (. app key)))
+  (local (ok result) (pcall some-other-fn))
+  (each [_ key (ipairs fields)]
+    (set (. app key) (. snapshot key)))
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-pcall-other-fn"
+                                 :top-level? true
+                                 :line 15 :column 1
+                                 :length 120
+                                 :form "(fn test-pcall-other-fn []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 17 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 18 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1c: should flag — pcall of other fn, not f")
+  (assert (> (length result) 0) "R1-1c: should have at least one diagnostic"))
+
+(fn mutation-restoration-flags-unrelated-same-name-helper []
+  "R1-1d: A same-file function named with-restored-app that does completely
+   different work (not snapshot/restore of app) should NOT suppress diagnostics.
+   Same name alone is insufficient — the definition must have restoring semantics."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; with-restored-app that does unrelated logging, not snapshot/restore
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 60
+                                 :form "(fn with-restored-app [fields f]
+  (print \"restoring\" fields)
+  (f))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-unrelated-helper"
+                                 :top-level? true
+                                 :line 10 :column 1
+                                 :length 120
+                                 :form "(fn test-unrelated-helper []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 12 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 13 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1d: should flag — unrelated same-name helper")
+  (assert (> (length result) 0) "R1-1d: should have at least one diagnostic"))
+
+;; ======================================================================
+;; R1-2: Exact callee match — reject similarly-named wrapper calls
+;; ======================================================================
+
+(fn mutation-restoration-flags-similarly-named-wrapper []
+  "R1-2a: A not-with-restored-app call should NOT be mistaken for a
+   with-restored-app wrapper. The token match must be exact at call position."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; Valid with-restored-app def exists in file
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 200
+                                 :form "(fn with-restored-app [fields f]
+  (local snapshot {})
+  (each [_ key (ipairs fields)]
+    (set (. snapshot key) (. app key)))
+  (local (ok result) (pcall f))
+  (each [_ key (ipairs fields)]
+    (set (. app key) (. snapshot key)))
+  (if ok result (error result)))"})
+  ;; Test function uses not-with-restored-app (not a wrapper, just a call)
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-similarly-named"
+                                 :top-level? true
+                                 :line 15 :column 1
+                                 :length 120
+                                 :form "(fn test-similarly-named []
+  (not-with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 17 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 18 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-2a: should flag — similarly-named non-wrapper call")
+  (assert (> (length result) 0) "R1-2a: should have at least one diagnostic"))
+
 ;; Register all tests
 (table.insert tests {:name "T11-WRA-1 allows with-restored-app wrapper" :fn mutation-restoration-allows-with-restored-app-wrapper})
 (table.insert tests {:name "T11-WRA-2 flags no same-file def" :fn mutation-restoration-flags-with-restored-app-no-same-file-def})
@@ -327,6 +554,11 @@
 (table.insert tests {:name "T11-WRA-4 flags unlisted field" :fn mutation-restoration-flags-with-restored-app-unlisted-field})
 (table.insert tests {:name "T11-WRA-5 flags mutation outside wrapper" :fn mutation-restoration-flags-mutation-outside-with-restored-app})
 (table.insert tests {:name "T11-WRA-RF real-file regression sandbox-activity" :fn mutation-restoration-real-file-regression-sandbox-activity})
+(table.insert tests {:name "R1-1a flags missing snapshot loop" :fn mutation-restoration-flags-with-restored-app-def-missing-snapshot-loop})
+(table.insert tests {:name "R1-1b flags missing restore loop" :fn mutation-restoration-flags-with-restored-app-def-missing-restore-loop})
+(table.insert tests {:name "R1-1c flags pcall of other fn" :fn mutation-restoration-flags-with-restored-app-def-pcall-of-other-fn})
+(table.insert tests {:name "R1-1d flags unrelated same-name helper" :fn mutation-restoration-flags-unrelated-same-name-helper})
+(table.insert tests {:name "R1-2a flags similarly-named wrapper call" :fn mutation-restoration-flags-similarly-named-wrapper})
 
 (local main
   (fn []

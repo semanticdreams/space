@@ -245,14 +245,25 @@
 (fn anon-byte-inside-with-restored-app-body? [parent-form anon-byte]
   "Check if the byte position in parent-form falls inside a
    with-restored-app wrapper body (past the fields key argument).
-   Returns {:body-start body-start-byte} on success, nil on failure."
+   Returns {:body-start body-start-byte} on success, nil on failure.
+   Requires exact callee match: token must not be a substring of a
+   longer identifier name (e.g. not-with-restored-app)."
   (var inside nil)
   (var search-pos 1)
   (local token "with-restored-app")
   (local token-len (length token))
+  (local id-char-pat "[%w%-_%?!%.]")
   (while (and (not inside) search-pos)
     (local token-start (string.find parent-form token search-pos true))
-    (if (and token-start (< token-start anon-byte))
+    (if (and token-start (< token-start anon-byte)
+             ;; Exact callee boundary: byte before token must not be
+             ;; an identifier character (prevents substring matching
+             ;; within longer names like not-with-restored-app).
+             (if (> token-start 1)
+                 (not (string.find
+                       (parent-form:sub (- token-start 1) (- token-start 1))
+                       id-char-pat 1 false))
+                 true))
         (do
           (var op nil)
           (for [i (- token-start 1) 1 -1]
@@ -269,14 +280,19 @@
                           (set search-pos (+ token-start token-len))))
                     (set search-pos (+ call-end 1))))
               (set search-pos (+ token-start token-len))))
-        (set search-pos nil)))
+         ;; Reject: no match, or token is part of a longer identifier
+         (set search-pos (if token-start (+ token-start token-len) nil))))
   inside)
 
 (fn has-valid-with-restored-app-def? [definitions]
   "Check if definitions includes a function named with-restored-app
-   whose body matches restoring semantics: snapshots fields from app,
-   runs (pcall f), then restores fields back to app.
-   Returns true only when all three semantic markers are present."
+   whose body matches restoring semantics: snapshots fields from app
+   into snapshot table, runs (pcall f), then restores fields from
+   snapshot back to app.
+   Returns true only when all three semantic markers are present:
+   - snapshot-direction set: (. snapshot key) (. app key)
+   - (pcall f) call specifically (not any pcall)
+   - restore-direction set after pcall: (. app key) (. snapshot key)"
   (var defs definitions)
   (when (not defs) (set defs []))
   (var found false)
@@ -285,24 +301,25 @@
     (local def (. defs di))
     (when (and (= def.kind :fn) (= def.name "with-restored-app") def.form)
       (local form def.form)
-      ;; Three semantic markers required:
-      ;; 1. snapshot loop: (each [_ key (ipairs ... (set (. snapshot key) (. app key)
-      ;; 2. pcall invocation: (pcall f) or similar
-      ;; 3. restore loop: (each [_ key (ipairs ... (set (. app key) (. snapshot key)
+      ;; Check 1: snapshot-direction assignment
+      ;; Pattern: (set (. snapshot key) (. app key))
+      ;; Key: (. snapshot key) appears BEFORE (. app key) in the set form
       (var has-snapshot false)
+      (when (string.find form "(. snapshot key) (. app key)" 1 true)
+        (set has-snapshot true))
+      ;; Check 2: pcall(f) specifically — not just any pcall
       (var has-pcall false)
-      (var has-restore false)
-      (when (form:find "snapshot" 1 true)
-        (when (form:find "%(each%s+%[_%s" 1 false)
-          (set has-snapshot true)))
-      (when (form:find "pcall" 1 true)
+      (when (string.find form "(pcall f)" 1 true)
         (set has-pcall true))
+      ;; Check 3: restore-direction assignment after pcall position
+      ;; Pattern: (set (. app key) (. snapshot key))
+      ;; Key: (. app key) appears BEFORE (. snapshot key) in the set form,
+      ;; and must appear after the pcall position
+      (var has-restore false)
       (when (and has-snapshot has-pcall)
-        ;; Check for restore pattern: after pcall, there should be another
-        ;; each loop restoring from snapshot to app
-        (local pcall-pos (form:find "pcall" 1 true))
+        (local pcall-pos (string.find form "(pcall f)" 1 true))
         (when pcall-pos
-          (when (string.find form "%(each%s+%[_%s" (+ pcall-pos 1) false)
+          (when (string.find form "(. app key) (. snapshot key)" (+ pcall-pos 1) true)
             (set has-restore true))))
       (when (and has-snapshot has-pcall has-restore)
         (set found true)))
