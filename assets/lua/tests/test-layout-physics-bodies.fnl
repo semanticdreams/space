@@ -689,6 +689,97 @@
     (when (not ok)
       (error err))))
 
+(fn physics-anchor-drag-end-preserves-body-rotation []
+  (assert bt "Anchor drag end test requires Bullet bindings")
+  (assert (and app.engine app.engine.physics) "Physics instance not available")
+  (local original-provider app.activity-drag-attachment-provider)
+  (set app.activity-drag-attachment-provider (fn [] :anchor))
+  (local setup (setup-scene))
+  (local cleanup setup.cleanup)
+  (local scene setup.scene-result.scene)
+  (local size-ref {:value (glm.vec3 4 4 4)})
+  (local builder (make-probe-panel-builder size-ref))
+  (let [(ok err)
+        (pcall
+          (fn []
+            (local panel (scene:add-panel-child {:builder builder
+                                                  :skip-cuboid true
+                                                  :position (glm.vec3 0 12 0)}))
+            (assert panel "Expected panel for anchor drag end test")
+            (local entry (find-physics-entry-for-element scene panel))
+            (assert (and entry entry.body) "Expected runtime physics body")
+
+            ;; Collect movables
+            (local LayoutPhysicsBodies (require :layout-physics-bodies))
+            (local movables-entries (LayoutPhysicsBodies.collect-movables scene.entity))
+            (var anchor-entry nil)
+            (each [_ m (ipairs movables-entries)]
+              (when (and (not anchor-entry)
+                         (= m.target panel.layout))
+                (set anchor-entry m)))
+            (assert anchor-entry "Should find anchor-mode movable entry")
+            (assert anchor-entry.on-drag-end "Anchor mode should include on-drag-end callback")
+
+            ;; Set up a fake body with known position and a non-identity rotation.
+            ;; The key assertion: after on-drag-end, layout rotation must match
+            ;; the body rotation (not some stale pre-drag value).
+            (var set-world-transform-called false)
+            (local body-position (bt.Vector3 10 20 30))
+            ;; Body rotated 45 degrees around Y axis
+            (local half-sqrt2 (/ (math.sqrt 2) 2))
+            (local body-rotation (bt.Quaternion 0 half-sqrt2 0 half-sqrt2))
+            (local original-body entry.body)
+            (set entry.body
+                 {:getCenterOfMassTransform (fn [_self]
+                                              (local t (bt.Transform))
+                                              (t:setIdentity)
+                                              (t:setOrigin body-position)
+                                              (t:setRotation body-rotation)
+                                              t)
+                  :setWorldTransform (fn [_self _transform]
+                                      (set set-world-transform-called true))
+                  :setLinearVelocity (fn [_self _v] nil)
+                  :forceActivationState (fn [_self _state] nil)
+                  :activate (fn [_self _force] nil)
+                  :applyForce (fn [_self _f] nil)
+                  :applyForceAtPosition (fn [_self _f _p] nil)})
+
+            ;; Mark entry as dragging so on-drag-end path executes
+            (set entry.dragging true)
+
+            ;; Call on-drag-end
+            (anchor-entry.on-drag-end anchor-entry)
+
+            ;; Restore original body
+            (set entry.body original-body)
+
+            ;; Assert layout rotation was set from body rotation (preserves body rotation)
+            (assert (approx panel.layout.rotation.w (body-rotation:w))
+                    "Layout rotation.w should match body rotation w")
+            (assert (approx panel.layout.rotation.x (body-rotation:x))
+                    "Layout rotation.x should match body rotation x")
+            (assert (approx panel.layout.rotation.y (body-rotation:y))
+                    "Layout rotation.y should match body rotation y")
+            (assert (approx panel.layout.rotation.z (body-rotation:z))
+                    "Layout rotation.z should match body rotation z")
+
+            ;; Assert layout position was set from body position
+            ;; Body center is at (10, 20, 30), half-size is (2, 2, 2)
+            ;; layout-position = body-center - rotation * half
+            ;; rotation is 45 deg around Y: half rotated = roughly (-1.414, 2, 1.414)
+            ;; layout-position ≈ (10 + 1.414, 20 - 2, 30 - 1.414) = (11.414, 18, 28.586)
+            ;; We just verify it's not the original position (0, 12, 0)
+            (assert (not (vec3-approx= panel.layout.position (glm.vec3 0 12 0)))
+                    "Layout position should be updated from body transform, not remain at (0 12 0)")
+
+            ;; Assert apply-layout-to-body (setWorldTransform) was NOT called for anchor mode
+            (assert (not set-world-transform-called)
+                    "Anchor drag end should NOT call apply-layout-to-body; body transform already correct")))]
+    (cleanup)
+    (set app.activity-drag-attachment-provider original-provider)
+    (when (not ok)
+      (error err))))
+
 (table.insert tests {:name "Physical panels collide with each other"
                      :fn physical-panels-collide-with-each-other})
 (table.insert tests {:name "Physical panel collides with Perlin terrain"
@@ -713,6 +804,8 @@
                      :fn physics-center-mode-allows-default-teleport})
 (table.insert tests {:name "Physics anchor mode errors if applyForceAtPosition absent"
                      :fn physics-anchor-mode-errors-if-applyForceAtPosition-absent})
+(table.insert tests {:name "Physics anchor drag end preserves body rotation"
+                     :fn physics-anchor-drag-end-preserves-body-rotation})
 
 (local main
   (fn []

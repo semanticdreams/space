@@ -280,6 +280,12 @@
       (copy-vec3-into! entry.spawn local-offset)
       (set entry.spawn (glm.vec3 local-offset.x local-offset.y local-offset.z))))
 
+(fn drag-attachment-mode []
+  (if (and app.activity-drag-attachment-provider
+           (= (app.activity-drag-attachment-provider) :anchor))
+      :anchor
+      :center))
+
 (fn resolve-entry-world-state [entry base-position base-rotation positioned]
   (local body entry.body)
   (local transform
@@ -475,11 +481,6 @@
       (table.remove entries remove-idx)
       entry)))
 
-(fn drag-attachment-mode []
-  (if (and app.activity-drag-attachment-provider
-           (= (app.activity-drag-attachment-provider) :anchor))
-      :anchor
-      :center))
 
 (fn compute-body-center [entry]
   (if (and entry.body entry.body.getCenterOfMassTransform)
@@ -548,21 +549,32 @@
         (local base (entity-transform entity))
         (local inverse (base.rotation:inverse))
         (local mode (drag-attachment-mode))
-        (if (= mode :anchor)
-            (let [body-center (compute-body-center entry)
-                  entry-half (half-size entry)
-                  layout-rotation (or target.rotation (glm.quat 1 0 0 0))
-                  layout-position (- body-center (layout-rotation:rotate entry-half))]
-              (set target.position layout-position)
-              (update-entry-offset-from-world-center! entry base.position inverse body-center)
-              (when (and entry.positioned entry.positioned.layout)
-                (entry.positioned.layout:mark-layout-dirty))
-              (ensure-body-matches-layout-size entry)
-              (apply-layout-to-body entry)
-              (activate-entry-body! entry)
-              (when entry.body
-                (sync-moved-body entry.body)
-                (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
+      (if (= mode :anchor)
+          (let [body-center (compute-body-center entry)
+                entry-half (half-size entry)
+                ;; Read body rotation from the actual body transform,
+                ;; not from stale layout state. Syncing layout FROM body
+                ;; ensures rotation applied by physics forces is preserved.
+                body-rotation (if (and entry.body entry.body.getCenterOfMassTransform)
+                                 (let [transform (entry.body:getCenterOfMassTransform)]
+                                   (bt-quat->glm-quat (transform:getRotation)))
+                                 (or target.rotation (glm.quat 1 0 0 0)))
+                layout-position (- body-center (body-rotation:rotate entry-half))]
+            ;; Sync layout FROM body (position and rotation).
+            (set target.position layout-position)
+            (set target.rotation body-rotation)
+            (update-entry-offset-from-world-center! entry base.position inverse body-center)
+            (when (and entry.positioned entry.positioned.layout)
+              (entry.positioned.layout:mark-layout-dirty))
+            (ensure-body-matches-layout-size entry)
+            ;; Do NOT call apply-layout-to-body for anchor mode:
+            ;; the body already holds the correct physics transform.
+            ;; apply-layout-to-body would overwrite current body rotation
+            ;; with a value derived from stale layout state.
+            (activate-entry-body! entry)
+            (when entry.body
+              (sync-moved-body entry.body)
+              (entry.body:applyForce (bt.Vector3 0 -0.5 0))))
             (do
               (local world-center (+ target.position (target.rotation:rotate (half-size entry))))
               (update-entry-offset-from-world-center! entry base.position inverse world-center)
