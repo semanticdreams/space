@@ -496,7 +496,7 @@
           (set found true))))
     found))
 
-(fn fn-def-has-assert-call? [calls def cleaned-form interactive-access-patterns]
+(fn fn-def-has-assert-call? [calls def cleaned-form interactive-access-patterns interactive-access-texts]
   "Check whether any call in the same enclosing function is to 'assert'.
   For anonymous functions, fall back to per-definition form-text detection
   to avoid cross-anonymous-function correlation.
@@ -505,7 +505,8 @@
   attribute call facts to recovered parent functions.
   When cleaned-form (outer-only-form) is provided, the named fallback uses it
   instead of raw def.form. The fallback only counts asserts that mention an
-  interactive keyword (clickables/hoverables); unrelated asserts are ignored."
+  interactive keyword actually used by the function (as determined by
+  interactive-access-texts); cross-service asserts are ignored."
   (if (not def.name)
       false
       (= def.name "<anonymous>")
@@ -525,23 +526,32 @@
                      (= call.callee "assert")
                      (= (or call.enclosing-fn "") (or def.name "")))
             (set found true)))
-         (if found
-             true
-             ;; Fallback: when call-fact correlation fails, scan form text
-             ;; for asserts mentioning an interactive keyword.
-             (do
-               (var fallback-form def.form)
-               (when (and cleaned-form (= (type cleaned-form) :string) (< 0 (length cleaned-form)))
-                 (set fallback-form cleaned-form))
-               (local no-strings (strip-strings fallback-form))
-               (local clean (strip-comments no-strings))
-               (var has-relevant-assert false)
-               (each [kw _ (pairs interactive-access-patterns)]
-                 (when (not has-relevant-assert)
-                   (local pat (.. "%(assert[^%)]*" kw))
-                   (when (clean:find pat 1 false)
-                     (set has-relevant-assert true))))
-               has-relevant-assert)))))
+        (if found
+            true
+            ;; Fallback: when call-fact correlation fails, scan form text.
+            ;; Determine which interactive keywords this function uses.
+            (do
+              (local relevant-kws {})
+              (each [kw _ (pairs interactive-access-patterns)]
+                (each [_ text (ipairs (if interactive-access-texts interactive-access-texts []))]
+                  (when (string.find text kw 1 true)
+                    (tset relevant-kws kw true))))
+              ;; Also check bare usage in cleaned form as fallback
+              (when (= (next relevant-kws) nil)
+                (each [kw _ (pairs interactive-access-patterns)]
+                  (tset relevant-kws kw true)))
+              (var fallback-form def.form)
+              (when (and cleaned-form (= (type cleaned-form) :string) (< 0 (length cleaned-form)))
+                (set fallback-form cleaned-form))
+              (local no-strings (strip-strings fallback-form))
+              (local clean (strip-comments no-strings))
+              (var has-relevant-assert false)
+              (each [kw _ (pairs relevant-kws)]
+                (when (not has-relevant-assert)
+                  (local pat (.. "%(assert[^%)]*" kw))
+                  (when (clean:find pat 1 false)
+                    (set has-relevant-assert true))))
+              has-relevant-assert)))))
 
 ;; ---- nested-def masking for outer-fn false positives ----
 
@@ -867,7 +877,7 @@
          (when (not skip-because-param)
            (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
                  has-bare (fn-def-has-bare-interactive? def cleaned)
-                 asserted (fn-def-has-assert-call? calls def cleaned interactive-access-patterns)]
+                 asserted (fn-def-has-assert-call? calls def cleaned interactive-access-patterns interactive-access-texts)]
               (var bare-covered {})
               (when (and (not asserted) has-bare (not has-access)
                          (not (fn-def-has-dotted-interactive? def cleaned)))
