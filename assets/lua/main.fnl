@@ -1596,7 +1596,6 @@
     (set app.kernels nil))
   (local Kernels (require :kernels))
   (set app.kernels (Kernels.get-default))
-
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
   (AppBootstrap.init-input-systems)

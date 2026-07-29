@@ -1192,8 +1192,8 @@
   (each [_ d (ipairs (or result []))]
     (when (= d.evidence.function-name "app.init")
       (assert false "should not flag app.init — form-text fallback should detect assert"))))
-
 (table.insert tests {:name "interactive-assertion named fn assert form-text fallback"
                      :fn interactive-assertion-allows-named-fn-assert-form-text})
-
+(fn r1-1-flags-outer-when-assert-in-nested-def [] (local Layout (require :constraints.rules.layout)) (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion")) (assert rule "rule should be in rules list") (local nested "(fn init-subsystems [] (assert app.clickables \"ok\"))") (local outer (.. "(fn app.init [] (AppBootstrap.init-inputs) " nested " (when app.clickables (app.clickables:register nil)))")) (local ff (make-file-fact {:path "/s/m.fnl" :module "m" :definitions [{:kind :fn :name "app.init" :top-level? true :line 1 :column 1 :length (length outer) :form outer} {:kind :fn :name "init-subsystems" :top-level? false :line 2 :column 3 :length (length nested) :form nested}] :calls [] :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 2 :column 60 :form "app.clickables"}]})) (local result (rule.run (make-ctx [ff]))) (var flagged false) (each [_ d (ipairs (or result []))] (when (= d.evidence.function-name "app.init") (set flagged true))) (assert flagged "should flag — nested-def assert must not suppress outer"))
+(table.insert tests {:name "interactive-assertion flags outer with assert in nested def" :fn r1-1-flags-outer-when-assert-in-nested-def})
 {:tests tests}

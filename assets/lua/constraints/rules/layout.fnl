@@ -496,13 +496,15 @@
           (set found true))))
     found))
 
-(fn fn-def-has-assert-call? [calls def]
+(fn fn-def-has-assert-call? [calls def cleaned-form]
   "Check whether any call in the same enclosing function is to 'assert'.
   For anonymous functions, fall back to per-definition form-text detection
   to avoid cross-anonymous-function correlation.
   For named functions, also fall back to form-text detection when no call-fact
   matches; this handles ERROR-root trees where tree-sitter cannot properly
-  attribute call facts to recovered parent functions."
+  attribute call facts to recovered parent functions.
+  When cleaned-form (outer-only-form) is provided, the named fallback uses it
+  instead of raw def.form to avoid counting nested-function assertions."
   (if (not def.name)
       false
       (= def.name "<anonymous>")
@@ -522,16 +524,18 @@
                      (= call.callee "assert")
                      (= (or call.enclosing-fn "") (or def.name "")))
             (set found true)))
-        (if found
-            true
-            ;; Fallback: when tree-sitter cannot properly attribute call facts
-            ;; (e.g., ERROR-root files with recovered parents), scan the def's
-            ;; own form text for assert calls.
-            (do
-              (local no-strings (strip-strings def.form))
-              (local clean (strip-comments no-strings))
-              (or (clean:find "(assert " 1 true)
-                  (clean:find "(assert)" 1 true)))))))
+         (if found
+             true
+             ;; Fallback: when call-fact correlation fails, scan form text.
+             ;; Use cleaned-form (with nested defs blanked) when available.
+             (do
+               (var fallback-form def.form)
+               (when (and cleaned-form (= (type cleaned-form) :string) (< 0 (length cleaned-form)))
+                 (set fallback-form cleaned-form))
+               (local no-strings (strip-strings fallback-form))
+               (local clean (strip-comments no-strings))
+               (or (clean:find "(assert " 1 true)
+                   (clean:find "(assert)" 1 true)))))))
 
 ;; ---- nested-def masking for outer-fn false positives ----
 
@@ -857,7 +861,7 @@
          (when (not skip-because-param)
            (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
                  has-bare (fn-def-has-bare-interactive? def cleaned)
-                 asserted (fn-def-has-assert-call? calls def)]
+                 asserted (fn-def-has-assert-call? calls def cleaned)]
               (var bare-covered {})
               (when (and (not asserted) has-bare (not has-access)
                          (not (fn-def-has-dotted-interactive? def cleaned)))
