@@ -6,7 +6,7 @@
   (local channel (CameraAnimation.scalar-channel {:value 0 :target 0 :smoothing-rate 5}))
   (channel:set-target 100)
   (let [v (channel:snap 100)]
-    (assert (= v 100) "snap must return the new value"))
+    (assert (= v true) "snap must return true"))
   (assert (= (channel:value) 100)
           "snap must set value to target")
   true)

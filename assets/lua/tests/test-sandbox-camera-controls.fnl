@@ -113,6 +113,23 @@
   (controls:drop)
   true)
 
+(fn grounded-wheel-is-noop []
+  "In grounded mode, on-mouse-wheel must not mutate inner flight controls."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
+  (local flight-controls (make-fake-flight-controls camera))
+  (local fake-sampler (make-fake-terrain-sampler 0))
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls
+                                           :terrain-sampler fake-sampler}))
+  (local pre-count (length flight-controls.wheel-calls))
+  (controls:on-mouse-wheel {:x 0 :y 5})
+  (assert (= (length flight-controls.wheel-calls) pre-count)
+          "Grounded wheel must not mutate flight-controls wheel calls")
+  (controls:drop)
+  true)
+
 (fn flight-mode-delegates-mouse []
   (local camera (make-fake-camera))
   (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
@@ -151,14 +168,36 @@
   (controls:drop)
   true)
 
+(fn flight-to-grounded-without-sampler-errors []
+  "When controls are constructed in :flight without a terrain sampler,
+  then the toolbar toggles to :grounded and update is called, it must error."
+  (local camera (make-fake-camera))
+  (local toolbar-state (SandboxToolbarState {:camera-mode :flight}))
+  (local flight-controls (make-fake-flight-controls camera))
+  ;; Construct without terrain-sampler (valid in flight mode)
+  (local controls (SandboxCameraControls {:camera camera
+                                           :toolbar-state toolbar-state
+                                           :flight-controls flight-controls}))
+  ;; Toggle to grounded
+  (toolbar-state:toggle-camera-mode)
+  ;; Update must error because terrain-sampler is missing
+  (local (ok err) (pcall controls.update controls 16))
+  (assert (not ok)
+          "Update must error when toggled to grounded without terrain sampler")
+  (assert (or (string.find err "terrain sampler")
+              (string.find err "terrain-sampler"))
+          (.. "Error must mention terrain sampler, got: " (tostring err)))
+  (controls:drop)
+  true)
+
 (fn grounded-mode-requires-terrain-sampler []
   (local camera (make-fake-camera))
   (local toolbar-state (SandboxToolbarState {:camera-mode :grounded}))
   (local flight-controls (make-fake-flight-controls camera))
   (local (ok err) (pcall SandboxCameraControls
-                         {:camera camera
-                          :toolbar-state toolbar-state
-                          :flight-controls flight-controls}))
+                          {:camera camera
+                           :toolbar-state toolbar-state
+                           :flight-controls flight-controls}))
   (assert (not ok)
           "SandboxCameraControls must error when grounded mode is selected but no terrain sampler")
   (assert (or (string.find err "terrain sampler")
@@ -176,13 +215,31 @@
                                            :flight-controls flight-controls
                                            :terrain-sampler fake-sampler
                                            :pitch-min -1.2
-                                           :pitch-max 1.2}))
-  (controls:on-mouse-button-down {:button 1 :x 100 :y 200 :state true})
-  (controls:on-mouse-motion {:x 100 :y 100 :xrel 0 :yrel -500})
-  (assert (> (length camera.yaw-calls) 0)
-          "Mouse look must call camera:yaw in grounded mode")
-  (assert (> (length camera.pitch-calls) 0)
-          "Mouse look must call camera:pitch in grounded mode")
+                                           :pitch-max 1.2
+                                           :mouse-look-speed 0.1}))
+  ;; Start drag at origin and apply several large upward motions that
+  ;; would exceed pitch-min if unclamped. The accumulated pitch (sum of
+  ;; camera:pitch deltas) must stay within [pitch-min, pitch-max].
+  (controls:on-mouse-button-down {:button 1 :x 0 :y 0 :state true})
+  ;; Apply three large upward motions (each raw delta = -2.0)
+  (controls:on-mouse-motion {:x 0 :y -20})  ;; dy=-20, raw=-2.0 -> clamped to -1.2
+  (controls:on-mouse-motion {:x 0 :y -40})  ;; dy=-20, raw=-2.0 -> already at -1.2, delta=0
+  (controls:on-mouse-motion {:x 0 :y -60})  ;; dy=-20, raw=-2.0 -> still at -1.2, delta=0
+  ;; Now apply large downward motions
+  (controls:on-mouse-motion {:x 0 :y 0})    ;; dy=60, raw=6.0 -> goes to +1.2, delta=2.4
+  (controls:on-mouse-motion {:x 0 :y 20})   ;; dy=20, raw=2.0 -> already at +1.2, delta=0
+  ;; Sum all applied pitch deltas to compute accumulated pitch
+  (var accumulated 0.0)
+  (each [_ delta (ipairs camera.pitch-calls)]
+    (set accumulated (+ accumulated delta)))
+  ;; Accumulated pitch must be within bounds
+  (assert (>= accumulated -1.2)
+          (.. "Accumulated pitch " (tostring accumulated) " must be >= -1.2"))
+  (assert (<= accumulated 1.2)
+          (.. "Accumulated pitch " (tostring accumulated) " must be <= 1.2"))
+  ;; There must be at least one yaw or pitch call
+  (assert (> (+ (length camera.yaw-calls) (length camera.pitch-calls)) 0)
+          "Mouse look must call camera:yaw or camera:pitch in grounded mode")
   (controls:drop)
   true)
 
@@ -289,13 +346,17 @@
 (table.insert tests {:name "flight mode delegates update to flight controls"
                      :fn flight-mode-delegates-update})
 (table.insert tests {:name "grounded mode skips flight update"
-                     :fn grounded-mode-skips-flight-update})
+                      :fn grounded-mode-skips-flight-update})
+(table.insert tests {:name "grounded wheel is noop"
+                      :fn grounded-wheel-is-noop})
 (table.insert tests {:name "flight mode delegates mouse handlers"
-                     :fn flight-mode-delegates-mouse})
+                      :fn flight-mode-delegates-mouse})
 (table.insert tests {:name "flight mode delegates gamepad handlers"
-                     :fn flight-mode-delegates-gamepad})
-(table.insert tests {:name "grounded mode requires terrain sampler"
-                     :fn grounded-mode-requires-terrain-sampler})
+                      :fn flight-mode-delegates-gamepad})
+(table.insert tests {:name "grounded mode requires terrain sampler at construction"
+                      :fn grounded-mode-requires-terrain-sampler})
+(table.insert tests {:name "flight to grounded without sampler errors on update"
+                      :fn flight-to-grounded-without-sampler-errors})
 (table.insert tests {:name "grounded mouse look clamps pitch"
                      :fn grounded-mouse-look-clamps-pitch})
 (table.insert tests {:name "grounded Space sets positive vertical velocity"

@@ -995,6 +995,62 @@
               "After restore, drag-attachment must be :anchor")
       true)))
 
+(fn sandbox-activation-reuses-previous-raw-controls []
+  "When a previous raw FirstPersonControls is stored at
+  activity-controls.scene.sandbox (without a wrapper), activation must
+  reuse it as the flight-controls inside the new SandboxCameraControls
+  wrapper."
+  (local FirstPersonControlsModule (require :first-person-controls))
+  (with-restored-app
+    [:active-world-runtime
+     :scene
+     :activity-root-actions
+     :activity-target-enabled?
+     :activity-update
+     :activity-preferred-interaction-surface
+     :activity-surface-state
+     :canvas-surface-interactive?
+     :activity-context-enricher
+     :active-activity-id
+     :activity-top-toolbar-builder
+     :activity-object-move-predicate
+     :activity-drag-attachment-provider
+     :sandbox-toolbar-state]
+    (fn []
+      (ensure-built-in-activities!)
+      ;; Deactivate any lingering sandbox FIRST before setting up controls,
+      ;; otherwise deactivation would clear our pre-populated state.
+      (when (= (Activities.active-activity-id) "sandbox")
+        (Activities.deactivate-active-activity))
+      (local mock-scene (make-mock-scene))
+      ;; Create a real Camera for the controls
+      (local Camera (require :camera))
+      (local glm (require :glm))
+      (local camera (Camera {:position (glm.vec3 0 0 30)}))
+      ;; Create a previous raw FirstPersonControls
+      (local raw-controls (FirstPersonControlsModule.FirstPersonControls
+                            {:camera camera}))
+      ;; Give it a marker so we can identify it later
+      (set raw-controls._test-marker true)
+      ;; Set up runtime with the pre-populated raw controls at sandbox key
+      (local activity-controls {:scene {"sandbox" raw-controls}})
+      (set app.active-world-runtime {:scene mock-scene
+                                      :activity-session-state
+                                      {:sandbox {:scene (ActivitySceneState.empty-state)}}
+                                      :activity-cameras {:scene {"sandbox" camera}}
+                                      :activity-controls activity-controls})
+      (set app.scene mock-scene)
+      (Activities.activate-activity "sandbox")
+      ;; After activation, the wrapper should be at sandbox key
+      (local wrapper (. activity-controls.scene "sandbox"))
+      (assert wrapper "Activation must store wrapper at sandbox key")
+      (assert (= (type wrapper.flight-controls) :table)
+              "Wrapper must have flight-controls")
+      ;; The wrapper's flight-controls should be the original raw controls
+      (assert wrapper.flight-controls._test-marker
+              "Wrapper flight-controls must be the previous raw controls")
+      true)))
+
 (table.insert tests {:name "sandbox activity unit registers spec"
                      :fn sandbox-activity-unit-registers-spec})
 (table.insert tests {:name "sandbox activation sets scene interaction surface"
@@ -1029,6 +1085,8 @@
                       :fn sandbox-snapshot-includes-toolbar-state})
 (table.insert tests {:name "restore includes toolbar state"
                       :fn sandbox-restore-includes-toolbar-state})
+(table.insert tests {:name "activation reuses previous raw FirstPersonControls"
+                      :fn sandbox-activation-reuses-previous-raw-controls})
 
 (local main
   (fn []

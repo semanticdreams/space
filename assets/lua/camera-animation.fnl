@@ -45,7 +45,7 @@
                  ": " (tostring new-value))))
     (set value new-value)
     (set target new-value)
-    value)
+    true)
 
   (fn update [self delta-seconds]
     (when (not (= (type delta-seconds) :number))

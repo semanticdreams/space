@@ -76,11 +76,21 @@
   (var grounded-airborne? false)
   (var grounded-drag-look-start nil)
   (var grounded-mouse-pos nil)
+  (var grounded-pitch 0.0)
 
   (local y-channel (CameraAnimation.scalar-channel
                      {:value (vec3-y camera.position)
                       :target (vec3-y camera.position)
                       :smoothing-rate 8.0}))
+
+  (fn apply-grounded-pitch! [delta]
+    "Apply a pitch delta clamped to [pitch-min, pitch-max]."
+    (local new-pitch (+ grounded-pitch delta))
+    (local clamped-pitch (clamp new-pitch pitch-min pitch-max))
+    (local actual-delta (- clamped-pitch grounded-pitch))
+    (when (not (= actual-delta 0.0))
+      (camera:pitch actual-delta))
+    (set grounded-pitch clamped-pitch))
 
   (fn grounded-action-active? [action]
     (local key (. default-key-mapping action))
@@ -91,10 +101,10 @@
        (if (grounded-action-active? :jump) 1.5 1.0)))
 
   (fn grounded-sample-terrain-height []
-    (if options.terrain-sampler
-        (let [sampled (options.terrain-sampler:height-at-world-point camera.position)]
-          (if (finite-number? sampled) sampled 0.0))
-        0.0))
+    (when (not options.terrain-sampler)
+      (error "SandboxCameraControls grounded mode requires terrain sampler (terrain-sampler)"))
+    (let [sampled (options.terrain-sampler:height-at-world-point camera.position)]
+      (if (finite-number? sampled) sampled 0.0)))
 
   (fn grounded-apply-gravity-and-terrain [delta-seconds]
     (let [terrain-height (grounded-sample-terrain-height)
@@ -152,9 +162,9 @@
                   (camera:set-position (+ camera.position flat-move)))))
             ;; Keyboard look
             (when (grounded-action-active? :look-up)
-              (camera:pitch (* delta-seconds 1.0)))
+              (apply-grounded-pitch! (* delta-seconds 1.0)))
             (when (grounded-action-active? :look-down)
-              (camera:pitch (* -1 delta-seconds 1.0)))
+              (apply-grounded-pitch! (* -1 delta-seconds 1.0)))
             (when (grounded-action-active? :look-right)
               (camera:yaw (* delta-seconds 1.0)))
             (when (grounded-action-active? :look-left)
@@ -168,7 +178,8 @@
     (set grounded-drag-look-start nil)
     (set grounded-mouse-pos nil)
     (set grounded-vertical-velocity 0.0)
-    (set grounded-airborne? false))
+    (set grounded-airborne? false)
+    (set grounded-pitch 0.0))
 
   (fn drag-active? [self]
     (if (= toolbar-state.camera-mode :flight)
@@ -198,7 +209,7 @@
   (fn on-mouse-wheel [self payload]
     (if (= toolbar-state.camera-mode :flight)
         (flight-controls:on-mouse-wheel payload)
-        (flight-controls:on-mouse-wheel payload)))
+        nil))  ;; grounded mode: wheel is a no-op
 
   (fn on-mouse-button-down [self payload]
     (if (= toolbar-state.camera-mode :flight)
@@ -220,7 +231,7 @@
                 dy (- payload.y grounded-drag-look-start.y)]
             (set grounded-drag-look-start {:x payload.x :y payload.y})
             (camera:yaw (* dx mouse-look-speed))
-            (camera:pitch (* dy mouse-look-speed))))))
+            (apply-grounded-pitch! (* dy mouse-look-speed))))))
 
   (fn on-gamepad-button-down [self payload]
     (if (= toolbar-state.camera-mode :flight)
@@ -249,6 +260,7 @@
    :on-mouse-motion on-mouse-motion
    :on-gamepad-button-down on-gamepad-button-down
    :on-gamepad-axis-motion on-gamepad-axis-motion
-   :on-gamepad-removed on-gamepad-removed})
+   :on-gamepad-removed on-gamepad-removed
+   :flight-controls flight-controls})
 
 {: SandboxCameraControls}

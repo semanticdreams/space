@@ -121,16 +121,27 @@
                               (set (. world-runtime.activity-cameras.scene "sandbox") cam)
                               cam))))
   (when world-runtime.activity-controls
+    ;; Check for a previous raw FirstPersonControls at the sandbox key
+    ;; (i.e. before the wrapper existed). If present, reuse it as the inner
+    ;; flight-controls so any accumulated state (key tracking, etc.) is preserved.
+    (local previous-raw (and world-runtime.activity-controls.scene
+                             (. world-runtime.activity-controls.scene "sandbox")))
     ;; Create or reuse inner flight controls (raw FirstPersonControls)
     (local flight-controls (or (. world-runtime.activity-controls.scene "sandbox-flight")
-                               (let [ctrl (FirstPersonControls {:camera sandbox-camera})]
-                                 (set (. world-runtime.activity-controls.scene "sandbox-flight") ctrl)
-                                 ctrl)))
+                                (and previous-raw
+                                     (not previous-raw.flight-controls)
+                                     previous-raw)
+                                (let [ctrl (FirstPersonControls {:camera sandbox-camera})]
+                                  (set (. world-runtime.activity-controls.scene "sandbox-flight") ctrl)
+                                  ctrl)))
+    ;; Ensure the raw controls reference is stored at sandbox-flight for cleanup
+    (when (not (. world-runtime.activity-controls.scene "sandbox-flight"))
+      (set (. world-runtime.activity-controls.scene "sandbox-flight") flight-controls))
     ;; Wrap in SandboxCameraControls (handles flight/grounded camera mode)
     (set sandbox-controls (SandboxCameraControls {:camera sandbox-camera
-                                                   :toolbar-state toolbar-state
-                                                   :flight-controls flight-controls
-                                                   :terrain-sampler scene}))
+                                                    :toolbar-state toolbar-state
+                                                    :flight-controls flight-controls
+                                                    :terrain-sampler scene}))
     (set (. world-runtime.activity-controls.scene "sandbox") sandbox-controls))
   ;; Install camera and controls on the scene slot
   (local slot (scene:activity-slot "sandbox"))
