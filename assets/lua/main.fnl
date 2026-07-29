@@ -1600,6 +1600,7 @@
   (AppBootstrap.init-themes)
   (AppBootstrap.init-lights)
   (AppBootstrap.init-input-systems)
+  (assert app.clickables "app.clickables missing; AppBootstrap.init-input-systems should provide it")
   (local initial-width (or (and app.engine (. app.engine "pixel-width")) (and app.engine app.engine.width) 0))
   (local initial-height (or (and app.engine (. app.engine "pixel-height")) (and app.engine app.engine.height) 0))
   (when (and (> initial-width 0) (> initial-height 0))

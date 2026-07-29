@@ -499,7 +499,10 @@
 (fn fn-def-has-assert-call? [calls def]
   "Check whether any call in the same enclosing function is to 'assert'.
   For anonymous functions, fall back to per-definition form-text detection
-  to avoid cross-anonymous-function correlation."
+  to avoid cross-anonymous-function correlation.
+  For named functions, also fall back to form-text detection when no call-fact
+  matches; this handles ERROR-root trees where tree-sitter cannot properly
+  attribute call facts to recovered parent functions."
   (if (not def.name)
       false
       (= def.name "<anonymous>")
@@ -519,7 +522,16 @@
                      (= call.callee "assert")
                      (= (or call.enclosing-fn "") (or def.name "")))
             (set found true)))
-        found)))
+        (if found
+            true
+            ;; Fallback: when tree-sitter cannot properly attribute call facts
+            ;; (e.g., ERROR-root files with recovered parents), scan the def's
+            ;; own form text for assert calls.
+            (do
+              (local no-strings (strip-strings def.form))
+              (local clean (strip-comments no-strings))
+              (or (clean:find "(assert " 1 true)
+                  (clean:find "(assert)" 1 true)))))))
 
 ;; ---- nested-def masking for outer-fn false positives ----
 

@@ -1180,4 +1180,20 @@
 (table.insert tests {:name "interactive-assertion flags local construction with dotted access"
                      :fn interactive-assertion-flags-local-construction-with-dotted-access})
 
+(fn interactive-assertion-allows-named-fn-assert-form-text [] ; Task 11: form-text fallback
+  (local Layout (require :constraints.rules.layout))
+  (local rule (find-rule-by-id (Layout.rules) "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  (local form "(fn app.init [] (assert app.clickables \"missing\") (when app.clickables (app.clickables:register nil)))")
+  (local ff (make-file-fact {:path "/s/main.fnl" :module "main"
+                              :definitions [{:kind :fn :name "app.init" :top-level? true :line 1 :column 1 :length (length form) :form form}]
+                              :calls [] :accesses [{:text "app.clickables" :path ["app" "clickables"] :line 1 :column 50 :form "app.clickables"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (each [_ d (ipairs (or result []))]
+    (when (= d.evidence.function-name "app.init")
+      (assert false "should not flag app.init — form-text fallback should detect assert"))))
+
+(table.insert tests {:name "interactive-assertion named fn assert form-text fallback"
+                     :fn interactive-assertion-allows-named-fn-assert-form-text})
+
 {:tests tests}
