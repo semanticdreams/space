@@ -1,7 +1,4 @@
-;; Tests for Test-Isolation constraint rules (lifecycle.global-mutation-restoration).
-
 (local tests [])
-
 ;; --- Helpers for constructing synthetic fact DBs ---
 
 (fn make-file-fact [opts]
@@ -1191,6 +1188,9 @@
 (table.insert tests {:name "test-isolation rules returns table with one rule" :fn test-isolation-rules-returns-table-with-one-rule})
 (table.insert tests {:name "test-isolation rules have required structure" :fn test-isolation-rules-have-required-structure})
 (table.insert tests {:name "test-isolation rules executable by runner" :fn test-isolation-runner-executable})
+;; Import with-restored-app (WRA) wrapper recognition tests
+(local wra (require :tests.test-constraints-rules-test-isolation-wra))
+(each [_ t (ipairs wra.tests)] (table.insert tests t))
 (local main
   (fn []
     (local runner (require :tests/runner))

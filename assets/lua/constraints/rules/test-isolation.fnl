@@ -242,6 +242,73 @@
            (= fn-name "init-test-app")) true
       false))
 
+(fn anon-byte-inside-with-restored-app-body? [parent-form anon-byte]
+  "Check if the byte position in parent-form falls inside a
+   with-restored-app wrapper body (past the fields key argument).
+   Returns {:body-start body-start-byte} on success, nil on failure."
+  (var inside nil)
+  (var search-pos 1)
+  (local token "with-restored-app")
+  (local token-len (length token))
+  (while (and (not inside) search-pos)
+    (local token-start (string.find parent-form token search-pos true))
+    (if (and token-start (< token-start anon-byte))
+        (do
+          (var op nil)
+          (for [i (- token-start 1) 1 -1]
+            (when (and (not op) (= (parent-form:sub i i) "("))
+              (set op i)))
+          (if op
+              (do
+                (local call-end (find-matching-close parent-form op))
+                (if (and call-end (< anon-byte call-end))
+                    (do
+                      (local body-start (skip-argument parent-form (+ token-start token-len)))
+                      (if (and body-start (>= anon-byte body-start))
+                          (set inside {:body-start body-start})
+                          (set search-pos (+ token-start token-len))))
+                    (set search-pos (+ call-end 1))))
+              (set search-pos (+ token-start token-len))))
+        (set search-pos nil)))
+  inside)
+
+(fn has-valid-with-restored-app-def? [definitions]
+  "Check if definitions includes a function named with-restored-app
+   whose body matches restoring semantics: snapshots fields from app,
+   runs (pcall f), then restores fields back to app.
+   Returns true only when all three semantic markers are present."
+  (var defs definitions)
+  (when (not defs) (set defs []))
+  (var found false)
+  (var di 1)
+  (while (and (not found) (<= di (length defs)))
+    (local def (. defs di))
+    (when (and (= def.kind :fn) (= def.name "with-restored-app") def.form)
+      (local form def.form)
+      ;; Three semantic markers required:
+      ;; 1. snapshot loop: (each [_ key (ipairs ... (set (. snapshot key) (. app key)
+      ;; 2. pcall invocation: (pcall f) or similar
+      ;; 3. restore loop: (each [_ key (ipairs ... (set (. app key) (. snapshot key)
+      (var has-snapshot false)
+      (var has-pcall false)
+      (var has-restore false)
+      (when (form:find "snapshot" 1 true)
+        (when (form:find "%(each%s+%[_%s" 1 false)
+          (set has-snapshot true)))
+      (when (form:find "pcall" 1 true)
+        (set has-pcall true))
+      (when (and has-snapshot has-pcall)
+        ;; Check for restore pattern: after pcall, there should be another
+        ;; each loop restoring from snapshot to app
+        (local pcall-pos (form:find "pcall" 1 true))
+        (when pcall-pos
+          (when (string.find form "%(each%s+%[_%s" (+ pcall-pos 1) false)
+            (set has-restore true))))
+      (when (and has-snapshot has-pcall has-restore)
+        (set found true)))
+    (set di (+ di 1)))
+  found)
+
 (fn operand-is-path-prefix? [op path-text]
   "Check if op is a strict path prefix of path-text (followed by . or end)."
   (local ol (length op))
@@ -845,13 +912,13 @@
 
 (fn check-positions-inside-covering-wraf? [parent-form parent-line positions path-text definitions]
   "Check if every mutation position byte in parent-form is inside a
-   with-restored-app-fields body whose keys cover path-text.
+   with-restored-app-fields or with-restored-app body whose keys cover path-text.
    Returns true if all positions are covered, false otherwise.
-   Requires mutation positions to fall within the form bounds
-   (find-mutation-approx-byte can return bytes beyond form length
-   when target line exceeds form line count)."
+   with-restored-app wrapper recognition is only active when the same file
+   has a valid with-restored-app helper definition with restoring semantics."
   (var all-covered true)
   (var pi 1)
+  (local has-wra (has-valid-with-restored-app-def? definitions))
   (while (and all-covered (<= pi (length positions)))
     (local pos (. positions pi))
     (local pos-byte (+ (find-mutation-approx-byte parent-form parent-line pos.line)
@@ -862,7 +929,14 @@
           (if wraf-result
               (when (not (wrapper-covers-path? parent-form wraf-result.body-start path-text definitions))
                 (set all-covered false))
-              (set all-covered false)))
+              (if has-wra
+                  (do
+                    (local wra-result (anon-byte-inside-with-restored-app-body? parent-form pos-byte))
+                    (if wra-result
+                        (when (not (wrapper-covers-path? parent-form wra-result.body-start path-text definitions))
+                          (set all-covered false))
+                        (set all-covered false)))
+                  (set all-covered false))))
         (set all-covered false))
     (set pi (+ pi 1)))
   all-covered)
@@ -924,10 +998,13 @@
        :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))
 
 (fn all-positions-inside-covering-wrapper? [fn-form fn-def-line positions path-text definitions]
-  "Check if every mutation position is inside a with-restored-app-fields body
-   whose key argument covers the given path-text.
+  "Check if every mutation position is inside a with-restored-app-fields
+   or with-restored-app body whose key argument covers the given path-text.
+   with-restored-app recognition only activates when the same file has
+   a valid with-restored-app helper definition.
    Returns false if any mutation position is outside a covering wrapper."
   (var all-inside true)
+  (local has-wra (has-valid-with-restored-app-def? definitions))
   (each [_ pos (ipairs positions)]
     (when all-inside
       (local pos-byte (+ (find-mutation-approx-byte fn-form fn-def-line pos.line)
@@ -936,7 +1013,14 @@
        (if wraf-result
            (when (not (wrapper-covers-path? fn-form wraf-result.body-start path-text definitions))
              (set all-inside false))
-           (set all-inside false))))
+           (if has-wra
+               (do
+                 (local wra-result (anon-byte-inside-with-restored-app-body? fn-form pos-byte))
+                 (if wra-result
+                     (when (not (wrapper-covers-path? fn-form wra-result.body-start path-text definitions))
+                       (set all-inside false))
+                     (set all-inside false)))
+               (set all-inside false)))))
   all-inside)
 
 (fn compute-max-position [positions]
