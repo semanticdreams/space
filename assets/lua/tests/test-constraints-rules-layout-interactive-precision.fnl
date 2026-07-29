@@ -939,4 +939,36 @@
 (table.insert tests {:name "interactive-assertion allows production BW"
                      :fn interactive-assertion-allows-production-buttonwidget})
 
+;; R2-1: layout rule must not mutate ff.definitions when merging
+;; recovered-parents. It must build a fresh all-defs table.
+(fn interactive-assertion-does-not-mutate-definitions []
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.interactive-context-assertion"))
+  (assert rule "rule should be in rules list")
+  ;; Create a file-fact with definitions and recovered-parents
+  (local defs [{:kind :fn :name "helper" :line 10 :column 1
+                :form "(fn helper [] (clickables:register))"
+                :start-byte 100 :end-byte 200
+                :top-level? true :enclosing-fn nil}])
+  (local recovered [{:kind :fn :name "factory" :line 1 :column 1
+                     :form "(fn factory [opts] (local clickables ...) ...)"
+                     :start-byte 0 :end-byte 300
+                     :top-level? true :enclosing-fn nil}])
+  (local ff (make-file-fact {:definitions defs}))
+  (tset ff :recovered-parents recovered)
+  (local def-count-before (length ff.definitions))
+  ;; Run the rule — it should NOT mutate ff.definitions
+  (rule.run (make-ctx [ff]))
+  (assert (= (length ff.definitions) def-count-before)
+          (.. "ff.definitions length changed from " def-count-before
+              " to " (length ff.definitions)))
+  ;; Content should be unchanged
+  (local first-def (. ff.definitions 1))
+  (assert (= first-def.name "helper")
+          (.. "first def name changed to " (tostring first-def.name))))
+
+(table.insert tests {:name "interactive-assertion does not mutate definitions"
+                     :fn interactive-assertion-does-not-mutate-definitions})
+
 {:tests tests}

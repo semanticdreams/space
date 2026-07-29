@@ -730,7 +730,11 @@
             (when (not already)
               (table.insert interactive-access-texts text))))))
      (let [calls (or ff.calls [])
-           all-defs (or ff.definitions [])]
+           all-defs []]
+       ;; Copy ff.definitions into a fresh table to avoid mutating
+       ;; the canonical definitions used by structure rules.
+       (each [_ d (ipairs (or ff.definitions []))]
+         (table.insert all-defs d))
        ;; Merge recovered synthetic parents (from ERROR recovery)
        ;; so the closure-helper bypass can find the parent definition.
        (when ff.recovered-parents
