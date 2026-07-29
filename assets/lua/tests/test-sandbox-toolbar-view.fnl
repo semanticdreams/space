@@ -42,14 +42,11 @@
 
 (fn ensure-themes []
   "Ensure app.themes is initialized with a known-good active theme.
-  Other tests in the fast suite may leave app.themes in an unexpected state,
-  so we re-apply the dark theme regardless of initialization status."
-  (when (not (and app.themes app.themes.get-active-theme))
-    (local AppBootstrap (require :app-bootstrap))
-    (AppBootstrap.init-themes))
-  ;; Force dark theme so button variant colors differ between primary/secondary
-  (when app.themes.set-theme
-    (pcall app.themes.set-theme :dark)))
+  Earlier tests in the fast suite may leave app.themes in an unexpected
+  state, so we unconditionally re-initialize the themes system from
+  scratch.  This matches the pattern used by test-button.fnl."
+  (local AppBootstrap (require :app-bootstrap))
+  (AppBootstrap.init-themes))
 
 (fn make-test-ctx []
   "Create a BuildContext with theme, clickables, hoverables, and icons."

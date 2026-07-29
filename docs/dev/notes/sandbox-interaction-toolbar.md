@@ -22,7 +22,7 @@ The Sandbox toolbar is contributed by the active activity and laid out in the HU
 The activity activation context (`ctx`) in `activities.fnl` exposes three new hooks:
 
 ### `ctx:set-top-toolbar-builder!(builder)`
-Sets the current activity's top-toolbar builder. The builder must be a function `(fn [ctx] -> widget)` that produces a Layout-compatible widget tree. Sandbox sets this to `(SandboxToolbarView toolbar-state)`. The toolbar is rebuilt when the builder reference changes or on each frame.
+Sets the current activity's top-toolbar builder. The builder must be a function `(fn [ctx] -> widget)` that produces a Layout-compatible widget tree. Sandbox sets this to `(SandboxToolbarView toolbar-state)`. The toolbar is built when the builder reference changes (e.g., on activation or deactivation); the retained child is measured and laid out on subsequent frames.
 
 ### `ctx:set-object-move-predicate!(predicate)`
 Sets a zero-argument function that returns `true` when no-`Alt` object dragging is enabled for this activity. `state-runtime.fnl` calls `app.activity-object-move-predicate` to gate `MovableMouseButtonDown`. Sandbox sets this to `(fn [] (= toolbar-state.object-move-enabled? true))`. When no activity sets a predicate (or it returns `false`/`nil`), only `Alt`+drag works — this is the safe default for all other activities.
