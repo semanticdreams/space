@@ -497,61 +497,73 @@
     found))
 
 (fn fn-def-has-assert-call? [calls def cleaned-form interactive-access-patterns interactive-access-texts]
-  "Check whether any call in the same enclosing function is to 'assert'.
-  For anonymous functions, fall back to per-definition form-text detection
-  to avoid cross-anonymous-function correlation.
-  For named functions, also fall back to form-text detection when no call-fact
-  matches; this handles ERROR-root trees where tree-sitter cannot properly
-  attribute call facts to recovered parent functions.
-  When cleaned-form (outer-only-form) is provided, the named fallback uses it
-  instead of raw def.form. The fallback only counts asserts that mention an
-  interactive keyword actually used by the function (as determined by
-  interactive-access-texts); cross-service asserts are ignored."
+  "Return a table of interactive keywords covered by assert calls in this
+  function, or nil when no assert coverage exists.
+  For anonymous functions, conservatively marks all keywords as covered
+  when any assert call is found in the form text.
+  For named functions, correlates via call facts first; when a call.fact
+  matches, checks call.form to determine which keywords are asserted.
+  Falls back to form-text scan when no call-fact matches."
   (if (not def.name)
-      false
+      nil
       (= def.name "<anonymous>")
       ;; Anonymous functions: check the definition's own form text for
       ;; an actual (assert ...) or (assert) call — no cross-correlation.
-      ;; Strip strings and comments first to avoid false positives.
+      ;; Since we cannot determine which keyword the assert covers,
+      ;; conservatively mark all keywords as covered.
       (do
-        (let [no-strings (strip-strings def.form)
-              clean (strip-comments no-strings)]
-          (or (clean:find "(assert " 1 true)
-              (clean:find "(assert)" 1 true))))
+        (local no-strings (strip-strings def.form))
+        (local clean (strip-comments no-strings))
+        (if (or (clean:find "(assert " 1 true)
+                (clean:find "(assert)" 1 true))
+            (do
+              (local covered {})
+              (each [kw _ (pairs interactive-access-patterns)]
+                (tset covered kw true))
+              covered)
+            nil))
       ;; Named functions: correlate via call facts.
       (do
-        (var found false)
+        (local covered {})
+        (var call-fact-found false)
         (each [_ call (ipairs calls)]
-          (when (and (not found)
-                     (= call.callee "assert")
+          (when (and (= call.callee "assert")
                      (= (or call.enclosing-fn "") (or def.name "")))
-            (set found true)))
-        (if found
-            true
-            ;; Fallback: when call-fact correlation fails, scan form text.
-            ;; Determine which interactive keywords this function uses.
-            (do
-              (local relevant-kws {})
+            (set call-fact-found true)
+            (when call.form
+              (local call-no-strings (strip-strings call.form))
+              (local call-clean (strip-comments call-no-strings))
               (each [kw _ (pairs interactive-access-patterns)]
-                (each [_ text (ipairs (if interactive-access-texts interactive-access-texts []))]
-                  (when (string.find text kw 1 true)
-                    (tset relevant-kws kw true))))
-              ;; Also check bare usage in cleaned form as fallback
-              (when (= (next relevant-kws) nil)
+                (when (not (. covered kw))
+                  (when (call-clean:find kw 1 true)
+                    (tset covered kw true)))))))
+        (if call-fact-found
+            (do
+              (when (= (next covered) nil)
                 (each [kw _ (pairs interactive-access-patterns)]
-                  (tset relevant-kws kw true)))
+                  (tset covered kw true)))
+              covered)
+            ;; Fallback: scan form text per keyword
+            (do
               (var fallback-form def.form)
               (when (and cleaned-form (= (type cleaned-form) :string) (< 0 (length cleaned-form)))
                 (set fallback-form cleaned-form))
               (local no-strings (strip-strings fallback-form))
               (local clean (strip-comments no-strings))
-              (var has-relevant-assert false)
+              (local relevant-kws {})
+              (each [kw _ (pairs interactive-access-patterns)]
+                (each [_ text (ipairs (if interactive-access-texts interactive-access-texts []))]
+                  (when (string.find text kw 1 true)
+                    (tset relevant-kws kw true))))
+              (when (= (next relevant-kws) nil)
+                (each [kw _ (pairs interactive-access-patterns)]
+                  (tset relevant-kws kw true)))
               (each [kw _ (pairs relevant-kws)]
-                (when (not has-relevant-assert)
+                (when (not (. covered kw))
                   (local pat (.. "%(assert[^%)]*" kw))
                   (when (clean:find pat 1 false)
-                    (set has-relevant-assert true))))
-              has-relevant-assert)))))
+                    (tset covered kw true))))
+              (if (= (next covered) nil) nil covered))))))
 
 ;; ---- nested-def masking for outer-fn false positives ----
 
@@ -877,53 +889,66 @@
          (when (not skip-because-param)
            (let [has-access (fn-def-has-interactive-access? interactive-access-texts def cleaned)
                  has-bare (fn-def-has-bare-interactive? def cleaned)
-                 asserted (fn-def-has-assert-call? calls def cleaned interactive-access-patterns interactive-access-texts)]
+                 assert-covered (fn-def-has-assert-call? calls def cleaned interactive-access-patterns interactive-access-texts)]
               (var bare-covered {})
-              (when (and (not asserted) has-bare (not has-access)
+              ;; Seed bare-covered with assert-covered keywords so the per-keyword
+              ;; gate below treats them as covered.
+              (when assert-covered
+                (each [kw _ (pairs assert-covered)]
+                  (tset bare-covered kw true)))
+              ;; Compute closure-bypass coverage for bare usage (no dotted access).
+              (when (and has-bare (not has-access)
                          (not (fn-def-has-dotted-interactive? def cleaned)))
-                (set bare-covered (build-bare-covered def cleaned calls all-defs))
+                (each [kw _ (pairs (build-bare-covered def cleaned calls all-defs))]
+                  (tset bare-covered kw true))
                 ;; Locally constructed adapter tables (e.g., (local clickables {:register ...}))
                 ;; are owned infrastructure, not external services requiring assertion.
                 ;; Narrowed to the reviewed next-app.renderers make-interaction-adapters pattern.
                 (each [kw _ (pairs interactive-access-patterns)]
                   (when (fn-def-constructs-local-kw? ff def cleaned kw)
                     (tset bare-covered kw true))))
-            ;; Flag only if there is uncovered bare interactive usage
-            (var has-uncovered-bare false)
-            (when (and (not asserted) has-bare (not has-access)
-                       (not (fn-def-has-dotted-interactive? def cleaned)))
-              (each [kw _ (pairs interactive-access-patterns)]
-                (when (and (not has-uncovered-bare)
-                           (has-bare-keyword? cleaned kw)
-                           (not (. bare-covered kw)))
-                  (set has-uncovered-bare true))))
-            (when (and (not asserted)
-                       (if has-access
-                           true
-                           (and has-bare
-                                (not (fn-def-has-dotted-interactive? def cleaned))
-                                has-uncovered-bare)))
-              (var access-used nil)
-              (each [_ text (ipairs interactive-access-texts)]
-                (when (and (not access-used) (string.find cleaned text 1 true))
-                  (set access-used text)))
-              (when (not access-used)
-                (each [kw _ (pairs interactive-access-patterns)]
-                  (when (and (not access-used) (string.find cleaned kw 1 true))
-                    (set access-used kw))))
-              (table.insert diagnostics
-                (Diagnostics.violation
-                  {:constraint-id "layout.interactive-context-assertion"
-                   :family "layout-rendering"
-                   :message (.. "function " (or def.name "<anonymous>") " uses "
-                                (or access-used "interactive context") " without assert in "
-                                (or ff.module ff.path))
-                   :file ff.path :line (or def.line 0) :column (or def.column 0)
-                   :evidence {:function-name (or def.name "<anonymous>")
-                              :interactive-access (or access-used "clickables/hoverables")}
-                   :hint (.. "Assert that " (or access-used "the interactive context")
-                             " is available before using it")}))))))))
-  (if (> (length diagnostics) 0) diagnostics nil))
+              ;; Find the first interactive keyword that is used by this function
+              ;; but not covered by assert or closure bypass.
+              (var uncovered-kw nil)
+              (if has-access
+                  ;; Scan dotted access texts for an uncovered keyword.
+                  (each [_ text (ipairs interactive-access-texts)]
+                    (when (and (not uncovered-kw) (string.find cleaned text 1 true))
+                      (each [kw _ (pairs interactive-access-patterns)]
+                        (when (and (not uncovered-kw)
+                                   (string.find text kw 1 true)
+                                   (not (. bare-covered kw)))
+                          (set uncovered-kw kw)))))
+                  (when (and has-bare (not (fn-def-has-dotted-interactive? def cleaned)))
+                    ;; Scan bare keyword usage for an uncovered keyword.
+                    (each [kw _ (pairs interactive-access-patterns)]
+                      (when (and (not uncovered-kw)
+                                 (has-bare-keyword? cleaned kw)
+                                 (not (. bare-covered kw)))
+                        (set uncovered-kw kw)))))
+              (when uncovered-kw
+                ;; Determine the best diagnostic text for this uncovered keyword.
+                (var access-used nil)
+                (each [_ text (ipairs interactive-access-texts)]
+                  (when (and (not access-used)
+                             (string.find text uncovered-kw 1 true)
+                             (string.find cleaned text 1 true))
+                    (set access-used text)))
+                (when (not access-used)
+                  (set access-used uncovered-kw))
+                (table.insert diagnostics
+                  (Diagnostics.violation
+                    {:constraint-id "layout.interactive-context-assertion"
+                     :family "layout-rendering"
+                     :message (.. "function " (or def.name "<anonymous>") " uses "
+                                  (or access-used "interactive context") " without assert in "
+                                  (or ff.module ff.path))
+                     :file ff.path :line (or def.line 0) :column (or def.column 0)
+                     :evidence {:function-name (or def.name "<anonymous>")
+                                :interactive-access (or access-used "clickables/hoverables")}
+                     :hint (.. "Assert that " (or access-used "the interactive context")
+                                " is available before using it")}))))))))
+   (if (> (length diagnostics) 0) diagnostics nil))
 
 ;; ---------------------------------------------------------------------------
 ;; Rule registry
