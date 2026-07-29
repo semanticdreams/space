@@ -168,7 +168,8 @@
             (local current-y (or entity-layout.position.y 0))
             (local current-h (or entity-layout.size.y 0))
             (set entity-layout.position.y (+ current-y reserve))
-            (set entity-layout.size.y (math.max 0 (- current-h reserve)))))))
+            (set entity-layout.size.y (math.max 0 (- current-h reserve)))
+            (entity-layout:layouter)))))
 
     (set root-layout
          (Layout {:name "activity-dock"
