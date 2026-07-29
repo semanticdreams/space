@@ -505,15 +505,19 @@
     (when (> pos slen) (lua "break"))
     ;; Determine where the current token ends
     (local ch (vec-content:sub pos pos))
+    (local is-bracket (if (= ch "(") true (= ch "[") true (= ch "{") true false))
     (local token-end
-      (if (or (= ch "(") (= ch "[") (= ch "{"))
-          (let [close (find-matching-close vec-content pos)]
+      (if is-bracket
+          (do
+            (local close (find-matching-close vec-content pos))
             (if close (+ close 1) (+ slen 1)))
           (= ch "\"")
-          (let [eq (vec-content:find "\"" (+ pos 1) true)]
+          (do
+            (local eq (vec-content:find "\"" (+ pos 1) true))
             (if eq (+ eq 1) (+ slen 1)))
           ;; Simple token: identifier, number, keyword, etc.
-          (let [delim (vec-content:find "[%s%(%)%[%]%{%}\";]" (+ pos 1))]
+          (do
+            (local delim (vec-content:find "[%s%(%)%[%]%{%}\";]" (+ pos 1)))
             (if delim delim (+ slen 1)))))
     (local token (vec-content:sub pos (- token-end 1)))
     ;; Check for escaped-var match at binding-name positions
@@ -538,12 +542,15 @@
   (var found false)
   (while (and (not found) search-pos)
     (local let-start (between:find "%(let%s+%[" search-pos))
-    (if (not let-start) (set search-pos nil)
-        (let [bracket-pos (between:find "%[" let-start)
-              bracket-end (and bracket-pos (find-matching-close between bracket-pos))]
+    (if (not let-start)
+        (set search-pos nil)
+        (do
+          (local bracket-pos (between:find "%[" let-start))
+          (local bracket-end (and bracket-pos (find-matching-close between bracket-pos)))
           (if (not bracket-end)
               (set search-pos (+ let-start 4))
-              (let [vec-content (between:sub (+ bracket-pos 1) (- bracket-end 1))]
+              (do
+                (local vec-content (between:sub (+ bracket-pos 1) (- bracket-end 1)))
                 (if (scan-let-vec-for-binding vec-content escaped-var)
                     (set found true)
                     (set search-pos (+ bracket-end 1))))))))

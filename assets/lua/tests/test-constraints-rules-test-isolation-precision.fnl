@@ -53,9 +53,7 @@
 ;; lifecycle.global-mutation-restoration (test-isolation)
 ;; ======================================================================
 
-;; ======================================================================
-;; Precision: wrapper anonymous fn restoration (with-restored-app-fields)
-;; ======================================================================
+;; --- Precision: wrapper anonymous fn restoration (with-restored-app-fields) ---
 
 (fn mutation-restoration-allows-anonymous-fn-wrapped-by-restore-fields []
   "Mutation inside anonymous fn inside with-restored-app-fields wrapper should pass."
@@ -116,9 +114,7 @@
   (assert result "should flag anonymous fn mutation without wrapper")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
-;; ======================================================================
-;; Precision: snapshot/restore helper pair
-;; ======================================================================
+;; --- Precision: snapshot/restore helper pair ---
 
 (fn mutation-restoration-allows-snapshot-restore-helper-pair []
   "Test functions using snapshot-app-fields + restore-app-fields! helpers should pass."
@@ -174,9 +170,7 @@
   (assert result "should flag snapshot helper without restore call")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
-;; ======================================================================
-;; Precision: definition matching by line range for anonymous functions
-;; ======================================================================
+;; --- Precision: definition matching by line range for anonymous functions ---
 
 (fn mutation-restoration-matches-anonymous-def-by-line []
   "Multiple anonymous fns in a file: should match the correct one by line containment."
@@ -210,9 +204,7 @@
   (assert result "should flag mutation in anonymous fn at line 16 without restoration")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
-;; ======================================================================
-;; Precision: setup/harness narrow exemption
-;; ======================================================================
+;; --- Precision: setup/harness narrow exemption ---
 
 (fn mutation-restoration-allows-setup-test-env-in-runner []
   "setup-test-env in runner.fnl is test infrastructure, not per-test mutation."
@@ -277,9 +269,7 @@
   (assert result "should flag setup-test-env in non-runner file")
   (assert (> (length result) 0) "should have at least one diagnostic"))
 
-;; ======================================================================
-;; R1-1: anonymous grouping should not collapse distinct anonymous fns
-;; ======================================================================
+;; --- R1-1: anonymous grouping should not collapse distinct anonymous fns ---
 
 (fn mutation-restoration-flags-first-anon-mutation-when-second-restores []
   "R1-1: Two anonymous functions mutating the same path. The first leaks,
@@ -326,9 +316,7 @@
   (assert result "should produce diagnostics for the first leaking anonymous mutation")
   (assert (> (length result) 0) "should have at least one diagnostic for the leak"))
 
-;; ======================================================================
-;; R1-2: snapshot/restore helper pair must be order-aware
-;; ======================================================================
+;; --- R1-2: snapshot/restore helper pair must be order-aware ---
 
 (fn mutation-restoration-flags-helper-restore-before-mutation []
   "R1-2: A function that calls snapshot-app-fields and restore-app-fields!
@@ -406,9 +394,7 @@
   (assert (> (length engine-diags) 0)
           "unwrapped app.engine sibling mutation should be flagged"))
 
-;; ======================================================================
-;; R1-1 round2: same-line anonymous fns must be distinct
-;; ======================================================================
+;; --- R1-1 round2: same-line anonymous fns must be distinct ---
 
 (fn mutation-restoration-flags-same-line-anon-leak-when-same-line-restores []
   "R1-1 round2: Two anonymous functions on the same line mutating the same path.
