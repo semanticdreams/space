@@ -8,6 +8,7 @@
 (local no-setters (require :tests.test-constraints-rules-layout-no-setters))
 (local child-drop (require :tests.test-constraints-rules-layout-child-drop))
 (local interactive (require :tests.test-constraints-rules-layout-interactive))
+(local ancestors (require :tests.test-constraints-rules-layout-interactive-ancestors))
 
 (local tests [])
 
@@ -17,6 +18,7 @@
 (each [_ t (ipairs no-setters.tests)] (table.insert tests t))
 (each [_ t (ipairs child-drop.tests)] (table.insert tests t))
 (each [_ t (ipairs interactive.tests)] (table.insert tests t))
+(each [_ t (ipairs ancestors.tests)] (table.insert tests t))
 
 ;; ======================================================================
 

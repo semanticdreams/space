@@ -718,7 +718,9 @@
 
 (fn build-bare-covered [def cleaned calls all-defs]
    "Build a set of keywords whose bare usage in def is covered by a
-   parent scope that asserts the keyword before the child."
+   parent scope that asserts the keyword before the child.  When the
+   immediate parent lacks the assert, walks up lexically-containing
+   named ancestors via enclosing-fn chains."
    (var bare-covered {})
    (each [kw _ (pairs interactive-access-patterns)]
      (when (and (not (. bare-covered kw))
@@ -726,11 +728,40 @@
                 (not (shadows-keyword? def.form kw)))
        (var covered false)
        (when def.enclosing-fn
+         ;; Immediate parent check (existing)
          (each [_ parent (ipairs all-defs)]
            (when (and (not covered)
                       (= parent.name def.enclosing-fn)
                       (parent-has-asserted-local-before-child? calls parent def kw))
-             (set covered true))))
+             (set covered true)))
+         ;; Walk up ancestor chain when immediate parent lacks the assert.
+         ;; Rejects coverage if any intervening ancestor shadows the keyword.
+         (when (not covered)
+           (var ancestor nil)
+           (each [_ p (ipairs all-defs)]
+             (when (and (not ancestor) (= p.name def.enclosing-fn))
+               (set ancestor p)))
+           (var current ancestor)
+           (var max-depth 10)
+           (var depth 0)
+           (while (and current (not covered)
+                       (< depth max-depth)
+                       current.enclosing-fn
+                       (not= current.enclosing-fn "<anonymous>"))
+             (var next-ancestor nil)
+             (each [_ p (ipairs all-defs)]
+               (when (and (not next-ancestor)
+                          (= p.name current.enclosing-fn)
+                          (not= p.name current.name))
+                 (set next-ancestor p)))
+             (var intervening-shadows false)
+             (when (shadows-keyword? current.form kw)
+               (set intervening-shadows true))
+             (when (and next-ancestor (not intervening-shadows))
+               (when (parent-has-asserted-local-before-child? calls next-ancestor def kw)
+                 (set covered true)))
+             (set current next-ancestor)
+             (set depth (+ depth 1)))))
        (when (and (not covered) (= def.enclosing-fn nil))
          (each [_ parent (ipairs all-defs)]
            (when (and (not covered)
