@@ -547,6 +547,110 @@
   (assert result "R1-2a: should flag — similarly-named non-wrapper call")
   (assert (> (length result) 0) "R1-2a: should have at least one diagnostic"))
 
+;; ======================================================================
+;; R1-1-fix: Ordered semantic structure — snapshot before pcall, restore after
+;; ======================================================================
+
+(fn mutation-restoration-flags-pcall-before-snapshot-restore []
+  "R1-1e: Helper calls (pcall f) BEFORE snapshot+restore assignments.
+   The correct ordering is snapshot before pcall, restore after pcall.
+   A helper that runs pcall first (mutating app), then snapshots the
+   already-mutated state and restores from it should NOT be accepted.
+   The snapshot assignment must appear BEFORE (pcall f) in the form."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; pcall before snapshot+restore — wrong order
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 150
+                                 :form "(fn with-restored-app [fields f]
+  (local snapshot {})
+  (local (ok result) (pcall f))
+  (each [_ key (ipairs fields)]
+    (set (. snapshot key) (. app key)))
+  (each [_ key (ipairs fields)]
+    (set (. app key) (. snapshot key)))
+  (if ok result (error result)))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-pcall-first"
+                                 :top-level? true
+                                 :line 15 :column 1
+                                 :length 120
+                                 :form "(fn test-pcall-first []
+  (with-restored-app [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 17 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 18 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-1e: should flag — pcall before snapshot+restore")
+  (assert (> (length result) 0) "R1-1e: should have at least one diagnostic"))
+
+;; ======================================================================
+;; R1-2-fix: Trailing boundary — reject suffix callee names
+;; ======================================================================
+
+(fn mutation-restoration-flags-suffix-callee-name []
+  "R1-2b: with-restored-app-extra should NOT be mistaken for a
+   with-restored-app wrapper. Both leading and trailing identifier
+   boundaries must be checked. The trailing '-' after 'with-restored-app'
+   makes it a different identifier."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"}))
+  ;; Valid with-restored-app def exists in file
+  (table.insert ff.definitions {:kind :fn
+                                 :name "with-restored-app"
+                                 :top-level? true
+                                 :line 1 :column 1
+                                 :length 200
+                                 :form "(fn with-restored-app [fields f]
+  (local snapshot {})
+  (each [_ key (ipairs fields)]
+    (set (. snapshot key) (. app key)))
+  (local (ok result) (pcall f))
+  (each [_ key (ipairs fields)]
+    (set (. app key) (. snapshot key)))
+  (if ok result (error result)))"})
+  ;; Test function uses with-restored-app-extra (suffix, different name)
+  (table.insert ff.definitions {:kind :fn
+                                 :name "test-suffix-callee"
+                                 :top-level? true
+                                 :line 15 :column 1
+                                 :length 120
+                                 :form "(fn test-suffix-callee []
+  (with-restored-app-extra [:engine]
+    (fn []
+      (set app.engine custom-engine))))"})
+  (table.insert ff.definitions {:kind :fn
+                                 :name "<anonymous>"
+                                 :top-level? false
+                                 :line 17 :column 5
+                                 :length 15
+                                 :form "(fn []
+      (set app.engine custom-engine))"})
+  (table.insert ff.mutations {:op :set
+                               :path ["app" "engine"]
+                               :line 18 :column 7
+                               :form "(set app.engine custom-engine)"
+                               :enclosing-fn "<anonymous>"})
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "R1-2b: should flag — suffix callee name should not match")
+  (assert (> (length result) 0) "R1-2b: should have at least one diagnostic"))
+
 ;; Register all tests
 (table.insert tests {:name "T11-WRA-1 allows with-restored-app wrapper" :fn mutation-restoration-allows-with-restored-app-wrapper})
 (table.insert tests {:name "T11-WRA-2 flags no same-file def" :fn mutation-restoration-flags-with-restored-app-no-same-file-def})
@@ -559,6 +663,8 @@
 (table.insert tests {:name "R1-1c flags pcall of other fn" :fn mutation-restoration-flags-with-restored-app-def-pcall-of-other-fn})
 (table.insert tests {:name "R1-1d flags unrelated same-name helper" :fn mutation-restoration-flags-unrelated-same-name-helper})
 (table.insert tests {:name "R1-2a flags similarly-named wrapper call" :fn mutation-restoration-flags-similarly-named-wrapper})
+(table.insert tests {:name "R1-1e flags pcall before snapshot+restore" :fn mutation-restoration-flags-pcall-before-snapshot-restore})
+(table.insert tests {:name "R1-2b flags suffix callee name" :fn mutation-restoration-flags-suffix-callee-name})
 
 (local main
   (fn []

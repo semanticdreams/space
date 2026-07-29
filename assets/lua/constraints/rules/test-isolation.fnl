@@ -247,7 +247,7 @@
    with-restored-app wrapper body (past the fields key argument).
    Returns {:body-start body-start-byte} on success, nil on failure.
    Requires exact callee match: token must not be a substring of a
-   longer identifier name (e.g. not-with-restored-app)."
+   longer identifier name (both leading and trailing boundaries)."
   (var inside nil)
   (var search-pos 1)
   (local token "with-restored-app")
@@ -255,15 +255,25 @@
   (local id-char-pat "[%w%-_%?!%.]")
   (while (and (not inside) search-pos)
     (local token-start (string.find parent-form token search-pos true))
+    (local after-pos (if token-start (+ token-start token-len) nil))
     (if (and token-start (< token-start anon-byte)
-             ;; Exact callee boundary: byte before token must not be
-             ;; an identifier character (prevents substring matching
-             ;; within longer names like not-with-restored-app).
+             ;; Leading boundary: byte before token must not be an
+             ;; identifier character (prevents matching within longer
+             ;; names like not-with-restored-app).
              (if (> token-start 1)
                  (not (string.find
                        (parent-form:sub (- token-start 1) (- token-start 1))
                        id-char-pat 1 false))
-                 true))
+                 true)
+             ;; Trailing boundary: byte after token must not be an
+             ;; identifier character (prevents matching within longer
+             ;; names like with-restored-app-extra).
+             (if after-pos
+                 (and (<= after-pos (length parent-form))
+                      (not (string.find
+                            (parent-form:sub after-pos after-pos)
+                            id-char-pat 1 false)))
+                 false))
         (do
           (var op nil)
           (for [i (- token-start 1) 1 -1]
@@ -280,8 +290,8 @@
                           (set search-pos (+ token-start token-len))))
                     (set search-pos (+ call-end 1))))
               (set search-pos (+ token-start token-len))))
-         ;; Reject: no match, or token is part of a longer identifier
-         (set search-pos (if token-start (+ token-start token-len) nil))))
+        ;; Reject: no match, or token is part of a longer identifier
+        (set search-pos (if token-start (+ token-start token-len) nil))))
   inside)
 
 (fn has-valid-with-restored-app-def? [definitions]
@@ -289,10 +299,8 @@
    whose body matches restoring semantics: snapshots fields from app
    into snapshot table, runs (pcall f), then restores fields from
    snapshot back to app.
-   Returns true only when all three semantic markers are present:
-   - snapshot-direction set: (. snapshot key) (. app key)
-   - (pcall f) call specifically (not any pcall)
-   - restore-direction set after pcall: (. app key) (. snapshot key)"
+   Requires correct ordering: snapshot before (pcall f), restore after.
+   Returns true only when all three ordered markers are present."
   (var defs definitions)
   (when (not defs) (set defs []))
   (var found false)
@@ -301,28 +309,23 @@
     (local def (. defs di))
     (when (and (= def.kind :fn) (= def.name "with-restored-app") def.form)
       (local form def.form)
-      ;; Check 1: snapshot-direction assignment
-      ;; Pattern: (set (. snapshot key) (. app key))
-      ;; Key: (. snapshot key) appears BEFORE (. app key) in the set form
-      (var has-snapshot false)
-      (when (string.find form "(. snapshot key) (. app key)" 1 true)
-        (set has-snapshot true))
-      ;; Check 2: pcall(f) specifically — not just any pcall
-      (var has-pcall false)
-      (when (string.find form "(pcall f)" 1 true)
-        (set has-pcall true))
-      ;; Check 3: restore-direction assignment after pcall position
-      ;; Pattern: (set (. app key) (. snapshot key))
-      ;; Key: (. app key) appears BEFORE (. snapshot key) in the set form,
-      ;; and must appear after the pcall position
-      (var has-restore false)
-      (when (and has-snapshot has-pcall)
-        (local pcall-pos (string.find form "(pcall f)" 1 true))
-        (when pcall-pos
-          (when (string.find form "(. app key) (. snapshot key)" (+ pcall-pos 1) true)
-            (set has-restore true))))
-      (when (and has-snapshot has-pcall has-restore)
-        (set found true)))
+      ;; Find the (pcall f) position first — this is the ordering anchor
+      (local pcall-pos (string.find form "(pcall f)" 1 true))
+      (when pcall-pos
+        ;; Check 1: snapshot-direction assignment BEFORE pcall
+        ;; Pattern: (set (. snapshot key) (. app key)) must appear before pcall
+        (var has-snapshot false)
+        (when (string.find form "(. snapshot key) (. app key)" 1 true)
+          (local snap-pos (string.find form "(. snapshot key) (. app key)" 1 true))
+          (when (< (if snap-pos snap-pos 0) pcall-pos)
+            (set has-snapshot true)))
+        ;; Check 2: restore-direction assignment AFTER pcall
+        ;; Pattern: (set (. app key) (. snapshot key)) must appear after pcall
+        (var has-restore false)
+        (when (string.find form "(. app key) (. snapshot key)" (+ pcall-pos 1) true)
+          (set has-restore true))
+        (when (and has-snapshot has-restore)
+          (set found true))))
     (set di (+ di 1)))
   found)
 
