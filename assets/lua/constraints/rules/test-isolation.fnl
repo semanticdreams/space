@@ -493,14 +493,18 @@
   "Returns true iff restore-start >= min-byte AND the snapshot variable
    escaped-var is NOT rebound (via local or let) in the text between
    min-byte and restore-start. If the variable was rebound, the restore
-   is invalid — it captures a post-mutation value."
+   is invalid — it captures a post-mutation value.
+   Detects (local VAR ...) and (let [VAR ...] ...) rebindings, including
+   let bindings where VAR appears at any position in the binding vector."
   (if (< restore-start min-byte) false
       (do
         (local between (fn-form:sub min-byte (- restore-start 1)))
         (local local-pat (.. "%(local%s+" escaped-var "%s+"))
-        (local let-pat (.. "%(let%s+%[%s*" escaped-var "%s+"))
+        (local let-first-pat (.. "%(let%s+%[%s*" escaped-var "%s+"))
+        (local let-any-pat (.. "%(let%s+%[[^%]]*[%s(]+" escaped-var "%s+"))
         (if (between:find local-pat) false
-            (between:find let-pat) false
+            (between:find let-first-pat) false
+            (between:find let-any-pat) false
             true))))
 
 (fn has-restore-after-byte-for-var? [fn-form path snap-var min-byte]

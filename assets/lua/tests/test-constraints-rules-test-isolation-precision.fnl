@@ -1144,11 +1144,20 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "T11-5: non-literal module-level variable should be unresolved and flagged")
   (assert (> (length result) 0) "T11-5: should have at least one diagnostic"))
-
-;; ======================================================================
+(fn mutation-restoration-flags-let-rebound-nonfirst-after-pcall []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-bad.fnl" :module "tests.test-bad"
+                              :definitions [{:kind :fn :name "test-let-rebound" :top-level? true :line 5 :column 1 :length 100
+                                             :form "(fn test-let-rebound []\n  (local orig (and app.engine app.engine.width))\n  (pcall (fn [] (set app.engine.width 100)))\n  (let [unused true orig (and app.engine app.engine.width)] (set app.engine.width orig)))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 8 :column 1 :length 50
+                                             :form "(fn [] (set app.engine.width 100))"}]
+                              :mutations [{:op :set :path ["app" "engine" "width"] :line 8 :column 1
+                                           :form "(set app.engine.width 100)" :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "should flag — let rebound orig nonfirst position")
+  (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
 ;; Register all precision tests
-;; ======================================================================
-
+(table.insert tests {:name "mutation-restoration flags let rebound nonfirst after pcall" :fn mutation-restoration-flags-let-rebound-nonfirst-after-pcall})
 (table.insert tests {:name "mutation-restoration allows anonymous fn wrapped by restore fields" :fn mutation-restoration-allows-anonymous-fn-wrapped-by-restore-fields})
 (table.insert tests {:name "mutation-restoration flags anonymous fn without wrapper" :fn mutation-restoration-flags-anonymous-fn-without-wrapper})
 (table.insert tests {:name "mutation-restoration allows snapshot restore helper pair" :fn mutation-restoration-allows-snapshot-restore-helper-pair})
