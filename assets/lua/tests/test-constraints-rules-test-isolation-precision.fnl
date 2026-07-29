@@ -951,6 +951,75 @@
   (assert result "R2-3: direct restore before same-line mutation should be flagged")
   (assert (> (length result) 0) "should have at least one diagnostic for same-line direct leak"))
 
+;; ======================================================================
+;; T11-1: same-line nested callback inside restored wrapper passes
+;; ======================================================================
+
+(fn mutation-restoration-allows-sameline-nested-callback-in-wrapper []
+  "T11-1: Same-line nested anonymous fn inside a with-restored-app-fields
+   wrapper body must not be flagged. Models the real test-scene-activity-slots.fnl
+   pattern where a same-line (fn [_] x) callback inside a table assignment
+   does not cause a false positive."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-sameline-wrapper"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 150
+                                             :form "(fn test-sameline-wrapper []
+  (with-restored-app-fields [:engine]
+    (fn []
+      (set app.engine {:physics {:step (fn [_] x)}}))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 13 :column 5
+                                             :length 80
+                                             :form "(fn []
+      (set app.engine {:physics {:step (fn [_] x)}}))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 14 :column 35
+                                             :length 10
+                                             :form "(fn [_] x)"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 14 :column 7
+                                           :form "(set app.engine {:physics {:step (fn [_] x)}})"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "T11-1: same-line nested callback inside restored wrapper should pass"))
+
+;; ======================================================================
+;; T11-2: wrapper missing the mutated key still flags
+;; ======================================================================
+
+(fn mutation-restoration-flags-wrapper-missing-key []
+  "T11-2: with-restored-app-fields wrapping [:renderers] but mutation is on
+   app.engine. The wrapper key argument must include the mutated path."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl"
+                              :module "tests.test-module"
+                              :definitions [{:kind :fn
+                                             :name "test-wrong-key"
+                                             :top-level? true
+                                             :line 10 :column 1
+                                             :length 150
+                                             :form "(fn test-wrong-key []
+  (with-restored-app-fields [:renderers]
+    (fn []
+      (set app.engine custom-engine))))"}]
+                              :mutations [{:op :set
+                                           :path ["app" "engine"]
+                                           :line 14 :column 7
+                                           :form "(set app.engine custom-engine)"
+                                           :enclosing-fn "<anonymous>"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "T11-2: wrapper missing key should flag")
+  (assert (> (length result) 0) "T11-2: should have at least one diagnostic"))
 
 ;; ======================================================================
 ;; Register all precision tests
@@ -983,6 +1052,8 @@
 (table.insert tests {:name "R2-2 flags named mutation outside wrapper" :fn mutation-restoration-flags-named-mutation-outside-wrapper})
 (table.insert tests {:name "R2-3 flags same-line helper restore before mutation" :fn mutation-restoration-flags-same-line-helper-restore-before-mutation})
 (table.insert tests {:name "R2-3 flags same-line direct restore before mutation" :fn mutation-restoration-flags-same-line-direct-restore-before-mutation})
+(table.insert tests {:name "T11-1 allows same-line nested callback in wrapper" :fn mutation-restoration-allows-sameline-nested-callback-in-wrapper})
+(table.insert tests {:name "T11-2 flags wrapper missing key" :fn mutation-restoration-flags-wrapper-missing-key})
 
 (local main
   (fn []
