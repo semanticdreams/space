@@ -512,61 +512,59 @@
               covers)))
       true))
 
-(fn check-any-parent-wrapper [ff fn-def-line anon-def-col path-text]
+(fn check-positions-inside-covering-wraf? [parent-form parent-line positions path-text]
+  "Check if every mutation position byte in parent-form is inside a
+   with-restored-app-fields body whose keys cover path-text.
+   Returns true if all positions are covered, false otherwise."
+  (var all-covered true)
+  (var pi 1)
+  (while (and all-covered (<= pi (length positions)))
+    (local pos (. positions pi))
+    (local pos-byte (+ (find-mutation-approx-byte parent-form parent-line pos.line)
+                       (math.max 0 (- pos.column 1))))
+    (local wraf-result (anon-byte-inside-wraf-body? parent-form pos-byte))
+    (if wraf-result
+        (when (not (wrapper-covers-path? parent-form wraf-result.body-start path-text))
+          (set all-covered false))
+        (set all-covered false))
+    (set pi (+ pi 1)))
+  all-covered)
+
+(fn check-any-parent-wrapper [ff fn-def-line anon-def-col positions path-text max-line max-col]
   "Fallback: scan all fn definitions in the file to find any parent function
    whose form text contains a with-restored-app-fields wrapper that covers
-   the anonymous fn definition and the mutated path."
+   the actual mutation positions and the mutated path."
   (var found false)
   (var di 1)
   (var defs ff.definitions)
   (when (not defs) (set defs []))
-  (var safe-col (if (= anon-def-col nil) 1 anon-def-col))
   (while (and (not found) (<= di (length defs)))
     (local def (. defs di))
-    (when (and (= def.kind :fn) def.form)
-      (local def-col (if (= def.column nil) 1 def.column))
-      (local is-same-pos (and (= def.line fn-def-line) (= def-col safe-col)))
-      (when (and (not is-same-pos) (> fn-def-line def.line))
-        (local anon-byte (+ (find-mutation-approx-byte def.form def.line fn-def-line)
-                            (math.max 0 (- safe-col 1))))
-        (when (<= anon-byte (length def.form))
-          (local wraf-result (anon-byte-inside-wraf-body? def.form anon-byte))
-          (when wraf-result
-            (when (wrapper-covers-path? def.form wraf-result.body-start path-text)
-              (set found true))))))
+    (when (and (= def.kind :fn) def.form (> max-line def.line))
+      (when (check-positions-inside-covering-wraf? def.form def.line positions path-text)
+        (set found true)))
     (set di (+ di 1)))
   found)
 
-(fn check-parent-wrapper [ff fn-def-line anon-def-col path-text]
+(fn check-parent-wrapper [ff fn-def-line anon-def-col positions path-text max-line max-col]
   "Check Pattern 3: parent function wrapper for anonymous functions.
-   Returns true if the anonymous fn is inside a with-restored-app-fields body
-   in any containing parent function, AND the wrapper key argument includes
-   the mutated path-text field. Iterates through all containing defs
-   starting at index 2 (the immediate parent) to handle deeply nested
-   anonymous fns. Falls back to scanning all definitions if the containment
-   hierarchy is incomplete (tree-sitter byte-span issues)."
+   Returns true if the actual mutation positions are inside a
+   with-restored-app-fields body in any containing parent function,
+   AND the wrapper key argument includes the mutated path-text field."
   (local search-col (if anon-def-col anon-def-col nil))
   (local containing (find-containing-fn-defs ff.definitions fn-def-line search-col))
   (if (<= (length containing) 1)
-      (check-any-parent-wrapper ff fn-def-line anon-def-col path-text)
+      (check-any-parent-wrapper ff fn-def-line anon-def-col positions path-text max-line max-col)
       (do
-        (local anon-def (. containing 1))
         (var found-restored false)
         (var pi 2)
         (while (and (not found-restored) (<= pi (length containing)))
           (local parent (. containing pi))
-          (local anon-line-byte (find-mutation-approx-byte parent.form parent.line fn-def-line))
-          (local col (if anon-def.column anon-def.column 1))
-          (local anon-byte (+ anon-line-byte (math.max 0 (- col 1))))
-          (local wraf-result (anon-byte-inside-wraf-body? parent.form anon-byte))
-          (if wraf-result
-              (do
-                (local body-start wraf-result.body-start)
-                (when (wrapper-covers-path? parent.form body-start path-text)
-                  (set found-restored true))))
+          (when (check-positions-inside-covering-wraf? parent.form parent.line positions path-text)
+            (set found-restored true))
           (set pi (+ pi 1)))
         (if found-restored true
-            (check-any-parent-wrapper ff fn-def-line anon-def-col path-text)))))
+            (check-any-parent-wrapper ff fn-def-line anon-def-col positions path-text max-line max-col)))))
 
 (fn emit-mutation-diagnostic [diagnostics diagnosed key ff path-text max-line fn-name]
   "Record a violation diagnostic for an unrestored sensitive global mutation."
@@ -580,16 +578,20 @@
        :evidence {:global-path path-text :enclosing-fn fn-name}
        :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))
 
-(fn all-positions-inside-wrapper? [fn-form fn-def-line positions]
-  "Check if every mutation position is inside a with-restored-app-fields body.
-   Returns false if any mutation position is outside a wrapper."
+(fn all-positions-inside-covering-wrapper? [fn-form fn-def-line positions path-text]
+  "Check if every mutation position is inside a with-restored-app-fields body
+   whose key argument covers the given path-text.
+   Returns false if any mutation position is outside a covering wrapper."
   (var all-inside true)
   (each [_ pos (ipairs positions)]
     (when all-inside
       (local pos-byte (+ (find-mutation-approx-byte fn-form fn-def-line pos.line)
                          (math.max 0 (- pos.column 1))))
-      (when (not (anon-byte-inside-wraf-body? fn-form pos-byte))
-        (set all-inside false))))
+      (local wraf-result (anon-byte-inside-wraf-body? fn-form pos-byte))
+      (if wraf-result
+          (when (not (wrapper-covers-path? fn-form wraf-result.body-start path-text))
+            (set all-inside false))
+          (set all-inside false))))
   all-inside)
 
 (fn compute-max-position [positions]
@@ -615,10 +617,10 @@
     (table.insert path-segments seg))
   (local min-byte (+ (find-mutation-approx-byte fn-form fn-def-line max-line)
                       (math.max 0 (- max-col 1))))
-  (when (and (not has-restoration) (all-positions-inside-wrapper? fn-form fn-def-line positions))
+  (when (and (not has-restoration) (all-positions-inside-covering-wrapper? fn-form fn-def-line positions path-text))
     (set has-restoration true))
   (when (and (not has-restoration) (= fn-name "<anonymous>"))
-    (when (check-parent-wrapper ff fn-def-line anon-def-col path-text)
+    (when (check-parent-wrapper ff fn-def-line anon-def-col positions path-text max-line max-col)
       (set has-restoration true)))
   (local pcall-ranges (find-all-pcall-fn-ranges fn-form))
   (local enclosing-pcall-end (find-enclosing-pcall-end-byte fn-form fn-def-line max-line pcall-ranges))

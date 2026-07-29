@@ -999,7 +999,9 @@
 
 (fn mutation-restoration-flags-wrapper-missing-key []
   "T11-2: with-restored-app-fields wrapping [:renderers] but mutation is on
-   app.engine. The wrapper key argument must include the mutated path."
+   app.engine. The wrapper key argument must include the mutated path.
+   The mutation is inside the wrapper body (anonymous fn is defined),
+   so the key check is the only barrier to suppression."
   (local rule (get-test-isolation-rule))
   (local ff (make-file-fact {:path "/tests/test-module.fnl"
                               :module "tests.test-module"
@@ -1011,7 +1013,14 @@
                                              :form "(fn test-wrong-key []
   (with-restored-app-fields [:renderers]
     (fn []
-      (set app.engine custom-engine))))"}]
+      (set app.engine custom-engine))))"}
+                                            {:kind :fn
+                                             :name "<anonymous>"
+                                             :top-level? false
+                                             :line 13 :column 5
+                                             :length 20
+                                             :form "(fn []
+      (set app.engine custom-engine))"}]
                               :mutations [{:op :set
                                            :path ["app" "engine"]
                                            :line 14 :column 7
@@ -1020,6 +1029,36 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "T11-2: wrapper missing key should flag")
   (assert (> (length result) 0) "T11-2: should have at least one diagnostic"))
+
+;; ======================================================================
+;; T11-3: real-file regression — test-scene-activity-slots.fnl
+;; ======================================================================
+
+(fn mutation-restoration-real-file-regression-activity-slots []
+  "T11-3: Real-file regression using Source.discover + Facts.extract.
+   The production file test-scene-activity-slots.fnl should produce zero
+   lifecycle.global-mutation-restoration diagnostics after wrapper precision fix."
+  (local fs (require :fs))
+  (local Source (require :constraints.source))
+  (local Facts (require :constraints.facts))
+  (local scene-path (fs.absolute "assets/lua/tests/test-scene-activity-slots.fnl"))
+  (local target {:kind :files
+                 :files [scene-path]
+                 :module-roots [(fs.absolute "assets/lua")]})
+  (local source-records (Source.discover target))
+  (local fact-db (Facts.extract source-records))
+  (local rule (get-test-isolation-rule))
+  (local ctx {:target {:kind :repo :name :test} :facts fact-db :files []})
+  (local result (rule.run ctx))
+  (if result
+      (do
+        (var scene-count 0)
+        (each [_ d (ipairs result)]
+          (when (string.find (or d.file "") "test-scene-activity-slots" 1 true)
+            (set scene-count (+ scene-count 1))))
+        (assert (= scene-count 0)
+                (.. "T11-3: expected 0 activity-slots diagnostics, got " scene-count)))
+      (assert true "T11-3: pass - no diagnostics returned")))
 
 ;; ======================================================================
 ;; Register all precision tests
@@ -1054,6 +1093,7 @@
 (table.insert tests {:name "R2-3 flags same-line direct restore before mutation" :fn mutation-restoration-flags-same-line-direct-restore-before-mutation})
 (table.insert tests {:name "T11-1 allows same-line nested callback in wrapper" :fn mutation-restoration-allows-sameline-nested-callback-in-wrapper})
 (table.insert tests {:name "T11-2 flags wrapper missing key" :fn mutation-restoration-flags-wrapper-missing-key})
+(table.insert tests {:name "T11-3 real-file regression activity-slots" :fn mutation-restoration-real-file-regression-activity-slots})
 
 (local main
   (fn []
