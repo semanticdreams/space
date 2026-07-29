@@ -1156,8 +1156,21 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag — let rebound orig nonfirst position")
   (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
+;; R1-1: post-pcall let where orig is only a value, not rebound — restore valid
+(fn mutation-restoration-allows-let-value-position-after-pcall []
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-ok.fnl" :module "tests.test-ok"
+                              :definitions [{:kind :fn :name "test-let-value" :top-level? true :line 5 :column 1 :length 100
+                                             :form "(fn test-let-value []\n  (local orig (and app.engine app.engine.width))\n  (pcall (fn []\n    (set app.engine.width 100)))\n  (let [unused orig more true] (set app.engine.width orig)))"}
+                                            {:kind :fn :name "<anonymous>" :top-level? false :line 8 :column 1 :length 50
+                                             :form "(fn []\n    (set app.engine.width 100))"}]
+                              :mutations [{:op :set :path ["app" "engine" "width"] :line 8 :column 1
+                                           :form "(set app.engine.width 100)" :enclosing-fn "<anonymous>"}]}))
+  (assert (= (rule.run (make-ctx [ff])) nil)
+          "R1-1: orig as let value (not binding name) should not invalidate pcall restore"))
 ;; Register all precision tests
 (table.insert tests {:name "mutation-restoration flags let rebound nonfirst after pcall" :fn mutation-restoration-flags-let-rebound-nonfirst-after-pcall})
+(table.insert tests {:name "R1-1 allows let value position after pcall" :fn mutation-restoration-allows-let-value-position-after-pcall})
 (table.insert tests {:name "mutation-restoration allows anonymous fn wrapped by restore fields" :fn mutation-restoration-allows-anonymous-fn-wrapped-by-restore-fields})
 (table.insert tests {:name "mutation-restoration flags anonymous fn without wrapper" :fn mutation-restoration-flags-anonymous-fn-without-wrapper})
 (table.insert tests {:name "mutation-restoration allows snapshot restore helper pair" :fn mutation-restoration-allows-snapshot-restore-helper-pair})

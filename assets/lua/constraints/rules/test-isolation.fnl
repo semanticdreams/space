@@ -489,22 +489,83 @@
       (set enclosing cs)))
   enclosing)
 
+(fn scan-let-vec-for-binding [vec-content escaped-var]
+  "Scan a let binding vector's content (text between [ and ]) for escaped-var
+   at binding-name positions (even 0-indexed). Handles complex value
+   expressions via paren/bracket/brace matching. Returns true iff
+   escaped-var appears as a binding name."
+  (var pos 1)
+  (var is-name true)  ;; first token after [ is always a binding name
+  (local slen (length vec-content))
+  (var found false)
+  (while (and (not found) (<= pos slen))
+    ;; Skip leading whitespace
+    (while (and (<= pos slen) (vec-content:find "^[%s\n]" pos))
+      (set pos (+ pos 1)))
+    (when (> pos slen) (lua "break"))
+    ;; Determine where the current token ends
+    (local ch (vec-content:sub pos pos))
+    (local token-end
+      (if (or (= ch "(") (= ch "[") (= ch "{"))
+          (let [close (find-matching-close vec-content pos)]
+            (if close (+ close 1) (+ slen 1)))
+          (= ch "\"")
+          (let [eq (vec-content:find "\"" (+ pos 1) true)]
+            (if eq (+ eq 1) (+ slen 1)))
+          ;; Simple token: identifier, number, keyword, etc.
+          (let [delim (vec-content:find "[%s%(%)%[%]%{%}\";]" (+ pos 1))]
+            (if delim delim (+ slen 1)))))
+    (local token (vec-content:sub pos (- token-end 1)))
+    ;; Check for escaped-var match at binding-name positions
+    (when (and is-name (not= token "&"))
+      (when (token:find (.. "^" escaped-var "$"))
+        (set found true)))
+    ;; Advance past this token
+    (set pos token-end)
+    ;; Toggle name/value: & at a name position keeps the next position
+    ;; as a name (rest arg). Otherwise alternate.
+    (if (and is-name (= token "&"))
+        (set is-name true)
+        (set is-name (not is-name))))
+  found)
+
+(fn var-rebound-in-let? [between escaped-var]
+  "Check if escaped-var appears as a binding NAME (not value) in any
+   (let [bindings ...] ...) form within the text. Only matches at
+   binding-name positions in the vector. Returns true iff the var
+   is rebound via let."
+  (var search-pos 1)
+  (var found false)
+  (while (and (not found) search-pos)
+    (local let-start (between:find "%(let%s+%[" search-pos))
+    (if (not let-start) (set search-pos nil)
+        (let [bracket-pos (between:find "%[" let-start)
+              bracket-end (and bracket-pos (find-matching-close between bracket-pos))]
+          (if (not bracket-end)
+              (set search-pos (+ let-start 4))
+              (let [vec-content (between:sub (+ bracket-pos 1) (- bracket-end 1))]
+                (if (scan-let-vec-for-binding vec-content escaped-var)
+                    (set found true)
+                    (set search-pos (+ bracket-end 1))))))))
+  found)
+
 (fn restore-valid-for-var? [fn-form min-byte restore-start escaped-var]
   "Returns true iff restore-start >= min-byte AND the snapshot variable
    escaped-var is NOT rebound (via local or let) in the text between
    min-byte and restore-start. If the variable was rebound, the restore
    is invalid — it captures a post-mutation value.
-   Detects (local VAR ...) and (let [VAR ...] ...) rebindings, including
-   let bindings where VAR appears at any position in the binding vector."
+   Detects (local VAR ...) and (let [VAR ...] ...) rebindings.
+   For let, only binding-name positions (even 0-indexed from '[')
+   are treated as rebindings; the var appearing as a value for another
+   name (e.g. (let [unused orig ...] ...)) does not invalidate the restore."
   (if (< restore-start min-byte) false
       (do
         (local between (fn-form:sub min-byte (- restore-start 1)))
         (local local-pat (.. "%(local%s+" escaped-var "%s+"))
         (local let-first-pat (.. "%(let%s+%[%s*" escaped-var "%s+"))
-        (local let-any-pat (.. "%(let%s+%[[^%]]*[%s(]+" escaped-var "%s+"))
         (if (between:find local-pat) false
             (between:find let-first-pat) false
-            (between:find let-any-pat) false
+            (var-rebound-in-let? between escaped-var) false
             true))))
 
 (fn has-restore-after-byte-for-var? [fn-form path snap-var min-byte]
