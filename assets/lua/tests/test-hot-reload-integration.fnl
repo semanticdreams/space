@@ -55,6 +55,11 @@
       result
       (error result)))
 
+(fn finish-protected-result [body-ok body-result cleanup-ok cleanup-result]
+  (if body-ok
+      (if cleanup-ok body-result (error cleanup-result))
+      (error body-result)))
+
 (fn count-searcher-occurrences [target]
   (var count 0)
   (each [_ searcher (ipairs package.searchers)]
@@ -134,19 +139,20 @@
               (controller:drop))
             (set app.hot-reload-controller nil)
             true)))
-      (when app.hot-reload-controller
-        (app.hot-reload-controller:drop)
-        (set app.hot-reload-controller nil))
-      (when (= (type (. (require :main) :drop)) :function)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when app.hot-reload-controller
+              (app.hot-reload-controller:drop)
+              (set app.hot-reload-controller nil))
+            (when (= (type (. (require :main) :drop)) :function)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
       (set app.hot-reload-controller original-controller)
       (set app.worlds-dir original-worlds-dir)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn drop-app-cleans-hot-reload-controller-and-callback []
   (with-temp-dir
@@ -182,16 +188,17 @@
             (assert (= app.hot-reload-callback-id nil)
                     "Expected drop to clear app.hot-reload-callback-id")
             true)))
-      (when (and (= (type Main.drop) :function)
-                 app.engine)
-        (pcall (fn [] (Main.drop)))
-        (restore-test-runner-app-services!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when (and (= (type Main.drop) :function)
+                       app.engine)
+              (Main.drop)
+              (restore-test-runner-app-services!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
       (set app.hot-reload-config original-config)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn app-init-refreshes-agent-preset-context-after-drop []
   (with-temp-dir
@@ -227,13 +234,14 @@
             (assert (not (= reset-context.activity "stale-mode"))
                     "Expected app init to overwrite stale preset context")
             true)))
-      (when (= (type (. (require :main) :drop)) :function)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when (= (type (. (require :main) :drop)) :function)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hud-unit-reload-roundtrips-panel-state []
   (with-temp-dir
@@ -293,17 +301,18 @@
             (assert after-panel.relative-position
                     "Expected HUD unit reload to preserve panel position state")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-hud-file-changes-to-hud-unit []
   (with-temp-dir
@@ -377,17 +386,18 @@
                        (length (or before-state.panels [])))
                     "Expected routed HUD reload to preserve panel count")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn canvas-unit-reload-roundtrips-surface-state []
   (with-temp-dir
@@ -471,17 +481,18 @@
             (assert (= after-panel.restorer-module before-panel.restorer-module)
                     "Expected canvas unit reload to preserve panel restorer module")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-canvas-file-changes-to-canvas-unit []
   (with-temp-dir
@@ -563,17 +574,18 @@
                        (length (or before-state.panels [])))
                     "Expected routed canvas reload to preserve panel count")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-workspace-shell-state-file-changes-to-app-root []
   (with-temp-dir
@@ -630,17 +642,18 @@
             (assert (not (= app.world-manager old-world-manager))
                     "Expected workspace shell helper reload to replace app root ownership")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-shared-triangle-line-to-canvas-unit []
   (with-temp-dir
@@ -699,17 +712,18 @@
             (assert app.graph-view
                     "Canvas unit reload should recreate graph view for shared triangle-line changes")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-drawing-render-file-changes-to-drawing-activity-unit []
   (with-temp-dir
@@ -776,17 +790,18 @@
             (assert app.activity-command-hints-provider
                     "Expected drawing activity unit reload to restore command hints hook")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-           (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-graph-view-file-changes-to-graph-activity-unit []
   (with-temp-dir
@@ -849,17 +864,18 @@
             (assert app.graph-view
                     "Expected graph activity unit reload to restore graph view")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn graph-activity-registers-active-activity-snapshot-hooks []
   (with-temp-dir
@@ -890,17 +906,18 @@
             (assert app.graph-view
                     "Graph activity restore-active-activity should keep graph view active")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn hot-reload-routes-board-file-changes-to-board-activity-unit []
   (with-temp-dir
@@ -962,17 +979,18 @@
             (assert app.board-view
                     "Expected board activity unit reload to restore board view")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (fn unloading-active-drawing-activity-updates-shell-state []
   (local Main (require-main!))
@@ -1006,14 +1024,15 @@
         (assert (not (= app.activity-drawing-enabled? true))
                 "Expected drawing-only hooks to clear after unloading drawing activity")
         true)))
-  (when (and (= (type (. (require :main) :drop)) :function)
-             app.engine)
-    (drop-main-and-restore-test-fixture!))
+  (local (cleanup-ok cleanup-result)
+    (pcall
+      (fn []
+        (when (and (= (type (. (require :main) :drop)) :function)
+                   app.engine)
+          (drop-main-and-restore-test-fixture!)))))
   (set app.renderers original-renderers)
   (set AppBootstrap.init-renderers original-init-renderers)
-  (if ok
-      result
-      (error result)))
+  (finish-protected-result ok result cleanup-ok cleanup-result))
 
 (fn hot-reload-routes-drawing-activity-actions-file-changes-to-drawing-activity-unit []
   (with-temp-dir
@@ -1069,17 +1088,18 @@
             (assert (= debug-state.last-target-unit-id "drawing-activity")
                     "Expected drawing activity actions file change to target drawing activity unit")
             true)))
-      (when controller
-        (controller:drop)
-        (set controller nil))
-      (when (and (= (type (. (require :main) :drop)) :function)
-                 app.engine)
-        (drop-main-and-restore-test-fixture!))
+      (local (cleanup-ok cleanup-result)
+        (pcall
+          (fn []
+            (when controller
+              (controller:drop)
+              (set controller nil))
+            (when (and (= (type (. (require :main) :drop)) :function)
+                       app.engine)
+              (drop-main-and-restore-test-fixture!)))))
       (set app.renderers original-renderers)
       (set AppBootstrap.init-renderers original-init-renderers)
-      (if ok
-          result
-          (error result)))))
+      (finish-protected-result ok result cleanup-ok cleanup-result))))
 
 (table.insert tests {:name "full app root reload roundtrips active world"
                      :fn full-app-root-reload-roundtrips-active-world})
