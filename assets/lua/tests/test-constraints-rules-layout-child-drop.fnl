@@ -784,6 +784,94 @@
       (set found-missing-drop true)))
   (assert found-missing-drop "should flag missing public drop for non-fn symbol"))
 
+;; R11-remediation-1: method-style self:clear-children is cleanup evidence
+(fn child-drop-allows-method-clear-children-cleanup []
+  "A valid public drop path with (self:clear-children) should satisfy
+  child cleanup evidence."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "drop"
+                                             :top-level? true
+                                             :line 20 :column 1
+                                             :length 80
+                                             :form "(fn drop [self]
+  (self:clear-children))"}]
+                              :accesses [{:path ["self" "children"]
+                                          :text "self.children"
+                                          :line 10 :column 1
+                                          :form "self.children"}]
+                              :calls [{:callee "self:clear-children"
+                                       :receiver "self" :method "clear-children"
+                                       :line 21 :column 1
+                                       :form "(self:clear-children)"
+                                       :enclosing-fn "drop"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "method-style self:clear-children should satisfy cleanup evidence"))
+
+;; R11-remediation-2: method-style root:drop-children is cleanup evidence
+(fn child-drop-allows-method-drop-children-cleanup []
+  "A valid public drop path with (root:drop-children) should satisfy
+  child cleanup evidence."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "drop"
+                                             :top-level? true
+                                             :line 20 :column 1
+                                             :length 80
+                                             :form "(fn drop [root]
+  (root:drop-children))"}]
+                              :accesses [{:path ["root" "scene-objects"]
+                                          :text "root.scene-objects"
+                                          :line 10 :column 1
+                                          :form "root.scene-objects"}]
+                              :calls [{:callee "root:drop-children"
+                                       :receiver "root" :method "drop-children"
+                                       :line 21 :column 1
+                                       :form "(root:drop-children)"
+                                       :enclosing-fn "drop"}]}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert (= result nil) "method-style root:drop-children should satisfy cleanup evidence"))
+
+;; R11-remediation-3: no cleanup still fails
+(fn child-drop-still-flags-public-drop-without-cleanup []
+  "A valid public drop path must still report missing child cleanup when no
+  cleanup call exists."
+  (local Layout (require :constraints.rules.layout))
+  (local rules (Layout.rules))
+  (local rule (find-rule-by-id rules "layout.owned-child-drop"))
+  (assert rule "rule should be in rules list")
+  (local ff (make-file-fact {:path "/src/widget.fnl"
+                              :module "widget"
+                              :definitions [{:kind :fn
+                                             :name "drop"
+                                             :top-level? true
+                                             :line 20 :column 1
+                                             :length 80
+                                             :form "(fn drop [self]
+  (set self.children []))"}]
+                              :accesses [{:path ["self" "children"]
+                                          :text "self.children"
+                                          :line 10 :column 1
+                                          :form "self.children"}]
+                              :calls []}))
+  (local result (rule.run (make-ctx [ff])))
+  (assert result "public drop without child cleanup should still report diagnostics")
+  (var found-missing-cleanup false)
+  (each [_ d (ipairs result)]
+    (when (= d.evidence.missing "child drop evidence")
+      (set found-missing-cleanup true)))
+  (assert found-missing-cleanup "should still flag missing child drop evidence"))
+
 ;; R9-3: valid public drop path but missing cleanup evidence
 (fn child-drop-flags-missing-cleanup-with-returned-drop []
   "A file with valid returned :drop but no :drop/clear-children/drop-children
@@ -937,7 +1025,14 @@
                      :fn child-drop-flags-unrelated-returned-drop})
 ;; R9-2: :drop symbol where symbol is non-function
 (table.insert tests {:name "child-drop flags returned drop non-fn symbol"
-                     :fn child-drop-flags-returned-drop-non-fn-symbol})
+                      :fn child-drop-flags-returned-drop-non-fn-symbol})
+;; R11 remediation: method-style cleanup calls and no-cleanup regression
+(table.insert tests {:name "child-drop allows method clear-children cleanup"
+                     :fn child-drop-allows-method-clear-children-cleanup})
+(table.insert tests {:name "child-drop allows method drop-children cleanup"
+                     :fn child-drop-allows-method-drop-children-cleanup})
+(table.insert tests {:name "child-drop still flags public drop without cleanup"
+                     :fn child-drop-still-flags-public-drop-without-cleanup})
 ;; R9-3: valid :drop but missing cleanup
 (table.insert tests {:name "child-drop flags missing cleanup with returned drop"
                      :fn child-drop-flags-missing-cleanup-with-returned-drop})
@@ -945,4 +1040,12 @@
 (table.insert tests {:name "child-drop flags two creators one drop"
                      :fn child-drop-flags-two-creators-one-drop})
 
-{:tests tests}
+(local main
+  (fn []
+    (local runner (require :tests.runner))
+    (runner.run-tests {:name "constraints-rules-layout-child-drop"
+                       :tests tests})))
+
+{:name "constraints-rules-layout-child-drop"
+ :tests tests
+ :main main}
