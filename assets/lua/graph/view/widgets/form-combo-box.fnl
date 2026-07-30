@@ -16,10 +16,19 @@
   (set combo.get-text
        (fn [self]
          (self:get-value)))
+  (var changed-handler nil)
+  (fn handle-change [value]
+    (options.on-change combo value))
+  (local drop-combo combo.drop)
+  (fn drop [self]
+    (when changed-handler
+      (combo.changed:disconnect changed-handler true)
+      (set changed-handler nil))
+    (drop-combo self))
   (when options.on-change
-    (combo.changed:connect
-      (fn [value]
-        (options.on-change combo value))))
+    (set changed-handler
+         (combo.changed:connect handle-change)))
+  (set combo.drop drop)
   combo)
 
 FormComboBox
