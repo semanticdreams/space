@@ -365,7 +365,7 @@
                    :activities-changed
                    :active-activity-id])
   (local app-snapshot (snapshot-app-fields app-keys))
-  (set app.activity-registry nil)
+  (tset _G.app :activity-registry nil)
   (set app.activities-changed nil)
   (set app.active-activity-id nil)
   (local runtime {:activity-session-state {:test {:value 9}}})
@@ -505,7 +505,7 @@
                    :activities-changed
                    :active-activity-id])
   (local app-snapshot (snapshot-app-fields app-keys))
-  (set app.activity-registry nil)
+  (tset _G.app :activity-registry nil)
   (set app.activities-changed nil)
   (set app.active-activity-id nil)
   (local runtime {:requested-activity-id "test"

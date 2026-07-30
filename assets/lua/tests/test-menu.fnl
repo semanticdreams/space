@@ -76,7 +76,7 @@
     ;; If the registry did not exist before the module loaded,
     ;; remove it so no newly-created object leaks to later modules.
     (when (not _saved-registry-existed?)
-      (set app.activity-registry nil))
+      (tset _G.app :activity-registry nil))
     true))
 
 (local tests [])

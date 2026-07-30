@@ -185,6 +185,7 @@
                    :workspace-shell-changed app.workspace-shell-changed
                    :activity-units app.activity-units
                    :themes app.themes})
+  (local prev-activity-registry app.activity-registry)
   (set app.clickables (Clickables))
   (set app.hoverables (Hoverables))
   (set app.activity-registry nil)
@@ -204,6 +205,7 @@
     (app.hoverables:drop))
   (each [key value (pairs previous)]
     (set (. app key) value))
+  (set app.activity-registry prev-activity-registry)
   (when (not ok)
     (error result))
   result)
