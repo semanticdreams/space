@@ -675,7 +675,29 @@
 ;; Main
 ;; ═══════════════════════════════════════
 
-(fn main []
+(fn quiet-validation? []
+  (not (os.getenv "TEST_VERBOSE")))
+
+(fn with-quiet-output [body]
+  (if (quiet-validation?)
+      (do
+        (local logging (require :logging))
+        (logging.set-level "mcp" "error")
+        (logging.set-level "space" "error")
+        (local original-print _G.print)
+        (local original-io-write io.write)
+        (local original-io-flush io.flush)
+        (set _G.print (fn [...] nil))
+        (set io.write (fn [...] nil))
+        (set io.flush (fn [...] nil))
+        (local (ok result) (pcall body))
+        (set io.flush original-io-flush)
+        (set io.write original-io-write)
+        (set _G.print original-print)
+        (if ok result (error result)))
+      (body)))
+
+(fn main-body []
   (print "Agent Online: Tic-Tac-Toe Game")
   (print "==============================")
   (math.randomseed (math.floor (now-ms)))
@@ -685,7 +707,15 @@
   (print (.. "Results: " passed " passed, " failed " failed"))
   (when (> (# failures) 0)
     (print "Failures:")
-    (each [_ f (ipairs failures)] (print (.. "  " f.name ": " f.error))))
+    (each [_ f (ipairs failures)] (print (.. "  " f.name ": " f.error)))))
+
+(fn main []
+  (with-quiet-output main-body)
+  (when (quiet-validation?)
+    (print (.. "Executed " (+ passed failed) " Lua tests"))
+    (when (> (# failures) 0)
+      (print "Failures:")
+      (each [_ f (ipairs failures)] (print (.. "  " f.name ": " f.error)))))
   (when (> failed 0) (os.exit 1)))
 
 {:main main}
