@@ -55,8 +55,8 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
-  (local original-hoverables app.hoverables)
-  (local original-clickables app.clickables)
+  (local original-hoverables (assert app.hoverables "Scene entity drag test requires app.hoverables"))
+  (local original-clickables (assert app.clickables "Scene entity drag test requires app.clickables"))
   (local original-events app.engine.events)
   (local original-states app.states)
   (local original-viewport app.viewport)
@@ -74,7 +74,7 @@
   (var state nil)
   (var target-layout nil)
 
-  (fn cleanup []
+  (fn cleanup [] (assert app.hoverables "Scene entity drag cleanup requires app.hoverables") (assert app.clickables "Scene entity drag cleanup requires app.clickables")
     (when state
       (state.on-leave)
       (set state nil))
@@ -120,8 +120,8 @@
           (fn []
             (reset-engine-events)
             (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
+            (set clickables (assert (Clickables {:intersectables intersector}) "Scene entity drag test requires clickables"))
+            (set hoverables (assert (Hoverables {:intersectables intersector}) "Scene entity drag test requires hoverables"))
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
@@ -188,8 +188,8 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
-  (local original-hoverables app.hoverables)
-  (local original-clickables app.clickables)
+  (local original-hoverables (assert app.hoverables "Scene ball drag test requires app.hoverables"))
+  (local original-clickables (assert app.clickables "Scene ball drag test requires app.clickables"))
   (local original-events app.engine.events)
   (local original-states app.states)
   (local original-create-default-projection app.create-default-projection)
@@ -206,7 +206,7 @@
   (var state nil)
   (var ball nil)
 
-  (fn cleanup []
+  (fn cleanup [] (assert app.hoverables "Scene ball drag cleanup requires app.hoverables") (assert app.clickables "Scene ball drag cleanup requires app.clickables")
     (when state
       (state.on-leave)
       (set state nil))
@@ -251,8 +251,8 @@
           (fn []
             (reset-engine-events)
             (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
+            (set clickables (assert (Clickables {:intersectables intersector}) "Scene ball drag test requires clickables"))
+            (set hoverables (assert (Hoverables {:intersectables intersector}) "Scene ball drag test requires hoverables"))
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
@@ -320,8 +320,8 @@
   (local original-intersectables app.intersectables)
   (local original-camera app.camera)
   (local original-controls app.first-person-controls)
-  (local original-hoverables app.hoverables)
-  (local original-clickables app.clickables)
+  (local original-hoverables (assert app.hoverables "Scene physics body drag test requires app.hoverables"))
+  (local original-clickables (assert app.clickables "Scene physics body drag test requires app.clickables"))
   (local original-events app.engine.events)
   (local original-states app.states)
   (local original-create-default-projection app.create-default-projection)
@@ -338,7 +338,7 @@
   (var state nil)
   (var cuboid nil)
 
-  (fn cleanup []
+  (fn cleanup [] (assert app.hoverables "Scene physics body drag cleanup requires app.hoverables") (assert app.clickables "Scene physics body drag cleanup requires app.clickables")
     (when state
       (state.on-leave)
       (set state nil))
@@ -383,8 +383,8 @@
           (fn []
             (reset-engine-events)
             (set intersector (Intersectables))
-            (set clickables (Clickables {:intersectables intersector}))
-            (set hoverables (Hoverables {:intersectables intersector}))
+            (set clickables (assert (Clickables {:intersectables intersector}) "Scene physics body drag test requires clickables"))
+            (set hoverables (assert (Hoverables {:intersectables intersector}) "Scene physics body drag test requires hoverables"))
             (set movables (Movables {:intersectables intersector}))
             (set camera (Camera {:position (glm.vec3 0 0 10)}))
             (set controls (FirstPersonControls {:camera camera}))
@@ -476,8 +476,8 @@
   (local original-controls app.first-person-controls)
   (local original-canvas-controls app.canvas-controls)
   (local original-active-pointer-controls app.active-pointer-controls)
-  (local original-hoverables app.hoverables)
-  (local original-clickables app.clickables)
+  (local original-hoverables (assert app.hoverables "Canvas-hidden scene drag test requires app.hoverables"))
+  (local original-clickables (assert app.clickables "Canvas-hidden scene drag test requires app.clickables"))
   (local original-events app.engine.events)
   (local original-states app.states)
   (local original-viewport app.viewport)
@@ -503,7 +503,7 @@
   (var state nil)
   (var target-layout nil)
 
-  (fn cleanup []
+  (fn cleanup [] (assert app.hoverables "Canvas-hidden scene drag cleanup requires app.hoverables") (assert app.clickables "Canvas-hidden scene drag cleanup requires app.clickables")
     (when state
       (state.on-leave)
       (set state nil))
@@ -566,8 +566,8 @@
       (fn []
         (reset-engine-events)
         (set intersector (Intersectables))
-        (set clickables (Clickables {:intersectables intersector}))
-        (set hoverables (Hoverables {:intersectables intersector}))
+        (set clickables (assert (Clickables {:intersectables intersector}) "Canvas-hidden scene drag test requires clickables"))
+        (set hoverables (assert (Hoverables {:intersectables intersector}) "Canvas-hidden scene drag test requires hoverables"))
         (set movables (Movables {:intersectables intersector}))
         (set app.intersectables intersector)
         (set app.clickables clickables)
