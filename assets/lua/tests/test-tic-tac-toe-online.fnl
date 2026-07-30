@@ -678,22 +678,71 @@
 (fn quiet-validation? []
   (not (os.getenv "TEST_VERBOSE")))
 
+(fn append-captured-output! [captured args]
+  (var text "")
+  (each [i value (ipairs args)]
+    (when (> i 1)
+      (set text (.. text "\t")))
+    (set text (.. text (tostring value))))
+  (table.insert captured text))
+
+(fn unexpected-captured-output [captured]
+  (local markers ["[sol2]" "level=warning" "level=error" "WARNING" "[WARN" "[ERROR" "FAIL:" "Failures:"])
+  (var found nil)
+  (each [_ line (ipairs captured)]
+    (var expected-noise? false)
+    (when (string.find line "force_sse_reject" 1 true)
+      (set expected-noise? true))
+    (when (string.find line "[mcp] tool space_unit_edit_file error" 1 true)
+      (set expected-noise? true))
+    (when (string.find line "expected whitespace before token" 1 true)
+      (set expected-noise? true))
+    (when (not expected-noise?)
+      (each [_ marker (ipairs markers)]
+        (when (and (not found) (string.find line marker 1 true))
+          (set found line)))))
+  found)
+
 (fn with-quiet-output [body]
   (if (quiet-validation?)
       (do
         (local logging (require :logging))
         (logging.set-level "mcp" "error")
-        (logging.set-level "space" "error")
+        (logging.set-level "space" "warn")
+        (local original-logging-error logging.error)
         (local original-print _G.print)
         (local original-io-write io.write)
         (local original-io-flush io.flush)
-        (set _G.print (fn [...] nil))
-        (set io.write (fn [...] nil))
+        (local original-io-stderr io.stderr)
+        (local captured [])
+        (set logging.error
+             (fn [...]
+               (local args [...])
+               (var text "")
+               (each [i value (ipairs args)]
+                 (when (> i 1)
+                   (set text (.. text "\t")))
+                 (set text (.. text (tostring value))))
+               (if (string.find text "[mcp] tool space_unit_edit_file error" 1 true)
+                   (append-captured-output! captured args)
+                   (original-logging-error ...))))
+        (set _G.print (fn [...] (append-captured-output! captured [...])))
+        (set io.write (fn [...] (append-captured-output! captured [...])))
         (set io.flush (fn [...] nil))
+        (set io.stderr {:write (fn [_self ...] (append-captured-output! captured [...]))
+                        :flush (fn [_self] nil)})
         (local (ok result) (pcall body))
+        (set io.stderr original-io-stderr)
         (set io.flush original-io-flush)
         (set io.write original-io-write)
         (set _G.print original-print)
+        (set logging.error original-logging-error)
+        (logging.set-level "space" "info")
+        (logging.set-level "mcp" "info")
+        (local unexpected (unexpected-captured-output captured))
+        (when unexpected
+          (print (.. "Unexpected tic-tac-toe validation output: " unexpected))
+          (error unexpected))
         (if ok result (error result)))
       (body)))
 
