@@ -1224,10 +1224,10 @@
 (fn app-drop-releases-active-input-before-state-teardown []
   (reset-state)
   (local original-renderers app.renderers)
-  (set app.renderers minimal-renderers)
   (local saved-intersectables app.intersectables)
   (local saved-clickables (assert app.clickables "test requires app.clickables"))
   (local saved-hoverables (assert app.hoverables "test requires app.hoverables"))
+  (set app.renderers minimal-renderers)
   (local saved-movables app.movables)
   (local saved-resizables app.resizables)
   (local saved-system-cursors app.system-cursors)
