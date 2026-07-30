@@ -1,5 +1,4 @@
 ;; Tests for Test-Isolation constraint rules (lifecycle.global-mutation-restoration).
-
 (local tests [])
 
 ;; --- Helpers for constructing synthetic fact DBs ---
@@ -87,7 +86,6 @@
                                            :enclosing-fn "<anonymous>"}]}))
   (assert (= (rule.run (make-ctx [ff])) nil)
           "anonymous fn mutation wrapped by with-restored-app-fields in parent should pass"))
-
 (fn mutation-restoration-flags-anonymous-fn-without-wrapper []
   "Mutation inside anonymous fn without any wrapper should still be flagged."
   (local rule (get-test-isolation-rule))
@@ -110,7 +108,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag anonymous fn mutation without wrapper")
   (assert (> (length result) 0) "should have at least one diagnostic"))
-
 ;; --- Precision: snapshot/restore helper pair ---
 
 (fn mutation-restoration-allows-snapshot-restore-helper-pair []
@@ -142,7 +139,6 @@
                                            :enclosing-fn "test-snapshot-helper-pair"}]}))
   (assert (= (rule.run (make-ctx [ff])) nil)
           "snapshot-app-fields + restore-app-fields! helper pair should pass"))
-
 (fn mutation-restoration-flags-snapshot-helper-without-restore []
   "Test with snapshot-app-fields but without restore-app-fields! should be flagged."
   (local rule (get-test-isolation-rule))
@@ -166,7 +162,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag snapshot helper without restore call")
   (assert (> (length result) 0) "should have at least one diagnostic"))
-
 ;; --- Precision: definition matching by line range for anonymous functions ---
 
 (fn mutation-restoration-matches-anonymous-def-by-line []
@@ -200,7 +195,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag mutation in anonymous fn at line 16 without restoration")
   (assert (> (length result) 0) "should have at least one diagnostic"))
-
 ;; --- Precision: setup/harness narrow exemption ---
 
 (fn mutation-restoration-allows-setup-test-env-in-runner []
@@ -223,7 +217,6 @@
                                            :enclosing-fn "setup-test-env"}]}))
   (assert (= (rule.run (make-ctx [ff])) nil)
           "setup-test-env in runner.fnl should be exempt from test-isolation check"))
-
 (fn mutation-restoration-allows-init-test-app-in-harness []
   "init-test-app in e2e/harness.fnl is test infrastructure, not per-test mutation."
   (local rule (get-test-isolation-rule))
@@ -244,7 +237,6 @@
                                            :enclosing-fn "init-test-app"}]}))
   (assert (= (rule.run (make-ctx [ff])) nil)
           "init-test-app in e2e/harness.fnl should be exempt from test-isolation check"))
-
 (fn mutation-restoration-flags-setup-like-fn-in-other-file []
   "A setup-like function in a non-infrastructure file should still be flagged."
   (local rule (get-test-isolation-rule))
@@ -265,7 +257,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag setup-test-env in non-runner file")
   (assert (> (length result) 0) "should have at least one diagnostic"))
-
 ;; --- R1-1: anonymous grouping should not collapse distinct anonymous fns ---
 
 (fn mutation-restoration-flags-first-anon-mutation-when-second-restores []
@@ -312,7 +303,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should produce diagnostics for the first leaking anonymous mutation")
   (assert (> (length result) 0) "should have at least one diagnostic for the leak"))
-
 ;; --- R1-2: snapshot/restore helper pair must be order-aware ---
 
 (fn mutation-restoration-flags-helper-restore-before-mutation []
@@ -387,7 +377,6 @@
       (table.insert engine-diags d)))
   (assert (> (length engine-diags) 0)
           "unwrapped app.engine sibling mutation should be flagged"))
-
 ;; --- R1-1 round2: same-line anonymous fns must be distinct ---
 
 (fn mutation-restoration-flags-same-line-anon-leak-when-same-line-restores []
@@ -458,7 +447,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "should flag mutation when snapshot covers unrelated keys")
   (assert (> (length result) 0) "should have at least one diagnostic"))
-
 (fn mutation-restoration-allows-snapshot-covering-path []
   "Snapshot covers app.engine, mutation is on app.engine subfield.
    Restoration should be accepted."
@@ -681,7 +669,6 @@
                                            :enclosing-fn "test-subpath-coverage"}]}))
   (assert (= (rule.run (make-ctx [ff])) nil)
           "snapshot [:engine] should cover app.engine.audio subpath"))
-
 (fn mutation-restoration-flags-variable-key-snapshot-missing-field []
   "V2-3: Variable key list [:activity-registry] should be resolved from local;
    mutating app.engine (not in the resolved keys) should still be flagged."
@@ -873,7 +860,6 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "R2-3: helper restore before same-line mutation should be flagged")
   (assert (> (length result) 0) "should have at least one diagnostic for same-line helper leak"))
-
 (fn mutation-restoration-flags-same-line-direct-restore-before-mutation []
   "R2-3: Direct concrete restore before same-line mutation should be flagged.
    Byte-based comparison must detect restore is textually before the mutation."
@@ -1167,12 +1153,39 @@
   (local result (rule.run (make-ctx [ff])))
   (assert result "R1-1: must flag — fn is not direct pcall callee (some-runner is)")
   (assert (= (. result 1 :constraint-id) "lifecycle.global-mutation-restoration")))
-
 (table.insert tests {:name "T11-5 flags nonliteral module var key" :fn mutation-restoration-flags-nonliteral-module-var-key})
 (table.insert tests {:name "T11-6 allows multi-line pcall parent restore" :fn mutation-restoration-allows-multiline-pcall-parent-restore})
 (table.insert tests {:name "T11-7 flags multi-line pcall invalid before valid after" :fn mutation-restoration-flags-multiline-pcall-invalid-before})
 (table.insert tests {:name "R1-1 flags pcall other callee fn extra arg" :fn mutation-restoration-flags-pcall-other-callee-fn-extra-arg})
-
+;; --- Column-aware same-line fn def exclusion (test-units.fnl pattern) ---
+(fn mutation-restoration-allows-same-line-inline-fn-excluded-by-column []
+  "Same-line inline fn with later column excluded from containment; outer fn
+   with guarded snapshot/restore satisfies the check."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+    :definitions [{:kind :fn :name "<anonymous>" :top-level? true :line 10 :column 1 :length 180
+      :form "(fn []\n  (local prev (and app app.engine))\n  (set app.engine {:now-ms (fn [_self]\n    (os.clock))})\n  (do-something)\n  (set app.engine prev))"}
+     {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 34 :length 30
+      :form "(fn [_self]\n    (os.clock))"}]
+    :mutations [{:op :set :path ["app" "engine"] :line 13 :column 11 :enclosing-fn "<anonymous>"
+      :form "(set app.engine {:now-ms (fn [_self] ...)})"}]}))
+  (local ctx (make-ctx [ff]))
+  (assert (= (rule.run ctx) nil) "Same-line inline fn excluded; expected nil (no diagnostic)"))
+(fn mutation-restoration-flags-mutation-inside-inline-fn-no-restore []
+  "Mutation at/after inline fn column is truly inside; flag if no restore."
+  (local rule (get-test-isolation-rule))
+  (local ff (make-file-fact {:path "/tests/test-module.fnl" :module "tests.test-module"
+    :definitions [{:kind :fn :name "<anonymous>" :top-level? true :line 10 :column 1 :length 180
+      :form "(fn []\n  (local prev (and app app.engine))\n  (set app.engine {:now-ms (fn [_self]\n    (set app.engine 100))})\n  (set app.engine prev))"}
+     {:kind :fn :name "<anonymous>" :top-level? false :line 13 :column 34 :length 50
+      :form "(fn [_self]\n    (set app.engine 100))"}]
+    :mutations [{:op :set :path ["app" "engine"] :line 14 :column 5 :enclosing-fn "<anonymous>"
+      :form "(set app.engine 100)"}]}))
+  (local ctx (make-ctx [ff]))
+  (local result (rule.run ctx))
+  (assert (and result (> (length result) 0)) "Mutation inside inline fn without restore should flag"))
+(table.insert tests {:name "T11-8 allows same-line inline fn excluded by column" :fn mutation-restoration-allows-same-line-inline-fn-excluded-by-column})
+(table.insert tests {:name "T11-9 flags mutation inside inline fn no restore" :fn mutation-restoration-flags-mutation-inside-inline-fn-no-restore})
 ;; Import cleanup-closure restore precision tests
 (local cleanup-tests (require :tests.test-constraints-rules-test-isolation-cleanup))
 (each [_ t (ipairs cleanup-tests.tests)]

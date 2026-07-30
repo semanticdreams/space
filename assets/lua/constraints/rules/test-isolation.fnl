@@ -7,7 +7,6 @@
 ;; matching does not produce false positives on string contents.
 (fn strip-strings [s]
   (s:gsub "\"[^\"]*\"" ""))
-
 ;; Strip Fennel comments (; to end of line) from form text. Must be
 ;; called after strip-strings to avoid removing semicolons that appear
 ;; inside string literals.
@@ -19,7 +18,6 @@
         (table.insert lines (string.sub line 1 (- comment-pos 1)))
         (table.insert lines line)))
   (table.concat lines "\n"))
-
 (fn path-prefix-matches? [mp sg-parts plen]
   "Check if the mutation path head matches the sensitive-global path prefix."
   (local slen (length sg-parts))
@@ -30,7 +28,6 @@
           (when (not (= (. mp i) (. sg-parts i)))
             (set matches false)))
         matches)))
-
 (fn mutation-path-is-sensitive? [mutation-path]
   (local mp (if mutation-path mutation-path []))
   (local plen (length mp))
@@ -44,11 +41,9 @@
             (when (path-prefix-matches? mp sg-parts plen)
               (set found true))))
         found)))
-
 (fn escape-pattern [s]
   "Escape Lua pattern magic characters in a string."
   (s:gsub "[%]%[%%%.%*%+%-%?%(%)%^%$]" "%%%1"))
-
 (fn def-contains-line? [def line]
   "Check if a function definition contains the given source line.
    Computes end-line from the form text's newline count."
@@ -57,17 +52,25 @@
     (set form-lines (+ form-lines 1)))
   (local end-line (+ def.line form-lines))
   (and (>= line def.line) (<= line end-line)))
-
 (fn find-containing-fn-defs [definitions line col]
   "Find all fn definitions that contain the given line.
    col is optional; when two definitions share the same start line,
    the one with the later column (closer to col) is sorted first.
+   Same-line defs whose column is after col are excluded (mutation
+   occurs before the fn starts on that line).
    Returns a list sorted by start-line descending (innermost first)."
   (var result [])
   (var defs definitions)
   (when (not defs) (set defs []))
   (each [_ def (ipairs defs)]
-    (when (and (= def.kind :fn) (def-contains-line? def line))
+    (when (and (= def.kind :fn)
+               (def-contains-line? def line)
+               ;; Column-aware exclusion: when the mutation is on the
+               ;; same line as a fn def but textually before it, the
+               ;; fn does not contain the mutation on that line.
+               (if (and col (= def.line line))
+                   (>= col def.column)
+                   true))
       (table.insert result def)))
   (var sorted false)
   (while (not sorted)
@@ -106,7 +109,6 @@
                               (when eq (set pos eq))))
           (set pos (+ pos 1)))
         result)))
-
 (fn find-helper-snapshot-var [fn-form path-text]
   "Find all snapshot variables whose snapshot keys cover the given path.
    Returns a list of variable names, or empty list if none found.
@@ -166,7 +168,6 @@
   (if (. result 1)
       {:start (. result 1) :end (. result 2)}
       nil))
-
 (fn has-helper-restore-after-byte? [fn-form path-text min-byte]
   "Check for snapshot-app-fields + restore-app-fields! with restore after min-byte.
    Any snapshot variable covering the path, when restored after the mutation, is accepted."
@@ -215,7 +216,6 @@
                     (lua :break)
                     (set sp (+ sp 1))))
               sp)))))
-
 (fn anon-byte-inside-wraf-body? [parent-form anon-byte]
   "Check if the byte position in parent-form falls inside a
    with-restored-app-fields body (past the keys argument).
@@ -255,7 +255,6 @@
       (and (string.find file-path "/tests/e2e/harness.fnl" 1 true)
            (= fn-name "init-test-app")) true
       false))
-
 (fn anon-byte-inside-with-restored-app-body? [parent-form anon-byte]
   "Check if the byte position in parent-form falls inside a
    with-restored-app wrapper body (past the fields key argument).
@@ -362,7 +361,6 @@
       (not (= (path-text:sub 1 ol) op)) false
       (> pl ol) (= (path-text:sub (+ ol 1) (+ ol 1)) ".")
       true))
-
 (fn all-operands-are-prefixes? [operands path-text]
   "Check that all operands (except the last) are path prefixes of path-text."
   (var all-prefixes true)
@@ -378,7 +376,6 @@
   (if (<= nops 0) false
       (not (= (. operands nops) path-text)) false
       (all-operands-are-prefixes? operands path-text)))
-
 (fn try-and-snapshot-var [fn-form path-text]
   "Try to find a snapshot variable from a nil-guarded (and ...) form.
    Returns the variable name or nil. Supports both (local VAR (and ...)) and
@@ -428,7 +425,6 @@
 (local cleanup-helpers (h.make-helpers {:find-containing-fn-defs find-containing-fn-defs
                                          :find-snapshot-var find-snapshot-var
                                          :escape-pattern escape-pattern}))
-
 (fn only-whitespace-between? [form-text start-byte end-byte]
   "Return true if every character between start-byte and end-byte (exclusive)
    is whitespace (space, newline, or tab)."
@@ -520,7 +516,6 @@
                 (set byte-pos (+ nl-pos 1)))
               (set search-pos nil)))
         byte-pos)))
-
 (fn find-enclosing-pcall-end-byte [fn-form fn-def-line max-mutation-line pcall-ranges]
   "Find the end byte of the pcall fn body that encloses the mutation position.
    Uses the max mutation line to approximate the mutation byte position in the
@@ -591,7 +586,6 @@
                              (set search-start (+ end2 1))))
                        (set search-start nil))))))
         found)))
-
 (fn find-pcall-call-start [form-text pcall-byte]
   "Given the byte position of 'p' in 'pcall', find the opening '(' of the pcall call.
    Returns the byte position of '(' or nil."
@@ -604,7 +598,6 @@
         (= ch "\t") (set pos (- pos 1))
         (do (set pos nil))))
   (if (and pos (>= pos 1) (= (form-text:sub pos pos) "(")) pos nil))
-
 (fn find-all-pcall-call-spans [form-text pcall-ranges]
   "Given a form text and pre-computed pcall fn-ranges, compute pcall CALL spans.
    Returns a list of {:call-start :call-end} for each pcall call.
@@ -715,7 +708,6 @@
             (between:find let-first-pat) false
             (var-rebound-in-let? between escaped-var) false
             true))))
-
 (fn has-restore-after-byte-for-var? [fn-form path snap-var min-byte]
   "Check for concrete restore evidence at a byte position >= min-byte
    for a specific snapshot variable (no re-derivation of snap-var).
@@ -784,7 +776,6 @@
   (local snap-var (find-snapshot-var before-text path-segments))
   (if (not snap-var) false
       (has-restore-after-byte-for-var? parent-form path-segments snap-var enclosing-span.call-end)))
-
 (fn check-parent-pcall-restoration [ff fn-def-line anon-def-col path-text path-segments max-line]
   "Check if an anonymous fn inside a pcall has parent-scope snapshot/restore.
    Returns true if the parent function has snapshot BEFORE pcall + restore AFTER pcall."
@@ -804,7 +795,6 @@
                           (local enclosing-span (find-enclosing-call-span call-spans parent.form parent.line max-line))
                           (if (not enclosing-span) false
                               (snapshot-before-pcall-and-restore-after? parent.form path-segments path-text enclosing-span)))))))))))
-
 ;; --- Extracted helpers for global-mutation-restoration-rule-run ---
 
 (fn build-mutation-group-key [mutation ff]
@@ -823,7 +813,6 @@
               fn-name))
         fn-name))
   (.. fn-key "::" path-text))
-
 (fn parse-group-key [key]
   "Parse a grouping key into fn-name, anon-def-line, anon-def-col, path-text.
    Returns nil if key has no :: separator."
@@ -852,7 +841,6 @@
          :anon-def-col anon-def-col
          :path-text path-text
          :is-anon is-anon})))
-
 (fn resolve-fn-form [ff fn-name anon-def-line anon-def-col max-line]
   "Find the function form and its definition line for a given function name.
    Returns {:fn-form ... :fn-def-line ...} or {:fn-form nil :fn-def-line nil}."
@@ -879,7 +867,6 @@
                 (set ffm def.form)
                 (set ffd def.line)))
             {:fn-form ffm :fn-def-line ffd}))))
-
 (fn check-keys-string-coverage [keys-str path-text]
   "Given a keys string (e.g. ':renderers :engine'), check if path-text is covered."
   (local app-key (if (path-text:match "^app%.") (path-text:sub 5) path-text))
@@ -927,7 +914,6 @@
                   (each [ks (def.form:gmatch local-pat)]
                     (when (not found-keys) (set found-keys ks)))))
               found-keys)))))
-
 (fn wrapper-covers-path? [form body-start path-text definitions]
   "Check if the with-restored-app-fields key argument (just before body-start)
    covers the given path-text (e.g. 'app.engine').
@@ -983,7 +969,6 @@
               (if resolved-keys
                   (check-keys-string-coverage resolved-keys path-text)
                   false))))))
-
 (fn check-positions-inside-covering-wraf? [parent-form parent-line positions path-text definitions]
   "Check if every mutation position byte in parent-form is inside a
    with-restored-app-fields or with-restored-app body whose keys cover path-text.
@@ -1058,7 +1043,6 @@
           (set pi (+ pi 1)))
         (if found-restored true
             (check-any-parent-wrapper ff fn-def-line anon-def-col positions path-text max-line max-col)))))
-
 (fn emit-mutation-diagnostic [diagnostics diagnosed key ff path-text max-line fn-name]
   "Record a violation diagnostic for an unrestored sensitive global mutation."
   (tset diagnosed key true)
@@ -1070,7 +1054,6 @@
        :file ff.path :line max-line :column 0
        :evidence {:global-path path-text :enclosing-fn fn-name}
        :hint (.. "snapshot and restore " path-text " using with-restored-app-fields or pcall cleanup")})))
-
 (fn all-positions-inside-covering-wrapper? [fn-form fn-def-line positions path-text definitions]
   "Check if every mutation position is inside a with-restored-app-fields
    or with-restored-app body whose key argument covers the given path-text.
@@ -1192,7 +1175,6 @@
             (when (not has-restoration)
               (emit-mutation-diagnostic diagnostics diagnosed key ff path-text max-line fn-name)))))))
   (if (> (length diagnostics) 0) diagnostics nil))
-
 (fn M.rules []
   [{:id "lifecycle.global-mutation-restoration" :family "test-isolation" :targets [:repo] :kind :static :run global-mutation-restoration-rule-run :fn global-mutation-restoration-rule-run}])
 
